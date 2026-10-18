@@ -3,7 +3,7 @@
 # Description: Unit tests for rich_markup_check and rich_markup_content
 # Version: 1.1.1
 # Created: 2026-08-11
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/rich_markup_check.py, asserted on rendered output."""
@@ -23,18 +23,7 @@ from rich.errors import MarkupError
 from aipass.seedgo.apps.handlers.aipass_standards.rich_markup_check import check_module
 from aipass.seedgo.apps.handlers.aipass_standards.rich_markup_content import get_rich_markup_standards
 
-# ---------------------------------------------------------------------------
-# Rendering harness
-#
-# THE ACCEPTANCE CRITERION OF THIS STANDARD: every assertion below is made
-# against bytes read back out of a real Console's buffer. The repo conftest
-# installs a MagicMock console elsewhere; nothing here touches it, and nothing
-# here asserts on call arguments. A MagicMock records the arguments -- which
-# are CORRECT, that is the entire defect -- and renders nothing, so it agrees
-# by construction. A real Console whose output is never read is the same
-# stand-in wearing a better name. Only reading the rendered bytes can catch
-# a loss that only happens at render time.
-# ---------------------------------------------------------------------------
+# Every assertion reads bytes back out of a real Console's buffer: a MagicMock records the correct arguments and renders nothing.
 
 
 def _render(markup: str) -> str:
@@ -44,10 +33,6 @@ def _render(markup: str) -> str:
     console.print(markup)
     return buffer.getvalue().rstrip("\n")
 
-
-# ---------------------------------------------------------------------------
-# Module-under-test builders
-# ---------------------------------------------------------------------------
 
 _HEADER = ['"""Sample module."""', "", "console = None", "", "def emit():", '    """Emit output."""']
 _FIRST_PRINT_LINE = len(_HEADER) + 1
@@ -61,12 +46,7 @@ def _write_source(tmp_path: Path, source: str, name: str = "sample.py") -> str:
 
 
 def _write_module(tmp_path: Path, printed: List[str], name: str = "sample.py") -> str:
-    """Write a module that console.print()s each string in *printed*.
-
-    ``repr()`` round-trips the value: the source Python parses back to exactly
-    the string handed to :func:`_render`, so the checker and the renderer are
-    judging the same bytes.
-    """
+    """Write a module that console.print()s each string in *printed*."""
     lines = list(_HEADER) + [f"    console.print({text!r})" for text in printed]
     return _write_source(tmp_path, "\n".join(lines) + "\n", name)
 
@@ -77,19 +57,9 @@ def _message(result: dict) -> str:
 
 
 def _rendered_message(result: dict) -> str:
-    """The check message as the audit displays it -- through Rich.
-
-    audit_display.py interpolates every check message into
-    ``console.print(f"[dim]• {message}[/dim]")``. A message naming ``[args...]``
-    unescaped would have that token eaten on its way to the reader, so the
-    checker would commit the very defect it reports. Read it back rendered.
-    """
+    """The check message as the audit displays it -- through Rich."""
     return _render(f"[dim]• {_message(result)}[/dim]")
 
-
-# ---------------------------------------------------------------------------
-# 1. The defect: tokens Rich silently eats
-# ---------------------------------------------------------------------------
 
 EATEN_CASES: List[Tuple[str, str]] = [
     ("a [args...] b", "[args...]"),
@@ -118,10 +88,6 @@ def test_eaten_token_is_flagged(tmp_path, text, token):
     assert token in _rendered_message(result)
 
 
-# ---------------------------------------------------------------------------
-# 2. False-positive families: brackets Rich leaves alone
-# ---------------------------------------------------------------------------
-
 SURVIVING_CASES: List[Tuple[str, str]] = [
     ("a [1,2,3] b", "a [1,2,3] b"),
     ("lines [42, 78]", "lines [42, 78]"),
@@ -144,23 +110,13 @@ LEGITIMATE_MARKUP: List[Tuple[str, str]] = [
 
 @pytest.mark.parametrize("text,expected", SURVIVING_CASES + LEGITIMATE_MARKUP)
 def test_surviving_family_reaches_the_terminal_intact(text, expected):
-    """The premise: nothing is lost, so there is nothing to report.
-
-    It holds the intentional markup too, whose claim was a test of the same
-    body (compass 443; seedgo, fleet green leg 8): a real style tag consumes
-    itself, never the content.
-    """
+    """The premise: nothing is lost, so there is nothing to report."""
     assert _render(text) == expected
 
 
 @pytest.mark.parametrize("text,expected", SURVIVING_CASES + LEGITIMATE_MARKUP)
 def test_surviving_family_is_not_flagged(tmp_path, text, expected):
-    """No token was lost, so the checker must stay silent.
-
-    It holds the intentional markup too, whose claim was a test of the same
-    body (compass 443; seedgo, fleet green leg 8): deliberate styling is the
-    feature, not the defect.
-    """
+    """No token was lost, so the checker must stay silent."""
     result = check_module(_write_module(tmp_path, [text]))
     assert result["score"] == 100, f"{text!r} must not be flagged: {result}"
 
@@ -173,18 +129,8 @@ def test_mismatched_closing_tag_fails_loudly_and_is_not_flagged(tmp_path):
     assert result["score"] == 100, f"loud failures are out of scope: {result}"
 
 
-# ---------------------------------------------------------------------------
-# 3. Structural exclusions (AST, not regex)
-# ---------------------------------------------------------------------------
-
-
 def test_markup_false_is_not_flagged(tmp_path):
-    """markup=False turns Rich's parser off -- nothing is eaten, nothing to fix.
-
-    This is the correct treatment for pass-through content the author cannot
-    edit (@ai_mail renders message bodies this way). Flagging it would mark a
-    branch non-compliant for applying the only fix available to it.
-    """
+    """markup=False turns Rich's parser off -- nothing is eaten, nothing to fix."""
     source = '"""S."""\nconsole = None\n\n\ndef emit():\n    console.print("cmd [args...] here", markup=False)\n'
     result = check_module(_write_source(tmp_path, source))
     assert result["score"] == 100, f"markup=False must not be flagged: {result}"
@@ -206,7 +152,6 @@ def test_fstring_subscript_is_not_flagged(tmp_path):
     source = '"""S."""\nconsole = None\n\n\ndef emit(d):\n    console.print(f"count {d[\'k\']} rows")\n'
     result = check_module(_write_source(tmp_path, source))
     assert result["score"] == 100, f"f-string subscript must not be flagged: {result}"
-    # And nothing is lost when the realized string is rendered
     assert _render("count 42 rows") == "count 42 rows"
 
 
@@ -219,17 +164,10 @@ def test_fstring_literal_segment_is_still_checked(tmp_path):
 
 
 def test_format_template_tag_is_not_flagged(tmp_path):
-    """A {} placeholder inside a tag is filled in before Rich ever sees it.
-
-    ``[bold {color}]`` is deliberately the shape used here: Rich's own regex
-    DOES match it (it starts with a-z), so only the ``{`` guard keeps it out
-    of the report. ``[{color}]`` would prove nothing -- RE_TAGS never matches
-    a tag opening on ``{``.
-    """
+    """A {} placeholder inside a tag is filled in before Rich ever sees it."""
     source = '"""S."""\nconsole = None\n\n\ndef emit(c):\n    console.print("[bold {color}]x[/]".format(color=c))\n'
     result = check_module(_write_source(tmp_path, source))
     assert result["score"] == 100, f"format templates must not be flagged: {result}"
-    # The realized string is real markup and loses nothing
     assert _render("[bold red]x[/]") == "x"
 
 
@@ -270,11 +208,6 @@ def test_multiline_literal_reports_the_tag_line(tmp_path):
     assert "[options] on line 7" in _rendered_message(result)
 
 
-# ---------------------------------------------------------------------------
-# 4. The violation message
-# ---------------------------------------------------------------------------
-
-
 def test_message_names_every_token_and_its_line(tmp_path):
     """A bare count cannot be acted on -- name the token and the line."""
     path = _write_module(tmp_path, ["a [args...] b", "clean line", "[branch] row"])
@@ -301,11 +234,6 @@ def test_capped_message_announces_how_many_it_hid(tmp_path):
     assert "[tag0]" in rendered
     assert "[tag4]" in rendered
     assert "[tag6]" not in rendered
-
-
-# ---------------------------------------------------------------------------
-# 5. Bypass
-# ---------------------------------------------------------------------------
 
 
 def test_per_line_bypass_suppresses_only_that_line(tmp_path):
@@ -348,11 +276,6 @@ def test_bypass_for_another_standard_does_not_apply(tmp_path):
     assert result["score"] == 0, f"another standard's bypass must not apply: {result}"
 
 
-# ---------------------------------------------------------------------------
-# 6. Result shape and edge cases
-# ---------------------------------------------------------------------------
-
-
 def test_clean_file_passes(tmp_path):
     """A file with correct markup scores 100."""
     result = check_module(_write_module(tmp_path, ["all [green]good[/green] here", "L[42]: msg"]))
@@ -374,11 +297,6 @@ def test_unparseable_file_is_skipped_not_failed(tmp_path):
     assert "Not parseable" in _message(result)
 
 
-# ---------------------------------------------------------------------------
-# 7. Content handler
-# ---------------------------------------------------------------------------
-
-
 def test_content_renders_without_losing_its_own_examples():
     """The standard's own text must survive the defect it documents."""
     rendered = _render(get_rich_markup_standards())
@@ -394,15 +312,7 @@ def test_content_states_the_rendered_output_criterion():
     assert "buffer.getvalue()" in rendered
 
 
-# ---------------------------------------------------------------------------
-# 8. Following a literal to the print site that consumes it
-#
-# v1 read the PRINT SITE only, so drone's per-verb git help page scored 100
-# while eating its own placeholders: the page is a literal RETURNED by
-# get_help() and printed by print_help(), and the print site carried no
-# literal at all to read. Measured 2026-09-15: v1 found 0 tokens in that file;
-# the same file carries 29.
-# ---------------------------------------------------------------------------
+# A help page returned by get_help() and printed by print_help() carries its literal away from the print site.
 
 
 def _line_of(source: str, needle: str) -> int:
@@ -492,14 +402,7 @@ def test_bypassing_the_print_line_silences_a_followed_token(tmp_path):
     assert check_module(path, bypass_rules=rules)["score"] == 100
 
 
-# ---------------------------------------------------------------------------
-# 9. markup=False -- right for one case, wrong for the rest
-#
-# "Escape the data; do not disarm the line" (src/aipass/cli/docs/rich_markup.md).
-# markup=False is per-call and absolute: correct for a pre-formatted block that
-# carries no styling, and on a styled line it does not merely fail to help --
-# it prints the tags.
-# ---------------------------------------------------------------------------
+# markup=False is per-call and absolute: right for an unstyled block, and on a styled line it prints the tags.
 
 
 def test_preformatted_block_printed_verbatim_is_clean(tmp_path):
@@ -542,18 +445,9 @@ def test_markup_false_message_names_escape_not_the_switch(tmp_path):
 
 
 def test_pass_through_body_with_markup_false_stays_clean(tmp_path):
-    """@ai_mail routes message bodies this way: a runtime value, nothing to read.
-
-    This is the case the guard exists for. A rule that flagged it would mark a
-    branch non-compliant for applying the only fix available to it.
-    """
+    """@ai_mail routes message bodies this way: a runtime value, nothing to read."""
     source = '"""S."""\nconsole = None\n\n\ndef emit(body):\n    """Emit."""\n    console.print(body, markup=False)\n'
     assert check_module(_write_source(tmp_path, source))["score"] == 100
-
-
-# ---------------------------------------------------------------------------
-# 10. Escaping: per value, and what a hand-escape is worth
-# ---------------------------------------------------------------------------
 
 
 def test_per_value_escape_is_clean(tmp_path):
@@ -570,24 +464,14 @@ def test_per_value_escape_is_clean(tmp_path):
 
 
 def test_eaten_message_prescribes_escape_not_a_hand_written_backslash(tmp_path):
-    """A hand-escape is not the spelling this standard asks for any more.
-
-    It works while the parser is on, so it is not flagged; it is simply no
-    longer what the checker tells an author to type. escape() is per-value,
-    composes, and is the only spelling available to a runtime value.
-    """
+    """A hand-escape is not the spelling this standard asks for any more."""
     rendered = _rendered_message(check_module(_write_module(tmp_path, ["a [args...] b"])))
     assert "escape the value with rich.markup.escape()" in rendered
     assert "escape as" not in rendered
 
 
 def test_hand_escape_still_works_so_it_is_not_flagged(tmp_path):
-    """The stated limit: a scored, gating standard does not fail working code.
-
-    A styled literal help page that must also show a literal placeholder has
-    no other spelling -- escape() applied to the whole page would eat the
-    styling with it. The demotion is in the guidance, not in the score.
-    """
+    """The stated limit: a scored, gating standard does not fail working code."""
     source = '"""S."""\nconsole = None\n\n\ndef emit():\n    """Emit."""\n    console.print("[bold]usage:[/bold] cmd \\\\[args...]")\n'
     assert check_module(_write_source(tmp_path, source))["score"] == 100
     assert _render("[bold]usage:[/bold] cmd \\[args...]") == "usage: cmd [args...]"
@@ -605,13 +489,7 @@ def test_hand_escape_is_not_credited_once_the_parser_is_off(tmp_path):
     assert "cmd \\[args...]" in buffer.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# 11. What this rule deliberately does not claim
-#
-# Every pin below asserts SILENCE. Each one is a stated limit in
-# rich_markup_check's module docstring and in rich_markup.md; a limit with no
-# pin is a limit that quietly widens on the next edit.
-# ---------------------------------------------------------------------------
+# Every pin below asserts silence: each is a stated limit in rich_markup.md, and an unpinned limit widens on the next edit.
 
 
 def test_limit_the_file_boundary_is_not_crossed(tmp_path):
@@ -673,11 +551,6 @@ def test_limit_a_rich_renderable_wrapper_is_not_opened(tmp_path):
 
 
 def test_limit_markup_false_cannot_read_intent(tmp_path):
-    """The known false positive, pinned so it is a decision and not a surprise.
-
-    A pre-formatted block that QUOTES a real style tag is reported, because
-    nothing in the source distinguishes documentation about [dim] from a line
-    the author meant to style. It nominates. A human decides.
-    """
+    """The known false positive, pinned so it is a decision and not a surprise."""
     source = '"""S."""\nconsole = None\n\n\ndef emit():\n    """Emit."""\n    console.print("write [dim] to dim a run", markup=False)\n'
     assert check_module(_write_source(tmp_path, source))["score"] == 0

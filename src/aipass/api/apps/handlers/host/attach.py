@@ -3,90 +3,13 @@
 # Description: Host API Attach Handler — a real PTY running a tmux client, for the phone
 # Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 # pyright: reportOptionalMemberAccess=false
-# The suppression covers the POSIX-only placeholders: on Windows fcntl/pty/
-# termios are None, and every path that touches them is guarded by
-# PTY_AVAILABLE, which the checker cannot narrow across a module boundary.
-# Same pattern as server.py's [host] extra and handlers/google/auth.py.
+# fcntl/pty/termios are None off POSIX; every use sits behind PTY_AVAILABLE, which the checker cannot narrow.
 
-"""
-Host API Attach Handler
-
-The terminal lane (DPLAN-0300 Round 18b/18c). A WebSocket carrying a real PTY
-that runs a tmux CLIENT into a branch's persistent room — the same window the
-desktop has, over a different wire.
-
-WHY THIS IS NOT THE POLL/CAPTURE LANE THAT WAS BRIEFED FIRST
-------------------------------------------------------------------------
-Round 18 briefed a capture-and-repaint design: poll `tmux capture-pane`, render
-the text, send keys back. The owner corrected it four minutes later, and the
-sentence is worth keeping because it is the whole difference:
-
-    repaint-polling shows a PICTURE of the room that updates.
-    attach gives you THE ROOM.
-
-A picture has to be re-fetched, drifts between frames, and cannot carry a
-program that draws its own cursor. Attaching makes the phone a real tmux client,
-so scrollback, colour, cursor position and full-screen programs all work because
-nobody is reimplementing them.
-
-MIRROR THE DESKTOP, DO NOT REDESIGN IT
-------------------------------------------------------------------------
-`pty.rs` on the desktop spawns a PTY running `tmux new-session -A -t <room>`.
-This runs the SAME command. Attach-or-create, identical semantics, so a phone
-and a desktop attaching to one branch land in one room rather than two.
-
-A launch IS an attach (their `Terminal.tsx`, since m6). There is no third mode
-here and no launch endpoint: the client attaches, then writes the command bytes
-into the socket exactly as their terminal types into the pty after `ptyCreate`.
-`resume_id` and `has_history` already ride the fleet card, so this lane needs no
-read route to support fresh/resume — the decision is made where the card is
-rendered, which is where the desktop makes it too.
-
-WHY A SECOND PTY IS NOT A SECOND DOOR
-------------------------------------------------------------------------
-The one-door rule governs ENDING a session — `room_kill`, reached here only
-through `--end-room`, untouched by this module. Attaching a tmux client is
-ordinary tmux usage, and tmux itself stays the single source of truth for the
-room. The desktop's PTY is Rust and this one is Python because they run in
-different processes on different platforms; that is a parallel implementation of
-a client, not a competing implementation of a mechanism.
-
-D0 STILL HOLDS WHERE IT MATTERS. `verbs.py` imports no subprocess machinery and
-cannot run a program. This module can — it is the exec lane, like `fleet.py`,
-and the rule was always that the exec lives in ONE named place per mechanism
-rather than leaking into the lane that validates.
-
-DETACH IS A HANGUP, AND THE ROOM SURVIVES IT
-------------------------------------------------------------------------
-Closing the socket sends SIGHUP to the tmux CLIENT, which detaches. The session,
-the agent inside it, and its scrollback all live on — that is the desktop's exact
-lifecycle and the reason a phone can close a sheet without consequence. What must
-never happen is this module killing a session: it never calls kill-session, never
-sends `tmux kill-*` anything, and a test reads this file to prove it.
-
-AUTH ON A WEBSOCKET, AND WHY NOT THE QUERY STRING
-------------------------------------------------------------------------
-A browser cannot set an `Authorization` header on a WebSocket. The two options
-are a query parameter or the `Sec-WebSocket-Protocol` subprotocol, and the query
-string is disqualified: URLs land in access logs, proxy logs and browser history,
-so a token there is a credential written to disk in three places nobody chose.
-
-The subprotocol header is used instead. The server MUST echo back exactly one of
-the offered protocols or the browser fails the handshake, so the accepted value
-is the sentinel name and never the token itself.
-
-Scope is `operate`, without exception: an attached room is a shell prompt on
-the owner's machine, and there is no reading half to split off.
-
-Functions:
-    is_available()   - Whether this platform can host a PTY
-    room_name()      - The tmux session name for a branch
-    attach_command() - The exact argv the desktop runs
-    open_attach()    - Spawn the PTY and return a live session
-"""
+"""Host API Attach Handler
+Reference: docs/host_surfaces.md. Detach is SIGHUP and the room survives: nothing here may kill a session."""
 
 import os
 import shutil
@@ -101,10 +24,6 @@ from typing import Any, Dict, List, Optional
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 
-# POSIX-only, and that is a platform truth rather than a missing feature: a PTY
-# is a Unix object and tmux does not run on Windows either. Guarded exactly like
-# the [host] extra so the import cannot take the whole server down on a machine
-# that will never use this route.
 try:
     import fcntl
     import pty
@@ -120,59 +39,28 @@ except ImportError as e:  # pragma: no cover - Windows only
 
     PTY_AVAILABLE = False
 
-# @baud's naming convention for a branch's room. Mirrored, not invented — this
-# is the string their desktop uses, and a room name this server made up would be
-# a SECOND room sitting beside the real one with the same agent's name on it.
+# @baud's convention, mirrored: an invented name would be a second room beside the real one.
 ROOM_PREFIX = "baud-"
 
 TMUX_BINARY = "tmux"
 
-# The watch lane's binary — the same drone that started this server, so it
-# resolves from the server's own PATH with no login shell in between.
 MONITOR_BINARY = "drone"
 
-# What a targetless watch calls itself in labels and logs. A watch with no
-# target is global mission control, and "watch-" with nothing after it would
-# read as a truncated name rather than a deliberate one.
 GLOBAL_WATCH_LABEL = "watch-all"
 
-# The subprotocol the client offers, carrying the bearer as a second value. The
-# server echoes THIS name back, never the token — the accepted protocol is
-# visible in the handshake response.
 BEARER_SUBPROTOCOL = "aipass.bearer"
 
-# A terminal that opens at 0x0 renders nothing, and the client resizes on its
-# first frame anyway. These are only what the room sees for the few milliseconds
-# before that arrives.
 DEFAULT_COLS = 80
 DEFAULT_ROWS = 24
 
-# tmux itself caps at 65535 and a client asking for more has lost track of what
-# it is doing. Refused rather than clamped, because a geometry silently changed
-# is a geometry the client will render against wrongly.
 MAX_DIMENSION = 1000
 
-# Read size for one pump iteration. Large enough that a full-screen repaint
-# arrives in a few frames, small enough that a chatty room cannot starve the
-# socket writer.
 READ_CHUNK_BYTES = 65536
 
-# THE PUMP'S THREADS, NAMED AND BOUNDED (DPLAN-0305 Audit 2, finding 9).
-#
-# Every live socket parks ONE thread forever in a blocking os.read on its PTY.
-# The pump used to hand that to asyncio's DEFAULT executor, which sizes itself
-# to min(32, cpu_count + 4) — EIGHT on this 4-CPU host. The ninth socket
-# connected, authenticated, accepted, and then silently never pumped: its read
-# sat in the executor's queue behind eight threads that never return. A blank
-# terminal with no error, which is the exact failure shape this house refuses.
-#
-# So the lane gets its own pool, and the cap becomes a SENTENCE instead of a
-# hang: a session beyond it is refused in words the phone can render.
+# Each socket parks a thread in os.read for life: its own pool, never asyncio's shared default, capped in words.
 PUMP_WORKERS = 16
 
-# A BOUNDED semaphore, not a counter: over-releasing raises instead of quietly
-# manufacturing capacity this server does not have. An accounting bug here
-# would otherwise reappear as the same silent hang, one release later.
+# Bounded: an over-release raises instead of inventing capacity, which would return as a silent hang.
 _PUMP_SLOTS = threading.BoundedSemaphore(PUMP_WORKERS)
 _PUMP_EXECUTOR: Any = None
 _EXECUTOR_GUARD = threading.Lock()
@@ -187,20 +75,7 @@ class AttachUnavailable(Exception):
 
 
 def pump_executor() -> Any:
-    """
-    The thread pool the socket pump reads on. One pool, built once.
-
-    Returns:
-        A ThreadPoolExecutor with PUMP_WORKERS threads, named so `ps -L` says
-        which lane a parked thread belongs to.
-
-    Note:
-        Its own pool rather than asyncio's default, because the default is
-        SHARED with anything else that ever calls run_in_executor(None, ...)
-        on this loop, and this lane's threads never come back — they are parked
-        for the life of a socket. A lane that permanently consumes a shared
-        pool is a lane that starves whatever borrows it next.
-    """
+    """The thread pool the socket pump reads on. One pool, built once."""
     global _PUMP_EXECUTOR
     with _EXECUTOR_GUARD:
         if _PUMP_EXECUTOR is None:
@@ -209,26 +84,8 @@ def pump_executor() -> Any:
 
 
 def _reserve_session(room: str) -> None:
-    """
-    Take one of the pump's threads, or refuse in words.
-
-    Args:
-        room: What to name in the refusal.
-
-    Raises:
-        AttachUnavailable: Every pump thread is already parked on a socket.
-
-    Note:
-        Non-blocking on purpose: WAITING for a slot is the silent hang wearing
-        a different hat — the socket would sit accepted and empty until some
-        other operator closed a terminal. Refused now, in a sentence the phone
-        can render.
-
-        Taken BEFORE the spawn, so two sockets arriving together cannot both
-        pass a cap with room for one. The slot is handed to the AttachSession
-        the caller builds next and released by its hangup — see the release in
-        _spawn_pty for what happens when no session is ever built.
-    """
+    """Take one of the pump's threads, or refuse in words.
+    Non-blocking (waiting is the silent hang) and before the spawn, so two sockets cannot share one slot."""
     if not _PUMP_SLOTS.acquire(blocking=False):
         raise AttachUnavailable(
             f"This server is already pumping {PUMP_WORKERS} terminals, which is its cap — "
@@ -237,64 +94,24 @@ def _reserve_session(room: str) -> None:
 
 
 def _release_session() -> None:
-    """
-    Give a pump thread back.
-
-    Raises:
-        ValueError: More releases than reservations — the bounded semaphore
-            refusing to invent capacity. Loud rather than clamped: a slot
-            handed back twice is an accounting bug, and clamping it would
-            hide the bug and re-create the silent hang one socket later.
-    """
+    """Give a pump thread back."""
     _PUMP_SLOTS.release()
 
 
 def is_available() -> bool:
-    """
-    Whether this platform can host a PTY at all.
-
-    Returns:
-        True on POSIX with the pty module importable.
-    """
+    """Whether this platform can host a PTY at all."""
     return PTY_AVAILABLE
 
 
 def _tmux_safe(text: str) -> str:
-    """
-    Flatten anything outside [A-Za-z0-9_-] to '-', mirroring @baud's sanitize.
-
-    '.' and ':' carry tmux target syntax; a name containing them would glob or
-    address another session. Same charset as `room_name` in @baud's lib.rs —
-    the two implementations are pinned to the same test vectors.
-
-    Args:
-        text: Raw name component.
-
-    Returns:
-        The tmux-safe form.
-    """
+    """Flatten anything outside [A-Za-z0-9_-] to '-', mirroring @baud's sanitize.
+    '.' and ':' are tmux target syntax; pinned to @baud's lib.rs `room_name` by shared test vectors."""
     return "".join(ch if (ch.isascii() and ch.isalnum()) or ch in "_-" else "-" for ch in text)
 
 
 def room_name(branch: str, scope: str = "") -> str:
-    """
-    The tmux session name for a branch, in @baud's convention.
-
-    Anchor rooms keep their historical plain names ('baud-memory'); a branch
-    in another project carries that project as a scope
-    ('baud-vera-studio-vera'), so two projects' same-named branches can never
-    land in each other's sessions. The rule is the desktop's `room_name` in
-    lib.rs, mirrored — a phone attach and a desktop attach must always agree
-    on which room a card means.
-
-    Args:
-        branch: Branch name, with or without a leading '@'.
-        scope: The branch's project, LOWERCASED by the caller, for non-anchor
-            projects. Empty for the anchor.
-
-    Returns:
-        The session name, e.g. 'baud-memory' or 'baud-vera-studio-vera'.
-    """
+    """The tmux session name for a branch, in @baud's convention.
+    Mirrors the desktop's lib.rs `room_name`; `scope` is the non-anchor project, lowercased by the caller."""
     plain = _tmux_safe(branch.strip().lstrip("@"))
     if scope:
         return ROOM_PREFIX + _tmux_safe(scope) + "-" + plain
@@ -302,26 +119,8 @@ def room_name(branch: str, scope: str = "") -> str:
 
 
 def shell_room_name(project: str, branch: str = "") -> str:
-    """
-    The tmux session name for an EMPTY shell — no claude, just a prompt.
-
-    A separate `baud-shell-` namespace, deliberately: the fleet scan matches
-    agent rooms by exact name and skips everything else under 'baud-', so a
-    shell can never be mistaken for a branch's live session or dressed up as
-    an outside room. The project is ALWAYS in the name — including the
-    anchor's — because a shell is a place, and 'baud-shell-devpulse' does not
-    say which devpulse when two projects have one.
-
-    Args:
-        project: The project the shell stands in, lowercased by the caller
-            (census name for external projects, seated name for the anchor).
-        branch: Branch whose directory the shell opens in; empty for a shell
-            at the project root.
-
-    Returns:
-        'baud-shell-aipass', 'baud-shell-aipass-devpulse',
-        'baud-shell-testing-testing' — that shape.
-    """
+    """The tmux session name for an EMPTY shell — no claude, just a prompt.
+    Own namespace, which the fleet scan skips, so a shell is never taken for an agent's room."""
     room = ROOM_PREFIX + "shell-" + _tmux_safe(project.strip().lower())
     if branch and branch.strip():
         room += "-" + _tmux_safe(branch.strip().lstrip("@"))
@@ -331,13 +130,7 @@ def shell_room_name(project: str, branch: str = "") -> str:
 def valid_monitor_target(target: str) -> bool:
     """
     Charset fence for a watch target — MIRRORED from `valid_monitor_target`
-    in @baud's pty.rs, character for character.
-
-    A branch list ('seedgo,cli') or the 'commons' feed keyword. Anything
-    outside it is refused: the phone picks targets off the fleet snapshot, it
-    never composes command lines — and the fence is what makes that a fact
-    about the system rather than a fact about today's client.
-    """
+    in @baud's pty.rs, character for character."""
     return bool(target) and all(
         ch.islower() and ch.isascii() or ch.isdigit() and ch.isascii() or ch in "_-," for ch in target
     )
@@ -346,29 +139,7 @@ def valid_monitor_target(target: str) -> bool:
 def monitor_command(target: str = "") -> List[str]:
     """
     The watch argv: `drone @prax monitor run <target>` — the exact command the
-    desktop's monitor pane runs (pty.rs `monitor_create`), minus its login
-    shell: this server was itself started by drone, so drone resolves from the
-    server's own PATH and there is no shell for a target to be interpreted by.
-
-    AN EMPTY TARGET DROPS THE ARGUMENT ENTIRELY, and that is the whole point of
-    the default. `drone @prax monitor run` with nothing after it is global
-    mission control — every branch at once — and it is what the desktop runs.
-    @prax also documents `run all` for the same thing, and this lane deliberately
-    does NOT use it: the desktop's argv is the one being mirrored, and if those
-    two paths ever diverge on @prax's side the phone must diverge with the desk,
-    not with the synonym.
-
-    Before this, the no-target form was unreachable: the charset fence refused
-    an empty string and this function always appended one. @baud measured it and
-    shipped the phone's door DISABLED rather than pointing it at a single
-    branch's monitor, which would have rendered perfectly and been a lie.
-
-    Args:
-        target: A branch list or 'commons'. Empty means every branch.
-
-    Returns:
-        The argv, with no trailing argument when target is empty.
-    """
+    desktop's monitor pane runs, minus its login shell; empty target means every branch, never `run all`."""
     command = ["drone", "@prax", "monitor", "run"]
     if target:
         command.append(target)
@@ -376,62 +147,25 @@ def monitor_command(target: str = "") -> List[str]:
 
 
 def attach_command(branch: str, scope: str = "") -> List[str]:
-    """
-    The exact argv the desktop runs, mirrored — including its room options.
-
-    `new-session -A` is attach-or-create: it attaches to the room if it exists
-    and creates it if it does not, which is why the phone and the desktop cannot
-    end up in two different rooms for one branch. The two options that follow
-    are what make a room born HERE identical to one born at the desk: without
-    them a phone-created room comes up with no scroll lane and the wrong sizing
-    policy, so the phone-only path would get the worst geometry of the two.
-
-    EVERY CHAINED COMMAND CARRIES ITS OWN -t, AND THAT IS THE WHOLE POINT.
-    @baud's `pty.rs` chained `set-option mouse on` with no target. A chained
-    set-option without one writes to whatever tmux considers the CURRENT
-    session — never the room being opened. It parses, it exits 0, it does
-    nothing, and no BAUD room had mouse on from the day rooms were born. The
-    code read correctly; only `show-options` against a live room could tell.
-
-    Args:
-        branch: Branch whose room to attach to.
-        scope: The branch's project scope for non-anchor projects — see
-            `room_name`.
-
-    Returns:
-        The tmux client command as a list — a list, never a string, because a
-        list never reaches a shell and a branch name therefore cannot be one.
-        `;` is its own argument: that is how tmux separates commands in an argv,
-        and it is why no shell escaping is involved anywhere here.
-    """
+    """The exact argv the desktop runs, mirrored — including its room options."""
     return client_command(room_name(branch, scope))
 
 
 def client_command(room: str) -> List[str]:
-    """
-    The tmux client argv for a NAMED room — the shared tail of every attach.
-
-    Agent rooms and empty shells differ only in what runs inside and where the
-    room is born; the client that carries the bytes is identical. One builder,
-    so the mouse and window-size lessons in `attach_command`'s docstring are
-    learned once and hold for both.
-    """
+    """The tmux client argv for a NAMED room — the shared tail of every attach.
+    Every chained command carries its own -t: without one, set-option hits tmux's current session and exits 0."""
     return [
         TMUX_BINARY,
         "new-session",
         "-A",
         "-s",
         room,
-        # Session option: the scroll lane. -t names the room explicitly.
         ";",
         "set-option",
         "-t",
         room,
         "mouse",
         "on",
-        # Window option, hence -w. `smallest` measured by @baud against two real
-        # clients: it holds the phone through a desk resize and self-heals on
-        # detach, which `latest` and `largest` do not.
         ";",
         "set-option",
         "-w",
@@ -443,36 +177,10 @@ def client_command(room: str) -> List[str]:
 
 
 def attach_only_command(room: str) -> List[str]:
-    """
-    The tmux client argv for a room this server must NOT create (DPLAN-0327).
-
-    `client_command` above is `new-session -A` — attach-OR-create — which is
-    right for a room named after the branch, because if it is missing the
-    branch should get one. It is exactly wrong for a room the fleet snapshot
-    told us about: `outside_room` names a session somebody ELSE created, and
-    the only honest thing to do with a name we did not choose is attach to it
-    or fail. Creating it would mint an empty session under a name the desktop
-    believes it owns.
-
-    That is the m12 shape one level down. On 2026-09-04 the owner opened his
-    aipass chat on the laptop and attached from the phone to a blank terminal,
-    because `_room_for` rebuilt `baud-<branch>` from the name and `-A` happily
-    created it while the live seat sat elsewhere. A builder that cannot create
-    is how that stops being possible rather than being remembered not to do.
-
-    Args:
-        room: The room to attach to, exactly as the snapshot named it.
-
-    Returns:
-        The argv. Same mouse and window-size options as `client_command`, each
-        carrying its own `-t` for the same pinned reason: a `set-option` with
-        no target resolves against whatever tmux calls current and exits 0
-        either way.
-    """
+    """The tmux client argv for a room this server must NOT create (DPLAN-0327).
+    For `outside_room`: creating a name someone else chose mints an empty session the desktop owns."""
     return [
         TMUX_BINARY,
-        # attach-session, never new-session: no -A, and nothing here can bring
-        # a room into being.
         "attach-session",
         "-t",
         room,
@@ -493,56 +201,19 @@ def attach_only_command(room: str) -> List[str]:
 
 
 def set_winsize(descriptor: int, cols: int, rows: int) -> None:
-    """
-    Stamp a terminal size into the kernel for a PTY.
-
-    Published rather than private because two callers need it and they must not
-    disagree: the initial size set the moment the PTY is created, and every
-    resize the client sends afterwards. Two copies of a struct-packing call is
-    how a startup geometry and a live geometry end up transposed relative to
-    each other.
-
-    Args:
-        descriptor: The PTY master.
-        cols: Column count, already validated.
-        rows: Row count, already validated.
-
-    Raises:
-        AttachUnavailable: This platform has no TIOCSWINSZ.
-    """
+    """Stamp a terminal size into the kernel for a PTY."""
     if not PTY_AVAILABLE:
         raise AttachUnavailable("Setting a terminal size needs a PTY, which this platform does not have")
 
-    # struct winsize is (rows, cols, xpixel, ypixel) — rows FIRST. Getting that
-    # pair backwards produces a room that renders at a plausible but wrong
-    # shape, which reads as a rendering bug rather than a bad ioctl.
+    # struct winsize is (rows, cols, ...): backwards renders a plausible wrong shape, not an error.
     packed = struct.pack("HHHH", rows, cols, 0, 0)
     fcntl.ioctl(descriptor, termios.TIOCSWINSZ, packed)
 
 
 class AttachSession:
-    """
-    One live PTY running one tmux client.
-
-    Owns the file descriptor and the child process, and knows how to hang up.
-    Deliberately not a context manager: the socket handler's lifecycle is the
-    session's lifecycle, and hiding that in a `with` would make the close path
-    harder to see than it deserves to be.
-    """
+    """One live PTY running one tmux client."""
 
     def __init__(self, process: Any, descriptor: int, branch: str, room: str, read_only: bool = False) -> None:
-        """
-        Args:
-            process: The spawned tmux client.
-            descriptor: Master side of the PTY.
-            branch: Branch this room belongs to.
-            room: The tmux session name.
-            read_only: A tier-0 watch — output streams, input refuses. The
-                refusal lives HERE, at the layer that counts, exactly where the
-                desktop puts it (`pty_write` refuses monitor panes): a client
-                that never sends bytes is politeness, a session that refuses
-                them is the contract.
-        """
         self.process = process
         self.descriptor = descriptor
         self.branch = branch
@@ -556,57 +227,22 @@ class AttachSession:
         return self._closed
 
     def read(self, size: int = READ_CHUNK_BYTES) -> bytes:
-        """
-        Read whatever the room has produced.
-
-        Args:
-            size: Maximum bytes to take.
-
-        Returns:
-            Raw bytes, or empty when the PTY has closed. Bytes, never str: the
-            room emits escape sequences and partial UTF-8 across chunk
-            boundaries, and decoding here would corrupt both.
-        """
+        """Read whatever the room has produced."""
         try:
             return os.read(self.descriptor, size)
         except OSError as e:
-            # The child exited and the master went away. Not an error — it is
-            # how a PTY reports end-of-life, and the caller closes the socket.
-            # Logged at debug rather than swallowed: this fires exactly once per
-            # session, and when a room dies for a reason nobody expected, the
-            # errno is the only thing that says which.
+            # How a PTY reports end of life; logged since the errno is the only clue to an unexpected death.
             logger.debug("[host_api] PTY for %s reached end of life: %s", self.room, e)
             return b""
 
     def write(self, data: bytes) -> None:
-        """
-        Type into the room.
-
-        Args:
-            data: Raw bytes from the client, forwarded UNCHANGED. Key bar
-                buttons send real control bytes (\\x03 for Ctrl+C), exactly as a
-                keyboard would, so there is nothing here to interpret and no
-                allowlist to keep in step with somebody else's.
-
-        Raises:
-            AttachRefused: This is a read-only watch — nothing types into it.
-        """
+        """Type into the room."""
         if self.read_only:
             raise AttachRefused(f"{self.room} is a read-only watch — nothing types into it")
         os.write(self.descriptor, data)
 
     def resize(self, cols: int, rows: int) -> None:
-        """
-        Resize the PTY, so the room draws at the client's geometry.
-
-        Args:
-            cols: Column count.
-            rows: Row count.
-
-        Raises:
-            AttachRefused: A dimension that is not a usable terminal size.
-            AttachUnavailable: This platform has no TIOCSWINSZ.
-        """
+        """Resize the PTY, so the room draws at the client's geometry."""
         if not PTY_AVAILABLE:
             raise AttachUnavailable("Resizing needs a PTY, which this platform does not have")
 
@@ -617,27 +253,16 @@ class AttachSession:
         )
 
     def hangup(self) -> None:
-        """
-        Detach: SIGHUP the tmux CLIENT and let the room live on.
-
-        This is the whole lifecycle promise. The client process dies, the
-        session it was attached to does not, and everything running inside it
-        keeps running — which is why closing a sheet on a phone is free.
-
-        Idempotent: a socket that errors and then closes calls this twice.
-        """
+        """Detach: SIGHUP the tmux CLIENT and let the room live on."""
         if self._closed:
             return
 
         self._closed = True
-        # The pump thread this session was holding is free the moment the
-        # descriptor closes below. Released here rather than in the socket
-        # handler because hangup is the ONE path every lane ends through.
+        # Released here, not in the socket handler: hangup is the one path every lane ends through.
         _release_session()
 
         try:
-            # SIGHUP, not SIGKILL: a hangup is what a detaching terminal sends,
-            # and tmux clients handle it as a clean detach.
+            # SIGHUP, never SIGKILL: tmux clients take a hangup as a clean detach.
             self.process.send_signal(signal.SIGHUP)
         except (ProcessLookupError, OSError) as e:
             logger.debug("[host_api] attach client for %s was already gone: %s", self.room, e)
@@ -658,31 +283,7 @@ def open_attach(
     room: str = "",
     attach_only: bool = False,
 ) -> AttachSession:
-    """
-    Spawn a PTY running a tmux client into a branch's room.
-
-    Args:
-        branch: Branch whose room to attach to. Required unless `room` names
-            the room directly (an empty shell has no branch to be named after).
-        cwd: Directory the room is created in when it does not exist yet — the
-            branch's own directory, so an attach-or-create lands somewhere that
-            makes sense rather than wherever this server was started.
-        scope: The branch's project scope for non-anchor projects — decides
-            the room NAME, exactly as the desktop decides it (see `room_name`).
-        room: Explicit room name override — the shell lane's door. When set,
-            `branch`/`scope` no longer decide the name (use `shell_room_name`
-            to build it) and `branch` may be empty.
-        attach_only: Attach to `room` or fail, never create it. For a room this
-            server did not name — the snapshot's `outside_room` (DPLAN-0327).
-            Requires `room`; without a name there is nothing to attach to.
-
-    Returns:
-        A live AttachSession.
-
-    Raises:
-        AttachRefused: No branch named and no room override.
-        AttachUnavailable: No PTY on this platform, or tmux is not installed.
-    """
+    """Spawn a PTY running a tmux client into a branch's room."""
     if not PTY_AVAILABLE:
         raise AttachUnavailable("This host cannot attach: a PTY is a POSIX object and this platform has none")
 
@@ -690,15 +291,10 @@ def open_attach(
         raise AttachRefused("A branch name is required — this lane has no default room")
 
     if not shutil.which(TMUX_BINARY):
-        # Named rather than shrugged at: tmux missing is a real, fixable state,
-        # and "attach failed" with no subject is a support ticket.
         raise AttachUnavailable(f"{TMUX_BINARY} is not installed on this host — the attach lane runs a tmux client")
 
     if room and room.strip():
         room = room.strip()
-        # attach_only is only meaningful for a NAMED room, which is why it is
-        # read here and nowhere else: the generated-name branch below always
-        # owns the name it builds and is always allowed to create it.
         command = attach_only_command(room) if attach_only else client_command(room)
     else:
         room = room_name(branch, scope)
@@ -709,48 +305,18 @@ def open_attach(
     json_handler.log_operation("host_api_attach_opened", {"branch": branch, "room": room, "pid": process.pid})
     logger.info("[host_api] attached to %s (pid %s)", room, process.pid)
 
-    # A shell has no branch; its room name is the truest label it owns.
     return AttachSession(process, master, branch.strip().lstrip("@") or room, room)
 
 
 def open_monitor(target: str = "", cwd: Optional[Path] = None) -> AttachSession:
-    """
-    Spawn a tier-0 watch: `drone @prax monitor run <target>` on its own PTY.
-
-    The phone twin of the desktop's monitor pane (m9): live output, no
-    keyboard. Deliberately NOT tmux-backed — the opposite call from the shell
-    lane, for the opposite reason. A shell holds work, so it must survive its
-    client; a watch holds nothing, so when the socket closes the observer
-    dies and nothing was lost. A persistent watcher would just be a process
-    printing into a room nobody is in.
-
-    Args:
-        target: What to watch — a branch name off the fleet snapshot, or
-            'commons' for the feed. EMPTY means global mission control, every
-            branch at once, which is the desktop's own default form. A non-empty
-            target is fenced by `valid_monitor_target`.
-        cwd: Where the monitor runs — the repo root, where drone expects to
-            stand.
-
-    Returns:
-        A live AttachSession with `read_only=True` — its `write` refuses.
-
-    Raises:
-        AttachRefused: A named target fails the charset fence.
-        AttachUnavailable: No PTY on this platform, or drone is not on PATH.
-    """
+    """Spawn a tier-0 watch: `drone @prax monitor run <target>` on its own PTY.
+    Not tmux-backed: a watch holds no work, so it dies with its socket."""
     if not PTY_AVAILABLE:
         raise AttachUnavailable("This host cannot attach: a PTY is a POSIX object and this platform has none")
 
     cleaned = target.strip().lstrip("@")
 
-    # ABSENCE IS NOT A BAD VALUE, and the two questions are kept apart on
-    # purpose. `valid_monitor_target` is mirrored from @baud's pty.rs character
-    # for character and answers "is this string a legal target" — so it still
-    # refuses the empty string and stays a faithful mirror. Whether a target was
-    # NAMED AT ALL is asked here, once, before the fence is consulted. Folding
-    # "" into the fence would have been the shorter diff and would have quietly
-    # broken the mirror this lane's safety rests on.
+    # Absence is asked here, before the fence: folding "" into the mirrored fence would break the mirror.
     if cleaned and not valid_monitor_target(cleaned):
         raise AttachRefused(f"Not a monitor target: {target!r}")
 
@@ -769,45 +335,14 @@ def open_monitor(target: str = "", cwd: Optional[Path] = None) -> AttachSession:
 def _spawn_pty(command: List[str], cwd: Optional[Path], room: str, close_fd: Any = None) -> tuple:
     """
     Spawn `command` as the child of a fresh PTY. The shared mechanics of every
-    lane that ends in a live terminal — attach, shell, and watch differ only
-    in what runs and whether it listens.
-
-    Args:
-        command: The argv to run.
-        cwd: Directory the child starts in; None inherits the server's.
-        room: What to call this session in logs and error sentences.
-        close_fd: What closes a descriptor, called with the descriptor. None
-            (every product caller) means os.close, resolved at call time. A
-            seam for the tests alone (api, fleet green leg 5): test_host_perf's
-            failed-spawn pin records the closes in order through it, rather
-            than replacing os.close for the whole process.
-
-    Returns:
-        (process, master descriptor).
-
-    Raises:
-        AttachUnavailable: The spawn itself failed; both descriptors are
-            closed, each exactly once, before the error leaves.
-    """
+    lane that ends in a live terminal. `close_fd` is a test seam; None means os.close."""
     closer = close_fd if close_fd is not None else os.close
 
-    # Before anything is spawned: a terminal this server cannot pump must be
-    # refused, not opened. Held from here until the session hangs up.
     _reserve_session(room)
 
-    # openpty rather than fork: the child is a normal subprocess with the slave
-    # as its three standard descriptors, so it can be signalled and waited on
-    # like anything else. forkpty would hand back a bare pid and a fork this
-    # process has no other reason to own.
-    # Not a file open: a PTY is a byte pipe with no encoding='utf-8' to give it.
-    # Decoding happens nowhere in this module — see AttachSession.read().
     master, slave = pty.openpty()
 
-    # openpty hands back a 0x0 terminal, and a tmux client reads that at startup,
-    # decides it is not a real size, and falls back to its OWN 80x24. The
-    # contract has always PROMISED 80x24 and until the stamp it was true only by
-    # that accident. Stamped for real, before the child exists, so the contract
-    # and the kernel agree from the first byte.
+    # openpty gives 0x0, which tmux reads at startup: stamped before the child exists.
     set_winsize(master, DEFAULT_COLS, DEFAULT_ROWS)
 
     try:
@@ -817,41 +352,23 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str, close_fd: Any
             stdout=slave,
             stderr=slave,
             cwd=str(cwd) if cwd else None,
-            # NOT start_new_session: that gives the child its own session and no
-            # CONTROLLING TERMINAL, and a pty with no controlling terminal is
-            # DEAF. TIOCSWINSZ delivers SIGWINCH to the foreground process group
-            # of the controlling tty; with none, the signal has no destination.
-            # The resize reached the kernel and the client never heard it — every
-            # resize, forever. _acquire_controlling_tty does the setsid itself,
-            # so the signal isolation start_new_session bought is kept.
+            # Not start_new_session: with no controlling tty every resize is deaf (see that function).
             preexec_fn=_acquire_controlling_tty,  # see the note in that function
             close_fds=True,
             env=_child_env(),
         )
     except OSError as e:
         closer(master)
-        # No session will ever be built to own this reservation, so it goes back
-        # here. Without this, a machine that fails to spawn PUMP_WORKERS times
-        # refuses every terminal afterwards while pumping none.
+        # No session will own this slot: without the release, failed spawns use up the cap.
         _release_session()
         logger.error("[host_api] could not start a client for %s: %s", room, e)
         raise AttachUnavailable(f"Could not start a client for {room}: {e}") from e
     finally:
-        # The child holds its own copy; keeping ours open would mean the master
-        # never reports EOF when the client exits, and the pump would hang
-        # forever on a room that is already gone. Closed HERE ALONE, on every
-        # path (api, fleet green leg 5): the except used to close it too, and the
-        # second close, caught and logged at debug, could land on a descriptor
-        # number another thread had just been handed. Nothing closes the slave
-        # before this line now, so that catch is gone with it.
+        # Ours open means the master never reports EOF. Closed here alone: a second close
+        # can land on a descriptor number another thread was just handed.
         closer(slave)
 
     return process, master
-
-
-# ==============================================
-# INTERNALS
-# ==============================================
 
 
 def _acquire_controlling_tty(
@@ -860,58 +377,15 @@ def _acquire_controlling_tty(
     _ioctl: Any = getattr(fcntl, "ioctl", None),
     _tiocsctty: Any = getattr(termios, "TIOCSCTTY", None),
 ) -> None:
-    """
-    Run in the CHILD, between fork and exec: take the slave as our controlling tty.
-
-    This is the whole reason resizes work. A PTY only delivers SIGWINCH to the
-    foreground process group of its CONTROLLING terminal, and a controlling
-    terminal is never acquired by INHERITING an already-open descriptor — only
-    by a session leader opening a tty, or by TIOCSCTTY. `start_new_session=True`
-    gave the child a fresh session and therefore no controlling terminal at all,
-    so every TIOCSWINSZ landed in the kernel and reached nobody. The room was
-    deaf to every resize any client would ever send.
-
-    By the time this runs, subprocess has already dup'd the slave onto fds 0, 1
-    and 2, so fd 0 IS the terminal to claim.
-
-    THE preexec_fn CAVEAT, stated rather than hidden: this runs after fork in a
-    process that has threads (uvicorn's executor, among others), where only
-    async-signal-safe work is really allowed. Both operations here are single
-    syscalls, and every callable and constant they need is bound as a DEFAULT
-    ARGUMENT so the child performs no attribute lookup, no import and no
-    allocation before exec — which is the standard mitigation, and the reason
-    this function takes arguments nobody ever passes.
-
-    EVERY DEFAULT IS A getattr, INCLUDING os.setsid — that is not style. A bare
-    `os.setsid` in this signature is evaluated when the module is IMPORTED, and
-    the attribute does not exist on Windows, so it raised AttributeError before
-    any platform guard could run and took `attach` down, then `server`, then
-    `host_api`, then every test file that imports them. One line cost 22
-    collection errors on the Windows lane (2026-08-18). The POSIX-only names
-    are already fetched this way; this one was the exception and the exception
-    was the bug.
-
-    Args:
-        _setsid: Bound at definition time. Never passed. None off POSIX.
-        _login_tty: Bound at definition time. Never passed. None before 3.11.
-        _ioctl: Bound at definition time. Never passed. None off POSIX.
-        _tiocsctty: Bound at definition time. Never passed. None off POSIX.
-
-    Raises:
-        AttachUnavailable: This platform has no way to acquire a controlling
-            tty. No caller can reach it — every one of them is behind
-            PTY_AVAILABLE — so this refuses rather than pretending, and it
-            refuses in the CHILD, which subprocess reports to the parent.
-    """
+    """Run in the CHILD, between fork and exec: take the slave as our controlling tty.
+    SIGWINCH reaches only a controlling tty's group, and inheriting a descriptor never acquires one.
+    Callables are default args so the forked child does no lookup or allocation before exec;
+    each is a getattr, os.setsid included, because a bare name raises at import on Windows."""
     if _login_tty is not None:
-        # One C call doing setsid + TIOCSCTTY + the dup2s. Less Python running
-        # in a forked child is strictly better here. Python 3.11+.
         _login_tty(0)
         return
 
     if _setsid is None or _ioctl is None or _tiocsctty is None:
-        # Three identity comparisons: async-signal-safe, and nothing is
-        # allocated until the platform has already lost.
         raise AttachUnavailable("This platform cannot acquire a controlling tty")
 
     _setsid()
@@ -919,34 +393,15 @@ def _acquire_controlling_tty(
 
 
 def _child_env() -> Dict[str, str]:
-    """
-    The environment the tmux client runs in.
-
-    Returns:
-        A copy of this process's environment with TERM pinned. The phone's
-        xterm.js is xterm-256color, and a client inheriting a server's bare or
-        missing TERM renders a room in the wrong capability set — which looks
-        like an application bug rather than an environment one.
-    """
+    """The environment the tmux client runs in.
+    TERM pinned to the phone's xterm.js: an inherited TERM renders the wrong capability set."""
     env = dict(os.environ)
     env["TERM"] = "xterm-256color"
     return env
 
 
 def _require_dimension(value: Any, name: str) -> int:
-    """
-    Validate one terminal dimension.
-
-    Args:
-        value: Caller-supplied size.
-        name: Which dimension, for the message.
-
-    Returns:
-        The value as an int.
-
-    Raises:
-        AttachRefused: Not a whole number, not positive, or over the cap.
-    """
+    """Validate one terminal dimension. Refused, never clamped: the client would render against the wrong size."""
     try:
         size = int(value)
     except (TypeError, ValueError) as e:

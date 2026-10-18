@@ -31,14 +31,14 @@ time. Move a cap at its owner and the next audit moves with it; no file in seedg
 when a cap moves — without it, a branch keeps serving the row it cached against the old
 number until someone runs `--full`.
 
-**Chars, never bytes, never tokens.** The boardroom corrected bytes-for-chars three times in
-one afternoon, so the unit is written into the rule.
+**Chars, never bytes, never tokens.** The unit is written into the rule because bytes and
+chars are easy to confuse.
 
 ---
 
 ## The layer contract it instruments
 
-Settled in `drone @commons thread 16`, recorded in DPLAN-0347. One job, one cap, one owner
+One job, one cap, one owner
 per layer, and nothing is said twice:
 
 | Layer | Its one job |
@@ -52,15 +52,14 @@ per layer, and nothing is said twice:
 | README | the face for strangers and other agents: purpose, how to reach me, self-map pointer, docs index |
 | `docs/` | the depth — one file per module or handler group, each small enough for one Read, indexed from the README, opened when something breaks |
 
-The README left the startup read fleet-wide on 2026-09-15 (the user, 16:02, with the 10,000
-cap in the same ruling). A branch's breadcrumbs are its prompt from that moment on.
+The README is not part of the startup read; a branch's breadcrumbs are its prompt.
 
 ---
 
 ## Why the audit row is advisory
 
-A checker that moved in one commit put 17 of 18 branches red on 2026-09-13. The ruling was
-*advisory, then ratchet*: the score prints, `branch_audit` keeps it out of the gating
+A checker that lands in one commit reds the fleet, so the rule is *advisory, then ratchet*:
+the score prints, `branch_audit` keeps it out of the gating
 average, and the holding is done by a separate per-file gate over the files a clean checkout
 can actually see.
 
@@ -73,8 +72,7 @@ fleet-wide measurement would make the table's columns mean a different thing in 
 ## The ratchet
 
 `apps/handlers/context_standards/startup_ratchet.py`, run from
-`.github/scripts/seedgo_audit.py` in the **seedgo-audit** CI job. Landed 2026-09-15
-(DPLAN-0347 / FPLAN-0593 Phase 5), after 17 README diets put every branch under cap.
+`.github/scripts/seedgo_audit.py` in the **seedgo-audit** CI job.
 
 The advisory row says how big things are. The ratchet is the part that holds: once a branch
 is under its cap, the commit that pushes it back over turns the job red in the same run.

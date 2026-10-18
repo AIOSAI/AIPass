@@ -3,36 +3,11 @@
 # Description: Error detected event handler with Medic v2 dispatch gating
 # Version: 2.9.1
 # Created: 2026-02-10
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Error Detected Event Consumer
-
-Handles error_detected events fired by Trigger's log_watcher.
-Delivers notifications to affected branches via AI_MAIL.
-
-Event data from log_watcher.py (Medic v2):
-    - branch: Target branch name (e.g., 'FLOW')
-    - module: Module that logged the error
-    - message: Error message text
-    - log_path: Path to log file
-    - error_hash: Short ID from registry (or legacy 8-char MD5)
-    - timestamp: When error occurred
-    - fingerprint: SHA1 fingerprint from error_registry (Medic v2)
-    - registry_id: Short UUID from error_registry (Medic v2)
-    - first_seen: ISO timestamp of first occurrence (Medic v2)
-    - last_seen: ISO timestamp of most recent occurrence (Medic v2)
-
-Architecture (Medic v2):
-    1. Trigger's log_watcher detects ERROR in branch logs
-    2. log_watcher reports to error_registry, fires error_detected if new
-    3. This handler records the occurrence in the escalation lane (BEFORE any
-       gate — a mute stops the dispatch, never the count)
-    4. This handler checks circuit_breaker_allows() (global gate)
-    5. This handler checks should_dispatch(fingerprint) (per-error backoff)
-    6. If allowed, delivers email to affected branch (auto_execute=True)
-    7. Records dispatch via record_dispatch() and circuit_breaker_record_error()
 """
 
 import json
@@ -51,9 +26,7 @@ from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers import escalation
 
-# Deliberately NOT prax: this handler runs on the event path the log watchers
-# read, so a line through prax would be detected and fired straight back at it.
-# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+# Not prax: this runs on the watched event path, so a prax line would fire straight back at it.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
 
 
@@ -65,10 +38,9 @@ BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
 LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
-# Email send callback (set by module layer, avoids handler importing from modules)
+# Set by the module layer, so this handler never imports from modules.
 _send_email: Optional[Callable[..., bool]] = None
 
-# Try to import error_registry for Medic v2 circuit breaker + per-fingerprint backoff
 try:
     from aipass.trigger.apps.handlers.error_registry import (
         circuit_breaker_allows,
@@ -108,19 +80,14 @@ except ImportError:
         return False
 
 
-# Legacy rate limiting (kept for backward compat when registry unavailable)
+# Per-branch rate limiting, used only when error_registry is unavailable.
 _dispatch_timestamps: Dict[str, List[float]] = {}
 MAX_DISPATCHES_PER_WINDOW = 3
 RATE_LIMIT_WINDOW_SECONDS = 600  # 10 minutes
 
 
 def _read_medic_state() -> Dict[str, Any]:
-    """
-    Read medic_state.json, migrating off the legacy path on first read.
-
-    Returns:
-        Parsed state dict, or empty dict if missing or unreadable
-    """
+    """Read medic_state.json, migrating off the legacy path on first read."""
     migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
     if not MEDIC_STATE_FILE.exists():
         return {}
@@ -128,24 +95,8 @@ def _read_medic_state() -> Dict[str, Any]:
 
 
 def _is_medic_enabled() -> bool:
-    """
-    Check if medic (auto-healing dispatch) is enabled.
-
-    Reads medic_enabled from medic_state.json. If disabled with a TTL
-    (medic_disabled_until timestamp), treats an expired TTL as enabled.
-    Defaults to True when no state file exists.
-
-    Returns:
-        True if medic dispatch is enabled
-
-    Raises:
-        RuntimeError: the state exists but cannot be read. It may hold a
-            person's 'medic off', and answering enabled mailed and woke
-            branches against it. @trigger's decision in fleet green leg 4
-            (2026-09-29): the one caller, handle_error_detected, has already
-            counted the error into the escalation lane; its outer except logs
-            this and dispatches nothing.
-    """
+    """Check if medic (auto-healing dispatch) is enabled."""
+    # Unreadable state raises, never answers enabled: it may hold a person's 'medic off'.
     try:
         config = _read_medic_state().get("config", {})
         enabled = bool(config.get("medic_enabled", True))
@@ -174,20 +125,7 @@ def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
 
 
 def _is_branch_muted(branch_name: str) -> bool:
-    """
-    Check if a specific branch is muted for medic dispatch.
-
-    Reads muted_branches list from medic_state.json. Supports both
-    legacy plain-string entries (permanent) and new dict entries with
-    optional expires_at timestamp. Expired TTL mutes are treated as
-    unmuted.
-
-    Args:
-        branch_name: Branch name (case-insensitive)
-
-    Returns:
-        True if branch is actively muted
-    """
+    """Check if a specific branch is muted for medic dispatch."""
     try:
         muted = _read_medic_state().get("config", {}).get("muted_branches", [])
         branch_lower = branch_name.lower()
@@ -199,36 +137,14 @@ def _is_branch_muted(branch_name: str) -> bool:
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
-    """
-    Set the callback function for sending emails.
-
-    Must be called by the module/registry layer before events fire.
-    This avoids handler importing from modules (maintains independence).
-
-    Args:
-        callback: Function matching send_email_direct signature
-    """
+    """Set the callback function for sending emails."""
     global _send_email
     _send_email = callback
 
 
 def _get_registered_emails() -> set:
-    """
-    Read registered branch emails from AIPASS_REGISTRY.json.
-
-    Returns:
-        Set of registered email addresses (e.g., {'@flow', '@drone'}); empty
-        when no registry file exists
-
-    Raises:
-        RuntimeError: the registry exists but cannot be read or parsed. An
-            unreadable registry is not a registry with nobody in it: answering
-            an empty set made every branch read as unregistered, so medic
-            logged 'Unknown branch skipped' and the escalation lane mailed
-            'no registered owner' for a branch that has one. Each caller
-            handles the raise: handle_error_detected's outer except logs it,
-            escalation._has_registered_owner answers True.
-    """
+    """Read registered branch emails from AIPASS_REGISTRY.json."""
+    # Unreadable raises, never answers empty: an empty set reads every branch as unregistered.
     if not BRANCH_REGISTRY_FILE.exists():
         return set()
     try:
@@ -239,64 +155,32 @@ def _get_registered_emails() -> set:
 
 
 def _is_rate_limited(branch_email: str) -> bool:
-    """
-    Check if a branch has exceeded the dispatch rate limit.
-
-    BACKWARD COMPAT: Legacy Medic v1 per-branch rate limiting.
-    Primary dispatch gating is now circuit_breaker_allows() +
-    should_dispatch(fingerprint) from error_registry (Medic v2).
-
-    Args:
-        branch_email: Target branch email (e.g., '@flow')
-
-    Returns:
-        True if branch has hit the limit (3 dispatches in 10 minutes)
-    """
+    """Check if a branch has exceeded the dispatch rate limit."""
     now = time.time()
     cutoff = now - RATE_LIMIT_WINDOW_SECONDS
 
     if branch_email not in _dispatch_timestamps:
         _dispatch_timestamps[branch_email] = []
 
-    # Prune old timestamps
     _dispatch_timestamps[branch_email] = [ts for ts in _dispatch_timestamps[branch_email] if ts > cutoff]
 
     return len(_dispatch_timestamps[branch_email]) >= MAX_DISPATCHES_PER_WINDOW
 
 
 def _record_dispatch(branch_email: str) -> None:
-    """
-    Record a dispatch timestamp for rate limiting.
-
-    BACKWARD COMPAT: Legacy Medic v1 per-branch dispatch tracking.
-    Primary tracking is now record_dispatch(fingerprint) from error_registry (Medic v2).
-
-    Args:
-        branch_email: Target branch email (e.g., '@flow')
-    """
+    """Record a dispatch timestamp for rate limiting."""
     if branch_email not in _dispatch_timestamps:
         _dispatch_timestamps[branch_email] = []
     _dispatch_timestamps[branch_email].append(time.time())
 
 
 def _read_log_context(log_path: str, error_message: str, context_lines: int = 2) -> str:
-    """
-    Read context lines around an error in the log file.
-
-    Args:
-        log_path: Path to the log file
-        error_message: Error message to find in the log
-        context_lines: Number of lines before and after to include
-
-    Returns:
-        Formatted context string, or empty string if unavailable
-    """
+    """Read context lines around an error in the log file."""
     try:
         path = Path(log_path)
         if not path.exists():
             return ""
         lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        # Find last occurrence of the error message
         target_idx = -1
         for i in range(len(lines) - 1, -1, -1):
             if error_message in lines[i]:
@@ -326,25 +210,7 @@ def _build_notification_message(
     fingerprint: str = "",
     registry_id: str = "",
 ) -> str:
-    """
-    Build error notification message with investigation instructions.
-
-    Args:
-        error_hash: Unique error identifier (8-char legacy or registry ID)
-        module: Module that logged the error
-        message: Error message text
-        timestamp: When error occurred
-        log_path: Path to source log file
-        occurrences: Number of times this error was seen
-        first_seen: Timestamp of first occurrence
-        last_seen: Timestamp of most recent occurrence
-        log_context: Lines surrounding the error from the log file
-        fingerprint: SHA1 fingerprint from error_registry (Medic v2)
-        registry_id: Short UUID from error_registry (Medic v2)
-
-    Returns:
-        Formatted message string with investigation instructions
-    """
+    """Build error notification message with investigation instructions."""
     context_block = ""
     if log_context:
         context_block = f"""
@@ -352,7 +218,6 @@ Log context (surrounding lines):
 {log_context}
 """
 
-    # Registry tracking info (Medic v2)
     registry_block = ""
     if fingerprint:
         registry_block = f"""
@@ -360,11 +225,8 @@ Registry tracking:
   Fingerprint: {fingerprint[:12]}
 """
 
-    # The ID the responder is told to investigate has to be the one the registry
-    # verbs accept. @hooks, 2026-09-24: this slot printed the legacy error_hash,
-    # so `errors detail <that>` answered "Error not found" while the real row sat
-    # under a different string. And with no closing verb named anywhere, three
-    # cured entries stayed at status new and re-dispatched two days later.
+    # The ID shown must be the one the registry verbs accept, and the closing verbs must be
+    # named: an entry nobody resolves stays new and re-dispatches.
     if registry_id:
         identity_line = f"Error ID: {registry_id}"
         closing_block = f"""CLOSE IT - a dispatch nobody closes comes back:
@@ -451,56 +313,13 @@ def handle_error_detected(
     count: int = 1,
     **kwargs: Any,
 ) -> None:
-    """
-    Handle error_detected event - deliver notification to affected branch.
-
-    Called by Trigger when log_watcher detects an ERROR in branch logs.
-    Sends email to affected branch with auto_execute=True so an
-    investigation agent spawns automatically.
-
-    Dispatch threshold: count >= 2 required before dispatching. First
-    occurrence (count == 1) is registered but NOT dispatched - could be
-    transient. Second occurrence (count >= 2) confirms a pattern and
-    triggers investigation dispatch.
-
-    Medic v2 dispatch gating (when error_registry available):
-        1. count >= 2 threshold (skip first occurrence)
-        2. circuit_breaker_allows() - global gate, pauses all dispatch on error storm
-        3. should_dispatch(fingerprint) - registry status gate (suppressed = never
-           dispatch while suppressed) then per-error exponential backoff
-    Fallback: legacy per-branch rate limiting (3 per 10 min) if registry unavailable.
-
-    Args:
-        branch: Target branch name (e.g., 'FLOW') - REQUIRED
-        module: Module that logged the error - REQUIRED
-        message: Error message text - REQUIRED
-        log_path: Path to source log file
-        error_hash: Short ID from registry or legacy 8-char hash - REQUIRED
-        timestamp: When error occurred (defaults to now)
-        fingerprint: SHA1 fingerprint from error_registry (Medic v2)
-        registry_id: Short UUID from error_registry (Medic v2)
-        first_seen: ISO timestamp of first occurrence (Medic v2)
-        last_seen: ISO timestamp of most recent occurrence (Medic v2)
-        count: Registry occurrence count (default: 1). Dispatch requires >= 2.
-        **kwargs: Additional event data (ignored)
-
-    Returns:
-        None - handlers must not return values
-
-    Note:
-        Handler follows silent failure pattern - all exceptions caught.
-        NO logger imports (causes infinite recursion with trigger events).
-        NO console.print() (handlers must be silent).
-    """
+    """Handle error_detected event - deliver notification to affected branch."""
+    # Silent by contract: never raises, never prints, never logs through prax.
     try:
-        # Validate required fields
         if not branch or not module or not message or not error_hash:
             return
 
-        # Escalation counting comes FIRST, before every dispatch gate below.
-        # A mute, a medic toggle or an open breaker stops the DISPATCH; none of
-        # them may stop the COUNT, or the repeat would go dark exactly when it
-        # matters most (DPLAN-0283). Sending is gated inside the lane, not here.
+        # Count BEFORE every gate: a mute, toggle or open breaker stops the dispatch, never the count.
         escalation.record_error(
             branch=branch,
             module=module,
@@ -510,53 +329,44 @@ def handle_error_detected(
             raw_line=kwargs.get("raw_line", "") or "",
         )
 
-        # Medic toggle - if disabled, log but do NOT dispatch
         if not _is_medic_enabled():
             _write_suppression_log("Medic OFF - suppressed dispatch for", branch, module, message)
             return
 
-        # Per-branch mute check - muted branches have errors logged but NOT dispatched
         if _is_branch_muted(branch):
             _write_suppression_log("Branch muted - suppressed dispatch for", branch, module, message)
             return
 
-        # Dispatch threshold: count >= 2 required. First occurrence could
-        # be transient - only dispatch when the error recurs.
+        # A first occurrence may be transient; dispatch only on recurrence.
         if count < 2:
             _write_suppression_log(f"First occurrence (count={count}) - waiting for pattern", branch, module, message)
             return
 
-        # Record error for circuit breaker at detection time (not dispatch time)
+        # The breaker counts at detection time, not dispatch time.
         if _REGISTRY_DISPATCH_AVAILABLE:
             circuit_breaker_record_error()
 
-        # Callback must be set by module layer before events fire
         if _send_email is None:
             return
 
-        # Convert branch name to email format (FLOW -> @flow)
         recipient = f"@{branch.lower()}"
 
-        # devpulse is protected from auto-triggering
+        # devpulse is protected from auto-triggering.
         if recipient == "@devpulse":
             return
 
-        # Validate target branch exists in registry before attempting delivery
         registered_emails = _get_registered_emails()
         if recipient not in registered_emails:
             _write_suppression_log(f"Unknown branch skipped: {recipient}", branch, module, message)
             return
 
-        # --- Dispatch gating ---
         if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:
-            # Medic v2: Circuit breaker (global) + per-fingerprint backoff
             if not circuit_breaker_allows():
                 _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
                 return
 
             if not registry_should_dispatch(fingerprint):
-                # Distinguish the two reasons should_dispatch can refuse, so the
-                # trail does not report a permanent suppression as a timing wait.
+                # Keep a permanent suppression from reading as a timing wait on the trail.
                 if registry_is_suppressed(fingerprint):
                     _write_suppression_log(
                         f"Suppressed fingerprint {fingerprint[:12]} - no dispatch for", branch, module, message
@@ -567,7 +377,6 @@ def handle_error_detected(
                     )
                 return
         else:
-            # Legacy fallback: per-branch rate limiting (Medic v1)
             recent_count = len(
                 [ts for ts in _dispatch_timestamps.get(recipient, []) if ts > time.time() - RATE_LIMIT_WINDOW_SECONDS]
             )
@@ -575,20 +384,15 @@ def handle_error_detected(
                 _write_rate_log("Rate limited", f"{recipient} has {recent_count} recent dispatches, skipping")
                 return
 
-        # Default timestamp to now if not provided
         if not timestamp:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Default log_path if not provided
         effective_log_path = log_path if log_path else "unknown"
 
-        # Read log context (2 lines before and after)
         error_log_context = _read_log_context(effective_log_path, message)
 
-        # Build subject line
         email_subject = f"[ERROR] {module} - detected in logs"
 
-        # Build notification message with structured context
         notification_message = _build_notification_message(
             error_hash=error_hash,
             module=module,
@@ -603,7 +407,7 @@ def handle_error_detected(
             registry_id=registry_id,
         )
 
-        # Send via callback (set by module layer, trigger isn't a branch so PWD detection fails)
+        # Via the callback: trigger is not a branch, so ai_mail's PWD sender detection fails.
         sent = _send_email(
             to_branch=recipient,
             subject=email_subject,
@@ -617,27 +421,21 @@ def handle_error_detected(
             logger.warning(f"Email delivery failed for {recipient} (fingerprint={fingerprint})")
             return
 
-        # Wake the target branch so the email is processed immediately
         try:
-            # Through ai_mail's published door (DPLAN-0404), never its handlers.
+            # Through ai_mail's published door, never its handlers.
             from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception as exc:
-            # Not fatal — the email is already delivered and waits in the inbox.
-            # But a wake that never lands means nobody reads it until they next
-            # wake anyway, so the miss is recorded rather than swallowed.
+            # Not fatal: the email waits in the inbox. Recorded so the missed wake is visible.
             logger.warning(f"wake failed for {recipient} (fingerprint={fingerprint}): {exc}")
 
         json_handler.log_operation("dispatch_sent", {"recipient": recipient})
 
-        # Record dispatch for tracking
         if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:
-            # Medic v2: per-fingerprint dispatch tracking
             registry_record_dispatch(fingerprint)
             circuit_breaker_probe_succeeded()
         else:
-            # Legacy: per-branch rate limiting
             _record_dispatch(recipient)
 
     except Exception as exc:

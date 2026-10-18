@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-10-01
+# Modified: 2026-10-17
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
@@ -31,6 +31,7 @@ from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -47,8 +48,7 @@ def _read_provider_hooks(path=None):
     """Read hook events from provider settings. Returns {event: [entries]}."""
     settings_path = Path(path) if path else Path.home() / ".claude" / "settings.json"
     try:
-        raw = settings_path.read_text(encoding="utf-8")
-        data = json.loads(raw)
+        data = json_files.read_json_file(settings_path)
         return data.get("hooks", {})
     except (OSError, json.JSONDecodeError) as exc:
         logger.info("[WIRE_VERIFY] cannot read provider settings: %s", exc)

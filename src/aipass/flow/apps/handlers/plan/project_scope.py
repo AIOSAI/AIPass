@@ -3,46 +3,13 @@
 # Description: Project-Scope Resolution (a project is its register)
 # Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Project Scope Resolution
+"""Project Scope Resolution
 
-Answers one question: **which project does this path belong to?**
-
-The owner's ruling (2026-08-22): A PROJECT IS ITS REGISTER. Not its repository
-marker, not the presence of citizens, not nesting depth. A directory is a
-project root if and only if it holds a project register -- a
-``<NAME>_REGISTRY.json`` whose top level carries a ``branches`` key. That is
-what distinguishes 15 real projects on this machine, including ones with ZERO
-citizens (SPEAKEASY, FEEL_GOOD_APP) and one with no repository marker at all
-(MARKETSTAND).
-
-The ``branches`` key is load-bearing, not decoration. Three files on this
-machine match ``*_REGISTRY.json`` and are NOT project registers:
-``marketstand/inventory/LISTINGS_REGISTRY.json`` (a listings index),
-``flow/flow_json/PLAN_REGISTRY.json`` and ``.../BRANCH_REGISTRY.json``
-variants. A name-only test would have made ``inventory/`` and ``flow_json/``
-into projects of their own -- and under a nearest-ancestor rule that is not a
-cosmetic error: it silently removes rows from their real project's scope.
-
-WHY THIS EXISTS SEPARATELY: seven files in flow answer "where am I" from
-``Path(__file__)`` -- they find the tree flow's SOURCE lives in, which is the
-right answer for flow's own registries and the wrong answer for "whose plan is
-this". This module never consults ``__file__``. It reads the caller's location
-as EVIDENCE (``AIPASS_CALLER_CWD``) and each row's own ``location``, and walks
-up from there.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.project_scope import (
-        find_project_root, caller_project_root, describe_project,
-    )
-
-    caller = caller_project_root()          # Path | None
-    cache  = {}                             # share across one operation
-    row    = find_project_root(Path(loc), cache)
-    in_scope = caller is not None and row == caller
+A project root holds a ``*_REGISTRY.json`` with a top-level ``branches`` key (name alone matches plan registries).
+Never consults ``__file__``: scope comes from the caller's location and each row's ``location``.
 """
 
 import json
@@ -57,8 +24,6 @@ from aipass.flow.apps.handlers.repo_root import exactly_named
 
 MODULE_NAME = "project_scope"
 
-# A project register is named <NAME>_REGISTRY.json and carries a top-level
-# "branches" list. Both halves are required -- see the module docstring.
 REGISTER_GLOB = "*_REGISTRY.json"
 REGISTER_KEY = "branches"
 
@@ -70,27 +35,10 @@ class UnreadableRegisterError(Exception):
 def _holds_register(directory: Path) -> bool:
     """True if `directory` holds a project register.
 
-    A read failure is neither "yes" nor "no". "Yes" on no evidence makes a
-    subdirectory its own project and its rows fall out of the real project's
-    scope. "No" was the answer until leg 6 of fleet green, and it is the
-    namesake defect: the walk went on upward, so the rows (and a caller
-    standing there) were attributed to the enclosing project, and a close
-    --all from either side could sweep the other's plans. It raises now
-    (flow's decision, leg 6).
-
-    Raises:
-        UnreadableRegisterError: The directory cannot be listed, or a
-            ``*_REGISTRY.json`` candidate in it cannot be read or parsed.
-            Chained from the OSError or decode error underneath.
+    Raises UnreadableRegisterError on a read failure: "no" would attribute rows to the enclosing project.
     """
     try:
-        # exactly_named, not the glob alone: pathlib's glob is case-INSENSITIVE
-        # on Windows and default macOS, so REGISTER_GLOB also matches flow's own
-        # lowercase flow_json/*_registry.json plan registries there. Measured on
-        # the live tree 2026-08-31: 237 files match the folded pattern and 0 of
-        # them carry a "branches" key, so this was reachable-not-armed — the
-        # second clause was holding, not the glob. A register-shaped file under a
-        # lowercase name would make a subdirectory read as its own project.
+        # glob is case-insensitive on Windows/macOS; exactly_named drops lowercase *_registry.json.
         candidates = exactly_named(sorted(directory.glob(REGISTER_GLOB)), "_REGISTRY.json")
     except OSError as e:
         raise UnreadableRegisterError(f"Cannot list {directory} for a project register: {e}") from e
@@ -109,29 +57,8 @@ def _holds_register(directory: Path) -> bool:
 def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional[Path]]] = None) -> Optional[Path]:
     """Return the nearest ancestor of `start` (inclusive) holding a register.
 
-    Args:
-        start: Absolute path to a file or directory. A relative path, an empty
-               path or None yields None -- see below.
-        cache: Optional directory -> root map, filled in as the walk proceeds.
-               Resolving many rows shares one walk per ancestor chain; pass the
-               SAME dict for the duration of one operation and drop it after.
-               Deliberately not module state: a memo with no invalidation path
-               is only safe while flow stays a one-shot CLI, and that is an
-               assumption the caller can hold but the resolver cannot.
-
-    Returns:
-        The project root, or None when no register stands above `start`.
-
-    Raises:
-        UnreadableRegisterError: A directory on the walk cannot be listed or
-            holds a register candidate that cannot be read. The cache is left
-            untouched for the walk that failed.
-        OSError: ``start`` cannot be resolved.
-
-    A relative path is refused rather than resolved. ``Path("").resolve()`` is
-    the process CWD, so an empty ``location`` field would silently attribute
-    that row to whoever happened to be running the command -- the row would
-    join the caller's project by accident. No base, no attribution.
+    None, empty or relative `start` yields None: resolving it would use the process CWD.
+    `cache` is per-operation, never module state: it has no invalidation path.
     """
     if start is None:
         return None
@@ -141,9 +68,7 @@ def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional
         logger.warning(f"[{MODULE_NAME}] Refusing to attribute relative path: {start}")
         return None
 
-    # An OSError from resolve() propagates: None would read as "no register
-    # above it", a claim nobody checked (flow's decision, leg 6). A symlink
-    # loop raises RuntimeError on 3.12 and nothing on 3.13; neither is caught.
+    # resolve() errors propagate: None would claim "no register above" unchecked.
     current = start if start.is_dir() else start.parent
     current = current.resolve()
 
@@ -171,12 +96,7 @@ def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional
 def caller_cwd() -> Path:
     """Return where the caller stood, as evidence.
 
-    Drone sets AIPASS_CALLER_CWD before invoking flow. When it is absent flow
-    was invoked directly (a test, or the module run in place) and the process
-    CWD *is* the same kind of evidence -- a location, observed. What is never
-    consulted is a CLAIM about identity: no branch name, no passport, no
-    directory name.
-    Mirrors handlers/plan/resolve_location.py, deliberately.
+    AIPASS_CALLER_CWD (set by drone), else the process CWD; never a branch name or passport.
     """
     env_cwd = os.environ.get("AIPASS_CALLER_CWD")
     if env_cwd:
@@ -185,16 +105,7 @@ def caller_cwd() -> Path:
 
 
 def caller_project_root() -> Optional[Path]:
-    """Return the project the caller is standing in, or None if none is.
-
-    Logged once per invocation, not per row: this is the single answer every
-    scope decision in the run is measured against, and when a sweep later
-    looks wrong the first question is which project it thought it was in.
-
-    Raises:
-        UnreadableRegisterError, OSError: As find_project_root, never logged
-            as resolved.
-    """
+    """Return the project the caller is standing in, or None if none is."""
     cwd = caller_cwd()
     root = find_project_root(cwd)
     json_handler.log_operation(

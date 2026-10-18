@@ -4,14 +4,13 @@
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
 
-# handle() is cadence-gated (loader "identity", period 5). The render tests below
-# pin the passport formatting, so the gate is held open for every test in this
-# module; TestCadenceGate pins the gate itself.
+# handle() is cadence-gated; the gate is held open for every test here so the render
+# tests pin formatting alone. TestCadenceGate pins the gate itself.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/prompt/identity.py parses and imports
@@ -88,8 +87,7 @@ class TestCadenceGate:
         assert "identity DEGRADED loader=identity" in caplog.text
 
 
-# Schema 1.0.0 shape — principles live at the TOP LEVEL. Live on every passport
-# in the fleet today, so this layout must keep rendering after the 2.0 migration.
+# Schema 1.0.0 shape — principles at the TOP LEVEL; still live, so it must keep rendering.
 SAMPLE_PASSPORT = {
     "branch_info": {
         "branch_name": "devpulse",
@@ -106,9 +104,7 @@ SAMPLE_PASSPORT = {
     "principles": ["Fail honestly", "Memory is everything"],
 }
 
-# Schema 2.0.0 shape (DPLAN-0319) — principles MOVED INSIDE identity. Block order
-# also changes, but every field is read by key, so order costs nothing. Must render
-# byte-identically to SAMPLE_PASSPORT.
+# Schema 2.0.0 shape — principles inside identity; must render byte-identically to SAMPLE_PASSPORT.
 SAMPLE_PASSPORT_V2 = {
     "branch_info": {
         "branch_name": "devpulse",
@@ -210,7 +206,7 @@ class TestIdentityHandler:
         assert result["sound"] == "identity"
 
     def test_empty_hook_data(self, tmp_path, monkeypatch):
-        # No cwd in the hook data: the real cwd is read, an empty directory (fleet green leg 7).
+        # No cwd in the hook data: the real cwd is read, an empty directory.
         monkeypatch.chdir(tmp_path)
         result = handle({})
 
@@ -235,10 +231,7 @@ class TestIdentityHandler:
 class TestPrinciplesLayoutFallback:
     """principles must render on BOTH passport layouts (DPLAN-0319).
 
-    Schema 2.0.0 moves the top-level ``principles`` array inside ``identity``.
-    A plain ``data.get("principles")`` returns [] after that move and the
-    Principles line vanishes with no error and no log — the failure is silent,
-    which is why it is pinned on both shapes rather than just the new one.
+    A plain ``data.get("principles")`` returns [] on 2.0.0 and the line vanishes silently.
     """
 
     @staticmethod
@@ -292,13 +285,7 @@ class TestPrinciplesLayoutFallback:
 
 
 class TestPersonalityAndAntiTraits:
-    """identity.personality and identity.anti_traits reach the model (RPLAN-0005 row 1).
-
-    Both keys existed in passports and were silently dropped by the renderer.
-    Measured 2026-09-08 across 173 passports on this machine: 12 carry either
-    key and exactly ONE of those is a live citizen (Vera). So the whole fleet's
-    render must be unchanged, which is what the last two tests here pin.
-    """
+    """identity.personality and identity.anti_traits reach the model (RPLAN-0005 row 1)."""
 
     @staticmethod
     def _render(tmp_path: Path, passport_data: dict) -> str:
@@ -325,8 +312,6 @@ class TestPersonalityAndAntiTraits:
 
         assert "Core: Three brains, one mouth." in out
         assert "Voice: Clear over clever." in out
-        # The key's underscores become a space and only the first word is capped,
-        # so a multi-word facet reads as a label rather than as an identifier.
         assert "Under pressure: Steady." in out
         lines = out.splitlines()
         assert [line.split(":")[0] for line in lines if ":" in line][-3:] == ["Core", "Voice", "Under pressure"]
@@ -350,10 +335,7 @@ class TestPersonalityAndAntiTraits:
         assert never_at == dont_at + 1
 
     def test_a_passport_without_either_key_renders_unchanged(self, tmp_path):
-        """The fleet-wide claim: 172 of 173 passports must be byte-identical.
-
-        SAMPLE_PASSPORT carries neither key, so its render is the before-picture.
-        """
+        """The fleet-wide claim: 172 of 173 passports must be byte-identical."""
         out = self._render(tmp_path, SAMPLE_PASSPORT)
 
         assert "Never:" not in out
@@ -373,9 +355,7 @@ class TestPersonalityAndAntiTraits:
     def test_wrong_shapes_and_empties_emit_nothing(self, tmp_path):
         """A string personality or an empty anti_traits list is not a render.
 
-        Guarding on truthiness alone would let a string personality through and
-        iterate it character by character, which is a far worse prompt than the
-        missing line this change set out to fix.
+        A truthiness-only guard would iterate a string personality character by character.
         """
         passport = {
             "branch_info": {"branch_name": "vera"},
@@ -386,11 +366,7 @@ class TestPersonalityAndAntiTraits:
 
         assert "Never:" not in out
         assert "steady and direct" not in out
-        # The rest of the block MUST still render. Without this the test passes
-        # when the wrong shape CRASHES the renderer to empty, which is how it
-        # read against a truthiness-only guard: a str has no .items(), the
-        # handler swallowed the AttributeError, and "not in out" held because
-        # nothing was in out. Measured — the mutation killed nothing until here.
+        # Without this, a wrong shape that crashes the renderer to empty still passes.
         assert "# vera Identity" in out
 
     def test_a_facet_longer_than_its_budget_is_cut_at_a_sentence(self, tmp_path):
@@ -410,17 +386,13 @@ class TestPersonalityAndAntiTraits:
         assert len(body) <= FACET_CHAR_BUDGET
         assert body.endswith(".")
         assert "Filler" in body
-        # Cut at a boundary, never mid-word.
         assert body in long_facet
-        # The facet is trimmed, not dropped, and the later keys still render.
         assert "Never: Never drifts" in out
 
     def test_veras_whole_render_stays_under_the_budget(self, tmp_path):
         """The one live passport that exercises this path, at full size.
 
-        The budget is a per-turn tax, not a platform limit: this block is
-        injected on EVERY turn, so an unbounded passport quietly costs the whole
-        session. Six facets plus five anti-traits is the richest in the fleet.
+        The block is injected on EVERY turn, so the budget is a per-turn tax.
         """
 
         passport = {
@@ -446,11 +418,7 @@ class TestPersonalityAndAntiTraits:
 class TestIdentityBudgetIsEnforced:
     """DPLAN-0347 row 2: IDENTITY_CHAR_BUDGET stops being documentation.
 
-    It was declared on 2026-09-08 and read by nothing: the facet budget alone
-    kept the block small, and only for passports that carry facets. Every other
-    field — purpose, traits, principles, what_i_do — was unbounded, and the
-    largest passport in the fleet had already reached 5,461 chars against a
-    4,000 budget nobody enforced.
+    Every field counts against it, not only the facets.
     """
 
     @staticmethod

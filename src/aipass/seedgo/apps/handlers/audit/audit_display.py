@@ -3,39 +3,20 @@
 # Description: Audit Display Module
 # Version: 1.6.1
 # Created: 2026-03-05
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 Audit Display Module
-
-Formats and prints audit results to console.
-Module-level display logic for audit output.
 """
 
 from typing import List, Dict
 from collections import defaultdict
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
-
-# CLI services (display/output formatting)
 from aipass.cli import console, warning
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.audit.discovery import DEFAULT_PACK_CORPUS
 from aipass.seedgo.apps.handlers.json import json_handler
-
-
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -63,22 +44,13 @@ def print_introspection() -> None:
     console.print()
 
 
-# =============================================================================
-# PRIVATE HELPERS — Generic violation rendering
-# =============================================================================
-
-
 def _format_standard_name(name: str) -> str:
     """Convert 'DEEP_NESTING' or 'deep_nesting' to 'Deep Nesting'."""
     return name.replace("_", " ").title()
 
 
 def _render_violations(standard_name: str, violations: list, console_obj) -> None:
-    """Generic renderer for standard violation lists.
-
-    Handles both 'path' and 'file' keys (tries 'path' first, falls back to 'file').
-    Shows up to 5 violations with their issues, then a 'and N more...' note.
-    """
+    """Generic renderer for standard violation lists, five shown, the rest counted."""
     console_obj.print()
     console_obj.print(f"  [bold red]{standard_name.upper()} VIOLATIONS ({len(violations)} files):[/bold red]")
 
@@ -89,7 +61,6 @@ def _render_violations(standard_name: str, violations: list, console_obj) -> Non
         console_obj.print(f"    [red]✗[/red] [magenta]{file_path}[/magenta] [dim](score: {score}%)[/dim]")
         for issue in violation.get("issues", []):
             console_obj.print(f"      [dim]• {issue}[/dim]")
-        # Fallback: if no 'issues' key but 'message' exists, show that
         if not violation.get("issues") and violation.get("message"):
             console_obj.print(f"      [dim]• {violation['message']}[/dim]")
 
@@ -110,7 +81,6 @@ def _render_architecture_violations(audit_result: dict, console_obj) -> None:
     console_obj.print()
     console_obj.print(f"  [bold red]ARCHITECTURE VIOLATIONS ({len(failed_checks)} missing):[/bold red]")
 
-    # Group by type for clarity (match both "Dir:" and "Directory:" prefixes)
     missing_dirs = [c for c in failed_checks if "Dir:" in c.get("name", "") or "Directory:" in c.get("name", "")]
     missing_files = [c for c in failed_checks if "File:" in c.get("name", "")]
     other_failures = [c for c in failed_checks if c not in missing_dirs and c not in missing_files]
@@ -145,10 +115,7 @@ def _render_type_errors(audit_result: dict, console_obj) -> None:
     if type_errors > 0:
         console_obj.print()
         console_obj.print(f"  [bold red]TYPE ERRORS ({type_errors} errors):[/bold red]")
-        # Every cap here announces itself. A silent cap is indistinguishable from a
-        # short list, so a caller reading this output cannot tell 'clean' from
-        # 'not shown' — which is how a branch measures the display budget and
-        # publishes it as a finding about its own code (@prax, mail 83190864).
+        # Every cap announces itself: a silent cap reads as a short list, 'clean' for 'not shown'.
         failing = [f for f in type_error_files if f.get("errors", 0) > 0]
         for file_result in failing[:10]:
             console_obj.print(f"    [red]✗[/red] {file_result['file']} [dim]({file_result['errors']} errors)[/dim]")
@@ -182,35 +149,21 @@ def _render_test_map(audit_result: dict, console_obj) -> None:
 
 
 def _render_info_lines(audit_result: dict, console_obj) -> None:
-    """Show non-scored signpost lines from checkers (informational, not scored).
-
-    Always rendered, including at 100% — an info line is context, not a
-    failure, so hiding it behind a below-100 score would make it invisible
-    on exactly the healthy branches it describes.
-    """
+    """Show non-scored signpost lines from checkers, at 100% too: context, not failure."""
     for entry in audit_result.get("info_lines", []):
         message = entry.get("message", "")
         if message:
             console_obj.print(f"  [dim]ⓘ {message}[/dim]")
 
 
-#: Cell states a checker may publish in a fleet row, and how each prints.
-#: A state this map does not know prints as its own name rather than being
-#: dropped: a cell that silently vanishes is a measurement the reader cannot
-#: tell from a clean one.
+#: Cell states a checker may publish in a fleet row; an unknown state prints, never vanishes.
 _FLEET_STATE_STYLE = {"over": "red", "error": "red", "absent": "dim", "under": ""}
 
 
 def _fleet_rows(audit_results: List[Dict]) -> List[Dict]:
     """Every ``fleet_row`` the pack's checkers published, in the order audited.
 
-    A GENERIC CHANNEL, not one pack's arm. A branch_level checker whose whole
-    point is one number per branch (context/startup_budget: six files against
-    six caps) has nowhere to say so on a fleet run — print_branch_summary is
-    only called for a single-branch audit, so on `audit <pack>` the per-branch
-    detail never prints at all. Any checker that returns a ``fleet_row`` dict
-    of ``{branch, title, cells, notes}`` gets a table here; every pack that
-    returns none renders byte-identically to before this existed.
+    A generic channel: any checker returning ``{branch, title, cells, notes}`` gets a table.
     """
     rows = []
     for result in audit_results:
@@ -224,12 +177,7 @@ def _fleet_rows(audit_results: List[Dict]) -> List[Dict]:
 
 
 def _fleet_columns(rows: List[Dict]) -> List[tuple]:
-    """(label, cap) per column, first-seen order, cap from the first row that knows one.
-
-    Read from the rows rather than declared here, so the display carries no
-    knowledge of which files a checker measures — a column added to the checker
-    appears without touching this module.
-    """
+    """(label, cap) per column, first-seen order, cap from the first row that knows one."""
     caps: Dict[str, int | None] = {}
     for row in rows:
         for cell in row["cells"]:
@@ -253,12 +201,7 @@ def _fleet_cell_text(cell: dict) -> str:
 def _render_fleet_table(audit_results: List[Dict], console_obj) -> None:
     """Print the fleet table a checker published, one row per branch.
 
-    Returns immediately when no checker published one, which is every pack but
-    context today — the guard is what keeps every other pack's output
-    unchanged. Laid out as padded text inside Rich markup rather than as a Rich
-    Table: the padding has to be INSIDE the markup or the invisible style tags
-    are counted as width, and a fixed 8-column grid stays readable at 80 chars
-    where a bordered table wraps.
+    Padding sits inside the Rich markup, or style tags count as width; a bordered Table wraps at 80.
     """
     rows = _fleet_rows(audit_results)
     if not rows:
@@ -320,33 +263,14 @@ def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
         console_obj.print(f"      [dim]→ {pattern['message']}[/dim]")
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
-#: How many re-run checkers to name before the line stops being readable. A
-#: pack-wide bust never reaches here (it fails the branch stamp and reports
-#: nothing cached), so this only trims the rare many-checkers-edited run.
+#: How many re-run checkers to name before the line stops being readable.
 _MAX_NAMED_RERUNS = 4
 
 
 def cache_tag(audit_result: dict) -> str:
-    """The `(cached)` suffix for a branch line — and what a PARTIAL hit says.
+    """The `(cached)` suffix for a branch line, and what a partial hit re-ran.
 
-    A full hit reads `(cached)`. A run that served most of the cache and re-ran
-    a little used to read as nothing at all, identical to a cold scan, so a
-    working cache and a broken one looked the same from the outside. The owner
-    diagnosed a clobbering bug in 2026-09-21 from timings alone because of it.
-
-    Now it says what it re-did:
-
-        (cached: 51 of 53 checkers; re-ran imports, named_encoding)
-        (cached: 98 of 101 files)
-
-    Both clauses appear when both are true. Nothing is printed for a cold run,
-    a `--full` run or a stamp bust: there was no cache to serve, and claiming
-    a fraction of one would be worse than silence.
+    A partial hit must not read as a cold scan; a cold, ``--full`` or stamp-bust run prints nothing.
     """
     if audit_result.get("_cache_hit"):
         return " [dim](cached)[/dim]"
@@ -374,12 +298,7 @@ def print_branch_summary(
 ):
     """Print summary for a single branch - always shows full details (audit = comprehensive)
 
-    no_bypass tags the branch line and the Overall line, so the label travels
-    with the number. A --no-bypass score copied out of an unlabelled summary is
-    indistinguishable from a branch that just regressed.
-
-    It took system_averages and overall_system_avg and read neither; both were
-    dropped with the computation that fed them (seedgo, fleet green leg 8).
+    no_bypass tags the branch and Overall lines, so a raw score never travels unlabelled.
     """
     json_handler.log_operation("audit_display_rendered", {"branch": audit_result["branch"]["name"]})
     branch = audit_result["branch"]
@@ -387,23 +306,7 @@ def print_branch_summary(
     avg = audit_result["average"]
     files_checked = audit_result.get("files_checked", 0)
 
-    # Branch header - always says WHAT was measured, never just how much.
-    #
-    # It read "N files checked" until 2026-08-31. The audit's corpus is
-    # apps/**/*.py and nothing else: tests/ is never walked, so on a branch
-    # that is a third test code by file count, a 100 stood for a number the
-    # reader had no way to compute. @devpulse's ruling the same morning, on
-    # this branch's own report of it: the honest sentence ships now; aligning
-    # the walk to each checker's APPLIES_TO (+136 findings across 12 branches)
-    # is a separate, scheduled fleet change needing the owner's GO. A score that
-    # stops overclaiming is a fix, not a change.
-    #
-    # THE SENTENCE COMES FROM THE PACK since 2026-09-07. It was hardcoded to
-    # the aipass pack's corpus and printed verbatim under pytest_quality too -
-    # a pack whose eleven rules are all branch-level and read test units, not
-    # one apps/ file - so both halves were wrong at once: the wrong corpus,
-    # and a count taken from a walk none of those rules used. Falls back to
-    # the aipass wording, which is what a pack declaring nothing still means.
+    # Says what was measured, never just how much; the corpus sentence comes from the pack.
     corpus_noun = audit_result.get("corpus_noun") or DEFAULT_PACK_CORPUS["noun"]
     corpus_detail = audit_result.get("corpus_detail") or DEFAULT_PACK_CORPUS["detail"]
     corpus_size = audit_result.get("corpus_size", files_checked)
@@ -416,10 +319,8 @@ def print_branch_summary(
         f"{cached_tag}{no_bypass_tag}"
     )
 
-    # Scores in a grid
     score_items = list(scores.items())
 
-    # Print in rows of 2
     for i in range(0, len(score_items), 2):
         left_name, left_score = score_items[i]
         left_icon = "✅" if left_score >= 90 else "⚠️" if left_score >= 75 else "❌"
@@ -439,26 +340,22 @@ def print_branch_summary(
         counts = ", ".join(f"{name.title()} {len(files)} declined" for name, files in sorted(declined.items()))
         console.print(f"  [dim]Not judged: {counts}[/dim]")
 
-    # What the audit ignore list removed, and any tracked source it should not have.
     ignored = audit_result.get("ignored") or {}
     if ignored:
         counts = ", ".join(f"{pattern} {len(files)}" for pattern, files in sorted(ignored.items()))
         console.print(f"  [dim]Ignored by the audit list: {counts}[/dim]")
     for rel in audit_result.get("ignored_tracked") or []:
         warning(f"Ignore list drops tracked source: {rel}")
-    # Bypass rules that match nothing, and inline bypass comments nothing reads.
     for dead in audit_result.get("bypass_dead") or []:
         warning(f"Dead bypass rule [{dead['index']}] {dead['file']} / {dead['standard']}: {dead['why']}")
     for marker in audit_result.get("bypass_markers") or []:
         warning(f"Inline bypass comment, read by nothing: {marker}")
 
-    # Overall score
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"
     console.print(f"  [bold]Overall:{' ' * 8} {avg:3}% {overall_icon}[/bold]")
     if no_bypass:
         console.print("  [bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — raw score[/dim]")
 
-    # Display violation details for any standard with violations
     rendered_standards = set()
     for standard_name, score in sorted(audit_result.get("scores", {}).items()):
         if score >= 100:
@@ -472,7 +369,6 @@ def print_branch_summary(
             _render_violations(standard_name, violations, console)
             rendered_standards.add(standard_name)
         else:
-            # Branch-level checkers: no violations list, read from results[standard]['checks']
             result_data = audit_result.get("results", {}).get(standard_name, {})
             failed_checks = [c for c in result_data.get("checks", []) if not c.get("passed", True)]
             if failed_checks:
@@ -482,7 +378,6 @@ def print_branch_summary(
                     console.print(f"       [dim]• {check.get('message', '')}[/dim]")
                 rendered_standards.add(standard_name)
 
-    # Catch any violation lists not represented in scores (defensive)
     for key in audit_result:
         if not key.endswith("_violations"):
             continue
@@ -493,35 +388,21 @@ def print_branch_summary(
         if violations:
             _render_violations(standard_name, violations, console)
 
-    # Type errors (separate from standards)
     _render_type_errors(audit_result, console)
 
-    # Custom function test coverage (informational)
     _render_test_map(audit_result, console)
 
-    # Checker signposts (informational, never scored)
     _render_info_lines(audit_result, console)
 
-    # Deprecated patterns
     _render_deprecated_patterns(audit_result, console)
 
-    # A published fleet row, as a one-row table. Same arm as the fleet run, so
-    # `audit context @seedgo` and `audit context` cannot describe one branch
-    # two different ways. Prints nothing when the pack publishes no row.
+    # Same arm as the fleet run, so one branch never reads two ways.
     _render_fleet_table([audit_result], console)
 
 
 def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
-    """Print system-wide summary with standard averages
-
-    no_bypass labels the summary itself, not just the run that produced it —
-    this block is the part that gets copied into a plan or a message, and a
-    fleet average with every rule switched off means something else entirely.
-    """
-    # The fleet table first: on a full audit this is the only place a
-    # branch_level checker's per-branch reading can appear at all, because
-    # print_branch_summary is skipped for a compact run. No row published, no
-    # output — every pack that predates this channel prints exactly as before.
+    """Print system-wide summary with standard averages; no_bypass labels the copied block itself."""
+    # On a fleet run this is the only place a branch_level checker's per-branch reading appears.
     _render_fleet_table(audit_results, console)
 
     total_branches = len(audit_results)
@@ -532,7 +413,6 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
     needs_work = sum(1 for r in audit_results if r["average"] < 75)
     cache_served = sum(1 for r in audit_results if r.get("_cache_hit"))
 
-    # Calculate total type errors
     total_type_errors = sum(r.get("type_errors", 0) for r in audit_results)
     branches_with_type_errors = sum(1 for r in audit_results if r.get("type_errors", 0) > 0)
 
@@ -557,7 +437,6 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
         console.print("  Bypass rules:          [bold yellow]DISABLED[/bold yellow] [dim](raw, not comparable)[/dim]")
     console.print()
 
-    # Calculate standard averages
     standard_scores = defaultdict(list)
     for result in audit_results:
         for standard, score in result["scores"].items():
@@ -565,11 +444,9 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
 
     standard_averages = {standard: int(sum(scores) / len(scores)) for standard, scores in standard_scores.items()}
 
-    # Print standard averages section
     console.print("[bold]STANDARD AVERAGES:[/bold]")
     standard_items = sorted(standard_averages.items(), key=lambda x: x[0])
 
-    # Print in rows of 2
     for i in range(0, len(standard_items), 2):
         left_name, left_avg = standard_items[i]
         left_icon = "✅" if left_avg >= 90 else "⚠️" if left_avg >= 75 else "❌"
@@ -585,7 +462,6 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
 
     console.print()
 
-    # Top improvement areas
     top_issues = sorted(standard_averages.items(), key=lambda x: x[1])[:3]
 
     if top_issues:

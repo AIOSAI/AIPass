@@ -3,7 +3,7 @@
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.0.0
 # Created: 2026-08-11
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the rendered [placeholders] of apps/devpulse.py, apps/modules/watchdog.py and its presenter."""
@@ -27,11 +27,6 @@ def _real_console(width: int = 200) -> tuple[Console, io.StringIO]:
     """A real rendering console writing to a buffer."""
     buffer = io.StringIO()
     return Console(file=buffer, width=width, no_color=True, highlight=False, markup=True), buffer
-
-
-# ---------------------------------------------------------------------------
-# Help-surface placeholders
-# ---------------------------------------------------------------------------
 
 
 class TestHelpPlaceholders:
@@ -62,14 +57,8 @@ class TestHelpPlaceholders:
         monkeypatch.setattr(watchdog, "_guard_caller", _owner_seat)
         for verb in ("timer", "schedule"):
             assert watchdog.handle_command("watchdog", [verb]) is True
-            # every non-style bracket group in the source must survive rendering
             assert "watchdog" in capsys.readouterr().out
         assert gate_calls == ["consulted", "consulted"]
-
-
-# ---------------------------------------------------------------------------
-# Watch-status handle prefix
-# ---------------------------------------------------------------------------
 
 
 class TestStatusHandleTag:
@@ -96,11 +85,6 @@ class TestStatusHandleTag:
         assert "[wd-9]" in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------------------
-# Control: the canary can actually fail
-# ---------------------------------------------------------------------------
-
-
 def test_canary_fails_on_unescaped_bracket():
     """An unescaped lowercase tag IS swallowed — proves the assertions above bite."""
     console, buffer = _real_console()
@@ -109,8 +93,7 @@ def test_canary_fails_on_unescaped_bracket():
 
 
 def test_dash_leading_tags_are_not_at_risk():
-    """Tags starting with '-' are not valid Rich markup and pass through — documents
-    why [--timeout SECONDS] never needed escaping while [command] did."""
+    """Tags starting with '-' are not valid Rich markup, so [--timeout SECONDS] never needed escaping."""
     console, buffer = _real_console()
     console.print("  watchdog agent <branch> [--timeout SECONDS]")
     assert "[--timeout SECONDS]" in buffer.getvalue()

@@ -3,25 +3,18 @@
 # Description: Unconsumed Side Effect Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unconsumed Side Effect Standards Content Handler
-
-Provides formatted Unconsumed Side Effect standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_unconsumed_side_effect_standards() -> str:
-    """Return formatted unconsumed_side_effect standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted unconsumed_side_effect standards content with Rich markup."""
     lines = [
         "[bold cyan]CORE PRINCIPLE (crack class F):[/bold cyan]",
         "  A test queues several answers for a mock and never checks they were all",

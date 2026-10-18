@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-#
-# DPLAN-0194 — P1 cross-OS e2e wiring harness PROTOTYPE (Linux/Docker dev loop).
-# Runs INSIDE a clean container with the repo bind-mounted read-only at /repo.
-# Builds a wheel, installs into a CLEAN venv, then asserts the 4 tiers:
-#   T0 install+binaries  T1 aipass init scaffold  T2a synthetic hook fire  T3 drone routing
-# Tolerant: never exits on first failure — runs every assertion so we see the full red/green ladder.
-#
+# Cross-OS e2e wiring harness prototype: runs inside a clean container, repo read-only at /repo.
+# Never exits on first failure, so every tier's red/green shows.
 set -uo pipefail
 
 P=0; F=0
@@ -26,9 +21,7 @@ hdr "SETUP — copy repo (writable), build wheel"
 rm -rf "$SRC" "$DIST" "$BUILDENV" "$CLEANENV"
 cp -r /repo "$SRC" 2>/dev/null || true   # .trinity memory files are perm-restricted; harmless, code copies fine
 cd "$SRC"
-# A real fresh-clone runs setup.sh to GENERATE the registry (the host's AIPASS_REGISTRY.json
-# is mode 0600 and won't copy across uids anyway). Synthesize a minimal one pointing at the
-# copied branches — faithful to what setup.sh produces, lets Tier 3 prove routing plumbing.
+# A fresh clone generates the registry via setup.sh (the host's is 0600): synthesize a minimal one.
 cat > "$SRC/AIPASS_REGISTRY.json" <<JSON
 { "metadata": { "name": "AIPASS", "version": "1.0.0", "total_branches": 2 },
   "branches": [
@@ -57,8 +50,7 @@ chk "aipass entrypoint imports (aipass init --help)" "'$AIPASS' init --help"
 
 hdr "TIER 1 — aipass init scaffolds correctly"
 PROJ=/tmp/proj; rm -rf "$PROJ"
-# AIPASS_HOME left UNSET on purpose: tests core scaffold independent of venv/templates,
-# and sidesteps the .venv symlink (the symlink bug is a Windows-only failure — N/A on Linux).
+# AIPASS_HOME unset on purpose: the core scaffold alone, without the Windows-only .venv symlink path.
 "$AIPASS" init "$PROJ" demo > /tmp/init.out 2>&1
 echo "  init exit=$? (see /tmp/init.out)"; tail -3 /tmp/init.out | sed 's/^/    | /'
 chk "DEMO_REGISTRY.json exists"           "[ -f '$PROJ/DEMO_REGISTRY.json' ]"
@@ -84,22 +76,19 @@ UUID="PROTOUUID12345"
 LOG=$(find "$CLEANENV" -path '*/aipass/hooks/logs/engine.jsonl' 2>/dev/null | head -1)
 LOGDIR=$(dirname "$(find "$CLEANENV" -path '*/aipass/hooks' -type d 2>/dev/null | head -1)")
 [ -n "$LOG" ] && : > "$LOG"   # truncate if present
-# fire: rm -rf -> expect block (exit 2)
 OUT=$(cd "$HOOKP" && echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf /tmp/x\"},\"agent_id\":\"$UUID\"}" \
   | AIPASS_HOME="$HOOKP" "$PY" -m aipass.hooks.apps.handlers.bridges.claude "PreToolUse:rm_gate" 2>/tmp/hook.err)
 HX=$?
-# relocate LOG now if it didn't exist before
 [ -z "$LOG" ] && LOG=$(find "$CLEANENV" -path '*/aipass/hooks/logs/engine.jsonl' 2>/dev/null | head -1)
 printf '%s' "$OUT" > /tmp/hook.out   # write to file: never eval-interpolate captured JSON
 echo "  hook exit=$HX  stdout=${OUT:0:80}"
 [ -s /tmp/hook.err ] && echo "    stderr: $(head -1 /tmp/hook.err)"
-# REAL contract (discovered by prototype): rm_gate blocks via {"decision":"block"} on STDOUT, exit 0 — NOT exit 2.
+# rm_gate blocks via {"decision":"block"} on stdout with exit 0, not exit 2.
 chk "rm_gate decision==block (stdout JSON)" "jq -e '.decision==\"block\"' /tmp/hook.out"
 chk "bridge exit 0 (block via JSON not code)" "[ '$HX' = 0 ]"
 chk "engine.jsonl exists"                 "[ -n '$LOG' ] && [ -f '$LOG' ]"
 chk "engine.jsonl logged sentinel UUID"   "[ -n '$LOG' ] && grep -q '$UUID' '$LOG'"
 chk "logged record hook==rm_gate"         "[ -n '$LOG' ] && grep '$UUID' '$LOG' | grep -q rm_gate"
-# negative: harmless echo -> allow (exit 0)
 OUT2=$(cd "$HOOKP" && echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"agent_id\":\"$UUID-neg\"}" \
   | AIPASS_HOME="$HOOKP" "$PY" -m aipass.hooks.apps.handlers.bridges.claude "PreToolUse:rm_gate" 2>/dev/null)
 HX2=$?

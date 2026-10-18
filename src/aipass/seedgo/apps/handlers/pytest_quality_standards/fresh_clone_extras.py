@@ -3,29 +3,14 @@
 # Description: fresh_clone - the OPTIONAL_EXTRA species and the primitives it shares with the checker
 # Version: 1.0.0
 # Created: 2026-10-10
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """fresh_clone -- the OPTIONAL_EXTRA species and the primitives it shares.
 
-Split out of ``fresh_clone_check.py`` on 2026-10-10, when that file crossed the
-1500-line architecture cap with the OPTIONAL_EXTRA species. This is a
-RELOCATION: no rule, list or message changed in the move, and every body here
-is byte-identical to the one it replaced. ``fresh_clone_check`` keeps the
-module contract, the other species and the orchestration; it imports every
-name below back, so no caller's import address moved.
-
-The file name deliberately does NOT end in ``_check.py``: the pack discovers
-``*_check.py`` as checkers, and this module is a helper, like ``corpus.py``.
-
-WHY THREE SHARED PRIMITIVES LIVE HERE. ``_tail``, ``_is_fixture`` and
-``_finding`` are read by OPTIONAL_EXTRA and by the species that stayed in the
-checker. A helper that imported them back from the checker would be a cycle,
-so they moved with the species and the checker imports them from here - the
-dependency runs one way, checker -> helper, as it does for ``trinity_groups``.
-
-STDLIB ONLY - `ast`, `typing`, and the pack's own corpus reader, like the rest
-of the pack. That constraint is why the pack lifts onto any project.
+Not named ``*_check.py``: the pack discovers those as checkers. The checker imports
+from here, never the reverse, so the shared primitives live here to avoid a cycle.
+Reference: fresh_clone.md
 """
 
 import ast
@@ -33,17 +18,8 @@ from typing import Dict, List, Sequence, Set, Tuple, Union
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
-#: OPTIONAL_EXTRA: the top-level import names of the project's optional extras,
-#: DERIVED from the AIPass root `pyproject.toml` `[project.optional-dependencies]`
-#: on 2026-10-10 and frozen here - shipped, never read at audit time, for the same
-#: reason fresh_clone_check's ignore list is: the pack reads Python files and nothing else.
-#: A distribution name is not an import name (`google-api-python-client` imports
-#: as `googleapiclient`), so the mapping was done by hand, one extra at a time.
-#: THE PRICE: another project's extras are invisible here until named.
+#: Import names (not distribution names) of the root pyproject's optional extras, mapped
+#: by hand and shipped: the pack reads Python files only. Other projects' extras are invisible.
 OPTIONAL_EXTRA_MODULES: frozenset = frozenset(
     {
         "openai",  # llm
@@ -67,11 +43,6 @@ OPTIONAL_EXTRA_MODULES: frozenset = frozenset(
 IMPORT_ERRORS: frozenset = frozenset({"ImportError", "ModuleNotFoundError"})
 
 
-# =============================================================================
-# SHARED PRIMITIVES - READ BY OPTIONAL_EXTRA AND BY THE CHECKER'S OTHER SPECIES
-# =============================================================================
-
-
 def _tail(dotted: str) -> str:
     """The last component of a dotted call spelling."""
     return dotted.rsplit(".", 1)[-1]
@@ -89,11 +60,6 @@ def _is_fixture(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
 def _finding(species: str, unit: corpus.TestUnit, line: int, detail: str) -> Dict:
     """One row, in the shape every rule in this pack reports."""
     return {"nodeid": unit.nodeid, "line": line, "species": species, "detail": detail}
-
-
-# =============================================================================
-# OPTIONAL_EXTRA - THE HOST'S INSTALL OF AN OPTIONAL DEPENDENCY DECIDES THE PATH
-# =============================================================================
 
 
 def _catches_import_error(handler: ast.ExceptHandler) -> bool:
@@ -128,14 +94,7 @@ def _guarded_extras(func: ast.AST) -> Set[str]:
 def optional_extra_functions(production_trees: Dict[str, ast.Module]) -> Dict[str, Dict[str, Set[str]]]:
     """Dotted module key -> {module-level function: the extras its own body imports behind except ImportError}.
 
-    FUNCTION-LOCAL ONLY, and that is the narrowing. A guard at MODULE level is
-    decided once, at import, and which product function then reads the binding
-    is the call graph this pack does not follow; a guard inside the function is
-    decided on every call, so a unit that calls the function IS the unit whose
-    path the host's install chooses. Measured 2026-10-10: the module-level
-    reading convicted 19 api/backup test files, most of them host-server route
-    tests whose answer does not move with the extra; the function-local one
-    finds api's check_status and nothing else.
+    Function-local only: a module-level guard is decided at import, a call graph this pack does not follow.
     """
     found: Dict[str, Dict[str, Set[str]]] = {}
     for relpath, tree in production_trees.items():
@@ -208,10 +167,7 @@ def _called_guarded(
 def _names_an_extra(nodes: Sequence[ast.AST], extra: str) -> bool:
     """True when a string spelled exactly as the extra (or a submodule of it) appears in any node.
 
-    That string is how a test takes the extra's presence into its own hands:
-    ``monkeypatch.setitem(sys.modules, "openai", ...)``, ``patch.dict(sys.modules,
-    {"openai": ...})``, ``pytest.importorskip("openai")``, ``find_spec("openai")``.
-    An exact match, so a docstring that merely mentions the SDK acquits nothing.
+    Exact match, so a docstring that merely mentions the SDK acquits nothing.
     """
     texts = [text for node in nodes for text in corpus.string_constants(node)]
     return any(text == extra or text.startswith(extra + ".") for text in texts)

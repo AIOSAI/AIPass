@@ -3,16 +3,13 @@
 # Description: Digest Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Digest Operations Handler
 
-Implementation logic for the trending + highlights digest.
-Queries recent activity across posts, comments, votes, and reactions
-to produce a summary of community engagement over the last 24 hours.
-Returns dicts for module display layer.
+Returns dicts for the module display layer; never prints.
 """
 
 import sqlite3
@@ -24,23 +21,8 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# QUERY HELPERS
-# =============================================================================
-
-
 def _get_top_posts(conn: sqlite3.Connection, hours: int = 24, limit: int = 3) -> List[Dict[str, Any]]:
-    """
-    Get top posts by engagement in the last N hours.
-
-    Args:
-        conn: Active database connection
-        hours: Lookback window in hours
-        limit: Max posts to return
-
-    Returns:
-        List of dicts with post info and engagement counts
-    """
+    """Get top posts by engagement (votes + comments + reactions) in the last N hours."""
     hours_offset = f"-{hours}"
     query = """
         SELECT
@@ -86,17 +68,7 @@ def _get_top_posts(conn: sqlite3.Connection, hours: int = 24, limit: int = 3) ->
 
 
 def _get_most_active_branches(conn: sqlite3.Connection, hours: int = 24, limit: int = 5) -> List[Dict[str, Any]]:
-    """
-    Get most active branches by post + comment count in the last N hours.
-
-    Args:
-        conn: Active database connection
-        hours: Lookback window in hours
-        limit: Max branches to return
-
-    Returns:
-        List of dicts with branch activity counts
-    """
+    """Get most active branches by post + comment count in the last N hours."""
     hours_offset = f"-{hours}"
     query = """
         SELECT
@@ -124,16 +96,7 @@ def _get_most_active_branches(conn: sqlite3.Connection, hours: int = 24, limit: 
 
 
 def _get_new_branches(conn: sqlite3.Connection, hours: int = 24) -> List[str]:
-    """
-    Get branches that joined in the last N hours.
-
-    Args:
-        conn: Active database connection
-        hours: Lookback window in hours
-
-    Returns:
-        List of branch names
-    """
+    """Get branches that joined in the last N hours."""
     hours_offset = f"-{hours}"
     query = """
         SELECT branch_name
@@ -147,16 +110,7 @@ def _get_new_branches(conn: sqlite3.Connection, hours: int = 24) -> List[str]:
 
 
 def _get_activity_totals(conn: sqlite3.Connection, hours: int = 24) -> Dict[str, int]:
-    """
-    Get total posts and comments in the last N hours.
-
-    Args:
-        conn: Active database connection
-        hours: Lookback window in hours
-
-    Returns:
-        Dict with total_posts and total_comments
-    """
+    """Get total posts and comments in the last N hours."""
     hours_offset = f"-{hours}"
 
     post_count = conn.execute(
@@ -172,18 +126,8 @@ def _get_activity_totals(conn: sqlite3.Connection, hours: int = 24) -> Dict[str,
     return {"total_posts": post_count, "total_comments": comment_count}
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def show_digest() -> dict:
-    """
-    Query community digest data (last 24 hours).
-
-    Returns:
-        Dict with success, top_posts, active_branches, new_branches, totals
-    """
+    """Query community digest data (last 24 hours)."""
     try:
         conn = get_db()
 

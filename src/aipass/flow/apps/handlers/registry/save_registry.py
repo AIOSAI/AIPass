@@ -3,26 +3,10 @@
 # Description: Save Registry Handler
 # Version: 1.3.0
 # Created: 2025-11-07
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Save Registry Handler
-
-Saves the Flow PLAN registry to JSON file with automatic timestamp updates.
-
-Features:
-- Saves fplan_registry.json
-- Auto-updates last_updated timestamp
-- Creates directory if missing
-- Graceful error handling
-- Reusable across Flow modules
-
-Usage:
-    from aipass.flow.apps.handlers.registry.save_registry import save_registry
-    registry = {"plans": {}, "next_number": 1}
-    save_registry(registry)
-"""
+"""Save Registry Handler"""
 
 import json
 import os
@@ -34,15 +18,10 @@ from typing import Dict, Any
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
-
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "save_registry"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
@@ -55,8 +34,7 @@ _LOCK_BACKOFF_BASE = 0.05
 def _sleep(seconds: float) -> None:
     """time.sleep(seconds), the lock backoff's wait.
 
-    The reason is the tests alone: they patch this name so the backoff neither
-    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    Tests patch this name so the backoff skips waiting without patching time.sleep globally.
     """
     time.sleep(seconds)
 
@@ -64,12 +42,7 @@ def _sleep(seconds: float) -> None:
 def _create_exclusive(lock_path: Path) -> int:
     """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
 
-    It stands alone because this create is where platforms answer differently:
-    Windows answers a lock another writer is still removing (delete pending)
-    with PermissionError, which a retry wins, and Linux cannot produce that.
-    The tests (test_registry_ops, the plan-registry denial tests) hand the
-    denial in through this name rather than replacing os.open for the whole
-    process (flow's decision, leg 11).
+    Tests inject Windows' delete-pending PermissionError here instead of patching os.open.
     """
     return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
@@ -77,16 +50,8 @@ def _create_exclusive(lock_path: Path) -> int:
 def _acquire_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
 
-    A Windows delete-pending PermissionError (another writer mid-release) is
-    a held lock: it is retried on the same budget as FileExistsError.
-
-    Returns:
-        True once acquired; False only when the budget runs out on contention.
-
-    Raises:
-        PermissionError: The budget ran out and the last attempt was denied.
-            Chained from that denial, so a real permissions problem surfaces.
-        OSError: The create failed with any other OSError, raised at once.
+    Returns: True once acquired; False only when the budget runs out on contention.
+    Raises: PermissionError (chained) if the last attempt was denied; any other OSError at once.
     """
     denial: PermissionError | None = None
     waited = 0.0
@@ -105,8 +70,7 @@ def _acquire_lock(lock_path: Path) -> bool:
                 "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
             )
         except OSError as exc:
-            # Neither contention nor denial: False would read as a spent retry
-            # budget, so it propagates to the caller (flow's decision, leg 3).
+            # False would read as a spent retry budget, so other OSErrors propagate.
             logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
             raise
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
@@ -127,28 +91,10 @@ def _release_lock(lock_path: Path) -> None:
         logger.warning("[%s] Could not release lock %s: %s", MODULE_NAME, lock_path, exc)
 
 
-# =============================================
-# HANDLER FUNCTION
-# =============================================
-
-
 def save_registry(registry: Dict[str, Any], registry_file: str | None = None) -> bool:
     """Save PLAN registry
 
-    Args:
-        registry: Dictionary containing registry data
-        registry_file: Optional filename (e.g. "fplan_registry.json",
-            "dplan_registry.json"). When provided, saves to
-            ``FLOW_JSON_DIR / registry_file`` instead of the default
-            ``fplan_registry.json``.
-
-    Returns:
-        True if save successful, False on error
-
-    Automatically updates the last_updated timestamp before saving.
-    Creates the flow_json directory if it doesn't exist.
-    Uses a lockfile to serialize concurrent writes and atomic
-    tempfile+rename to prevent torn reads.
+    Returns True if saved, False on error (logged). Lockfile serializes writers; tmp+replace prevents torn reads.
     """
     target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
     lock_path = target.with_suffix(".lock")
@@ -181,6 +127,5 @@ def save_registry(registry: Dict[str, Any], registry_file: str | None = None) ->
         )
         return True
     except Exception as e:
-        # The exception itself is a log argument, so its cause chain stays readable.
         logger.error("[%s] Failed to save registry to %s: %s", MODULE_NAME, target, e, exc_info=True)
         return False

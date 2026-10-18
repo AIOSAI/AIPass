@@ -31,8 +31,7 @@ apps/
     ├── json/               → json_handler shim (prax-owned service) + operator config_loader
     ├── events/             → registry.py wires the handlers on first fire
     │   ├── startup.py, error_detected.py, warning_logged.py, runaway_handler.py
-    │   ├── memory_pool.py, memory_template_updated.py, cli.py
-    │   └── pr_status_sync.py (decommissioned, kept on disk)
+    │   └── memory_pool.py, memory_template_updated.py, cli.py
     └── watchers/log_watcher.py → system_logs reader; the observer is withdrawn, the reader stays
 ```
  - apps/extensions, apps/plugins, apps/integrations are spawn scaffolding this branch never adopted — no code runs in them.

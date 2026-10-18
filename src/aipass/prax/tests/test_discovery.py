@@ -3,15 +3,10 @@
 # Description: Unit tests for discovery handlers
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
-
-# Unit tests for PRAX discovery handlers.
-#
-# Tests filtering.should_ignore_path, scanner.scan_directory_safely,
-# and scanner.discover_python_modules.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — start_file_watcher, stop_file_watcher, covered by tests/test_watcher.py
@@ -25,14 +20,9 @@ from aipass.prax.apps.handlers.discovery import filtering, scan, scanner
 from aipass.prax.apps.modules import discover
 
 
-# =============================================
-# FIXTURES
-# =============================================
-
-
 @pytest.fixture()
 def mock_ignore_patterns(monkeypatch):
-    """The ignore list, doubled where filtering binds its loader (prax, leg 9: no reload)."""
+    """The ignore list, doubled where filtering binds its loader."""
     loader = MagicMock(return_value={".git", "__pycache__", ".venv", "node_modules"})
     monkeypatch.setattr(filtering, "load_ignore_patterns_from_config", loader)
     return loader
@@ -60,11 +50,6 @@ def scanner_module(monkeypatch, filtering_module, mock_config_load):
     return scanner
 
 
-# =============================================
-# should_ignore_path TESTS
-# =============================================
-
-
 class TestShouldIgnorePath:
     """Tests for filtering.should_ignore_path."""
 
@@ -72,12 +57,9 @@ class TestShouldIgnorePath:
         """should_ignore_path answers True or False, and the answer tracks the path."""
         result = filtering_module.should_ignore_path(tmp_path / "some" / "normal" / "file.py")
         assert isinstance(result, bool)
-        # Which bool: False for a path holding no ignored component, True once
-        # one of the configured patterns appears in it.
         assert result is False
         assert filtering_module.should_ignore_path(tmp_path / "some" / ".venv" / "file.py") is True
-        # Matching is per path COMPONENT, not substring: a directory that merely
-        # starts with an ignored name is still walked.
+        # Matching is per path COMPONENT, not substring.
         assert filtering_module.should_ignore_path(tmp_path / "some" / "node_modules_backup" / "file.py") is False
 
     def test_ignores_git_directory(self, filtering_module, tmp_path):
@@ -118,7 +100,6 @@ class TestShouldIgnorePath:
 
     def test_similar_name_not_ignored(self, filtering_module, tmp_path):
         """Directories with names similar to ignored patterns should pass."""
-        # 'git_utils' is not '.git'
         assert filtering_module.should_ignore_path(tmp_path / "project" / "git_utils" / "helper.py") is False
 
     def test_logs_filtered_path(self, filtering_module, tmp_path):
@@ -128,11 +109,6 @@ class TestShouldIgnorePath:
         filtering_module.json_handler.log_operation.assert_called_once_with(
             "discovery_filtered", {"ignored_path": str(ignored)}
         )
-
-
-# =============================================
-# scan_directory_safely TESTS
-# =============================================
 
 
 class TestScanDirectorySafely:
@@ -250,11 +226,6 @@ class TestScanDirectorySafely:
         assert modules == {}
 
 
-# =============================================
-# discover_python_modules TESTS
-# =============================================
-
-
 class TestDiscoverPythonModules:
     """Tests for scanner.discover_python_modules."""
 
@@ -265,8 +236,6 @@ class TestDiscoverPythonModules:
 
         result = scanner_module.discover_python_modules()
         assert isinstance(result, dict)
-        # Which dict: keyed by the file stem, valued by the metadata record --
-        # the path is stored relative to ECOSYSTEM_ROOT, and it is enabled.
         assert set(result) == {"gamma"}
         assert Path(result["gamma"]["relative_path"]) == Path("pkg/gamma.py")
         assert result["gamma"]["enabled"] is True
@@ -288,13 +257,7 @@ class TestDiscoverPythonModules:
     def test_logs_scan_result(self, scanner_module):
         """discover_python_modules should log the scan result count."""
         scanner_module.discover_python_modules()
-        # An empty root: the count handed on is the count found, nought.
         scanner_module.json_handler.log_operation.assert_any_call("modules_scanned", {"modules_found": 0})
-
-
-# =============================================
-# scan.run_scan — the registry as a truthful snapshot (DPLAN-0339 step 4)
-# =============================================
 
 
 @pytest.fixture()
@@ -305,11 +268,7 @@ def saved_registry() -> dict:
 
 @pytest.fixture()
 def scan_module(monkeypatch, saved_registry):
-    """Import scan.py with its three collaborators replaced by doubles.
-
-    run_scan is orchestration: walk, diff, save. Doubling the walk and the
-    registry is what lets a test state a tree and read back the arithmetic.
-    """
+    """Import scan.py with its three collaborators replaced by doubles."""
 
     def fake_save(modules, scan_stats=None):
         saved_registry["modules"] = modules
@@ -348,9 +307,7 @@ class TestRunScan:
         assert result["previous_unreadable"] is False
 
     def test_an_unreadable_registry_is_rebuilt_from_the_walk_and_flagged(self, scan_module, monkeypatch):
-        """load answers None for a registry it cannot read (prax, leg 15). The scan
-        saves what it walked, which heals the file, and flags that nothing could
-        be compared."""
+        """An unreadable registry (load answers None) is healed from the walk and flagged."""
         _walk(scan_module, monkeypatch, before=None, found={"fresh": {}})
 
         result = scan_module.run_scan()
@@ -360,8 +317,7 @@ class TestRunScan:
         assert result["saved"] is not False
 
     def test_saved_registry_is_the_walk_not_a_merge(self, scan_module, saved_registry, monkeypatch):
-        """The defect this cures: a module whose file is gone stayed on record
-        forever, because the incremental path only ever added."""
+        """A module whose file is gone leaves the record; the scan never merges."""
         _walk(scan_module, monkeypatch, before={"gone": {"file_path": "/dead.py"}}, found={"live": {}})
 
         scan_module.run_scan()
@@ -370,8 +326,7 @@ class TestRunScan:
         assert sorted(saved_registry["modules"]) == ["live"]
 
     def test_discovered_time_is_carried_over_for_a_known_module(self, scan_module, saved_registry, monkeypatch):
-        """discovered_time means FIRST seen. A scan is not a rediscovery, so a
-        module already on record keeps its original stamp."""
+        """discovered_time means FIRST seen: a module on record keeps its original stamp."""
         _walk(
             scan_module,
             monkeypatch,
@@ -428,11 +383,6 @@ class TestRunScan:
         assert handed == [["a"]]
 
 
-# =============================================
-# The discover module's command gate (DPLAN-0339 step 4)
-# =============================================
-
-
 @pytest.fixture()
 def discover_module(monkeypatch):
     """discover.py with the json service and the logger doubled; the console is real, read with capsys."""
@@ -442,12 +392,7 @@ def discover_module(monkeypatch):
 
 
 class TestDiscoverCommandGate:
-    """A module that does not check the command name answers for every module.
-
-    Found live during the build: without the guard, `discover` sorted first in
-    the entry point's glob and ran a full registry rewrite when someone typed
-    `drone @prax status`.
-    """
+    """A module that does not check the command name answers for every module (and rewrites the registry)."""
 
     def test_another_modules_command_is_declined(self, discover_module, monkeypatch):
         scanned = MagicMock()
@@ -465,7 +410,7 @@ class TestDiscoverCommandGate:
         scanned.assert_not_called()
 
     def test_run_performs_the_scan(self, discover_module, monkeypatch, capsys):
-        """The real console prints the scan's answer; read what reached the terminal (prax, leg 9)."""
+        """The real console prints the scan's answer; read what reached the terminal."""
         monkeypatch.setattr(
             discover_module,
             "run_scan",
@@ -486,8 +431,7 @@ class TestDiscoverCommandGate:
         assert "could not be read" not in captured.out + captured.err
 
     def test_a_rebuilt_unreadable_registry_is_said_beside_the_counts(self, discover_module, monkeypatch, capsys):
-        """Every module reads as added when the previous registry was unreadable;
-        the run says so, so the count is not taken for news (prax, leg 15)."""
+        """After an unreadable registry every module reads as added; the run says why."""
         monkeypatch.setattr(
             discover_module,
             "run_scan",
@@ -514,11 +458,6 @@ class TestDiscoverCommandGate:
         with pytest.raises(RuntimeError):
             discover_module.handle_command("discover", ["scna"])
         refused.assert_called_once()
-
-
-# =============================================
-# SANDBOXES (the owner's ruling of 09-27: nothing looks into a dropbox, a sandbox like .archive)
-# =============================================
 
 
 def _tree(root: Path, *relative: str) -> None:
@@ -554,11 +493,7 @@ class TestSandboxesAreNotDiscovered:
     def test_a_root_inside_a_directory_named_dropbox_still_finds_its_own_module(
         self, scanner_module, tmp_path, monkeypatch
     ):
-        """The names are compared below the root of the walk, never on the whole path.
-
-        Green on the tree before the cure (nothing was skipped then); its proof is the
-        mutant that compares the whole path.
-        """
+        """The names are compared below the root of the walk, never on the whole path."""
         root = tmp_path / "dropbox" / "eco"
         monkeypatch.setattr(scanner_module, "ECOSYSTEM_ROOT", root)
         _tree(root, "branch/apps/live.py")

@@ -3,23 +3,10 @@
 # Description: Command lookup and matching for custom command shortcuts
 # Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
-"""Command Lookup and Matching for Custom Commands.
-
-Provides exact-match lookup and greedy multi-word matching so that
-user input like ``plan create flow`` resolves to the longest registered
-shortcut name (trying 3 words, then 2, then 1).
-
-Usage:
-    from aipass.drone.apps.handlers.command_registry.lookup import (
-        lookup_command, match_command, list_commands,
-    )
-
-    cmd = lookup_command("audit")
-    result = match_command(["plan", "create", "flow", "--verbose"])
-"""
+"""Command Lookup and Matching for Custom Commands."""
 
 from __future__ import annotations
 
@@ -29,27 +16,11 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from .ops import load_registry
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 MODULE_NAME = "command_lookup"
 
 
-# ---------------------------------------------------------------------------
-# Lookup functions
-# ---------------------------------------------------------------------------
-
-
 def lookup_command(name: str) -> dict[str, Any] | None:
-    """Look up a custom command by exact name.
-
-    Args:
-        name: Shortcut name to look up.
-
-    Returns:
-        Command dict if found, None otherwise.
-    """
+    """Look up a custom command by exact name."""
     try:
         registry = load_registry()
         return registry.get("commands", {}).get(name)
@@ -61,29 +32,9 @@ def lookup_command(name: str) -> dict[str, Any] | None:
 def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
     """Match user input against registered commands using greedy multi-word matching.
 
-    Tries the longest candidate first (up to 4 words), then progressively
-    shorter candidates until a match is found.
-
-    For example, given args ``["plan", "create", "flow", "--verbose"]``
-    it tries:
-    1. ``"plan create flow --verbose"`` (4 words)
-    2. ``"plan create flow"`` (3 words)
-    3. ``"plan create"`` (2 words)
-    4. ``"plan"`` (1 word)
-
-    The operation log written on a hit is telemetry: a log write that raises
-    (``log_operation`` raises ``InvalidDocument`` on a malformed log) is logged
-    as a warning and the match still stands, so a command that matched runs.
-
-    Args:
-        args: List of whitespace-split user input tokens.
-
-    Returns:
-        Tuple of (command_dict, remaining_args) on match, None otherwise.
-
-    Raises:
-        Exception: whatever ``load_registry`` raises, and only that. A registry
-        that cannot load is a failure, never reported as "no match".
+    Longest candidate first, up to 4 words; returns (command_dict, remaining_args) or None.
+    The hit's operation log is telemetry: a raising write is a warning and the matched command runs.
+    Raises only what ``load_registry`` raises: a registry that cannot load is never "no match".
     """
     if not args:
         return None
@@ -112,11 +63,7 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
 
 
 def list_commands() -> list[dict[str, Any]]:
-    """List all registered custom commands, sorted by name.
-
-    Returns:
-        List of command dicts sorted alphabetically by name.
-    """
+    """List all registered custom commands, sorted by name."""
     try:
         registry = load_registry()
         commands = registry.get("commands", {})
@@ -129,11 +76,7 @@ def list_commands() -> list[dict[str, Any]]:
 def list_commands_by_branch(branch_name: str) -> list[dict[str, Any]]:
     """List custom commands filtered by source branch.
 
-    Args:
-        branch_name: Branch name to filter by (e.g. ``"seedgo"``).
-
-    Returns:
-        List of command dicts whose source_branch matches, sorted by name.
+    *branch_name* is bare (``seedgo``, no @), matched exactly against ``source_branch``.
     """
     try:
         registry = load_registry()

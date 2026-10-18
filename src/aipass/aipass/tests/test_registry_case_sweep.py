@@ -3,33 +3,12 @@
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for shared/registry_discovery.py and its case-insensitive-filesystem pins."""
-# Every ``*_REGISTRY.json`` walk in this tree must be case-SENSITIVE.
-#
-# ``Path.glob`` asks the FILESYSTEM to match.  On Windows -- and on macOS by
-# default -- that match is case-insensitive, so ``*_REGISTRY.json`` also matches
-# ``*_registry.json``.  The bait ships in every branch: ``flow_json/*_registry.json``
-# plan counters and a ``.spawn/.template_registry.json`` (pathlib's ``*`` matches
-# dotfiles, unlike the ``glob`` module).  Measured on CI: ``find_registry()``
-# returned ``drone_command_registry.json`` as the fleet trust-anchor candidate.
-#
-# A registry is a TRUST ANCHOR -- it decides which installation a caller belongs
-# to, what project name lands on an identity, and where the delete lane thinks
-# root is.  A plan counter answering that is not a near miss; it is a different
-# question.
-#
-# These pins run RED ON LINUX by emulating the widened match, so no Windows box
-# is needed to keep them honest.
-#
-# 1.1.0 -- the CONTROL was the thing that assumed a host.  It asserted the raw
-# glob returns nothing, which is false on NTFS, so it failed on the Windows leg
-# of ebb8075d: broken on the exact platform the defect lives on.  The host is
-# PROBED now and both outcomes are pinned (see host_folds_case).  A
-# ``skipif`` was refused for the same reason -- it would retire the control where
-# it matters most.
+# Every *_REGISTRY.json walk must be case-SENSITIVE: Path.glob folds case on Windows/macOS
+# and reaches *_registry.json plan counters. The pins run red on Linux by emulating that.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the registry-discovery module and the modules it imports parse and import
@@ -48,19 +27,11 @@ from aipass.aipass.shared.registry_discovery import find_registry, registries_in
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 
 
-# ---------------------------------------------------------------------------
-# the emulation
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def case_insensitive_fs(monkeypatch: pytest.MonkeyPatch):
     """Make ``Path.glob`` behave the way Windows/macOS behave.
 
-    A real case-insensitive filesystem matches ANY case permutation, so this
-    translates the pattern through ``fnmatch`` and re-matches ``iterdir()`` with
-    ``re.IGNORECASE``.  Valid only for single-component, non-recursive patterns
-    -- which is every registry walk in this tree.
+    Valid only for single-component, non-recursive patterns: every registry walk here.
     """
     real_iterdir = Path.iterdir
 
@@ -77,18 +48,7 @@ def case_insensitive_fs(monkeypatch: pytest.MonkeyPatch):
 def host_folds_case(tmp_path: Path) -> bool:
     """Does THIS filesystem fold case? Asked in the DEFECT'S OWN DIRECTION.
 
-    Writes a LOWERCASE name and globs the UPPERCASE pattern: an uppercase
-    pattern reaching a lowercase file is exactly the direction the defect
-    travels.  The reverse direction is a different question and a filesystem is
-    entitled to answer it differently, so asking it backwards would measure
-    something this file does not care about (@ai_mail's direction lesson,
-    2026-08-31).
-
-    A PROBE, never a ``skipif``: the host answers and BOTH answers are pinned.
-    A skip would retire the control on the very platform the defect lives on.
-
-    The probe writes into its own subdirectory, so it can never join the decoy
-    set of the world under test.
+    Lowercase file, uppercase pattern; a probe, never a skipif, so both answers are pinned.
     """
     probe = tmp_path / "_case_probe"
     probe.mkdir(exist_ok=True)
@@ -99,17 +59,7 @@ def host_folds_case(tmp_path: Path) -> bool:
 def _project(tmp_path: Path) -> tuple[Path, Path]:
     """A project root with the real anchor, and a DECOY one level down.
 
-    The decoy is placed so that a widened match does not merely add a wrong
-    entry to a list -- it changes the ANSWER, because the walk meets ``sub``
-    before it meets ``root``.  Every assertion below is about where discovery
-    POINTS, never about set membership.
-
-    Every decoy carries a DISTINCT STEM (``flow``, ``.template``), never a case
-    twin of ``AIPASS``.  Two names differing only by case CANNOT COEXIST on a
-    folding filesystem: the second write lands in the first file while the
-    directory keeps the original spelling, so a case-twin decoy would silently
-    overwrite the real anchor's content and build a DIFFERENT WORLD on Windows
-    than on Linux (@memory's coexistence fact, 2026-08-31).
+    Met before the root, so widening changes the answer; distinct stems, as case twins cannot coexist.
     """
     root = tmp_path / "root"
     deep = root / "sub" / "deep"
@@ -120,12 +70,6 @@ def _project(tmp_path: Path) -> tuple[Path, Path]:
     return root, deep
 
 
-# ---------------------------------------------------------------------------
-# positive control -- the emulation must genuinely widen
-# ---------------------------------------------------------------------------
-
-
-#: The two lowercase baits ``_project`` plants one level below the real anchor.
 DECOY_NAMES = {"flow_registry.json", ".template_registry.json"}
 
 
@@ -135,16 +79,7 @@ class TestTheEmulationIsNotBlind:
     def test_the_raw_glob_answers_exactly_as_the_host_folds(self, tmp_path: Path) -> None:
         """The control, pinned in BOTH worlds rather than assuming one.
 
-        This assertion used to read ``== []`` unconditionally.  It failed on the
-        Windows CI leg of ebb8075d -- correctly: NTFS folds case, so the raw
-        glob really does return the decoys there, and a control that asserts
-        otherwise is broken on the exact host the defect lives on.
-
-        Where the host folds, the emulation is redundant rather than absent:
-        the real filesystem already supplies the widened match, so every pin
-        below is exercised against the genuine article.  Where it does not
-        fold, the emulation is the only thing that widens -- which is what the
-        companion test proves.
+        Where the host folds, the raw glob reaches the decoys; elsewhere only the emulation widens.
         """
         root, _ = _project(tmp_path)
         found = {path.name for path in (root / "sub").glob("*_REGISTRY.json")}
@@ -164,25 +99,11 @@ class TestTheEmulationIsNotBlind:
     def test_the_probe_reads_the_world_not_a_platform_string(self, tmp_path: Path, case_insensitive_fs) -> None:
         """The probe must be an experiment, not ``sys.platform`` in disguise.
 
-        It is allowed to disagree with the platform -- a case-sensitive volume
-        can be mounted on Windows and a folding one on Linux -- so a probe that
-        answered from ``sys.platform`` would be wrong exactly where it matters
-        and no case-sensitive host could ever catch it.
-
-        Running it inside the folding EMULATION is what makes that catchable
-        here: a platform string still says False on this Linux runner, while a
-        probe that genuinely globs says True.  The opposite mutant (a probe
-        hardwired to True) is killed by the control above, which then demands
-        decoys the raw glob does not return.
+        Inside the emulation a platform string says False on Linux; a real glob says True.
         """
         assert host_folds_case(tmp_path) is True, (
             "the probe did not see a folding world it was standing in -- it is not measuring the filesystem"
         )
-
-
-# ---------------------------------------------------------------------------
-# the reader
-# ---------------------------------------------------------------------------
 
 
 class TestRegistriesIn:
@@ -205,19 +126,9 @@ class TestRegistriesIn:
         assert registries_in(tmp_path / "does_not_exist") == []
 
 
-# ---------------------------------------------------------------------------
-# the behaviour that actually matters
-# ---------------------------------------------------------------------------
-
-
 class TestFindRegistryUnderCaseInsensitivity:
     def test_the_decoy_does_not_become_the_trust_anchor(self, tmp_path: Path, case_insensitive_fs) -> None:
-        """The assertion is WHERE discovery points, not what a list contains.
-
-        Widened matching makes ``root/sub/flow_registry.json`` -- a plan
-        counter -- answer the question "where is this project rooted?".  The
-        project root would silently become ``root/sub``.
-        """
+        """The assertion is WHERE discovery points, not what a list contains."""
         root, deep = _project(tmp_path)
         found = find_registry(start_path=deep)
         assert found is not None
@@ -240,24 +151,12 @@ class TestFindRegistryUnderCaseInsensitivity:
         assert find_registry(start_path=isolated, package_root=str(deep)) == (root / "AIPASS_REGISTRY.json")
 
 
-# ---------------------------------------------------------------------------
-# the structural pin -- an eighth private copy must be impossible to write
-# ---------------------------------------------------------------------------
-
-
 def _private_registry_globs(root: Path) -> tuple[list[str], int]:
-    """Every direct ``glob("*_REGISTRY.json")`` under *root*, and the file count.
-
-    Returns the count too so a caller can prove the walk actually WALKED --
-    see ``TestNoPrivateRegistryGlobSurvives``.
-    """
+    """Every direct ``glob("*_REGISTRY.json")`` under *root*, and the file count."""
     offenders: list[str] = []
     scanned = 0
     for py in sorted(root.rglob("*.py")):
         rel = py.relative_to(root).as_posix()
-        # dropbox and .archive are sandboxes nothing looks into (the owner's ruling
-        # of 09-27, 20:42).  docs.local is untracked scratch, never shipped --
-        # aipass's decision, fleet green leg 3.
         if {"dropbox", ".archive", ".backup", "__pycache__", "docs.local"} & set(py.relative_to(root).parts):
             continue
         if rel in {"tests/test_registry_case_sweep.py", "shared/registry_discovery.py"}:
@@ -281,12 +180,7 @@ def _private_registry_globs(root: Path) -> tuple[list[str], int]:
 
 
 class TestNoPrivateRegistryGlobSurvives:
-    """One reader, called by every walk.
-
-    The eighth private copy of ``glob("*_REGISTRY.json")`` is how a fix lands on
-    some of N identical paths.  This pin names every offender by file and line
-    so a new one cannot be added quietly.
-    """
+    """One reader, called by every walk."""
 
     def test_no_module_globs_the_registry_pattern_directly(self) -> None:
         offenders, scanned = _private_registry_globs(BRANCH_ROOT)
@@ -297,10 +191,7 @@ class TestNoPrivateRegistryGlobSurvives:
     def test_the_walk_actually_walked(self) -> None:
         """A scan that visits nothing reports clean.  Refuse to call that a pass.
 
-        Found by a mutant: blinding the skip-list to ``if True`` made the walk
-        visit zero files and every assertion above still passed.  A positive
-        control that exercises a COPY of the logic cannot catch that -- only one
-        that measures the instrument can.
+        A mutant blinding the skip-list visited zero files and every assertion still passed.
         """
         _, scanned = _private_registry_globs(BRANCH_ROOT)
         assert scanned > 50, f"walk only parsed {scanned} modules -- it is blind, not clean"

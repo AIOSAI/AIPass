@@ -15,9 +15,9 @@ its introspection and does nothing else) and is intentionally undocumented as a
 command.
 
 **A `--help` anywhere in the arguments prints help and runs nothing** — `drone
-@backup snapshot @myapp --help` is a safe probe, not a backup. That rule is a
-cure, not a convenience: checking only the first argument once let `snapshot
-<project> --help` fall through and execute a real backup.
+@backup snapshot @myapp --help` is a safe probe, not a backup. The whole
+argument list is screened, not only the first argument, so a trailing `--help`
+never falls through to a real backup.
 
 **Relative paths resolve where you are.** Backup runs as an installed entry
 point, so its process CWD is its own branch directory. Drone exports
@@ -74,15 +74,17 @@ writes the key into the project's own `.backup/config.json` through the project
 config handler, keeping every other key as written, and prints the new value
 (`drive_sync: on (<root>)`). A wrong word, a missing project, or a directory
 with no `.backup/` store is refused on stderr with a non-zero exit. Any other
-`settings` line still fails honestly: the settings UI is deferred.
+`settings` line writes nothing: the module raises, and the router prints
+`settings failed -- ...` on stderr (the message points at editing
+`.backup/config.json` directly) and exits 1.
 
 ## `status --json`
 
 `status <project_path|@name> --json [--sizes]` prints the object the backup door
-reads, exactly the shape pinned in devpulse's `backup_door_contract.md`
-("@backup: status --json"), as one JSON object on stdout with nothing else there.
+reads and passes through unchanged (drive_sync.md, "On the host API's backup
+door"), as one JSON object on stdout with nothing else there.
 `store` is present only with `--sizes`, which walks both stores. `running`
-(round 2, DPLAN-0412) lists the lanes in flight, `[]` when none; see
+lists the lanes in flight, `[]` when none; see
 [Running lanes and `stop`](#running-lanes-and-stop) below. Each lane's
 `last` and `files` come from the project's changelog: the last entry of that
 mode, its `timestamp` and `files_copied`. A snapshot that found no changes writes
@@ -97,8 +99,7 @@ stderr. `--sizes` without `--json` is refused.
 
 Every lane that does work (snapshot, versioned, drive_sync) announces itself in
 `<project>/.backup/running/<lane>.json` for as long as it runs, whoever started
-it. The document is the contract's `running` entry (devpulse's
-`backup_door_contract.md`, "running"): `verb`, `lane`, `pid`, `started_at` and
+it. The document is the `running` entry the door reports: `verb`, `lane`, `pid`, `started_at` and
 `progress` (`done`, `total`, `failed`, `bytes_done`, `bytes_total`, `current`,
 `updated_at`). `progress` is null while the lane scans; after that the file is
 rewritten from the lane's per-file callback at most once a second, atomically,
@@ -158,8 +159,7 @@ The documented form is `<verb> <project>`: the verb first, the project second.
 There is also a legacy form, `backup <project|@name>`, which runs `snapshot` by
 default and accepts `--versioned` or `--all` to pick another lane
 (`apps/backup.py`, in `main()`). It resolves registered names the same way the
-verbs do. It predates the auto-discovery router, nothing in the tree calls it,
-and no test exercises it — it is documented here because it is live, not because
+verbs do. Nothing in the tree calls it, and no test exercises it — it is documented here because it is live, not because
 it is recommended. Use the verbs.
 
 `--version` and `-V` both print the entry point's version; `help` on its own

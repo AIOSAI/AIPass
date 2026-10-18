@@ -3,21 +3,11 @@
 # Description: Status sync handler — scans branches for STATUS.local.md
 # Version: 2.0.0
 # Created: 2026-03-10
-# Modified: 2026-09-24
+# Modified: 2026-10-17
 # =============================================
 
 """
 Status Sync Handler
-
-Scans all registered branches for STATUS.local.md files,
-extracts state and last-update metadata, and builds an
-aggregate with collapsible <details> sections per branch. Since the
-2026-09-15 ruling it builds that aggregate and declines to write it:
-the repo-root STATUS.md was decommissioned with the rest of the flow.
-
-Usage (internal):
-    from aipass.prax.apps.handlers.status.sync import sync_status
-    result = sync_status()
 """
 
 import json
@@ -29,10 +19,6 @@ from aipass.prax.apps.handlers.config.load import _find_repo_root
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.prax.apps.handlers.json import json_handler
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 _STATE_RE = re.compile(r"^\*\*State:\*\*\s*(.+)", re.MULTILINE)
 _UPDATE_RE = re.compile(r"^\*\*Last update:\*\*\s*(.+)", re.MULTILINE)
@@ -46,19 +32,9 @@ def _extract_field(pattern: re.Pattern, text: str) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Core
-# ---------------------------------------------------------------------------
-
-
 def sync_status() -> Dict:
     """
-    Scan all branches for STATUS.local.md and build the aggregate — without
-    writing it. See the comment at the write site for why nothing is written.
-
-    Returns:
-        Dict with keys: status ("declined" or "error"), reason, branches_synced,
-        branches_missing, timestamp
+    Scan all branches for STATUS.local.md and build the aggregate, without writing it.
     """
     repo_root = _find_repo_root()
     registry_path = repo_root / "AIPASS_REGISTRY.json"
@@ -85,7 +61,6 @@ def sync_status() -> Dict:
 
     branches = registry.get("branches", [])
 
-    # Collect per-branch data ------------------------------------------------
     synced = []
     missing = []
     entries = []  # (branch_email, state, date, content)
@@ -113,7 +88,6 @@ def sync_status() -> Dict:
         synced.append(branch_email)
         entries.append((branch_email, state, last_update, content))
 
-    # Tally states -----------------------------------------------------------
     state_counts: Dict[str, int] = {}
     for _, state, _, _ in entries:
         normalised = state.lower()
@@ -125,7 +99,6 @@ def sync_status() -> Dict:
 
     now = datetime.now().strftime("%Y-%m-%d")
 
-    # Build STATUS.md --------------------------------------------------------
     lines = [
         "# AIPass — System Status",
         "",
@@ -146,13 +119,8 @@ def sync_status() -> Dict:
         lines.append("</details>")
         lines.append("")
 
-    # The aggregate is BUILT and not written. TDPLAN-0007 decommissioned the
-    # STATUS flow — every STATUS.local.md and the aggregated STATUS.md were
-    # deleted across the fleet — but only the trigger registration was unwired,
-    # so this command kept writing the root file back (the 2026-08-13 audit
-    # resurrected it by running it). @devpulse ruled on 2026-09-15: stop writing.
-    # The scan above is left whole because the engine is meant to stay revivable;
-    # the branch state it would have rendered lives in DASHBOARD.local.json now.
+    # Built, never written: the STATUS flow is decommissioned and a write
+    # resurrects the root STATUS.md. The scan stays so the engine is revivable.
     logger.info(
         "status sync declined the write: %d branches scanned, %d missing, %d lines built and discarded",
         len(synced),

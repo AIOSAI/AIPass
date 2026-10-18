@@ -3,32 +3,13 @@
 # Description: Case-exact registry discovery, and the sweep that keeps every lane off the glob
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry_scan.py and the lanes that delegate to it."""
 
-# Registry discovery must be case-EXACT, and no lane may glob for one again.
-#
-# THE DEFECT (@devpulse relaying @drone, 2026-08-31, found on ef029782's
-# windows-setup leg): ``Path.glob("*_REGISTRY.json")`` matches case-INSENSITIVELY
-# on Windows and on default macOS, so ``*_registry.json`` matched too. Every
-# branch carries bait — ten ``flow_json/*_registry.json`` plan counters and
-# ``.spawn/.template_registry.json``, which pathlib's ``*`` matches despite the
-# leading dot. Measured on CI, ``find_registry`` returned
-# ``drone_command_registry.json`` as the trust-anchor candidate.
-#
-# For seedgo the stakes are discovery and bypass scoping: an audit that finds
-# branches through a plan counter audits the wrong world, and a bypass keyed off
-# the wrong registry grants an exemption nobody declared.
-#
-# THESE PINS RUN RED ON LINUX. The widened listing is EMULATED by a Path subclass
-# whose ``glob`` wraps the real one so it also yields case-folded matches; it
-# reaches the product as the path a test hands in and through registry_scan's own
-# ``Path`` binding, never by replacing pathlib process-wide. Every emulated test
-# carries a positive control that exercises the REAL pathlib API — not a
-# re-implementation of the matching, which would prove only that the copy works
-# (@aipass's lesson, same night, from a control that visited zero files).
+# Registry discovery is case-exact: Path.glob matches case-insensitively on Windows and macOS, so *_REGISTRY.json
+# also finds plan counters. The widened listing is emulated by a Path subclass; each emulated test has a real-pathlib control.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/registry_scan.py and the four delegating lanes parse and import
@@ -67,39 +48,13 @@ class _FoldingPath(type(Path())):
 
 @pytest.fixture
 def widened_glob(monkeypatch):
-    """Emulate a case-insensitive filesystem's LISTING, not the caller's matching.
-
-    Returns the folding path class: a test wraps the path it hands the product in
-    it, and registry_scan's own ``Path`` binding is pointed at it so a path the
-    product builds from a string (``AIPASS_CALLER_CWD``) folds too. Its ``glob``
-    runs pathlib's real one first, then adds names that differ only in case —
-    which is what Windows and default macOS do to the pattern the nine deleted
-    sites passed in.
-    """
+    """Emulate a case-insensitive filesystem's LISTING, not the caller's matching."""
     monkeypatch.setattr(registry_scan, "Path", _FoldingPath)
     return _FoldingPath
 
 
 def host_folds_glob(directory: Path) -> bool:
-    """Does THIS filesystem fold case inside a glob PATTERN?
-
-    Travels the DEFECT'S OWN DIRECTION (@ai_mail's lesson): write a lowercase
-    name, glob the UPPERCASE pattern — which is exactly what the nine deleted
-    sites did. Probing the other way round answers a different question and can
-    answer it differently.
-
-    DISTINCT STEMS, always (@memory's coexistence fact): two names differing
-    only by case CANNOT coexist on a folding filesystem — the second write
-    overwrites the FIRST'S CONTENT while the directory keeps the first's
-    spelling, so a case-twin probe would be measuring a world it created.
-
-    Args:
-        directory: A writable directory; the probe gets its own subdirectory.
-
-    Returns:
-        True if the host's glob matched a name the pattern only matches when
-        case is folded.
-    """
+    """Does THIS filesystem fold case inside a glob PATTERN?"""
     probe_dir = directory / "casefold_probe"
     probe_dir.mkdir(exist_ok=True)
     (probe_dir / "probe_registry.json").write_text("{}", encoding="utf-8")
@@ -107,11 +62,7 @@ def host_folds_glob(directory: Path) -> bool:
 
 
 def _project(tmp_path):
-    """A real anchor at the project root and a lowercase counter one level down.
-
-    The decoy MAPS SOMEWHERE WRONG on purpose: a lane that returns it does not
-    merely pick a different file, it discovers a different world.
-    """
+    """A real anchor at the project root and a lowercase counter one level down."""
     root = tmp_path / "project"
     lane = root / "sub" / "flow_json"
     lane.mkdir(parents=True)
@@ -133,15 +84,7 @@ class TestTheEmulationGenuinelyWidens:
         assert COUNTER_DECOY in found, "emulation is not widening — every red below would be vacuous"
 
     def test_the_raw_glob_matches_the_host_it_is_running_on(self, tmp_path):
-        """The negative control, PROBED rather than assumed.
-
-        Its first spelling asserted the raw glob finds nothing — true on this
-        Linux runner and FALSE on real Windows, where NTFS folds and the decoy
-        comes straight back. A control that fails on the exact host the defect
-        lives on is worse than none: it turns the CI leg that found the bug red
-        for the instrument's own reason. Both outcomes are pinned; nothing is
-        skipped (@memory's ruling: never skipif what a probe can measure).
-        """
+        """The negative control, PROBED rather than assumed."""
         _root, lane = _project(tmp_path)
         found = [p.name for p in lane.glob("*_REGISTRY.json")]
         if host_folds_glob(tmp_path):
@@ -150,14 +93,7 @@ class TestTheEmulationGenuinelyWidens:
             assert found == [], "host is case-sensitive but the raw glob matched anyway"
 
     def test_the_probe_answers_from_the_filesystem_not_from_sys_platform(self, tmp_path, widened_glob):
-        """Probe integrity (@aipass's trick), and it is killable HERE.
-
-        Under the emulation this Linux runner behaves like a folding host, so a
-        probe that read ``sys.platform`` would still answer False and this line
-        goes red. The opposite mutant — a probe hardwired to True — dies in the
-        test above, which on this case-sensitive host demands an empty listing.
-        Both directions have a killer on whichever host is running.
-        """
+        """Probe integrity (@aipass's trick), and it is killable HERE."""
         assert host_folds_glob(widened_glob(tmp_path)) is True
 
 
@@ -168,10 +104,7 @@ class TestDiscoveryPointsAtTheRealAnchorOnACaseFoldingFilesystem:
         assert found == root / REAL_ANCHOR
 
     def test_what_it_finds_maps_the_real_world(self, tmp_path, widened_glob):
-        """The assertion is about where discovery POINTS, not set membership.
-
-        Mutant: registries_in matches the suffix case-blind in apps/handlers/registry_scan.py — killed.
-        """
+        """The assertion is about where discovery POINTS, not set membership."""
         _root, lane = _project(tmp_path)
         found = registry_scan.find_registry_upward(widened_glob(lane))
         assert found is not None
@@ -200,8 +133,7 @@ class TestTheNameCheckIsCaseExactWithoutAnyEmulation:
         assert registry_scan.registries_in(tmp_path) == []
 
     def test_an_external_projects_own_registry_survives(self, tmp_path):
-        """SUFFIX only, never the stem: nothing promises an uppercase stem, and
-        Vera-Studio_REGISTRY.json is a real one in the live fleet."""
+        """The suffix is matched case-exact, never the stem: Vera-Studio_REGISTRY.json is a real registry."""
         target = tmp_path / "Vera-Studio_REGISTRY.json"
         target.write_text("{}", encoding="utf-8")
         assert registry_scan.registries_in(tmp_path) == [target]
@@ -224,12 +156,7 @@ class TestTheNameCheckIsCaseExactWithoutAnyEmulation:
 
 
 class TestEveryLaneReadsTheSharedReader:
-    """The four private walks are gone; each name now delegates.
-
-    Patched on the MODULE so the assertion proves a call-time lookup — a lane
-    that had done ``from ... import find_registry`` would keep its own binding
-    and these would pass while reading something else.
-    """
+    """The four private walks are gone; each name now delegates."""
 
     @pytest.mark.parametrize(
         "module_path",
@@ -264,11 +191,7 @@ class TestEveryLaneReadsTheSharedReader:
 
 
 class TestNoLaneGlobsForARegistryAnyMore:
-    """A parse-tree sweep, so the tenth walk cannot be written quietly.
-
-    Named offenders, not a count: a sweep that reports a number tells the next
-    reader nothing about where to look.
-    """
+    """A parse-tree sweep, so the tenth walk cannot be written quietly."""
 
     def _glob_call_sites(self, tree, path):
         offenders = []
@@ -292,8 +215,7 @@ class TestNoLaneGlobsForARegistryAnyMore:
         assert offenders == [], f"cased glob patterns fold on Windows: {offenders}"
 
     def test_the_sweep_can_see_an_offender(self):
-        """Positive control on the INSTRUMENT: the same walker, on a real file
-        holding the deleted spelling — not a re-implementation of the match."""
+        """Positive control on the instrument: the same walker finds the deleted spelling in a real file."""
         tree = ast.parse('from pathlib import Path\nx = Path(".").glob("*_REGISTRY.json")\n')
         assert self._glob_call_sites(tree, Path("probe.py")) != []
 

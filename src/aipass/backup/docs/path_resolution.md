@@ -33,23 +33,18 @@ the frame touches no filesystem at all; where the fence resolves a real frame's
 path it catches `OSError` and keeps the raw spelling, and a pseudo filename
 (`<string>`, `<frozen ...>`) is never resolved.
 
-Measured on 2026-08-31 by importing all 57 modules then in the tree, in a child
-interpreter under two injections: **57/57 failed to import before the cure, 0/57
-after**. Re-measured 2026-09-05 against the tree as it now stands (60 modules,
-`audit/` added since): **0/60 red in both denial worlds**.
-
-The standing pin is `tests/test_dead_cwd_imports.py`. Note what it does and does
-not do: it re-runs the two injections against **9 representative modules**
-(`PROBE_MODULES`), not the whole tree — the 57 and 60 figures above are ad-hoc
-sweeps, not something CI re-walks. The file also carries an AST ban on
+The pin is `tests/test_dead_cwd_imports.py`. Note what it does and does not
+do: it runs a child interpreter under two injections (two denial worlds) against
+**9 representative modules** (`PROBE_MODULES`), not the whole tree; nothing in
+CI re-walks every module. The file also carries an AST ban on
 `inspect.stack()` — a behavioural test cannot catch its return, because the
 branch that used it is unreachable from any import-shaped pin.
 
 **Backup destinations are unaffected by all of this.** Every path under
 `.backup/` is derived from the caller-supplied `project_root` (see
 `handlers/path/builder.py`), never from a module-level resolve and never from
-the cwd — so no backup or archive has ever been written to a location derived
-from where the caller's shell happened to be standing.
+the cwd — so no backup or archive is written to a location derived from where
+the caller's shell happens to be standing.
 
 ---
 

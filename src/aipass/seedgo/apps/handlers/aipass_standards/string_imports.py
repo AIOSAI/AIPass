@@ -3,35 +3,14 @@
 # Description: Import targets written as string literals, read from the parse tree
 # Version: 1.0.0
 # Created: 2026-10-07
-# Modified: 2026-10-07
+# Modified: 2026-10-17
 # =============================================
 
 """Import targets a file names as a STRING, for the cross-branch handler rule.
 
-``importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")``
-reaches another branch's handlers exactly like an import statement does, and
-both the ``handlers`` and ``encapsulation`` standards used to be blind to it:
-the first reads import nodes only, the second skips any line where
-``apps.handlers`` sits inside quotes, by design, to acquit documentation
-examples (DPLAN-0404, measured 10-06/07: 10 product sites, ~45 test files).
-
-The cure keeps that acquittal. A string is an import only when it is an
-ARGUMENT to a call that imports or patches by name; a string anywhere else is
-prose. The parse tree answers that for free: docstrings and comments are never
-call arguments.
-
-The calls read, by the call's own name (any module, any alias):
-
-- ``import_module("lit")`` - ``importlib.import_module``, a bare import, an
-  ``as`` alias, and a seam whose name ends in ``import_module``
-- ``resolve_name("lit")`` - ``pkgutil.resolve_name``
-- ``patch("lit")`` - ``unittest.mock.patch``, ``mock.patch``; first positional
-  only. ``patch.object`` takes an object and is not read.
-- ``<x>.setattr("lit", ...)`` - ``monkeypatch.setattr``, the string form only
-
-A literal counts when it starts with ``aipass.`` and contains
-``.apps.handlers``. A bare name counts too when it resolves to a module-level
-assignment of one string literal (hooks' ``_RAIL`` shape).
+A string is an import only as the first argument of a call that imports or
+patches by name (import_module, resolve_name, patch, <x>.setattr); anywhere
+else it is prose, so documentation examples stay acquitted.
 """
 
 import ast
@@ -40,7 +19,6 @@ from typing import Dict, Iterator, Optional, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
-#: The marker a string must carry to be a handlers target.
 HANDLERS_MARKER = ".apps.handlers"
 
 #: The conviction note both standards append to a quoted line.
@@ -102,13 +80,7 @@ def _literal_of(arg: ast.expr, constants: Dict[str, str]) -> Optional[str]:
 def iter_string_imports(content: str) -> Iterator[Tuple[int, str]]:
     """Yield (line, target) for every handlers target named as a call's string.
 
-    Args:
-        content: Source of the file.
-
-    Returns:
-        An iterator of (1-indexed line of the call, dotted target). An
-        unparseable file yields nothing: the import-node readers beside this
-        one already decline it the same way.
+    An unparseable file yields nothing, as the import-node readers beside it do.
     """
     try:
         tree = ast.parse(content)

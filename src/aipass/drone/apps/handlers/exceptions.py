@@ -3,23 +3,14 @@
 # Description: Custom exceptions for routing and branch resolution
 # Version: 1.0.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-17
 # =============================================
 
 """
 Drone module custom exceptions.
-
-Defines the exception hierarchy for routing and branch resolution errors.
 """
 
-# This module deliberately records nothing when it loads. It used to call
-# log_operation("exceptions_loaded") at module level, which wrote into
-# drone_json on every import — including during pytest COLLECTION, before any
-# fixture exists, so neither the repo-root conftest's autouse guard nor
-# AIPASS_TEST_LOG_DIR could intercept it. It was the last live-tree write left
-# after the seam was adopted, and it recorded nothing a reader wanted: that an
-# exception class file was imported. Defining exceptions is not an operation.
-# Raising one is, and the raiser logs it.
+# Logs nothing at import: a module-level write fires during pytest collection, before any seam.
 
 
 class RoutingError(Exception):
@@ -59,11 +50,7 @@ class RegistryNotFoundError(RegistryError):
 
 
 class RegistryMismatchError(RegistryError):
-    """Raised when registry credential doesn't match caller's passport.
-
-    NOT recoverable — unlike RegistryNotFoundError (no file, use fallback),
-    a mismatch means the wrong registry was found. Must error, not fall back.
-    """
+    """Raised when registry credential doesn't match caller's passport; never fall back on it."""
 
     pass
 

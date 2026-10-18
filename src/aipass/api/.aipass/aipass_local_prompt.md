@@ -49,7 +49,7 @@ api/
 
 # Design rules
 
- - Not auth, credentials, or a service factory → it does not belong here (DPLAN-0036; the old Telegram anti-pattern).
+ - Not auth, credentials, or a service factory → it does not belong here (the old Telegram anti-pattern).
  - One module per provider, one handler directory per provider. Module orchestrates, handlers implement.
  - No default models or configs — consumers provide their own. API provides the connection.
  - The server owns the pipe, never the meaning: a host route proxies the branch that owns the data (verbs.py D0).

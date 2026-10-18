@@ -3,15 +3,12 @@
 # Description: Tests for the escalation lane's signature, counting, windows, gates and state file
 # Version: 1.2.0
 # Created: 2026-08-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/escalation.py — the repeat signature, counting, windows, gates and state file."""
 
-# The digest itself (send, mail, reporting) and apps/modules/escalation.py, the
-# CLI, live in test_escalation_digest.py since the oversize_test_file split
-# (2026-10-08). The lane fixtures are in conftest.py; the event payloads and the
-# fire/read helpers both files share are in support_escalation.py.
+# Digest send/mail/CLI tests live in test_escalation_digest.py; shared helpers in support_escalation.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
@@ -39,11 +36,6 @@ from aipass.trigger.tests.support_escalation import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _age_occurrences(lane, signature: str, seconds: float) -> None:
     """Push a signature's recorded occurrences *seconds* into the past."""
     state = _read_state(lane)
@@ -52,17 +44,9 @@ def _age_occurrences(lane, signature: str, seconds: float) -> None:
     _write_state(lane, state)
 
 
-# ---------------------------------------------------------------------------
-# compute_signature
-# ---------------------------------------------------------------------------
-
-
 class TestComputeSignature:
     """Signature stability — the same failure must collapse to one signature.
-
-    Variable data (paths, line numbers, timestamps) is what makes a repeating
-    failure look like a hundred unique ones; identity fields (level, branch,
-    module) are what keeps two unrelated failures apart.
+    Variable data makes one repeating failure look unique; identity fields keep unrelated ones apart.
     """
 
     def test_different_absolute_paths_share_a_signature(self, lane) -> None:
@@ -114,10 +98,7 @@ class TestComputeSignature:
         assert all(char in "0123456789abcdef" for char in signature)
 
 
-# The two variants @devpulse pinned from the 2026-08-11 storm: one logical event
-# (prax live-monitor queue full during seedgo's fleet audit) that minted 112
-# separate signatures and mailed 17 digests. They differ by a count and by the
-# citizen named in the tail — nothing else.
+# One logical event (prax queue full) that minted 112 signatures; differs only by count and citizen.
 PRAX_QUEUE_A = (
     "[event_queue] The live monitor display queue is full — 20 events were skipped from the "
     "terminal monitor view since the last report (latest: log from SEEDGO). Nothing is lost: "
@@ -130,11 +111,8 @@ PRAX_QUEUE_B = (
 )
 
 
-# The four @devpulse diffed out of their inbox on the evening of 2026-08-11,
-# copied verbatim from the live state file. Same warning family as the pair
-# above, arriving in a costume the first fix was never measured against: the
-# count sits mid-sentence and the source is a slash-compound carrying a citizen
-# name AND a model name. The last two differ ONLY by the count.
+# Same warning family in another shape: count mid-sentence, slash-compound source naming a
+# citizen and a model. The last two differ only by the count.
 PRAX_QUEUE_LOG_DAEMON = (
     "[event_queue] The live monitor display queue is full — 5 events were skipped from the "
     "terminal monitor view since the last report (latest: log from DAEMON). Nothing is lost: "
@@ -155,22 +133,13 @@ PRAX_QUEUE_AGENT_FABLE_OTHER_COUNT = PRAX_QUEUE_AGENT_FABLE.replace("11 events",
 
 class TestSignatureFragmentation:
     """One logical event must not mint a signature per repeat.
-
-    The registry normalizer strips what varies between *errors*. Repetition
-    needs more: a message differing only by a count, a duration, or a named
-    citizen is the same condition happening again. Every case here was measured
-    on real state, not imagined — see the module comment above.
+    A message differing only by a count, duration or citizen name is the same condition repeating.
     """
 
     @pytest.fixture(autouse=True)
     def pinned_registry(self, lane, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Every citizen the corpus names, pinned to a fixture registry.
-
-        AIPASS_REGISTRY.json is runtime state, not tracked source — a bare CI
-        checkout has none, name collapse silently skips, and the collapse
-        assertions fork while the same tests pass on any dev machine where
-        _find_repo_root() walks up into the live tree. The world a test needs
-        must be the world it builds.
+        The registry is runtime state a CI checkout lacks; a test must build the world it needs.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         names = ("SEEDGO", "PRAX", "DRONE", "DEVPULSE", "DAEMON", "HOOKS", "AIPASS", "FLOW")
@@ -192,10 +161,7 @@ class TestSignatureFragmentation:
 
     def test_the_hundred_boundary_does_not_fork_the_signature(self, lane) -> None:
         """The regression that hides behind a mismatched placeholder.
-
-        The registry pass rewrites 3+ digit numbers to <id> before this lane
-        runs. Collapse the smaller ones to any OTHER token and 99 and 101 stop
-        matching — one condition, two signatures, split on a round number.
+        The registry pass rewrites 3+ digit numbers to <id>; smaller ones must collapse to the same token.
         """
         small = lane.compute_signature("WARNING", "prax", "queue", "99 events were skipped")
         large = lane.compute_signature("WARNING", "prax", "queue", "101 events were skipped")
@@ -220,12 +186,8 @@ class TestSignatureFragmentation:
         assert first == second
 
     def test_the_slash_compound_source_token_is_one_signature(self, lane) -> None:
-        """@devpulse's 2026-08-11 evening counterexample, verbatim from their inbox.
-
-        Four signatures they diffed by hand. The varying tokens are a mid-sentence
-        count (5/8/10/11) and a compound source token that carries an uppercase
-        citizen name AND a model name inside a slash-path shape. Pinned because a
-        counterexample is only answered once; a test answers it forever.
+        """@devpulse's counterexample, verbatim from their inbox.
+        A mid-sentence count and a slash-compound source carrying a citizen and a model name.
         """
         signatures = {
             lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", message)
@@ -241,9 +203,7 @@ class TestSignatureFragmentation:
 
     def test_the_source_kind_still_separates_signatures(self, lane) -> None:
         """The counterpart guard: 'log from' and 'agent from' are different conditions.
-
-        @devpulse ruled the residual source kinds are MEANING, not fragmentation.
-        This pins that ruling so a future widening cannot quietly erase it.
+        Residual source kinds are meaning, not fragmentation; this pins that ruling.
         """
         as_log = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_LOG_DAEMON)
         as_agent = lane.compute_signature("WARNING", "prax", "direct_prax_event_queue", PRAX_QUEUE_AGENT_SEEDGO)
@@ -272,11 +232,7 @@ class TestSignatureFragmentation:
 
     def test_registry_names_are_reread_after_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
         """A newly spawned citizen collapses without restarting the watcher.
-
-        Freshness is time-bounded, not mtime-bounded: on this filesystem two
-        writes moments apart report the same st_mtime AND st_mtime_ns, so an
-        mtime check can tie and never re-read at all. Expiring the stamp is
-        what a watcher crossing the TTL does.
+        Freshness is TTL-bound, not mtime-bound: two quick writes can share st_mtime_ns.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
@@ -293,8 +249,7 @@ class TestSignatureFragmentation:
 
     def test_names_are_not_reread_inside_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
         """The cache is real: no file read per log line.
-
-        Mutant killed 2026-09-27: the TTL early return in _branch_name_pattern made unconditional-false.
+        Mutant: the TTL early return in _branch_name_pattern made unconditional-false.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
@@ -314,11 +269,6 @@ class TestSignatureFragmentation:
         assert lane._branch_name_pattern() is None
         stamped_at, _ = lane._branch_names_cache
         assert stamped_at > 0
-
-
-# ---------------------------------------------------------------------------
-# Counting and threshold
-# ---------------------------------------------------------------------------
 
 
 class TestCountingAndThreshold:
@@ -390,11 +340,6 @@ class TestCountingAndThreshold:
         assert len(outbox) == 1
 
 
-# ---------------------------------------------------------------------------
-# Window trimming
-# ---------------------------------------------------------------------------
-
-
 class TestWindowTrimming:
     """Occurrences older than window_minutes stop counting toward the threshold."""
 
@@ -426,11 +371,6 @@ class TestWindowTrimming:
 
         assert len(_entry(lane, signature)["occurrences"]) == 1
         assert _entry(lane, signature)["total_count"] == 3
-
-
-# ---------------------------------------------------------------------------
-# Cooldown
-# ---------------------------------------------------------------------------
 
 
 class TestCooldown:
@@ -478,14 +418,8 @@ class TestCooldown:
         assert len(outbox) == 1
 
 
-# ---------------------------------------------------------------------------
-# Error eligibility
-# ---------------------------------------------------------------------------
-
-
 class TestErrorEligibility:
     """Which repeating ERRORs the human still needs to hear about.
-
     Eligible means medic is NOT going to wake the owner about this right now.
     """
 
@@ -546,12 +480,8 @@ class TestErrorEligibility:
 
     def test_an_unreadable_branch_registry_manufactures_no_digest(self, lane, outbox, medic) -> None:
         """A registry the check cannot read is not a registry with nobody in it.
-
-        _has_registered_owner documents True when the check itself failed. The
-        lookup used to swallow the read failure and answer an empty set, so every
-        branch read as unregistered and the lane mailed 'no registered owner'.
-        Red first on that code (outcome 'sent').
-        Mutant 2026-09-28: the lookup's re-raise put back to return set() reddens this.
+        _has_registered_owner answers True when the check itself fails; a swallowed read made every branch unregistered.
+        Mutant: the lookup's re-raise put back to return set() reddens this.
         """
         medic.branch_registry.write_text("{not json", encoding="utf-8")
 
@@ -562,8 +492,7 @@ class TestErrorEligibility:
 
     def test_suppressed_fingerprint_stays_silent(self, monkeypatch, lane, outbox, medic) -> None:
         """A human called this benign (compass #219) — suppression beats 'already dispatched'.
-
-        Mutant killed 2026-09-27: is_suppressed(fingerprint) -> is_suppressed("") in _is_error_eligible.
+        Mutant: is_suppressed(fingerprint) -> is_suppressed("") in _is_error_eligible.
         """
         medic.suppressed.add(ERROR_EVENT["fingerprint"])
         monkeypatch.setattr(medic.registry, "get_dispatch_count", lambda fingerprint: 1)
@@ -590,11 +519,6 @@ class TestErrorEligibility:
 
         assert decision["outcome"] == "sent"
         assert "no dispatch path" in outbox[0]["message"]
-
-
-# ---------------------------------------------------------------------------
-# Config gates
-# ---------------------------------------------------------------------------
 
 
 class TestConfigGates:
@@ -679,11 +603,6 @@ class TestConfigGates:
         assert not lane.STATE_FILE.exists()
 
 
-# ---------------------------------------------------------------------------
-# State file resilience
-# ---------------------------------------------------------------------------
-
-
 class TestStateFileResilience:
     """The lane must survive its own state file, whatever shape it is in."""
 
@@ -717,11 +636,6 @@ class TestStateFileResilience:
         assert lane.get_signatures() == []
 
 
-# ---------------------------------------------------------------------------
-# Pruning
-# ---------------------------------------------------------------------------
-
-
 class TestPruning:
     """max_signatures bounds the state file, dropping the least recently seen."""
 
@@ -748,10 +662,7 @@ class TestPruning:
 
     def test_a_refreshed_signature_survives_a_tied_prune(self, lane, cfg, monkeypatch: pytest.MonkeyPatch) -> None:
         """Re-seeing a signature protects it even when last_seen cannot record that.
-
-        Creation order is A, B, C; touch order puts A last. On a tied clock the
-        pre-fix code pruned by creation order and dropped the entry that had
-        just been re-seen.
+        Creation order A, B, C; touch order puts A last. A tied clock must not prune the re-seen entry.
         """
         cfg["max_signatures"] = 3
         _freeze_clock(monkeypatch, lane)
@@ -764,11 +675,6 @@ class TestPruning:
         stored = _read_state(lane)["signatures"]
         assert first in stored, "the re-seen signature is the newest, not the oldest"
         assert second not in stored
-
-
-# ---------------------------------------------------------------------------
-# get_config read-through
-# ---------------------------------------------------------------------------
 
 
 class TestConfigReadThrough:

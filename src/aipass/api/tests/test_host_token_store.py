@@ -3,37 +3,13 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
 
-# Tests for the Token Store's Accountability Fields
-#
-# Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
-# this machine and the store could not say who minted it. Three fields:
-#
-#   minted_by   - best-effort provenance. WHO ran issue-token.
-#   revoked_at  - when a token stopped working.
-#   last_used   - whether a live token is actually live, or merely un-revoked.
-#
-# THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
-#
-# `last_used` means a write on EVERY authenticated request, against a JSON file
-# that issue and revoke also write. Two things could go wrong, and the second one
-# is the dangerous one:
-#
-#   1. Two writers race and one update is lost. For telemetry, survivable.
-#   2. A telemetry write, holding a record list it read BEFORE a revoke landed,
-#      writes that stale list back — and un-revokes the token. A revoked device
-#      starts working again because somebody looked at a timestamp.
-#
-# So the load-bearing test in this file is not "last_used is written". It is
-# "a concurrent revoke survives a touch". Telemetry must never undo security.
-#
-# And one more: a truncated store reads as empty, which denies every request. With
-# per-request writes that window stops being theoretical, so the write is atomic —
-# a reader sees the old file or the new one, never half of either.
+# `last_used` is written on every authenticated request to the file revoke writes; a touch
+# holding a list read before a revoke would un-revoke the token. Telemetry never undoes security.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — scope_allows() and resolve_token(), tests/test_host_api.py
@@ -85,19 +61,8 @@ def _record(token_id: str) -> dict:
     return next(record for record in host_tokens.load_tokens() if record.get("id") == token_id)
 
 
-# ==============================================
-# PROVENANCE
-# ==============================================
-
-
 class TestTheStoreRemembersWhoMintedIt:
-    """
-    The gap that cost an investigation round tonight.
-
-    An operate-scoped token appeared, and the honest answer to "who minted this"
-    was that the store does not record it. The C1 audit knows precisely who
-    FAILS auth; nothing knew who ISSUES.
-    """
+    """The audit knows who FAILS auth; the store must know who ISSUES."""
 
     def test_the_calling_branch_is_recorded(self, minted_by_baud: Path) -> None:
         """drone names the caller in the child env; this reads it."""
@@ -106,12 +71,7 @@ class TestTheStoreRemembersWhoMintedIt:
         assert record["minted_by"] == "baud"
 
     def test_an_unnamed_caller_is_recorded_as_unknown(self, store: Path) -> None:
-        """
-        'unknown' rather than a blank or a missing key.
-
-        A field that vanishes when it has nothing to say reads as though nobody
-        thought to record it — the same reasoning as the audit's peer address.
-        """
+        """'unknown' rather than a blank or a missing key."""
         with patch.dict(os.environ, {}, clear=True):
             record, _ = host_tokens.issue_token("hand-rolled", scope="read")
 
@@ -128,9 +88,7 @@ class TestTheStoreRemembersWhoMintedIt:
         """
         It records what happened; it never decides what is allowed.
 
-        The value comes from an environment variable the caller's own process
-        carries, so trusting it for authorisation would be trusting the caller
-        about the caller. Any value issues a token; the value only names it.
+        The value is the caller's own env var; trusting it would be trusting the caller about the caller.
         """
         with patch.dict(os.environ, {CALLER_ENV: "definitely-not-a-real-branch"}):
             record, raw = host_tokens.issue_token("odd-caller", scope="operate")
@@ -142,9 +100,7 @@ class TestTheStoreRemembersWhoMintedIt:
         """
         Best-effort means it answers under every environment, including none.
 
-        Provenance that can throw would turn a bookkeeping field into a reason
-        a token cannot be minted. Called directly here, because the callers
-        above would hide a raise behind issue_token's own failure.
+        Called directly: through issue_token a raise would hide behind issue_token's own failure.
         """
         with patch.dict(os.environ, {}, clear=True):
             assert host_tokens.current_minter() == host_tokens.UNKNOWN_MINTER
@@ -156,19 +112,8 @@ class TestTheStoreRemembersWhoMintedIt:
             assert host_tokens.current_minter() == "baud"
 
 
-# ==============================================
-# REVOCATION TIME
-# ==============================================
-
-
 class TestRevokedAtWasStoredButNotSurfaced:
-    """
-    My own correction. I reported `revoked_at` as a missing field; it has been
-    written since Phase 1 and was simply not projected by list_tokens().
-
-    I read the projection and called it the store. The fix is one line, and the
-    lesson is worth more than the line: check the record, not the view of it.
-    """
+    """`revoked_at` is stored at revoke and must also reach the list_tokens() projection."""
 
     def test_revocation_stamps_the_time(self, store: Path) -> None:
         """Written at revoke, as it always was."""
@@ -194,20 +139,8 @@ class TestRevokedAtWasStoredButNotSurfaced:
         assert listed["revoked_at"] is None
 
 
-# ==============================================
-# LIVE OR DORMANT
-# ==============================================
-
-
 class TestLastUsedAnswersLiveOrDormant:
-    """
-    The question this field exists for is not 'when exactly', it is 'is this
-    credential still in use, or has it been sitting there since March'.
-
-    So writes coalesce inside a window. A phone polling the feed every few
-    seconds would otherwise rewrite the whole store every few seconds, for a
-    field nobody reads at second resolution.
-    """
+    """The field answers 'still in use or dormant', not 'when exactly', so writes coalesce in a window."""
 
     def test_a_touch_records_the_time(self, store: Path) -> None:
         """The basic claim."""
@@ -250,8 +183,7 @@ class TestLastUsedAnswersLiveOrDormant:
         """
         A hand-edited stamp is due, rewritten readable, and named in words only.
 
-        The stamp is read out of the credential store, and ValueError's own text
-        quotes it, so neither reaches the log line (PR #774 r10).
+        The stamp comes from the credential store and ValueError's text quotes it; neither reaches the log.
         """
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
         records = host_tokens.load_tokens()
@@ -279,28 +211,13 @@ class TestLastUsedAnswersLiveOrDormant:
 
 
 class TestTelemetryNeverUndoesSecurity:
-    """
-    The load-bearing class in this file.
-
-    `touch_token` is a read-modify-write on the same file `revoke_token` writes.
-    Done carelessly it would let a timestamp update resurrect a revoked device —
-    a security property destroyed by a telemetry field. The whole reason the
-    Phase 1 reservation said 'not until there is locking'.
-    """
+    """The load-bearing class in this file."""
 
     def test_the_touch_reads_inside_the_lock_not_before_it(self, store: Path) -> None:
         """
         The property that makes a concurrent revoke safe, pinned directly.
 
-        A read taken before the lock could be stale by the time it is written
-        back — that is the whole resurrection bug. Holding the lock across BOTH
-        the read and the write is what removes the window, so this asserts the
-        ordering rather than trying to hand-simulate a race.
-
-        My first attempt at this test forced the revoke re-entrantly from inside
-        the touch's own read, which deadlocked against a lock that is correctly
-        not re-entrant, and then reported the code broken. The harness was wrong;
-        the ordering is the thing worth pinning.
+        The lock is not re-entrant: forcing a revoke from inside the touch's read deadlocks the harness.
         """
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
         real_load = host_tokens.load_tokens
@@ -319,13 +236,7 @@ class TestTelemetryNeverUndoesSecurity:
         assert held_during_read == [True]
 
     def test_a_revoke_racing_a_touch_across_threads_still_wins(self, store: Path) -> None:
-        """
-        Real threads, real lock, the outcome that matters.
-
-        Whichever order they serialise in, the token must end up revoked: the
-        touch re-reads under the lock, so it can never write back a list that
-        predates the revoke.
-        """
+        """Real threads, real lock: whichever order they serialise in, the token ends up revoked."""
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
         token_id = record["id"]
         barrier = threading.Barrier(2)
@@ -357,12 +268,7 @@ class TestTelemetryNeverUndoesSecurity:
         assert host_tokens.verify_token(raw) is None
 
     def test_a_touch_that_cannot_take_the_lock_is_dropped_not_raised(self, store: Path) -> None:
-        """
-        Telemetry never fails a request.
-
-        If the store is busy, the honest outcome is a missing timestamp — never
-        a 500 on a request that was properly authenticated.
-        """
+        """Telemetry never fails a request: a busy store means a missing timestamp, not a 500."""
         record, _ = host_tokens.issue_token("pixel-8", scope="read")
 
         with patch.object(host_tokens, "_store_lock", side_effect=OSError("lock is held")):
@@ -370,8 +276,7 @@ class TestTelemetryNeverUndoesSecurity:
                 host_tokens.touch_token(record["id"])
 
         assert _record(record["id"])["last_used"] is None
-        # Said out loud, but never with the id: it is read out of the credential
-        # store (CodeQL py/clear-text-logging-sensitive-data, PR #774 r10).
+        # Never with the id: it is read out of the credential store (CodeQL clear-text logging).
         message, *values = log.warning.call_args.args
         logged = message % tuple(values)
         assert "could not record last_used for the presented token" in logged
@@ -379,20 +284,8 @@ class TestTelemetryNeverUndoesSecurity:
         assert record["id"] not in logged
 
 
-# ==============================================
-# THE WRITE ITSELF
-# ==============================================
-
-
 class TestTheStoreIsNeverSeenHalfWritten:
-    """
-    A truncated store reads as empty, and an empty store denies every request.
-
-    That window existed before tonight but was crossed rarely, by an operator
-    running a command. Writing on every authenticated request makes it a
-    constant, so the write became atomic: a reader sees the old file or the new
-    one, never part of either.
-    """
+    """A truncated store reads as empty, and an empty store denies every request."""
 
     def test_the_store_is_valid_json_after_a_write(self, store: Path) -> None:
         """The property, stated at its simplest."""
@@ -413,13 +306,7 @@ class TestTheStoreIsNeverSeenHalfWritten:
         reason="0o600 is a POSIX mode; Windows st_mode carries no owner-only story to assert",
     )
     def test_the_store_file_stays_owner_only(self, store: Path) -> None:
-        """
-        0o600 survives the rename.
-
-        A temp file created with default permissions and then renamed into place
-        would quietly widen a credential store — the atomicity fix undoing the
-        permission discipline it was added to protect.
-        """
+        """0o600 survives the rename: a default-mode temp file renamed in would widen the store."""
         host_tokens.issue_token("pixel-8", scope="read")
 
         path = store / "host_api" / "tokens.json"
@@ -435,11 +322,7 @@ class TestTheStoreIsNeverSeenHalfWritten:
 
 
 class TestOlderRecordsStillWork:
-    """
-    Version 1 records exist on this machine right now — every token minted
-    today. They must keep verifying, listing and revoking with the fields they
-    do not have.
-    """
+    """Version 1 records must keep verifying, listing and revoking without the new fields."""
 
     def test_a_version_one_record_still_verifies(self, store: Path) -> None:
         """No minted_by, no revoked_at. Still a valid credential."""
@@ -454,12 +337,7 @@ class TestOlderRecordsStillWork:
         assert verified["id"] == record["id"]
 
     def test_a_version_one_record_lists_without_inventing_a_minter(self, store: Path) -> None:
-        """
-        Absent is not 'unknown' here — it is honestly absent.
-
-        A record minted before the field existed cannot claim its minter was
-        unknown; nobody was ever asked. None says that; "unknown" would not.
-        """
+        """Absent is not 'unknown' here — it is honestly absent."""
         record, _ = host_tokens.issue_token("legacy", scope="read")
         records = host_tokens.load_tokens()
         for stored in records:
@@ -470,15 +348,8 @@ class TestOlderRecordsStillWork:
         assert listed["minted_by"] is None
 
 
-# ==============================================
-# THE REQUEST PATH
-# ==============================================
-
-
-# find_spec, not host_server.is_available(): the skip must read the MACHINE, not
-# the code under test. Asking the subject whether to run means a renamed or
-# broken is_available() turns these two into silent skips — seedgo's self_skip
-# rule, 2026-09-07, and it is the same shape that once made 75 tests evaporate.
+# find_spec, not host_server.is_available(): the skip reads the machine, not the code under
+# test, so a broken is_available() cannot turn these into silent skips (seedgo self_skip).
 fastapi_installed = pytest.mark.skipif(
     importlib.util.find_spec("fastapi") is None,
     reason="the [host] extra is not installed",
@@ -521,10 +392,7 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
 
 class TestTheTouchIsNotAnOracle:
-    """
-    `last_used` is written only for a token that verified, so the file never
-    grows a record for a value somebody guessed.
-    """
+    """`last_used` is written only for a token that verified, never for a guessed value."""
 
     def test_an_unrecognised_token_creates_no_record(self, store: Path) -> None:
         """Probing must not populate the store it is probing."""
@@ -550,13 +418,7 @@ class TestTheLockIsRealNotDecorative:
             assert lock.called
 
     def test_a_stale_lock_does_not_wedge_the_store_forever(self, store: Path) -> None:
-        """
-        A process that dies holding the lock must not lock out its successors.
-
-        Bounded staleness beats a permanent outage: the worst case for breaking
-        a stale lock is a lost timestamp, and the worst case for honouring one
-        forever is a server that can never issue or revoke again.
-        """
+        """A process that dies holding the lock must not lock out its successors."""
         lock_path = host_tokens.lock_path()
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         lock_path.write_text("dead pid", encoding="utf-8")
@@ -573,13 +435,7 @@ class TestTheLockIsRealNotDecorative:
         assert not host_tokens.lock_path().exists()
 
     def test_the_lock_guards_the_store_it_names(self, store: Path) -> None:
-        """
-        Both paths, side by side — a lock beside a DIFFERENT file guards nothing.
-
-        store_path() is the single place that names the store, so issue, revoke
-        and touch cannot drift onto separate files; this asserts the lock is a
-        sibling of it rather than an unrelated path that merely exists.
-        """
+        """Both paths, side by side — a lock beside a DIFFERENT file guards nothing."""
         assert host_tokens.store_path().parent == host_tokens.lock_path().parent
         assert host_tokens.store_path() != host_tokens.lock_path()
 
@@ -592,10 +448,7 @@ class TestTheLockIsRealNotDecorative:
         """
         CI 35192484222, Windows: the answer that killed a revoke.
 
-        An exclusive create against a lock another writer is still removing
-        (delete pending) answers ACCESS DENIED on Windows, not FILE EXISTS. The
-        loop caught only the second, so the revoke thread died on the first and
-        a revoked credential stayed live. Manufactured here once, on any host.
+        An exclusive create on a delete-pending lock answers ACCESS DENIED on Windows, not FILE EXISTS.
         """
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
         lock_file = str(host_tokens.lock_path())
@@ -621,10 +474,7 @@ class TestTheLockIsRealNotDecorative:
         """
         A fresh lock another writer holds (FILE EXISTS) is waited for, then refused.
 
-        Through issue_token with a real lock file at lock_path(), its mtime now,
-        so it is not stale. The wait is shortened through LOCK_WAIT_SECONDS,
-        read at the call (api, fleet green leg 14); elapsed >= wait with the
-        poll below the wait says the loop polled more than once.
+        elapsed >= wait with the poll below the wait says the loop polled more than once.
         """
         wait = 0.1
         monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
@@ -649,11 +499,7 @@ class TestTheLockIsRealNotDecorative:
         """
         Waiting out a delete is not forgiving a permissions problem.
 
-        Through issue_token, with the lock's directory made unwritable for real.
-        It is polled inside the wait and never past it, and what is raised still
-        carries the denial. Whether the host refuses at all is asked of the host
-        itself: root, and Windows, which ignores a directory's read-only mode,
-        create anyway, and there the issue simply lands (api, fleet green leg 14).
+        The host is probed first: root and Windows create in a read-only directory anyway.
         """
         wait = 0.1
         monkeypatch.setattr(host_tokens, "LOCK_WAIT_SECONDS", wait)
@@ -691,13 +537,7 @@ class TestTheLockIsRealNotDecorative:
         """
         A release refused by the platform has not found the lock already gone.
 
-        Through issue_token: the save stand-in turns the lock into something
-        unlink refuses. POSIX unlinks a held file, so a directory takes its
-        place (IsADirectoryError on Linux, PermissionError on macOS). Windows
-        refuses to unlink a file this process holds open, so there a second
-        handle is kept open past the release instead. The host is asked which
-        by the unlink itself (api, fleet green leg 14). A warning, never a
-        debug line claiming it vanished, and never raised.
+        POSIX unlinks a held file, so a directory takes the lock's place; Windows keeps a handle open.
         """
         lock = host_tokens.lock_path()
         refusals: list = []
@@ -725,8 +565,7 @@ class TestTheLockIsRealNotDecorative:
         assert len(held) == len(refusals), "every refused unlink kept its handle open past the release"
         assert log.warning.call_count == 1
         message, *values = log.warning.call_args.args
-        # Named in words, and the only value on the line is the OSError: the
-        # lock's path stays off it (seedgo clear_text_secret_logging, PR #774).
+        # The lock's path stays off the line (seedgo clear_text_secret_logging).
         assert "token store lock" in message
         assert len(values) == 1
         assert isinstance(values[0], OSError)
@@ -735,10 +574,7 @@ class TestTheLockIsRealNotDecorative:
         """
         The ordinary outcome of a stale-lock break racing a release: debug, not a warning.
 
-        Through issue_token: the save stand-in removes the lock mid-body. Windows
-        refuses to unlink a file this process holds open, so there the state
-        cannot arise and the release removes the lock quietly instead; the host
-        is asked by the unlink itself (api, fleet green leg 14).
+        Windows cannot unlink a held file, so there the release removes the lock quietly instead.
         """
         lock = host_tokens.lock_path()
         refusals: list = []
@@ -771,14 +607,7 @@ class TestTheLockSurvivesAFailedWrite(object):
 
 
 class TestTheListingSaysWhatTheStoreNowKnows:
-    """
-    The operator's actual window onto all three fields.
-
-    The ruling came from a question asked at a terminal — an operate token had
-    appeared and nobody could say who minted it. Storing the answer in JSON and
-    leaving the listing unchanged would have left that question exactly as
-    unanswerable at the place it gets asked.
-    """
+    """The operator's actual window onto all three fields."""
 
     def _listing(self, capsys: pytest.CaptureFixture) -> str:
         """Run the operator's own command and return what it printed."""
@@ -834,13 +663,7 @@ class TestTheListingSaysWhatTheStoreNowKnows:
     def test_an_unparseable_stamp_is_shown_raw_and_never_as_nothing(
         self, store: Path, capsys: pytest.CaptureFixture, stamp: str | None, provenance: str
     ) -> None:
-        """
-        A stamp that renders as an empty string reads as 'absent'.
-
-        Hand-edited stores exist. Showing the odd value is how someone notices;
-        showing nothing is how it stays wrong. One rendering per case, so a red
-        names the rendering that broke (api, fleet green leg 4).
-        """
+        """A stamp that renders as an empty string reads as 'absent'."""
         host_tokens.issue_token("one-token", scope="read")
         records = host_tokens.load_tokens()
         for stored in records:
@@ -849,19 +672,12 @@ class TestTheListingSaysWhatTheStoreNowKnows:
         host_tokens.save_tokens(records)
         capsys.readouterr()
 
-        # Pinned exactly, line by line (api, fleet green leg 3): a substring passed a
-        # provenance line with anything around it. Mutants: the unknown-minter word,
-        # 'never used', and the stamp format each changed.
+        # Whole lines, not a substring: a substring passes a provenance line with anything around it.
         lines = {line.strip() for line in self._listing(capsys).splitlines()}
         assert provenance in lines
 
     def test_an_unparseable_stamp_is_logged_without_its_value(self, store: Path, capsys: pytest.CaptureFixture) -> None:
-        """
-        The listing shows the odd stamp to the operator; the log line only names it.
-
-        The value and ValueError's text are read out of the credential store, and
-        nothing read from there reaches a log (PR #774 r10).
-        """
+        """The listing shows the odd stamp to the operator; the log line only names it."""
         host_tokens.issue_token("one-token", scope="read")
         records = host_tokens.load_tokens()
         for stored in records:
@@ -880,12 +696,7 @@ class TestTheListingSaysWhatTheStoreNowKnows:
 
 
 def test_the_reserved_comment_is_gone(store: Any) -> None:
-    """
-    Phase 1 left a RESERVATION comment saying last_used is never written.
-
-    It is written now, and a stale reservation is worse than no comment: the
-    next reader trusts it and stops looking.
-    """
+    """Phase 1 left a RESERVATION comment saying last_used is never written."""
     source = Path(host_tokens.__file__).read_text(encoding="utf-8")
 
     assert "never written in Phase 1" not in source
@@ -895,13 +706,7 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     """
     Where a raw token lands when the caller does not choose.
 
-    The owner found three raw bearer receipts in his home root on 2026-08-19 —
-    ~/<owner>.token and two siblings, 43 bytes each, from the August phone
-    setup. The mechanism was never wrong (raw never printed, 0600 file); the
-    HELP TEXT said `--out ~/pixel.token` and whoever follows the docs mints a
-    secret into their home directory. The default lives beside the hashed store
-    now, and the label — free-form until today — becomes a filename, which is
-    the one place it could reach somewhere it should not.
+    The label becomes a filename, the one place it could reach somewhere it should not.
     """
 
     def test_the_receipt_sits_beside_the_hashed_store(self, store: Path) -> None:
@@ -948,11 +753,7 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
         assert "label is required" in str(refusal.value)
 
     def test_an_ordinary_label_with_spaces_still_works(self, store: Path) -> None:
-        """The fence refuses what is DANGEROUS, not what is untidy.
-
-        Labels are human names ("Someone's old phone"). Refusing a space would
-        make the fence a naming policy, which is not what it is for.
-        """
+        """The fence refuses what is DANGEROUS, not what is untidy."""
         receipt = host_tokens.receipt_path("Someone's old phone")
 
         assert receipt.name == "Someone's old phone.token"
@@ -962,16 +763,7 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     def test_a_receipt_path_that_symlinks_out_of_the_store_is_refused(self, store: Path) -> None:
         """The second gate, and the case that proves it is not decoration.
 
-        The label checks above all refuse the SENTENCE — a name that looks like
-        a path. They cannot see this one: "pixel-8" is a perfectly good name,
-        and the escape lives in the filesystem rather than in the string. A
-        symlink planted at the receipt's own path sends an 0600 write wherever
-        it points, so the fence has to be checked after resolving, not only
-        before.
-
-        Found while mutating: deleting the post-resolve check bit nothing,
-        because every label test above is caught one line earlier. A guard no
-        test can distinguish from its own absence is a guard nobody can trust.
+        "pixel-8" is a good name; the escape is a symlink at the receipt's path, seen only after resolving.
         """
         provider_dir = store / "host_api"
         provider_dir.mkdir(parents=True, exist_ok=True)

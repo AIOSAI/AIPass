@@ -3,7 +3,7 @@
 # Description: Tests for trigger.py CLI entry point — line coverage
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the apps/trigger.py CLI entry point (discover, route, main)."""
@@ -20,11 +20,6 @@ import pytest
 from aipass.cli.apps.modules import error, mark_command_failed
 from aipass.trigger.apps import trigger as trigger_entry
 
-
-# ---------------------------------------------------------------------------
-# Infrastructure mocks — isolate from real prax / cli
-# ---------------------------------------------------------------------------
-
 _mock_logger = MagicMock()
 
 
@@ -32,27 +27,15 @@ _mock_logger = MagicMock()
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch the entry point's prax logger on the real module.
 
-    The entry point logs failures at ERROR, and a real prax ERROR line is what
-    the live branch watcher escalates, so the logger is the edge patched here.
+    A real prax ERROR line is what the live branch watcher escalates; cli stays real.
     """
-    # Reset call counts between tests
     _mock_logger.reset_mock()
     monkeypatch.setattr(trigger_entry, "logger", _mock_logger)
-
-    # ---- cli ----
-    # cli is REAL here (2026-09-27): console output is read with capsys and a
-    # refusal from error() on stderr. The exit seam was already real; a mocked
-    # console only let the tests read call args instead of what a user sees.
 
 
 def _import_trigger():
     """Return the real trigger.py entry module the fixture patched."""
     return trigger_entry
-
-
-# ===================================================================
-# discover_modules
-# ===================================================================
 
 
 class TestDiscoverModules:
@@ -69,7 +52,6 @@ class TestDiscoverModules:
         trigger = _import_trigger()
         monkeypatch.setattr(trigger, "MODULES_DIR", tmp_path)
 
-        # We need importlib to actually find the module, so patch import_module
         fake_module = MagicMock()
         fake_module.handle_command = MagicMock()
         monkeypatch.setattr(trigger.importlib, "import_module", lambda name: fake_module)
@@ -137,11 +119,6 @@ class TestDiscoverModules:
         _mock_logger.warning.assert_called()
 
 
-# ===================================================================
-# route_command
-# ===================================================================
-
-
 class TestRouteCommand:
     """Cover route_command() paths."""
 
@@ -199,11 +176,6 @@ class TestRouteCommand:
         assert trigger.route_command("anything", [], []) is False
 
 
-# ===================================================================
-# print_introspection
-# ===================================================================
-
-
 class TestPrintIntrospection:
     """Cover print_introspection() paths."""
 
@@ -215,7 +187,6 @@ class TestPrintIntrospection:
         mock_mod.__doc__ = "Fire all the things\nSecond line ignored"
 
         trigger.print_introspection([mock_mod])
-        # Verify console.print was called with the module name
         joined = capsys.readouterr().out
         assert "fire" in joined
 
@@ -236,11 +207,6 @@ class TestPrintIntrospection:
         trigger.print_introspection([])
         joined = capsys.readouterr().out
         assert "No modules discovered" in joined
-
-
-# ===================================================================
-# print_help
-# ===================================================================
 
 
 class TestPrintHelp:
@@ -277,11 +243,6 @@ class TestPrintHelp:
         assert "No modules discovered" in joined
 
 
-# ===================================================================
-# main
-# ===================================================================
-
-
 class TestMain:
     """Cover main() paths."""
 
@@ -294,7 +255,6 @@ class TestMain:
 
         result = trigger.main([])
         assert result == 0
-        # print_introspection prints "No modules discovered"
         joined = capsys.readouterr().out
         assert "No modules discovered" in joined
 
@@ -357,12 +317,7 @@ class TestMain:
     ) -> None:
         """Handled is not succeeded — a routed refusal must reach the shell.
 
-        Every module of mine that declined through error() still exited 0,
-        because main() returned the literal 0 on any truthy route and nothing
-        ever read cli's failure flag (canary's fleet sweep, 2026-09-07). A
-        caller's `drone @trigger log_events start && <next>` therefore ran
-        <next> with no watcher. The route is still handled, so the unknown
-        command gate cannot catch this; resolve_exit is what separates the two.
+        The route is handled, so the unknown-command gate cannot catch it; resolve_exit separates the two.
         """
         trigger = _import_trigger()
 
@@ -382,9 +337,7 @@ class TestMain:
     def test_a_previous_refusal_does_not_colour_the_next_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The failure flag is process-level, so main() resets it at the door.
 
-        cli keeps the flag in module state that outlives a single main(). In a
-        long-lived process — anything importing and calling main() twice — one
-        refusal would otherwise make every later command exit 2 forever.
+        Otherwise one refusal makes every later main() in a long-lived process exit 2.
         """
         trigger = _import_trigger()
         mock_mod = MagicMock()
@@ -409,10 +362,7 @@ class TestMain:
     def test_unknown_command_returns_1(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Unrecognised command reports one error on stderr and returns 1.
-
-        Mutant run: dropping the error() call on the unknown-command arm reddens this.
-        """
+        """Unrecognised command reports one error on stderr and returns 1."""
         trigger = _import_trigger()
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = False
@@ -440,13 +390,7 @@ class TestVersionString:
     """`--version` and the README header must never drift apart again."""
 
     def test_cli_version_matches_readme_header(self) -> None:
-        """The version printed by the CLI is the version the README publishes.
-
-        These were 2.2.0 (CLI) and 2.6.0 (README) when APLAN-0008 measured them:
-        four documented releases — the escalation lane and the reload sentinel
-        among them — shipped without the string moving. Nothing enforced the
-        pairing, so it drifted silently and `--version` misreported the branch.
-        """
+        """The version printed by the CLI is the version the README publishes."""
         __version__ = trigger_entry.__version__
 
         readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
@@ -465,9 +409,7 @@ class TestUnknownCommandMessage:
     ) -> None:
         """`medic nonsense` reports both words, not just `medic`.
 
-        Found live in APLAN-0008: `drone @trigger medic nonsense` printed
-        "Unknown command: medic". The medic module exists — the subcommand did
-        not — so the message accused the one word that was valid.
+        Naming only `medic` accuses the one word that was valid.
         """
         trigger = _import_trigger()
         monkeypatch.setattr(trigger, "discover_modules", lambda: [])
@@ -482,11 +424,7 @@ class TestUnknownCommandMessage:
     ) -> None:
         """A real module's unknown subcommand exits 1, not 0.
 
-        `errors` printed its own refusal and returned True; `escalation`
-        printed help and returned True. Both told the entry point "handled",
-        so the invocation exited 0 — a refusal that reports success is
-        indistinguishable from a command that worked (FPLAN-0492). Modules
-        discovered for real here: mocking them away would prove nothing.
+        Modules are discovered for real here: mocking them away would prove nothing.
         """
         trigger = _import_trigger()
 

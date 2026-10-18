@@ -3,14 +3,11 @@
 # Description: Scoped git status for branch directories
 # Version: 1.3.0
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Scoped git status for branch directories.
-
-Runs ``git status --porcelain`` and filters results to files under the
-caller's branch directory, providing a focused view of changes.
 """
 
 from __future__ import annotations
@@ -26,26 +23,9 @@ from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 def get_branch_status(branch_dir: Path, repo_root: Path | None = None) -> dict:
     """Get git status filtered to files under branch_dir.
 
-    Args:
-        branch_dir: Absolute path to the branch directory.
-        repo_root: The repo to run in. Defaults to the one the caller stands in;
-            the external-repo door names another one outright.
-
-    Returns:
-        Dict with ok (bool — False when git itself failed), files (list of
-        {status, path, index, worktree}), total (int), and message (str).
-        Callers must check ``ok``: an error return is otherwise
-        indistinguishable from a clean empty tree, which false-greened
-        `drone @git status` for months.
-
-        ``status`` carries porcelain's TWO COLUMNS VERBATIM — index first, then
-        worktree. It used to be stripped here, which made ``M `` (staged) and
-        `` M`` (unstaged) the same answer, so every consumer downstream read a
-        staged modification as an unstaged one. Stripping is a rendering
-        choice and now lives in the renderer that wants it; this function
-        reports what git said. ``index`` and ``worktree`` carry the columns
-        split, because that split is what consumers actually branch on and
-        re-slicing a padded string is where they get it wrong.
+    Callers must check ``ok``: an error is otherwise indistinguishable from a clean tree.
+    ``status`` keeps porcelain's two columns verbatim; stripping makes staged ``M `` and
+    unstaged `` M`` the same answer. ``index`` and ``worktree`` carry them split.
     """
     if repo_root is None:
         repo_root = find_repo_root()
@@ -69,7 +49,6 @@ def get_branch_status(branch_dir: Path, repo_root: Path | None = None) -> dict:
             "message": f"git status error: {result.stderr.strip()}",
         }
 
-    # Compute relative path for filtering
     try:
         rel_dir = branch_dir.resolve().relative_to(repo_root.resolve())
     except ValueError:
@@ -116,12 +95,8 @@ def _no_count(branch: str | None, message: str) -> dict:
 def get_ahead_behind(repo_root: Path) -> dict:
     """How far the current branch is from its origin twin, as of the last fetch: no network.
 
-    The twin of ``git rev-list --left-right --count origin/<b>...HEAD``.
-
-    Returns:
-        Dict with ok (bool), branch (str, or None when HEAD is detached),
-        upstream (``origin/<b>``, or None when origin has no such branch),
-        ahead and behind (int, or None with no upstream), and message (str).
+    branch is None when HEAD is detached; upstream, ahead and behind are None
+    when origin has no such branch.
     """
     head = _git(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
     if head.returncode == 1:

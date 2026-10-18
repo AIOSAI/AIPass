@@ -3,38 +3,14 @@
 # Description: The trinity push lane — dry-run reporting and gated execution
 # Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """Trinity Push Module
 
-CLI routing for ``drone @memory push`` — the one lane that brings a branch's
-``.trinity/`` files to the trinity standard.  All domain logic lives in
-``handlers/templates/trinity_push.py``; this module parses flags, renders the
-report, and enforces the two gates.
-
-The gates
----------
-**A fleet write needs ``--confirm``.**  The owner's ruling is that the fleet run
-is gated on a dry-run he has read.  Encoding that as a flag rather than as an
-operator's memory is the difference between a rule and a hope — and this
-branch has already demonstrated the alternative, when a command run to check
-*whether a verb existed* performed a fleet-wide reset on 18 branches with no
-prompt and exit 0.
-
-**``--dry-run`` writes nothing anywhere** — not the memory files, not the
-vector store, not the receipts.  Its report is the artifact the owner reads, so
-it is written to a file as well as to the terminal and the path is printed.
-
-Todos never go to vectors (DPLAN-0345).  A non-canonical todo, and past the
-pad size the oldest canonical ones, move to ``.backup/todo/<branch>/backlog.json``
-(verified before the pad is written).  The report counts them per branch with
-their reasons and the backlog path, and the fleet line totals them.
-
-Note that ``push`` no longer aliases ``rollover push``.  That alias fired the
-fleet-wide per-branch CONFIG reset from a bare, unprompted word; the config
-reset keeps its own explicit verb and this name now belongs to the lane that
-earns it.
+Gates: a fleet write needs ``--confirm`` (the owner reads the dry-run first), and
+``--dry-run`` writes nothing anywhere except its report file. ``push`` is not an
+alias of ``rollover push`` (the fleet-wide config reset keeps its own verb).
 """
 
 import os
@@ -65,21 +41,8 @@ _SUBCOMMANDS = {
 }
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """Route ``push`` and its flags.
-
-    Args:
-        command: Command name.
-        args: Remaining CLI arguments.
-
-    Returns:
-        True when this module handled the command.
-    """
+    """Route ``push`` and its flags."""
     if command != "push":
         return False
 
@@ -167,11 +130,6 @@ def _run_push(branch, dry_run: bool) -> None:
         {"scope": label, "dry_run": dry_run, "branches": result.get("scope", 0), "report": path},
         module_name="push",
     )
-
-
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
 
 
 def print_introspection() -> None:

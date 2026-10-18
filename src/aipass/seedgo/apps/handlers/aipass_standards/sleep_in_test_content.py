@@ -3,25 +3,18 @@
 # Description: Sleep In Test Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
 """
 Sleep In Test Standards Content Handler
-
-Provides formatted Sleep In Test standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_sleep_in_test_standards() -> str:
-    """Return formatted sleep_in_test standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted sleep_in_test standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (crack class N, template v1 item 23):[/bold cyan]",
         "  A sleep inside a test. It is always one of two mistakes, and both are",

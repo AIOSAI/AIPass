@@ -3,31 +3,13 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.3.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
 
-# Pins for ``handlers/repo_root.py`` — one repo-root answer, never the cwd.
-#
-# WHY A WHOLE MODULE FOR ONE FUNCTION
-# -----------------------------------
-# @drone reported the ``Path.cwd()`` fallback in ``registry_scope`` and it was
-# cured the same hour. CI went red again within that hour on ``detector.py``:
-# byte-identical function, one file over, one of TEN copies. The subprocess pin
-# written for the first fix is what caught it — but only because CI runs a bare
-# checkout where the fallback is actually reached. On a developer machine the
-# walk finds the live registry and the defect is invisible.
-#
-# So the pins here come in two species, deliberately:
-#
-#   * BEHAVIOURAL — what the function does when the fallback IS taken. These run
-#     everywhere, because they hand the walk a directory with no registry above
-#     it rather than waiting for the machine to be bare.
-#   * STRUCTURAL — that no lane keeps a private copy of the answer. This is the
-#     pin that would have caught ``detector.py`` before CI did, and it is the
-#     only one that makes a third round impossible. A test that can only fail in
-#     an environment we do not run locally is not a guard, it is a report.
+# Two species: BEHAVIOURAL pins hand the walk a registry-less world so the fallback
+# runs on every machine; STRUCTURAL pins sweep the tree so no lane keeps a private copy.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — module_file() on Windows, where resolve() reads the cwd; the sweep pins its callers
@@ -57,10 +39,7 @@ from aipass.memory.tests.dead_cwd import (
     WINDOWS_REALPATH_WORLD,
 )
 
-# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
-# whole path: a checkout that lives under a directory named dropbox must not hide itself.
-# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
-# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+# Judged by the parts BELOW the walk's root: a checkout under a dir named dropbox must not hide itself.
 _SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -78,21 +57,14 @@ def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path:
     assert _walk(root) == [root / "live" / "test_x.py"]
 
 
-# Every .py in the branch's own source, minus archives (kept deliberately as
-# written) and caches. The sweep must read the tree, not a list someone
-# maintains by hand — a hand-maintained list is how the tenth copy hid.
+# The sweep reads the tree, never a hand-kept list (that is how the tenth copy hid).
 _APPS = Path(rr.__file__).resolve().parent.parent
 _SOURCES = _walk(_APPS)
 
-# The one other species of cwd read in this tree, and it is not this defect:
-# "where was the caller standing" is a QUESTION ABOUT THE CALLER, and cwd is
-# the right answer to it. Named here so the sweep refuses everything else.
+# "Where was the caller standing" is a question ABOUT THE CALLER; cwd answers it.
 _CALLER_CWD_SITES = {
     "detector.py",
-    # memory_watcher.py left 2026-09-18: it reads the detector's scope, no cwd of its own.
-    # DPLAN-0345: `rollover run` / `check` roll the todo pad of the branch the
-    # CALLER stands in - drone's AIPASS_CALLER_CWD, the process cwd only when
-    # no launcher stamped one. A question about the caller, never the root.
+    # rolls the todo pad of the branch the CALLER stands in (AIPASS_CALLER_CWD first).
     "todo_roll.py",
 }
 
@@ -105,10 +77,7 @@ def _src_root() -> str:
 def _prose_lines(text: str) -> set[int]:
     """Line numbers occupied by string literals — docstrings included.
 
-    The sweeps below convict a file for CONTAINING a construct, and every
-    docstring that explains this defect has to spell it. Reading the parse tree
-    rather than guessing at quote characters means a file can describe the bug
-    it cured without being convicted of having it.
+    A file may describe the bug it cured without being convicted of having it.
     """
     import ast
 
@@ -120,24 +89,13 @@ def _prose_lines(text: str) -> set[int]:
 
 
 def _cwd_reads(text: str) -> list[int]:
-    """Line numbers where ``Path.cwd()`` appears in CODE, not in prose or a comment.
-
-    Extracted so it can be measured against a known sample. A filter is an
-    instrument, and an instrument nothing checks can be silenced without
-    anything going red — a mutation that made ``_prose_lines`` return every
-    line left the whole sweep vacuous and the suite green.
-    """
+    """Line numbers where ``Path.cwd()`` appears in CODE, not in prose or a comment."""
     prose = _prose_lines(text)
     return [
         number
         for number, line in enumerate(text.splitlines(), start=1)
         if "Path.cwd()" in line and not line.lstrip().startswith("#") and number not in prose
     ]
-
-
-# ---------------------------------------------------------------------------
-# BEHAVIOURAL — what the fallback resolves to
-# ---------------------------------------------------------------------------
 
 
 class TestTheFallbackIsDerivedFromTheSourceTree:
@@ -193,14 +151,8 @@ class TestTheFallbackIsDerivedFromTheSourceTree:
 class TestTheAuditLineCanNeverTakeAnImportDown:
     """Four callers resolve at MODULE level, so this write happens during their import.
 
-    ``repo_root`` imports ``json_handler`` INSIDE ``_record_fallback`` — a
-    module-level edge would be a cycle now that ``json_handler`` imports
-    ``module_file`` from here — so the patch has to land on the object that
-    function-local import will actually find. That is whatever ``sys.modules``
-    holds at call time, which under this suite's infrastructure mock is not the
-    module a plain ``from ... import json_handler`` at the top of this file
-    binds. Patching a name the code under test never reads is the quietest way
-    to write a test that cannot fail.
+    ``_record_fallback`` imports json_handler at call time, so the patch lands on
+    whatever ``sys.modules`` holds, not on a top-of-file binding the code never reads.
     """
 
     @staticmethod
@@ -227,20 +179,13 @@ class TestTheAuditLineCanNeverTakeAnImportDown:
         assert seen[0][0][0] == "repo_root_fallback"
 
 
-# ---------------------------------------------------------------------------
-# STRUCTURAL — no lane keeps a private copy
-# ---------------------------------------------------------------------------
-
-
 class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
     """The sweep pin. This is the one that catches the eleventh copy."""
 
     def test_only_repo_root_implements_the_walk(self):
         """A second implementation is how the first cure missed nine files.
 
-        Delegating wrappers are fine and expected — several lanes keep a local
-        ``_find_repo_root`` name because tests patch it. What is refused is a
-        second BODY: a wrapper is one line that calls this module.
+        Delegating wrappers are fine (tests patch the local name); a second BODY is not.
         """
         offenders = []
         for path in _SOURCES:
@@ -256,14 +201,7 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
         )
 
     def test_the_write_fence_stands_on_this_source_tree_not_the_callers_directory(self, tmp_path):
-        """The fence's root is this module's answer. A cwd — even one holding a registry — never moves it.
-
-        The 2026-09-17 defect in one sentence: where a caller happened to stand
-        decided what memory would write. A fence whose root came from the caller
-        would move to Vera Studio the moment someone stood in Vera Studio. So the
-        probe stands in a directory that HAS an ``AIPASS_REGISTRY.json``, names
-        it as the caller's cwd too, and the fence must not notice either.
-        """
+        """The fence's root is this module's answer. A cwd — even one holding a registry — never moves it."""
         elsewhere = tmp_path / "another_repo"
         elsewhere.mkdir()
         (elsewhere / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -294,15 +232,8 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
     def test_the_only_remaining_cwd_reads_are_the_caller_cwd_species(self):
         """Not a ban on cwd — a ban on cwd standing in for "where does the code live".
 
-        `AIPASS_CALLER_CWD` reads are a question ABOUT THE CALLER, and cwd is
-        the correct answer to that question. They are named, so a new one has
-        to be argued for rather than blend in.
-
-        PROSE IS NOT CODE. The docstrings that explain this defect necessarily
-        SPELL it, and a sweep that convicts a file for describing the bug it
-        fixed would be uncurable — the only way to pass would be to stop
-        explaining. String and comment lines are excluded structurally, via the
-        parse tree, not by guessing at quote characters.
+        `AIPASS_CALLER_CWD` sites are named so a new one has to be argued for.
+        String and comment lines are excluded via the parse tree.
         """
         offenders = []
         for path in _SOURCES:
@@ -320,13 +251,7 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
 
 
 class TestTheSweepCanStillSee:
-    """The positive control. A filter nothing checks can be silenced quietly.
-
-    A mutation that made ``_prose_lines`` cover every line left the sweep above
-    unable to flag anything and the whole suite green — the instrument reported
-    its own blindness as a clean bill of health. Same species as a guard fixture
-    that skips: the assertion existed and could no longer fail.
-    """
+    """The positive control. A filter nothing checks can be silenced quietly."""
 
     _SAMPLE = (
         '"""A docstring that mentions Path.cwd() while explaining the defect."""\n'
@@ -347,13 +272,7 @@ class TestTheSweepCanStillSee:
         assert 3 not in _cwd_reads(self._SAMPLE)
 
 
-# ---------------------------------------------------------------------------
-# IMPORT-TIME — the crash species
-# ---------------------------------------------------------------------------
-
-# The four lanes that resolve their root while being IMPORTED. For these the
-# defect needs no call: `import` is the crash site, which is why the CI
-# traceback ran through handlers/__init__ and never reached a test body.
+# Lanes that resolve their root while being IMPORTED: `import` is the crash site.
 _IMPORT_TIME_LANES = [
     "aipass.memory.apps.handlers.monitor.detector",
     "aipass.memory.apps.handlers.monitor.registry_scope",
@@ -362,28 +281,9 @@ _IMPORT_TIME_LANES = [
     "aipass.memory.apps.handlers.rollover.orchestrator",
 ]
 
-# --- BUILDING THE WORLD, TWICE, BECAUSE ONE WAY DOES NOT EXIST EVERYWHERE ----
-#
-# The original recipe deletes the process's working directory. That is a REAL
-# world on POSIX and an IMPOSSIBLE one on Windows: Windows holds a lock on the
-# directory a process is standing in, so the rmdir raises PermissionError
-# (WinError 32) and every pin built this way dies at SETUP rather than at its
-# claim — which is how these arrived on the Windows CI leg.
-#
-# The condition being pinned is NOT "a directory was deleted". It is
-# "``os.getcwd()`` raises", which is what ``Path.cwd()`` does underneath and the
-# only thing this code can actually observe. Deleting the directory is one way
-# to cause it; a disconnected network share or an ejected volume is another, and
-# those DO happen on Windows. So the primary construction denies ``getcwd``
-# directly — the failure itself rather than one cause of it — and runs on every
-# platform.
-#
-# Injecting it is not faking the world, on the same reasoning that lets the
-# marker be denied in-process: the interpreter raises the real exception from
-# the real call site. And the claim does not rest on that argument alone —
-# ``TestBothConstructionsAgree`` runs BOTH recipes on POSIX and asserts they
-# produce the same outcome, which is what licenses using the injected one where
-# the real one cannot be built.
+# The condition pinned is "os.getcwd() raises". Denying getcwd builds it on every
+# platform; deleting the cwd cannot run on Windows (the directory is locked).
+# TestBothConstructionsAgree proves the two equivalent on POSIX.
 _DENY_CWD = DEAD_CWD_WORLD
 
 _DELETE_CWD = DELETE_CWD_WORLD
@@ -401,32 +301,7 @@ _WINDOWS_CANNOT_DELETE_ITS_OWN_CWD = pytest.mark.skipif(
 
 
 class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
-    """Importing must never raise, in any world. Subprocess, because cwd is process-wide.
-
-    Once the working directory is gone, EVERY ``Path.cwd()`` in the interpreter
-    raises — pytest's own included. Deleting the runner's cwd would take the
-    suite down with it, so the condition is created in a child.
-
-    THE PIN JUDGES ONLY THIS BRANCH, and that distinction is the whole point of
-    running it. On a bare tree the import chain reaches @prax before it reaches
-    us: every handler in the fleet does ``logger = get_system_logger()`` at
-    module level, and prax's own ``config/load.py`` carries this exact species
-    — a repo-root walk whose last resort is ``Path.cwd()``. So a raw "did the
-    import survive" assertion measures two branches at once and reports prax's
-    line as memory's defect.
-
-    THE BLOCKER IS CLEARED, AND SO THE ESCAPE HATCH IS GONE (2026-08-31, later
-    the same night). @prax swept eight sites of the same species and their fix
-    landed, so this reports a HARD failure again — verified here by rebuilding
-    the bare stand-in against their tree: 11/11 memory modules import clean in a
-    dead cwd with no substitution at all.
-
-    An xfail that outlives its blocker is worse than no pin, because a
-    regression upstream would go on reporting itself as an expected failure.
-    What survives is the ATTRIBUTION: a crash outside this branch still fails,
-    and it fails naming the tree it happened in, because convicting ourselves of
-    somebody else's line is how a real defect gets fixed in the wrong place.
-    """
+    """Importing must never raise, in any world. Subprocess, because cwd is process-wide."""
 
     _NOT_OURS = "/aipass/prax/"
 
@@ -449,26 +324,13 @@ class TestEveryImportTimeLaneSurvivesADeadWorkingDirectory:
 
 
 class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
-    """The measurement that isolates this branch from the fleet's shared logger.
-
-    The class above cannot prove memory is cured on a bare tree, because prax
-    raises first and an xfail proves nothing about us. Here prax's copy is
-    neutralised in the child — replaced, not caught — so what remains is
-    memory's tree alone. If any of these go red the defect IS ours.
-
-    Neutralising rather than skipping matters: a skip when the world is
-    inconvenient is how a guard quietly stops guarding. This still runs, it
-    still asserts, and it names exactly what it held constant.
-    """
+    """@prax's copy is neutralised in the child, so what remains is memory's tree alone."""
 
     @pytest.mark.parametrize("world", [_DENY_CWD, pytest.param(_DELETE_CWD, marks=_WINDOWS_CANNOT_DELETE_ITS_OWN_CWD)])
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_this_branch_imports_in_a_bare_world(self, module, world):
         probe = (
-            # The world FIRST. It no longer has to be — DEAD_CWD_WORLD patches
-            # the 3.10 accessor too, so import order stops deciding whether the
-            # world is hostile — but a probe that reads in the order it takes
-            # effect cannot quietly regrow the dependency.
+            # The world first, in the order it takes effect.
             f"{world}import sys, pathlib\nsys.path.insert(0, {_src_root()!r})\nimport {module}\nprint('OK')\n"
         )
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, encoding="utf-8")
@@ -480,28 +342,11 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
 
     @pytest.mark.parametrize("module", _IMPORT_TIME_LANES)
     def test_this_branch_imports_where_the_fallback_actually_runs(self, module):
-        """@drone's technique, adopted: make the world hostile instead of waiting for it.
-
-        The pins above cannot reach the fallback on a developer machine — a real
-        registry sits above these files, the walk succeeds, and the branch that
-        broke CI twice is never executed. @drone hit the mirror of this the same
-        night (a sweep asserting "the checkout is a project root", true here and
-        false on a bare runner, red within two hours) and their cure is better
-        than my caveat: deny the marker in-process so the fallback leg RUNS,
-        on any machine, bare or not.
-
-        So the registry is made invisible before the import. With the cure in
-        place these pass; with ``Path.cwd()`` restored they raise
-        ``FileNotFoundError`` right here, on this laptop, with no CI required.
-        That is the difference between a pin with teeth and a pin that files a
-        report from an environment we do not run.
-        """
+        """Every registry is made invisible, so the fallback RUNS on any machine."""
         probe = (
             f"{_DENY_CWD}"
             "import sys, pathlib\n"
             f"sys.path.insert(0, {_src_root()!r})\n"
-            # every registry on this machine becomes invisible, so the walk in
-            # every lane runs off the end and the fallback is what answers
             "_real_exists = pathlib.Path.exists\n"
             "pathlib.Path.exists = lambda self, *a, **k: (\n"
             "    False if self.name.endswith('_REGISTRY.json') else _real_exists(self, *a, **k)\n"
@@ -517,13 +362,7 @@ class TestMemorysHalfIsCuredEvenWhereTheChainStillBreaks:
 
 
 class TestTheDeadCwdProbeIsAHonestInstrument:
-    """The pins above prove nothing unless the world they build really is hostile.
-
-    Both constructions get a positive control, because the whole argument for
-    using the injected one on Windows is that it produces the SAME condition —
-    and an unchecked instrument is what let a blinded filter report a vacuous
-    sweep as green earlier tonight.
-    """
+    """The pins above prove nothing unless the world they build really is hostile."""
 
     _CHECK = (
         "import pathlib\n"
@@ -553,16 +392,8 @@ class TestTheDeadCwdProbeIsAHonestInstrument:
 class TestBothConstructionsAgree:
     """What licenses using the injected world where the real one cannot be built.
 
-    Windows locks a process's working directory, so ``_DELETE_CWD`` cannot run
-    there at all — it raises PermissionError at the rmdir, before any claim is
-    reached. That is not a reason to stop pinning the defect on Windows; it is a
-    reason to pin the CONDITION (``os.getcwd()`` raises) rather than one cause
-    of it.
-
-    But "these two are equivalent" is an argument, and arguments belong in
-    tests. On POSIX both worlds can be built, so both are built and compared —
-    against the cured code AND against the defect restored. If they ever stop
-    agreeing, the Windows coverage is resting on a claim that has expired.
+    On POSIX both worlds are built and compared; if they stop agreeing, the Windows
+    coverage rests on an expired claim.
     """
 
     _ASK = (
@@ -600,16 +431,8 @@ class TestBothConstructionsAgree:
 class TestAFilenameIsNotAnExistsCall:
     """``exists_exactly`` — the half of the pair with no glob to warn a reader.
 
-    @seedgo published it as their own discriminator's blind spot on 2026-08-31:
-    a cased LITERAL folds too, so ``(dir / "AIPASS_REGISTRY.json").exists()``
-    returns True for a file actually named ``aipass_registry.json`` on Windows
-    and on a macOS default volume.
-
-    It lives here rather than at each caller because ``find_repo_root`` IS such
-    a check, run at module level in four modules. A folded bait file accepted as
-    THE REPO ROOT hands every writer downstream a tree nobody chose — which is
-    the quiet defect this module was built to end, arriving through a door it
-    did not cover.
+    A cased literal folds on Windows and macOS; a folded bait file accepted as THE
+    REPO ROOT would hand every writer a tree nobody chose.
     """
 
     def test_the_injected_world_really_folds(self, tmp_path, case_insensitive_exists):
@@ -633,12 +456,7 @@ class TestAFilenameIsNotAnExistsCall:
         assert rr.exists_exactly(tmp_path / "AIPASS_REGISTRY.json") is False
 
     def test_an_unlistable_parent_trusts_exists_rather_than_inventing_a_refusal(self, tmp_path, monkeypatch):
-        """The documented fallback, pinned so it is a decision and not an accident.
-
-        This is a READ anchor and today's behaviour is ``exists()`` alone.
-        Refusing a file that is demonstrably there because its directory could
-        not be enumerated would be a new failure invented by the guard.
-        """
+        """An unlistable parent trusts exists(): refusing a file that is there is a new failure."""
         target = tmp_path / "AIPASS_REGISTRY.json"
         target.write_text("{}", encoding="utf-8")
 
@@ -654,12 +472,7 @@ class TestAFilenameIsNotAnExistsCall:
         assert denied == [tmp_path]
 
     def test_the_repo_root_walk_does_not_anchor_on_a_folded_bait_file(self, tmp_path, case_insensitive_exists):
-        """The whole reason this guard is in THIS module.
-
-        A directory carrying a lowercase ``aipass_registry.json`` must not be
-        answered as the repo root. Every writer in this tree resolves through
-        here, and a guessed root is a write into somebody else's directory.
-        """
+        """A lowercase ``aipass_registry.json`` is never answered as the repo root."""
         bait = tmp_path / "someone_elses_repo"
         (bait / "deep").mkdir(parents=True)
         (bait / "aipass_registry.json").write_text("{}", encoding="utf-8")
@@ -681,12 +494,7 @@ class TestAFilenameIsNotAnExistsCall:
 class TestTheFilterHasOneImplementationForFourWalks:
     """``exactly_named`` moved here the day the third and fourth walks turned up.
 
-    It was written in ``registry_scope`` for that module's two globs, with a
-    docstring claiming a third walk could not be written without it. @drone's
-    sweep and @seedgo's fleet discriminator then named two more in this tree —
-    ``detector`` and ``memory_watcher`` — both written years before the filter
-    existed. The claim was true about the future and said nothing about the
-    past, so the body moved to the module all four already import.
+    Four walks import this module; a body in each would be four answers.
     """
 
     def test_registry_scope_delegates_rather_than_carrying_a_twin(self):
@@ -700,8 +508,7 @@ class TestTheFilterHasOneImplementationForFourWalks:
         ("module_name", "sites"),
         [
             ("aipass.memory.apps.handlers.monitor.detector", 1),
-            # ZERO since 2026-09-18: the watcher reads the rollover scope instead of
-            # walking its own, so a registry glob reappearing here is a second walk.
+            # Zero: the watcher reads the rollover scope; a glob here is a second walk.
             ("aipass.memory.apps.handlers.monitor.memory_watcher", 0),
             ("aipass.memory.apps.handlers.monitor.registry_scope", 2),
         ],
@@ -709,18 +516,7 @@ class TestTheFilterHasOneImplementationForFourWalks:
     def test_no_registry_glob_in_this_tree_is_left_unfiltered(self, module_name, sites):
         """The structural pin: catch it where it is WRITTEN, not only where it runs.
 
-        Last night's lesson cost a second CI red — a cure that landed on one of
-        N identical sites while the rest kept the disease. This reads the source
-        rather than the behaviour, so a fifth walk added tomorrow is red on the
-        line it is typed on.
-
-        TWO THINGS THIS UNIT LEARNED ON 2026-09-08. The matcher required the
-        literal ``"_REGISTRY.json"`` ON the glob line, so ``registry_scope``'s
-        two sites — which glob through the ``*_REGISTRY_GLOB`` constants — were
-        invisible, and that row asserted NOTHING while reading green. And the
-        loop could find no site at all and still pass, which is how the blind
-        row hid: the count below is measured per module and floors the loop, so
-        a site that moves out of reach of the matcher is red, not silent.
+        The per-module count floors the loop, so a site the matcher cannot see is red, not silent.
         """
         source = inspect.getsource(importlib.import_module(module_name))
 
@@ -740,18 +536,8 @@ class TestTheFilterHasOneImplementationForFourWalks:
 class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
     """The 3.10 red, reproduced on whatever interpreter is running this.
 
-    CI found it and none of us runs 3.10 locally, so the honest question was
-    whether this could be pinned here at all or only reported. It can: the
-    mechanism is plain Python, not a 3.10 feature. ``_NormalAccessor.getcwd =
-    os.getcwd`` stores a FUNCTION on a class, and a function reached through an
-    instance is a bound method on every version — so ``Path.cwd()`` handed the
-    accessor as ``self`` to a zero-argument lambda and got ``TypeError`` where
-    the pin expected ``FileNotFoundError``.
-
-    ``ACCESSOR_SHAPE`` is those three lines and nothing else. Running the world
-    against it here is the same move as denying ``getcwd`` instead of deleting a
-    directory: pin the CONDITION (the call arrives bound) rather than the cause
-    (an interpreter that binds it).
+    ``_NormalAccessor.getcwd = os.getcwd`` stores a function on a class, so it arrives
+    BOUND; ``ACCESSOR_SHAPE`` reproduces that on any version.
     """
 
     _ASK = (
@@ -778,20 +564,8 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
     def test_the_world_patches_an_accessor_that_already_captured_the_real_getcwd(self):
         """The defect CI could NOT see, and the more dangerous of the two.
 
-        On 3.10 the accessor captures ``os.getcwd`` when ``pathlib`` is first
-        imported, so a probe importing pathlib BEFORE installing the denial gets
-        an accessor holding the REAL function — a world that is not hostile at
-        all. Four of this branch's probes were written that way. On 3.10 they
-        were passing while asserting nothing, and nothing in the output tells a
-        vacuous pin apart from a cured defect.
-
-        A first draft of this pin just reordered the imports and asserted the
-        world still bit. It SURVIVED the mutant that removes the accessor patch,
-        because on 3.11+ there is no accessor and order genuinely does not
-        matter — a green light wired to nothing, in the test written to stop
-        exactly that. So the accessor is BUILT here, having captured the real
-        ``os.getcwd`` first, which is 3.10's situation reproduced rather than
-        described.
+        On 3.10 the accessor captures ``os.getcwd`` at pathlib import, so a denial installed
+        later never reaches it. The accessor is BUILT here so the pin bites on 3.11+ too.
         """
         pre_captured = (
             "import os, pathlib\n"
@@ -811,55 +585,23 @@ class TestTheDeniedWorldSurvivesEveryWayPathlibCallsIt:
         assert "RAISED" in result.stdout, f"the world never reached the accessor: {result.stdout}{result.stderr}"
 
     def test_the_world_is_defined_once_for_the_whole_branch(self):
-        """Two files carried two spellings of one world, and both were wrong.
-
-        The version bug was in both copies; only one of them was on the line CI
-        happened to run first. A world with two implementations is two worlds,
-        and the cheapest place to notice that is here.
-        """
+        """Two files carried two spellings of one world, and both were wrong."""
         assert residency.DEAD_CWD_WORLD is DEAD_CWD_WORLD
-        # Assembled rather than written out: a literal needle in the assertion
-        # makes this file its own first offender, which the first run proved by
-        # convicting this very line.
+        # Assembled: a literal needle would convict this file.
         retyped = "getcwd" + " = " + "lambda"
         for module in (residency, sys.modules[__name__]):
             source = inspect.getsource(module)
             assert retyped not in source, f"{module.__name__} retyped the world instead of importing it"
 
 
-# Was a local copy, and the copy is what went red on Python 3.10: it patched
-# ``os.path.realpath`` without patching the accessor 3.10's pathlib had already
-# captured it into, so the probe below printed NO_RAISE and every pin under it
-# was vacuous on that interpreter. The cure lives in ``dead_cwd.py`` beside the
-# getcwd world that already carried it — which is where this constant should
-# have been all along, since living apart from that docstring is how it came to
-# repeat the exact trap the docstring describes.
 _WINDOWS_REALPATH = WINDOWS_REALPATH_WORLD
 
 
 class TestResolvingOwnFileIsACwdReadOnWindows:
     """The Windows CI reds, and they were NOT the world being unbuildable.
 
-    @devpulse's steer offered two honest outcomes — a guard in the code if the
-    frame is mine, or the deletion-recipe treatment if it is not. The frame was
-    mine, and then thirty-one more were.
-
-    THE MECHANISM. ``ntpath.realpath`` computes ``os.getcwd()``
-    UNCONDITIONALLY — not only for a relative path, the way ``posixpath`` does —
-    and ``Path.resolve()`` goes through it. So on Windows every
-    ``Path(__file__).resolve()`` is a working-directory read, and this branch
-    had thirty-two of them running at import time. CI showed the first
-    (``inspect.stack()`` in the handlers guard, which resolves every frame's
-    source file); behind it the traceback simply moved down.
-
-    So the condition to inject is "resolving a path reads the cwd", which is a
-    property of the STDLIB on that platform and reproducible here in six lines.
-    Pinning "we are on Windows" would have pinned nothing runnable.
-
-    It used to hold prax's guard and repo-root walk constant in the child, while
-    prax carried the same ``inspect.stack()`` defect. Prax's cure landed, and
-    since DPLAN-0404 (2026-10-08) no probe here reaches into another branch's
-    handlers: the child imports this branch alone.
+    ``ntpath.realpath`` reads ``os.getcwd()`` unconditionally and ``Path.resolve()``
+    goes through it, so on Windows every ``Path(__file__).resolve()`` is a cwd read.
     """
 
     def _probe(self, module):
@@ -895,14 +637,7 @@ class TestResolvingOwnFileIsACwdReadOnWindows:
         assert "OK" in result.stdout
 
     def test_no_import_time_line_in_this_branch_resolves_its_own_file(self):
-        """The structural half, because the behavioural half only covers what it imports.
-
-        The first sweep of this species keyed on "written at module scope" and
-        missed ``find_repo_root``'s own default argument — a line inside a
-        function that four lanes reach during import, and the last crash
-        standing. So this reads every module the import-time lanes pull in and
-        fails on the idiom itself, wherever it is written.
-        """
+        """The structural half, because the behavioural half only covers what it imports."""
         offenders = []
         for path in _SOURCES:
             text = path.read_text(encoding="utf-8")
@@ -923,47 +658,9 @@ class TestResolvingOwnFileIsACwdReadOnWindows:
 class TestNothingReadsTheStackAtImportTime:
     """``inspect.stack()`` is a cwd read on Windows, and I could not reproduce it here.
 
-    The Windows CI traceback is unambiguous: ``inspect.stack()`` builds a
-    FrameInfo per frame, ``getsourcefile`` -> ``getmodule`` -> ``os.path.realpath``,
-    and ``ntpath.realpath`` reads the working directory. It crashed the import
-    of every handler in this branch.
-
-    ON POSIX IT DOES NOT CRASH FROM A DEAD CWD, and the reason is exact rather
-    than the cache guess this docstring first carried. ``inspect.getmodule``
-    reaches the unprotected ``os.path.realpath`` only past this, at
-    ``inspect.py:991``::
-
-        try:
-            file = getabsfile(object, _filename)
-        except (TypeError, FileNotFoundError):
-            return None
-
-    On POSIX ``abspath`` raises inside ``getabsfile`` — and inspect SWALLOWS it,
-    returning None before the realpath loop is reached. On Windows
-    ``ntpath.abspath`` uses ``_getfullpathname`` and does not raise for an
-    absolute path, so execution continues INTO the loop and dies on the
-    unprotected ``realpath`` there. Same stdlib, opposite outcome, and the
-    difference is which of two calls fails first.
-
-    Credit where it is due: @spawn measured this on the Windows gate and read it
-    out of CPython rather than inferring it, correcting a platform claim I had
-    mailed them a few hours earlier. Verified here against
-    ``/usr/lib/python3.12/inspect.py`` before adopting it.
-
-    Restoring ``inspect.stack()`` therefore leaves the DEAD-CWD pins GREEN,
-    which I found by running the mutant rather than by assuming it died.
-
-    THIS DOCSTRING USED TO SAY "on POSIX it cannot crash" AND THAT WAS WRONG —
-    corrected 2026-08-31 after @spawn reproduced it on Linux and this branch
-    verified the recipe rather than taking their word. The dead-cwd world is
-    the wrong injection, not POSIX the wrong platform. See
-    ``TestTheStackReadIsReproducibleAfterAll`` below for the world that does
-    reach the crash and for the behavioural pins that now stand beside this one.
-
-    This pin stays anyway, and not as a leftover: it fails on the line the
-    construct is WRITTEN on, which is where the next copy will appear, and it
-    convicts a file that never runs in any test. The behavioural pin can only
-    judge the lanes it imports.
+    On POSIX a getcwd denial is swallowed inside ``inspect.getabsfile``; on Windows
+    ``ntpath.abspath`` does not raise and the unprotected ``realpath`` dies. This pin
+    fails on the line the construct is written on, in files no probe imports.
     """
 
     def test_no_module_reached_during_import_walks_the_stack_with_inspect(self):
@@ -987,68 +684,14 @@ class TestNothingReadsTheStackAtImportTime:
 class TestTheStackReadIsReproducibleAfterAll:
     """The behavioural half of the pin above, which this branch said was impossible.
 
-    THE CORRECTION, AND WHOSE IT IS. On 2026-08-31 I wrote "on POSIX it cannot
-    crash" into the class above and shipped a structural-only pin on the
-    strength of it. @spawn reproduced the crash on Linux the same night. I was
-    denying the wrong call: the dead-cwd world denies ``os.getcwd``, and on
-    POSIX ``posixpath.abspath`` raises FIRST — inside ``inspect.getabsfile()``,
-    where inspect catches it. The unprotected ``os.path.realpath`` in
-    ``getmodule``'s loop is never reached, so the world is hostile to a call the
-    defect does not make.
-
-    THE RECIPE HAS TWO INGREDIENTS, and missing either one produces a green:
-
-    1. deny ``os.path.realpath`` directly, and
-    2. give the top frame a PSEUDO-FILENAME, which means launching the child
-       with ``python -c`` rather than as a script.
-
-    Ingredient 2 is the one that is easy to drop as noise. ``getsourcefile()``
-    opens with a fast path — ``if os.path.exists(filename): return filename`` —
-    so a frame that came from a real file on disk returns before ``getmodule``
-    is ever called and no realpath happens at all. Only ``<string>`` and
-    ``<stdin>`` fall through. Read out of ``inspect.py`` here before adopting
-    it, on the same standard I asked @spawn to hold me to.
-
-    So the third test below is a NEGATIVE CONTROL FOR THE POSITIVE CONTROL: it
-    proves the crash needs the launcher, not just the denial. Without it, a
-    future simplification that runs the probe as a script would leave the
-    positive control passing while measuring nothing, and a vacuous control and
-    a cured defect produce the same green.
-
-    WHAT THIS PIN DOES NOT REACH, measured by mutating both sites rather than
-    reasoned about. ``handlers/__init__.py`` has TWO frame walks, and the import
-    probe below only executes one of them:
-
-    * ``_find_real_caller`` — load-bearing, taken on every import. Restoring
-      ``inspect.stack()`` here reddens the first test with CI's own traceback,
-      ``inspect.py:1009 getmodule -> os.path.realpath``.
-    * the ``caller_file is None`` diagnostic branch — reached only when NO
-      real-file frame exists above the guard, and a package import always has
-      one: ``apps/__init__.py`` does ``from . import handlers``, so it is
-      always the caller. Restoring ``inspect.stack()`` there leaves every
-      IMPORT-shaped pin GREEN.
-
-    CORRECTED THE NEXT MORNING, AND THE CORRECTION IS AGAINST MY OWN SENTENCE.
-    I wrote "only the structural sweep convicts it" and @devpulse relayed that
-    fleet-wide. It was too strong. Import-shaped pins cannot reach that branch;
-    a DIRECT CALL to ``_guard_branch_access()`` from a ``python -c`` child
-    reaches it easily, and @spawn measured that while I was still calling it
-    unreachable. ``TestTheDiagnosticBranchIsReachableAfterAll`` below is the
-    behavioural sibling, and the regrown-walk mutant now dies to both
-    instruments.
-
-    The structural pin stays regardless, and for a reason the correction does
-    not touch: it needs no subprocess, it names the defect on the line it is
-    written on, and it convicts files no probe imports. What changed is the
-    claim, not the pin — "unreachable from the probes I built" was reported as
-    "unreachable", and those are not the same sentence.
+    Two ingredients, and missing either gives a green: deny ``os.path.realpath``, and
+    give the top frame a PSEUDO-FILENAME (``python -c``), since ``getsourcefile()``
+    returns early for a real file. The third test is the negative control proving that.
     """
 
     _WORLD = REALPATH_DENIED_WORLD
 
-    # What the guard used to call. The crash is inside ``inspect.stack()``
-    # itself — before any of the walking code runs — so the construct IS the
-    # reproduction; nothing about the surrounding loop changes the answer.
+    # The crash is inside ``inspect.stack()`` itself, so the construct IS the reproduction.
     _PROBE = (
         "import inspect\n"
         "try:\n"
@@ -1082,12 +725,7 @@ class TestTheStackReadIsReproducibleAfterAll:
         )
 
     def test_the_crash_needs_a_pseudo_filename_frame_not_just_the_denial(self, tmp_path):
-        """Negative control FOR the control: same world, real file, no crash.
-
-        If this ever starts reporting RAISED, the recipe has become
-        one-ingredient and the class docstring is out of date. If the test above
-        is ever rewritten to run from a file, it will silently join this one.
-        """
+        """Negative control FOR the control: same world, real file, no crash."""
         script = tmp_path / "from_a_real_file.py"
         script.write_text(self._WORLD + self._PROBE, encoding="utf-8")
         result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, encoding="utf-8")
@@ -1099,14 +737,10 @@ class TestTheStackReadIsReproducibleAfterAll:
 
 
 class TestTheFenceStillJudgesInADeadWorkingDirectory:
-    """The old guard's dead-cwd pins, on the fence's public shape (DPLAN-0404, 2026-10-08).
+    """The old guard's dead-cwd pins, on the fence's public shape.
 
-    The class here used to call the old guard's private walk and its diagnostic
-    branch directly; the v2 fence replaced both. What those pins meant stands:
-    with ``os.getcwd()`` raising, the fence neither dies nor waves a caller
-    through. The probe is ``tests/support_fence.py``, run by runpy from a
-    ``python -c`` child so the world is in place before the first import;
-    ``<string>`` and runpy are transport, and the probe's own file decides.
+    With ``os.getcwd()`` raising, the fence neither dies nor waves a caller through.
+    ``<string>`` and runpy are transport; the probe's own file decides.
     """
 
     @staticmethod
@@ -1147,24 +781,9 @@ class TestTheFenceStillJudgesInADeadWorkingDirectory:
 class TestTheTwoWorldsMustNotBeStacked:
     """Denying MORE can deny LESS — on POSIX. This class used to say it everywhere.
 
-    THE CI RED THAT REWROTE IT. On 8550ed10 windows-setup was down to exactly
-    two failures and both were this class::
-
-        test_getcwd_alone_does_not              assert 'DIES' == 'SURVIVES'
-        test_stacking_them_undoes_the_conviction assert 'DIES' == 'SURVIVES'
-
-    My failure message told the reader to suspect a CPython change. Wrong
-    suspect: it was the PLATFORM, and the mistake underneath it was that I
-    measured three verdicts on Linux and wrote them down as facts about
-    ``inspect``. They are facts about ``posixpath``.
-
-    THE TABLE, and what decides each row. On POSIX, ``abspath`` raises inside
-    ``inspect.getabsfile()`` — which sits in inspect's own
-    ``except (TypeError, FileNotFoundError)`` — so a getcwd denial is SWALLOWED
-    and the unprotected ``os.path.realpath`` in ``getmodule`` is never reached.
-    On nt, ``abspath`` rides Win32 ``_getfullpathname`` and never touches
-    ``os.getcwd``, so it sails through that try and arrives at
-    ``ntpath.realpath``, which reads the cwd unconditionally.
+    On POSIX ``abspath`` raises inside ``inspect.getabsfile()``'s own try, so a getcwd
+    denial is swallowed; on nt ``abspath`` never reads the cwd and ``ntpath.realpath``
+    does. Keyed on ``os.name`` (which path module), not ``sys.platform``.
 
     ==================  ========  ========
     world               posix     nt
@@ -1174,24 +793,7 @@ class TestTheTwoWorldsMustNotBeStacked:
     both denied         SURVIVES  DIES
     ==================  ========  ========
 
-    KEYED ON ``os.name``, not ``sys.platform``, because the question this table
-    answers is WHICH PATH MODULE the stdlib is using — @ai_mail's rule, and the
-    right one here: ``sys.platform`` would need a darwin row that behaves
-    exactly like linux, since darwin runs posixpath.
-
-    WHICH HALVES ARE MEASURED WHERE, stated because a derived row that reads
-    like a measured one is how a guess becomes a fact:
-
-    * posix rows — measured live, on this host, every run.
-    * nt rows — measured TWICE. Once on the real Windows runner (8550ed10:
-      ``realpath denied`` PASSED, and the two reds carry their actual verdict in
-      the assertion diff, so all three are positive measurements of a value and
-      not merely proof that something was not SURVIVES). And once here, inside
-      ``WINDOWS_EMULATED_WORLD``, which patches BOTH halves so every nt row runs
-      on this machine and is falsifiable on it forever.
-
-    Emulating the denial was never enough; the platform had to be emulated. That
-    is @prax's correction, and this class is the thing it was aimed at.
+    nt rows are measured on the real Windows runner and under WINDOWS_EMULATED_WORLD here.
     """
 
     _PROBE = (
@@ -1204,7 +806,6 @@ class TestTheTwoWorldsMustNotBeStacked:
         "    print('SURVIVES')\n"
     )
 
-    # The whole claim, in the shape the reader can check against the docstring.
     _EXPECTED = {
         ("posix", "realpath"): "DIES",
         ("posix", "getcwd"): "SURVIVES",
@@ -1230,11 +831,9 @@ class TestTheTwoWorldsMustNotBeStacked:
     _EMULATIONS = {"posix": POSIX_EMULATED_WORLD, "nt": WINDOWS_EMULATED_WORLD}
 
     def test_the_posix_emulation_actually_arms(self):
-        """Arming probe for the half round 6 forgot to build.
+        """Arming probe for the posix emulation.
 
-        A posix world must let ``realpath`` through an ABSOLUTE path without
-        touching the cwd — that is the fact the SURVIVES rows rest on, and the
-        one an nt host contradicts.
+        Posix ``realpath`` of an ABSOLUTE path must not touch the cwd; the SURVIVES rows rest on it.
         """
         world = (
             POSIX_EMULATED_WORLD
@@ -1255,23 +854,11 @@ class TestTheTwoWorldsMustNotBeStacked:
         )
 
     def _world_for(self, platform: str) -> str:
-        """The emulation every row runs under. Extracted so a pin can convict it.
-
-        Round 6's bug was not in an emulation, it was in the CHOICE: the posix
-        rows ran with no prefix. That is unfalsifiable on a posix host — bare
-        and posix agree here by definition — so the mutant that restores it
-        passes every local run. Naming the choice is what makes it testable.
-        """
+        """The emulation every row runs under. Extracted so a pin can convict it."""
         return self._EMULATIONS[platform]
 
     def test_every_row_runs_under_an_emulation(self):
-        """No row inherits the host, and this is the pin the mutant needed.
-
-        Restoring round 6's ``"" if platform == "posix"`` cannot be caught by
-        any behavioural probe on Linux, because there is nothing to observe: the
-        bare world IS the posix world here. It can only be caught by asserting
-        that a world was chosen at all.
-        """
+        """No row inherits the host: a world is chosen for every platform."""
         assert set(self._EXPECTED_PLATFORMS) == set(self._EMULATIONS), (
             "the emulation table and the row list disagree — a platform with no world, "
             "or a world no row runs under, makes the loop below prove nothing"
@@ -1284,12 +871,7 @@ class TestTheTwoWorldsMustNotBeStacked:
     _EXPECTED_PLATFORMS = ("posix", "nt")
 
     def test_neither_row_inherits_the_host(self):
-        """The failure of round 6, pinned: an unemulated row is a row about the runner.
-
-        Reproduced before fixing by standing the nt emulation in for a Windows
-        host and re-running what used to be the bare posix rows — DIES, exactly
-        what CI reported under a label that said posix.
-        """
+        """An unemulated row is a row about the runner."""
         assert set(self._EMULATIONS) == {"posix", "nt"}, self._EMULATIONS
         for platform, emulation in self._EMULATIONS.items():
             under_the_other_host = self._EMULATIONS["nt" if platform == "posix" else "posix"]
@@ -1300,12 +882,7 @@ class TestTheTwoWorldsMustNotBeStacked:
             )
 
     def test_the_platform_emulation_actually_arms(self):
-        """Arming probe: without BOTH halves patched, the nt rows are posix rows.
-
-        The abspath half is the one that is easy to leave out, and leaving it
-        out is silent — the table below would still pass three of its six rows
-        and the two that changed would look like a platform fact.
-        """
+        """Arming probe: without BOTH halves patched, the nt rows are posix rows."""
         world = (
             WINDOWS_EMULATED_WORLD
             + DEAD_CWD_WORLD
@@ -1327,9 +904,7 @@ class TestTheTwoWorldsMustNotBeStacked:
     @pytest.mark.parametrize("denial", ["realpath", "getcwd", "both"])
     @pytest.mark.parametrize("platform", ["posix", "nt"])
     def test_the_table_holds(self, platform, denial):
-        # BOTH rows are emulated. Round 6 ran the posix rows bare, which reads
-        # as "posix" only while the host is posix — on the Windows runner they
-        # measured nt and failed under a label that said otherwise.
+        # BOTH rows are emulated: a bare posix row measures whatever the host is.
         prefix = self._world_for(platform)
         expected = self._EXPECTED[(platform, denial)]
         assert self._verdict(prefix + self._DENIALS[denial]) == expected, (
@@ -1339,12 +914,7 @@ class TestTheTwoWorldsMustNotBeStacked:
         )
 
     def test_no_probe_in_this_branch_stacks_them_outside_the_table(self):
-        """Structural: only the table above may build the masking world.
-
-        The masking is real on posix and the stacked world is genuinely kinder
-        there, so a probe that reaches for "as hostile as possible" and
-        concatenates both gets a world where the defect cannot fire.
-        """
+        """Structural: only the table above may build the masking world."""
         offenders = []
         for path in _walk(Path(__file__).parent, "test_*.py"):
             if path.name == Path(__file__).name:
@@ -1358,62 +928,13 @@ class TestTheTwoWorldsMustNotBeStacked:
 class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
     """Python 3.10 held its own copy of ``os.path.realpath``, and my probe missed it.
 
-    CI, 2026-08-31, commit 8550ed10, Python 3.10 ONLY (3.11/3.12/3.13 green)::
-
-        TestResolvingOwnFileIsACwdReadOnWindows::test_the_injected_world_really_reads_the_cwd
-        AssertionError: NO_RAISE
-
-    That is the arming probe doing its whole job. The world was inert on that
-    interpreter, so every pin beneath it — the thirty-two import-time lanes —
-    had been passing on 3.10 while asserting nothing, and no other test could
-    have said so: a vacuous pin and a cured defect produce the same green.
-
-    THE MECHANISM, READ OUT OF CPython 3.10's ``Lib/pathlib.py`` rather than
-    inferred, because the diagnosis that reached me was that 3.10's pathlib does
-    not delegate to ``os.path.realpath`` at all, and that is not what the source
-    says::
-
-        358:  realpath = staticmethod(os.path.realpath)        # _NormalAccessor
-        1077: s = self._accessor.realpath(self, strict=strict)  # Path.resolve
-
-    It DOES delegate. It just took its copy when pathlib was first imported. So
-    a probe that imports pathlib and then rebinds ``os.path.realpath`` is
-    rebinding a name nothing will read again. 3.11 deleted the accessor and
-    calls ``os.path.realpath`` at use, which is why exactly one version reddened.
-
-    WHICH MAKES THIS THE SAME DEFECT AS THE GETCWD ONE, one constant over. The
-    getcwd world has carried the accessor cure since the last 3.10 red, with a
-    docstring explaining the trap in detail. Its sibling did not, because the
-    sibling lived in this test file instead of next to that docstring. A cure
-    that does not travel to the constant twenty lines away is the shape this
-    branch has now shipped twice; both worlds live in ``dead_cwd.py`` now.
-
-    NOT FALSIFIABLE BY RUNNING 3.10 — there is no 3.10 interpreter on this
-    machine. So the accessor is BUILT here instead, the way ``ACCESSOR_SHAPE``
-    already builds the getcwd one, and the pins below run on any interpreter.
-    That is a stand-in for a version, and it expires the moment a real 3.10 run
-    disagrees with it — which is the honest form for a row a local host cannot
-    reach.
+    3.10's ``_NormalAccessor`` captured ``os.path.realpath`` at pathlib import, so a later
+    rebind is never read. No 3.10 here, so the accessor is BUILT and the pins run anywhere;
+    a real 3.10 run that disagrees overrules this stand-in.
     """
 
-    # 3.10's shape, reduced to the two lines that matter: the accessor takes
-    # its copy of os.path.realpath at class-definition time (pathlib.py:358),
-    # and Path.resolve reaches it through an INSTANCE (pathlib.py:1077).
-    #
-    # THE CAPTURED FUNCTION IS A SENTINEL, NOT THE REAL ONE, and that is the
-    # round-7 correction. This class first let the accessor capture the live
-    # ``os.path.realpath`` and then used a getcwd denial to ask whether a later
-    # patch had reached it. On POSIX that works: the captured ``posixpath``
-    # function ignores the cwd for an absolute path, so RAISED could only mean
-    # the patch had landed. On nt it is ambiguous — ``ntpath.realpath`` reads
-    # ``os.getcwd()`` UNCONDITIONALLY (this branch's own round-4 finding), so
-    # the ORIGINAL raises too and RAISED no longer discriminates. Both accessor
-    # pins failed on the Windows runner for that reason, and neither failure was
-    # about the accessor.
-    #
-    # A sentinel that touches no filesystem and no cwd removes the platform from
-    # the measurement entirely: whatever raises or returns, it is the patch's
-    # doing. An instrument should not import behaviour it is not testing.
+    # The captured function is a SENTINEL that touches no filesystem or cwd: ntpath's
+    # real realpath reads the cwd itself, so RAISED would not discriminate on nt.
     _PRE_CAPTURED_ACCESSOR = (
         "import os, pathlib\n"
         "def _original_realpath(p, *a, **k):\n"
@@ -1425,20 +946,10 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
         "pathlib._the_accessor = _NormalAccessor()\n"
     )
 
-    # A literal no platform can complete with a drive. The round-7 red printed
-    # 'NO_RAISE D:\\tmp' against a hardcoded '/tmp', because a POSIX-absolute
-    # literal is DRIVE-RELATIVE on nt.
-    #
-    # PUBLISHED AS AN EQUIVALENT MUTANT GIVEN THE SENTINEL, because it is: with
-    # the captured original returning its argument untouched, nothing resolves
-    # the literal on any platform, so restoring '/tmp' passes everywhere. The
-    # sentinel fix SUBSUMED this one — two symptoms, one cause. It stays as the
-    # cheaper of the two guards, and it is named here so nobody reports it as a
-    # second cure or deletes it as decoration.
+    # A POSIX-absolute literal is drive-relative on nt (equivalent given the sentinel).
     _PROBE_PATH = "SENTINEL_PATH_NOT_A_REAL_FILE"
 
-    # Asked the way 3.10 asks: through an instance, which is what makes the
-    # staticmethod load-bearing rather than decoration.
+    # Through an instance, which makes the staticmethod load-bearing.
     _ASK_THE_ACCESSOR = (
         "import pathlib\n"
         "try:\n"
@@ -1496,19 +1007,7 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
 
     @pytest.mark.parametrize("host", ["posix", "nt"])
     def test_these_verdicts_do_not_move_when_the_host_changes(self, host):
-        """The round-7 red, pinned: an instrument must not import the platform.
-
-        Both pins above failed on the Windows runner, and neither failure was
-        about the accessor. The old probe let the accessor capture the LIVE
-        ``os.path.realpath`` and then asked "did a later patch reach it?" by
-        denying the cwd — a question only ``posixpath`` answers cleanly, because
-        ``ntpath.realpath`` reads ``os.getcwd()`` unconditionally and so the
-        ORIGINAL raises too.
-
-        Run here under both emulated platforms. If the sentinel is ever replaced
-        by the real function, the nt case goes red on this machine rather than
-        three days later on a runner.
-        """
+        """An instrument must not import the platform."""
         under = POSIX_EMULATED_WORLD if host == "posix" else WINDOWS_EMULATED_WORLD
         bare = under + self._PRE_CAPTURED_ACCESSOR + self._BARE_PATCH + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
         cured = under + self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + DEAD_CWD_WORLD + self._ASK_THE_ACCESSOR
@@ -1519,13 +1018,7 @@ class TestTheWindowsWorldSurvivesEveryWayPathlibReachesRealpath:
     def test_the_accessor_still_answers_correctly_when_the_cwd_is_fine(self):
         """A world that raises for the right reason can still return the wrong path.
 
-        ``staticmethod`` is what stops this. Through an instance a plain
-        function BINDS, so the accessor arrives as the first positional and the
-        real path slides into ``*a`` — the denial still fires, so every
-        raise-shaped pin above stays green, and the world silently starts
-        resolving the accessor object instead of the file. Dropping the
-        ``staticmethod`` survived the whole suite until this test existed, which
-        is why it is here rather than in a comment saying "obviously needed".
+        Without ``staticmethod`` the accessor binds and eats the path; every raise-shaped pin stays green.
         """
         world = self._PRE_CAPTURED_ACCESSOR + WINDOWS_REALPATH_WORLD + self._ASK_THE_ACCESSOR
         assert self._verdict(world) == f"NO_RAISE {self._PROBE_PATH}", (

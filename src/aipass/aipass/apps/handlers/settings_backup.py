@@ -3,29 +3,15 @@
 # Description: Back up the provider settings file and leave a receipt before every write
 # Version: 1.0.0
 # Created: 2026-10-15
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """settings_backup — a backup and a receipt before every write to ~/.claude/settings.json.
 
-The owner's ruling, 2026-10-15 (FPLAN-0645): his personal Claude settings file never
-changes without a copy of what it was and a record of who changed it. Every Python
-door that writes it calls ``backup_before_write`` first and ``write_receipt`` after.
-
-The folder is ``<settings dir>/.backup/settings/`` and its shape is a contract shared
-with @hooks, whose tool-door handler writes the same folder without importing this
-module: one history, whichever door fired.
-
- - Backup name ``<filename>.<YYYY-MM-DDTHH-MM-SS>.<door>``, local time; a second
-   backup in the same second gets ``-2``, ``-3``, … An existing backup is never
-   overwritten, and nothing here prunes: they stack.
- - ``receipts.jsonl`` beside them, append-only, one JSON object per write.
- - The gate: a backup or a receipt that fails raises ``SettingsBackupError``.
-   ``backup_before_write`` also opens the receipt file for append before it returns,
-   so a receipt that cannot be written stops the door BEFORE the settings write.
-
-This module hashes the settings file's bytes and copies it; it never parses it and
-never writes it.
+Every door that writes the file calls ``backup_before_write`` first and ``write_receipt`` after.
+The folder shape is a contract with @hooks, which writes it without importing this module:
+``<filename>.<YYYY-MM-DDTHH-MM-SS>.<door>`` (local time, ``-2``… in the same second, never
+pruned) and an append-only ``receipts.jsonl``. The settings file is copied, never parsed or written.
 """
 
 from __future__ import annotations
@@ -85,10 +71,7 @@ def sha256_of(path: Path) -> str:
 def _seat_actor(cwd: Path) -> str:
     """The AIPass branch of *cwd* when it sits under an AIPass home, else the cwd path.
 
-    The home is the directory holding the registry ``find_registry`` reaches from
-    *cwd*; the branch is the nearest ``.trinity/passport.json`` between *cwd* and that
-    home. A cwd at the home itself, or outside any home, is named by its path.
-    """
+    The branch is the nearest passport between *cwd* and the home (exclusive)."""
     registry = find_registry(cwd)
     if registry is None:
         return str(cwd)
@@ -119,9 +102,7 @@ def _ensure_folder(folder: Path) -> None:
 def _reserve_backup_name(folder: Path, base: str) -> Path:
     """Claim the first free ``base``, ``base-2``, ``base-3``… with an exclusive create.
 
-    O_EXCL makes the claim atomic, so two doors firing in the same second can never
-    pick the same name and overwrite each other.
-    """
+    O_EXCL makes the claim atomic: two doors in the same second never overwrite each other."""
     suffix = 1
     while True:
         candidate = folder / (base if suffix == 1 else f"{base}-{suffix}")
@@ -138,19 +119,8 @@ def _reserve_backup_name(folder: Path, base: str) -> Path:
 def backup_before_write(settings_path: Path, door: str, actor: Optional[str] = None) -> BackupRecord:
     """Copy *settings_path* into the backup folder before a door writes it.
 
-    Call it immediately before the write. No file yet (a first install) takes no
-    copy; the record says so and the receipt carries ``"backup": null``. The receipt
-    file is opened for append here too, so an unwritable receipt fails now, while the
-    settings file is still untouched.
-
-    Args:
-        settings_path: The settings file about to be written.
-        door: Which door is writing (``DOOR_*``).
-        actor: Who is writing; default the AIPass branch of the cwd, else the cwd path.
-
-    Raises:
-        SettingsBackupError: naming the path and the OS error; the caller must not write.
-    """
+    The receipt file is opened for append here too, so an unwritable receipt fails while the
+    settings file is untouched. On ``SettingsBackupError`` the caller must not write."""
     now = datetime.now().astimezone()
     folder = backup_dir(settings_path)
     backup: Optional[Path] = None
@@ -191,9 +161,7 @@ def backup_before_write(settings_path: Path, door: str, actor: Optional[str] = N
 def write_receipt(record: BackupRecord, after_sha256: Optional[str], summary: List[str]) -> Path:
     """Append one receipt line for a write the record's door has just made.
 
-    Returns the receipt file's path. Raises ``SettingsBackupError`` naming the path
-    and the OS error when the line cannot be appended.
-    """
+    Raises ``SettingsBackupError`` when the line cannot be appended."""
     entry = {
         "time": record.time,
         "door": record.door,

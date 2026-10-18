@@ -3,19 +3,13 @@
 # Description: Branch identity detection module
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Identity Detection for The Commons
 
-Thin wrapper that re-exports identity functions from
-handlers/identity/identity_ops.py for backward compatibility.
-
-Handles: whoami command.
-
-Usage:
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+Re-exports identity_ops for the callers that import from here; handles whoami.
 """
 
 from typing import List
@@ -32,7 +26,6 @@ except (ImportError, OSError):
     error = console.print  # type: ignore[assignment]
     warning = console.print  # type: ignore[assignment]
 
-# Re-export all public functions for backward compatibility
 from aipass.commons.apps.handlers.identity.identity_ops import (
     CallerLookupFailed,
     find_branch_root,
@@ -72,22 +65,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle identity-related commands routed by the entry point.
-
-    Args:
-        command: Command name (whoami)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle identity-related commands routed by the entry point."""
     if command == "whoami":
         if "--help" in args or "-h" in args:
             print_introspection()
@@ -99,20 +78,13 @@ def handle_command(command: str, args: List[str]) -> bool:
     return False
 
 
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
-
-
 def _handle_whoami() -> bool:
     """Detect and display the caller's branch identity."""
     try:
         branch_info = get_caller_branch()
 
         if not branch_info:
-            # error(), not warning(): this is a refusal - whoami could not
-            # answer - and only error() marks the command failed, which is what
-            # resolve_exit() reads (canary's warning-refusal sweep 2026-09-07).
+            # error(), not warning(): only error() marks the command failed, which resolve_exit() reads.
             error("Could not detect your branch identity. Run from a branch directory.")
             return True
 

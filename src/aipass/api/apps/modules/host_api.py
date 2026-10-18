@@ -3,36 +3,14 @@
 # Description: Host API Module — server lifecycle and token administration
 # Version: 1.5.0
 # Created: 2026-08-14
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Module
 
-Orchestration and CLI for the Stage 0 host API (FPLAN-0411) — the server the
-BAUD phone face talks to. This module routes; the handlers under
-apps/handlers/host/ implement.
-
-Per FPLAN-0411's D0 line, this branch owns the pipe and never the meaning: the
-server carries transport, auth and protocol, and every future read or verb is a
-pass-through to the branch that owns the data or the machinery.
-
-The loopback gate has been open since 2026-08-14, the owner's ruling on the Phase 5
-security review: the server binds one address this machine holds, never a
-wildcard. What the help says about it is read from LOOPBACK_ONLY, not written here.
-
-Commands (via drone @api):
-    host-api serve [--host H] [--port P]        Run the server
-    host-api issue-token <label> [--scope S] [--out FILE]
-    host-api list-tokens                        Show tokens (never the values)
-    host-api revoke-token <id>                  Revoke, effective next request
-    host-api pair <label> [--scope S] [--ttl SECONDS]  A one-use QR the phone redeems
-    host-api config                             Show the effective config
-    host-api set-config [--host H] [--port P] [--face-dir DIR|default] [--baud-bin PATH|default]
-
-config and set-config live in host_config_cli.py, serve/status/stop/autostart in
-host_serve.py, pair in host_pair_cli.py; this module offers them every call and
-owns the tokens.
+Owns the tokens and offers every other host-api call to host_serve, host_config_cli and host_pair_cli.
+Reference: docs/host_api.md
 """
 
 import os
@@ -63,11 +41,6 @@ from aipass.api.apps.modules import host_serve
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 HELP_FLAGS = ("--help", "-h", "help")
-
-
-# =============================================
-# MODULE INTROSPECTION
-# =============================================
 
 
 def print_introspection() -> None:
@@ -181,19 +154,13 @@ def print_help() -> None:
     console.print("  [dim]A paired token has no receipt: the phone holds the only copy. Revoke it like any.[/dim]")
     console.print("  [dim]An existing receipt is never overwritten: its token is still live.[/dim]")
     console.print("  [dim]Bind refuses wildcards, hostnames, and addresses this machine lacks.[/dim]")
-    # Read from the flag, never written down: the sentence that said loopback-only
-    # outlived the gate by a month (found by @baud, 2026-09-13).
+    # Read from the flag, never written down: a written sentence outlives the gate.
     if host_config.LOOPBACK_ONLY:
         console.print("  [dim]Loopback-only: every non-loopback bind is refused.[/dim]")
     else:
         console.print("  [dim]Non-loopback binds are open since the 2026-08-14 security review.[/dim]")
     console.print("  [dim]--detach validates the bind BEFORE spawning — a refusal never reaches a child.[/dim]")
     console.print()
-
-
-# =============================================
-# CROSS-BRANCH API
-# =============================================
 
 
 def issue_token(label: str, scope: str = "read"):
@@ -211,8 +178,7 @@ def serve(host: Optional[str] = None, port: Optional[int] = None) -> None:
     host_server.serve(host=host, port=port)
 
 
-# The door for other branches' in-process calls (@aipass's installer), so none
-# reaches into handlers/host/config.py. Same functions, same refusals.
+# The door for other branches' in-process calls (@aipass's installer), so none reaches into handlers.
 FaceDirRefused = host_config.FaceDirRefused
 BaudBinRefused = host_config.BaudBinRefused
 
@@ -242,9 +208,7 @@ def set_baud_bin(path: Optional[Path]) -> Optional[Path]:
     return host_config.set_baud_bin(path)
 
 
-# The install doors (FPLAN-0642 slice C): what `aipass install` needs to finish
-# the phone with nobody at the keyboard. The CLI's autostart verb still only
-# prints its steps; these run them, and only when called by name.
+# The install doors for `aipass install`: the CLI's autostart only prints its steps; these run them.
 BindRefused = host_config.BindRefused
 AutostartUnsupported = host_autostart.AutostartUnsupported
 SupervisorUnreachable = host_autostart.SupervisorUnreachable
@@ -275,11 +239,7 @@ def enable_unit(dry_run: bool = False) -> dict:
 def serve_detached(host: Optional[str] = None, port: Optional[int] = None) -> dict:
     """Start the server in its own session, as serve --detach does: {pid, host, port, log, started}.
 
-    The install's door for a machine with no user systemd (DPLAN-0407): the boot
-    unit cannot be installed there, and "Start it: ..." printed to a stranger is a
-    stop. The bind is validated here before anything is spawned. Raises
-    BindRefused, LifetimeError (a server already runs, or the child died on start)
-    and SupervisorUnreachable, all exported above.
+    The install's door on a machine with no user systemd. Raises BindRefused, LifetimeError, SupervisorUnreachable.
     """
     return host_lifetime.serve_detached(host=host, port=port)
 
@@ -289,8 +249,6 @@ def receipt_path(label: str) -> Path:
     return host_tokens.receipt_path(label)
 
 
-# The pairing door (DPLAN-0406): a one-use, five-minute code the phone trades for
-# its bearer at POST /v1/pair, shown as a QR so no token value reaches a screen.
 PairingError = host_pairings.PairingError
 
 
@@ -304,29 +262,11 @@ def render_qr(text: str) -> str:
     return host_pairings.render_qr(text)
 
 
-# =============================================
-# COMMAND HANDLING (drone @api host-api ...)
-# =============================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle host API commands routed via drone.
-
-    Args:
-        command: Command name — this module owns "host-api".
-        args: Command arguments, e.g. ["serve", "--host", "127.0.0.1"].
-
-    Returns:
-        True if command was handled, False to pass through.
-    """
-    # Both spellings answer. `drone @api` bare lists MODULE names, so it
-    # advertises "host_api" while the command is "host-api" — @baud read the
-    # self-map, typed what it said, and reported themselves blocked over one
-    # character. A surface that publishes a spelling which does not work is the
-    # surface's bug. Spelled literally so a checker can see the match too.
+    """Handle host API commands routed via drone."""
+    # Both spellings: the self-map advertises the module name host_api. Literal, so a checker sees the match.
     mine = command in ("host-api", "host_api")
 
-    # NO-ARGS GATE (seedgo standard)
     if not args:
         if mine:
             print_introspection()
@@ -336,11 +276,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if not mine:
         return False
 
-    # HELP GATE — a help flag ANYWHERE means "explain", never "run". Checking
-    # only args[0] is what let `cleanup 30 --help` run a real cleanup (S58) and
-    # `get-key <provider> --help` disclose key material (S59). Never again, and
-    # never only at the router: this module's __main__ reaches here directly.
-    # Flags spelled literally so a static checker can see the intercept too.
+    # A help flag anywhere means explain, never run (__main__ bypasses the router). Literal for the checker.
     if any(arg in ("--help", "-h", "help") for arg in args):
         print_help()
         return True
@@ -348,9 +284,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     subcommand = args[0]
     rest = args[1:]
 
-    # Offered to host_serve FIRST — it owns serve/status/stop and declines
-    # everything else, so an unknown subcommand still reaches the error below
-    # rather than disappearing into a silent True.
+    # Sub-routers decline what they do not own, so an unknown subcommand still reaches the error below.
     if host_serve.handle_command(command, args):
         return True
     if host_config_cli.handle_command(command, args):
@@ -375,11 +309,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     return True
 
 
-# =============================================
-# CLI COMMAND IMPLEMENTATIONS
-# =============================================
-
-
 def _cmd_issue_token(args: List[str]) -> None:
     """Mint a token for a device, writing the raw value to a 0600 file."""
     header("Issue Host API Token")
@@ -400,11 +329,6 @@ def _cmd_issue_token(args: List[str]) -> None:
     scope = host_serve.flag_value(args, "--scope") or "read"
     out_path = host_serve.flag_value(args, "--out")
 
-    # --out IS OPTIONAL NOW, and S49 is untouched by that: the rule was never
-    # "make the caller name a file", it was "never print the raw value". A
-    # default that lands in the secrets directory honours it better than a
-    # required flag whose own example pointed at the home root — which is how
-    # three raw receipts came to be sitting in ~ (found 2026-08-19).
     try:
         target = Path(os.path.expanduser(out_path)) if out_path else host_tokens.receipt_path(label)
     except host_tokens.TokenError as e:
@@ -412,10 +336,7 @@ def _cmd_issue_token(args: List[str]) -> None:
         error(str(e))
         return
 
-    # BEFORE minting, not after: a token that exists in the store with no
-    # readable receipt is a live credential nobody holds. Checked here so the
-    # refusal costs nothing, and again by O_EXCL below so the check is not
-    # merely check-then-act.
+    # Before minting: a stored token with no readable receipt is a live credential nobody holds.
     if target.exists():
         error(
             f"A receipt already exists at {target}",
@@ -442,20 +363,15 @@ def _cmd_issue_token(args: List[str]) -> None:
         return
 
     try:
-        # O_EXCL, not O_TRUNC: the existence check above is a good sentence, this
-        # is the guarantee. Between the two, another process could have created
-        # the file — and silently truncating whatever it wrote is the data loss
-        # the check exists to prevent.
+        # O_EXCL, not O_TRUNC: the check above is the sentence, this is the guarantee against a racing writer.
         fd = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             os.write(fd, raw.encode("utf-8"))
         finally:
             os.close(fd)
     except OSError as e:
-        # The token is already in the store. Say so — a caller who thinks the
-        # write failed cleanly would issue a second one and leave a live orphan.
+        # The token is already in the store: say so, or the caller issues a second and leaves a live orphan.
         logger.error("[host_api] token %s issued but its file write failed: %s", record["id"], e)
-        # The handler logged the issuance; only this module knows the receipt never landed.
         json_handler.log_operation("host_api_token_receipt_unwritten", {"id": record["id"], "error": str(e)})
         error(
             f"Token was issued but could not be written to {target}: {e}",
@@ -495,24 +411,9 @@ def _provenance(record: dict) -> str:
     """
     The one line that answers who minted a token, whether it is live, and when
     it died.
-
-    Written because the store learning it three fields would have changed
-    nothing on its own: an operate token appeared on this system and the honest
-    answer to "who minted this" was that nobody had recorded it. Provenance
-    nobody can read at the place they actually look is provenance that does not
-    exist — so the listing carries it, not just the JSON.
-
-    Args:
-        record: A row from list_tokens().
-
-    Returns:
-        A single dim line for beneath the record.
     """
     parts = [f"minted by {record.get('minted_by') or host_tokens.UNKNOWN_MINTER}"]
 
-    # 'never used' rather than a blank: a token minted an hour ago that has
-    # never been presented is a different situation from a live one, and the
-    # difference is the whole reason the field exists.
     parts.append(f"last used {_stamp(record.get('last_used'))}" if record.get("last_used") else "never used")
 
     if record.get("revoked_at"):
@@ -522,25 +423,12 @@ def _provenance(record: dict) -> str:
 
 
 def _stamp(value: object) -> str:
-    """
-    Render a stored ISO timestamp for a human, without inventing precision.
-
-    Args:
-        value: An ISO timestamp string, or anything else.
-
-    Returns:
-        'YYYY-MM-DD HH:MM', or the raw value if it will not parse — never an
-        empty string, because a stamp that renders as nothing reads as absent.
-    """
+    """Render a stored ISO timestamp for a human, without inventing precision."""
     text = str(value or "")
     try:
         return datetime.fromisoformat(text).strftime("%Y-%m-%d %H:%M")
     except ValueError as e:
-        # Shown raw rather than swallowed: the only way a stored stamp fails to
-        # parse is a hand-edited store or a shape change nobody migrated, and
-        # the operator reading this listing is exactly who should see it. The
-        # listing shows it; the log line names the condition only, because the
-        # value and ValueError's text are read out of the credential store.
+        # Shown raw to the operator; the log names the condition only, the value comes from the credential store.
         logger.warning("[host_api] unreadable timestamp in the token store (%s)", type(e).__name__)
         return text
 
@@ -559,17 +447,10 @@ def _cmd_revoke_token(args: List[str]) -> None:
         success(f"Token {token_id} revoked")
         console.print("[dim]Effective on the next request — no restart needed.[/dim]")
     else:
-        # A refusal, not a note: nothing was revoked, so an operator scripting
-        # `revoke-token <id> && <next>` must not proceed believing the device
-        # is off. error() names the id and carries the failure to the exit
-        # seam, the same channel its sibling refusal above already uses.
+        # error(), not a note: a scripted `revoke-token <id> && <next>` must not proceed believing the device is off.
         error(f"No active token with id: {token_id}")
     console.print()
 
-
-# =============================================
-# STANDALONE EXECUTION
-# =============================================
 
 if __name__ == "__main__":
     cli_args = sys.argv[1:]
@@ -578,8 +459,6 @@ if __name__ == "__main__":
         print_introspection()
         sys.exit(0)
 
-    # Both dashed spellings, ANY position — the standalone path bypasses the
-    # router, so it needs the same gate the router has (seedgo help_flag_safety).
     if any(arg in HELP_FLAGS for arg in cli_args):
         print_help()
         sys.exit(0)

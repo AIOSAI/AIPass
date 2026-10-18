@@ -3,24 +3,16 @@
 # Description: Admin ceremony — thin CLI layer for the registry admin flag
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-10-17
 # =============================================
 
 """Admin grant ceremony for the devpulse seat (DPLAN-0288).
 
-Thin CLI module that parses arguments and delegates to
-``registry.ensure_admin``. The owner runs this once, at the terminal.
-
-The flag this writes GRANTS NOTHING on its own — the admin dispatch lane
-verifies five legs (verified caller, cert path, cert content, HMAC
-signature, and this registry flag). Spawn owns exactly one of them.
-
-There is deliberately NO branch argument: the seat is a constant.
+The flag grants nothing alone: the admin lane verifies five legs and spawn owns one.
 """
 
 from aipass.prax import logger
 
-# CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, error
 
 from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin
@@ -39,25 +31,11 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "grant-admin")
-        args: List of arguments for the command
-
-    Returns:
-        True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "grant-admin":
         return False
 
-    # No args → introspection
     if not args:
         print_introspection()
         return True
@@ -67,11 +45,6 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     return handle_grant_admin(args) == 0
-
-
-# =============================================================================
-# PUBLIC API
-# =============================================================================
 
 
 def _print_usage() -> None:
@@ -88,12 +61,7 @@ def _print_usage() -> None:
 def handle_grant_admin(args: list[str]) -> int:
     """Run the admin grant ceremony.
 
-    Args patterns:
-        []                          -> grant on the discovered root registry
-        ["--registry", "<path>"]    -> grant on an explicit registry path
-
-    A branch argument is REFUSED: the seat is a constant, not a choice.
-
+    A branch argument is refused: the seat is a constant, not a choice.
     Returns exit code (0=granted or already granted, 1=refused/failure).
     """
     if "--help" in args or "-h" in args:
@@ -128,8 +96,7 @@ def handle_grant_admin(args: list[str]) -> int:
         error(str(exc))
         return 1
 
-    # The ceremony itself is logged — refusals included, so a rejected
-    # attempt on the admin seat leaves a trace, not just a console line.
+    # Refusals are logged too, so a rejected attempt on the admin seat leaves a trace.
     json_handler.log_operation("admin_ceremony", data={"branch": ADMIN_BRANCH, "status": status})
 
     console.print()

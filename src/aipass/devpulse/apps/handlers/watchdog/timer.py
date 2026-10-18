@@ -3,27 +3,13 @@
 # Description: Watchdog Timer Handler — wake-in-N + named duration tracking
 # Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-# Storage choice: .watchdog/watchdog_timers.json with atomic write (tmp + rename).
-# Relocated out of .trinity/ (2026-08-27, File set ruling): .trinity/ holds
-# identity and memory only — operational state lives in its own dot-dir.
-# Devpulse root is resolved by walking upward looking for AIPASS_REGISTRY.json
-# (same pattern the agent handler uses to find the repo). Tests override via
-# explicit storage_path to avoid touching the real trinity directory.
+# Operational state lives in .watchdog/, never .trinity/ (identity and memory only).
 
 """
 Watchdog Timer Handler — wake-in-N and named duration tracking.
-
-Public surface:
-  parse_duration(duration)       Parse "5m", "30s", "2h", "1h30m", "45"
-  format_human(seconds)          Render "5h 3m 12s" / "12m 07s" / "45s"
-  wake_in(duration)              Blocking sleep, returns on wake
-  timer_start(name, path=None)   Record a named start in .watchdog/watchdog_timers.json
-  timer_stop(name, path=None)    Stop + persist history entry + return elapsed
-  timer_list(path=None)          Active + history snapshot
-  timer_report(path=None)        Formatted multi-line session summary
 """
 
 import json
@@ -56,12 +42,8 @@ def _stderr(msg: str) -> None:
 def _devpulse_root() -> Path:
     """The devpulse package dir, derived from ``__file__`` — never from cwd.
 
-    The store is package state, so it lives where the package lives. The old
-    walk keyed on AIPASS_REGISTRY.json (machine-local, absent on fresh
-    checkouts) and fell back to Path.cwd() — the comment defending that branch
-    as production-only was refuted by CI on 2026-08-31: agent.watch calls
-    register() with no storage_path, so the default IS reachable from tests,
-    and a child with cwd = repo root planted ``.watchdog/`` in the tree.
+    The default IS reachable from tests (agent.watch names no store), and a cwd
+    answer plants ``.watchdog/`` wherever a child stands.
     """
     return Path(__file__).resolve().parents[3]
 
@@ -114,13 +96,7 @@ def _atomic_write(storage_path: Path, data: dict) -> None:
 
 
 def parse_duration(duration: str) -> int:
-    """Parse a duration string into total seconds.
-
-    Accepts: "5m", "30s", "2h", "1h30m", "45" (bare integer = seconds).
-
-    Raises:
-        ValueError: on empty, negative, non-string, or unparseable input.
-    """
+    """Parse ``5m``, ``2h``, ``1h30m`` or a bare integer (seconds) into total seconds."""
     if duration is None or not isinstance(duration, str):
         raise ValueError(f"duration must be a string, got {type(duration).__name__}")
     text = duration.strip().lower()
@@ -151,11 +127,7 @@ def parse_duration(duration: str) -> int:
 
 
 def format_human(seconds: int) -> str:
-    """Render a seconds count as ``5h 3m 12s`` / ``12m 07s`` / ``45s``.
-
-    Rules: drop zero higher units; when minutes are present, seconds are
-    zero-padded to two digits; hours are never zero-padded.
-    """
+    """Render a seconds count as ``5h 3m 12s`` / ``12m 07s`` / ``45s``."""
     if seconds < 0:
         raise ValueError(f"seconds must be non-negative, got {seconds}")
     total = int(seconds)
@@ -170,12 +142,7 @@ def format_human(seconds: int) -> str:
 
 
 def wake_in(duration: str) -> dict:
-    """Block for ``duration`` then return a wake dict.
-
-    Long timers emit an optional stderr status ping roughly every 10s so
-    orchestrators with a console attached can see progress. Short timers
-    stay silent so test runs aren't chatty.
-    """
+    """Block for ``duration`` then return a wake dict; a long timer pings stderr every 10s."""
     json_handler.log_operation("wake_in", {"duration": duration})
     total_seconds = parse_duration(duration)
     started_at = time.monotonic()
@@ -270,11 +237,7 @@ def timer_stop(name: str, storage_path: Path | None = None) -> dict:
 
 
 def timer_list(storage_path: Path | None = None) -> dict:
-    """Return a snapshot of active + historical timers.
-
-    Active entries include a live ``elapsed_so_far_seconds`` computed against
-    ``time.time()`` so callers always see fresh numbers.
-    """
+    """Return a snapshot of active (with live elapsed) and historical timers."""
     path = storage_path or default_storage_path()
     store = _load_store(path)
     now = time.time()

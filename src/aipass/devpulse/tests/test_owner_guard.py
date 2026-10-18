@@ -3,7 +3,7 @@
 # Description: Tests for the shared owner-capability caller guard (#681)
 # Version: 1.1.1
 # Created: 2026-07-10
-# Modified: 2026-10-07
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
@@ -51,11 +51,6 @@ def _patch_registry(monkeypatch, owner_email):
     return asked
 
 
-# ------------------------------------------------------------------
-# Caller resolution, read off what the owner check is asked
-# ------------------------------------------------------------------
-
-
 class TestResolveCaller:
     """Caller identity resolution from the env drone sets."""
 
@@ -95,11 +90,6 @@ class TestResolveCaller:
         assert asked == []
 
 
-# ------------------------------------------------------------------
-# The legacy heuristic, reached with no sealed owner
-# ------------------------------------------------------------------
-
-
 class TestLegacyHeuristic:
     """The pre-owner fail-safe: allow only a caller in the devpulse tree."""
 
@@ -124,10 +114,7 @@ class TestLegacyHeuristic:
     def test_an_unreadable_registry_never_reaches_the_heuristic(self, monkeypatch, tmp_path):
         """A registry that exists but cannot be read refuses, even a caller in a devpulse tree.
 
-        Spawn's real resolver answers an unreadable registry with no owner, the same
-        answer as an unsealed project. The heuristic then let any directory named
-        devpulse (a namesake in any project) run owner-only verbs, admin_grant's
-        ceremony among them (fleet green, 2026-10-04).
+        Spawn answers it with no owner, as for an unsealed project; the heuristic would then pass any namesake.
         """
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
         namesake = tmp_path / "src" / "devpulse"
@@ -144,11 +131,6 @@ class TestLegacyHeuristic:
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tree))
         assert guard_mod.guard_owner_caller("admin_grant") is True
-
-
-# ------------------------------------------------------------------
-# The owner decision (stubbed resolver)
-# ------------------------------------------------------------------
 
 
 class TestOwnerDecision:
@@ -194,11 +176,6 @@ class TestOwnerDecision:
         _patch_registry(monkeypatch, "@devpulse")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path / "devpulse"))
         assert guard_mod.guard_owner_caller("watchdog") is False
-
-
-# ------------------------------------------------------------------
-# guard_owner_caller / is_owner_caller (end to end via env)
-# ------------------------------------------------------------------
 
 
 class TestGuardOwnerCaller:

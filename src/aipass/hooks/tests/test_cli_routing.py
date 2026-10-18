@@ -3,26 +3,12 @@
 # Description: Tests for hooks's entry point routing, help and introspection
 # Version: 1.2.3
 # Created: 2026-09-03
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/hooks.py, the branch's CLI entry point."""
 
-# Covers the four things the entry point promises: no-args shows introspection,
-# --help shows help without executing anything, a subcommand's --help never runs
-# that subcommand, and an unknown command fails loudly with a non-zero code.
-#
-# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-# shell reads as success, so the refusal path is pinned by test rather than assumed.
-#
-# Arrived with the citizen template on 2026-09-03 (the DPLAN-0325 lane adds any
-# missing template file) and is adapted here to the entry point hooks actually
-# has. Three template assumptions do not hold for this branch and are asserted in
-# this branch's spelling instead of the template's: help sections are uppercase
-# (``USAGE:``), ``--version`` prints the lowercase branch name, and the refusal
-# message is written with the rest of the CLI's output rather than to stderr. The
-# template's ``__version__`` and ``_module_import_path`` pins are dropped
-# outright — hooks.py has neither name, so there was nothing to measure.
+# A refusal that exits 0 reads as success to the shell, so exit codes are pinned.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that hooks.py parses and imports, ruff and collection cover it
@@ -69,11 +55,7 @@ def stub_module(monkeypatch):
 def entry_logger(monkeypatch):
     """Capture calls made to the ENTRY POINT's logger.
 
-    Local on purpose: this branch's conftest already owns a ``mock_logger``
-    that patches the engine's logger, and the two must not be confused.
-
-    Returns:
-        A list that fills with (level, args) tuples as the code under test logs.
+    Not conftest's ``mock_logger``, which patches the engine's logger.
     """
     captured: list = []
 
@@ -97,11 +79,6 @@ def _run(monkeypatch, argv):
     return branch_entry.main()
 
 
-# =============================================================================
-# HELP AND INTROSPECTION OUTPUT
-# =============================================================================
-
-
 def test_print_introspection_renders_identity_and_help_pointer(capsys):
     """print_introspection names the branch and points at --help."""
     branch_entry.print_introspection()
@@ -119,11 +96,6 @@ def test_print_help_has_usage_and_examples(capsys):
     out = capsys.readouterr().out
     assert "USAGE:" in out
     assert "EXAMPLES:" in out
-
-
-# =============================================================================
-# TOP-LEVEL ROUTING
-# =============================================================================
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -147,11 +119,7 @@ def test_help_flag_preempts_routing(monkeypatch, capsys, flag):
 def test_version_flag_prints_the_header_version(monkeypatch, capsys, flag):
     """--version reports the branch and the version the FILE claims, then exits 0.
 
-    Read from the header rather than hardcoded: this test asserted a literal
-    "1.1.0" while the header said 1.2.0 and the banner said 1.1.0 — it passed
-    the whole time, pinning the stale value it was supposed to catch (todo 16,
-    open since 2026-09-03, fixed 2026-09-07). A version test that names a
-    version can only ever confirm whatever drifted last.
+    Read from the header: a hardcoded version only confirms whatever drifted last.
     """
     header = re.search(
         r"^# Version:\s*(\S+)",
@@ -165,11 +133,6 @@ def test_version_flag_prints_the_header_version(monkeypatch, capsys, flag):
     out = capsys.readouterr().out
     assert "hooks" in out
     assert header.group(1) in out
-
-
-# =============================================================================
-# COMMAND ROUTING - SUCCESS AND FAILURE PATHS
-# =============================================================================
 
 
 def test_route_command_returns_true_for_known_command(stub_module):
@@ -215,17 +178,9 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     captured = capsys.readouterr()
 
     assert result == 1
-    # STDERR, and not merely "somewhere". The open question this assert used to
-    # hedge on was settled 2026-09-07 (todo 16): a refusal goes to stderr, as
-    # @flow's already did, so redirecting stdout cannot swallow it. Pinning the
-    # stream is the whole point — out + err would pass either way.
+    # A refusal goes to stderr so redirecting stdout cannot swallow it.
     assert "Unknown command" in captured.err
     assert "Unknown command" not in captured.out
-
-
-# =============================================================================
-# SUBCOMMAND HELP
-# =============================================================================
 
 
 def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
@@ -246,16 +201,10 @@ def test_subcommand_help_on_unknown_command_exits_nonzero(monkeypatch, stub_modu
     assert "Unknown command" not in captured.out
 
 
-# =============================================================================
-# IMPORT-TIME INFRASTRUCTURE
-# =============================================================================
-
-
 def test_branch_name_is_set_at_import_time(monkeypatch):
     """The entry point stamps AIPASS_BRANCH_NAME before prax resolves a branch.
 
-    Uses importlib.reload so the module body actually re-executes - asserting on
-    the already-imported module would pass even if the line were deleted.
+    reload re-executes the body; the already-imported module would pass with the line deleted.
     """
     monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
 
@@ -268,10 +217,7 @@ def test_branch_name_is_set_at_import_time(monkeypatch):
 class TestDiscoverySkipsRetiredModules:
     """`(disabled)` in the filename must actually retire the module.
 
-    importlib.import_module resolves a submodule by matching the FILE on disk,
-    not by parsing a Python identifier — "presence(disabled)" imports as
-    cleanly as "presence". So the rename alone left the retired module wired
-    and answering commands. Discovery has to skip it by name.
+    import_module loads "presence(disabled)" as cleanly as "presence"; discovery must skip it by name.
     """
 
     def _modules_dir(self, monkeypatch, tmp_path):
@@ -282,9 +228,7 @@ class TestDiscoverySkipsRetiredModules:
     def _stand_in(monkeypatch, stem, module):
         """Serve `module` from sys.modules under the name discovery computes for `stem`.
 
-        The real import_module returns a sys.modules entry before it looks at any
-        file, so a retired stem that discovery failed to skip would come back as
-        this stand-in. importlib itself is never replaced (fleet green leg 7).
+        import_module returns a sys.modules entry first, so an unskipped retired stem comes back as this.
         """
         monkeypatch.setitem(sys.modules, f"{_MODULES_PACKAGE}.{stem}", module)
 
@@ -306,8 +250,7 @@ class TestDiscoverySkipsRetiredModules:
         assert branch_entry.discover_modules() == [stub]
 
     def test_the_mark_is_matched_anywhere_in_the_name(self, monkeypatch, tmp_path):
-        # The convention writes the mark as a suffix, but a stem like
-        # "presence(disabled)_v2" is the same retirement and must not sneak back.
+        # "presence(disabled)_v2" is the same retirement as a suffix mark.
         self._modules_dir(monkeypatch, tmp_path)
         (tmp_path / "presence(disabled)_v2.py").write_text("", encoding="utf-8")
         self._stand_in(monkeypatch, "presence(disabled)_v2", _StubModule())

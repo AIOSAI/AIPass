@@ -1,26 +1,9 @@
 // _srt_resolve.mjs — Resolves the @anthropic-ai/sandbox-runtime entry point and,
-// in full mode, wraps a command via SandboxManager. Called by sandbox.py, and
-// shellable directly by other branches (aipass doctor/setup.sh) for an
-// existence-only check — see CLI contract below.
-//
-// srt is installed globally (npm i -g). ESM resolution walks up from this file's
-// directory, never reaching the global node_modules — we must locate npm's
-// global root ourselves. Node's own install prefix is NOT always the same as
-// npm's global prefix: on Debian/Ubuntu apt layouts and the official node Docker
-// images, node ships at /usr/bin (prefix /usr) while npm installs globals under
-// /usr/local. A single derived path misses that layout entirely (DPLAN-0279).
-// We try several candidates and take the first one that actually exists.
-//
-// CLI contract:
-//   node _srt_resolve.mjs --resolve             Resolve only. Found: entry path
-//                                                on stdout, exit 0. Not found:
-//                                                tried candidates on stderr,
-//                                                exit 1. No config/import needed.
-//   node _srt_resolve.mjs <config.json> <cmd>    Resolve + wrap cmd for sandboxed
-//                                                execution: bwrap command on
-//                                                stdout, exit 0. Any failure
-//                                                (resolution or wrap): message on
-//                                                stderr, exit 1.
+// in full mode, wraps a command via SandboxManager (sandbox.py; doctor/setup.sh shell --resolve).
+// srt is global and ESM never walks to npm's global root, which on apt/Docker layouts is not
+// node's own prefix: so several candidates are tried, first existing wins.
+// --resolve: entry path on stdout, exit 0; not found: tried paths on stderr, exit 1.
+// <config.json> <cmd>: bwrap command on stdout, exit 0; any failure on stderr, exit 1.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';

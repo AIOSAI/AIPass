@@ -3,23 +3,13 @@
 # Description: Manager discovery — passports on this machine that own a project
 # Version: 1.0.0
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-10-17
 # =============================================
 
 """Manager discovery for release-notify (DPLAN-0335 leg 1).
 
-Answers one question: which citizens on this machine own a project that
-``aipass init update`` could update? A manager is a passport whose
-``citizen_class`` reads ``manager`` — the key sits at the top level on some
-schema versions, under ``identity`` on the 1.x/2.x passports the fleet
-actually carries, and under ``metadata`` on the oldest, so all three are read.
-
-Where we look is DECLARED, never guessed: the active rows of
-``AIPASS_ROOTS.json`` (@memory's roots doctrine — a root nobody wrote down is
-not a root) plus every directory under ``<aipass root>/projects/``. The AIPass
-source repo itself is skipped by name: ``aipass init update`` updates a
-project's scaffold FROM the source repo, so the source repo has no scaffold of
-its own to update and devpulse would be mailing itself.
+Roots are declared, never guessed: active AIPASS_ROOTS.json rows plus <aipass root>/projects/.
+The source repo is skipped: ``aipass init update`` updates FROM it, so it has no scaffold of its own.
 """
 
 import json
@@ -35,9 +25,7 @@ MODULE_NAME = "release_notify"
 ROOTS_FILE = "AIPASS_ROOTS.json"
 PROJECTS_DIRNAME = "projects"
 
-# Pruned during the walk. .archive/.backup hold retired copies of live
-# passports (11 of them under Vera-Studio alone), and mailing a retired
-# manager is mailing nobody.
+# .archive/.backup hold retired copies of live passports; mailing a retired manager is mailing nobody.
 SKIP_DIR_NAMES = frozenset({".archive", ".backup", "node_modules", ".venv", "__pycache__", ".git"})
 
 _ACTIVE = "active"
@@ -45,46 +33,24 @@ _MANAGER = "manager"
 
 
 def aipass_root() -> Path:
-    """The AIPass repo root, resolved from this module's own location.
-
-    Walks up from ``__file__`` looking for the marker every AIPass checkout
-    carries (``src/aipass/devpulse``) rather than counting parents, so a
-    re-homed checkout or a different install prefix still resolves. No literal
-    path anywhere: the module knows where it lives.
-
-    Returns:
-        The repository root that contains this branch.
-    """
+    """The AIPass repo root, found by a marker walk rather than a parent count, so a re-homed checkout resolves."""
     here = module_file(__file__)
     for parent in here.parents:
         if (parent / "src" / "aipass" / "devpulse").is_dir():
             return parent
-    # Fixed-layout fallback: handlers/release_notify/managers.py -> handlers ->
-    # apps -> devpulse -> aipass -> src -> root. Reached only when the marker
-    # walk fails, which means this file was copied out of its branch.
+    # Reached only when this file was copied out of its branch.
     parents = here.parents
     logger.warning(f"[{MODULE_NAME}] AIPass root marker not found above {here} — using the fixed layout")
     return parents[6] if len(parents) > 6 else here.parent
 
 
 def devpulse_root() -> Path:
-    """This branch's directory — the cwd every drone call is made from.
-
-    Returns:
-        The devpulse branch directory.
-    """
+    """This branch's directory — the cwd every drone call is made from."""
     return module_file(__file__).parents[3]
 
 
 def declared_roots(root: Path) -> tuple[list[Path], list[dict]]:
-    """Read ``AIPASS_ROOTS.json`` and return its active roots.
-
-    Args:
-        root: The AIPass repo root, which is also what relative rows resolve against.
-
-    Returns:
-        tuple: (existing active root paths, skipped rows as {path, reason} dicts).
-    """
+    """Read ``AIPASS_ROOTS.json``: (existing active roots, skipped {path, reason}); relative rows resolve on root."""
     roots_file = root / ROOTS_FILE
     if not roots_file.exists():
         logger.warning(f"[{MODULE_NAME}] {ROOTS_FILE} not found at {roots_file} — external roots skipped")
@@ -120,16 +86,7 @@ def declared_roots(root: Path) -> tuple[list[Path], list[dict]]:
 def project_roots(root: Path) -> tuple[list[Path], list[dict]]:
     """Every live project directory under ``<aipass root>/projects/``.
 
-    A dot-prefixed entry is not a project: ``projects/.archive/`` holds
-    retired ones, and its passports are real managers of nothing — the first
-    run of this command found @marketstand in there. Pruning inside the walk
-    could not catch it, because the archive was the walk's own starting point.
-
-    Args:
-        root: The AIPass repo root.
-
-    Returns:
-        tuple: (project directories sorted by name, skipped {path, reason} dicts).
+    Dot entries are skipped here: projects/.archive/ would be a walk's own start, so the walk's pruning misses it.
     """
     projects = root / PROJECTS_DIRNAME
     if not projects.is_dir():
@@ -151,18 +108,7 @@ def project_roots(root: Path) -> tuple[list[Path], list[dict]]:
 def find_passports(search_root: Path) -> list[Path]:
     """Every ``.trinity/passport.json`` under ``search_root``, archives pruned.
 
-    Prunes ``SKIP_DIR_NAMES`` from the walk in place rather than filtering
-    paths afterwards — .venv in a project is a symlink to the AIPass runtime,
-    and descending it would walk the whole fleet. ``os.walk`` and not
-    ``Path.walk`` for the same reason ``Path.rglob`` is not used: the walk is
-    the one place a directory NAME has to be edited mid-iteration; every path
-    that comes out of it is a Path again.
-
-    Args:
-        search_root: A project root to search.
-
-    Returns:
-        Passport paths, sorted.
+    Pruned in place, not filtered after: a project's .venv links to the AIPass runtime and would walk the fleet.
     """
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(search_root, onerror=_walk_error, followlinks=False):
@@ -174,23 +120,12 @@ def find_passports(search_root: Path) -> list[Path]:
 
 
 def _walk_error(exc: OSError) -> None:
-    """Report a directory the walk could not read instead of swallowing it.
-
-    Args:
-        exc: The OSError Path.walk hit on one directory.
-    """
+    """Report a directory the walk could not read instead of swallowing it."""
     logger.warning(f"[{MODULE_NAME}] cannot read {getattr(exc, 'filename', '?')}: {type(exc).__name__}: {exc}")
 
 
 def read_passport(path: Path) -> dict | None:
-    """Load one passport.
-
-    Args:
-        path: The passport.json to read.
-
-    Returns:
-        The passport dict, or None when it cannot be read or is not an object.
-    """
+    """Load one passport, or None when it cannot be read or is not an object."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -203,14 +138,7 @@ def read_passport(path: Path) -> dict | None:
 
 
 def passport_citizen_class(passport: dict) -> str:
-    """The passport's citizen_class, wherever the schema version put it.
-
-    Args:
-        passport: A loaded passport.
-
-    Returns:
-        The class string, or "" when the passport declares none.
-    """
+    """The passport's citizen_class at top level, identity or metadata (by schema version), or ""."""
     for holder in (passport, passport.get("identity"), passport.get("metadata")):
         if isinstance(holder, dict):
             value = holder.get("citizen_class")
@@ -220,15 +148,7 @@ def passport_citizen_class(passport: dict) -> str:
 
 
 def passport_name(passport: dict, path: Path) -> str:
-    """The citizen's name.
-
-    Args:
-        passport: A loaded passport.
-        path: That passport's path, the last-resort source of the name.
-
-    Returns:
-        The declared name, else the directory that holds the .trinity/ folder.
-    """
+    """The citizen's declared name, else the directory that holds the .trinity/ folder."""
     sources = (
         (passport.get("branch_info"), "branch_name"),
         (passport, "name"),
@@ -243,20 +163,7 @@ def passport_name(passport: dict, path: Path) -> str:
 
 
 def passport_address(passport: dict, path: Path) -> str:
-    """The ai_mail address to write to.
-
-    ``identity.email`` first (the schema this command was specified against),
-    then ``branch_info.email`` — which is where every live passport on this
-    machine actually carries it — then a top-level ``email``, and finally the
-    name lowercased with an @ in front.
-
-    Args:
-        passport: A loaded passport.
-        path: That passport's path, for the name fallback.
-
-    Returns:
-        An @-prefixed address.
-    """
+    """The @-prefixed ai_mail address; live passports carry it in branch_info, the spec named identity."""
     for holder in (passport.get("identity"), passport.get("branch_info"), passport):
         if isinstance(holder, dict):
             value = holder.get("email")
@@ -267,14 +174,7 @@ def passport_address(passport: dict, path: Path) -> str:
 
 
 def discover_managers() -> dict:
-    """Find every project manager on this machine.
-
-    Returns:
-        dict with ``roots`` (searched paths as strings), ``managers``
-        (address / name / passport / root dicts, deduped by address, sorted by
-        address) and ``skipped`` ({path, reason} dicts — an inactive root, an
-        unreadable passport, a non-manager citizen, the source repo).
-    """
+    """Find every project manager on this machine: roots, managers deduped by address, and skipped with reasons."""
     json_handler.log_operation("discover_managers", module_name=MODULE_NAME)
     root = aipass_root()
     source_repo = root / "src" / "aipass"

@@ -3,28 +3,10 @@
 # Description: Save Module Registry Handler
 # Version: 1.1.0
 # Created: 2025-11-07
-# Modified: 2026-09-12
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Save Module Registry Handler
-
-Saves the Prax system-wide module discovery registry with statistics.
-Auto-updates timestamp and calculates statistics before saving.
-
-Features:
-- Saves registry to prax_registry.json
-- Auto-updates timestamp to current UTC time
-- Includes statistics (total modules, last updated, scan location)
-- Creates directory if missing
-- Logs save operation
-
-Usage:
-    from aipass.prax.apps.handlers.registry.save import save_module_registry
-
-    modules = {"module1": {...}, "module2": {...}}
-    save_module_registry(modules)
-"""
+"""Save Module Registry Handler"""
 
 import json
 import logging
@@ -39,25 +21,15 @@ from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "save"
 PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
 REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
-
-# =============================================
-# INTERNAL HELPERS
-# =============================================
 
 
 def _existing_last_scan() -> Optional[Dict[str, Any]]:
     """The last_scan block already on disk, or None when there is none.
 
-    Never raises: a registry that cannot be read is a registry about to be
-    overwritten, and losing the previous scan stamp must not cost the write.
-    """
+    Never raises: losing the previous scan stamp must not cost the write."""
     try:
         with open(REGISTRY_FILE, "r", encoding="utf-8") as handle:
             existing = json.load(handle)
@@ -71,12 +43,7 @@ def _existing_last_scan() -> Optional[Dict[str, Any]]:
 def _atomic_write(json_path: Path, content: str) -> None:
     """Write content to file atomically via temp file + rename.
 
-    prax_registry.json is written by every branch's logging init plus the
-    filesystem watcher, all racing on the same shared file with no lock.
-    A plain open("w") can tear under concurrent writers and leave invalid
-    JSON behind; os.replace() is atomic, so readers always see either the
-    fully old or fully new file, never a partial mix.
-    """
+    Concurrent writers share this file with no lock; os.replace never leaves torn JSON."""
     fd, tmp_path = tempfile.mkstemp(dir=json_path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -92,43 +59,11 @@ def _atomic_write(json_path: Path, content: str) -> None:
         raise
 
 
-# =============================================
-# HANDLER FUNCTION
-# =============================================
-
-
 def save_module_registry(modules: Dict[str, Dict[str, Any]], scan_stats: Optional[Dict[str, Any]] = None) -> bool:
-    """Save module registry to prax_registry.json (system registry)
-
-    Args:
-        modules: Dict mapping module names to module info dicts
-
-    Returns:
-        True if save successful, False on error
-
-    The registry is saved with this structure:
-    {
-        "registry_version": "1.0.0",
-        "timestamp": "2025-11-07T...",
-        "modules": {...},
-        "statistics": {
-            "total_modules": 42,
-            "last_updated": "2025-11-07T...",
-            "scan_location": "src/aipass"
-        }
-    }
-
-    Example:
-        >>> modules = {"test_module": {"relative_path": "test/module.py"}}
-        >>> success = save_module_registry(modules)
-        >>> if success:
-        >>>     print(f"Saved {len(modules)} modules")
-    """
+    """Save module registry to prax_registry.json (system registry)"""
     try:
-        # Ensure directory exists
         PRAX_JSON_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Build registry structure with statistics
         registry_structure = {
             "registry_version": "1.0.0",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -140,10 +75,7 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]], scan_stats: Optiona
             },
         }
 
-        # A scan says when it ran and what it changed; any other writer says
-        # nothing and must not erase what the last scan said. So the key is
-        # written only by a caller that passed stats, and carried over otherwise
-        # (DPLAN-0339 step 4). This is what `drone @prax status` reports.
+        # Only a scan writes last_scan; every other writer carries it over (status reports it).
         if scan_stats is not None:
             registry_structure["last_scan"] = scan_stats
         else:
@@ -151,7 +83,6 @@ def save_module_registry(modules: Dict[str, Dict[str, Any]], scan_stats: Optiona
             if previous is not None:
                 registry_structure["last_scan"] = previous
 
-        # Save to file atomically (temp file + rename)
         content = json.dumps(registry_structure, indent=2, ensure_ascii=False)
         _atomic_write(REGISTRY_FILE, content)
 

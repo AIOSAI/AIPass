@@ -3,32 +3,13 @@
 # Description: Bypass rules that match nothing, and inline bypass comments nothing reads
 # Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """Bypass hygiene: rules that can never match, and comments that claim a rule.
 
-A ``.seedgo/bypass.json`` rule is applied by ``utils.matching_rule``: its ``file``
-is a SUBSTRING of the path a checker is handed, and its ``standard`` names one
-checker. A rule is dead (it matches nothing, so it does nothing) when:
-
-- its ``file`` is a substring of no file a lane can hand a checker. Retired
-  directories, ``(disabled)`` names and caches are never handed to one;
-- its ``standard`` is not a discovered checker;
-- it is line-level, and every line it names lies past the end of every file
-  it matches;
-- its ``file`` or its ``standard`` is blank. A rule is active only when it names
-  both (owner, 2026-09-25 18:55, survey row #10): the matcher skips it.
-
-``prune`` removes the first three kinds and leaves a blank-field rule for its
-owner: its reason is the owner's intent, and the cure is to rewrite it as named
-rules, which no tool can do for them.
-
-The inline comment form (a ``#`` then ``seedgo:bypass standard=... reason=...``)
-has never been read by any code path. Every one in the corpus is reported as a
-comment that claims an exception nobody grants.
-
-Survey rows #11-#13, DPLAN-0354, 2026-09-25.
+``utils.matching_rule`` treats a rule's ``file`` as a SUBSTRING of the handed path
+and skips a rule with a blank field. No code path reads the inline comment form.
 """
 
 import json
@@ -42,14 +23,12 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file
 from aipass.seedgo.apps.handlers.json import json_handler
 
-#: A whole-line comment, or a trailing one with no quote before its hash. The
-#: quote clause keeps a string that only mentions the form out of the list.
+#: The no-quote-before-hash clause keeps a string that only mentions the form out of the list.
 _MARKER = re.compile(r"^[^\"'\n]*#\s*seedgo:bypass\b", re.MULTILINE)
 
 #: Directories no lane hands a checker a file from, beside the retired ones.
 _NEVER_HANDED = frozenset({".git", "__pycache__", ".venv", "node_modules"})
 
-#: The json.dumps variants a bypass.json is found written in: (ensure_ascii, trailing newline).
 _STYLES: Tuple[Tuple[bool, bool], ...] = ((True, False), (True, True), (False, False), (False, True))
 
 
@@ -150,15 +129,7 @@ def _dump_style(config: Dict[str, Any], text: str) -> Optional[Tuple[bool, bool]
 def prune(branch_path: Path, known_standards: Set[str], dry_run: bool = True) -> Dict[str, Any]:
     """Remove the dead rules from a branch's bypass.json; with dry_run, write nothing.
 
-    Only rules :func:`dead_rules` convicts are removed, so a live rule is never
-    touched, and a blank-field rule is left for its owner to rewrite (it is
-    reported under ``left``). A file that json.dumps cannot reproduce is refused
-    rather than rewritten, because the rewrite would reformat every line the
-    owner wrote.
-
-    Raises:
-        OSError: the bypass.json cannot be read or written.
-        json.JSONDecodeError: the bypass.json is not JSON.
+    Blank-field rules are left for their owner; a file json.dumps cannot reproduce is refused, not reformatted.
     """
     bypass_file = branch_path / ".seedgo" / "bypass.json"
     text = bypass_file.read_text(encoding="utf-8")

@@ -3,23 +3,10 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
-
-# Tests for prax logging handler modules.
-#
-# Covers: direct.py (direct_log, doRollover), introspection.py (get_calling_module_path),
-# log_watchdog.py (get_oversized_files, truncate_log_file),
-# monitoring.py (run_monitoring_loop), operations.py (create_config_file),
-# override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
-# setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
-# terminal/filtering.py (load_filtered_modules, should_display_terminal),
-# terminal/formatting.py (format_terminal_message, create_terminal_handler).
-#
-# Modules are bound at the top by import statement; the conftest runs the real
-# logger and json handler under each test's tmp_path (prax, leg 13).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — log_watchdog's sweep_stale_logs(), covered by tests/test_sweep.py
@@ -44,19 +31,12 @@ from aipass.prax.apps.handlers.logging import setup as logging_setup
 from aipass.prax.apps.handlers.logging.terminal import filtering as terminal_filtering
 from aipass.prax.apps.handlers.logging.terminal import formatting as terminal_formatting
 
-# =============================================
-# direct.py -- direct_log
-# =============================================
-
 
 class TestDirectLog:
     """direct_log() on the real body, into a logger whose files live under tmp_path."""
 
     def test_direct_log_writes_the_line(self, monkeypatch, tmp_path):
-        """direct_log writes the message into the caller's system and local logs, both under tmp_path.
-
-        Mutant: dropping the log_fn(message) call reddens this; so does handing it the level.
-        """
+        """direct_log writes the message into the caller's system and local logs, both under tmp_path."""
         logs, cache, message = tmp_path / "logs", {}, "direct_log reached its file"
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(logs))
         monkeypatch.setattr(direct, "_direct_loggers", cache)
@@ -82,7 +62,7 @@ class TestDirectLog:
     def test_an_unwritable_log_home_degrades_to_log_handler_failed_and_never_raises(
         self, monkeypatch, tmp_path, caplog
     ):
-        """FPLAN-0642: a direct logger's first line raised PermissionError into `aipass install`."""
+        """A direct logger's first line never raises PermissionError into its caller."""
         locked, cache = tmp_path / "locked", {}
         locked.mkdir()
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
@@ -99,15 +79,8 @@ class TestDirectLog:
         assert list(locked.iterdir()) == []
 
 
-# =============================================
-# direct.py -- RotatingFileHandler.doRollover
-# =============================================
-
-
 class TestDirectRotatingFileHandlerDoRollover:
-    """Tests for direct.py RotatingFileHandler.doRollover(), on the module bound at
-    the top: the handler takes its file as an argument, so nothing needs stubbing
-    (prax, leg 12)."""
+    """Tests for direct.py RotatingFileHandler.doRollover(); it takes its file as an argument."""
 
     def test_do_rollover_success(self, mock_prax_infrastructure, tmp_path):
         """doRollover delegates to parent class on success."""
@@ -126,9 +99,7 @@ class TestDirectRotatingFileHandlerDoRollover:
         handler.emit(record)
         handler.close()
 
-        # Rotation moved the old bytes aside and the record landed in a
-        # fresh file — both halves are pinned, so an emit that silently
-        # skipped the rollover cannot read green.
+        # Both halves pinned, so an emit that silently skipped the rollover cannot read green.
         backup = tmp_path / "test.log.1"
         assert backup.read_text(encoding="utf-8") == "line1\nline2\n"
         assert log_file.read_text(encoding="utf-8") == "A" * 100 + "\n"
@@ -154,22 +125,11 @@ class TestDirectRotatingFileHandlerDoRollover:
         handler.close()
 
 
-# =============================================
-# introspection.py -- get_calling_module_path
-# =============================================
-
-
 class TestGetCallingModulePath:
     """Tests for introspection.py get_calling_module_path()."""
 
     def test_returns_this_test_files_path(self, mock_prax_infrastructure):
-        """The first non-prax-internal frame is this test file, so that is the path.
-
-        Only one answer is reachable here: the stack walk skips introspection.py
-        itself and the next frame up is this module, whose path matches none of
-        the _PRAX_INTERNAL_MARKERS. Pinned to the file rather than tolerated as
-        "a string or None".
-        """
+        """The first non-prax-internal frame is this test file, so that is the path."""
         result = introspection.get_calling_module_path()
         assert isinstance(result, str)
         assert result == __file__
@@ -187,11 +147,6 @@ class TestGetCallingModulePath:
         with patch.object(introspection, "_find_external_caller_path", return_value=fake_path):
             result = introspection.get_calling_module_path()
             assert result == fake_path
-
-
-# =============================================
-# log_watchdog.py -- get_oversized_files
-# =============================================
 
 
 class TestGetOversizedFiles:
@@ -238,11 +193,6 @@ class TestGetOversizedFiles:
             assert result == []
 
 
-# =============================================
-# log_watchdog.py -- truncate_log_file
-# =============================================
-
-
 class TestTruncateLogFile:
     """Tests for log_watchdog.py truncate_log_file()."""
 
@@ -283,15 +233,8 @@ class TestTruncateLogFile:
         assert new == 0
 
 
-# =============================================
-# log_watchdog.py -- scan_branch_log_files
-# =============================================
-
-
 def _import_watchdog(tmp_path):
-    """The log_watchdog module bound at the top (prax, leg 13: it never read the
-    config stub the old fresh import installed; its json service writes under the
-    conftest's tmp_path)."""
+    """The log_watchdog module bound at the top."""
     return log_watchdog
 
 
@@ -424,14 +367,8 @@ class TestEnforceBranchLogLimits:
                 assert "LOG TRUNCATED by PRAX watchdog" in content
 
 
-# =============================================
-# monitoring.py -- run_monitoring_loop
-# =============================================
-
-
 def _monitoring_quiet(monkeypatch):
-    """logging/monitoring.py bound at the top, its logger doubled for the test
-    (prax, leg 13: the loop prints its status lines through it)."""
+    """logging/monitoring.py bound at the top, its logger doubled for the test."""
     monkeypatch.setattr(logging_monitoring, "logger", MagicMock())
     return logging_monitoring
 
@@ -483,21 +420,12 @@ class TestRunMonitoringLoop:
                 mock_stdout.flush.assert_called()
 
 
-# =============================================
-# operations.py -- create_config_file
-# =============================================
-
-
 class TestCreateConfigFile:
     """Tests for operations.py create_config_file()."""
 
     @staticmethod
     def _operations_at(monkeypatch, config_path):
-        """logging/operations.py bound at the top, writing its config to config_path,
-        with the defaults these asserts read and a logger double (prax, leg 13).
-
-        Returns (module, logger double).
-        """
+        """logging/operations.py writing its config to config_path; returns (module, logger double)."""
         log = MagicMock()
         monkeypatch.setattr(logging_operations, "CONFIG_FILE", config_path)
         # Real dicts — create_config_file() serialises these into the file.
@@ -531,17 +459,11 @@ class TestCreateConfigFile:
             assert dead not in content["config"], f"{dead} is written but never read"
 
     def test_generated_config_is_readable_by_load_log_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        """The file prax generates must be a file prax can read.
-
-        These two halves lived apart for months: the template wrote retention
-        keys at config.* while the loader read config.system_logs/local_logs, so
-        a fresh install produced a config that governed nothing.
-        """
+        """The file prax generates must be a file prax can read."""
         config_path = tmp_path / "prax_logger_config.json"
         ops, _log = self._operations_at(monkeypatch, config_path)
         ops.create_config_file()
 
-        # Read it back with the real loader.
         mock_logger = MagicMock()
         monkeypatch.setattr(config_load, "logger", mock_logger)
         monkeypatch.setattr(config_load, "PRAX_LOGGER_CONFIG_FILE", config_path)
@@ -569,8 +491,7 @@ class TestCreateConfigFile:
         config_path = tmp_path / "nonexistent_dir" / "config.json"
         ops, mock_direct_logger = self._operations_at(monkeypatch, config_path)
 
-        # Not raising is the weak half. The observable consequence is that
-        # no file appears and the failure is reported once as a warning.
+        # Not raising is the weak half: no file appears and one warning is reported.
         ops.create_config_file()
 
         assert not config_path.exists()
@@ -580,22 +501,13 @@ class TestCreateConfigFile:
         assert mock_direct_logger.warning.call_args[0][0] == "Failed to create config file: %s"
 
 
-# =============================================
-# override.py -- enhanced_getLogger
-# =============================================
-
-
 def _override_doubled(monkeypatch, calling_module: str = "unknown_module", debug: bool = False) -> MagicMock:
-    """override.py bound at the top, with the names it took from introspection,
-    config and setup doubled on it for one test (prax, leg 13). getLogger is put
-    back by monkeypatch whatever an install does.
-
-    Returns the setup_individual_logger double.
-    """
+    """override.py with its introspection, config and setup names doubled; returns the setup double."""
     build = MagicMock()
     monkeypatch.setattr(override, "get_calling_module", MagicMock(return_value=calling_module))
     monkeypatch.setattr(override, "get_debug_prints_enabled", MagicMock(return_value=debug))
     monkeypatch.setattr(override, "setup_individual_logger", build)
+    # Not a no-op: monkeypatch puts getLogger back whatever an install does.
     monkeypatch.setattr(logging, "getLogger", logging.getLogger)
     return build
 
@@ -612,9 +524,6 @@ class TestEnhancedGetLogger:
 
         result = override.enhanced_getLogger("prax.test.known")
         assert isinstance(result, logging.Logger)
-        # WHICH logger comes back, and what was done to it: the stdlib
-        # logger for the requested name, wearing the individual logger's
-        # handlers and cut off from the root logger.
         assert result.name == "prax.test.known"
         assert result.handlers == mock_individual_logger.handlers
         assert result.propagate is False
@@ -626,10 +535,7 @@ class TestEnhancedGetLogger:
 
         result = override.enhanced_getLogger("prax.test.unknown")
         assert isinstance(result, logging.Logger)
-        # The same stdlib logger the caller asked for, handed back
-        # untouched: no handlers copied onto it, propagation left alone.
         assert result.name == "prax.test.unknown"
-        # The stdlib's own registry entry for the name (prax, leg 6: no private name).
         assert result is logging.root.manager.getLogger("prax.test.unknown")
         assert result.handlers == []
         assert result.propagate is True
@@ -644,11 +550,6 @@ class TestEnhancedGetLogger:
         assert capsys.readouterr().err == (
             "[DEBUG] enhanced_getLogger called with name: debug_test\n[DEBUG] Detected calling module: unknown_module\n"
         )
-
-
-# =============================================
-# override.py -- install_logger_override / restore_original_logger
-# =============================================
 
 
 class TestInstallRestoreLoggerOverride:
@@ -669,7 +570,6 @@ class TestInstallRestoreLoggerOverride:
         override.install_logger_override()
         assert logging.getLogger is override.enhanced_getLogger
         override.restore_original_logger()
-        # What stood there before install (prax, leg 6: no private name).
         assert logging.getLogger is original_fn
 
     def test_is_override_active_reflects_state(self, mock_prax_infrastructure, monkeypatch):
@@ -682,19 +582,12 @@ class TestInstallRestoreLoggerOverride:
         assert override.is_override_active() is True
 
 
-# =============================================
-# setup.py -- setup_system_logger
-# =============================================
-
-
 class TestSetupSystemLogger:
-    """Tests for setup.py setup_system_logger(), on the module bound at the top
-    with its log dirs and config under tmp_path (prax, leg 13)."""
+    """Tests for setup.py setup_system_logger(), log dirs and config under tmp_path."""
 
     @pytest.fixture(autouse=True)
     def _system_logger_fresh(self, monkeypatch, tmp_path):
-        """No cached system logger; dirs and config under tmp_path; the handlers a
-        build hangs on the shared prax_system_logger are taken off afterwards."""
+        """No cached system logger; dirs and config under tmp_path; added shared handlers removed after."""
         (tmp_path / "system").mkdir(parents=True, exist_ok=True)
         (tmp_path / "local").mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr(logging_setup, "get_system_logs_dir", lambda: tmp_path / "system")
@@ -734,7 +627,7 @@ class TestSetupSystemLogger:
     def test_a_system_logs_home_that_cannot_be_made_mutes_that_tier_and_never_raises(
         self, mock_prax_infrastructure, monkeypatch, tmp_path, caplog
     ):
-        """DPLAN-0409 C4: setup_system_logger called get_system_logs_dir() bare, so it raised."""
+        """An unmakeable system_logs home mutes that tier; setup_system_logger never raises."""
 
         def unmakeable():
             raise PermissionError(13, "Permission denied", "system_logs")
@@ -750,18 +643,8 @@ class TestSetupSystemLogger:
         assert Path(result.handlers[1].baseFilename) == tmp_path / "local" / "prax_logger.log"
 
 
-# =============================================
-# setup.py -- _WindowsSafeRotatingHandler.doRollover
-# =============================================
-
-
 class TestSetupWindowsSafeRotatingHandlerDoRollover:
-    """Tests for the rotating handler setup.py builds into every module logger.
-
-    The handler is taken off a logger built by the public setup_individual_logger,
-    with both log dirs under tmp_path, not constructed by its private class name
-    (prax, leg 12).
-    """
+    """Tests for the rotating handler setup.py builds into every module logger."""
 
     @pytest.fixture
     def system_handler(self, monkeypatch, tmp_path):
@@ -807,9 +690,6 @@ class TestSetupWindowsSafeRotatingHandlerDoRollover:
         handler.emit(record)
         handler.close()
 
-        # One outcome is reachable here, not two: the file is over
-        # maxBytes, so the old bytes move to .log.1 and the record lands in
-        # a fresh .log. Both halves pinned.
         backup = tmp_path / "prax_rollover_test.log.1"
         assert backup.read_text(encoding="utf-8") == "data\n"
         assert log_file.read_text(encoding="utf-8") == "A" * 50 + "\n"
@@ -828,22 +708,15 @@ class TestSetupWindowsSafeRotatingHandlerDoRollover:
             handler.doRollover()
         handler.close()
 
-        # "It did not raise" is half the contract. The other half: the
-        # skipped rotation is reported once, and no backup was produced.
+        # Not raising is half the contract: the skip is reported once and no backup is made.
         mock_logger.warning.assert_called_once_with("Log rotation skipped (file locked): %s", ANY)
         assert str(mock_logger.warning.call_args[0][1]) == "locked"
         assert not (tmp_path / "prax_rollover_test.log.1").exists()
         assert log_file.read_text(encoding="utf-8") == "data\n"
 
 
-# =============================================
-# terminal/filtering.py -- load_filtered_modules
-# =============================================
-
-
 def _filtering_at(monkeypatch, config_file):
-    """terminal/filtering.py bound at the top, reading config_file for this test
-    (prax, leg 13: it was re-imported per test and its CONFIG_FILE set raw)."""
+    """terminal/filtering.py bound at the top, reading config_file for this test."""
     monkeypatch.setattr(terminal_filtering, "CONFIG_FILE", config_file)
     return terminal_filtering
 
@@ -880,11 +753,6 @@ class TestLoadFilteredModules:
         assert result == filt.DEFAULT_FILTERED_MODULES
 
 
-# =============================================
-# terminal/filtering.py -- should_display_terminal
-# =============================================
-
-
 class TestShouldDisplayTerminal:
     """Tests for terminal/filtering.py should_display_terminal()."""
 
@@ -905,25 +773,18 @@ class TestShouldDisplayTerminal:
     def test_loads_from_config_when_no_set_provided(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Loads filtered modules from config when not explicitly passed."""
         filt = _filtering_at(monkeypatch, tmp_path / "nonexistent.json")
-        # "drone" is not in defaults, so it should display
         result = filt.should_display_terminal("drone")
         assert result is True
 
-        # "prax_logger" IS in defaults, so it should NOT display
         result = filt.should_display_terminal("prax_logger")
         assert result is False
-
-
-# =============================================
-# terminal/formatting.py -- format_terminal_message
-# =============================================
 
 
 class TestFormatTerminalMessage:
     """Tests for terminal/formatting.py format_terminal_message()."""
 
     def _import_formatting(self, tmp_path):
-        """terminal/formatting.py, bound at the top (prax, leg 13)."""
+        """terminal/formatting.py, bound at the top."""
         return terminal_formatting
 
     def test_format_with_branch(self, mock_prax_infrastructure, tmp_path):
@@ -1000,27 +861,20 @@ class TestFormatTerminalMessage:
         assert "plain_logger" in result
 
 
-# =============================================
-# terminal/formatting.py -- create_terminal_handler
-# =============================================
-
-
 class TestCreateTerminalHandler:
     """Tests for terminal/formatting.py create_terminal_handler()."""
 
     def _import_formatting(self, tmp_path):
-        """terminal/formatting.py, bound at the top (prax, leg 13)."""
+        """terminal/formatting.py, bound at the top."""
         return terminal_formatting
 
     def test_returns_stream_handler(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Returns a StreamHandler carrying config's DEFAULT_LOG_LEVEL."""
         fmt = self._import_formatting(tmp_path)
-        # DEBUG, not config's own default, so a handler left at another level
-        # cannot match by accident (prax, leg 13: set at the edge, not by stub).
+        # DEBUG, not config's own default, so a handler left at another level cannot match by accident.
         monkeypatch.setattr(fmt, "DEFAULT_LOG_LEVEL", logging.DEBUG)
         handler = fmt.create_terminal_handler()
         assert isinstance(handler, logging.StreamHandler)
-        # The handler must be gated at exactly that, not left at NOTSET.
         assert handler.level == logging.DEBUG
 
     def test_handler_has_terminal_formatter(self, mock_prax_infrastructure, tmp_path):
@@ -1038,8 +892,7 @@ class TestCreateTerminalHandler:
             args=(),
             exc_info=None,
         )
-        # The format string that matters is the one the formatter produces, not
-        # the "%(message)s" default it never uses.
+        # The line the formatter produces, not the "%(message)s" default it never uses.
         assert handler.format(record) == "[SYSTEM] my_mod - INFO: hello"
 
     def test_handler_writes_to_stdout(self, mock_prax_infrastructure, tmp_path):
@@ -1049,19 +902,8 @@ class TestCreateTerminalHandler:
         assert handler.stream is sys.stdout
 
 
-# =============================================
-# lifecycle.py -- run_initialize / run_shutdown
-# =============================================
-
-
 class TestLifecycleRecordsWhoAskedForIt:
-    """The lifecycle doors take the caller's module name — and must use it.
-
-    seedgo's accepted_and_never_used_parameter rule found both doors accepting
-    module_name and reading neither, with a docstring promising it was 'for log
-    prefixes'. The operation record is where it belongs: initialising the fleet's
-    logging is a system-wide act, and the record of it should say who asked.
-    """
+    """The lifecycle doors take the caller's module name — and must use it in the operation record."""
 
     def _lifecycle(self, monkeypatch):
         """The real lifecycle handler, bound at the top, with every step stubbed out."""
@@ -1112,14 +954,10 @@ print(len(writes))
 
 
 class TestAnImportWritesNothing:
-    """A fresh import of the dashboard module made 58 atomic writes (seedgo, 10-08).
+    """A fresh import of the dashboard module writes nothing.
 
-    Fourteen handlers call get_direct_logger() at module level, and each call
-    logged two json operations, direct_log_created and the introspection's
-    introspection_resolved: four renames per module, plus module_tracker's
-    initialisation. Every branch that imports the dashboard paid them
-    (DPLAN-0404, prax). The import runs in a fresh interpreter with
-    AIPASS_TEST_LOG_DIR set, so a red run writes under tmp_path, never prax_json.
+    Handlers call get_direct_logger() at module level, so any write there is paid by every
+    importer. The fresh interpreter has AIPASS_TEST_LOG_DIR set: a red run writes under tmp_path.
     """
 
     def test_a_fresh_import_of_the_dashboard_module_writes_nothing(self, tmp_path):

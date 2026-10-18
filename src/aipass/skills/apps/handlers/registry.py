@@ -3,16 +3,10 @@
 # Description: Skill registry management
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill registry: one deduplicated catalogue built from the search paths.
-
-Walks project, global and built-in paths in priority order and keeps the
-FIRST skill of any given name, so a project skill shadows a built-in of the
-same name rather than colliding with it. Also serves single-skill and
-name-only lookups off that same list.
-"""
+"""Skill registry: one deduplicated catalogue built from the search paths."""
 
 from pathlib import Path
 
@@ -20,17 +14,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def build_registry(search_paths, discover_fn):
-    """Discover and cache all skills from search paths.
-
-    Args:
-        search_paths: List of (path, source_label) tuples to scan.
-        discover_fn: Callable that takes a path and source label,
-                     returns list of skill dicts.
-
-    Returns:
-        list[dict]: All discovered skills across all search paths.
-            Each dict has: name, description, path, has_handler, source, tags.
-    """
+    """Discover and cache all skills from search paths."""
     registry = []
     seen_names = set()
 
@@ -41,7 +25,7 @@ def build_registry(search_paths, discover_fn):
 
         skills = discover_fn(path, source_label)
         for skill in skills:
-            # First match wins for same name
+            # Paths come in priority order: first name wins, so a project skill shadows a built-in.
             if skill["name"] not in seen_names:
                 seen_names.add(skill["name"])
                 registry.append(skill)
@@ -58,15 +42,7 @@ def build_registry(search_paths, discover_fn):
 
 
 def get_skill(name, registry):
-    """Look up a skill by name in the registry.
-
-    Args:
-        name: Skill name to find.
-        registry: List of skill dicts from build_registry.
-
-    Returns:
-        dict or None: The matching skill dict, or None if not found.
-    """
+    """Look up a skill by name in the registry."""
     for skill in registry:
         if skill["name"] == name:
             return skill
@@ -74,12 +50,5 @@ def get_skill(name, registry):
 
 
 def get_skill_names(registry):
-    """Get all skill names from the registry.
-
-    Args:
-        registry: List of skill dicts from build_registry.
-
-    Returns:
-        list[str]: Sorted list of skill names.
-    """
+    """Get all skill names from the registry."""
     return sorted(skill["name"] for skill in registry)

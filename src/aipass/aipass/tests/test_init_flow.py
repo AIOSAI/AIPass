@@ -3,12 +3,10 @@
 # Description: Tests for aipass init_flow Phase 3
 # Version: 1.2.8
 # Created: 2026-04-16
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
-
-# Phase 3 (FPLAN-0188).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every stage function and helper in init_flow.py parses and imports
@@ -47,10 +45,6 @@ from aipass.aipass.apps.modules.init_flow import (
 )
 
 
-# =============================================================================
-# Fixtures
-# =============================================================================
-
 _POLICY_MOD = "aipass.aipass.apps.modules.init_flow"
 
 
@@ -78,13 +72,8 @@ def real_policy_resolver() -> None:
 def test_write_policy_stays_in_tmp(tmp_path: Path, request: pytest.FixtureRequest) -> Generator[Path, None, None]:
     """No test in this file stamps a test-write policy into the real tree.
 
-    stage_1_welcome calls _stamp_test_write_policy, which resolved bare cwd until
-    2026-09-15 — so a suite run from a branch directory created a SECOND
-    .aipass/test_write_policy.json beside the fleet's live one, and @hooks' gate
-    walks up and reads the nearest copy first (found in the tree by @devpulse,
-    twice: DPLAN-0337 R5 and again tonight). Tests that patch the path themselves
-    still win; this is the floor for the ones that do not. A test asking for
-    real_policy_resolver keeps the real resolver on a dry run (see there).
+    A stray .aipass/test_write_policy.json shadows the live one: @hooks' gate reads
+    the nearest copy first. Tests that patch the path themselves still win.
     """
     policy = tmp_path / "policy-home" / ".aipass" / "test_write_policy.json"
     if "real_policy_resolver" in request.fixturenames:
@@ -105,11 +94,6 @@ def tmp_local_json_with_progress(tmp_local_json: Path) -> Path:
     }
     tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
     return tmp_local_json
-
-
-# =============================================================================
-# TestGetSetupProgress
-# =============================================================================
 
 
 def _info_line(capsys: pytest.CaptureFixture[str]) -> str:
@@ -141,10 +125,8 @@ class TestGetSetupProgress:
     def test_handles_corrupt_file(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
         """Corrupt JSON reads as not started, and the user is told the file is unreadable.
 
-        Until 2026-09-28 the reader answered {} for a corrupt file, the same answer
-        as a missing one, so `aipass init` said "not started" over a stored
-        progress it could not read and the next saved stage replaced it silently.
-        Mutant 2026-09-28: the unreadable-file warning() sent to logger.warning instead reddens this.
+        Answered silently, the next saved stage replaces the unread progress unseen.
+        Mutant: the unreadable-file warning() sent to logger.warning instead reddens this.
         """
         tmp_local_json.write_text("BAD JSON", encoding="utf-8")
         assert handle_command("init", ["--info"]) is True
@@ -153,11 +135,6 @@ class TestGetSetupProgress:
         assert "Setup not started" in out
         assert "Init progress file unreadable" in err
         assert "local.json" in err
-
-
-# =============================================================================
-# TestGetLastCompletedStage
-# =============================================================================
 
 
 class TestGetLastCompletedStage:
@@ -196,17 +173,8 @@ class TestGetLastCompletedStage:
         assert self._first_stage_run(tmp_path, monkeypatch) == 4
 
 
-# =============================================================================
-# TestSaveStage
-# =============================================================================
-
-
 class TestSaveStage:
-    """The progress save, reached through the public stages that call it.
-
-    stage_4_style_questions saves {"style": ...} and stage_10_done saves no data;
-    both write only tmp_local_json here.
-    """
+    """The progress save, reached through the public stages that call it."""
 
     def test_saves_stage_data(self, tmp_local_json) -> None:
         """Stage data is written to setup_progress.stages."""
@@ -232,8 +200,7 @@ class TestSaveStage:
     def test_unreadable_progress_is_replaced_by_the_saved_stage(self, tmp_local_json) -> None:
         """A progress file that is not JSON is replaced by a fresh record holding the stage.
 
-        Green on its first run; the proof is two mutants on _save_stage's None guard.
-        Mutant: guard removed -> red by the escaping AttributeError on None.get, not by the assert.
+        Mutant: _save_stage's None guard removed -> red by the escaping AttributeError on None.get, not by the assert.
         Mutant: guard turned into a plain return -> red by the assert on the file.
         """
         tmp_local_json.write_text("{not json", encoding="utf-8")
@@ -253,10 +220,8 @@ class TestSaveStage:
     def test_stamps_test_write_policy_in_hooks_shape(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
         """A fresh init stamps the policy in the exact shape @hooks' reader validates.
 
-        The three keys their validator consumes (mailed 2026-09-07, checked by
-        them against their live file): agent_test_writing is the STRING "off" --
-        a boolean is REFUSED -- allow is an array, block_test_edits a bool.
-        Reached through the public stage 1, which stamps it and says so.
+        agent_test_writing is the STRING "off" (a boolean is REFUSED), allow is an
+        array, block_test_edits a bool.
         """
         policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
         with patch(
@@ -287,11 +252,8 @@ class TestSaveStage:
     ) -> None:
         """The policy belongs to the project: a run from a subdirectory must not fork it.
 
-        Red before 2026-09-15: bare Path.cwd() put a second policy in whatever
-        directory the caller stood in, and @hooks' gate reads the nearest one first.
-        Read through stage 1's dry run with the real resolver: it names the target
-        and writes nothing.
-        Mutant 2026-09-28: `registry.parent / ".aipass"` -> `Path.cwd() / ".aipass"` reddens this.
+        @hooks' gate reads the nearest policy first, so a second one shadows it.
+        Mutant: `registry.parent / ".aipass"` -> `Path.cwd() / ".aipass"` reddens this.
         """
         project = tmp_path / "project"
         (project / "src" / "aipass" / "aipass").mkdir(parents=True)
@@ -345,10 +307,7 @@ class TestSaveStage:
     def test_write_goes_through_the_json_service(self, tmp_local_json) -> None:
         """The progress write routes through the fleet service, not a hand-rolled writer.
 
-        Pinned 2026-09-07 (FPLAN-0492 wave 6): this module carried its own
-        mkstemp/json.dump/os.replace writer until the fleet settled on one json
-        service. Asserting the service is CALLED is what stops a future edit
-        quietly reintroducing a second writer beside it.
+        Asserting the service is CALLED stops a second writer creeping back in.
         """
         with patch(
             "aipass.aipass.apps.modules.init_flow.json_handler.write_json",
@@ -364,13 +323,10 @@ class TestSaveStage:
     def test_failed_write_raises_instead_of_answering_false(self, tmp_local_json) -> None:
         """A lost init stage must not look identical to a saved one.
 
-        The service answers False and logs rather than raising; callers here are
-        written against OSError, so the False is turned back into one.
-
-        The failure is also signalled on the bus: the trigger object is patched
-        where it lives (the name init_flow imports at fire time), so no event
-        reaches the real bus, and the one fire is asserted with its arguments.
-        Mutant 2026-09-28: the fired event renamed "profile_write_failed" -> "file_deleted" reddens this.
+        The service answers False; callers expect OSError, so False becomes one.
+        The trigger is patched where init_flow imports it at fire time, so no event
+        reaches the real bus.
+        Mutant: the fired event renamed "profile_write_failed" -> "file_deleted" reddens this.
         """
         with (
             patch(
@@ -387,16 +343,11 @@ class TestSaveStage:
         )
 
 
-# =============================================================================
-# TestPrintIntrospection
-# =============================================================================
-
-
 class TestPrintIntrospection:
     def test_not_started(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
         """Stage 0 prints the not-started line and the command that starts it.
 
-        Mutant 2026-09-27: the line cut to "Setup not started." reddens this.
+        Mutant: the line cut to "Setup not started." reddens this.
         """
         print_introspection()
         out, _err = capsys.readouterr()
@@ -405,7 +356,7 @@ class TestPrintIntrospection:
     def test_in_progress(self, tmp_local_json_with_progress, capsys: pytest.CaptureFixture[str]) -> None:
         """A part-done setup prints the stage reached and where it resumes.
 
-        Mutant 2026-09-27: "resume from stage {last}" in place of {last + 1} reddens this.
+        Mutant: "resume from stage {last}" in place of {last + 1} reddens this.
         """
         print_introspection()
         out, _err = capsys.readouterr()
@@ -416,7 +367,7 @@ class TestPrintIntrospection:
     def test_complete(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
         """A finished setup reports completion through success(), not a stage line.
 
-        Mutant 2026-09-27: `last > TOTAL_STAGES` in place of `>=` reddens this.
+        Mutant: `last > TOTAL_STAGES` in place of `>=` reddens this.
         """
         data = {"setup_progress": {"last_completed_stage": TOTAL_STAGES, "stages": {}}}
         tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
@@ -427,30 +378,15 @@ class TestPrintIntrospection:
         assert "In progress:" not in out
 
 
-# =============================================================================
-# TestPrintHelp
-# =============================================================================
-
-
 class TestPrintHelp:
     def test_calls_console_print(self, capsys: pytest.CaptureFixture[str]) -> None:
         """print_help outputs via console.print.
 
-        Absorbed the sibling `test_does_not_raise` on 2026-09-07 (DPLAN-0323
-        contested band, MERGE). Mutation-checked before merging: making
-        print_help raise killed BOTH tests identically, because both patched the
-        same console and made the same call -- so this one, which additionally
-        asserts console.print was reached, strictly subsumed it.
-        Mutant 2026-09-27: the "init update --dry-run" usage line renamed to --preview reddens this.
+        Mutant: the "init update --dry-run" usage line renamed to --preview reddens this.
         """
         print_help()
         out, _err = capsys.readouterr()
         assert "aipass init update --dry-run" in out
-
-
-# =============================================================================
-# TestHandleCommand
-# =============================================================================
 
 
 class TestHandleCommand:
@@ -492,14 +428,10 @@ class TestHandleCommand:
     ) -> None:
         """'init run --name --style' routes to run_init, and the two flags land.
 
-        Stages 3 and 4 run for real, so the effect is measured where the user
-        would see it: the name in the profile store (conftest's autouse temp
-        store) and the style in the progress file (tmp_local_json). Every other
-        stage is stubbed, cwd is tmp_path and the empty template builds no
-        scaffold, so nothing reaches live state. "just-exploring" is not the
+        Stages 3 and 4 run for real against temp stores. "just-exploring" is not the
         non-interactive default, so a dropped --style cannot pass by luck.
-        Mutant 2026-09-28: `name = _flag_value("--name")` -> `name = None` reddens this.
-        Mutant 2026-09-28: `style = _flag_value("--style")` -> `style = None` reddens this.
+        Mutant: `name = _flag_value("--name")` -> `name = None` reddens this.
+        Mutant: `style = _flag_value("--style")` -> `style = None` reddens this.
         """
         monkeypatch.chdir(tmp_path)
         stubbed = {
@@ -537,11 +469,6 @@ class TestHandleCommand:
                     handle_command("init", ["test-proj"])
         assert exc_info.value.code == 0
         mock_scaffold.assert_called_once_with(["test-proj"])
-
-
-# =============================================================================
-# TestRunInit
-# =============================================================================
 
 
 @pytest.fixture(autouse=True)
@@ -596,10 +523,8 @@ class TestRunInit:
     def test_keyboard_interrupt_pauses_gracefully(self, tmp_local_json, capsys: pytest.CaptureFixture[str]) -> None:
         """Ctrl-C during a stage pauses with a resume hint and exits 130, never 0.
 
-        Until 2026-09-28 a pause exited 0, the same code as a finished init, so
-        `aipass init run && next-step` went on after the user stopped it. 130 is
-        the shell's code for an interrupt; the progress file keeps the resume.
-        Mutant 2026-09-28: the paused `return 130` put back to `return 0` reddens this.
+        Exit 0 would let `aipass init run && next-step` go on after the user stopped it.
+        Mutant: the paused `return 130` put back to `return 0` reddens this.
         """
         with (
             patch("aipass.aipass.apps.modules.init_flow.stage_1_welcome", side_effect=KeyboardInterrupt),
@@ -663,10 +588,6 @@ class TestRunInit:
         stage_1_mock.assert_not_called()
         stage_4_mock.assert_called_once()
 
-
-# =============================================================================
-# TestStages
-# =============================================================================
 
 _MOD = "aipass.aipass.apps.modules.init_flow"
 
@@ -787,8 +708,8 @@ class TestStages:
     ) -> None:
         """Missing claude + interactive + no → asked, no install, continues. PATH is an empty directory.
 
-        Mutant: claude never counted missing -> red at the prompt assert (leg 8; before it, the
-        test asserted only that nothing installed, which a stage that never asks also passes).
+        Mutant: claude never counted missing -> red at the prompt assert; "nothing installed"
+        alone is also passed by a stage that never asks.
         """
         tools_on_path()
         mock_profile_mod = MagicMock()
@@ -890,11 +811,6 @@ class TestStages:
         assert stored["setup_progress"]["last_completed_stage"] == 10
 
 
-# =============================================================================
-# TestProviderGaps — provider-manifest surfacing, decoupled from the doctor stage
-# =============================================================================
-
-
 class TestProviderGaps:
     """Provider gaps reach the init report without running the full doctor."""
 
@@ -941,11 +857,6 @@ class TestProviderGaps:
         assert "provider_action" not in report
 
 
-# =============================================================================
-# `aipass init update`: owner/identity check and fix via drone @spawn sync-registry
-# =============================================================================
-
-
 _MOD_UPDATE = "aipass.aipass.apps.modules.init_flow"
 
 
@@ -963,7 +874,10 @@ def _init_update(args: list[str]) -> int:
 
 
 class TestInitUpdateRegistrySync:
-    """Tests for owner/identity check+fix in `aipass init update` (DPLAN-0239 P5)."""
+    """Tests for owner/identity check+fix in `aipass init update`.
+
+    Git-auth provisioning is stubbed: it needs a real project on disk and has its own suite below.
+    """
 
     def test_clean_check_prints_ok(self, tmp_path: Path) -> None:
         """Clean --check (exit 0) prints 'Owner/identity OK.' and skips --fix."""
@@ -973,8 +887,6 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
-            # Subject here is the sync-registry branch; git-auth provisioning
-            # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=check_proc) as mock_run,
             patch(f"{_MOD_UPDATE}.success") as mock_success,
@@ -997,8 +909,6 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
-            # Subject here is the sync-registry branch; git-auth provisioning
-            # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(
                 f"{_MOD_UPDATE}.subprocess.run",
@@ -1025,8 +935,6 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
-            # Subject here is the sync-registry branch; git-auth provisioning
-            # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(
                 f"{_MOD_UPDATE}.subprocess.run",
@@ -1045,8 +953,6 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
-            # Subject here is the sync-registry branch; git-auth provisioning
-            # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=FileNotFoundError("drone not found")),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
@@ -1063,8 +969,6 @@ class TestInitUpdateRegistrySync:
                 "aipass.aipass.apps.handlers.init.bootstrap.update_project",
                 return_value={"updated_files": [], "already_current": []},
             ),
-            # Subject here is the sync-registry branch; git-auth provisioning
-            # (which needs a real project on disk) has its own suite below.
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", side_effect=_sp.TimeoutExpired(cmd="drone", timeout=30)),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
@@ -1095,7 +999,7 @@ class TestInitUpdateRegistrySync:
 
 
 class TestInitUpdateGitAuth:
-    """Tests for git-auth provisioning wired into `aipass init update` (DPLAN-0281 P2)."""
+    """Tests for git-auth provisioning wired into `aipass init update`."""
 
     @staticmethod
     def _project(root: Path, citizen_class: str = "builder") -> None:
@@ -1184,9 +1088,7 @@ class TestInitUpdateGitAuth:
     def test_dry_run_plans_the_scaffold_and_writes_nothing(self, tmp_path: Path) -> None:
         """--dry-run touches nothing: the plan is computed with apply=False, no sync-registry.
 
-        DPLAN-0335 turned --dry-run from "skip the scaffold entirely" into a
-        real preview, so the pin is now that update_project is CALLED and told
-        not to write — not that it is skipped.
+        The pin is that update_project is CALLED and told not to write, not skipped.
         """
         self._project(tmp_path)
         passport_path = tmp_path / "src" / "demo" / "vera" / ".trinity" / "passport.json"
@@ -1254,11 +1156,10 @@ class TestInitUpdateGitAuth:
     def test_stamp_only_dry_run_says_no_go_is_needed_and_still_exits_2(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """DPLAN-0337 R1: the preview names the apply as the next move, not a request.
+        """The preview names the apply as the next move, not a request.
 
-        Exit stays 2 — the stamp IS pending, and 2 keeps meaning "there is a
-        plan"; the sentence is what changes, because the go does not apply here.
-        Mutant 2026-09-27: "so no go is needed" cut to "so no go" reddens this.
+        Exit stays 2: the stamp IS pending, and 2 keeps meaning "there is a plan".
+        Mutant: "so no go is needed" cut to "so no go" reddens this.
         """
         target = self._stamp_behind_scaffold(tmp_path)
         capsys.readouterr()
@@ -1275,9 +1176,9 @@ class TestInitUpdateGitAuth:
     def test_a_plan_that_writes_a_file_still_asks_for_the_go(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """The other half of R1: one file write and today's sentence stands.
+        """One file write in the plan and the preview still asks for the go.
 
-        Mutant 2026-09-27: "devpulse's go" cut to "devpulse" in the preview line reddens this.
+        Mutant: "devpulse's go" cut to "devpulse" in the preview line reddens this.
         """
         target = self._stamp_behind_scaffold(tmp_path)
         (target / ".claude" / "commands" / "prep.md").write_text("# mine\n", encoding="utf-8")
@@ -1296,7 +1197,7 @@ class TestInitUpdateGitAuth:
     ) -> None:
         """A manager's agent reads the key, never the prose.
 
-        Mutant 2026-09-27: the plan's "stamp_only" key renamed reddens this.
+        Mutant: the plan's "stamp_only" key renamed reddens this.
         """
         target = self._stamp_behind_scaffold(tmp_path)
         capsys.readouterr()
@@ -1314,7 +1215,7 @@ class TestInitUpdateGitAuth:
     ) -> None:
         """The receipt reports what happened: after apply the stamp is written,
         not pending — the one word that would have been a lie in the receipt.
-        Mutant 2026-09-27: `state = "pending"` on both branches reddens this."""
+        Mutant: `state = "pending"` on both branches reddens this."""
         target = self._stamp_behind_scaffold(tmp_path)
         capsys.readouterr()
         with (
@@ -1337,15 +1238,11 @@ class TestInitUpdateGitAuth:
     ) -> None:
         """--json prints the plan document itself, not a rendered table.
 
-        Stdout is exactly ONE JSON document with git-auth provisioning really
-        running: its prose goes to stderr, where a manager's agent piping stdout
-        into a JSON parser never meets it. Provisioning is a dry run here and its
-        far side stays in tmp_path: the registry walk stops at the DEMO registry
-        written under tmp_path, and its log_operation lands in the autouse json seam.
-
-        Mutant 2026-09-27: console.print_json swapped for console.print reddens this.
-        Mutant 2026-09-28: the --json redirect aimed at sys.stdout instead of sys.stderr reddens this.
-        Mutant (fleet green leg 4): the redirect removed -> red at the raw-text assert, before json.loads.
+        Stdout is exactly ONE JSON document with git-auth provisioning really running:
+        its prose goes to stderr, so a manager's agent parsing stdout never meets it.
+        Mutant: console.print_json swapped for console.print reddens this.
+        Mutant: the --json redirect aimed at sys.stdout instead of sys.stderr reddens this.
+        Mutant: the redirect removed -> red at the raw-text assert, before json.loads.
         """
         self._project(tmp_path)
         plan = {
@@ -1372,11 +1269,6 @@ class TestInitUpdateGitAuth:
         assert emitted["handlers"][0]["name"] == "testwrite_gate"
         assert "Git authorization (owner-tier)" in err
         assert "would repair" in err
-
-
-# =============================================================================
-# TestTemplateSelector
-# =============================================================================
 
 
 class TestTemplateSelector:
@@ -1435,7 +1327,7 @@ class TestTemplateSelector:
     def test_list_flag_shows_catalog(self, capsys: pytest.CaptureFixture[str]) -> None:
         """aipass init --list shows the catalog (not swallowed into run).
 
-        Mutant 2026-09-27: the catalog loop printing nothing reddens this.
+        Mutant: the catalog loop printing nothing reddens this.
         """
         result = handle_command("init", ["--list"])
         assert result is True
@@ -1474,9 +1366,7 @@ class TestTemplateSelector:
         tools_on_path()
         with patch(f"{_MOD}.warning") as mock_warn:
             stage_8_smoke_test()
-        # THE FLOOR (v5 unentered_assert, 2026-09-08). A stage 8 that stopped
-        # warning at all - or one that never reached the hint - made this a
-        # silent pass, which is precisely the regression it guards.
+        # Without this floor a stage 8 that never warns passes the loop below vacuously.
         assert mock_warn.call_args_list, "stage 8 emitted no warning - the loop below proves nothing"
         for call in mock_warn.call_args_list:
             msg = call[0][0].lower()

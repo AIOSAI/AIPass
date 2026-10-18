@@ -3,15 +3,12 @@
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
 # Version: 1.5.0
 # Created: 2026-04-03
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
 
-# File reading and rotation live in test_log_watcher_rotation.py, and the
-# persisted state and lifecycle in test_log_watcher_state.py, since the
-# oversize_test_file split (2026-10-08). The live-state doors are closed by
-# conftest's log_watcher_infrastructure, which this file names in pytestmark.
+# Rotation and state have their own test files; conftest's log_watcher_infrastructure closes live state.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — the centralized system_logs watcher, in test_watchers_log_watcher.py
@@ -33,14 +30,8 @@ from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH, _SYNTHETI
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
 
 
-# A second synthetic root, beside support_log_watcher's _SYNTHETIC_HOME, for a
-# path outside every known tree: an input under test, not a location.
+# Outside every known tree: an input under test, not a location.
 _SYNTHETIC_ELSEWHERE = PurePosixPath("/synthetic/elsewhere")
-
-
-# ---------------------------------------------------------------------------
-# Tests -- generate_error_hash
-# ---------------------------------------------------------------------------
 
 
 class TestGenerateErrorHash:
@@ -67,11 +58,6 @@ class TestGenerateErrorHash:
         """Hash matches the first 8 chars of MD5(module:message)."""
         expected = hashlib.md5("mymod:mymsg".encode()).hexdigest()[:8]
         assert lw.generate_error_hash("mymod", "mymsg") == expected
-
-
-# ---------------------------------------------------------------------------
-# Tests -- detect_branch_from_path
-# ---------------------------------------------------------------------------
 
 
 class TestDetectBranchFromPath:
@@ -104,20 +90,11 @@ class TestDetectBranchFromPath:
     def test_failure_raises_instead_of_answering_unknown(self):
         """A path it cannot read raises; it is not filed under the UNKNOWN branch.
 
-        UNKNOWN is a real answer (a log outside every known tree), so a
-        failure returned as UNKNOWN fired an error_detected event for a branch
-        nobody owns. The caller, _process_log_line, contains the raise and
-        skips that one line (test_outer_exception_handler_catches_unexpected).
-        Mutant run: `Path(log_path or "")` (a swallowed failure) reddens this.
+        UNKNOWN is a real answer, so a failure filed there fires an event for a branch nobody owns.
         """
         unreadable: Any = None
         with pytest.raises(TypeError):
             lw.detect_branch_from_path(unreadable)
-
-
-# ---------------------------------------------------------------------------
-# Tests -- parse_prax_log_line
-# ---------------------------------------------------------------------------
 
 
 class TestParsePraxLogLine:
@@ -170,21 +147,11 @@ class TestParsePraxLogLine:
     def test_failure_raises_instead_of_answering_none(self):
         """A line it cannot read raises; None means "not an error line".
 
-        Returning None on a failure made the line look like an ordinary
-        INFO line. The callers, _process_log_line and _process_warning_line,
-        contain the raise and skip that one line
-        (test_outer_exception_handler_catches_unexpected,
-        test_unexpected_failure_is_contained).
-        Mutant run: `if log_line is None: return None` ahead of the parse reddens this.
+        None would make a failed line look like an ordinary INFO line; the callers contain the raise.
         """
         unreadable: Any = None
         with pytest.raises(TypeError):
             lw.parse_prax_log_line(unreadable)
-
-
-# ---------------------------------------------------------------------------
-# Tests -- is_stale_entry
-# ---------------------------------------------------------------------------
 
 
 class TestIsStaleEntry:
@@ -212,11 +179,6 @@ class TestIsStaleEntry:
         recent = datetime.now() - timedelta(seconds=5)
         ts = recent.strftime("%Y-%m-%d %H:%M:%S,") + "123"
         assert lw.is_stale_entry(ts) is False
-
-
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher._should_process
-# ---------------------------------------------------------------------------
 
 
 class TestShouldProcess:
@@ -248,11 +210,6 @@ class TestShouldProcess:
         """Log file outside branch and system_logs dirs is rejected."""
         watcher = lw.BranchLogWatcher()
         assert watcher._should_process(str(_SYNTHETIC_ELSEWHERE / "random" / "output.log")) is False
-
-
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher._process_log_line
-# ---------------------------------------------------------------------------
 
 
 class TestProcessLogLine:
@@ -312,11 +269,6 @@ class TestProcessLogLine:
         fire.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- is_stale_entry (additional format coverage)
-# ---------------------------------------------------------------------------
-
-
 class TestIsStaleEntryFormats:
     """Additional format coverage for is_stale_entry."""
 
@@ -349,11 +301,6 @@ class TestIsStaleEntryFormats:
         assert lw.is_stale_entry("") is True
 
 
-# ---------------------------------------------------------------------------
-# Tests -- detect_branch_from_path (additional edge cases)
-# ---------------------------------------------------------------------------
-
-
 class TestDetectBranchFromPathEdgeCases:
     """Additional edge cases for detect_branch_from_path."""
 
@@ -381,11 +328,6 @@ class TestDetectBranchFromPathEdgeCases:
         """Multi-word prefix (ai_mail) is matched correctly."""
         path = str(lw.SYSTEM_LOGS_DIR / "ai_mail_delivery.log")
         assert lw.detect_branch_from_path(path) == "AI_MAIL"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- parse_prax_log_line (additional edge cases)
-# ---------------------------------------------------------------------------
 
 
 class TestParsePraxLogLineEdgeCases:
@@ -426,11 +368,6 @@ class TestParsePraxLogLineEdgeCases:
         assert lw.parse_prax_log_line(line) is None
 
 
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher._should_process (additional edge cases)
-# ---------------------------------------------------------------------------
-
-
 class TestShouldProcessEdgeCases:
     """Additional edge cases for BranchLogWatcher._should_process."""
 
@@ -457,11 +394,6 @@ class TestShouldProcessEdgeCases:
         watcher = lw.BranchLogWatcher()
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "medic_suppressed.jsonl")
         assert watcher._should_process(path) is False
-
-
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher._process_log_line (deeper coverage)
-# ---------------------------------------------------------------------------
 
 
 class TestProcessLogLineDeeper:
@@ -528,8 +460,7 @@ class TestProcessLogLineDeeper:
 
         monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
 
-        # The lazy fallback reaches the registry and it fails too: the
-        # watcher is left with its own local count.
+        # The lazy fallback fails too: the watcher keeps its own local count.
         monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ImportError("registry gone")))
         watcher = lw.BranchLogWatcher()
         line = self._make_error_line("Fallback triggered")
@@ -587,17 +518,10 @@ class TestProcessLogLineDeeper:
         fire.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- WARNING capture for the escalation lane (DPLAN-0283 WS-A)
-# ---------------------------------------------------------------------------
-
-
 def _set_warning_capture(lw, enabled: bool, monkeypatch) -> MagicMock:
     """Answer the operator config the way a real config_loader would.
 
-    config_loader is imported lazily inside _warning_capture_enabled, so the
-    answer is configured on the mocked handlers.json package and the 60s TTL
-    cache is dropped.
+    config_loader is imported lazily, so the answer is set on the mocked package and the TTL cache dropped.
     """
     section = MagicMock(return_value={"watch_branch_log_warnings": enabled})
     monkeypatch.setattr(config_loader, "section", section)
@@ -665,8 +589,7 @@ class TestParsePraxLogLineLevels:
 class TestProcessWarningLine:
     """WARNING lines feed the escalation lane and nothing else.
 
-    They never enter the error registry and never dispatch anyone — before
-    this path existed, a branch warning was read by nothing at all.
+    They never enter the error registry and never dispatch anyone.
     """
 
     def test_fires_warning_logged(self, monkeypatch):
@@ -747,10 +670,7 @@ class TestProcessWarningLine:
         fire.assert_not_called()
 
     def test_capture_enabled_by_config_fires(self, monkeypatch):
-        """Positive control for the switch: the identical line fires when it is on.
-
-        Mutant: the event renamed error_detected.
-        """
+        """Positive control for the switch: the identical line fires when it is on."""
         _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
@@ -860,16 +780,8 @@ class TestProcessLogLineRoutesWarnings:
         fire.assert_not_called()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- system_logs twins (double-processing, devpulse e9d92ed2)
-# ---------------------------------------------------------------------------
-
-
 def _dual_write_tree(tmp_path, branch: str, module: str):
-    """Build the tree prax actually produces: the same line in two files.
-
-    Returns (branch_log, system_log), both real files under tmp_path.
-    """
+    """Build the tree prax actually produces: the same line in two files."""
     branch_log = tmp_path / "aipass" / branch / "logs" / f"{module}.log"
     branch_log.parent.mkdir(parents=True, exist_ok=True)
     branch_log.touch()
@@ -888,16 +800,7 @@ def _point_at_tree(lw, monkeypatch, tmp_path) -> None:
 
 class TestSystemLogTwinIsNotProcessedTwice:
     """Prax writes every branch line to BOTH the branch's own logs/ dir and
-    system_logs/<branch>_<module>.log, and this watcher schedules both trees.
-    One physical line was therefore counted twice — once attributed by
-    directory, once by a filename guess.
-
-    Live evidence (2026-08-14): escalation signatures 0249c13b4d64 (HOOKS,
-    src/aipass/hooks/logs/edit_gate.log) and 690de8d87cdc (UNKNOWN,
-    system_logs/hooks_edit_gate.log) hold the SAME three sample lines with
-    consecutive sequence numbers 8514/8515 — one reader, two files. Reported
-    by devpulse in e9d92ed2. Measured: 230 of 243 system_logs files are
-    twin-backed.
+    system_logs/<branch>_<module>.log, and this watcher schedules both trees; one line counts once.
     """
 
     def test_dual_written_system_log_is_skipped(self, monkeypatch, tmp_path):
@@ -967,9 +870,7 @@ class TestSystemLogTwinIsNotProcessedTwice:
 
 class TestSystemLogAttributionComesFromTheLiveTree:
     """The branch prefixes were a hardcoded list of 11 names while the tree
-    held 17 branches. Every system_logs file belonging to one of the missing
-    six (@hooks, @backup, @commons, @daemon, @skills, @aipass) was attributed
-    to UNKNOWN — the fault was the list, not the log.
+    held 17 branches; system_logs attribution comes from the live tree.
     """
 
     def test_unlisted_branch_attributes_from_the_tree(self, monkeypatch, tmp_path):
@@ -996,20 +897,9 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         assert lw.detect_branch_from_path(path) == "SEEDGO"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- path classification is separator-agnostic (Windows CI, 70a10016)
-# ---------------------------------------------------------------------------
-
-
 class TestLogPathClassificationOnBothPlatforms:
     """`_should_process` classified paths with `"/logs/" in file_path`, so every
-    Windows path — `...\\aipass\\hooks\\logs\\edit_gate.log` — fell through to
-    "foreign" and was dropped. Four tests went red on the first honest Windows
-    CI run (devpulse, 70a10016, 2026-08-18).
-
-    A separator string test cannot be fixed by normalising on one platform and
-    hoping; the classifier takes a PurePath, so these cases prove BOTH flavours
-    from either runner.
+    Windows path fell through to "foreign"; these prove BOTH PurePath flavours from either runner.
     """
 
     def test_windows_branch_log_is_a_branch_log(self):

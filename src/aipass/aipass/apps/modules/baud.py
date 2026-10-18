@@ -3,39 +3,15 @@
 # Description: aipass baud: install @baud's phone face and baud-cli from a release and point @api at them
 # Version: 1.5.0
 # Created: 2026-09-13
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 aipass baud: the phone face and the headless baud-cli come from a release, not a checkout.
 
-A stranger who never cloned baud still gets the phone face and a fleet behind it:
-fetch ``baud-phone-<tag>.tar.gz``, ``baud-cli-<tag>-linux-x86_64`` and
-``SHA256SUMS.txt`` from one baud release, verify every digest, unpack the face
-through a safety filter into ``~/.aipass/baud/phone/``, land the binary at
-``~/.aipass/baud/bin/baud-cli``, and hand both to @api's host server
-(FPLAN-0587 row 2, FPLAN-0589 row 3). AIPass never vendors either: the licences
-stay apart (DPLAN-0313). Releases build baud-cli for linux-x86_64 only; anywhere
-else the install says so in one line and lands the face alone.
-
-Usage:
-    aipass baud install                              # latest release
-    aipass baud install --tag v0.2.1                 # one release
-    aipass baud install --from <tar> --sums <sums>   # a tarball on disk, no network
-    aipass baud install --from <tar> --binary <bin>  # + a baud-cli on disk, its line in the same sums
-    aipass baud install --dest <dir>                 # face in <dir>, baud-cli in <dir>/../bin
-    aipass baud install --dry-run                    # say what would happen, touch nothing
-    aipass baud status [--dest <dir>]                # what is installed, where @api points
-
-``aipass install`` runs the same install as its best-effort step 4 (its --baud-tag
-is this command's --tag), then ends on ``finish_phone``: through @api's module
-door it moves the bind to the tailnet address and installs the boot unit, then
-prints the phone URL and the guide (FPLAN-0642 slices B, D). Where no boot unit
-will bring the server up, it starts it detached (DPLAN-0407). On a terminal, with
-the face served on a tailnet bind, it waits for Enter, then @api's pairing door
-mints a one-use code and the install ends on its QR; otherwise, and always under
---non-interactive, it names the pair command (DPLAN-0406 slice C).
-The print itself lives in ``_phone_print.py``.
+Every file is verified against the release's SHA256SUMS before it lands. AIPass never
+vendors either: the licences stay apart. Releases build baud-cli for linux-x86_64 only;
+anywhere else the install lands the face alone. The phone print lives in ``_phone_print.py``.
 """
 
 from __future__ import annotations
@@ -120,11 +96,8 @@ class UsageError(Exception):
 def _api_host_config() -> Any:
     """@api's host-api module door (set_face_dir, face_dir, set_baud_bin, baud_bin, load_config), or None.
 
-    The one cross-branch edge of this command, held here in the module layer and
-    handed to handlers/baud/point.py. FPLAN-0587 and FPLAN-0589 pin the in-process
-    call: @api validates each path at write time and aipass never writes api's config.
-    It goes through @api's MODULE, which re-exports the handler's functions and
-    refusal classes (FaceDirRefused, BaudBinRefused), never into its handlers.
+    The one cross-branch edge: @api validates each path at write time and aipass never
+    writes api's config. Import @api's module, never its handlers.
     """
     try:
         from aipass.api.apps.modules import host_api
@@ -214,10 +187,8 @@ def _say(result: PointResult) -> None:
 def _point(outcome: InstallOutcome, hints: bool = True) -> int:
     """Hand the face and the binary to @api, then say how to see it. 0 when @api took everything installed.
 
-    ``hints`` False skips the restart hint and the open-this URL. aipass install's
-    step 4 runs before the bind moves to the tailnet and before the server is
-    started, so both lines were stale by the time its last block printed the real
-    phone URL (the owner's test 13, 2026-10-13); that block says it instead.
+    ``hints`` False for aipass install's step 4: it runs before the bind moves and the
+    server starts, so those lines would be stale; its last block prints the real URL.
     """
     host_config = _api_host_config()
     face = point_api_at(outcome.dest, host_config)
@@ -247,10 +218,8 @@ def install_phone_face(
 ) -> int:
     """Fetch (or take), verify, unpack, land, point. 0 installed and pointed; 1 otherwise.
 
-    No baud-cli for this platform, in this release, or on the --from command line
-    is one line and still 0: the face alone is a complete install. best_effort
-    reports refusals as warnings and leaves the open-this lines to the install's
-    own phone block (aipass install's step); dry_run changes nothing.
+    No baud-cli for this platform or release is one line and still 0: the face alone
+    is a complete install.
     """
     target = _resolve_dest(dest)
     try:
@@ -276,13 +245,7 @@ def install_phone_face(
 
 
 def install_best_effort(dry_run: bool = False, tag: str = LATEST) -> bool:
-    """aipass install's step 4 (phone face + baud-cli). Never raises, never fails the install.
-
-    ``tag`` is aipass install's --baud-tag, the release a stamped install.sh pins.
-
-    Returns:
-        True when the install was pointed (or dry-run walked).
-    """
+    """aipass install's step 4 (phone face + baud-cli). Never raises, never fails the install."""
     try:
         rc = install_phone_face(tag=tag, dry_run=dry_run, best_effort=True)
     except Exception as exc:  # best-effort by contract: the install must continue
@@ -339,16 +302,8 @@ def finish_phone(
 ) -> None:
     """aipass install's last step and its closing lines, FPLAN-0642 slice D, DPLAN-0407.
 
-    Through @api's module door: move the bind to the tailnet address, render,
-    install and enable the boot unit, ask the server (a starting unit gets
-    PROBE_TRIES asks), and start it detached when no unit will (start_server).
-    A dry run calls install_unit and enable_unit with dry_run=True and neither
-    set_bind, autostart nor serve_detached.
-
-    The pairing code waits for the person: only on a terminal, without
-    --non-interactive, with the face served on a tailnet bind, the print pauses
-    for Enter and mints after it. Anything else mints nothing and names the pair
-    command. ``sleep`` paces the re-probes; tests hand in one that does not sleep.
+    A dry run never calls set_bind, autostart or serve_detached. A pairing code is minted
+    only on a terminal, without --non-interactive, on a tailnet bind, after Enter.
     """
     if not ready.api:
         print_phone_ready(ready, dry_run=dry_run)

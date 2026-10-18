@@ -4,7 +4,7 @@
 # Description: Every cli module imports, the fence decides, and call-time sites run, with the cwd deleted
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # Category: cli/tests
 # =============================================
 
@@ -24,43 +24,14 @@ import pytest
 
 from aipass.cli.tests import support_fence
 
-# Every cli module must import without a readable working directory, and the
-# handlers fence must still decide without one.
-#
-# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-# reported to this branch by @trigger): ntpath.realpath calls os.getcwd()
-# UNCONDITIONALLY - not only for relative paths, the way posixpath does - and both
-# Path.resolve() and inspect.stack() route through it. So on Windows every one of
-# those reached AT IMPORT is a working-directory read, and a process whose cwd was
-# deleted cannot import the module at all.
-#
-# WHY THIS BRANCH, LOUDLY. The handlers fence at apps/handlers/__init__.py runs at
-# IMPORT time and resolves every frame's path, and most of the fleet imports
-# aipass.cli. A fence that dies without a cwd takes the fleet's renderer with it.
-#
-# THE WORLD injects ntpath's behaviour as a CONDITION rather than a platform, so
-# the defect is reachable from Linux. The injection happens in a child process
-# before any aipass import, so no module has cached the real functions. In-process
-# this property is unobservable - the imports already happened - which is why every
-# world here is a subprocess.
-#
-# WHY THE NTPATH SHAPE IS REQUIRED, and it cost @trigger an hour before they
-# warned us: on POSIX every route inspect.stack() takes to os.path.realpath runs
-# through getabsfile(), whose os.path.abspath raises FileNotFoundError for the
-# relative "<frozen importlib._bootstrap>" filenames an import stack carries - and
-# getmodule() CATCHES FileNotFoundError, so the unguarded
-# `modulesbyfile[os.path.realpath(f)]` below it is never reached. A pin built on a
-# realpath denial alone therefore goes GREEN against a reintroduced
-# inspect.stack(): it measures the module-level resolve() next door, not the stack
-# walk. ntpath has no such early raise. Emulated by giving abspath ntpath's
-# non-raising behaviour while realpath keeps reading cwd - the injection then
-# denies the call the DEFECT actually makes (@memory's rule), not one the platform
-# happens to catch first.
+# ntpath.realpath reads os.getcwd() unconditionally, so on Windows Path.resolve() and
+# inspect.stack() at import die with a deleted cwd. Each world is a child process that
+# emulates ntpath before any aipass import; abspath must not raise as posixpath's does,
+# or getmodule() swallows the error and a reintroduced inspect.stack() stays green.
 
 KIN_PROBE = Path(support_fence.__file__)
 
-# Peers held constant in the HEALTHY world, before the denial, so a failure here
-# names a cli site and never a dependency's.
+# Peers load before the denial, so a failure names a cli site, never a dependency's.
 _PRELOAD = r"""
 import rich.console  # noqa: F401
 import inspect  # noqa: F401
@@ -112,9 +83,7 @@ except FileNotFoundError:
 """
 )
 
-# Every cli site that resolves a path at IMPORT, reached the way the fleet reaches
-# them: the modules door (which imports the handlers as kin), then the package's
-# lazy names. Named one per line so a failure says which step died.
+# Import-time sites reached the way the fleet reaches them, one print per step.
 _SITES = r"""
 import aipass.cli.apps.modules  # noqa: F401
 print("MODULES_OK")
@@ -124,8 +93,7 @@ print("IMPORTED")
 
 SWEEP_WORLD = _NTPATH_PREAMBLE + _SITES
 
-# The CALL-time site: display.print_help() resolves __file__ to print the module
-# reference, and `drone @cli --help` in a dead-cwd world should not traceback.
+# The call-time site: display.print_help() resolves __file__.
 CALL_TIME_WORLD = (
     _NTPATH_PREAMBLE
     + r"""
@@ -198,11 +166,7 @@ class TestTheInstrumentItself:
         _assert_world_is_hostile(result.stdout)
 
     def test_the_denied_world_is_not_so_hostile_that_everything_dies(self):
-        """The negative control: a plain stdlib import must still work.
-
-        Without this, a world that broke ALL imports would satisfy every
-        'did not crash' assertion by never getting far enough to crash.
-        """
+        """The negative control: a plain stdlib import must still work."""
         result = _run(
             _NTPATH_PREAMBLE
             + r"""
@@ -259,17 +223,8 @@ class TestCallTimeSites:
 
 
 class TestStructuralSweep:
-    """AST ban on inspect.stack() in the files that run at import.
+    """AST ban on inspect.stack() in the files that run at import; parsed, not grepped."""
 
-    REQUIRED BY THE ROLLOUT (@memory's rule, relayed by @devpulse): an
-    import-probe cannot see every branch of a stack walk, so a behavioural pin
-    alone can miss a reintroduced inspect.stack(). Parsed, not grepped: a string
-    ban convicts docstrings, and this file's own comments discuss inspect.stack()
-    at length. The two pins are complementary, not redundant — this one convicts
-    the CODE, the worlds above convict the BEHAVIOUR.
-    """
-
-    # Files whose module level runs on import of this branch.
     _IMPORT_TIME_FILES = (
         "apps/handlers/__init__.py",
         "apps/handlers/json/json_handler.py",
@@ -277,7 +232,6 @@ class TestStructuralSweep:
     )
 
     def _branch_root(self) -> Path:
-        # tests/ -> cli/
         return Path(__file__).resolve().parents[1]
 
     def test_no_inspect_stack_call_in_import_time_files(self):
@@ -297,23 +251,13 @@ class TestStructuralSweep:
         )
 
     def test_the_ast_pin_can_actually_fail(self):
-        """Positive control: the matcher must convict the shape it bans.
-
-        Without this the test above is satisfied by a matcher that never
-        matches anything — which is how the old test_quality check scored
-        everyone 100. It drives the SAME matcher the ban uses.
-        Mutant: _inspect_stack_call_lines matches attr "stak" — killed.
-        """
+        """Positive control: the matcher must convict the shape it bans."""
         tree = ast.parse("import inspect\nstack = inspect.stack()\n")
         assert _inspect_stack_call_lines(tree) == [2], (
             "the AST matcher cannot see inspect.stack() — the ban above is vacuous"
         )
 
     def test_the_ast_pin_does_not_convict_a_docstring(self):
-        """A string ban would convict this very file's docstrings. Parsing does not.
-
-        Mutant: _inspect_stack_call_lines also counts string constants that
-        mention inspect.stack( — killed.
-        """
+        """A string ban would convict this very file's docstrings. Parsing does not."""
         tree = ast.parse('"""We used to call inspect.stack() here."""\nx = 1\n')
         assert _inspect_stack_call_lines(tree) == [], "prose mentioning inspect.stack() must not count as a call"

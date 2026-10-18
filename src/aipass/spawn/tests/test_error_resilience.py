@@ -3,7 +3,7 @@
 # Description: Error resilience tests for spawn json_handler
 # Version: 1.0.1
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py's read_json and write_json error handling."""
@@ -17,13 +17,6 @@ import json
 from pathlib import Path
 
 from aipass.spawn.apps.handlers.json.json_handler import read_json, write_json
-
-# Covers: a missing file, corrupt JSON, an empty file, and write_json auto-creating a missing parent dir.
-
-
-# ============================================================================
-# Error Resilience Tests (4 tests)
-# ============================================================================
 
 
 def test_missing_file(tmp_path: Path) -> None:  # ER-001
@@ -45,11 +38,7 @@ def test_corrupt_json(tmp_path: Path) -> None:  # ER-002
 
 
 def test_empty_file(tmp_path: Path) -> None:  # ER-003
-    """An empty file (0 bytes / empty_content) is handled gracefully.
-
-    Writes an empty file, then calls read_json. The handler must not crash
-    on empty content -- it should return None since empty is not valid JSON.
-    """
+    """An empty file (0 bytes / empty_content) is handled gracefully."""
     target = tmp_path / "empty_log.json"
     target.write_text("", encoding="utf-8")
 
@@ -58,11 +47,7 @@ def test_empty_file(tmp_path: Path) -> None:  # ER-003
 
 
 def test_nonexistent_dir(tmp_path: Path) -> None:  # ER-004
-    """Missing parent directory is handled gracefully by write_json.
-
-    Points write_json at a file inside a directory that does not exist.
-    The handler must create the directory automatically (mkdir parents=True).
-    """
+    """Missing parent directory is handled gracefully by write_json."""
     nested_dir = tmp_path / "does_not_exist" / "nested"
     target = nested_dir / "nodir_config.json"
     assert not nested_dir.exists(), "Precondition: directory must not exist"

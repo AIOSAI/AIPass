@@ -3,18 +3,13 @@
 # Description: System-wide Type Error Diagnostics
 # Version: 1.0.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-17
 # =============================================
 
-"""
-System-wide Type Error Diagnostics
+"""System-wide Type Error Diagnostics
 
 Runs pyright on all AIPass branches to detect type errors,
 undefined variables, and other static analysis issues.
-
-Usage:
-    seedgo diagnostics           # All branches
-    seedgo diagnostics @flow     # Specific branch
 """
 
 import sys
@@ -23,19 +18,12 @@ from typing import Dict, List
 
 from aipass.prax import logger
 
-# CLI service
 from aipass.cli import console
 from aipass.cli.apps.modules import error, warning
 
-# JSON handler for logging
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
-
-# Drone services for @ resolution
-
-# Diagnostics handlers
 
 
 def print_branch_diagnostics(result: Dict):
@@ -49,7 +37,6 @@ def print_branch_diagnostics(result: Dict):
     files_analyzed = result.get("total_files", 0)
     files_with_errors = result.get("files_with_errors", 0)
 
-    # Status icon
     if errors == 0:
         status = "[green]✓[/green]"
         color = "green"
@@ -65,7 +52,6 @@ def print_branch_diagnostics(result: Dict):
     console.print(f"  Files: {files_analyzed} analyzed, {files_with_errors} with errors")
     console.print(f"  [{color}]Errors: {errors}[/{color}]  Warnings: {warnings}")
 
-    # Show top files with errors (clickable paths)
     if files_with_errors > 0:
         console.print("  [dim]Top files with errors:[/dim]")
         for file_result in result.get("results", [])[:5]:
@@ -74,7 +60,6 @@ def print_branch_diagnostics(result: Dict):
                 file_errors = file_result["errors"]
                 console.print(f"    • {file_path} [dim]({file_errors} errors)[/dim]")
 
-                # Show first 3 errors per file
                 for diag in file_result["diagnostics"][:3]:
                     line = diag["line"]
                     msg = diag["message"][:60] + "..." if len(diag["message"]) > 60 else diag["message"]
@@ -105,7 +90,6 @@ def print_system_summary(all_results: List[Dict]):
     console.print(f"  Total warnings:        {total_warnings}")
     console.print()
 
-    # Top branches by error count
     if branches_with_errors > 0:
         console.print("[bold]BRANCHES BY ERROR COUNT:[/bold]")
         sorted_results = sorted(all_results, key=lambda x: x.get("total_errors", 0), reverse=True)
@@ -120,31 +104,20 @@ def print_system_summary(all_results: List[Dict]):
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle 'diagnostics' command
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if handled, False if not this module's command
-    """
+    """Handle 'diagnostics' command"""
     if command not in ("diagnostics", "diagnostics_audit"):
         return False
 
-    # A help flag ANYWHERE means explain: `diagnostics aipass --help` used to
-    # answer "Unknown argument" for a question it can answer.
+    # A help flag anywhere means explain.
     if wants_help(None, args):
         print_help()
         return True
 
-    # No args → introspection
     if not args:
         print_introspection()
         return True
 
-    # Unknown argument — fail to error, not fallback
+    # Fail to error, never fall back.
     error(f"Unknown argument: '{args[0]}'")
     warning("This module has no subcommands.")
     console.print("Diagnostics runs through the audit pipeline:")
@@ -214,16 +187,12 @@ if __name__ == "__main__":
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    # Handle help flag or no arguments
     if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]):
         print_help()
         sys.exit(0)
 
-    # Confirm Prax logger connection
     logger.info("Prax logger connected to diagnostics_audit")
 
-    # Log standalone execution
     json_handler.log_operation("diagnostics_run", {"command": "standalone", "args": sys.argv[1:]})
 
-    # Run diagnostics
     handle_command("diagnostics", sys.argv[1:])

@@ -3,19 +3,10 @@
 # Description: Tests for the central writer handler
 # Version: 1.0.2
 # Created: 2026-04-05
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
-
-# Tests for the central writer handler.
-#
-# Covers:
-#   - central_writer.py (count_chroma_vectors, count_archive_files,
-#     get_last_rollover_timestamp, collect_stats, read_central_file,
-#     write_central_file, update_central, get_current_stats)
-#
-# All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — _find_repo_root's delegation to repo_root, in tests/test_repo_root.py
@@ -35,30 +26,18 @@ from aipass.memory.apps.handlers import central_writer
 from aipass.memory.apps.handlers import repo_root as rr
 
 
-# ---------------------------------------------------------------------------
-# Import helper
-# ---------------------------------------------------------------------------
-
-
 def _import_central_writer(monkeypatch, tmp_path):
     """The real central_writer, with every path constant it writes or reads at tmp_path.
 
-    Its json_handler is the conftest's stand-in, the one repo_root's diagnostic
-    reaches too, so an operation count below sees both lanes on one mock.
+    Its json_handler is conftest's stand-in, which repo_root's diagnostic also reaches.
     """
     monkeypatch.setattr(central_writer, "json_handler", sys.modules["aipass.memory.apps.handlers.json"].json_handler)
-    # Redirect all path constants to tmp_path
     monkeypatch.setattr(central_writer, "_MEMORY_ROOT", tmp_path)
     monkeypatch.setattr(central_writer, "CENTRAL_FILE", tmp_path / "central" / "MEMORY.central.json")
     monkeypatch.setattr(central_writer, "CHROMA_DB_PATH", tmp_path / ".chroma")
     monkeypatch.setattr(central_writer, "ARCHIVE_DIR", tmp_path / ".archive")
 
     return central_writer
-
-
-# ---------------------------------------------------------------------------
-# Helper: create a tiny SQLite DB with embeddings table
-# ---------------------------------------------------------------------------
 
 
 def _create_chroma_db(db_path: Path, num_rows: int = 5) -> None:
@@ -71,11 +50,6 @@ def _create_chroma_db(db_path: Path, num_rows: int = 5) -> None:
         cursor.execute("INSERT INTO embeddings (data) VALUES (?)", (f"vec_{i}",))
     conn.commit()
     conn.close()
-
-
-# ===========================================================================
-# Tests: count_chroma_vectors
-# ===========================================================================
 
 
 class TestCountChromaVectors:
@@ -113,11 +87,7 @@ class TestCountChromaVectors:
         assert cw.count_chroma_vectors() == 0
 
     def test_an_unreadable_store_is_never_published_as_zero_vectors(self, monkeypatch, tmp_path):
-        """A store that cannot be counted fails the update; the central file is not written.
-
-        Until leg 3 of DPLAN-0354 the count answered 0 here, the count of an
-        empty store, and update_central published 0 vectors as a success.
-        """
+        """A store that cannot be counted fails the update, never publishes 0 vectors as a success."""
         cw = _import_central_writer(monkeypatch, tmp_path)
         chroma_dir = tmp_path / ".chroma"
         chroma_dir.mkdir(parents=True)
@@ -128,11 +98,6 @@ class TestCountChromaVectors:
         assert result["success"] is False
         assert result["error"]
         assert not cw.CENTRAL_FILE.exists()
-
-
-# ===========================================================================
-# Tests: count_archive_files
-# ===========================================================================
 
 
 class TestCountArchiveFiles:
@@ -183,11 +148,6 @@ class TestCountArchiveFiles:
             cw.count_archive_files()
 
 
-# ===========================================================================
-# Tests: get_last_rollover_timestamp
-# ===========================================================================
-
-
 class TestGetLastRolloverTimestamp:
     """Test get_last_rollover_timestamp file stat reading."""
 
@@ -217,13 +177,7 @@ class TestGetLastRolloverTimestamp:
         result = cw.get_last_rollover_timestamp()
 
         assert result != ""
-        # Should be a valid ISO timestamp string
         assert "T" in result
-
-
-# ===========================================================================
-# Tests: collect_stats
-# ===========================================================================
 
 
 class TestCollectStats:
@@ -233,7 +187,6 @@ class TestCollectStats:
         """Should return dict with total_vectors, total_archives, last_rollover."""
         cw = _import_central_writer(monkeypatch, tmp_path)
 
-        # Set up minimal data
         archive = tmp_path / ".archive"
         archive.mkdir(parents=True)
         (archive / "session.md").write_text("# test", encoding="utf-8")
@@ -244,7 +197,7 @@ class TestCollectStats:
         assert "total_archives" in stats
         assert "last_rollover" in stats
         assert stats["total_archives"] == 1
-        assert stats["total_vectors"] == 0  # no chroma DB
+        assert stats["total_vectors"] == 0
 
     def test_all_zeros_when_empty(self, monkeypatch, tmp_path):
         """Should return zeros/empty when no data exists."""
@@ -255,11 +208,6 @@ class TestCollectStats:
         assert stats["total_vectors"] == 0
         assert stats["total_archives"] == 0
         assert stats["last_rollover"] == ""
-
-
-# ===========================================================================
-# Tests: read_central_file
-# ===========================================================================
 
 
 class TestReadCentralFile:
@@ -307,11 +255,6 @@ class TestReadCentralFile:
             cw.read_central_file()
 
 
-# ===========================================================================
-# Tests: write_central_file
-# ===========================================================================
-
-
 class TestWriteCentralFile:
     """Test write_central_file JSON writing."""
 
@@ -347,18 +290,13 @@ class TestWriteCentralFile:
     def test_write_failure_raises(self, monkeypatch, tmp_path):
         """Should raise Exception on write failure."""
         cw = _import_central_writer(monkeypatch, tmp_path)
-        # Use a file as parent so mkdir fails on all platforms
+        # A file as parent makes mkdir fail on all platforms.
         blocker = tmp_path / "blocker"
         blocker.write_text("I am a file", encoding="utf-8")
         monkeypatch.setattr(cw, "CENTRAL_FILE", blocker / "subdir" / "impossible.json")
 
         with pytest.raises(Exception, match="Failed to write central file"):
             cw.write_central_file({"test": True})
-
-
-# ===========================================================================
-# Tests: update_central
-# ===========================================================================
 
 
 class TestUpdateCentral:
@@ -375,7 +313,6 @@ class TestUpdateCentral:
         assert "stats" in result
         assert "total_vectors" in result["stats"]
 
-        # Verify file was written
         central_file = tmp_path / "central" / "MEMORY.central.json"
         assert central_file.exists()
 
@@ -445,22 +382,7 @@ class TestUpdateCentral:
     def test_logs_operation(self, monkeypatch, tmp_path):
         """Should log update_central exactly once — counted by OPERATION, not by mock.
 
-        THIS PIN WENT RED ON ALL FOUR PYTHON VERSIONS ON CI (2026-08-31, round
-        5) and was green on every developer machine, which is the whole lesson.
-
-        ``assert_called_once()`` counted every call on a mock the CONFTEST
-        installs before import, and ``_import_central_writer`` performs the
-        import inside the test window. On a bare checkout ``repo_root``'s marker
-        walk finds no ``AIPASS_REGISTRY.json``, logs a ``repo_root_fallback``
-        diagnostic through that same mock, and the count is 2. Production was
-        behaving exactly as designed; the TEST pinned a number that depended on
-        whether the machine had a registry above it.
-
-        So the count is now taken over the calls that name THIS operation. That
-        is the claim the test always meant — update_central logs itself, once —
-        and it still catches a double-log of update_central, which a bare
-        ``assert_any_call`` would not. Diagnostics from other lanes ride along
-        without touching it, which is what a diagnostic should be able to do.
+        A bare checkout adds a ``repo_root_fallback`` diagnostic on the same mock.
         """
         cw = _import_central_writer(monkeypatch, tmp_path)
         mock_handler: MagicMock = sys.modules["aipass.memory.apps.handlers.json"].json_handler
@@ -474,19 +396,9 @@ class TestUpdateCentral:
 
 
 class TestTheBareWorldTheOldPinCouldNotSurvive:
-    """CI's world, built here: no marker above the walk, so the fallback fires.
+    """CI's world, built here: no marker above the walk, so the fallback fires and the write still lands.
 
-    @devpulse asked for both worlds stated rather than for the red one to be
-    silenced, and this is the half that was missing. The pin above proves the
-    count is stable WHEN a diagnostic rides along; this one proves the
-    diagnostic genuinely rides along and that the write still lands underneath
-    it. Without it, "counted by operation" would be a claim about a world no
-    test ever builds.
-
-    Only markers on the REAL checkout are denied. A blunt ``lambda: False``
-    was tried first and took 21 unrelated tests down with it — every test that
-    builds its own marker in ``tmp_path`` and expects the walk to find it. A
-    world too hostile to be true does not report CI, it reports the probe.
+    Only the real checkout's markers are denied; tests that build a marker in tmp_path must still find it.
     """
 
     @staticmethod
@@ -530,11 +442,6 @@ class TestTheBareWorldTheOldPinCouldNotSurvive:
         assert len(ours) == 1
 
 
-# ===========================================================================
-# Tests: get_current_stats
-# ===========================================================================
-
-
 class TestGetCurrentStats:
     """Test get_current_stats read-only stats collection."""
 
@@ -574,11 +481,9 @@ class TestGetCurrentStats:
         """Should return actual counts from real test data."""
         cw = _import_central_writer(monkeypatch, tmp_path)
 
-        # Set up chroma DB
         db_file = tmp_path / ".chroma" / "chroma.sqlite3"
         _create_chroma_db(db_file, num_rows=3)
 
-        # Set up archive files
         archive = tmp_path / ".archive"
         archive.mkdir(parents=True)
         (archive / "s1.md").write_text("session 1", encoding="utf-8")

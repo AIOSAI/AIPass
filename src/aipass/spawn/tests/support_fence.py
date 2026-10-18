@@ -3,16 +3,12 @@
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
 
-One source, run from a kin seat (this file) and from foreign seats (copies the
-test writes under tmp). Each import shape is one small function; the table
-SHAPES maps the shape name on argv to it (aipass, DPLAN-0404 leg 8: the
-template's single if/elif ran nine deep against the nesting row).
-"""
+One source, run from a kin seat (this file) and from foreign copies the test writes under tmp."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
@@ -53,18 +49,15 @@ def _dyn() -> None:
 
 
 def _chain() -> None:
-    """The line below names the handlers and reaches the fence through a kin frame
-    (import_named): the shape of an import that comes in through a package
-    __init__ chain. Refused on the line's spelling alone."""
+    """A package __init__ chain: names the handlers, reaches the fence via a kin frame; refused on spelling."""
     kin = importlib.import_module(KIN_PROBE)
     kin.import_named("aipass.spawn.apps.handlers.json.json_handler")
 
 
 def _sibling() -> None:
-    """A frame whose file sits under the fleet root beside this branch, as a sibling
-    branch's would - in an installed wheel that is under site-packages, which the
-    fence must still read as foreign, not as a third-party library. Compiled under
-    that filename; no file is written."""
+    """A frame under the fleet root beside this branch, compiled under that filename; no file is written.
+
+    In a wheel that is site-packages, which the fence must still read as foreign, not third-party."""
     seat = str(Path(aipass.__file__).resolve().parent / "sibling" / "probe.py")
     exec(compile(f"importlib.import_module({HANDLERS!r})", seat, "exec"), {"importlib": importlib})
 

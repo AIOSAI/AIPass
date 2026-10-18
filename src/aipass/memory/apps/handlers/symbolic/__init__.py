@@ -14,40 +14,8 @@
 """
 Symbolic Memory Handler Package — PARKED 2026-08-14.
 
-WHY THIS IS PARKED
-    The Agent Memory Atlas published a code-grounded review of AIPass memory at
-    revision 0d27e5ef (https://neoneye.github.io/agent-memory-atlas/systems/aipass/).
-    Its top criticism: the AUDN deduplicator asks an LLM for a verdict and acts on
-    ``Delete`` without recording what was removed or why — an unauditable deletion
-    in a memory system. The tier was never wired into any live lane (no hook entry,
-    no caller in rollover/extractor/auto_process/search/verify), so nothing depends
-    on it. The owner's ruling, 2026-08-14: park it, revivable, and point at the piece
-    that is actually active.
-
-WHERE THE ACTIVE PIECE IS
-    Compass — @devpulse's curated-truth store. Owned by @devpulse, lives in
-    src/aipass/devpulse, SQLite + FTS5, reached with ``drone @devpulse compass``.
-    It already carries the supersession discipline this tier lacked: a correcting
-    entry archives and links the entry it replaces, so a change of mind leaves a
-    record instead of a hole.
-
-    Note the split: Compass RECALL is gated by @memory's governance engine
-    (apps/modules/governance.py -> handlers/governance/engine.py), which is LIVE on
-    the UserPromptSubmit lane via @hooks' compass_recall. Governance is not parked
-    and is not part of this tier.
-
-HOW TO REVIVE (a park, not a demolition)
-    1. Move the seven files back:
-       tests/parked/symbolic_20260814/handlers/*(disabled).py -> apps/handlers/symbolic/
-       (the original __init__.py is in there too and replaces this file)
-    2. Move tests/parked/symbolic_20260814/modules/symbolic(disabled).py back over
-       apps/modules/symbolic.py
-    3. Uncomment ``from . import symbolic`` in apps/handlers/__init__.py
-    4. Drop the module-level skips at the top of tests/test_symbolic*.py
-    Full detail: tests/parked/symbolic_20260814/README.md
-
-This file stays behind on purpose. A missing package raises ModuleNotFoundError,
-which says nothing about why; this one says who parked it, when, and what to use.
+Kept on purpose: a missing package raises a bare ModuleNotFoundError; this one
+says why it is parked and what to use. Revive: tests/parked/symbolic_20260814/README.md
 """
 
 _PARKED_MESSAGE = (

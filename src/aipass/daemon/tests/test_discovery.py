@@ -3,7 +3,7 @@
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -48,9 +48,6 @@ NOT_ABSENT = (
 )
 
 
-# ── Fixtures ──────────────────────────────────────────
-
-
 @pytest.fixture
 def temp_src_aipass():
     """Create a temp src/aipass tree with .daemon/ files."""
@@ -88,9 +85,6 @@ def sample_registry():
             {"name": "INACTIVE", "email": "@inactive", "path": "src/aipass/inactive", "status": "inactive"},
         ]
     }
-
-
-# ── job validation, through discover_jobs ─────────────
 
 
 KEEP = {"id": "keep", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "kept"}
@@ -135,9 +129,7 @@ class TestValidateJob:
         assert discovered_ids(one_branch, job) == ["keep"]
 
     def test_all_valid_schedule_types(self, one_branch):
-        # The floor. An empty VALID_SCHEDULE_TYPES would make the list below
-        # empty — and _validate_job reads that same set, so emptying it
-        # rejects every job while this unit stayed green. Five, counted live.
+        # The floor: _validate_job reads the same set, so emptying it would leave the list below empty and green.
         assert len(VALID_SCHEDULE_TYPES) == 5, f"expected five schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
         stypes = sorted(VALID_SCHEDULE_TYPES)
         jobs = [{"id": f"t-{stype}", "schedule": {"type": stype}, "prompt": "do stuff"} for stype in stypes]
@@ -150,8 +142,7 @@ class TestValidateJob:
         Let through, a text or null interval raised TypeError in runstate and stopped the tick for every job.
         Mutant killed: the interval_minutes check removed from _validate_job.
         Mutant killed: the isinstance(interval, bool) clause dropped (True read as the number 1).
-        Mutant killed: the upper bound dropped (inf let through); the bound put back to interval <= 0 (nan let
-        through, DPLAN-0354 leg 4).
+        Mutant killed: the upper bound dropped (inf let through); the bound put back to interval <= 0 (nan let through).
         """
         job = {"id": "tick", "schedule": {"type": "interval", "interval_minutes": interval}, "prompt": "x"}
         with caplog.at_level("WARNING"):
@@ -167,13 +158,9 @@ class TestValidateJob:
         assert discovered_ids(one_branch, job) == ["keep", "tick"]
 
     def test_required_keys_constant(self):
-        # prompt left the required set at DPLAN-0338: a job now says exactly one
-        # of prompt or command, which JOB_ACTION_KEYS checks rather than requires.
+        # A job says exactly one of prompt or command: JOB_ACTION_KEYS checks it, REQUIRED_JOB_KEYS does not.
         assert REQUIRED_JOB_KEYS == {"id", "schedule"}
         assert discovery.JOB_ACTION_KEYS == ("prompt", "command")
-
-
-# ── command jobs (DPLAN-0338) ─────────────────────────
 
 
 def command_job(**extra) -> dict:
@@ -261,9 +248,6 @@ class TestCommandJobValidation:
         assert "notify.email works on command jobs only" in caplog.text
 
 
-# ── schedule file loading, through discover_jobs ──────
-
-
 def ids_beside(daemon_dir: Path, raw: str) -> list:
     """The ids discover_jobs() returns when a_bad.json holds `raw`, read before a good schedule.json."""
     (daemon_dir / "a_bad.json").write_text(raw, encoding="utf-8")
@@ -298,19 +282,8 @@ class TestLoadScheduleFile:
         assert ids_beside(one_branch, '{"jobs": "not a list"}') == ["keep"]
 
 
-# ── _build_branch_map ────────────────────────────────
-
-
 class TestCitizenRecordShape:
-    """What daemon builds from @memory's rows.
-
-    The registry READ that used to live here is gone (FPLAN-0460) — it is
-    registry_scope's now, and pinning a copy of it in this file is what let the
-    two definitions drift in the first place. What remains daemon's own is the
-    mapping into the {name, email, dir_name, path, source} record every lane in
-    this branch consumes, and the address refusal @memory deliberately left to
-    each caller.
-    """
+    """What daemon builds from @memory's rows: the {name, email, dir_name, path, source} record."""
 
     def test_record_carries_dir_name_and_source(self, sample_registry, temp_src_aipass):
         root, src = temp_src_aipass
@@ -328,10 +301,7 @@ class TestCitizenRecordShape:
     def test_name_keeps_the_registry_spelling_not_the_directory(self, sample_registry, temp_src_aipass):
         """`name` is the registry's own field, casing and all.
 
-        branch-health looks branches up by the registry spelling (uppercase),
-        so switching to the directory name would break it silently. Pinned
-        because @memory's default is the OTHER one — name_from='path' — and a
-        future reader will wonder why this call passes 'registry'.
+        branch-health looks branches up by the registry spelling (uppercase); @memory's default is name_from='path'.
         """
         root, src = temp_src_aipass
         (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
@@ -532,16 +502,11 @@ class TestDiscoverJobs:
         assert jobs[0]["enabled"] is False
 
 
-# ── projects/* citizens (DPLAN-0287 piece 2) ─────────
-
-
 @pytest.fixture
 def projects_tree(temp_src_aipass, sample_registry):
     """A repo with one framework branch and one project citizen (@proj).
 
-    @proj's registry path — 'src/proj/proj' — deliberately ALSO exists under the
-    repo root: the real tree has exactly this collision for @baud, and resolving
-    a project path repo-first silently picks the wrong directory.
+    @proj's registry path also exists under the repo root (a decoy): resolving a project path repo-first picks it.
     """
     root, src = temp_src_aipass
     (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
@@ -565,10 +530,7 @@ def projects_tree(temp_src_aipass, sample_registry):
 def patched_roots(root: Path, src: Path):
     """Point discovery at a temp repo tree.
 
-    _REGISTRY_FILE is gone with daemon's own reader — @memory resolves the core
-    registry from the root it is handed, so _REPO_ROOT is the only seam the
-    fleet lane needs now. _SRC_AIPASS stays: branch_path_for still falls back to
-    it for an unregistered directory.
+    _REPO_ROOT is the only seam the fleet lane needs; _SRC_AIPASS stays for branch_path_for's unregistered fallback.
     """
     with (
         patch(f"{DISCOVERY}._REPO_ROOT", root),
@@ -630,11 +592,8 @@ class TestProjectCitizens:
     def test_the_duplicate_address_is_refused_by_name(self, projects_tree):
         """Deduplication is daemon's own, on daemon's own axis, and never silent.
 
-        @memory deduplicates by resolved PATH — right for their path-keyed
-        lanes. Two rows with the SAME email and DIFFERENT paths survive that
-        and both reach here, which for an email-keyed scheduler means one
-        citizen's schedule fires twice. Red-first: without the dedup in
-        active_citizens() this returns @testbranch twice.
+        @memory deduplicates by resolved PATH; two rows with the same email and different paths survive that,
+        and an email-keyed scheduler would fire one citizen's schedule twice.
         """
         root, src, _citizen, _decoy = projects_tree
         dupe_root = root / "projects" / "dupe"
@@ -673,8 +632,7 @@ class TestCitizenClass:
     def test_a_trinity_that_cannot_be_read_returns_none(self, tmp_path, caplog, error):
         """Only a passport truly absent is an ordinary citizen; not learning whether it exists is None.
 
-        Path.exists() on 3.12 raised PermissionError out of the call and answered False on ENOTDIR,
-        so an unreadable .trinity either crashed the sweep or read as "" (a worker, possibly a manager).
+        Path.exists() raises on EACCES and answers False on ENOTDIR, so an unreadable .trinity read as "" (a worker).
         Mutant killed: except FileNotFoundError widened to except OSError in citizen_class_for.
         """
         passport = tmp_path / ".trinity" / "passport.json"
@@ -686,8 +644,7 @@ class TestCitizenClass:
     def test_malformed_passport_returns_none(self, tmp_path):
         """A passport that exists but cannot be read answers None, never "" (not a manager).
 
-        "" let a manager whose passport was corrupt be woken by the sweep and put on the rounds roster.
-        Mutant killed: the parse failure answering "" (the code before 2026-09-27).
+        Mutant killed: the parse failure answering "".
         """
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -695,7 +652,7 @@ class TestCitizenClass:
         assert citizen_class_for(tmp_path) is None
 
     def test_non_dict_passport_returns_none(self, tmp_path):
-        """Mutant killed: a non-dict passport answering "" (the code before 2026-09-27)."""
+        """Mutant killed: a non-dict passport answering ""."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("[]", encoding="utf-8")
@@ -713,14 +670,8 @@ class TestCitizenClass:
         assert citizen_class_for(tmp_path) is None
 
 
-# ── Declared residency (DPLAN-0319 wave 3) ───────────
-#
-# The wave's landed semantics, converged on here from @memory's registry_scope
-# 2.0.0 and @ai_mail's registry/read.py. Discovery is registry-led and shallow;
-# classification reads the branch's OWN passport; inside projects/ BOTH keys are
-# required. The exclusion layers are asserted ALONE, because on the live tree
-# the parked projects are refused by every layer at once and each one looks
-# unnecessary until the others are removed.
+# Residency: discovery is registry-led and shallow; classification reads the branch's OWN passport; inside
+# projects/ BOTH keys are required. Each exclusion layer is asserted ALONE: on the live tree they overlap.
 
 REAL_REPO_ROOT = framework_root().parents[1]  # <repo>/src/aipass -> <repo>
 
@@ -1011,12 +962,8 @@ class TestTwoKeyRule:
 class TestParkedProjectPolicyChange:
     """The documented behaviour change: a parked project at depth one is now refused.
 
-    Before this wave every projects/<name>/ subdir was path-walked and any branch
-    its registry marked active became a citizen — a parked project kept its place
-    in the scheduler, the steward rotation and the inbox sweep on the strength of
-    a status field nobody had revisited. The passport is now the second key, and
-    it is the only layer that refuses this case: the project sits one level down
-    with no dot in its path, so neither the depth rule nor the dot filter fires.
+    The passport is the second key and the only layer that refuses this case: the project sits one level
+    down with no dot in its path, so neither the depth rule nor the dot filter fires.
     """
 
     def test_parked_project_refused_by_the_passport_layer_alone(self, core_only):
@@ -1053,13 +1000,8 @@ class TestLiveFleet:
         assert len(active_citizens()) >= 18
 
     def test_every_project_citizen_declares_resident(self):
-        # Narrowed to projects/ deliberately, when the external tier went live
-        # (AIPASS_ROOTS.json blessed 2026-08-30). Externals declare NOTHING and
-        # must not: membership out there is PRESENCE - a passport exists in a
-        # declared root - and the tier label is applied by the reader, never
-        # claimed by the passport. Six live external citizens across four repos
-        # carry no residency field, and requiring one would have made a
-        # six-owner schema campaign the price of the feature.
+        # Narrowed to projects/: externals declare NOTHING and must not; their membership is a passport in a
+        # declared root and the tier label is applied by the reader.
         citizens = [c for c in active_citizens() if c["source"].startswith("projects/")]
         assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
         for citizen in citizens:
@@ -1075,11 +1017,7 @@ class TestLiveFleet:
             assert outside == citizen["source"].startswith("external"), citizen
 
     def test_no_citizen_resolves_under_a_dot_prefixed_component(self):
-        # Compared against the citizen's OWN root, not AIPass home - an
-        # external path is not relative to REAL_REPO_ROOT at all, and the
-        # invariant being held here was never about which repo it lives in.
-        # The .backup/ copies this exists to keep out are equally forbidden
-        # in a declared root.
+        # Compared against the citizen's OWN root: an external path is not relative to REAL_REPO_ROOT.
         citizens = active_citizens()
         assert citizens
         for citizen in citizens:

@@ -5,45 +5,13 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
 
-When the owner runs `claude` in a branch directory, this wrapper presents a menu:
-
-Live session (interactive):
-  hooks — live chat: PID 1234 · abc12345 · interactive · 2h old
-    [Enter]  resume this chat
-    [n]      start new chat   (closes the one above first)
-    [c]      close it and exit
-
-Live session (background):
-  devpulse — live chat: PID 773292 · c624cbcd · background "chroma review" · 2h old
-    [Enter]  resume this chat   (stops bg, reopens as normal chat)
-    [n]      start new chat   (stops bg first)
-    [c]      close it and exit   (stops bg)
-
-No live session:
-  devpulse — no live chat
-    [Enter]  continue last chat
-    [n]      new chat
-
-Dispatched (an agent is WORKING here — outranks every menu above):
-  canary — agent is WORKING here (dispatched · lock PID 1781957 · 2m ago)
-    [Enter]  leave it working and exit
-    [w]      spectate (read-only):  drone @prax monitor run canary
-    [r]      reclaim the seat — STOPS THE JOB, then resumes its chat
-    [n]      new chat  (separate session — steals nothing)
-
-All interactive launches are tmux-wrapped (closed terminal = recoverable).
-
-Special cases:
-  - Already inside tmux → execs claude directly (no nesting).
-  - Headless (-p flag) → execs claude directly.
-
-Entry points:
-  drone @hooks boot [claude args...]
+Menu order: a live dispatch lock outranks the live-session menu, which outranks no-live.
+Interactive launches are tmux-wrapped; inside tmux or headless (-p) it execs claude directly.
 """
 
 import json
@@ -60,10 +28,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 _DEFAULT_ARGS = ["--permission-mode", "bypassPermissions"]
 _CHAT_LIMIT = 5
 
-# After 'r' stops the branch's claudes, the dispatch monitor notices its agent
-# die and surrenders the lock it owns (PID-verified). How long to wait for that
-# handover before refusing to resume — resuming while the lock stands would
-# race the monitor's own cleanup.
+# How long 'r' waits for the dispatch monitor to surrender its lock; resuming before races its cleanup.
 _RECLAIM_WAIT_S = 10.0
 _RECLAIM_POLL_S = 0.5
 
@@ -93,9 +58,7 @@ def _find_tmux() -> str | None:
 def _tmux_session_exists(name: str) -> bool:
     """Check if a tmux session with the given name exists.
 
-    No tmux on this machine is a fact about the world, not a failure: answer
-    "no session" rather than raising. Windows has no tmux at all, and the
-    binary can be absent on any host.
+    No tmux (Windows, or absent) answers "no session" rather than raising.
     """
     try:
         result = subprocess.run(
@@ -113,16 +76,8 @@ def _tmux_session_exists(name: str) -> bool:
 def _tmux_kill_session(name: str) -> bool:
     """Kill a tmux session by name. True when the kill was actually delivered.
 
-    ``check=False`` is not a guard here: a missing tmux raises
-    FileNotFoundError out of ``exec``, before there is any exit code to ignore
-    (seedgo host_portability, arm B). No tmux on this host means there is no
-    session to kill, which is a fact about the world and not a failure of this
-    call — so the exec failure is caught and NAMED rather than swallowed, and
-    the caller learns the kill did not happen.
-
-    The exec failure is the probe, deliberately: a ``shutil.which`` here would
-    read the REAL PATH in every test that mocks ``subprocess.run`` and nothing
-    else, which is the host-coupled unit this standard exists to prevent.
+    A missing tmux raises out of exec (check=False cannot catch it); the exec failure is the probe,
+    since shutil.which would read the real PATH in tests that mock only subprocess.run.
     """
     try:
         subprocess.run(["tmux", "kill-session", "-t", name], check=False)
@@ -135,10 +90,7 @@ def _tmux_kill_session(name: str) -> bool:
 def _find_tmux_session_for_pid(pid: int) -> str | None:
     """Find which tmux session hosts the given PID (as a descendant of a pane).
 
-    Reached while DESCRIBING a live process in the multi-session menu, so an
-    unguarded call here takes the whole menu down with it on any host without
-    tmux — Windows always, and any Linux box where it is not installed. No
-    tmux means no answer, which is exactly what None says.
+    Guarded: the multi-session menu calls it, and a host without tmux must not take the menu down.
     """
     try:
         result = subprocess.run(
@@ -287,12 +239,7 @@ def _stop_session(session: dict, claude_bin: str) -> str:
 def _resume_session(
     session: dict, branch: str, claude_bin: str, defaults: list[str], extra_args: list[str] | None = None
 ) -> dict:
-    """Resume a session — right mechanism per kind.
-
-    bg: takeover (daemon stop + --resume in tmux). Never opens agents view.
-    tmux: attach to existing tmux session.
-    dead-window: --continue in a new tmux session.
-    """
+    """Resume a session — right mechanism per kind."""
     pid = session.get("pid")
     kind = session.get("kind", "unknown")
     ea = list(extra_args or [])
@@ -337,10 +284,6 @@ def _exec_in_tmux(branch: str, session_id: str, claude_cmd: list[str]) -> dict:
     return {"exit_code": 0, "action": "started", "tmux_session": session_name}
 
 
-# =============================================================================
-# CLI VERSION LOCK (P0 residual — DPLAN-0310 lane C)
-# =============================================================================
-
 _MANIFEST_RELATIVE = Path(".claude") / "provider_manifest.json"
 
 
@@ -357,10 +300,7 @@ def _find_manifest() -> Path | None:
 def _pinned_cli_version() -> str:
     """The CLI version this repo is pinned to, or "" when nothing is pinned.
 
-    Lives in .claude/provider_manifest.json under cli.claude.pinned_version —
-    the manifest is already this branch's to maintain, is tracked in the repo so
-    the pin ships with a clone, and is what doctor reads. A pin in a personal
-    settings file could not be reviewed and would not travel.
+    The pin lives in the tracked provider_manifest.json so it ships with a clone and doctor reads it.
     """
     manifest = _find_manifest()
     if manifest is None:
@@ -391,13 +331,7 @@ def _running_cli_version(claude_bin: str) -> str:
 def _warn_on_version_drift(claude_bin: str) -> str:
     """One loud line per boot when the running CLI is not the pinned one.
 
-    The auto-updater self-ran on 2026-08-18 at 21:14 from a process that started
-    before DISABLE_AUTOUPDATER was set — env pins bind at process start, so a
-    long-lived session carried a live updater all day and moved 234 -> 235 under
-    us. The CLI changed the session lifecycle rules (background adoption,
-    /resume refusing) while the code below stayed still, which is why "we had
-    this working for a long time" was true and broken at once. Drift is silent
-    by nature; this is the line that makes it not.
+    CLI versions change the session lifecycle rules this file depends on, and drift is silent.
     """
     pinned = _pinned_cli_version()
     if not pinned:
@@ -416,15 +350,7 @@ def _warn_on_version_drift(claude_bin: str) -> str:
 
 
 def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
-    """Boot Claude Code — present menu when sessions exist.
-
-    Args:
-        cwd: Branch directory (defaults to current working directory).
-        extra_args: Additional arguments to pass to claude (after default args).
-
-    Returns:
-        Result dict with action taken and details.
-    """
+    """Boot Claude Code — present menu when sessions exist."""
     cwd = cwd or str(Path.cwd().resolve())
     branch = Path(cwd).name
     claude_bin = _resolve_claude_binary()
@@ -453,13 +379,8 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
 
     _warn_on_version_drift(claude_bin)
 
-    # FPLAN-0449: a live dispatch lock outranks BOTH menus below. The
-    # dispatch claude writes a session file like any other, so without this
-    # check the live menu offers the JOB as a "live chat" and Enter walks
-    # into the takeover; and the no-live pointer aims Enter at the exact
-    # session the job is working in. Checked after the -p/tmux early exits
-    # on purpose — the dispatch itself boots through -p and must never be
-    # gated by its own lock.
+    # A live dispatch lock outranks both menus, else Enter walks into the job's session. After the
+    # -p exit on purpose: the dispatch itself boots through -p and must not be gated by its own lock.
     lock = _dispatch_lock(cwd)
     if lock is not None:
         return _menu_dispatched(lock, branch, claude_bin, defaults, extra_args, cwd)
@@ -492,10 +413,7 @@ def _get_collateral_bg(branch: str) -> list[dict]:
 
 
 def _daemon_stop(claude_bin: str, branch: str, pid: int | None) -> dict:
-    """Run daemon stop --any with blast-radius confirmation.
-
-    Returns {"ok": True} on success, {"ok": False, "error": "..."} on failure.
-    """
+    """Run daemon stop --any with blast-radius confirmation."""
     collateral = _get_collateral_bg(branch)
     if collateral:
         sys.stderr.write("  Other branches have live bg sessions that will also stop:\n")
@@ -540,12 +458,7 @@ def _daemon_stop(claude_bin: str, branch: str, pid: int | None) -> dict:
 def _takeover_bg(
     session: dict, branch: str, claude_bin: str, defaults: list[str], extra_args: list[str] | None = None
 ) -> dict:
-    """Take over a bg session: daemon stop --any, poll, then --resume in tmux.
-
-    Checks blast radius first (other branches' bg sessions). On daemon stop
-    failure, aborts honestly. Resumes inside a tmux session so a closed
-    terminal is always recoverable.
-    """
+    """Take over a bg session: daemon stop --any, poll, then --resume in tmux."""
     session_id = session.get("sessionId", "")
     pid = session.get("pid")
     ea = list(extra_args or [])
@@ -566,12 +479,7 @@ def _takeover_bg(
 def _is_session_file_present(pid: int | None) -> bool:
     """Check if a CC session file exists for the given PID.
 
-    Home is resolved through cc_sessions._claude_home() rather than
-    `Path.home()` directly: that call raises RuntimeError when expanduser
-    cannot answer (Windows with no %USERPROFILE%), and a presence CHECK must
-    come back True or False, never take the menu down with it. No home means no
-    session file, which is False. Resolution stays LIVE rather than reading the
-    module constant, so a caller that redirects home still moves this lookup.
+    Via cc_sessions._claude_home(), live: Path.home() raises with no %USERPROFILE%, and redirects must move it.
     """
     if pid is None:
         return False
@@ -652,9 +560,7 @@ def _menu_single_close(session: dict, is_bg: bool, branch: str, claude_bin: str)
 def _transcripts():
     """The CC transcript reader, imported on use.
 
-    Handlers stay independent of modules at import time — engine dispatches
-    handlers dynamically, and a top-level module import would make this file
-    unloadable wherever that module is not present.
+    A top-level module import would make this handler unloadable wherever that module is absent.
     """
     import importlib
 
@@ -664,14 +570,7 @@ def _transcripts():
 def _session_pointer():
     """The dispatch session-pointer store, imported on use (same rule as above).
 
-    FPLAN-0448: the branch's `.ai_mail.local/session.json` names the session
-    its seat lives in — written by ai_mail's dispatch on every wake, and by
-    this shim when a human opens or mints a seat. It is the only record that
-    can reach a dispatched session: interactive `-c` refuses headless
-    transcripts outright, so continue-by-mtime lands at the last HUMAN chat
-    no matter how many dispatches ran since. Reading and writing go through
-    session_pointer.py, never by hand — it owns the format, the atomic write,
-    and the trust checks (cwd match + transcript-exists).
+    The only record that reaches a dispatched session (-c refuses headless transcripts); never hand-edit it.
     """
     import importlib
 
@@ -714,13 +613,7 @@ def _open_chat(
     extra_args: list[str] | None,
     cwd: str | None = None,
 ) -> dict:
-    """Open a chosen chat — ATTACH when a brain already holds it, never spawn a second.
-
-    This is the doctrine at the one place a user can violate it by hand: if a
-    live process owns this sessionId, the only correct move is to join that
-    process. Spawning `--resume` against a held sessionId is exactly what put
-    two PIDs on sessionId e4cd682a on 2026-08-18.
-    """
+    """Open a chosen chat — ATTACH when a brain already holds it, never spawn a second."""
     holder = _live_by_session(live).get(chat.get("session_id", ""))
     if holder is not None:
         logger.info(
@@ -730,12 +623,7 @@ def _open_chat(
 
     session_id = chat.get("session_id", "")
     logger.info("[SESSION_BOOT] Resuming transcript %s (no live holder)", session_id[:8])
-    # The chat he just opened IS the seat now — record it, so the next Enter,
-    # the next dispatch, and BAUD's resume door all land here (FPLAN-0448).
-    # Opening under -c had the same effect implicitly (the resumed
-    # transcript's mtime rose); the pointer makes it a written record instead
-    # of a side effect. The attach path above records nothing on purpose:
-    # joining a live seat doesn't change which session is current.
+    # The opened chat is the seat now; the attach path records nothing, joining changes no seat.
     _session_pointer().write_pointer(Path(cwd or Path.cwd()), session_id, "session_boot")
     nf = _name_flag(branch, session_id, extra_args)
     cmd = [claude_bin] + defaults + ["--resume", session_id] + list(extra_args or []) + nf
@@ -782,17 +670,12 @@ def _menu_multi(
 ) -> dict:
     """Two or more live processes — offer the CHATS, and name the processes separately.
 
-    The old menu listed live PIDs and called them the sessions. A chat whose
-    process was Ctrl+C'd has no session file, so the conversation the user wants
-    is precisely the one a PID list cannot contain, while background leftovers
-    are offered as though they were his chats. It also had no continue-last path
-    at all, which the single and no-live menus both carry.
+    A Ctrl+C'd chat has no session file, so a PID list cannot contain the chat the user wants.
     """
     branch_cwd = cwd or str(Path.cwd())
     transcripts = _transcripts().recent_chats(branch_cwd, limit=_CHAT_LIMIT)
 
-    # A live seat may hold a chat older than the listed ones. Showing the process
-    # while hiding the only door into it would repeat the defect in miniature.
+    # A live seat may hold a chat older than the listed ones; list its door too.
     listed = {c.get("session_id") for c in transcripts}
     for session in live:
         sid = str(session.get("sessionId", ""))
@@ -802,11 +685,7 @@ def _menu_multi(
                 transcripts.append(held)
                 listed.add(sid)
 
-    # FPLAN-0448: Enter follows the SEAT'S OWN RECORD, not newest-by-mtime —
-    # mtime is the guess the pointer exists to retire, and it is how a day of
-    # dispatch work vanished behind an older interactive chat. The numbered
-    # list stays the override. No trustworthy pointer → transcripts[0], the
-    # old behaviour.
+    # Enter follows the session pointer, not newest-by-mtime; no trustworthy pointer → transcripts[0].
     default_chat = None
     ptr_sid, ptr_reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
     if ptr_sid:
@@ -913,14 +792,7 @@ def _menu_no_live(
     extra_args: list[str] | None,
     cwd: str | None = None,
 ) -> dict:
-    """Display menu when no live session exists.
-
-    Enter follows the SESSION POINTER when the branch has a trustworthy one
-    (FPLAN-0448) — `--resume <id>` is the only door into a dispatched
-    session, `-c` refuses those transcripts outright. No pointer → the old
-    `--continue`, so a branch that predates the pointer opens exactly as
-    before.
-    """
+    """Display menu when no live session exists."""
     branch_cwd = cwd or str(Path.cwd())
     sid, reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
 
@@ -950,8 +822,7 @@ def _continue_by_pointer(
     branch_cwd: str,
 ) -> dict:
     """Open the branch's recorded seat — `--resume <pointer>` when trustworthy,
-    else the old `--continue`. The shared tail of the no-live Enter and the
-    reclaim door: both mean "give me this branch's current chat"."""
+    else `--continue`."""
     sid, reason = _session_pointer().resolve_resume_target(Path(branch_cwd))
     if sid:
         logger.info("[SESSION_BOOT] Continuing via session pointer: %s", reason)
@@ -967,10 +838,7 @@ def _continue_by_pointer(
 def _dispatch_lock(cwd: str) -> dict | None:
     """The branch's live dispatch lock, or None. READ-ONLY — never unlinks.
 
-    ai_mail's wake owns the lock lifecycle (acquire, PID-verify, stale
-    cleanup) — this probe only asks "is an agent working here right now",
-    so a lock whose PID is dead gates nothing and is left in place for the
-    owner to clean. Format is wake.py's: {pid, timestamp, branch}.
+    ai_mail's wake owns the lock lifecycle and its format {pid, timestamp, branch}.
     """
     import importlib
 
@@ -1002,13 +870,7 @@ def _menu_dispatched(
 ) -> dict:
     """An agent is WORKING in this branch — resume steps aside (FPLAN-0449).
 
-    Resume onto a live dispatch is takeover, not spectate: two claudes on
-    one session id migrate the session's background-task state to the newer
-    PID and the job dies mid-run, unreplied (DPLAN-0310, measured live
-    2026-08-20 — the OSPREY intercept). The presence gate blocks the newer
-    seat's prompts but cannot block that migration, so the DOOR refuses.
-    What remains: wait (Enter), spectate (w), take the seat with eyes open
-    (r), or a fresh chat (n) — a new session id steals nothing.
+    A second claude on one session id takes its background-task state and the job dies; the presence gate cannot stop that.
     """
     branch_cwd = cwd or str(Path.cwd())
     age = ""
@@ -1051,12 +913,7 @@ def _reclaim_dispatched(
     extra_args: list[str] | None,
     branch_cwd: str,
 ) -> dict:
-    """Deliberate takeover: stop the job, wait for its lock, resume its chat.
-
-    The kill is the CHOICE here — this door exists so takeover happens with
-    eyes open instead of by accident. Only after the monitor surrenders the
-    lock is the session unheld and safe to resume with its task state whole.
-    """
+    """Deliberate takeover: stop the job, wait for its lock, resume its chat."""
     import importlib
 
     cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
@@ -1083,12 +940,7 @@ def _start_fresh(
 ) -> dict:
     """Start a fresh Claude session in a new tmux session.
 
-    The session id is MINTED here and the pointer written BEFORE claude
-    starts (FPLAN-0448) — a fresh seat the record never learned about is how
-    the resume doors drift back to mtime guessing. Crash-safe by order: a
-    pointer to a session that never materialized is refused later by the
-    transcript-exists check. Proven live 2026-08-20: interactive claude binds
-    a minted `--session-id` exactly like headless does.
+    The id is minted and the pointer written BEFORE claude starts; a never-born session fails transcript-exists later.
     """
     session_name = _make_session_name(branch)
 

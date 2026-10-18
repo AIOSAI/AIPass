@@ -3,7 +3,7 @@
 # Description: Line-coverage tests for architecture_check.py and checklist.py
 # Version: 1.1.2
 # Created: 2026-04-26
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
@@ -46,11 +46,6 @@ def _lines(text: str) -> List[str]:
 def _windows_form(tmp_path: Path, *parts: str) -> str:
     """The tmp_path-rebuilt path as Windows spells it: a drive letter and backslashes."""
     return str(PureWindowsPath("C:/", *tmp_path.parts[1:], *parts))
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -138,11 +133,6 @@ def _rows(result) -> set:
     return {c["name"] for c in result}
 
 
-# ===========================================================================
-# 1. architecture_check — is_bypassed
-# ===========================================================================
-
-
 class TestIsBypassed:
     """Tests for is_bypassed helper."""
 
@@ -190,11 +180,6 @@ class TestIsBypassed:
 
         rules = [{"standard": "architecture"}]
         assert is_bypassed(str(tmp_path / "file.py"), "architecture", bypass_rules=rules) is False
-
-
-# ===========================================================================
-# 2. architecture_check — check_module (integration)
-# ===========================================================================
 
 
 class TestCheckModule:
@@ -292,11 +277,6 @@ class TestCheckModule:
         assert result["passed"] is False
 
 
-# ===========================================================================
-# 3. architecture_check — check_file_size edge cases
-# ===========================================================================
-
-
 class TestCheckFileSizeEdgeCases:
     """Edge cases for file size boundaries."""
 
@@ -333,11 +313,6 @@ class TestCheckFileSizeEdgeCases:
         result = check_file_size([], "f.py")
         assert result["passed"] is True
         assert "perfect" in result["message"]
-
-
-# ===========================================================================
-# 4. architecture_check — check_handler_independence edge cases
-# ===========================================================================
 
 
 class TestHandlerIndependenceEdgeCases:
@@ -410,11 +385,6 @@ class TestHandlerIndependenceEdgeCases:
         assert result["passed"] is True
 
 
-# ===========================================================================
-# 5. architecture_check — check_domain_organization edge cases
-# ===========================================================================
-
-
 class TestDomainOrganizationEdgeCases:
     """Additional domain organization tests."""
 
@@ -449,11 +419,6 @@ class TestDomainOrganizationEdgeCases:
         assert result is not None
         # my_handler.py is the "domain" — not a technical name, so it passes
         assert result["passed"] is True
-
-
-# ===========================================================================
-# 6. architecture_check — template baseline helpers
-# ===========================================================================
 
 
 class TestLoadIgnorePatterns:
@@ -565,10 +530,7 @@ class TestTransformPath:
         assert "File: mybranch/apps/mybranch.py" in rows
 
     def test_hyphenated_branch_name(self, tmp_path, monkeypatch):
-        """Hyphenated branch: placeholder replaced, then the entry-point rename applied.
-
-        Mutant: entry named from my_branch in apps/handlers/aipass_standards/architecture_check.py — killed.
-        """
+        """Hyphenated branch: placeholder replaced, then the entry-point rename applied."""
 
         rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/{{BRANCH}}.py": "x\n"}, branch_name="my-branch"))
         # branch_lower="my_branch" replaces placeholder -> "apps/my_branch.py"
@@ -576,10 +538,7 @@ class TestTransformPath:
         assert "File: apps/my-branch.py" in rows
 
     def test_dotted_branch_name(self, tmp_path, monkeypatch):
-        """A leading dot is stripped for the entry-point name.
-
-        Mutant: the entry-point rename skipped in apps/handlers/aipass_standards/architecture_check.py — killed.
-        """
+        """A leading dot is stripped for the entry-point name."""
 
         rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/{{BRANCH}}.py": "x\n"}, branch_name=".hidden"))
         # The placeholder replacement gives ".hidden.py"; FILE_RENAMES maps it to "hidden.py"
@@ -625,31 +584,11 @@ class TestScanTemplate:
         assert "File: tests/conftest.py" in rows
 
 
-# ===========================================================================
-# 7. architecture_check — check_template_baseline with mocked templates
-# ===========================================================================
-
-
 class TestCheckTemplateBaselineFull:
     """Full template baseline tests with mocked spawn template dirs."""
 
     def test_a_template_entry_is_spelled_in_posix_on_every_platform(self):
-        """The CI red of 2026-09-08, cured at the producer instead of at the pin.
-
-        `_scan_template` rendered each entry with `str()`, which follows the
-        host, so the Windows leg produced "apps\\something.py" where Linux
-        produced "apps/something.py". Two things broke there and only one of them
-        was visible: the check NAME a branch reads, and the bypass match, which
-        is done against this same text while bypass rules are written with
-        forward slashes - so a deliberate exception silently stopped being
-        honoured on one platform. `_transform_path` already returned posix on its
-        rename branch, so the module disagreed with itself.
-
-        Asserted through `PureWindowsPath`, which behaves the same on every host,
-        because a pin for a platform defect must not itself ask the platform.
-        Mutation caught: `item.relative_to(root).as_posix()` becoming
-        `str(item.relative_to(root))`, which answers "apps\\something.py" here.
-        """
+        """The CI red of 2026-09-08, cured at the producer instead of at the pin."""
         spelled = architecture_check._relative_spelling(
             PureWindowsPath(r"C:\templates\citizen\apps\something.py"),
             PureWindowsPath(r"C:\templates\citizen"),
@@ -679,12 +618,7 @@ class TestCheckTemplateBaselineFull:
         assert "not found" in result[0]["message"]
 
     def test_template_dir_absent_for_registered_class(self, tmp_path, monkeypatch):
-        """A registered class whose template directory is not on disk fails by name.
-
-        This is the environment failure (templates root present, the one template
-        dir missing) — distinct from an unrecognised class, which never reaches
-        the filesystem at all. Both are scored; only this one is about the disk.
-        """
+        """A registered class whose template directory is not on disk fails by name."""
         templates_dir = tmp_path / "templates"
         templates_dir.mkdir()  # root exists, templates/citizen/ deliberately does not
         monkeypatch.setattr(architecture_check, "SPAWN_TEMPLATES_DIR", templates_dir)
@@ -823,11 +757,6 @@ class TestCheckTemplateBaselineFull:
         assert dir_checks[0]["message"] == "Template directory missing (bypassed)"
 
 
-# ===========================================================================
-# 8. checklist — _is_applicable
-# ===========================================================================
-
-
 class TestIsApplicable:
     """Tests for _is_applicable."""
 
@@ -873,10 +802,7 @@ class TestIsApplicable:
         assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "branch.py")) is True
 
     def test_entry_point_scope_matches_entry_on_a_windows_path(self, tmp_path, monkeypatch):
-        """A drive letter and backslashes still name an entry point (compass 458).
-
-        Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
-        """
+        """A drive letter and backslashes still name an entry point (compass 458)."""
         # verdicts' Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
         monkeypatch.setattr(verdicts, "Path", PureWindowsPath)
         checker = MagicMock()
@@ -908,11 +834,6 @@ class TestIsApplicable:
         assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "modules" / "helper.py")) is False
 
 
-# ===========================================================================
-# 9. checklist — handle_command directory mode
-# ===========================================================================
-
-
 class TestHandleCommandDirectoryMode:
     """Tests for handle_command in directory mode."""
 
@@ -938,9 +859,7 @@ class TestHandleCommandDirectoryMode:
         d.mkdir()
         (d / "readme.txt").write_text("not python\n", encoding="utf-8")
 
-        # Refuses since 2026-09-07: it printed ❌ and returned True, which
-        # seedgo.py turned into exit 0 - a caller could not tell "nothing to
-        # check here" from "checked, all clean".
+        # A refusal, not ❌ plus exit 0: a caller must tell "nothing to check here" from "checked, all clean".
         with pytest.raises(CommandRefused) as refused:
             checklist.handle_command("checklist", [str(d)])
         assert refused.value.code == refusal.EXIT_NO_UNITS
@@ -957,11 +876,6 @@ class TestHandleCommandDirectoryMode:
         with pytest.raises(CommandRefused) as refused:
             checklist.handle_command("checklist", [str(d)])
         assert refused.value.code == refusal.EXIT_NO_UNITS
-
-
-# ===========================================================================
-# 10. checklist — handle_command with --pack flag
-# ===========================================================================
 
 
 class TestHandleCommandPackFlag:
@@ -1006,11 +920,6 @@ class TestHandleCommandPackFlag:
         ran.assert_called_once_with(str(f.resolve()), pack_name="aipass", prototype=False)
 
 
-# ===========================================================================
-# 11. checklist — _resolve_pack_path
-# ===========================================================================
-
-
 class TestResolvePackPath:
     """A pack name resolved to its directory, through the command and run_checklist."""
 
@@ -1039,11 +948,6 @@ class TestResolvePackPath:
         assert len(results) == 1
         assert results[0]["passed"] is False
         assert "not found" in results[0]["detail"]
-
-
-# ===========================================================================
-# 12. checklist — _load_bypass_for_file
-# ===========================================================================
 
 
 class TestLoadBypassForFile:
@@ -1100,28 +1004,17 @@ class TestLoadBypassForFile:
         assert probe.check_module.call_args.kwargs["bypass_rules"] == []
 
 
-# ===========================================================================
-# 13. checklist — _format_failure
-# ===========================================================================
-
-
 class TestFormatFailureEdgeCases:
     """A failed checker's one-line detail, through run_checklist."""
 
     def test_format_failure_no_checks_key(self, tmp_path, monkeypatch):
-        """A failed result with no 'checks' key gets the fallback.
-
-        Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed.
-        """
+        """A failed result with no 'checks' key gets the fallback."""
 
         results, _probe = _run_one(tmp_path, monkeypatch, {"passed": False})
         assert "no details" in results[0]["detail"].lower()
 
     def test_format_failure_all_passed(self, tmp_path, monkeypatch):
-        """A failed result whose checks all passed gets the fallback.
-
-        Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed.
-        """
+        """A failed result whose checks all passed gets the fallback."""
 
         results, _probe = _run_one(
             tmp_path, monkeypatch, {"passed": False, "checks": [{"passed": True, "message": "OK"}]}
@@ -1148,11 +1041,6 @@ class TestFormatFailureEdgeCases:
 
         results, _probe = _run_one(tmp_path, monkeypatch, {"passed": False, "checks": [{"passed": False}]})
         assert "Unknown issue" in results[0]["detail"]
-
-
-# ===========================================================================
-# 14. checklist — run_checklist with checker that raises exception
-# ===========================================================================
 
 
 class TestRunChecklistCheckerException:
@@ -1262,11 +1150,6 @@ class TestRunChecklistCheckerException:
         assert "No checkers" in results[0]["detail"]
 
 
-# ===========================================================================
-# 15. checklist — _print_results
-# ===========================================================================
-
-
 class TestPrintResults:
     """The checklist's printed verdicts, through the command, read off stdout."""
 
@@ -1279,10 +1162,7 @@ class TestPrintResults:
         return capsys.readouterr().out
 
     def test_print_all_passed(self, tmp_path, capsys):
-        """All-passed results show a checkmark per standard and the summary.
-
-        Mutant: the summary line's markup unclosed in apps/modules/checklist.py — killed.
-        """
+        """All-passed results show a checkmark per standard and the summary."""
 
         results = [
             {"standard": "architecture", "passed": True, "detail": None},
@@ -1306,10 +1186,7 @@ class TestPrintResults:
         assert "[FAIL] — architecture\n" in out
 
     def test_print_mixed_results(self, tmp_path, capsys):
-        """Mixed results do not print the 'All passed' summary.
-
-        Mutant: the summary printed unconditionally in apps/modules/checklist.py — killed.
-        """
+        """Mixed results do not print the 'All passed' summary."""
 
         results = [
             {"standard": "architecture", "passed": True, "detail": None},
@@ -1317,11 +1194,6 @@ class TestPrintResults:
         ]
         # Check that "All X standards passed" was NOT printed
         assert "standards passed" not in self._printed(tmp_path, capsys, results)
-
-
-# ===========================================================================
-# 16. checklist — handle_command path resolution
-# ===========================================================================
 
 
 class TestHandleCommandPathResolution:
@@ -1355,11 +1227,6 @@ class TestHandleCommandPathResolution:
         assert asked == ["repo root"]
 
 
-# ===========================================================================
-# 17. checklist — _is_entry_point edge cases
-# ===========================================================================
-
-
 class TestIsEntryPointEdgeCases:
     """Additional _is_entry_point edge cases."""
 
@@ -1380,10 +1247,7 @@ class TestIsEntryPointEdgeCases:
         assert _is_entry_point(str(tmp_path / "branch" / "apps" / "branch.py")) is True
 
     def test_valid_entry_point_on_a_windows_path(self, tmp_path, monkeypatch):
-        """A drive letter and backslashes still name an entry point (compass 458).
-
-        Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
-        """
+        """A drive letter and backslashes still name an entry point (compass 458)."""
         # verdicts' Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
         monkeypatch.setattr(verdicts, "Path", PureWindowsPath)
         assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "branch.py")) is True

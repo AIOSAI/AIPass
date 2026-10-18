@@ -3,17 +3,13 @@
 # Description: Embedding Subprocess Handler
 # Version: 2.1.0
 # Created: 2026-03-12
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Embedding Subprocess Handler
 
-Called via subprocess from rollover orchestrator to generate embeddings
-using fastembed (ONNX runtime, no torch dependency).
-
-Input: JSON on stdin with texts to encode
-Output: JSON on stdout with embeddings
+JSON {"texts": [...]} on stdin, JSON embeddings on stdout (fastembed, no torch).
 """
 
 import sys
@@ -34,12 +30,7 @@ def main():
 
         model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 
-        # One text per batch. The model's tokenizer pads to a fixed 128 tokens but
-        # truncates at 256, so a batch holding a text over 128 tokens beside a
-        # shorter one gives numpy rows of different lengths and the whole batch
-        # fails ("inhomogeneous shape"). ai_mail's sent folder met it on every purge
-        # from 2026-09-28 (trigger digest 15638146; leg 9 of DPLAN-0354). 229 mails
-        # embed in about 19 s this way.
+        # batch_size=1: pad 128 / truncate 256 makes mixed-length batches ragged ("inhomogeneous shape").
         ordered = [vector.tolist() for vector in model.embed(list(texts), batch_size=1)]
 
         print(json.dumps({"success": True, "embeddings": ordered, "count": len(ordered), "dimension": 384}))

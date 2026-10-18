@@ -3,25 +3,18 @@
 # Description: Logged Fallback Standards Content Handler
 # Version: 1.0.1
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Logged Fallback Standards Content Handler
-
-Provides formatted Logged Fallback standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_logged_fallback_standards() -> str:
-    """Return formatted logged_fallback standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted logged_fallback standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  silent_catch acquits an except that logs. This rule reads what it RETURNS: a handler",

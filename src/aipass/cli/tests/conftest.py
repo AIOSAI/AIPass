@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for CLI branch tests
 # Version: 4.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""
@@ -15,8 +15,7 @@ from io import StringIO
 from pathlib import Path
 from typing import Generator, List, Tuple
 
-# Redirect prax logs to temp directory during tests
-# Must be set before any prax imports to catch logger initialization
+# Must be set before any prax import, or logger initialization writes the real logs.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -28,41 +27,22 @@ from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import display
 from aipass.trigger.apps.modules import core as trigger_core
 
-# Never discover out of .archive/: it holds verbatim disposal copies (the old
-# handler's tests, the pre-service durability and provisioning suites) that must
-# not be collected or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
+# .archive/ holds verbatim disposal copies of old suites; they must never be collected.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
-# Matches every ANSI escape sequence Rich can emit — colour AND attributes
-# (bold, dim, reset). CSI form: ESC [ params ... final-byte.
+# Every CSI escape Rich can emit: colour and attributes (bold, dim, reset).
 _ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def strip_ansi(text: str) -> str:
-    """Return only the characters a human would SEE in the terminal.
-
-    A display test means to assert what is VISIBLE, not which bytes carried it.
-    Asserting raw output makes the suite a function of the environment: Rich
-    decides whether to emit escapes by probing the terminal, and FORCE_COLOR
-    makes it treat even a StringIO as a colour terminal. `created: 5` then
-    renders as `created: \\x1b[1m5\\x1b[0m`, so the plain substring is genuinely
-    absent from the string while being perfectly legible on screen.
-
-    Learned the expensive way twice in one night, @cli S42 and @daemon S39: the
-    same suite was green at 09:00 and red at 22:00 on byte-identical code,
-    because only the shell had changed. Green in one shell is luck, not proof.
-    """
+    """Return only the characters a human would SEE in the terminal."""
+    # Raw output depends on the shell: FORCE_COLOR makes Rich colour even a StringIO.
     return _ANSI_PATTERN.sub("", text)
 
 
 def make_capture_console(**kwargs):
-    """Build a Console whose rendering the environment CANNOT influence.
-
-    force_terminal=False and color_system=None pin the two knobs FORCE_COLOR,
-    NO_COLOR and TERM move. Callers still assert through strip_ansi(): pinning
-    alone is one env-var away from being wrong again, and @daemon proved that
-    layer failed under TERM=dumb after passing under FORCE_COLOR.
-    """
+    """Build a Console whose rendering the environment CANNOT influence."""
+    # Output still goes through strip_ansi(): pinning alone failed under TERM=dumb.
     buf = StringIO()
     console = Console(
         file=buf,
@@ -100,12 +80,7 @@ class TriggerRecorder:
 @pytest.fixture(autouse=True)
 def trigger_recorder(monkeypatch) -> TriggerRecorder:
     """header() fires cli_header_displayed on the live trigger bus, which has a live
-    handler. display holds the trigger it loaded in _TRIGGER behind _TRIGGER_LOADED,
-    so a replacement at trigger's home comes too late once one header has run; the
-    recorder goes where display looks. The name at trigger's home and Trigger.fire on
-    the class are replaced as well, for any caller that loads the trigger itself: a
-    second copy of display.py, loaded by file path in discover_modules() until leg 3,
-    was one. The decision of the cli branch, fleet green leg 3."""
+    handler; the recorder replaces display's cached _TRIGGER and trigger's own names."""
     recorder = TriggerRecorder()
     monkeypatch.setattr(display, "_TRIGGER", recorder)
     monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
@@ -123,23 +98,8 @@ def clean_command_state() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect cli's json writes into a temp dir.
-
-    autouse=True on purpose: the shim's names write into the real cli_json/
-    unless the seam is set, so a test that forgets to redirect pollutes the
-    branch. The guard belongs on every test, not on the ones that remember.
-
-    The service recomputes its directory on every call, so setting the variable
-    here — after import — still takes effect. The sandbox is MEASURED off the
-    shim rather than spelled out, so it cannot drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    # tmp_path/cli/ in every test and collide with a test that builds a
-    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    """Redirect cli's json writes into a temp dir; autouse, or the real cli_json/ gets them."""
+    # A seam AT tmp_path would create tmp_path/cli/ and collide with a test's own dir.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -148,11 +108,7 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture
 def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
-    """Capture calls made to the entry point's logger.
-
-    Returns:
-        A list that fills with (level, args) tuples as the code under test logs.
-    """
+    """Capture calls made to the entry point's logger as (level, args) tuples."""
     captured: List[Tuple[str, tuple]] = []
 
     class _CapturingLogger:

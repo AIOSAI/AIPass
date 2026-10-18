@@ -3,34 +3,14 @@
 # Description: Host API Serve Module — starting, watching and stopping the server
 # Version: 1.0.1
 # Created: 2026-08-19
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Serve Module
 
-The server's lifecycle at the CLI: run it here, run it detached, ask whether it
-is up, ask it to stop.
-
-Split from host_api.py on 2026-08-19, when adding --detach/status/stop pushed
-that file past its size cap. The seam is a real one rather than an arbitrary
-cut: everything here is about a PROCESS, and everything left there is about
-tokens and stored config.
-
-A MODULE RATHER THAN A HANDLER, after trying it the other way. Handlers do
-not print, and these three commands are almost entirely presentation — so the
-first cut put it under handlers/ and seedgo was right to refuse it. It carries
-its own handle_command() because it genuinely IS a command surface: host_api.py
-offers it the subcommands first and owns everything it declines.
-
-Functions:
-    handle_command()      - Claim serve/status/stop, decline everything else
-    print_introspection() - This module's live self-map
-    flag_value()          - Read the value following a flag
-    cmd_serve()   - Run the server, in this process or its own
-    cmd_status()  - Whether a server is running, who holds it, and where to read it
-    cmd_stop()    - Stop the running server through whoever owns it
-    cmd_autostart() - Render the boot unit and print the host-side install steps
+A module, not a handler: these commands are presentation. host_api.py offers it every host-api call first.
+Reference: docs/host_autostart.md
 """
 
 import sys
@@ -49,17 +29,7 @@ def flag_value(args: List[str], flag: str) -> Optional[str]:
     """
     Read the value following *flag*.
 
-    Shared with host_api.py's token commands. It lives HERE rather than
-    there because host_api imports this module and not the reverse — and a
-    third module for one seven-line function would cost more to find than
-    the slightly odd address does.
-
-    Args:
-        args: Argument list.
-        flag: Flag name, e.g. "--host".
-
-    Returns:
-        The value, or None if the flag is absent or has no value after it.
+    Lives here, shared with host_api.py, because host_api imports this module and not the reverse.
     """
     if flag not in args:
         return None
@@ -107,32 +77,15 @@ def cmd_serve(args: List[str]) -> None:
 
 
 def _serve_foreground(host: Optional[str], port: Optional[int]) -> None:
-    """
-    Run the server in this process until it stops.
-
-    Sits beside `_serve_detached` rather than inside `cmd_serve` so the two
-    ways to start a server keep their refusal handling in one place — they
-    share the D1 exit rule below, and eighty lines of argv parsing between
-    them is how one of the two quietly stops obeying it.
-
-    Args:
-        host: Bind address override, already parsed.
-        port: Port override, already parsed.
-    """
+    """Run the server in this process until it stops."""
     try:
         host_server.serve(host=host, port=port)
     except host_config.BindRefused as e:
-        # The whole point of D1: refuse, explain, and do not start.
         logger.error("[host_api] bind refused, server not started: %s", e)
         error("Bind refused — server not started", suggestion=str(e))
         json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
-        # Non-zero because the UNIT is listening. This ran under
-        # Restart=on-failure with a 60-attempt window built for exactly the
-        # boot race where tailscaled has not yet assigned the address — and a
-        # zero exit silently disarmed all sixty. Measured 2026-09-07: the unit
-        # gave up at 12:19:16, the address arrived at 12:19:22, and nothing
-        # retried. A restart policy that reads as protection and provides none
-        # is worse than no policy, because it is the reason nobody looks.
+        # Non-zero: the unit's Restart=on-failure retries the boot race where tailscaled has not yet
+        # assigned the address; a zero exit disarms every retry.
         sys.exit(1)
     except RuntimeError as e:
         logger.error("[host_api] server could not start: %s", e)
@@ -143,17 +96,7 @@ def _serve_detached(host: Optional[str], port: Optional[int]) -> None:
     """
     Start the server in its own session and hand back where it lives.
 
-    A serve routed through drone is a CHILD of drone's exec timeout — twelve
-    hours on the tailnet server, and @baud read fourteen death-and-restart
-    cycles out of the pane on 2026-08-19. The restart churn cost more than the
-    downtime did: uvicorn's access log goes to stdout, stdout was that pane, and
-    a day of history scrolled out of it. Detached, the child owns its own
-    session and writes to a file, so drone times a launcher that exits in under
-    a second and nothing it does reaches the server.
-
-    Args:
-        host: Bind address override, already parsed.
-        port: Port override, already parsed.
+    A serve under drone is a child of drone's exec timeout; detached, it owns its session and logs to a file.
     """
     try:
         record = host_lifetime.serve_detached(host=host, port=port)
@@ -162,14 +105,10 @@ def _serve_detached(host: Optional[str], port: Optional[int]) -> None:
         error("Cannot start — the supervisor did not answer", suggestion=str(e))
         return
     except host_config.BindRefused as e:
-        # D1 again, and it fires HERE rather than inside the child on purpose:
-        # a refusal an operator has to go and find in a log file is a refusal
-        # that reads as a crash.
+        # Refused here, not in the child: a refusal found only in a log file reads as a crash.
         logger.error("[host_api] bind refused, nothing detached: %s", e)
         error("Bind refused — server not started", suggestion=str(e))
         json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
-        # Same exit rule as the foreground path: a launcher that refuses and
-        # reports success is a launcher whose caller cannot tell it refused.
         sys.exit(1)
     except host_lifetime.LifetimeError as e:
         logger.warning("[host_api] detached serve refused: %s", e)
@@ -192,9 +131,7 @@ def cmd_status() -> None:
     answer = host_lifetime.server_state()
 
     if answer["state"] == "unknown":
-        # NOT "no server". This host runs the server under a unit that writes no
-        # record file, so a swallowed probe would print a confident "nothing is
-        # running" about a server answering requests.
+        # Not "no server": a supervised server writes no record file, so a swallowed probe would lie.
         error("Cannot tell — the supervisor did not answer", suggestion=answer["reason"])
         console.print()
         console.print(f"[dim]Ask it directly: systemctl --user status {host_autostart.unit_name()}[/dim]")
@@ -204,9 +141,6 @@ def cmd_status() -> None:
     if answer["state"] == "none":
         warning("No server is running")
         console.print()
-        # NOT a restart. A dead server that stays dead and says so is the honest
-        # failure — and the answer to "who restarts it" is now systemd, named
-        # here so nobody has to find the autostart verb by accident.
         console.print("[dim]Start one now:      drone @api host-api serve --detach[/dim]")
         console.print("[dim]Start one at boot:  drone @api host-api autostart[/dim]")
         console.print(f"[dim]Its last output, if any: {host_lifetime.log_path()}[/dim]")
@@ -216,15 +150,7 @@ def cmd_status() -> None:
 
 
 def _show_server(record: dict) -> None:
-    """
-    Print a running server's facts.
-
-    Args:
-        record: The live server's record.
-    """
-    # An unknown bind prints as a word rather than as None. A status line
-    # reading "None:None" is a bug report waiting to be filed against the wrong
-    # thing.
+    """Print a running server's facts."""
     bind_host = record.get("host") or "unknown"
     bind_port = record.get("port") or "unknown"
 
@@ -250,8 +176,7 @@ def cmd_stop() -> None:
     try:
         record = host_lifetime.stop()
     except host_autostart.SupervisorUnreachable as e:
-        # Refusing beats signalling into the dark: if a unit IS holding the
-        # server, a bare SIGTERM is a stop its restart policy may undo.
+        # Refuse: if a unit holds the server, a bare SIGTERM is a stop its restart policy may undo.
         logger.warning("[host_api] stop could not reach the supervisor: %s", e)
         error("Cannot stop — the supervisor did not answer", suggestion=str(e))
         return
@@ -268,9 +193,6 @@ def cmd_stop() -> None:
     success(f"Stopped pid {record.get('pid')}")
 
     if record.get("owner") == host_lifetime.OWNER_SUPERVISOR:
-        # Said plainly, because a supervised stop is the one an operator is
-        # entitled to distrust: it is the case where a naive implementation
-        # would have been undone seconds later.
         console.print(f"  [dim]through systemd ({record.get('unit')}) — it stays down until started[/dim]")
         console.print(f"  [dim]Start it again: systemctl --user start {record.get('unit')}[/dim]")
 
@@ -301,13 +223,10 @@ def cmd_autostart(args: List[str]) -> None:
         error("Autostart is not available here", suggestion=str(e))
         return
     except host_config.BindRefused as e:
-        # D1 reaches the unit too: an address refused at the CLI must not be
-        # baked into something that retries it at every boot forever.
         logger.error("[host_api] bind refused, no unit written: %s", e)
         error("Bind refused — no unit written", suggestion=str(e))
         json_handler.log_operation("host_api_bind_refused", {"reason": str(e)})
-        # An operator scripting `autostart && systemctl --user enable ...` must
-        # not reach the enable step when no unit was rendered.
+        # Non-zero so a scripted `autostart && systemctl --user enable ...` stops here.
         sys.exit(1)
     except OSError as e:
         logger.error("[host_api] the unit could not be written: %s", e)
@@ -318,12 +237,7 @@ def cmd_autostart(args: List[str]) -> None:
 
 
 def _show_installation(report: dict) -> None:
-    """
-    Print a rendered unit's install steps and what stands in their way.
-
-    Args:
-        report: The handler's installation report, including any conflict.
-    """
+    """Print a rendered unit's install steps and what stands in their way."""
     success(f"Unit rendered: {report['unit']}")
     console.print()
     console.print("[dim]It is NOT installed — these steps run outside this tree, and are yours:[/dim]")
@@ -339,18 +253,11 @@ def _show_installation(report: dict) -> None:
     if linger is True:
         console.print("[dim]Lingering is already on for this account — the unit starts at boot without a login.[/dim]")
     elif linger is False:
-        # A real warning, routed as one: without the last step the unit waits
-        # for a login that a headless reboot never provides, which is the exact
-        # failure this build exists to end.
         warning("Lingering is OFF — without the last step the unit waits for a login that a reboot never brings")
     else:
         console.print("[dim]Lingering could not be read — run the last step anyway, it is idempotent.[/dim]")
 
-    # THE TRAP THIS CATCHES, and it is live on this host right now: a
-    # hand-started server already holds the port, so `enable --now` starts a
-    # unit that cannot bind, exits non-zero, retries its whole window and ends
-    # in `failed`. The operator reads that as "autostart is broken" when the
-    # actual cause is the server they started themselves this morning.
+    # A hand-started server on the port makes `enable --now` fail to bind, which reads as broken autostart.
     conflict = report.get("conflict")
 
     if conflict is not None:
@@ -362,11 +269,6 @@ def _show_installation(report: dict) -> None:
     console.print()
 
 
-# =============================================
-# DRONE ROUTING
-# =============================================
-
-
 SUBCOMMANDS = {"serve", "status", "stop", "autostart"}
 
 
@@ -374,28 +276,14 @@ def handle_command(command: str, args: List[str]) -> bool:
     """
     Claim the server-lifecycle subcommands of `host-api`.
 
-    Args:
-        command: The routed command name.
-        args: Everything after it, subcommand first.
-
-    Returns:
-        True if this module handled it. False means "not mine" — host_api.py
-        offers every host-api call here first and owns everything declined, so
-        an unknown subcommand still reaches its error message rather than
-        disappearing into a silent True.
+    False means "not mine": host_api.py owns every declined call, so an unknown subcommand reaches its error.
     """
-    # Both spellings, matching host_api.py — `drone @api` bare advertises the
-    # MODULE name while the command is host-api, and a surface that publishes a
-    # spelling which does not work is the surface's bug.
+    # Both spellings: `drone @api` bare advertises the module name while the command is host-api.
     if command not in ("host-api", "host_api"):
         return False
 
-    # NO-ARGS GATE and HELP GATE (seedgo standard). The help gate claims only
-    # this router's own subcommands: `host-api --help` is host_api.py's, and
-    # drone's router offers it to every discovered module in whatever order the
-    # directory listed them. A help flag ANYWHERE in an owned subcommand means
-    # "explain", never "run": checking only args[0] is what once let
-    # `cleanup 30 --help` run a real cleanup.
+    # The help gate claims only owned subcommands (`host-api --help` is host_api.py's); a help flag
+    # anywhere means explain, never run.
     if not args:
         print_introspection()
         return True

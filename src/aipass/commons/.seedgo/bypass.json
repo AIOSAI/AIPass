@@ -156,11 +156,6 @@
       "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
     },
     {
-      "file": "apps/handlers/dashboard/dashboard_writer.py",
-      "standard": "handlers",
-      "reason": "Commons shared database architecture — cross-handler db import + devpulse dashboard integration"
-    },
-    {
       "file": "apps/handlers/notifications/notification_ops.py",
       "standard": "handlers",
       "reason": "Commons shared database architecture — cross-handler db import + commons_identity for caller detection"
@@ -204,16 +199,6 @@
       "file": "apps/handlers/activity/activity_ops.py",
       "standard": "naming",
       "reason": "Redundant prefix — file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
-    },
-    {
-      "file": "apps/handlers/dashboard/dashboard_writer.py",
-      "standard": "naming",
-      "reason": "Redundant prefix — file naming convention inherited from port, all handlers follow {domain}_ops.py pattern for consistency"
-    },
-    {
-      "file": "apps/handlers/notifications/dashboard_pipeline.py",
-      "standard": "deep_nesting",
-      "reason": "_collect_branches_to_update() depth 7 — iterates registry branches with per-branch error handling and file existence checks. Aggregation pattern."
     },
     {
       "file": "apps/handlers/catchup/catchup_ops.py",
@@ -331,11 +316,6 @@
       "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"
     },
     {
-      "file": "apps/handlers/dashboard/dashboard_writer.py",
-      "standard": "naming",
-      "reason": "Local variable, not module-level constant — _write_section_loaded is module-level state flag, not a constant"
-    },
-    {
       "file": "apps/handlers/profiles/profile_queries.py",
       "standard": "deep_nesting",
       "reason": "format_time_ago() depth 5 — tight utility with try/except + if/elif for time delta calculation. Duplicate of feed_ops pattern."
@@ -349,16 +329,6 @@
       "file": "apps/handlers/curation/reaction_queries.py",
       "standard": "unused_function",
       "reason": "get_reaction_summary() — social utility called by other branches via drone @commons for displaying reaction summaries on posts/comments"
-    },
-    {
-      "file": "apps/handlers/dashboard/dashboard_writer.py",
-      "standard": "unused_function",
-      "reason": "write_commons_activity() — low-level dashboard write API used by notification pipeline and external branches pushing activity data"
-    },
-    {
-      "file": "apps/handlers/notifications/dashboard_pipeline.py",
-      "standard": "unused_function",
-      "reason": "update_dashboards_for_event() — event-driven pipeline entry point called by post_ops and comment_ops after new content creation"
     },
     {
       "file": "apps/handlers/notifications/preferences.py",
@@ -378,25 +348,25 @@
     {
       "file": "apps/commons.py",
       "standard": "logged_fallback",
-      "lines": [187],
+      "lines": [115],
       "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "apps/modules/central.py",
       "standard": "logged_fallback",
-      "lines": [85],
+      "lines": [65],
       "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "apps/modules/commons_identity.py",
       "standard": "logged_fallback",
-      "lines": [137],
+      "lines": [109],
       "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "apps/modules/space.py",
       "standard": "logged_fallback",
-      "lines": [281],
+      "lines": [242],
       "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, pinned by test_decorate_refuses_naming_a_failed_caller_lookup (commons' decision, DPLAN-0354 leg 5)"
     },
     {

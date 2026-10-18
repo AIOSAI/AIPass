@@ -3,23 +3,13 @@
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
 # Version: 1.1.2
 # Created: 2026-08-23
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
 
-# Tests for source_file matching in the ChromaDB subprocess handler.
-#
-# Covers: _source_matches, _check_plan, _get_by_source, _delete_by_source,
-# _search_vectors' --branch scope
-#
-# The defect these pin: `plan_label in source_file` is an unanchored substring
-# test, so DPLAN-0012 matches a TDPLAN-0012 filename and the exact-match pin
-# promotes the wrong plan. A label only counts when the character before it is
-# not alphanumeric. The same species in the search filter: `startswith(branch)`
-# sent --branch aipass into aipass_site_local.
-#
-# All tests use a fake collection -- no live ChromaDB.
+# Pins anchored matching: DPLAN-0012 must not match a TDPLAN-0012 filename, and
+# --branch aipass must not reach aipass_site_local. A fake collection, no live ChromaDB.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
@@ -43,11 +33,6 @@ def run(capsys):
         return json.loads(capsys.readouterr().out)
 
     return _run
-
-
-# ---------------------------------------------------------------------------
-# Fake ChromaDB collection
-# ---------------------------------------------------------------------------
 
 
 class _FakeCollection:
@@ -86,11 +71,6 @@ def fake_collection(monkeypatch):
         return collection
 
     return _install
-
-
-# ---------------------------------------------------------------------------
-# 1. _source_matches() -- the anchored predicate
-# ---------------------------------------------------------------------------
 
 
 class TestSourceMatches:
@@ -136,11 +116,6 @@ class TestSourceMatches:
         assert self._found(fake_collection, run, "", "DPLAN-0012") is False
 
 
-# ---------------------------------------------------------------------------
-# 2. _check_plan() -- vectorization verification
-# ---------------------------------------------------------------------------
-
-
 class TestCheckPlanAnchoring:
     """is_plan_vectorized() must not count another plan's chunks as its own."""
 
@@ -179,11 +154,6 @@ class TestCheckPlanAnchoring:
         assert result["source_files"] == ["TDPLAN-0012_hook.md"]
 
 
-# ---------------------------------------------------------------------------
-# 3. _get_by_source() -- the exact-match pin's data source
-# ---------------------------------------------------------------------------
-
-
 class TestGetBySourceAnchoring:
     """The search pin fetches through this -- a wrong row here is pinned at 100%."""
 
@@ -212,11 +182,6 @@ class TestGetBySourceAnchoring:
         assert result["count"] == 2
 
 
-# ---------------------------------------------------------------------------
-# 4. _delete_by_source() -- same predicate, destructive
-# ---------------------------------------------------------------------------
-
-
 class TestDeleteBySourceAnchoring:
     """Unanchored matching here deletes another plan's vectors outright."""
 
@@ -236,11 +201,6 @@ class TestDeleteBySourceAnchoring:
 
         assert result["deleted"] == 1
         assert collection.deleted == ["id_1"]
-
-
-# ---------------------------------------------------------------------------
-# 5. The search pin -- both layers composed
-# ---------------------------------------------------------------------------
 
 
 class TestPinComposition:
@@ -290,13 +250,7 @@ class TestPinComposition:
         assert not any(r.get("similarity") == 1.0 for r in pinned)
 
 
-# ---------------------------------------------------------------------------
-# 6. _search_vectors(branch=...) -- the collection-owner boundary
-# ---------------------------------------------------------------------------
-
-# Names as the live store holds them (memory/.chroma, measured 2026-09-15). Both
-# halves of "<branch>_<type>" may carry an underscore, so "<branch>_" alone is
-# no boundary: aipass_site_local starts with "aipass_".
+# Both halves of "<branch>_<type>" may carry an underscore, so "<branch>_" alone is no boundary.
 _STORE = [
     "ai_mail_email_sent",
     "ai_mail_local",

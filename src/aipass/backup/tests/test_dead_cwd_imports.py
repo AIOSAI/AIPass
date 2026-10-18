@@ -3,7 +3,7 @@
 # Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
 # Version: 2.0.3
 # Created: 2026-08-31
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""
@@ -26,20 +26,9 @@ import pytest
 from aipass.backup.apps.handlers.path import module_paths
 from aipass.backup.tests import support_fence
 
-# The defect (Windows round 4). ntpath.realpath reads os.getcwd()
-# UNCONDITIONALLY - posixpath only does so for relative paths - and
-# Path.resolve() routes through it. So on Windows every resolve() REACHED AT
-# IMPORT is an import-time crash for a process whose cwd was deleted: the module
-# cannot be imported at all.
-# Two injections are needed because they convict different code. World A wraps
-# os.path.realpath to read the cwd first, then denies os.getcwd: this convicts a
-# raw resolve(). It CANNOT convict inspect.stack() - denying getcwd also kills
-# abspath, so getmodule dies at getabsfile inside its own except and stack()
-# completes green for the wrong reason. World B denies os.path.realpath directly
-# and leaves abspath working: this convicts inspect.stack() via getmodule's
-# unguarded realpath at inspect.py:1009.
-# Every probe rides a string pseudo-frame (a -c child), never stdin: linecache
-# caches stdin and the probe would report green while lying.
+# On Windows ntpath.realpath always reads os.getcwd(), so a resolve() at import crashes under a dead cwd.
+# World A (getcwd denied) convicts a raw resolve(); world B (realpath denied) convicts inspect.stack(),
+# which world A lets pass green. Probes run as -c, never stdin: linecache caches stdin and lies green.
 
 
 TEST_FILE = Path(__file__).resolve()
@@ -48,14 +37,9 @@ GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 KIN_PROBE = Path(support_fence.__file__)
 
 
-#: Imported healthy BEFORE any denial. Other branches' cure is their own build;
-#: this suite measures backup. Deliberately NOT preloaded: the optional @api
-#: import inside drive/client, because a preload is a claim you stop testing.
+#: Imported healthy BEFORE any denial; drive/client's optional @api import is not preloaded, so it stays tested.
 PRELOAD = ["aipass.prax", "aipass.cli.apps.modules"]
 
-#: The five live cured sites (handlers, state.backup_timestamps, project.setup,
-#: project.registry, audit.trail); two entry points (apps, apps.backup);
-#: json.json_handler, now a shim over aipass.prax; drive.client, for its optional @api import.
 PROBE_MODULES = [
     "aipass.backup.apps",
     "aipass.backup.apps.backup",
@@ -154,12 +138,7 @@ class TestImportsSurviveADeadCwd:
 class _ResolveDeniedPath(type(Path())):
     """A ``Path`` whose ``resolve()`` refuses, standing in for the dead cwd.
 
-    Installed over ``module_paths.Path`` (the module's own ``from pathlib import
-    Path`` binding), it denies ``resolve()`` to the module under test and to
-    nothing else. ``module_file``'s fallback is reached through the same
-    binding, so it returns one of these: a real ``Path`` in every other respect.
-    It subclasses the concrete class (PosixPath or WindowsPath): on Python 3.10
-    and 3.11 a direct ``Path`` subclass has no ``_flavour`` and cannot be built.
+    Subclasses the concrete class: on Python 3.10/3.11 a direct ``Path`` subclass cannot be built.
     """
 
     def resolve(self, strict: bool = False) -> Path:
@@ -204,12 +183,7 @@ class TestSafePathHelper:
 
 
 class TestDegradedResolutionIsAnnouncedOnce:
-    """A dead cwd fails EVERY resolve, so the report is once per file, not per call.
-
-    One line per call buries the traceback that actually explains the run under
-    its own noise. The set that remembers what was already reported is isolated
-    per test rather than read, so the pin is the stderr the user sees.
-    """
+    """A dead cwd fails EVERY resolve, so the report is once per file, not per call."""
 
     def test_two_degraded_resolutions_of_one_file_write_one_line(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -286,9 +260,7 @@ class TestGuardNeverCallsInspectStack:
         assert _inspect_stack_calls(source) == []
 
 
-#: The kin probe run from a child whose cwd was removed under it. The child asks
-#: the platform whether a process may remove its own cwd and reports what it got;
-#: the probe's own seat is kin, so the fence must answer ALLOWED either way.
+#: The kin probe in a child whose cwd was removed (where the platform allows it): ALLOWED either way.
 _DEAD_CWD_PROBE = """
 import json, os, runpy, sys, tempfile
 seat, shape = sys.argv[1], sys.argv[2]

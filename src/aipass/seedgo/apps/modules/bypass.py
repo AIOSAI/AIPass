@@ -3,23 +3,14 @@
 # Description: Bypass Module — prune the bypass rules that can never match
 # Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """Bypass Module
 
-``bypass prune @branch`` removes the rules in a branch's ``.seedgo/bypass.json``
-that the audit convicts as dead: the file matches nothing on disk, the standard
-is not a checker, or every named line lies past the end of the file. A dead rule
-matches nothing, so removing it moves no score. It is debris that reads as a live
-exception to anyone who opens the file.
-
-Only convicted rules are removed, and a live rule is never touched. A rule with
-a blank ``file`` or ``standard`` is dead as well (a rule needs both to be active,
-owner 2026-09-25 18:55) but is left and named: its reason is the owner's intent,
-and only the owner can rewrite it as named rules. ``--dry-run`` writes nothing.
-
-Run: seedgo bypass prune @flow --dry-run
+``bypass prune @branch`` removes rules the audit convicts as dead; a dead rule
+matches nothing, so no score moves. A rule with a blank ``file`` or ``standard`` is
+named, never removed: its reason is the owner's intent.
 """
 
 import json
@@ -27,24 +18,13 @@ import sys
 from pathlib import Path
 from typing import List
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error as display_error, success, warning
 
-# Handlers (implementation)
 from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches
 from aipass.seedgo.apps.handlers.bypass import dead_rules
@@ -54,7 +34,6 @@ from aipass.seedgo.apps.modules import CommandRefused
 
 #: An argument nobody recognised (handlers/audit_tests/refusal.py's vocabulary).
 EXIT_UNKNOWN_ARGUMENT = 7
-#: A target with nothing to act on: no such branch.
 EXIT_NO_TARGET = 3
 #: The lane could not run: the bypass.json is unreadable or is not JSON.
 EXIT_LANE_FAILED = 2
@@ -63,11 +42,6 @@ _SUBCOMMANDS = {
     "prune": "prune @branch [--dry-run] — remove the rules the audit convicts as dead",
 }
 _FLAGS = ("--dry-run",)
-
-
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -89,20 +63,7 @@ def print_introspection() -> None:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle 'bypass' command.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if handled, False if not this module's command
-
-    Raises:
-        CommandRefused: exit 7 for an unknown subcommand or flag, 3 for an unknown
-            branch, 2 when the branch's bypass.json cannot be read or written.
-    """
+    """Handle 'bypass' command."""
     if command != "bypass":
         return False
 
@@ -129,11 +90,6 @@ def _refuse(token: str, code: int) -> None:
     console.print(f"[dim]Module: {module_file(__file__)}[/dim]")
     console.print()
     raise CommandRefused(code, token)
-
-
-# =============================================================================
-# SUBCOMMAND ORCHESTRATION
-# =============================================================================
 
 
 def _handle_prune(args: List[str]) -> None:
@@ -188,11 +144,6 @@ def _print_outcome(branch: str, dry_run: bool, outcome: dict) -> None:
     elif dry_run and outcome["dead"]:
         console.print("  [dim]Nothing was written. Run without --dry-run to remove them.[/dim]")
     console.print()
-
-
-# =============================================================================
-# HELP
-# =============================================================================
 
 
 def print_help() -> None:

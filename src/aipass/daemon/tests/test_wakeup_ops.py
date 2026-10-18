@@ -3,7 +3,7 @@
 # Description: Tests for the wakeup_ops facade module
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/wakeup_ops.py — the wakeup-ops command and its introspection."""
@@ -16,11 +16,6 @@ from unittest.mock import MagicMock
 
 from aipass.daemon.apps.modules import wakeup_ops
 from aipass.daemon.apps.modules.wakeup_ops import handle_command, print_introspection
-
-
-# =============================================
-# handle_command — routing
-# =============================================
 
 
 class TestHandleCommand:
@@ -62,11 +57,6 @@ class TestHandleCommand:
     def test_status_prints_notifications_archived(self, capsys):
         handle_command("wakeup-ops", ["status"])
         assert "Notifications" in capsys.readouterr().out
-
-
-# =============================================
-# print_introspection
-# =============================================
 
 
 class TestPrintIntrospection:

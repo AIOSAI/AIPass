@@ -3,28 +3,13 @@
 # Description: Centralized log file watcher for system_logs directory
 # Version: 1.3.0
 # Created: 2026-01-31
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 Centralized Log Watcher - Trigger owns all log event detection
 
-Watches system_logs/ for log file changes.
-Detects ERROR/WARNING/INFO entries and fires appropriate events.
-
-Events fired:
-    - error_detected: When ERROR level log detected (Medic v2 pipeline via registry_report)
-    - warning_logged: When WARNING level log detected
-
-An `error_logged` event is named nowhere in the fleet and is fired by nothing. It was
-advertised here and in the log_events help page until 2026-09-15; the line is gone rather
-than kept as vocabulary, because a name with no firer sends a reader looking for a lane
-that does not exist.
-
-Architecture:
-    - Trigger OWNS all file watching (filesystem events)
-    - Prax/AI_Mail RESPOND to events, don't watch themselves
-    - Consolidated from: Prax log_watcher.py, AI_Mail error_monitor.py
+Fires error_detected and warning_logged; no `error_logged` event exists, do not advertise one.
 """
 
 import hashlib
@@ -37,23 +22,14 @@ from aipass.prax import logger
 from aipass.trigger.apps.config import TRIGGER_ROOT
 from aipass.trigger.apps.handlers.json import json_handler
 
-# Logger - use prax system_logger for Error_Handling and Log_Visibility standards
-# logger imported from aipass.prax
-
-# System logs directory (package-relative via config)
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 
-# Sole owner of the system_logs directory (the owner's ruling, 2026-08-14).
-# Named here so the ownership is readable in the code rather than only in a
-# commit message — see start_log_watcher() for what the ruling cost to leave
-# unmade.
+# Sole owner of system_logs; see start_log_watcher() for why this module does not watch it.
 SYSTEM_LOGS_OWNER = "branch_log_events"
 
-# How far down the rotation chain ('<name>.log.1' .. '.N') to look for a
-# rotated-out file. Matches prax RotatingFileHandler backup_count.
+# Must match prax RotatingFileHandler backup_count.
 MAX_BACKUP_CHAIN_DEPTH = 3
 
-# Try to import watchdog
 try:
     from watchdog.observers import Observer as WatchdogObserver
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
@@ -65,44 +41,17 @@ except ImportError:
     WatchdogObserver = None  # type: ignore
     WatchdogFileSystemEventHandler = object  # type: ignore
 
-# Global observer instance
 _log_observer: Any = None
 
 
 def generate_error_hash(module_name: str, message: str) -> str:
-    """
-    Generate hash for error deduplication.
-
-    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
-    so its tests call it by name.
-
-    Args:
-        module_name: Module that generated the error
-        message: Error message content
-
-    Returns:
-        8-character hash string
-    """
+    """Generate hash for error deduplication."""
     content = f"{module_name}:{message}"
     return hashlib.md5(content.encode()).hexdigest()[:8]
 
 
 def detect_branch_from_log(log_file: str) -> str:
-    """
-    Detect branch from log filename.
-
-    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
-    so its tests call it by name.
-
-    Log files follow pattern: branch_operation.log
-    Example: seedgo_audit.log -> SEEDGO
-
-    Args:
-        log_file: Log filename or path
-
-    Returns:
-        Branch name in uppercase
-    """
+    """Detect branch from log filename: seedgo_audit.log -> SEEDGO."""
     try:
         name = Path(log_file).stem
         if "_" in name:
@@ -115,18 +64,7 @@ def detect_branch_from_log(log_file: str) -> str:
 
 
 def detect_log_level(log_line: str) -> str:
-    """
-    Detect log level from log line content.
-
-    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
-    so its tests call it by name.
-
-    Args:
-        log_line: Raw log line
-
-    Returns:
-        'error', 'warning', 'info', or 'debug'
-    """
+    """Detect log level from log line content."""
     if " - ERROR - " in log_line or " ERROR " in log_line or "[ERROR]" in log_line:
         return "error"
     if " - WARNING - " in log_line or " WARNING " in log_line or "[WARNING]" in log_line:
@@ -139,20 +77,7 @@ def detect_log_level(log_line: str) -> str:
 
 
 def parse_log_message(log_line: str) -> str:
-    """
-    Extract clean message from log line.
-
-    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
-    so its tests call it by name.
-
-    Raw format: [BRANCH_NAME] TIMESTAMP | SOURCE | LEVEL | MESSAGE
-
-    Args:
-        log_line: Raw log line
-
-    Returns:
-        Cleaned message content
-    """
+    """Extract clean message from log line: [BRANCH_NAME] TIMESTAMP | SOURCE | LEVEL | MESSAGE."""
     if " | " in log_line:
         parts = log_line.split(" | ")
         if len(parts) >= 4:
@@ -163,18 +88,7 @@ def parse_log_message(log_line: str) -> str:
 
 
 def extract_module_name(log_line: str) -> str:
-    """
-    Extract module name from log line.
-
-    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
-    so its tests call it by name.
-
-    Args:
-        log_line: Raw log line
-
-    Returns:
-        Module name or 'unknown'
-    """
+    """Extract module name from log line."""
     if " | " in log_line:
         parts = log_line.split(" | ")
         if len(parts) >= 2:
@@ -183,18 +97,7 @@ def extract_module_name(log_line: str) -> str:
 
 
 def should_skip_log(log_line: str) -> bool:
-    """
-    Filter out initialization noise.
-
-    Public since fleet green leg 4 (2026-09-29): a parser this module exists for,
-    so its tests call it by name.
-
-    Args:
-        log_line: Raw log line
-
-    Returns:
-        True if line should be skipped
-    """
+    """Filter out initialization noise."""
     noise_patterns = [
         "Initializing ",
         "Module initialized",
@@ -212,11 +115,7 @@ def should_skip_log(log_line: str) -> bool:
 
 
 class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else object):  # type: ignore[misc]
-    """
-    Watch log files and fire Trigger events.
-
-    Centralized watcher - all log event detection goes through here.
-    """
+    """Watch log files and fire Trigger events."""
 
     def __init__(self):
         """Initialize log watcher with position tracking."""
@@ -225,16 +124,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         self.log_inodes: Dict[str, int] = {}
 
     def _record_position(self, file_path: str, position: int) -> None:
-        """
-        Record byte position and inode identity for a watched file.
-
-        The inode is what later proves a shrunken file was rotated away
-        (renamed to '<name>.log.1') rather than truncated in place.
-
-        Args:
-            file_path: Path to log file
-            position: Byte offset already processed
-        """
+        """Record byte position and inode; the inode tells rotation from in-place truncation."""
         self.log_positions[file_path] = position
         try:
             self.log_inodes[file_path] = Path(file_path).stat().st_ino
@@ -246,25 +136,8 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         """
         Process the unread tail of a log file that was just rotated away.
 
-        The rotated file is located BY INODE across the backup chain
-        ('<file_path>.1' .. '.MAX_BACKUP_CHAIN_DEPTH', stopping at the first
-        gap): the only file drained is the one whose CURRENT inode matches the
-        inode recorded for the live path - proof it is literally the file we
-        were reading, now renamed. No match anywhere in the chain, a backup
-        shorter than the recorded position, or an unknown inode all skip
-        silently rather than re-fire old errors.
-
-        DELIBERATE SCOPE LIMIT: when the match is found at '.2' or later, at
-        least one whole backup rotated past unseen. Those skipped backups are
-        NOT replayed - re-reading a full backup would fire a flood of events
-        for already-historical lines, which is worse than the gap. Only the
-        matched file's own tail is drained, and one warning names the file and
-        the number of skipped backups so the loss is visible in the log
-        instead of silent.
-
-        Args:
-            file_path: Path to the live log file
-            last_pos: Byte offset processed before the rotation
+        Only the backup whose inode matches the recorded one is drained; anything uncertain skips rather than re-fires.
+        Backups skipped past are deliberately not replayed (a flood of historical events is worse than the gap).
         """
         known_inode = self.log_inodes.get(file_path)
         if not known_inode or last_pos <= 0:
@@ -310,14 +183,8 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
         """
         Read new content from a log file and process lines.
 
-        Rotation is detected by INODE, not by size: a fresh log can already
-        have grown past the recorded offset by the time the event arrives, and
-        a size-only check would then seek into the middle of a brand new file.
-        An inode of 0 (possible on some Windows filesystems) means "unknown"
-        and falls back to the size-based check.
-
-        Args:
-            file_path: Path to log file
+        Rotation is detected by inode, not size: a fresh log may already be past the old offset.
+        Inode 0 (some Windows filesystems) means unknown and falls back to the size check.
         """
         stats = Path(file_path).stat()
         current_size = stats.st_size
@@ -351,11 +218,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             self._record_position(file_path, f.tell())
 
     def on_modified(self, event):
-        """
-        Handle log file modification events.
-
-        Reads new content and fires appropriate Trigger events.
-        """
+        """Handle log file modification events."""
         if event.is_directory:
             return
 
@@ -369,14 +232,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             logger.warning("Failed to read log file '%s': %s", file_path, exc)
 
     def _process_log_line(self, branch: str, log_line: str, log_file: str) -> None:
-        """
-        Process a log line and fire appropriate events.
-
-        Args:
-            branch: Branch name
-            log_line: Raw log line
-            log_file: Path to log file
-        """
+        """Process a log line and fire appropriate events."""
         try:
             from aipass.trigger.apps.modules.core import trigger
 
@@ -397,7 +253,6 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             }
 
             if level == "error":
-                # Route through Medic v2: registry_report() for dedup/count, then error_detected
                 try:
                     from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
@@ -439,11 +294,7 @@ class LogFileWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else o
             logger.warning("Failed to process log line from '%s': %s", log_file, exc)
 
     def initialize_positions(self) -> None:
-        """
-        Initialize log positions to END of existing files.
-
-        Only show NEW entries after watcher starts.
-        """
+        """Initialize log positions to END of existing files."""
         if not SYSTEM_LOGS_DIR.exists():
             return
 
@@ -458,26 +309,7 @@ def start_log_watcher() -> Any:
     """
     Decline to start — `branch_log_events` owns system_logs.
 
-    The owner ruled on 2026-08-14 that double-watching this directory is wasted
-    CPU and, worse, duplicate signal: both watchers registered it, so one
-    condition minted two escalation signatures with different attribution. The
-    branch watcher resolved the owning branch from the filename, this one
-    reported UNKNOWN, and the operator got the same repeat warning twice under
-    two names — measured at 4 of 14 digests in 24h (APLAN-0008).
-
-    The branch watcher keeps the coverage: it globs `system_logs/*.log`
-    alongside the per-branch logs and carries the parsing, the branch mapping
-    and the staleness handling this module never had. The ruling ends the
-    duplicate, not the watching.
-
-    Everything else here stays live and tested — position tracking, parsing,
-    `stop_log_watcher`, `is_log_watcher_active` — because this module remains
-    the system_logs reader that `initialize_positions` and the catch-up scan
-    use. Only the observer registration is withdrawn.
-
-    Returns:
-        None, always. Kept as the documented start contract so callers that
-        check for an observer take their existing not-started path.
+    A second observer mints duplicate escalation signatures. Returns None always; callers take the not-started path.
     """
     logger.info(
         "[TRIGGER] system_logs is watched by %s — centralized observer not started (the owner's ruling, 2026-08-14)",
@@ -510,12 +342,7 @@ def stop_log_watcher() -> None:
 
 
 def is_log_watcher_active() -> bool:
-    """
-    Check if log watcher is running.
-
-    Returns:
-        True if watcher is active
-    """
+    """Check if log watcher is running."""
     return _log_observer is not None and _log_observer.is_alive()
 
 

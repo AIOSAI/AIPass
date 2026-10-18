@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Delegates rollover detection to @memory and triggers rollover if overdue."""
@@ -17,8 +17,7 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# @memory prints this on the fleet line AND on the todos line of `rollover
-# check` (todo_report.READY_PHRASE) - the one phrase this handler greps.
+# Contract with @memory's todo_report.READY_PHRASE: the one phrase this handler greps.
 READY_PHRASE = "ready for rollover"
 
 
@@ -50,10 +49,7 @@ def _find_repo_root() -> Path | None:
 def _compacting_branch(hook_data: dict) -> str | None:
     """The branch whose session is compacting, by directory name, or None.
 
-    DPLAN-0345: @memory rolls ONE branch's todo pad per call, the branch named by
-    --branch or the one drone's caller cwd sits in. drone runs here with cwd =
-    repo root and re-stamps AIPASS_CALLER_CWD with it, so without the flag no
-    branch resolves and no pad rolls. Same resolve as pre_compact_prep.
+    drone runs here from the repo root, so without --branch @memory resolves no pad to roll.
     """
     cwd = hook_data.get("cwd", "") or str(Path.cwd())
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
@@ -121,12 +117,7 @@ def handle(hook_data: dict) -> dict:
 
     logger.info("[HOOKS] rollover: overdue files detected — %s", check_output.replace("\n", " | "))
 
-    # Everything above is read-only and runs for real under the probe. This is
-    # the mutation: `rollover run` archives and TRIMS memory across the fleet,
-    # and @memory resolves its own roots — neither cwd nor AIPASS_HOME reaches
-    # it (measured 2026-09-06: the name appears nowhere in @memory's tree), so
-    # the refusal has to live at the call. Info, not warning: under a probe this
-    # is the designed path, not a fault.
+    # `rollover run` trims fleet memory and ignores cwd and AIPASS_HOME, so the probe must stop it here.
     if _probe_run():
         logger.info("[HOOKS] rollover: probe run — check ran, fleet rollover suppressed")
         return {"stdout": "", "exit_code": 0, "sound": "pre compact rollover"}

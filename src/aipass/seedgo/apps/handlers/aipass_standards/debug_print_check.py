@@ -3,15 +3,13 @@
 # Description: Debug Print Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Debug Print Standards Checker Handler
 
-Detects bare print() calls that should use structured logging (Prax/Rich).
-Excludes lines inside docstrings, comments, doctests, and
-``if __name__ == "__main__":`` blocks.
+Reference: debug_print.md
 """
 
 import re
@@ -22,18 +20,14 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# APPLIES_TO: a stray print in a test pollutes the same stdout a test asserts on.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
-# Matches a bare print( call: not preceded by a word char, dot, or #
-# This excludes console.print(, logger.print(, etc.
+# Not preceded by a word char, dot or #, so console.print( and logger.print( pass.
 _PRINT_RE = re.compile(r"(?<![.#\w])print\(")
 
-# Doctest / interactive example lines to skip (>>> and ...)
 _DOCTEST_RE = re.compile(r"^\s*(\.\.\.|>>>)\s")
 
-# Test file name patterns
 _TEST_FILE_RE = re.compile(r"^(test_.+|.+_test|conftest)\.py$")
 
 # String literals — strip content before regex to avoid false positives on print( inside strings
@@ -41,13 +35,7 @@ _STRING_LITERAL_RE = re.compile(r'""".*?"""|\'\'\'.*?\'\'\'|"(?:[^"\\]|\\.)*"|\'
 
 
 def _is_in_main_block(lines: list[str], lineno: int) -> bool:
-    """
-    Return True if the line at *lineno* (1-based) is inside an
-    ``if __name__ == "__main__":`` block.
-
-    Uses indentation: the flagged line must have greater indentation than the
-    ``if __name__`` header found by scanning backwards.
-    """
+    """Return True if the line at *lineno* (1-based) is inside an ``if __name__ == "__main__":`` block."""
     main_block_indent: int | None = None
     for i in range(lineno - 2, -1, -1):  # scan backwards (0-based)
         stripped = lines[i].strip()
@@ -66,11 +54,8 @@ def _is_in_main_block(lines: list[str], lineno: int) -> bool:
 
 
 def _scan_file(file_path: Path) -> tuple[list[int], str | None]:
-    """
-    Scan a single .py file for bare print() calls.
-
-    Returns:
-        (line_numbers, error_message) -- error_message is None on success.
+    """Scan a single .py file for bare print() calls.
+    Returns (line_numbers, error_message); error_message is None on success.
     """
     try:
         source = file_path.read_text(encoding="utf-8", errors="ignore")
@@ -86,7 +71,6 @@ def _scan_file(file_path: Path) -> tuple[list[int], str | None]:
     for lineno, line in enumerate(lines, start=1):
         stripped = line.strip()
 
-        # -- Docstring state machine --
         for tq in ('"""', "'''"):
             count = line.count(tq)
             if count == 0:
@@ -94,7 +78,6 @@ def _scan_file(file_path: Path) -> tuple[list[int], str | None]:
             if not in_docstring:
                 in_docstring = True
                 docstring_char = tq
-                # Opening and closing on the same line (one-liner)
                 if count >= 2:
                     in_docstring = False
                     docstring_char = None
@@ -105,22 +88,18 @@ def _scan_file(file_path: Path) -> tuple[list[int], str | None]:
         if in_docstring:
             continue
 
-        # Skip comment lines
         if stripped.startswith("#"):
             continue
 
-        # Skip doctest / interactive example lines
         if _DOCTEST_RE.match(line):
             continue
 
-        # Strip inline comments and string literal contents before checking
         code_part = line.split("#")[0]
         code_part = _STRING_LITERAL_RE.sub('""', code_part)
 
         if not _PRINT_RE.search(code_part):
             continue
 
-        # Skip if inside `if __name__ == "__main__":` block
         if _is_in_main_block(lines, lineno):
             continue
 
@@ -130,24 +109,9 @@ def _scan_file(file_path: Path) -> tuple[list[int], str | None]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check a Python file for bare debug print() calls.
-
-    Args:
-        module_path: Path to the Python file to check.
-        bypass_rules: Optional list of bypass rules to skip certain checks.
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': 'DEBUG_PRINT'
-        }
-    """
+    """Check a Python file for bare debug print() calls."""
     path = Path(module_path)
 
-    # -- Bypass entire standard for this file --
     if is_bypassed(module_path, "debug_print", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -162,7 +126,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DEBUG_PRINT",
         }
 
-    # -- Skip __init__.py --
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -178,7 +141,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DEBUG_PRINT",
         }
 
-    # -- Skip test files --
     if _TEST_FILE_RE.match(path.name):
         return {
             "passed": True,
@@ -194,7 +156,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DEBUG_PRINT",
         }
 
-    # -- Validate file exists --
     if not path.exists():
         return {
             "passed": False,
@@ -209,7 +170,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DEBUG_PRINT",
         }
 
-    # -- Scan --
     hit_lines, error = _scan_file(path)
 
     if error is not None:
@@ -226,10 +186,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "DEBUG_PRINT",
         }
 
-    # -- Filter out bypassed lines --
     non_bypassed = [ln for ln in hit_lines if not is_bypassed(module_path, "debug_print", ln, bypass_rules)]
 
-    # -- Build result --
     checks: list[Dict] = []
 
     if not non_bypassed:

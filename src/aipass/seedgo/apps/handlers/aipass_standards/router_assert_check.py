@@ -3,40 +3,13 @@
 # Description: Router Assert Standards Checker Handler
 # Version: 1.1.1
 # Created: 2026-09-20
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Router Assert Standards Checker Handler
 
-Convicts a test whose ONLY oracle is a command router returning ``is True``.
-
-Every router in this fleet returns ``True`` on the path it took and on the
-path it refused to take, so ``assert handle_command(...) is True`` passes
-whether the command ran, printed an error, or did nothing at all. The test
-named "unknown subcommand -- error displayed to user" asserts that a function
-returned the same constant it returns for success.
-
-``is False`` is NEVER convicted. A decline is a whole contract: the router
-recognising that a command is not its own is the entire behaviour under test,
-and there is no effect to assert beyond the return value.
-
-This is a PROHIBITION, not a requirement. Nothing here says a test must
-contain a particular string -- the v4 ``test_quality_check.py`` scored the
-literal ``"is True"`` as a positive and agents duly supplied 224 of them,
-which is how this defect was manufactured in the first place.
-
-Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
-
-  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
-    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
-    real row with a percentage and it moves the branch score.
-  * ``check_module`` in the per-file checklist lane -- the same function, fired
-    by the PostToolUse hook, so the rule also meets an author on the write.
-
-The ``check_branch_info`` backlog line retired with that ruling: an unscored
-grey line was the workaround for a corpus that handed this checker no files,
-and the scored row is the record now.
+Reference: router_assert.md
 """
 
 import ast
@@ -52,26 +25,14 @@ AUDIT_SCOPE = "all_files"
 
 STANDARD = "ROUTER_ASSERT"
 STANDARD_KEY = "router_assert"
-# A file nothing could read or parse: judged by nobody here, and said so (ruff convicts a parse error).
 NOT_JUDGED = "Not judged: the file cannot be read or does not parse (ruff convicts that)"
 
-# The callees whose return value is a routing verdict rather than a result.
-# Deliberately a short closed list: every one of these is the "did any module
-# claim this command" protocol in apps/<branch>.py and apps/modules/*.py, and
-# all of them answer True for "I handled it", including "I handled it by
-# printing an error". A wider list (any function returning a bool) would
-# convict real predicates, whose True IS the behaviour.
+# A short closed list: each is the "did any module claim this command" protocol and answers True even when it
+# handled the command by printing an error. A wider list would convict real predicates, whose True IS the behaviour.
 ROUTER_NAMES: frozenset[str] = frozenset({"handle_command", "route_command", "main", "handle"})
 
-# A call to any of these means the unit DOES assert an effect, without using
-# an `assert` statement to do it. mock's assert_* family raises on its own,
-# and pytest.raises/warns are oracles in a context manager.
-#
-# Leading underscores are stripped before the prefix test, which is not
-# cosmetic: aipass's test_help_flag.py:174 asserts the whole effect through
-# a module-local helper named ``_assert_nothing_happened``, and matching only
-# "assert_" convicted it. That was the one false positive in the first
-# precision sample, and it is the shape a shared oracle helper takes.
+# A call to any of these asserts an effect without an `assert` statement (mock's assert_*, pytest.raises/warns).
+# Leading underscores are stripped first: a module-local ``_assert_nothing_happened`` helper is an oracle too.
 _EFFECT_CALL_PREFIX = "assert"
 _EFFECT_CALL_NAMES: frozenset[str] = frozenset({"raises", "warns", "deprecated_call"})
 
@@ -101,9 +62,7 @@ def _is_router_call(node: ast.AST) -> bool:
 def _router_bound_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
     """Local names bound to a router call anywhere in the unit.
 
-    ``result = handle_command(...)`` followed by ``assert result is True`` is
-    the same test as the one-liner, and it is the more common shape: 130 of
-    this branch's own hits assign first.
+    ``result = handle_command(...)`` then ``assert result is True`` is the same test as the one-liner.
     """
     bound: set[str] = set()
     for node in ast.walk(func):
@@ -120,9 +79,7 @@ def _router_bound_names(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str
 def _is_sole_router_true(test: ast.expr, bound: set[str]) -> bool:
     """Whether an assert's expression is exactly ``<router result> is True``.
 
-    ``is False`` fails this deliberately, and so does ``==``: a test written
-    with ``== True`` is a different (weaker) claim and not the shape the owner
-    ruled on. Widening this is a separate rule with its own evidence.
+    ``is False`` fails this deliberately, and so does ``==``: ``== True`` is a weaker claim, another rule's job.
     """
     if not isinstance(test, ast.Compare):
         return False
@@ -140,9 +97,7 @@ def _is_sole_router_true(test: ast.expr, bound: set[str]) -> bool:
 def _asserts_an_effect(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """Whether the unit carries an oracle that is not an ``assert`` statement.
 
-    A test that only calls ``console.print.assert_called_once_with(...)`` has
-    no ``assert`` statement at all and must never be convicted for it -- it is
-    asserting precisely the effect this rule asks for.
+    A test that only calls ``console.print.assert_called_once_with(...)`` asserts the effect; never convict it.
     """
     for node in ast.walk(func):
         name = _callee_name(node)
@@ -165,13 +120,9 @@ def _test_functions(tree: ast.AST) -> List[ast.FunctionDef | ast.AsyncFunctionDe
 def find_violations(source: str) -> Optional[List[Tuple[int, str]]]:
     """Every convicted unit in this source, as (line of the unit, its name).
 
-    A unit is convicted when it HAS assertions and every one of them is a
-    router's ``is True`` -- one honest assertion anywhere else acquits the
-    whole unit, because the test then proves something the router's return
-    value does not.
+    Convicted when it HAS assertions and every one is a router's ``is True``; one other assertion acquits it.
 
-    None when the source does not parse: nothing was judged, which is not the
-    [] of a file with no violation (seedgo fleet green leg 14).
+    None when the source does not parse: nothing was judged, which is not the [] of a clean file.
     """
     try:
         tree = ast.parse(source)
@@ -212,15 +163,7 @@ def _result(passed: bool, message: str, score: int) -> Dict:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file for units whose only oracle is a router's True.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file for units whose only oracle is a router's True."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, "Standard bypassed via .seedgo/bypass.json", 100)
 

@@ -3,82 +3,13 @@
 # Description: Retired Token Docstring Standards Checker Handler
 # Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Retired Token Docstring Standards Checker Handler
 
-The v4 keyword auditor (``test_quality``, removed in commit c1e0eeed) scored a
-test file by grepping it for keyword patterns. Agents learned the grep and
-wrote the keywords into test docstrings as bait:
-
-  ``test_cli_routing.py:762``   "Test output capture -- capsys, capfd, StringIO tokens."
-  ``test_handlers_filesystem.py:175``   "Second call doesn't fail -- no_overwrite, already_exists."
-
-The gate is gone; the cargo stays, and it tells a reader nothing about what the
-test proves. This rule convicts it, in docstrings only (module, class,
-function). Comments and other strings are not judged.
-
-THE VOCABULARY is the retired file's own ``STANDARD_CATEGORIES``, taken from
-two commits and embedded verbatim below as their union -- 10 categories, 48 items:
-  * c1e0eeed^ (the commit that removed the file), 7 categories and 28 items:
-    ``V4_CATEGORIES``.
-  * 7cd59aa4^ (the parent of DPLAN-0325 part B, 2026-09-03, which retired 20
-    items), the same path apps/handlers/aipass_standards/test_quality_check.py:
-    ``V4_RETIRED_EARLIER`` holds the 20 items only it carries -- whole
-    categories json_handler, exception_contracts, data_structure_contracts, and
-    mock_json_handler, ensure_returns_bool, load_correct_type, returns_dict,
-    sys_modules_mock, reimport_after_mock. The auditor graded against them for
-    months, so their bait is still in the fleet.
-Nothing is added to either: ``patterns, whitelist`` reads like bait and is not
-v4's, so it is not convicted.
-
-CODE-SHAPED. A plain English pattern (``yield``, ``corrupt``, ``operation``,
-``is True``) is how people write about tests and never counts on its own. A
-term is code-shaped when it is a category or item name with an underscore, or
-a pattern holding one of ``_ ( ) . -``, or CamelCase (``StringIO``,
-``ValueError``), or one of ``capsys capfd tmp_path rmtree makedirs mkdir``.
-Four item names have no underscore -- ``cleanup``, ``load``, ``save``,
-``validate`` -- and are English: they never count for T2, and a T1 run needs a
-code-shaped term besides them ("validate tokens" is about auth, not v4).
-
-QUOTED CODE. A span in backticks is emptied before judging: inside one a
-docstring quotes code (``save_json(module_name, json_type, data)``, a real
-signature), it does not list keywords. No run crosses a quoted span.
-
-TWO SHAPES, one finding per docstring:
-  * T1 TOKEN LABEL -- a run of v4 terms (any category or item name, or a
-    code-shaped pattern; at least one code-shaped) that the docstring labels
-    ``token``/``tokens``: ``capsys, capfd, StringIO tokens``, ``output_capture
-    token``. "token" was the auditor's word for its patterns; the label is the
-    fingerprint.
-  * T2 BAIT LIST -- two or more code-shaped v4 terms in a row, separated by
-    nothing but commas, slashes, ``and``/``or`` and whitespace.
-
-CHECK FIRST (2026-09-25, 596 fleet test files; .archive and seedgo fixtures out).
-The first cut read T1 as "says token ANYWHERE and names a v4 term": 20 files,
-27 docstrings, and 11 of its 15 T1 hits were "token" in its own sense -- an argv
-token beside ``--help`` (daemon, drone, trigger, seedgo, hooks), a shell token
-beside ``mkdir``, a wrapped tmp_path "mid-token" (canary, spawn), api's auth
-tokens. So the label must FOLLOW the run. Three T2 hits were
-``print_introspection and print_help`` naming real functions (api x2, seedgo
-test_checkers_batch7): those two items are the fleet's own CLI contract, so
-they can lengthen a bait list but never make one. After both: 7 files
-convicted, 13 docstrings (T1 4, T2 12, both 3) -- backup 2 files / 8, api 3 / 3,
-commons 1 / 1, drone 1 / 1; every one read and every one cargo. The model file
-passes.
-
-CHECK AGAIN with the 7cd59aa4^ items (2026-09-25, 598 files; backup had cured
-its 8 live). c1e0eeed^ alone: 5 files, 5 docstrings (api 3, commons 1, drone 1).
-The union: 7 files, 8 docstrings -- api test_init_provisioning now also names
-returns_dict; memory test_contracts 2 new (``_create_default / ValueError``,
-``invalid_mode / invalid_type`` -- cargo); aipass conftest 1 new
-(``log_operation and ensure_module_jsons`` naming the two functions its
-mock_json_handler fixture patches -- read as a false positive, left standing:
-quoting them in backticks cures it). Two more in seedgo
-test_json_handler_contract.py were the signature ``(module_name, json_type)``
-in backticks -- the QUOTED CODE rule, which changes none of the other hits.
+Reference: retired_token_docstring.md
 """
 
 import ast
@@ -95,13 +26,10 @@ AUDIT_SCOPE = "all_files"
 
 STANDARD = "RETIRED_TOKEN_DOCSTRING"
 STANDARD_KEY = "retired_token_docstring"
-# A file that does not parse: judged by nobody here, and said so (ruff convicts a parse error).
 NOT_JUDGED = "Not judged: the file does not parse (ruff convicts that)"
 
-#: Provenance (1 of 2): STANDARD_CATEGORIES of apps/handlers/aipass_standards/test_quality_check.py
-#: as of c1e0eeed^ (the commit that removed it), kept in
-#: docs.local/v4_test_quality_check.py.txt. Copied, not edited: this rule convicts
-#: THAT vocabulary and no other.
+#: Provenance 1 of 2: test_quality_check.py's STANDARD_CATEGORIES as of c1e0eeed^, kept in
+#: docs.local/v4_test_quality_check.py.txt. Copied, not edited: this rule convicts THAT vocabulary only.
 V4_CATEGORIES: Dict[str, Dict[str, Tuple[str, ...]]] = {
     "cli_routing": {
         "help_flag": ("--help",),
@@ -147,14 +75,8 @@ V4_CATEGORIES: Dict[str, Dict[str, Tuple[str, ...]]] = {
     },
 }
 
-#: Provenance (2 of 2): the items ONLY the older STANDARD_CATEGORIES carries -- the same file
-#: as of 7cd59aa4^, the parent of the commit (DPLAN-0325 part B, 2026-09-03) that
-#: retired 20 of them, kept in docs.local/v4_test_quality_check_7cd59aa4parent.py.txt.
-#: Copied, not edited. The auditor graded against these for months, so the bait they
-#: taught is still in the fleet (``returns_dict, isinstance(result, dict), json_type
-#: tokens``). Every other item at 7cd59aa4^ is in V4_CATEGORIES with the same patterns
-#: or a subset of them (``empty_file`` gained ``test_empty``, ``command_returns_bool``
-#: gained ``, bool)`` after it), so nothing else differs.
+#: Provenance 2 of 2: the items ONLY the 7cd59aa4^ STANDARD_CATEGORIES carries, kept in
+#: docs.local/v4_test_quality_check_7cd59aa4parent.py.txt. Copied, not edited; every other item is in V4_CATEGORIES.
 V4_RETIRED_EARLIER: Dict[str, Dict[str, Tuple[str, ...]]] = {
     "json_handler": {
         "default_factory": (
@@ -348,8 +270,7 @@ def docstrings(tree: ast.Module) -> List[Tuple[int, str]]:
 def scan(source: str) -> Optional[List[Tuple[int, str, List[str]]]]:
     """(line, shape, terms) for every docstring in the file that carries v4 cargo.
 
-    None when the source does not parse: nothing was judged, which is not the
-    [] of a file with no cargo (seedgo fleet green leg 15).
+    None when the source does not parse: nothing was judged, which is not the [] of a clean file.
     """
     try:
         tree = ast.parse(source)
@@ -384,15 +305,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check that no test docstring carries the retired v4 auditor's keywords.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check that no test docstring carries the retired v4 auditor's keywords."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -410,8 +323,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not findings:
         return _result(True, _one_check(True, "No docstring carries the retired v4 keywords"), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per docstring would hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(
         f"{path.name}:{line} docstring carries v4 cargo [{shape}] {', '.join(terms)} - {CURE}"
         for line, shape, terms in findings

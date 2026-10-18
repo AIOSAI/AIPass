@@ -3,29 +3,13 @@
 # Description: Google API Client Module — public API for Google services
 # Version: 1.1.0
 # Created: 2026-03-14
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Google API Client Module
 
 Public API for Google service access across AIPass.
-Consumers import from here — never directly from handlers.
-
-Provides:
-- get_drive_service()      → Authenticated Google Drive v3 client
-- get_google_service()     → Any Google API service (Calendar, Sheets, etc.)
-- authenticate_google()    → Run OAuth2 flow and return credentials
-- validate_google()        → Check if valid credentials exist
-- reauth_google()          → Force re-authentication
-
-Consumer pattern:
-    from aipass.api.apps.modules.google_client import get_drive_service
-    service = get_drive_service()
-    service.files().list(...).execute()
-
-Thread-safe pattern (for concurrent workers):
-    service = get_drive_service(thread_safe=True)
 """
 
 import os
@@ -46,11 +30,6 @@ from aipass.prax import logger  # noqa: F401
 import aipass.api.apps.handlers.google.auth as google_auth
 import aipass.api.apps.handlers.google.service_factory as google_factory
 import aipass.api.apps.handlers.google.retry as google_retry
-
-
-# =============================================
-# MODULE INTROSPECTION
-# =============================================
 
 
 def print_introspection() -> None:
@@ -112,33 +91,17 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================
-# COMMAND HANDLING (drone @api validate google, etc.)
-# =============================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle Google client commands routed via drone.
-
-    Args:
-        command: Command name (e.g. "validate", "reauth")
-        args: Command arguments — first arg should be "google"
-
-    Returns:
-        True if command was handled, False to pass through.
-    """
-    # NO-ARGS GATE (seedgo standard)
+    """Handle Google client commands routed via drone."""
     if not args:
         if command == "google":
             print_introspection()
             return True
         return False
 
-    # Only handle commands with "google" as the provider argument
     if args[0] != "google":
         return False
 
-    # Help gate — only fires after confirming this is a google command
     remaining = args[1:] if len(args) > 1 else []
     if remaining and remaining[0] in ("--help", "-h", "help"):
         print_help()
@@ -152,11 +115,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     return False
-
-
-# =============================================
-# CLI COMMAND IMPLEMENTATIONS
-# =============================================
 
 
 def _cmd_validate() -> None:
@@ -234,24 +192,8 @@ def _cmd_reauth() -> None:
         json_handler.log_operation("google_reauth", {"status": "failed"})
 
 
-# =============================================
-# PUBLIC API — Cross-branch imports
-# =============================================
-
-
 def get_drive_service(thread_safe: bool = False) -> object:
-    """Get an authenticated Google Drive v3 service object.
-
-    Args:
-        thread_safe: If True, builds an isolated service instance
-            with fresh credentials from disk (for concurrent workers).
-
-    Returns:
-        Authenticated Drive v3 service object.
-
-    Raises:
-        RuntimeError: If authentication fails or libraries unavailable.
-    """
+    """Get an authenticated Google Drive v3 service object."""
     return get_google_service("drive", "v3", thread_safe=thread_safe)
 
 
@@ -263,21 +205,7 @@ def get_google_service(
 ) -> object:
     """Get an authenticated Google API service object.
 
-    Supports any Google API: Drive, Calendar, Sheets, Gmail, etc.
-
-    Args:
-        service_name: Google API service (e.g. "drive", "calendar").
-        version: API version (e.g. "v3").
-        scopes: OAuth2 scopes. Uses service-specific defaults if not provided.
-        thread_safe: If True, builds an isolated instance for concurrent use.
-
-    Returns:
-        Authenticated service object.
-
-    Raises:
-        RuntimeError: If authentication fails or libraries unavailable. A
-        google_auth.GoogleAuthUnavailable (a RuntimeError) carries the
-        library's own reason (api, fleet green leg 10).
+    Raises RuntimeError, a contract @backup's DriveClient relies on; GoogleAuthUnavailable is one.
     """
     if not google_auth.is_available():
         raise RuntimeError(
@@ -300,56 +228,20 @@ def get_google_service(
 
 
 def authenticate_google(scopes: Optional[list] = None) -> bool:
-    """Run Google OAuth2 authentication.
-
-    Args:
-        scopes: OAuth2 scopes to request.
-
-    Returns:
-        True if authentication succeeded.
-
-    Raises:
-        google_auth.GoogleAuthUnavailable: load, refresh or consent flow failed
-        (api, fleet green leg 10).
-    """
+    """Run Google OAuth2 authentication."""
     creds = google_auth.authenticate(scopes=scopes)
     return creds is not None
 
 
 def validate_google(scopes: Optional[list] = None) -> bool:
-    """Check if valid Google credentials exist.
-
-    Args:
-        scopes: OAuth2 scopes to validate against.
-
-    Returns:
-        True if valid credentials exist.
-
-    Raises:
-        google_auth.GoogleAuthUnavailable: the saved file does not load or the
-        refresh failed (api, fleet green leg 10).
-    """
+    """Check if valid Google credentials exist."""
     return google_auth.validate_credentials(scopes=scopes)
 
 
 def reauth_google(scopes: Optional[list] = None) -> bool:
-    """Force Google re-authentication.
-
-    Args:
-        scopes: OAuth2 scopes to request.
-
-    Returns:
-        True if re-authentication succeeded.
-
-    Raises:
-        google_auth.GoogleAuthUnavailable: the consent flow failed
-        (api, fleet green leg 10).
-    """
+    """Force Google re-authentication."""
     creds = google_auth.reauth(scopes=scopes)
     return creds is not None
-
-
-# Re-export retry utility for consumers that make raw API calls
 
 
 def api_call_with_retry(*args, **kwargs):
@@ -361,10 +253,6 @@ def is_ssl_error(error):
     """Check if an error is an SSL-related error."""
     return google_retry.is_ssl_error(error)
 
-
-# =============================================
-# STANDALONE EXECUTION
-# =============================================
 
 if __name__ == "__main__":
     args = sys.argv[1:]

@@ -5,17 +5,11 @@
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 HOOKS Branch - Main Orchestrator
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Skips names marked (disabled) — the fleet's retirement convention
-- Routes commands to discovered modules automatically
-- No manual imports or routing needed
 """
 
 import os
@@ -35,10 +29,6 @@ if sys.platform == "win32":
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, err_console
-
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
 _DISABLED_MARK = "(disabled)"
@@ -183,11 +173,6 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
     """Entry point for drone routing."""
     modules = discover_modules()
@@ -214,15 +199,8 @@ def main() -> int:
     if handle_command(args[0], args[1:]):
         return 0
 
-    # Name what was actually rejected, not just args[0]. "hooksound sideways" used
-    # to report "Unknown command: hooksound" — and hooksound IS a known command, so
-    # the caller was told the wrong token was wrong. A renamed sub-verb read as a
-    # missing top-level command. Exit stays 1; only the wording was ever dishonest.
-    # STDERR, not stdout (2026-09-07, todo 16 open since 09-03). A refusal is
-    # not output: `drone @hooks bogus > file` used to write the complaint into
-    # the file and leave the terminal silent. @flow already routes its refusal
-    # to stderr; @hooks was the outlier. Exit stays 1 — that is still the
-    # contract; the stream is now the fleet's.
+    # Name what was rejected, not just args[0]: a bad sub-verb must not read as an unknown command.
+    # STDERR, not stdout: a refusal is not output. Exit 1 is the contract.
     attempted = " ".join(args[:3])
     err_console.print(f"Unknown command: {attempted}. Try: drone @hooks --help")
     return 1

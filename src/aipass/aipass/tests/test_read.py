@@ -3,7 +3,7 @@
 # Description: Tests for aipass read — branch README rendering
 # Version: 1.3.1
 # Created: 2026-08-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/read.py — aipass read command."""
@@ -25,11 +25,6 @@ from aipass.aipass.apps.modules.read import COMMAND, handle_command
 _ENCODING = "utf-8"
 
 _MOD = "aipass.aipass.apps.modules.read"
-
-
-# =============================================================================
-# TestHandleCommand — routing
-# =============================================================================
 
 
 class TestHandleCommandRouting:
@@ -56,11 +51,6 @@ class TestHandleCommandRouting:
             assert handle_command("read", ["--info"]) is True
         out, _err = capsys.readouterr()
         assert "Module:" in out
-
-
-# =============================================================================
-# TestBranchList — bare invocation
-# =============================================================================
 
 
 class TestBranchList:
@@ -94,11 +84,6 @@ class TestBranchList:
                 handle_command("read", [])
         out, _err = capsys.readouterr()
         assert "zeta_brand_new" in out
-
-
-# =============================================================================
-# TestRenderReadme — read <branch>
-# =============================================================================
 
 
 class TestRenderReadme:

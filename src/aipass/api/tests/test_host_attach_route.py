@@ -3,16 +3,10 @@
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""
-
-# Split out of test_host_attach.py along the unit under test (api, the
-# oversize split leg, 2026-10-08): what has to be true before a PTY exists,
-# who the socket lets in, which room a seat reaches, and the liveness ping.
-# The room and the pump live in test_host_attach_pump.py; the socket's
-# records in test_host_attach.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
@@ -43,9 +37,7 @@ from aipass.api.tests.support_host_attach import (
     wait_for_log,
 )
 
-# The patch targets stay this file's own constants rather than the support
-# module's: seedgo's discarded_patch rule reads a target imported from this
-# branch's package as one it judges, and these silence loggers on purpose.
+# Own constants, not the support module's: discarded_patch judges a target imported from this package.
 PATCH_ATTACH_JSON = "aipass.api.apps.handlers.host.attach.json_handler"
 PATCH_ATTACH_LOGGER = "aipass.api.apps.handlers.host.attach.logger"
 PATCH_SERVER_JSON = "aipass.api.apps.handlers.host.server.json_handler"
@@ -53,26 +45,12 @@ PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
 
 
-# The portable door onto this process's own open descriptors: Linux serves it
-# as a symlink to /proc/self/fd, macOS mounts fdescfs there. /proc itself is
-# Linux-only and reading it is what took this file's leak census down on the
-# macOS runner (run 34704362515).
+# Portable: Linux symlinks /dev/fd to /proc/self/fd, macOS mounts fdescfs there; /proc is Linux-only.
 FD_DIR = "/dev/fd"
 
 
 def _open_descriptors(listdir: Any = None) -> int:
-    """
-    Count the descriptors this process holds open.
-
-    Args:
-        listdir: What lists the directory; None means os.listdir, resolved at
-            call time. Handed in by the no-/proc census case, so that case
-            manufactures its host without replacing os.listdir for the whole
-            process (api, fleet green leg 5).
-
-    Returns:
-        The number of open descriptors, the listing's own handle included.
-    """
+    """Count the descriptors this process holds open."""
     lister = listdir if listdir is not None else os.listdir
     return len(lister(FD_DIR))
 
@@ -93,34 +71,22 @@ class TestOpeningAnAttach:
             host_attach.open_attach("")
 
     def test_a_room_override_needs_no_branch(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
-        """
-        The shell door: a named room IS the subject, so the branch-required
-        rule steps aside. The session's label falls back to the room name —
-        a shell has no branch, and an empty label in the logs is a session
-        nobody can point at.
-        """
+        """The shell door: a named room IS the subject, so the branch-required
+        rule steps aside, and the label falls back to the room name."""
         attached_to = []
         with patch.object(host_attach, "client_command", lambda room: attached_to.append(room) or ["cat"]):
             session = host_attach.open_attach("", cwd=tmp_path, room="baud-shell-aipass")
 
         try:
-            # What the product DID with the room: the client it built targets it.
             assert attached_to == ["baud-shell-aipass"]
             assert session.branch == "baud-shell-aipass"
-            # The session answers for the room it attached, not another (api, fleet green leg 3).
-            # Mutant: AttachSession handed a room other than the one client_command got.
             assert session.room == attached_to[0]
         finally:
             session.hangup()
 
     def test_a_watch_is_read_only_at_the_layer_that_counts(self, quiet: Any, tmp_path: Path) -> None:
-        """
-        The desktop holds the no-keyboard line twice — xterm's `disableStdin`
-        up top and `pty_write`'s refusal underneath, 'the one that counts'.
-        This is our underneath: a polite client never sends bytes, but the
-        SESSION refusing them is what makes tier-0 a contract rather than a
-        client habit.
-        """
+        """The desktop holds the no-keyboard line twice — xterm's `disableStdin`
+        up top and `pty_write`'s refusal underneath; the SESSION refusing is what makes tier-0 a contract."""
         with patch.object(host_attach, "monitor_command", lambda target: ["cat"]):
             session = host_attach.open_monitor("seedgo", cwd=tmp_path)
 
@@ -153,9 +119,6 @@ class TestOpeningAnAttach:
 
     def test_a_missing_tmux_is_named_rather_than_shrugged_at(self, quiet: Any) -> None:
         """'Attach failed' with no subject is a support ticket."""
-        # The product's own binary name pointed at one no PATH holds, so the real
-        # lookup answers absent; shutil.which is not replaced for the process
-        # (api, fleet green leg 10).
         with patch.object(host_attach, "TMUX_BINARY", "aipass-no-such-tmux"):
             with pytest.raises(host_attach.AttachUnavailable) as caught:
                 host_attach.open_attach("api")
@@ -164,20 +127,8 @@ class TestOpeningAnAttach:
         assert "tmux client" in str(caught.value)
 
     def test_a_pty_case_opens_on_a_host_that_has_no_tmux(self, quiet: Any, monkeypatch: Any) -> None:
-        """
-        The other half of the case above, and the whole macOS red in one line.
-
-        The host here is manufactured to be the runner's: `shutil.which` answers
-        None for EVERY binary, which is what a macOS box with no tmux looks like
-        from inside this lane. The preflight is satisfied by the fixture rather
-        than by the host, the argv is `cat` as it always was, and the session
-        opens — so the real-PTY cases in this file measure the pump instead of
-        the runner's package list.
-
-        Run against a case without the preflight (the shape of every one of them
-        before this change) the same manufactured host raises AttachUnavailable,
-        which is precisely run 34704362515's 15 failed and 8 errors.
-        """
+        """The other half of the case above, and the whole macOS red in one line."""
+        # `which` answers None for EVERY binary, a tmux-less runner; the forced rule must still open the session.
         empty_host = MagicMock(return_value=None)
         monkeypatch.setattr(host_attach.shutil, "which", _forced_tmux_which(empty_host))
 
@@ -192,22 +143,14 @@ class TestOpeningAnAttach:
             session.hangup()
 
     def test_the_forced_preflight_answers_for_tmux_and_nothing_else(self, tmux_preflight: Any) -> None:
-        """
-        A fixture that answered a path for every binary would be a lie with
-        reach: the monitor lane runs its own `shutil.which` preflight on drone,
-        and a blanket yes would report a watch opening on a host with no drone
-        installed — green here, blank terminal there.
-        """
+        """A fixture that answered a path for every binary would be a lie with
+        reach: the monitor lane runs its own `shutil.which` preflight on drone."""
         assert host_attach.shutil.which(host_attach.TMUX_BINARY) == TMUX_STANDIN
         assert host_attach.shutil.which("aipass-binary-that-exists-on-no-host") is None
 
     @fd_census_required
     def test_a_failed_spawn_leaks_no_descriptors(self, quiet: Any, tmux_preflight: Any) -> None:
-        """
-        The error path is where descriptors leak, because nobody exercises it.
-
-        Counted before and after: a spawn that raises must give both ends back.
-        """
+        """The error path is where descriptors leak, because nobody exercises it."""
         before = _open_descriptors()
 
         with patch.object(host_attach.subprocess, "Popen", side_effect=OSError("no exec")):
@@ -219,20 +162,8 @@ class TestOpeningAnAttach:
 
     @fd_census_required
     def test_the_descriptor_census_counts_this_process_without_proc(self) -> None:
-        """
-        The instrument above, measured on a host that has no /proc.
-
-        RUN 34704362515 (macOS): the case above died on `FileNotFoundError:
-        '/proc/self/fd'` before it could measure anything — /proc is a Linux
-        filesystem and the runner is macOS. `/dev/fd` is the portable spelling
-        of the same question (a symlink to /proc/self/fd here, fdescfs there),
-        and the kernel resolves that symlink itself, which is why the poison
-        below leaves the census standing while the old spelling dies under it.
-
-        Both halves in one case: the census must survive a /proc-less host AND
-        still see a descriptor, because a census that answers a constant would
-        have passed the leak test with the descriptors leaking.
-        """
+        """The instrument above, measured on a host that has no /proc."""
+        # It must also SEE a descriptor: a census answering a constant passes the leak test while leaking.
         real_listdir = os.listdir
 
         def no_proc(path: Any, *args: Any, **kwargs: Any) -> Any:
@@ -248,12 +179,7 @@ class TestOpeningAnAttach:
             holder.close()
 
     def test_the_room_is_created_in_the_branch_directory(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
-        """
-        Attach-or-create lands somewhere that makes sense.
-
-        A room created wherever the server happened to start is a shell in the
-        wrong directory, which is worse than no shell — it looks right.
-        """
+        """Attach-or-create lands somewhere that makes sense."""
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["pwd"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1234)
@@ -262,10 +188,8 @@ class TestOpeningAnAttach:
         assert spawn.call_args.kwargs["cwd"] == str(tmp_path)
 
     def test_the_child_gets_a_usable_term(self, quiet: Any, tmux_preflight: Any, tmp_path: Path) -> None:
-        """
-        A client inheriting a bare TERM renders in the wrong capability set,
-        which looks like an application bug rather than an environment one.
-        """
+        """A client inheriting a bare TERM renders in the wrong capability set,
+        which looks like an application bug rather than an environment one."""
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["pwd"]):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 spawn.return_value = MagicMock(pid=1234)
@@ -274,18 +198,10 @@ class TestOpeningAnAttach:
         assert spawn.call_args.kwargs["env"]["TERM"] == "xterm-256color"
 
 
-# ==============================================
-# SOCKET AUTH — the token never lands in a log
-# ==============================================
-
-
 @fastapi_required
 class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
-    """
-    A WebSocket cannot carry an Authorization header. The query string is
-    disqualified because URLs are written to access logs, proxy logs and browser
-    history — three permanent copies of a credential nobody chose to make.
-    """
+    """A WebSocket cannot carry an Authorization header. The query string is
+    disqualified because URLs are written to access logs, proxy logs and browser history."""
 
     def _socket(self, protocols: str) -> Any:
         """A stand-in connection carrying the offered subprotocols."""
@@ -302,10 +218,8 @@ class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
         assert authenticated["id"] == record["id"]
 
     def test_the_token_alone_is_not_enough(self, store: Any) -> None:
-        """
-        Without the sentinel there is nothing to echo back, and a handshake that
-        cannot echo a protocol fails in the browser anyway.
-        """
+        """Without the sentinel there is nothing to echo back, and a handshake that
+        cannot echo a protocol fails in the browser anyway."""
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
 
         with pytest.raises(PermissionError):
@@ -322,10 +236,8 @@ class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
             host_server.socket_bearer(self._socket(""))
 
     def test_a_reordered_offer_still_works(self, store: Any) -> None:
-        """
-        Protocol order is the client's to choose, and a 401 that depends on it
-        would be unexplainable from the phone end.
-        """
+        """Protocol order is the client's to choose, and a 401 that depends on it
+        would be unexplainable from the phone end."""
         record, raw = host_tokens.issue_token("pixel-8", scope="operate")
 
         assert host_server.socket_bearer(self._socket(f"{raw}, aipass.bearer"))["id"] == record["id"]
@@ -336,10 +248,8 @@ class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
             host_server.socket_bearer(self._socket("aipass.bearer, not-a-real-token"))
 
     def test_a_revoked_token_is_refused_on_the_next_connection(self, store: Any) -> None:
-        """
-        Revocation works here for free, because the store is re-read per
-        connection exactly as it is per request.
-        """
+        """Revocation works here for free, because the store is re-read per
+        connection exactly as it is per request."""
         record, raw = host_tokens.issue_token("pixel-8", scope="operate")
         host_tokens.revoke_token(record["id"])
 
@@ -347,33 +257,21 @@ class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
             host_server.socket_bearer(self._socket(f"aipass.bearer, {raw}"))
 
     def test_a_read_token_cannot_attach(self, store: Any) -> None:
-        """
-        An attached room is a shell prompt. There is no reading half of that, so
-        there is no read-scope attach.
-        """
+        """An attached room is a shell prompt. There is no reading half of that, so
+        there is no read-scope attach."""
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
 
         with pytest.raises(PermissionError):
             host_server.socket_bearer(self._socket(f"aipass.bearer, {raw}"))
 
     def test_the_accepted_protocol_is_the_sentinel_never_the_token(self) -> None:
-        """
-        The accepted subprotocol appears in the handshake RESPONSE.
-
-        Echoing the token back would undo the entire reason it is not in the
-        query string — it would simply move the leak from the request line to
-        the response header.
-        """
+        """The accepted subprotocol appears in the handshake RESPONSE."""
         source = Path(host_server.__file__).read_text(encoding="utf-8")
 
         assert "await websocket.accept(subprotocol=host_attach.BEARER_SUBPROTOCOL)" in source
 
     def test_the_route_takes_no_token_query_parameter(self) -> None:
-        """
-        The disqualified design, pinned so it cannot come back as a convenience.
-
-        A token in a URL is a credential in every access log on the path.
-        """
+        """The disqualified design, pinned so it cannot come back as a convenience."""
         source = Path(host_server.__file__).read_text(encoding="utf-8")
         route = source[source.index('@app.websocket("/v1/room/attach")') :]
         signature = route[: route.index(") -> None:")]
@@ -398,12 +296,7 @@ class TestTheAttachRouteIsRegisteredAsASocket:
         assert sockets == ["/v1/room/attach"]
 
     def test_no_http_verb_answers_the_attach_path(self) -> None:
-        """
-        A GET that 200s here would be a second, unauthenticated way in.
-
-        FastAPI keeps sockets and routes separate, and this asserts nobody has
-        added an HTTP twin beside it.
-        """
+        """A GET that 200s here would be a second, unauthenticated way in."""
         app = host_server.create_app()
         http = [
             route.path
@@ -416,10 +309,8 @@ class TestTheAttachRouteIsRegisteredAsASocket:
 
 @fastapi_required
 class TestTheSocketRefusesBeforeItSpawns:
-    """
-    A PTY for an unauthenticated caller is a shell for an unauthenticated
-    caller. The scope check happens before accept, so it never gets that far.
-    """
+    """A PTY for an unauthenticated caller is a shell for an unauthenticated
+    caller. The scope check happens before accept, so it never gets that far."""
 
     def test_an_unauthenticated_socket_never_opens_a_pty(self, store: Any) -> None:
         """The wall stops the mechanism, not just the response."""
@@ -437,15 +328,8 @@ class TestTheSocketRefusesBeforeItSpawns:
                 assert not spawn.called
 
     def test_an_authenticated_caller_gets_a_readable_refusal(self, store: Any, seated: Any) -> None:
-        """
-        A refusal the operator can ACT on has to reach the screen.
-
-        A browser only surfaces a close code and reason on an ESTABLISHED
-        socket; refusing an unknown branch pre-accept would put a fixable
-        sentence where the phone cannot render it — a blank error screen holding
-        the answer. So auth refuses before accept and everything after it
-        refuses on an open socket.
-        """
+        """A refusal the operator can ACT on has to reach the screen."""
+        # A browser shows a close reason only on an ESTABLISHED socket, so only auth refuses before accept.
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -465,11 +349,8 @@ class TestTheSocketRefusesBeforeItSpawns:
         assert "Unknown branch" in closed["reason"]
 
     def test_a_server_side_failure_closes_on_its_own_code(self, store: Any, seated: Any) -> None:
-        """
-        1011 is 'ours', 1008 is 'yours' — the same split the HTTP lanes make
-        between 503 and 400, so the phone can tell the operator whether to fix
-        something or wait for someone else to.
-        """
+        """1011 is 'ours', 1008 is 'yours' — the same split the HTTP lanes make
+        between 503 and 400."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -485,18 +366,12 @@ class TestTheSocketRefusesBeforeItSpawns:
                     closed = socket.receive()
 
         assert closed["code"] == 1011
-        # The close reason is a response too: the fixed sentence, never the
-        # exception's words (seedgo exception_text_in_response, PR #774).
+        # The close reason is a response too: the fixed sentence, never the exception's words.
         assert closed["reason"] == host_denials.SOCKET_UNAVAILABLE
         assert "tmux" not in closed["reason"]
 
     def test_the_accepted_socket_carries_only_the_sentinel(self, store: Any) -> None:
-        """
-        The handshake response, read back off a real connection.
-
-        The token must not appear in it — echoing it would move the leak from
-        the request line to the response header and change nothing else.
-        """
+        """The handshake response, read back off a real connection."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -516,28 +391,15 @@ class TestTheSocketRefusesBeforeItSpawns:
 
 
 class TestGlobalMissionControlIsReachable:
-    """
-    The watch lane must be able to express `drone @prax monitor run` — bare.
-
-    @baud measured this on the live host: the charset fence refused an empty
-    string and monitor_command always appended a target, so the desktop's own
-    default pane — global mission control, every branch at once — could not be
-    opened through this socket at all. They shipped the phone's door DISABLED
-    rather than quietly pointing it at one branch's monitor, which would have
-    rendered perfectly and been a lie. That call is why this is a small fix and
-    not an incident.
-    """
+    """The watch lane must be able to express `drone @prax monitor run` — bare."""
 
     def test_no_target_drops_the_argument_entirely(self) -> None:
         """The desktop's argv, character for character — nothing trailing."""
         assert host_attach.monitor_command("") == ["drone", "@prax", "monitor", "run"]
 
     def test_the_synonym_is_deliberately_not_used(self) -> None:
-        """
-        @prax documents `run all` for the same thing. This lane mirrors the
-        DESKTOP's argv, not the synonym: if those two paths ever diverge on
-        @prax's side, the phone must diverge with the desk.
-        """
+        """@prax documents `run all` for the same thing. This lane mirrors the
+        DESKTOP's argv, so if the two ever diverge the phone diverges with the desk."""
         assert "all" not in host_attach.monitor_command("")
 
     @pty_required
@@ -554,10 +416,8 @@ class TestGlobalMissionControlIsReachable:
 
     @pty_required
     def test_a_targetless_watch_is_named_not_blank(self, quiet: Any, tmp_path: Path) -> None:
-        """
-        'watch-' with nothing after it reads as a truncated name. A watch over
-        everything has a name of its own so a log line says what it was.
-        """
+        """'watch-' with nothing after it reads as a truncated name. A watch over
+        everything has a name of its own so a log line says what it was."""
         with patch.object(host_attach, "monitor_command", lambda target="": ["cat"]):
             session = host_attach.open_monitor("", cwd=tmp_path)
 
@@ -572,18 +432,8 @@ class TestGlobalMissionControlIsReachable:
         ["seedgo; rm -rf /", "SEEDGO", "a b", "../etc", "seedgo && curl evil", "$(whoami)", "run all"],
     )
     def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str, monkeypatch) -> None:
-        """
-        Making absence reachable must not make anything ELSE reachable.
-
-        The phone picks targets off the fleet snapshot; it never composes a
-        command line. These all still die in front of the PTY.
-
-        PTY_AVAILABLE is forced True so the FENCE is what answers on every
-        platform: the platform gate stands in front of it, and without this a
-        Windows runner gets AttachUnavailable before the fence ever sees the
-        garbage — the subject here is the fence, and Popen stays patched so
-        nothing can spawn regardless.
-        """
+        """Making absence reachable must not make anything ELSE reachable."""
+        # PTY_AVAILABLE forced so the FENCE answers on every platform; the platform gate stands in front of it.
         monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         with patch.object(host_attach.subprocess, "Popen") as spawn:
             with pytest.raises(host_attach.AttachRefused):
@@ -592,10 +442,8 @@ class TestGlobalMissionControlIsReachable:
         spawn.assert_not_called()
 
     def test_a_pty_less_platform_is_refused_in_words_before_the_fence(self, quiet: Any) -> None:
-        """
-        The Windows contract, pinned from every platform: no PTY means the
-        honest sentence, raised before the fence or any spawn is consulted.
-        """
+        """The Windows contract, pinned from every platform: no PTY means the
+        honest sentence, raised before the fence or any spawn is consulted."""
         with patch.object(host_attach, "PTY_AVAILABLE", False):
             with patch.object(host_attach.subprocess, "Popen") as spawn:
                 with pytest.raises(host_attach.AttachUnavailable) as refusal:
@@ -618,29 +466,9 @@ class TestGlobalMissionControlIsReachable:
 
 @fastapi_required
 class TestAWatchIsNotAnchorTooling:
-    """
-    The parked external-watch refusal, ruled against and measured out.
+    """The parked external-watch refusal, ruled against and measured out."""
 
-    I refused an external project's watch on the reasoning that "a watch is
-    anchor tooling — @prax monitors the repo it lives in". The owner's ruling
-    ("I run more watchers, in aipass or external projects") sent me to measure
-    it instead of arguing it, and the measurement killed the fence outright:
-
-      drone @prax monitor run baud   ->  "Live — scoped to BAUD, all levels"
-      drone @prax monitor run vera   ->  "Live — scoped to VERA, all levels"
-                                          "Branch scope: VERA is not a known
-                                           branch — nothing will be shown for
-                                           it. Check the spelling, or run
-                                           without a branch list to see
-                                           everything."
-
-    Both from the anchor, both from the project's own root — identical output,
-    so cwd was never the variable I believed it was. @prax refuses nothing and
-    already says exactly what it can and cannot show, ON THE SCREEN THE
-    OPERATOR IS LOOKING AT. My refusal was strictly worse than theirs: it
-    blocked the tenant case that works, and for the external case it would have
-    replaced an accurate live warning with a guess.
-    """
+    # @prax's output is identical from any cwd and it already says on screen what it cannot show.
 
     @pty_required
     def test_a_tenant_project_watch_is_not_refused(self, quiet: Any, tmp_path: Path) -> None:
@@ -654,34 +482,19 @@ class TestAWatchIsNotAnchorTooling:
             session.hangup()
 
     def test_the_refusal_sentence_is_gone_from_the_socket_lane(self) -> None:
-        """
-        Grep-shaped because this fence lived in exactly one branch of one route
-        and the reasoning that justified it was measured false.
-
-        The phrase "anchor tooling" survives in a COMMENT explaining why the
-        fence was wrong, which is worth keeping — so this pins the refusal's
-        own distinctive words instead, and would fail if anyone re-raised it.
-        """
+        """Grep-shaped because this fence lived in exactly one branch of one route
+        and the reasoning that justified it was measured false."""
         source = Path(host_server.__file__).read_text(encoding="utf-8")
 
         assert "@prax monitors the seat, not" not in source
 
     def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any, seated: Any, tmp_path: Path) -> None:
-        """
-        The parked refusal, through the real socket.
-
-        A read token is enough — a watch has no keyboard — and the project
-        rides along without being checked against the seat.
-        """
+        """The parked refusal, through the real socket."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="read")
 
-        # The existence gate is stubbed, and ONLY it. A named branch in a
-        # foreign project is looked up in the fleet census — a live machine
-        # fact, absent on a fresh runner, and not the thing this test claims to
-        # check. What is under test is that no project fence stands in front of
-        # the spawn; the gate itself has its own tests next door.
+        # Only the existence gate is stubbed: the fleet census is a live machine fact, absent on a fresh runner.
         with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
             with patch.object(host_verbs.host_reads, "resolve_branch_root", return_value=tmp_path / "vera") as gate:
                 with patch.object(host_attach, "open_monitor") as spawn:
@@ -694,22 +507,13 @@ class TestAWatchIsNotAnchorTooling:
                     ) as socket:
                         closed = socket.receive()
 
-        # Reaching the spawn AT ALL is the assertion: before this, the route
-        # refused on the project and open_monitor was never called.
         assert spawn.call_count == 1
         assert spawn.call_args.args[0] == "vera"
-        # The REAL citizen_address ran: it asked the gate with the project.
         gate.assert_called_once_with("vera", "VERA-STUDIO")
         assert "anchor tooling" not in closed["reason"]
 
     def test_no_allowlist_of_watchable_projects_is_built_here(self) -> None:
-        """
-        @prax keeps the ruling on what it can monitor.
-
-        A second model of that would drift from @prax the first time they
-        changed it, and it would be answering a question this server has no way
-        to know. The watch lane reaches no census at all.
-        """
+        """@prax keeps the ruling on what it can monitor."""
         source = Path(host_attach.__file__).read_text(encoding="utf-8")
 
         assert "resolve_branch" not in source
@@ -717,32 +521,14 @@ class TestAWatchIsNotAnchorTooling:
 
 @fastapi_required
 class TestOneRoomHonoursAnOutsideSeat:
-    """
-    ONE ROOM, step 1 (DPLAN-0327). The phone attaches to where the agent
-    ACTUALLY IS, not to a room rebuilt from its name.
-
-    On 2026-09-04 the owner opened his aipass chat on the laptop and attached
-    from the phone to a blank terminal. `_room_for` composed `baud-<branch>`,
-    `new-session -A` created that empty room on the spot, and the live seat was
-    in the shim's own `aipass-<id>` session the whole time. DPLAN-0310 ruled on
-    08-18 that the snapshot's `outside_room` is how the seat is found; this is
-    that, built.
-    """
+    """ONE ROOM, step 1 (DPLAN-0327). The phone attaches to where the agent
+    ACTUALLY IS, not to a room rebuilt from its name."""
 
     def _row(self, has_room: bool, outside: Any) -> dict:
         return {"name": "demo", "path": "/x/demo", "has_room": has_room, "outside_room": outside}
 
     def _attach(self, census: dict, kind: str = "") -> tuple:
-        """
-        Drive the real socket route for branch 'demo' and record the room decision.
-
-        The census and open_attach are recorders, and the session a StubSession,
-        so no PTY, tmux or network is reached (api, fleet green leg 7: the room
-        decision through the public road instead of _room_for by name).
-
-        Returns:
-            (the kwargs open_attach was handed, the rendered attach line, the census mock).
-        """
+        """Drive the real socket route for branch 'demo' and record the room decision."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -761,26 +547,14 @@ class TestOneRoomHonoursAnOutsideSeat:
 
     @pytest.fixture(autouse=True)
     def _seated_branch_exists(self, tmp_path: Path):
-        """
-        Stand 'demo' up as a seated branch.
-
-        The non-external lane resolves a branch through the real citizen
-        registry, so without this every case here fails on 'demo' not existing
-        — which measures the registry, not the room resolution under test.
-        """
+        """Stand 'demo' up as a seated branch."""
         # Only the registry is stubbed: the real citizen_address runs on top.
         with patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path):
             yield
 
     def test_an_outside_room_is_attached_and_never_created(self, store: Any, seated: Any) -> None:
-        """
-        The whole cure in one assertion: the argv attaches, and carries nothing
-        that could bring a session into being.
-
-        `outside_room` names a session somebody else made. Creating it would
-        mint an empty room under a name the desktop believes it owns — which is
-        the m12 defect one level down from where it was first found.
-        """
+        """The whole cure in one assertion: the argv attaches, and carries nothing
+        that could bring a session into being."""
         opened, line, _ = self._attach({"return_value": self._row(False, "aipass-42")})
 
         assert opened["room"] == "aipass-42", "the snapshot's own name must be used verbatim"
@@ -788,25 +562,9 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert line == "[host_api] socket attached to baud-api for @demo", "the citizen address the real gate composed"
 
     def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self, monkeypatch) -> None:
-        """
-        The WIRING, not just the resolution — and this pin exists because a
-        mutation proved the wiring was unprotected.
-
-        Making `open_attach` ignore `attach_only` and always build
-        `client_command` survived the whole file: every case above asserts what
-        `_room_for` decided, and none of them followed the decision through to
-        the process that actually gets spawned. A resolution nobody acts on is
-        the same blank terminal with more paperwork, so this drives the real
-        door and reads the argv `_spawn_pty` was handed.
-
-        Both preflights are FORCED rather than skipped — the precedent this
-        file already set for the fence tests. The subject here is argv
-        composition, which is string work no PTY takes part in, and
-        `_spawn_pty` is patched so nothing can spawn regardless. This carried
-        `@pty_required` for one day (17f1e773, after the Windows matrix went
-        red on it); a skip there leaves exactly the wiring a mutation already
-        escaped unmeasured on half the fleet.
-        """
+        """The WIRING, not just the resolution — and this pin exists because a
+        mutation proved the wiring was unprotected."""
+        # Preflights FORCED, never skipped: argv composition is string work, and a skip leaves it unmeasured on Windows.
         monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         monkeypatch.setattr(host_attach.shutil, "which", lambda _binary: "/usr/bin/tmux")
         with patch.object(host_attach, "_spawn_pty") as spawn:
@@ -820,15 +578,8 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert "-A" not in argv, "attach-or-create is exactly what put a blank terminal on the phone"
 
     def test_without_the_flag_a_named_room_is_still_attach_or_create(self, monkeypatch) -> None:
-        """
-        The regression guard for the pin above. The shell lane names its own
-        room and MUST still be able to create it — if this ever goes red
-        alongside that one passing, attach-only has escaped its one case and
-        every shell is now refusing to open.
-
-        Runs on every platform for the same reason its twin does: a guard that
-        skips where the thing it guards still runs is not a guard.
-        """
+        """The regression guard for the pin above. The shell lane names its own
+        room and MUST still be able to create it."""
         monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
         monkeypatch.setattr(host_attach.shutil, "which", lambda _binary: "/usr/bin/tmux")
         with patch.object(host_attach, "_spawn_pty") as spawn:
@@ -841,11 +592,8 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert "-A" in argv
 
     def test_an_own_room_still_wins_and_the_snapshot_does_not_override_it(self, store: Any, seated: Any) -> None:
-        """
-        has_room true keeps today's behaviour EXACTLY. This lane may only ever
-        rescue a branch that has no room of its own; it must never take one
-        away from a branch that does.
-        """
+        """has_room true keeps today's behaviour EXACTLY. This lane may only ever
+        rescue a branch that has no room of its own."""
         opened, _, _ = self._attach({"return_value": self._row(True, "aipass-42")})
 
         assert opened["room"] == "", "an empty room name is what lets the agent naming rule decide"
@@ -859,43 +607,27 @@ class TestOneRoomHonoursAnOutsideSeat:
         assert opened["attach_only"] is False
 
     def test_a_census_that_cannot_answer_does_not_refuse_the_attach(self, store: Any, seated: Any) -> None:
-        """
-        A read failure leaves the caller on the behaviour that shipped for
-        months. Refusing an attach because an IMPROVEMENT to it could not be
-        computed would make the phone worse the moment @baud's binary hiccups.
-        """
+        """A read failure leaves the caller on the behaviour that shipped for
+        months, rather than refusing because an IMPROVEMENT could not be computed."""
         opened, _, _ = self._attach({"side_effect": host_server.host_fleet.FleetUnavailable("census down")})
 
         assert opened["room"] == ""
         assert opened["attach_only"] is False
 
     def test_a_shell_is_never_diverted_to_an_outside_room(self, store: Any, seated: Any) -> None:
-        """
-        A shell asks for its OWN room by name. `outside_room` is where an agent
+        """A shell asks for its OWN room by name. `outside_room` is where an agent
         sits, and dropping an operator's shell into the agent's session is the
-        opposite of what they typed.
-        """
+        opposite of what they typed."""
         opened, _, census = self._attach({"return_value": self._row(False, "aipass-42")}, kind="shell")
 
         assert opened["room"] != "aipass-42"
         assert opened["attach_only"] is False
-        # A shell resolves its own room by name, so the census is never
-        # consulted at all — the cheapest possible proof it cannot be diverted.
         census.assert_not_called()
 
 
 class TestTheOneSeatHostsAnyProjectsRoom:
-    """
-    Attach under the one-terminal ruling: any census-known project, tenant or
-    external. Written as part of the operate-lane un-fence, and the finding is
-    recorded here rather than smoothed over — this lane ALREADY did it. The
-    external door shipped with the attach train and resolves through
-    @baud's census; there was no seat check on it to remove.
-
-    So these are regression pins, not a fix. They exist because the ruling made
-    this behaviour load-bearing, and a lane nobody tested for it is one edit
-    away from losing it quietly.
-    """
+    """Attach under the one-terminal ruling: any census-known project, tenant or
+    external. Regression pins: the ruling made this behaviour load-bearing."""
 
     def test_an_external_projects_room_reaches_the_spawn(self, store: Any, tmp_path: Path) -> None:
         """The census resolves it; the seat never gets a vote."""
@@ -921,11 +653,8 @@ class TestTheOneSeatHostsAnyProjectsRoom:
         assert spawn.call_args.kwargs["cwd"] == vera_root
 
     def test_the_room_carries_the_projects_scope(self, store: Any) -> None:
-        """
-        @baud's rule, their learning 22: an external room is namespaced by its
-        project, so a phone attach and a desktop attach cannot end up in two
-        different rooms for one card.
-        """
+        """@baud's rule, their learning 22: an external room is namespaced by its
+        project, so a phone attach and a desktop attach land in one room."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -968,33 +697,12 @@ class TestTheOneSeatHostsAnyProjectsRoom:
 
 
 class TestThisModuleImportsWhereItCannotRun:
-    """
-    The Windows lane's 22 collection errors, and the one line that caused them.
+    """The Windows lane's 22 collection errors, and the one line that caused them."""
 
-    A PTY is a Unix object and tmux does not run on Windows, so nothing in this
-    module can WORK there — which is fine and guarded by PTY_AVAILABLE. What is
-    not fine is the module failing to IMPORT, because `server` imports `attach`
-    and `host_api` imports `server`, so one AttributeError at import time takes
-    down every host test file on the platform. That is exactly what happened on
-    2026-08-18, the first time the Windows lane ran to completion: 22 collection
-    errors, all from `_setsid: Any = os.setsid` in a function signature.
-
-    A DEFAULT ARGUMENT IS EVALUATED AT IMPORT. That is the whole trap. The
-    three other POSIX-only names in that signature were already fetched with
-    getattr; this one was reached for directly, and the platform guard sitting
-    forty lines above it never got the chance to run.
-    """
+    # A DEFAULT ARGUMENT IS EVALUATED AT IMPORT: a bare `os.setsid` default breaks importing every host module there.
 
     def test_no_posix_only_default_is_reached_for_directly(self) -> None:
-        """
-        The structural pin, so the NEXT one is caught rather than shipped.
-
-        Read on AST, not on prose: every default in this signature must be a
-        getattr call or a plain constant. A bare `os.setsid` / `fcntl.ioctl` /
-        `termios.TIOCSCTTY` is an attribute access that runs at import time on
-        a platform that may not have the attribute, which is the defect this
-        class exists for.
-        """
+        """The structural pin, so the NEXT one is caught rather than shipped."""
         tree = ast.parse(Path(host_attach.__file__).read_text(encoding="utf-8"))
         hook = next(
             node
@@ -1008,14 +716,8 @@ class TestThisModuleImportsWhereItCannotRun:
             assert not reached_for, f"{ast.unparse(default)} is evaluated at import; use getattr with a default"
 
     def test_a_platform_with_no_way_to_claim_a_tty_refuses(self) -> None:
-        """
-        What the getattr defaults become off POSIX, and what happens then.
-
-        No caller can reach this — every one is behind PTY_AVAILABLE — so this
-        is not a path anyone takes. It is here because the alternative to a
-        refusal is `None()`, and a TypeError raised inside a forked child is a
-        worse sentence than the true one.
-        """
+        """What the getattr defaults become off POSIX, and what happens then."""
+        # No caller reaches this (all sit behind PTY_AVAILABLE); without the refusal it is `None()` in a forked child.
         with pytest.raises(host_attach.AttachUnavailable) as refusal:
             host_attach._acquire_controlling_tty(
                 _setsid=None,
@@ -1027,36 +729,14 @@ class TestThisModuleImportsWhereItCannotRun:
         assert "controlling tty" in str(refusal.value)
 
 
-# ==============================================
-# LIVENESS AND LIFETIME
-# ==============================================
-
-
 @fastapi_required
 class TestThePhoneCanMeasureItsOwnSocket:
-    """
-    @baud's FPLAN-0446 r5 finding: the corpse frame on the owner's seat.
+    """@baud's FPLAN-0446 r5 finding: the corpse frame on the owner's seat."""
 
-    A phone whose peer vanishes WITHOUT a FIN — a tunnel dropped, a laptop
-    slept, a NAT entry expired — reads its socket as OPEN forever. The browser
-    keeps rendering the last frame it received and the operator believes they
-    are looking at a live room. uvicorn pings from this side every 20s, so the
-    SERVER always finds out; the JS WebSocket API exposes no ping at all, so
-    the client had no round-trip to measure and no way to find out.
-
-    Hence one application-level verb on the channel that already exists. Driven
-    through a real socket, because what is being pinned is that an answer comes
-    BACK — a unit test on the handler would prove the handler, not the wire.
-    """
+    # The JS WebSocket API exposes no ping, so a peer gone without a FIN reads as OPEN forever on the phone.
 
     def test_a_ping_is_answered_with_a_pong(self, store: Any, seated: Any) -> None:
-        """
-        The round trip, end to end. This is the whole feature.
-
-        Text in, text out: a pong on the binary channel would be indistinguishable
-        from room output and would paint `{"type": "pong"}` across the operator's
-        terminal every few seconds.
-        """
+        """The round trip, end to end. This is the whole feature."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -1071,23 +751,14 @@ class TestThePhoneCanMeasureItsOwnSocket:
                     socket.send_text('{"type": "ping"}')
                     answer = socket.receive_text()
 
-                    # The route's own last line, not the hangup: leaving the
-                    # context while the pump still unwinds cancels a live server
-                    # and the client's exit raises it as a CancelledError (the
-                    # same window test_host_attach_pump.py closed, round three).
+                    # Wait for the route's last line: leaving while the pump unwinds cancels a live server.
                     detach_and_wait(socket, session)
                     wait_for_log(log, "socket detached from")
 
         assert json.loads(answer) == {"type": "pong"}
 
     def test_every_ping_is_answered_so_a_client_can_keep_measuring(self, store: Any, seated: Any) -> None:
-        """
-        Not once — a heartbeat is only a heartbeat if it keeps beating.
-
-        A handler that answered the first ping and then fell through to the
-        unknown-frame branch would pass the test above and still leave the phone
-        showing a corpse from the second probe onward.
-        """
+        """Not once — a heartbeat is only a heartbeat if it keeps beating."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -1110,13 +781,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
         assert answers == [json.dumps({"type": "pong"})] * 5
 
     def test_a_ping_never_reaches_the_room(self, store: Any, seated: Any) -> None:
-        """
-        The hazard the control/keystroke split exists to prevent, at a new verb.
-
-        A liveness probe that fell through to the write path would type
-        `{"type": "ping"}` into a room sitting at a shell prompt — every few
-        seconds, forever. Nothing typed, nothing resized: a ping is inert.
-        """
+        """The hazard the control/keystroke split exists to prevent, at a new verb."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -1131,8 +796,6 @@ class TestThePhoneCanMeasureItsOwnSocket:
                     socket.send_text('{"type": "ping"}')
                     socket.receive_text()
 
-                    # A real keystroke after it, to prove the channel is still
-                    # carrying what it is FOR.
                     socket.send_bytes(b"echo alive")
                     session.wait_until(lambda: bool(session.writes))
 
@@ -1143,13 +806,8 @@ class TestThePhoneCanMeasureItsOwnSocket:
         assert session.resizes == []
 
     def test_a_pong_from_the_client_is_an_unknown_frame_not_a_loop(self, store: Any, seated: Any) -> None:
-        """
-        The server pongs; it does not ping. So an inbound pong is unknown.
-
-        Worth pinning because the symmetrical-looking mistake — treating pong as
-        a verb and answering it — is two sockets shouting at each other as fast
-        as the loop will carry it, on the wire the operator's keystrokes share.
-        """
+        """The server pongs; it does not ping. So an inbound pong is unknown."""
+        # Answering a pong would set two sockets shouting at each other on the keystroke wire.
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
@@ -1163,9 +821,7 @@ class TestThePhoneCanMeasureItsOwnSocket:
                 ) as socket:
                     socket.send_text('{"type": "pong"}')
 
-                    # The ping AFTER it is what makes the absence provable: its
-                    # answer cannot arrive before an answer to the pong would
-                    # have, so one frame back means exactly one was answered.
+                    # The ping's answer cannot beat one to the pong, so one frame back means one was answered.
                     socket.send_text('{"type": "ping"}')
                     answer = socket.receive_text()
 

@@ -3,31 +3,13 @@
 # Description: Pins for the live templates lane — spawn propagation, receipt status, the bump site, and two refusals
 # Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/templates.py and the template_bump lane it drives."""
 
-# The templates module, after the pre-`.trinity` lane was retired.
-#
-# Replaces `test_templates.py` and `test_templates_display.py`, archived with the
-# handlers they pinned (`.archive/dead_template_lane_20260827/`). Their sixteen
-# still-passing tests were all help-flag safety and routing; those behaviours are
-# re-pinned here against the surface that actually exists.
-#
-# WHAT THIS FILE EXISTS TO PREVENT
-# --------------------------------
-# A retired verb that silently does nothing is worse than one that is gone: it
-# answers, it looks like it worked, and the caller trusts it. `push-templates`
-# and `diff-templates` spent months confidently reporting on a layout no citizen
-# uses. So the pins are not "the code is deleted" — they are "the verb ANSWERS,
-# and what it says is where to go instead."
-#
-# The bump lane's pins all guard the same edge: a template version bump must heal
-# the fleet THROUGH the trinity push's gates, never around them. An automatic
-# fleet-wide rewrite triggered by a version number would be the exact unprompted
-# write `--confirm` exists to stop, and this branch has already performed one of
-# those by accident.
+# A retired verb must ANSWER and name where to go, never no-op silently.
+# A template bump heals the fleet THROUGH the trinity push's gates, never around them.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — gold_versions() and bump_pending(), tests/test_marker7_memory_lane.py
@@ -46,35 +28,16 @@ _MEMORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _out(capsys) -> str:
-    """Everything the module printed, both streams, unwrapped.
-
-    Rich hard-wraps at the terminal width, so a sentence this file asserts on
-    can arrive split across two lines. Collapsing whitespace makes these pins
-    test the MESSAGE rather than the width of whatever terminal ran them —
-    the same hermeticity lesson the fixtures learned in session 146.
-    """
+    """Everything the module printed, both streams, whitespace collapsed so Rich's wrap width never matters."""
     captured = capsys.readouterr()
     return " ".join((captured.out + captured.err).split())
-
-
-# =============================================================================
-# THE TWO REFUSALS
-# =============================================================================
 
 
 class TestRetiredVerbsAnswer:
     """A retired verb routes, refuses, and names its replacement."""
 
     def test_both_retired_verbs_route_and_exit_non_zero(self):
-        """Routed is not the same as succeeded.
-
-        REWRITTEN 2026-09-08 (the fleet refusal sweep): this asserted only that
-        the verb was CLAIMED, and a claimed refusal that printed through
-        `warning()` left the failure flag clear, so `drone @memory templates
-        push-templates` exited 0 and every script reading that code was told the
-        retired verb had worked. The refusal now goes through `error()`, and the
-        pin is the exit code the entry point would return, not the routing bool.
-        """
+        """Routed is not the same as succeeded: the refusal exits 2, not 0."""
         for verb in ("push-templates", "diff-templates"):
             for argv in ([verb, []], ["templates", [verb]]):
                 reset_command_state()
@@ -108,18 +71,10 @@ class TestRetiredVerbsAnswer:
             templates.handle_command("templates", ["push-templates", "--dry-run"])
         pushed.assert_not_called()
 
-        # "Loudly" is half the claim, and it was the half this unit captured and
-        # never looked at: capsys was requested, readouterr() was never called,
-        # so a verb that went back to silent no-op passed here. The refusal has
-        # to reach the caller even when --dry-run is on the line.
+        # The refusal must reach the caller even with --dry-run on the line.
         printed = _out(capsys)
         assert "retired" in printed.lower(), printed
         assert "dead_template_lane_20260827" in printed, printed
-
-
-# =============================================================================
-# HELP OUTRANKS EVERYTHING
-# =============================================================================
 
 
 class TestHelpNeverPerforms:
@@ -153,11 +108,6 @@ class TestHelpNeverPerforms:
 
     def test_an_unrelated_command_is_not_claimed(self):
         assert templates.handle_command("search", ["anything"]) is False
-
-
-# =============================================================================
-# THE LIVE LANES
-# =============================================================================
 
 
 class TestSpawnPropagationSurvives:

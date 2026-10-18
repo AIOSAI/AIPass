@@ -3,48 +3,12 @@
 # Description: nominator - a rooted path literal put through a resolver (POSIX-LITERAL)
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-10-17
 # =============================================
 
-r"""
-A rooted string literal resolved by a test is asserting posixpath semantics.
+r"""A rooted string literal resolved by a test is asserting posixpath semantics.
 
-    slash_tmp = Path("/tmp").resolve()
-    assert slash_tmp in roots
-
-On POSIX that is ``/tmp``. On Windows ``/tmp`` is DRIVE-RELATIVE — ntpath
-attaches the current drive and ``resolve()`` returns ``D:\tmp`` — so the same
-line means a different thing on the other half of the matrix, and the assertion
-underneath it accuses code that is working perfectly.
-
-WHERE IT CAME FROM. @drone's one windows-setup red in round 7 was a return-value
-pin they had added THAT MORNING to catch a platform assumption: it compared
-against ``RESOLVED: /tmp`` and CI handed it ``D:\tmp``. They reported it with
-the species named and asked for the acquittal rate before it became a rule,
-which is the right order. @devpulse arrived at the same construct from the other
-side the same evening.
-
-THE MEASUREMENT THAT DECIDED THE SHAPE, run before this file existed, over 721
-test files and 32,841 assert statements:
-
-  - "an assert containing a rooted string literal" ....... 501 sites, 112 files
-  - "a rooted literal reaching any callable named
-     resolve / realpath / abspath" ...................... 10 sites, 3 files
-  - THIS RULE (the receiver must BE a path constructor,
-     or the callee an os.path function) .................. 4 sites, 1 file
-
-The middle arm is the instructive one. Six of its ten sites were
-``target_module.resolve("@canary", {...})`` — a BRANCH-NAME resolver that
-happens to share a verb with pathlib, holding a rooted literal in a dict value
-it never resolves. A rule keyed on the method NAME nominates those six forever,
-and a nominator with that acquittal rate teaches the fleet to ignore it inside a
-week. Keyed on the RECEIVER instead, it nominates none of them.
-
-NOMINATION, NEVER CONVICTION (Law M1). A test that deliberately exercises POSIX
-spelling — a fence refusing ``/etc/passwd``, a parser fed a known-rooted
-input — is a legitimate site, and the execution tier rules on it. What this rule
-buys is that the decision gets MADE rather than inherited from whichever
-platform the author happened to be standing on.
+Reference: posix_literal.md
 """
 
 import ast
@@ -52,7 +16,6 @@ from typing import List, Optional
 
 from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
 
-#: The adapter group this nominator fills. Namespaced by the core.
 GROUP = "static_posix_literal"
 
 #: Constructors whose first argument is a path. A ``.resolve()`` hanging off one
@@ -64,11 +27,8 @@ PATH_CONSTRUCTORS: frozenset = frozenset(
 #: Module-level functions that normalise a path against the process state.
 RESOLVER_FUNCTIONS: frozenset = frozenset({"realpath", "abspath"})
 
-#: The path modules that name their dialect out loud. `os.path` is an ALIAS -
-#: posixpath on one leg of the matrix, ntpath on the other - and that aliasing
-#: IS the hazard. `ntpath.abspath("/x")` returns the same string on every host,
-#: so it is the cure a nominated site gets rewritten into, not the defect.
-#: Kept in step with the v5 pack copy, cured there the same day (2026-09-07).
+#: `os.path` is an alias whose dialect changes per host; these name theirs, so they
+#: are the cure, not the defect. Kept in step with the v5 pack copy.
 DIALECT_MODULES: frozenset = frozenset({"ntpath", "posixpath", "macpath"})
 
 SPECIFICATION = {
@@ -109,11 +69,7 @@ SPECIFICATION = {
 def _is_rooted_literal(node: ast.expr) -> bool:
     """True when this expression is a string literal starting at a root.
 
-    Args:
-        node: Any expression node.
-
-    Returns:
-        True for ``"/tmp"`` and ``"C:\\\\tmp"``, False for ``"tmp"``.
+    True for ``"/tmp"`` and ``"C:\\\\tmp"``, False for ``"tmp"``.
     """
     if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
         return False
@@ -128,16 +84,7 @@ def _is_rooted_literal(node: ast.expr) -> bool:
 def _resolved_path_constructor(call: ast.Call) -> Optional[ast.expr]:
     """The rooted literal a ``.resolve()`` receiver was built from, if any.
 
-    Keyed on the RECEIVER rather than the method name: ``Path("/tmp").resolve()``
-    is pathlib, ``registry.resolve("@canary", ...)`` is a branch-name lookup that
-    happens to share a verb. Measured before choosing - the name test nominates
-    six such sites fleet-wide and this one nominates none of them.
-
-    Args:
-        call: A call node whose func is an Attribute.
-
-    Returns:
-        The literal node, or None.
+    Keyed on the receiver, not the method name: a branch-name ``registry.resolve()`` shares the verb.
     """
     if not isinstance(call.func, ast.Attribute):
         return None
@@ -150,14 +97,7 @@ def _resolved_path_constructor(call: ast.Call) -> Optional[ast.expr]:
 
 
 def _resolver_function(call: ast.Call) -> Optional[ast.expr]:
-    """The rooted literal an ``os.path.realpath``-shaped call was handed.
-
-    Args:
-        call: A call node whose func is an Attribute.
-
-    Returns:
-        The literal node, or None.
-    """
+    """The rooted literal an ``os.path.realpath``-shaped call was handed."""
     if not isinstance(call.func, ast.Attribute):
         return None
     if call.func.attr not in RESOLVER_FUNCTIONS or not call.args:
@@ -169,14 +109,7 @@ def _resolver_function(call: ast.Call) -> Optional[ast.expr]:
 
 
 def _resolved_literals(unit: corpus.TestUnit) -> List[tuple]:
-    """Every rooted literal this unit puts through a resolver.
-
-    Args:
-        unit: The test function or class.
-
-    Returns:
-        ``(literal_text, lineno)`` pairs.
-    """
+    """Every rooted literal this unit puts through a resolver."""
     found = []
     for node in ast.walk(unit.node):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -191,14 +124,7 @@ def _resolved_literals(unit: corpus.TestUnit) -> List[tuple]:
 
 
 def nominate(scanned: corpus.Corpus) -> List[dict]:
-    """Every rooted path literal a test puts through a resolver.
-
-    Args:
-        scanned: The parsed corpus.
-
-    Returns:
-        Nomination rows, one per resolved literal.
-    """
+    """Every rooted path literal a test puts through a resolver."""
     rows: List[dict] = []
 
     for unit in scanned.units():

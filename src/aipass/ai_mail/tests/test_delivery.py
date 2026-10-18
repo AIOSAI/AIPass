@@ -3,7 +3,7 @@
 # Description: Tests for email delivery handler
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py."""
@@ -231,7 +231,7 @@ def _setup_branch(tmp_path, email: str = "@target", name: str = "TARGET"):
 
 
 # The helpers below reach delivery's private checks through its public lanes
-# instead of calling them (ai_mail, leg 14).
+# instead of calling them.
 
 
 def _deliver_into(recipient: Path, to_branch: str = "@target", sender: str = "@sender"):
@@ -328,7 +328,7 @@ def test_deliver_says_so_when_the_external_tier_cannot_answer(repo_root, noop_in
     dispatch to an external citizen was refused as an unknown branch while the
     tier that knows it was down. The refusal keeps delivery's (False, message)
     shape that trigger already handles. Its proof is the mutant that answers {}
-    again (ai_mail, leg 11).
+    again.
     """
 
     def _gateway_down(**kwargs):
@@ -807,7 +807,7 @@ def test_an_unreadable_caller_registry_refuses_rather_than_serving_a_namesake(ex
     the caller's registry answered {} on that, the walk climbed on, and the
     external tier served Vera-Studio's @vera; a verified admin is exempt from the
     boundary, so the mail meant for Lab's @vera landed in Vera-Studio. Now
-    delivery refuses and names the registry (ai_mail, leg 12).
+    delivery refuses and names the registry.
     """
     lab = external_world["tmp"] / "Lab"
     lab_vera = lab / "src" / "lab" / "vera"
@@ -834,7 +834,7 @@ def test_an_unreadable_hosted_registry_refuses_the_admin_rather_than_serving_a_n
     the sweep skipped it, the external tier served Vera-Studio's @vera, and the
     verified admin is exempt from the boundary, so the mail landed there. Green
     from its first run on the cured tree; its proof is the mutant that skips the
-    registry again (ai_mail, leg 12).
+    registry again.
     """
     lab = external_world["tmp"] / "AIPass" / "projects" / "lab"
     (lab / "vera").mkdir(parents=True)
@@ -860,7 +860,7 @@ def test_an_unreadable_aipass_registry_refuses_rather_than_serving_a_hosted_name
     here: the real one reads this checkout's registry). Before leg 12 the admin
     sweep then found projects/lab's @target and the verified admin, exempt from
     the boundary, had the mail delivered there. Now delivery refuses and names
-    the AIPass registry (ai_mail, leg 12).
+    the AIPass registry.
     """
     home = external_world["tmp"] / "AIPass"
     (home / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")

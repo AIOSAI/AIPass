@@ -3,7 +3,7 @@
 # Description: Tests for aipass ping_sweep handler Phase 3
 # Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/ping_sweep/__init__.py — Phase 3 (FPLAN-0188)."""
@@ -31,9 +31,8 @@ _PS = "aipass.aipass.apps.handlers.ping_sweep"
 def _sweep_one(branch: str, inbox: Path, timeout: int, run: MagicMock) -> tuple[dict, MagicMock]:
     """Sweep exactly one branch through sweep_all_branches with every live edge sealed.
 
-    The mail send is `subprocess.run(["drone", "@ai_mail", "email", ...])` inside ping_sweep:
-    `run` replaces it (the process edge), so no real mail leaves. The inbox is `inbox` under
-    tmp_path and the audit log is an autospec json_handler. Returns (results, run).
+    `run` replaces the drone mail send so no real mail leaves; the audit log is an autospec
+    json_handler. Returns (results, run).
     """
     with (
         patch(f"{_PS}._discover_branches", return_value=[branch]),
@@ -58,11 +57,6 @@ def _ack_inbox(tmp_path: Path, sender: str, status: str) -> Path:
     return inbox
 
 
-# =============================================================================
-# TestConstants
-# =============================================================================
-
-
 class TestConstants:
     def test_test_token_present(self) -> None:
         """TEST_TOKEN contains the required sentinel text."""
@@ -81,11 +75,6 @@ class TestConstants:
     def test_timeout_positive(self) -> None:
         """Default timeout is a positive integer."""
         assert TIMEOUT_PER_BRANCH > 0
-
-
-# =============================================================================
-# TestSendTestEmail
-# =============================================================================
 
 
 class TestSendTestEmail:
@@ -128,17 +117,11 @@ class TestSendTestEmail:
         assert TEST_TOKEN in args[5]
 
 
-# =============================================================================
-# TestWaitForAck
-# =============================================================================
-
-
 class TestWaitForAck:
     """The ack poll, reached through sweep_all_branches after a send drone accepts.
 
-    time.sleep is not patched: timeout=1 enters the poll once and sleeps the product's real
-    2 s, so each test that reads the inbox costs 2 s. A poll-interval seam on _wait_for_ack
-    would exist for these tests alone; aipass's decision, fleet green leg 3: pay the 2 s.
+    time.sleep is not patched: timeout=1 polls once and sleeps the real 2 s; a poll-interval
+    seam on _wait_for_ack would exist for these tests alone.
     """
 
     def test_returns_timeout_when_no_inbox(self, tmp_path) -> None:
@@ -173,11 +156,6 @@ class TestWaitForAck:
         inbox.write_text("NOT JSON", encoding="utf-8")
         results, _run = _sweep_one("seedgo", inbox, 1, _run_rc(0))
         assert results == {"seedgo": "timeout"}
-
-
-# =============================================================================
-# TestSweepAllBranches
-# =============================================================================
 
 
 class TestSweepAllBranches:
@@ -215,11 +193,6 @@ class TestSweepAllBranches:
                 with patch("aipass.aipass.apps.handlers.ping_sweep.json_handler", mock_jh):
                     sweep_all_branches(timeout=1)
         mock_jh.log_operation.assert_called_once_with("ping_sweep", {"results": {b: "error" for b in BRANCHES}})
-
-
-# =============================================================================
-# TestSweepSummary
-# =============================================================================
 
 
 class TestSweepSummary:

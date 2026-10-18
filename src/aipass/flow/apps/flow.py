@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @flow — plan lifecycle management
 # Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -15,7 +15,6 @@ Auto-discovery architecture:
 - No manual imports or routing needed
 """
 
-# INFRASTRUCTURE IMPORT PATTERN
 import sys
 import os
 
@@ -28,28 +27,15 @@ if sys.platform == "win32":
 
 from pathlib import Path
 
-# NOTE: this file has no module-level path resolution. _PKG_ROOT used to sit
-# here as Path(__file__).resolve().parents[2] — a cwd read on Windows at import
-# time — and it was assigned once and never read. Removed 2026-08-31 rather than
-# routed through handlers/repo_root: the entry point should not reach into
-# handlers, and the value was dead. MODULES_DIR below uses Path(__file__).parent
-# with no resolve(), which touches no filesystem at all.
-
-# Standard library imports
 import importlib
 import signal
 from typing import List, Any
 
-# Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# CLI services for formatted output
 from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
+# No resolve(): resolving reads the cwd on Windows at import time.
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
@@ -57,10 +43,7 @@ def discover_modules() -> List[Any]:
     """
     Auto-discover modules in modules/ directory
 
-    Modules must implement handle_command(command: str, args: List[str]) -> bool
-
-    Returns:
-        List of module objects with handle_command function
+    A module counts only if it defines handle_command(command, args) -> bool.
     """
     modules = []
 
@@ -68,7 +51,6 @@ def discover_modules() -> List[Any]:
         logger.warning(f"[FLOW] Modules directory not found: {MODULES_DIR}")
         return modules
 
-    # Discover all .py files (except __init__.py and those starting with _)
     for file_path in MODULES_DIR.glob("*.py"):
         if file_path.name.startswith("_"):
             continue
@@ -78,7 +60,6 @@ def discover_modules() -> List[Any]:
         try:
             module = importlib.import_module(module_name)
 
-            # Check if module has handle_command function
             if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"[FLOW] Loaded module: {file_path.stem}")
@@ -94,14 +75,6 @@ def discover_modules() -> List[Any]:
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """
     Route command to appropriate module
-
-    Args:
-        command: Command name (e.g., 'create', 'delete', 'list')
-        args: Additional arguments
-        modules: List of discovered modules
-
-    Returns:
-        True if command was handled, False otherwise
     """
     for module in modules:
         try:
@@ -114,11 +87,6 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             logger.error(f"[FLOW] Module {module.__name__} error: {e}")
 
     return False
-
-
-# =============================================================================
-# MAIN
-# =============================================================================
 
 
 def main():
@@ -134,16 +102,11 @@ def main():
 def _main_impl():
     """Internal implementation of main — separated for catch-all handler.
 
-    The exit seam (compass 451, the shape @backup's main() already has): cli's
-    error() marks the process failed, but that flag reaches an exit code only if
-    somebody reads it. reset_command_state() clears it on entry so a process that
-    calls main() more than once cannot inherit an earlier command's failure, and a
-    routed command returns resolve_exit(True) -- 0 when nothing errored, 2 when
-    the handler reported an error and used to exit 0 anyway.
+    cli's error() only marks the process failed; resolve_exit() turns that into exit 2, and
+    reset_command_state() stops a repeat main() call inheriting an earlier command's failure.
     """
     reset_command_state()
 
-    # Discover available modules
     modules = discover_modules()
 
     if not modules:
@@ -151,35 +114,27 @@ def _main_impl():
         error("No modules available")
         return 1
 
-    # Parse arguments
     args = sys.argv[1:]
 
-    # Show introspection when run with no arguments
     if len(args) == 0:
         print_introspection(modules)
         return 0
 
-    # Show version
     if args[0] in ["--version", "-V"]:
         console.print(f"FLOW v{BRANCH_VERSION}")
         return 0
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help(modules)
         return 0
 
-    # Extract command and remaining args
-    # Pattern: flow <command> <args...>
-    # Example: flow create . "Subject"
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # Route to modules (modules handle their own --help internally)
+    # Modules handle their own --help.
     if route_command(command, remaining_args, modules):
         return resolve_exit(True)
 
-    # Fallback: try module-specific help if command wasn't handled
     if remaining_args and remaining_args[0] in ["--help", "-h"]:
         print_module_help(command, modules)
         return 0
@@ -206,7 +161,6 @@ def print_introspection(modules: List[Any]):
     if modules:
         for module in modules:
             module_name = module.__name__.split(".")[-1]
-            # Get first line of docstring
             description = "No description"
             if module.__doc__:
                 description = module.__doc__.strip().split("\n")[0]
@@ -219,9 +173,7 @@ def print_introspection(modules: List[Any]):
     console.print()
 
 
-# The branch version --version prints. It lived as a literal inside the print
-# call and drifted from the README header (2.2.1 printed against 2.6.0
-# documented) because nothing could read it. One name, one place.
+# Must match the version in the README header.
 BRANCH_VERSION = "2.7.0"
 
 
@@ -229,18 +181,8 @@ def module_verbs(module: Any) -> str:
     """
     Render the verbs a module actually answers to, for the help table.
 
-    A module owning ONE verb is named by the first segment of its filename
-    (`create_plan` -> `create`). That derivation is wrong for a module owning
-    several: `template_manager` answers to `templates`, `register`, `unregister`
-    and `scan`, and never to `template`, so the derived name published a verb
-    that does not exist. A module owning more than one declares them in
-    COMMAND_VERBS and that list wins.
-
-    Args:
-        module: A discovered command module
-
-    Returns:
-        Comma-separated verbs, the string the help table prints
+    The filename prefix (`create_plan` -> `create`) is wrong for multi-verb modules
+    (`template_manager` never answers `template`), so a declared COMMAND_VERBS wins.
     """
     declared = getattr(module, "COMMAND_VERBS", None)
     if declared:
@@ -274,12 +216,9 @@ def print_help(modules: List[Any]):
     console.print()
 
     if modules:
-        # Width follows the longest verb list, so a module owning four verbs
-        # does not push every description out of its column.
         verbs = {module: module_verbs(module) for module in modules}
         width = max((len(v) for v in verbs.values()), default=20)
         for module, verb_list in verbs.items():
-            # Get first line of docstring
             description = "No description"
             if module.__doc__:
                 description = module.__doc__.strip().split("\n")[0]
@@ -333,11 +272,9 @@ def print_help(modules: List[Any]):
 
 def print_module_help(command: str, modules: List[Any]):
     """Display module-specific help with Rich formatting"""
-    # Try to find the module that handles this command
     target_module = None
     for module in modules:
         module_name = module.__name__.split(".")[-1]
-        # Check if module name matches command (e.g., create_plan matches "create" or "create_plan")
         if command == module_name or module_name.startswith(command):
             target_module = module
             break
@@ -355,7 +292,6 @@ def print_module_help(command: str, modules: List[Any]):
     header(f"Flow - {module_name} Command")
     console.print()
 
-    # Display full docstring if available
     if target_module.__doc__:
         docstring = target_module.__doc__.strip()
         console.print(f"[dim]{docstring}[/dim]")
@@ -366,9 +302,7 @@ def print_module_help(command: str, modules: List[Any]):
 
 
 if __name__ == "__main__":
-    # Handle broken pipe gracefully (e.g. output piped to head). Set here, where
-    # the process starts, never at import: a pytest worker that imports this
-    # module would otherwise die silently on its first EPIPE (CI 38132534544).
+    # Never at import: a pytest worker importing this module would die silently on EPIPE.
     # SIGPIPE does not exist on Windows.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)

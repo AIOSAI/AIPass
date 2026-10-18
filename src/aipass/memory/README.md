@@ -32,7 +32,8 @@ drone @memory push --dry-run            # The trinity push — report what would
   The write gate, the push, the state tabs and @seedgo's startup-budget pack all read those numbers
   from here rather than copying them.
 - **Keeps the frame honest.** The trinity push rebuilds each branch's machine frame from the gold
-  templates and moves every non-canonical entry to vectors, verbatim, verified before it is removed.
+  templates and moves every non-canonical entry out verbatim, verified before it is removed: records
+  to vectors, todos to the branch's backlog file.
 - **Holds the todo pad.** Ten live sticky notes per branch; the oldest roll by number to a backlog
   file, never to vectors, so open work can always be read back.
 - **Refuses a limit it cannot honour.** A keep count whose worst-case file would bust its budget is
@@ -69,8 +70,7 @@ down here and cannot go stale:
 ## Commands
 
 There is no command list on this page, deliberately: a hand-typed copy of the branch's own help
-output rots the next time a verb is added — this README carried four verbs that `--help` had never
-heard of. The generated surface is the one above under **Live Inventory**, and it is always current.
+output rots the next time a verb is added. The generated surface is the one above under **Live Inventory**, and it is always current.
 
 ---
 
@@ -106,10 +106,10 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | Doc | What it covers |
 |---|---|
 | [docs/rollover_pipeline.md](docs/rollover_pipeline.md) | The rollover engine: the pipeline, normalization, the safety valve, the newest-first guardrail, and the one definition of the fleet |
-| [docs/trinity_standard.md](docs/trinity_standard.md) | The entry shape and the write gate: the closed field shape, the two refusal reasons, authored-versus-carried, the char caps and the per-branch receipt |
+| [docs/trinity_standard.md](docs/trinity_standard.md) | The entry shape and the write gate: the closed field shape, the refusal reasons, authored-versus-carried, the char caps and the per-branch receipt |
 | [docs/trinity_push.md](docs/trinity_push.md) | The push lane: vectorize → verify → prune, what counts as non-canonical, the scope and the two gates |
 | [docs/todos_and_backlog.md](docs/todos_and_backlog.md) | The sticky-note pad, the backlog file, the roll and the restore |
-| [docs/todos_v2_shape_contract.md](docs/todos_v2_shape_contract.md) | The todos v2 shape contract in full — the relay other branches build against |
+| [docs/todos_v2_shape_contract.md](docs/todos_v2_shape_contract.md) | The todos v2 shape contract in full — the field-by-field contract other branches build against |
 | [docs/config_verbs.md](docs/config_verbs.md) | The rollover limit verbs, the keep-count ceiling, and the `--json` machine surface |
 | [docs/templates_and_tabs.md](docs/templates_and_tabs.md) | The gold templates, the bump site, and the `*_meta` state tabs written into every memory file |
 | [docs/vector_search.md](docs/vector_search.md) | The vector lane: subprocess isolation, `vectorize_and_store`, plan-ID matching |
@@ -142,7 +142,7 @@ absent rather than returning nothing.
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)

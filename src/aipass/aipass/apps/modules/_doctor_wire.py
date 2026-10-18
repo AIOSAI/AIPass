@@ -3,18 +3,11 @@
 # Description: Auto-wire provider settings from manifest into user config
 # Version: 1.2.0
 # Created: 2026-05-08
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 doctor_wire — auto-wire provider settings
-
-Extracted from doctor.py to keep module sizes manageable.
-Provides:
-  - HOOK_DESCRIPTIONS / ENV_DESCRIPTIONS / SETTINGS_DESCRIPTIONS — what each one is for
-  - Bridge pattern — hooks wired as $AIPASS_HOME bridge commands (no script copying)
-  - fix_provider_settings() — --fix's settings step: plan, show the diff, ask once, write (FPLAN-0646)
-  - check_settings_scalars() — doctor's diff row per manifest settings key, with the cure command
 """
 
 from __future__ import annotations
@@ -50,16 +43,8 @@ from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_IN
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN
 
 
-# =============================================================================
-# STALE DENY RULE MIGRATION (implementation in handler; re-exported here)
-# =============================================================================
-
+# Re-exported: callers reach the stale-deny migration through this module.
 from aipass.aipass.apps.handlers.provider_reconcile import plan_stale_deny, reconcile_stale_deny  # noqa: F401
-
-
-# =============================================================================
-# SETTINGS SCALAR SLOT — doctor's diff rows (DPLAN-0347)
-# =============================================================================
 
 
 class SettingsCheckResult(NamedTuple):
@@ -74,11 +59,8 @@ class SettingsCheckResult(NamedTuple):
 def merge_manifest_rows(services: List[Any], manifest_results: List[Any]) -> List[Any]:
     """Swap the Services group's provider rows for a fresh manifest pass.
 
-    Replaces every label the fresh pass carries, plus the three fixed provider labels
-    so an empty/failed pass still clears them. A settings-scalar row is labelled with
-    the manifest KEY, not a fixed name — filtering on the fixed three alone left the
-    first pass's row beside the new one and doctor printed the same gap twice
-    (measured on a scratch HOME, DPLAN-0347).
+    A settings-scalar row is labelled with the manifest KEY, so filtering on the three
+    fixed labels alone would leave the first pass's row and print the gap twice.
     """
     replaced = {row.label for row in manifest_results} | {"hooks", "env vars", "permissions"}
     return [row for row in services if row.label not in replaced] + manifest_results
@@ -99,16 +81,9 @@ def check_settings_scalars(
 ) -> "tuple[List[SettingsCheckResult], List[str]]":
     """One diff row per manifest settings key: what it wants, what the provider file has.
 
-    Reads the PERSONAL settings file — for a scalar like includeGitInstructions that is
-    the only place it takes effect, so the project copy would be a false green
-    (DPLAN-0347). Returns the rows plus the keys the wire verb would actually set: a key
-    the user set to a different value is not one of them, so doctor does not offer to
-    wire over a human decision.
-
-    *settings_path* is ``~/.claude/settings.json`` when None, resolved at call time.
-    doctor.check_provider_manifest hands on its own settings_path seam (None in the
-    product), so a test that hands a tmp settings file is never read against the live
-    one (aipass, fleet green leg 6: the seam is for the tests).
+    Reads the PERSONAL settings file, the only place such a scalar takes effect. A key the
+    user set differently is not settable, so doctor never offers to wire over a human
+    decision. *settings_path* is a test seam, ``~/.claude/settings.json`` when None.
     """
     wanted = manifest_settings(manifest)
     if not wanted:
@@ -136,10 +111,6 @@ def check_settings_scalars(
     return rows, settable
 
 
-# =============================================================================
-# SHOW THE PLAN, ASK ONCE (FPLAN-0646)
-# =============================================================================
-
 SETTINGS_FIX_LABEL = "settings fix"
 YES_COMMAND = "aipass doctor --fix --yes"
 NOT_APPLIED_NO_TTY = f"not applied: no tty — {YES_COMMAND}"
@@ -153,8 +124,7 @@ CONSENT_INSTALL = "install"
 def plan_settings_fix(manifest_path: Optional[Path], settings_path: Optional[Path] = None) -> List[SettingsPlan]:
     """The settings changes --fix would make: the wire, then the stale-deny removal on top of it.
 
-    Only plans that change the file are returned; the second is computed from the
-    first's result, so applying both in order lands exactly the diff shown.
+    The second is computed from the first's result, so applying both lands exactly the diff shown.
     """
     plans: List[SettingsPlan] = []
     wire = plan_wire_provider(manifest_path, settings_path) if manifest_path is not None else None
@@ -206,9 +176,7 @@ def fix_provider_settings(
 ) -> List[SettingsCheckResult]:
     """--fix's settings step: plan, show, ask once, write — or say why nothing was written.
 
-    The install door (``install``) never asks; ``--yes`` writes without the question;
-    a doctor-fix run with no tty and no ``--yes`` writes nothing. Returns the rows to
-    add to the Services group: empty when written or when nothing needed changing.
+    The install door never asks, ``--yes`` skips the question, no tty without ``--yes`` writes nothing.
     """
     plans = plan_settings_fix(manifest_path)
     if not plans:
@@ -248,11 +216,6 @@ def settings_fix_report(manifest_path: Optional[Path], yes: bool = False) -> dic
     return report
 
 
-# =============================================================================
-# INTERACTIVE WIRE PROMPTS
-# =============================================================================
-
-
 def _prompt_auto_wire(
     manifest_path: Path,
     missing_hooks: List[str],
@@ -262,10 +225,7 @@ def _prompt_auto_wire(
     missing_settings: List[str] | None = None,
     settings_path: Optional[Path] = None,
 ) -> bool:
-    """Show the planned wire line by line with its diff, ask once, or print the manual warning.
-
-    Returns True if wiring was performed.
-    """
+    """Show the planned wire line by line with its diff, ask once, or print the manual warning."""
     missing_settings = missing_settings or []
     logger.warning(
         "[doctor] %d hooks, %d env vars, %d permissions, %d settings missing",
@@ -330,11 +290,6 @@ def _print_manual_wire_warning(
     console.print(f"[dim]Wire when ready: {WIRE_COMMAND} — see .claude/hooks/README.md[/dim]")
 
 
-# =============================================================================
-# OUTPUT FORMATTING
-# =============================================================================
-
-
 def print_introspection() -> None:
     """Display module info for doctor_wire."""
     console.print()
@@ -348,21 +303,8 @@ def print_introspection() -> None:
     console.print()
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def handle_command(command: str, args: list[str]) -> bool:
-    """Handle command routing. This is a helper module — no standalone commands.
-
-    Args:
-        command: Command name.
-        args: Additional arguments.
-
-    Returns:
-        True if handled, False otherwise.
-    """
+    """Handle command routing. This is a helper module — no standalone commands."""
     if command != "doctor_wire":
         return False
 
@@ -383,11 +325,6 @@ def handle_command(command: str, args: list[str]) -> bool:
 
     json_handler.log_operation("doctor_wire_noop", {"command": command})
     return False
-
-
-# =============================================================================
-# WIRE VERIFY GUARD (doctor check row)
-# =============================================================================
 
 
 class WireCheckResult(NamedTuple):

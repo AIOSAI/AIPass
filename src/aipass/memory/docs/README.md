@@ -2,7 +2,7 @@
 
 # Docs
 
-Tracked public reference for the `memory` branch — the **depth** layer of the DPLAN-0347 contract:
+Tracked public reference for the `memory` branch — the **depth** layer:
 one file per module or handler group, each small enough for one read, each linked from the branch
 README, opened when something breaks.
 

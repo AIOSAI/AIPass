@@ -3,7 +3,7 @@
 # Description: import_site_check — test template v1 item 8, product imports at the top of a test file
 # Version: 1.2.0
 # Created: 2026-09-21
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/import_site_check.py."""
@@ -74,12 +74,7 @@ class TestADeferredProductImportIsConvicted:
         ]
 
     def test_a_method_import_is_counted_once_not_twice(self):
-        """An import in a method has BOTH a ClassDef and a FunctionDef ancestor.
-
-        Counting per scope rather than per node reported the fleet at 9,174
-        hits against a real 5,175 — the number that would have been quoted to
-        the owner.
-        """
+        """An import in a method has BOTH a ClassDef and a FunctionDef ancestor."""
         source = (
             "class TestThing:\n"
             "    class Inner:\n"
@@ -110,12 +105,7 @@ class TestModuleLevelAndForeignImportsAreLeftAlone:
         assert _shapes(source) == []
 
     def test_a_module_level_plain_import_is_not_a_hit(self):
-        """Both import forms have their own branch, so both need their own acquittal.
-
-        Added 2026-09-21 after a mutant that convicted every `import aipass...`
-        regardless of where it sat survived the whole file: every other
-        module-level test used the `from ... import` form.
-        """
+        """Both import forms have their own branch, so both need their own acquittal."""
         source = "import aipass.prax\n\n\ndef test_x():\n    assert aipass.prax\n"
 
         assert _shapes(source) == []
@@ -176,10 +166,7 @@ class TestTheStubMechanismIsConvicted:
         assert _shapes(source) == ["sys.modules stub (sys.modules[...] = ...)"]
 
     def test_a_module_level_importlib_call_is_not_convicted(self):
-        """It runs before any test could stage a replacement for it to pick up.
-
-        prax/tests/test_commons_feed.py:25 is the fleet's only instance.
-        """
+        """It runs before any test could stage a replacement for it to pick up."""
         source = 'feed = importlib.import_module("aipass.prax.apps.handlers.monitoring.commons_feed")\n'
 
         assert _shapes(source) == []
@@ -191,10 +178,7 @@ class TestTheStubMechanismIsConvicted:
         assert _shapes(source) == []
 
     def test_a_product_module_named_through_a_variable_is_missed(self):
-        """The known limit, pinned so it cannot be lost: a name bound inside the function is not read.
-
-        A module-level constant key is read since leg 17 (TestAModuleConstantKeyIsRead).
-        """
+        """The known limit, pinned so it cannot be lost: a name bound inside the function is not read."""
         source = 'def test_x():\n    key = "aipass.prax"\n    sys.modules[key] = stub\n'
 
         assert _shapes(source) == []
@@ -223,11 +207,7 @@ class TestCheckModuleIsThePerFileLane:
         assert result["score"] == 0
 
     def test_every_hit_gets_its_own_line_with_file_and_number(self, tmp_path):
-        """checklist._format_failure prints the FIRST failed check and counts the rest.
-
-        So N checks would show one hit and hide the others; the lines live in
-        one message instead, and this pins that they all survive.
-        """
+        """checklist._format_failure prints the FIRST failed check and counts the rest."""
         path = _write(
             tmp_path,
             "def test_x():\n"
@@ -299,11 +279,7 @@ class TestThroughTheChecklistCommand:
 
 
 class TestAModuleConstantKeyIsRead:
-    """``KEY = "aipass.prax"`` then ``sys.modules[KEY] = stub`` (seedgo, fleet green leg 17).
-
-    A subscript key that is a name bound once at module level to a string
-    naming an aipass module reads as that string. Nothing wider.
-    """
+    """A module-level name bound once to an aipass module string reads as that string as a sys.modules key."""
 
     def test_a_module_level_constant_key_is_convicted_at_the_write(self):
         source = 'KEY = "aipass.prax"\n\n\ndef test_x():\n    sys.modules[KEY] = stub\n'

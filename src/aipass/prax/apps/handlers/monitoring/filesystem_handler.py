@@ -3,20 +3,10 @@
 # Description: FileSystem Event Handler
 # Version: 0.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Filesystem Event Handler
-
-Watchdog FileSystemEventHandler that processes filesystem events and:
-1. Pushes events to the monitoring event queue for display
-2. Fires trigger events for cross-module integration
-3. Parses CLI session files for agent activity tracking (Claude Code, Codex)
-
-Extracted from monitor.py to maintain 3-layer architecture:
-  module (orchestration) -> handler (implementation)
-"""
+"""PRAX Filesystem Event Handler"""
 
 import json as _json
 from pathlib import Path
@@ -34,15 +24,7 @@ logger = get_direct_logger()
 
 
 class MonitoringFileHandler(FileSystemEventHandler):
-    """
-    File system event handler that pushes events to the monitoring queue
-    and fires trigger events for cross-module integration.
-
-    Args:
-        event_queue: MonitoringQueue instance to push events into
-        command_indicator_files: Map of filename -> command description for
-            detecting commands from file modifications
-    """
+    """File system event handler that pushes events to the monitoring queue."""
 
     def __init__(
         self,
@@ -56,20 +38,13 @@ class MonitoringFileHandler(FileSystemEventHandler):
         # Below this root no event from a dropbox or an .archive is shown (should_monitor)
         self._sandbox_root = sandbox_root
         json_handler.log_operation("file_change_handled", {"has_queue": event_queue is not None})
-        # Track last command emitted per file to avoid duplicate separators
         self._last_file_command: Dict[str, str] = {}
-        # Track JSONL file positions for incremental reading
         self._jsonl_positions: Dict[str, int] = {}
-        # Track last agent action per session to avoid duplicate displays
         self._last_agent_action: Dict[str, str] = {}
-        # Track model per session file for display tags
         self._session_models: Dict[str, str] = {}
-        # Track detected branch per CLI session file (from session metadata)
         self._session_branches: Dict[str, str] = {}
-        # Track files we've already warned about for branch detection
         self._branch_warn_logged: set = set()
 
-    # -- public property so the module can swap queues after construction ------
     @property
     def event_queue(self) -> Optional[MonitoringQueue]:
         """The monitoring event queue used to publish file events."""
@@ -79,10 +54,6 @@ class MonitoringFileHandler(FileSystemEventHandler):
     def event_queue(self, queue: Optional[MonitoringQueue]):
         """Replace the event queue (e.g. after handler construction)."""
         self._event_queue = queue
-
-    # =========================================================================
-    # WATCHDOG EVENT METHODS
-    # =========================================================================
 
     def on_created(self, event):
         """Handle file creation events."""
@@ -112,10 +83,6 @@ class MonitoringFileHandler(FileSystemEventHandler):
                 self._handle_event("modified", dest_path_str)
             else:
                 self._handle_event("moved", dest_path_str)
-
-    # =========================================================================
-    # AGENT ACTIVITY PARSING (Claude Code JSONL sessions)
-    # =========================================================================
 
     @staticmethod
     def _format_tool_action(item: dict) -> Optional[str]:
@@ -185,10 +152,6 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
         return None
 
-    # =========================================================================
-    # CLI SESSION BRANCH DETECTION
-    # =========================================================================
-
     @staticmethod
     def _branch_from_cwd(cwd: str) -> Optional[str]:
         """Extract branch name from a CWD path like /path/to/src/aipass/devpulse."""
@@ -199,8 +162,7 @@ class MonitoringFileHandler(FileSystemEventHandler):
             idx = parts.index("aipass")
             if idx + 1 < len(parts):
                 return parts[idx + 1].upper()
-        # External project under ~/Projects/: use branch_detector for full label
-        # e.g. ~/Projects/AIPL/src/polyglot/ → AIPL/POLYGLOT
+        # External project under ~/Projects/: branch_detector gives the full label (AIPL/POLYGLOT)
         projects_base = Path.home() / "Projects"
         try:
             Path(cwd).relative_to(projects_base)
@@ -245,29 +207,22 @@ class MonitoringFileHandler(FileSystemEventHandler):
         self._session_branches[path_key] = result
         return result
 
-    # =========================================================================
-    # MODEL TAG HELPERS
-    # =========================================================================
-
     @staticmethod
     def _shorten_model(model: str) -> str:
         """Shorten a model identifier for display."""
         if not model:
             return ""
         m = model.lower()
-        # Claude models
         if "opus" in m:
             return "opus"
         if "sonnet" in m:
             return "sonnet"
         if "haiku" in m:
             return "haiku"
-        # OpenAI/Codex models
         if m.startswith("gpt-"):
             return m  # already short: gpt-4o, gpt-5.4
         if m.startswith("o") and any(c.isdigit() for c in m):
             return m  # o1, o3, o4-mini
-        # Fallback: first 15 chars
         return model[:15]
 
     def _tag_branch_with_model(self, path_key: str, branch: str) -> str:
@@ -276,10 +231,6 @@ class MonitoringFileHandler(FileSystemEventHandler):
         if model:
             return f"{branch}/{model}"
         return branch
-
-    # =========================================================================
-    # CODEX AGENT ACTIVITY PARSING (JSONL sessions)
-    # =========================================================================
 
     @staticmethod
     def _extract_codex_action(entry: dict) -> Optional[str]:
@@ -405,20 +356,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
             logger.info(f"[monitor] Codex JSONL parse error for {file_path.name}: {e}")
             return False
 
-    # =========================================================================
-    # CLAUDE CODE AGENT ACTIVITY PARSING (JSONL sessions)
-    # =========================================================================
-
     _MAX_AGENT_EVENTS_PER_BATCH = 3
 
     def _parse_agent_activity(self, file_path, branch):
-        """Parse Claude Code session JSONL to show agent actions.
+        """Parse Claude Code session JSONL to show agent actions; True if emitted or deduped.
 
-        Returns True if an event was emitted (or deduped), False on failure.
-        Iterates forward through all new lines (for model extraction), but only
-        emits the last few distinct actions to prevent doom-scrolling when large
-        batches accumulate between polls or after compaction resets.
-        """
+        Emits only the last few distinct actions, so a large batch after a poll gap does not flood."""
         try:
             path_key = str(file_path)
             current_size = file_path.stat().st_size
@@ -483,10 +426,6 @@ class MonitoringFileHandler(FileSystemEventHandler):
             logger.info(f"[monitor] JSONL parse error for {file_path.name}: {e}")
             return False
 
-    # =========================================================================
-    # INTERNAL EVENT PROCESSING
-    # =========================================================================
-
     def _check_command_indicator(self, action, file_path, branch):
         """Check if file event indicates a command and emit separator if so."""
         if action != "modified" or file_path.name not in self._command_indicator_files:
@@ -520,14 +459,12 @@ class MonitoringFileHandler(FileSystemEventHandler):
             # Markers use forward slashes; match on a local copy so Windows paths match too
             norm = path_str.replace("\\", "/")
 
-            # Claude Code JSONL files: parse agent activity
             if file_path.suffix == ".jsonl" and ".claude/projects/" in norm:
                 if "/subagents/" in norm:
                     branch = branch + " agent"
                 if self._parse_agent_activity(file_path, branch):
                     return
 
-            # Codex JSONL files: parse agent activity
             if file_path.suffix == ".jsonl" and ".codex/sessions/" in norm:
                 codex_branch = self._get_codex_branch(file_path, path_str)
                 if self._parse_codex_activity(file_path, codex_branch):

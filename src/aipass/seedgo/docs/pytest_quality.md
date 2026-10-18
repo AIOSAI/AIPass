@@ -18,8 +18,8 @@ Corpus is declared in `pack.json` (`tests/` only; `apps/` is read by the rules t
 and measured by `corpus.py`. The banner over a score is that declaration, not the engine's
 file count.
 
-It replaced `aipass_standards/test_quality` (v4), which scanned test files as TEXT and
-awarded items for substrings — see [aipass_standards.md](aipass_standards.md).
+`aipass_standards/test_quality` (v4), which scanned test files as TEXT and awarded items for
+substrings, is retired — see [aipass_standards.md](aipass_standards.md).
 
 ---
 
@@ -37,6 +37,7 @@ the escape hatch. One line each here, nothing more — the rule file is the sour
 | `empty_parametrize` | Did the table vanish at collection time, leaving a green skip? |
 | `entry_point_diff` | Has the suite ever said this verb out loud? |
 | `fresh_clone` | Would this pass on a machine that has only what the repo ships? |
+| `host_leak` | Is the faked world faked all the way, or does it take one value from the real host? |
 | `host_state` | Did the test put the machine back? (About the restore, never the reach.) |
 | `mock_drift` | Does this patch replace a function, or a whole module? |
 | `module_eviction` | Did the test put the import cache back? |
@@ -50,10 +51,12 @@ the escape hatch. One line each here, nothing more — the rule file is the sour
 
 ## Why it does not gate
 
-Shadow status is a calibration decision, not timidity. `docstring_pin` carries the pack's
-whole false-conviction risk and is unscored for exactly that reason. The population-level
-diff against the calibrated haiku triage (Shadow diff #1 in the CHANGELOG) is the evidence,
-and it says what a population-level comparison cannot do: pair the two verdicts row by row.
+Shadow status is a calibration decision, not timidity: the pack scores in shadow until its
+numbers are diffed against the calibrated triage (`pack.json` carries that reason).
+`docstring_pin` carries the pack's whole false-conviction risk and is unscored for exactly
+that reason. The evidence is a population-level diff against the calibrated haiku triage,
+which states its own limit: a population-level comparison cannot pair the two verdicts row
+by row.
 
 ---
 
@@ -68,5 +71,5 @@ See [proof_and_coverage.md](proof_and_coverage.md).
 ## Related
 
 - [proof_and_coverage.md](proof_and_coverage.md) — inventory, twins, test_map, the execution lane
-- [aipass_standards.md](aipass_standards.md) — the v4 pack this one replaced a rule in
+- [aipass_standards.md](aipass_standards.md) — the scored AIPass pack, and the retired v4 rule
 - [audit_engine.md](audit_engine.md) — how any pack is discovered and scored

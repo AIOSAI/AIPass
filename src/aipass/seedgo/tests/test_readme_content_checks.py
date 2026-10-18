@@ -3,14 +3,11 @@
 # Description: Unit tests for readme content accuracy checks and the docs page standard
 # Version: 1.3.1
 # Created: 2026-05-15
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and docs_page_check.py beside it."""
 
-# readme_check's Check 7 (test count accuracy), Check 8 (markdown link validity) and the
-# advisory docs-index / rot-bait lane (check_branch_info); docs_page_check's docs/*.md page
-# shape one layer down (DPLAN-0351).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — check_required_sections and check_command_list; tests/test_checkers_batch9.py
@@ -37,11 +34,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.readme_content import get_read
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as budget
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _lines(text: str) -> List[str]:
     return text.split("\n")
 
@@ -60,28 +52,12 @@ def _tests(count: int) -> str:
     return "".join(f"def test_{i}(): pass\n" for i in range(count))
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure the checkers read, at the seam each reads it from.
-
-    ``is_bypassed``, ``is_seedgo_ignored`` and ``load_ignore_entries`` are left
-    real: each is a pure function of the arguments a call passes explicitly
-    (``bypass_rules``, ``branch_root``), with no live-repo dependency once
-    those are test-controlled.
-    """
+    """Mock heavy infrastructure the checkers read, at the seam each reads it from."""
     for module in (readme_check, docs_page_check):
         monkeypatch.setattr(module, "logger", MagicMock())
         monkeypatch.setattr(module, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
-
-
-# ===========================================================================
-# 7. check_test_count_accuracy
-# ===========================================================================
 
 
 def test_test_count_no_claims(tmp_path):
@@ -180,11 +156,6 @@ def test_test_count_rglob_nested(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# _extract_test_counts
-# ===========================================================================
-
-
 def test_extract_test_counts_various_patterns(tmp_path):
     """Mutant: only the first claim kept in apps/handlers/aipass_standards/readme_check.py — killed."""
     tree_line = "├── tests/    # 21 tests (watchdog + feedback)"
@@ -209,11 +180,6 @@ def test_extract_test_counts_empty(tmp_path):
     assert result["message"] == "No test count claims found in README (skipped)"
 
 
-# ===========================================================================
-# _count_test_functions
-# ===========================================================================
-
-
 def test_count_test_functions_basic(tmp_path):
     """Mutant: one count per file, not per def, in apps/handlers/aipass_standards/readme_check.py — killed."""
     files = {"test_a.py": "def test_one(): pass\ndef test_two(): pass\n", "test_b.py": "def test_three(): pass\n"}
@@ -222,10 +188,7 @@ def test_count_test_functions_basic(tmp_path):
 
 
 def test_count_test_functions_skips_non_test_files(tmp_path):
-    """Only test_*.py files are counted, not conftest or helpers.
-
-    Mutant: every *.py counted, not test_*.py, in apps/handlers/aipass_standards/readme_check.py — killed.
-    """
+    """Only test_*.py files are counted, not conftest or helpers."""
     files = {
         "test_real.py": "def test_one(): pass\n",
         "conftest.py": "def test_fixture(): pass\n",
@@ -239,11 +202,6 @@ def test_count_test_functions_empty_dir(tmp_path):
     """Mutant: the count starts at 1 in apps/handlers/aipass_standards/readme_check.py — killed."""
     result = _count_check(tmp_path, "5 tests", {})
     assert result["message"] == "README claims 5 tests but no test functions found"
-
-
-# ===========================================================================
-# 8. check_markdown_links
-# ===========================================================================
 
 
 def test_markdown_links_no_links(tmp_path):
@@ -311,16 +269,8 @@ def test_markdown_links_bypassed(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# _extract_relative_links
-# ===========================================================================
-
-
 def test_extract_relative_links_mixed(tmp_path):
-    """Only relative links are read; external and anchor links are skipped.
-
-    Mutant: anchor links no longer skipped in apps/handlers/aipass_standards/readme_check.py — killed.
-    """
+    """Only relative links are read; external and anchor links are skipped."""
     content = "[Ext](https://example.com)\n[Local](docs/setup.md)\n[Anchor](#top)\n[File](README.md)\n"
     # Neither target exists, so the dead-link message lists exactly the relative links read.
     result = check_markdown_links(_lines(content), tmp_path, "fake.py")
@@ -339,11 +289,6 @@ def test_extract_relative_links_backtick_text(tmp_path):
     content = "[`utils/`](utils/)\n"
     result = check_markdown_links(_lines(content), tmp_path, "fake.py")
     assert result["message"] == "Dead links: utils/ (`utils/`)"
-
-
-# ===========================================================================
-# Integration: check_module with new checks
-# ===========================================================================
 
 
 def test_check_module_includes_new_checks(tmp_path):
@@ -384,10 +329,7 @@ def test_check_module_missing_readme_has_8_failures(tmp_path):
 
 
 def test_is_runtime_artifact_known_dirs(tmp_path):
-    """Known runtime dirs and suffixes are runtime artifacts.
-
-    Mutant: _json not a runtime artifact in apps/handlers/aipass_standards/readme_check.py — killed.
-    """
+    """Known runtime dirs and suffixes are runtime artifacts."""
     names = [
         "logs",
         "artifacts",
@@ -426,10 +368,7 @@ def test_module_list_skips_disabled_file(tmp_path):
 
 
 def test_count_test_functions_skips_disabled_file(tmp_path):
-    """test_*(disabled).py files are not counted.
-
-    Mutant: the (disabled) skip removed in apps/handlers/aipass_standards/readme_check.py — killed.
-    """
+    """test_*(disabled).py files are not counted."""
     files = {
         "test_active.py": "def test_one(): pass\ndef test_two(): pass\n",
         "test_old(disabled).py": "def test_ghost(): pass\ndef test_phantom(): pass\ndef test_zombie(): pass\n",
@@ -439,8 +378,7 @@ def test_count_test_functions_skips_disabled_file(tmp_path):
 
 
 def test_directory_tree_passes_absent_runtime_dir(tmp_path):
-    """Parity regression: README tree lists runtime dir (logs), dir absent on
-    disk, no git available — tree check passes via _is_runtime_artifact."""
+    """A README tree listing an absent runtime dir passes via _is_runtime_artifact, with no git available."""
     branch_root = tmp_path / "mybranch"
     branch_root.mkdir()
     apps_dir = branch_root / "apps"
@@ -486,11 +424,6 @@ def test_directory_tree_names_the_unreadable_subtree_it_could_not_verify(tmp_pat
     assert f"could not be read: {locked}" in result["message"]
 
 
-# ===========================================================================
-# Advisory lane: docs index, named paths, rot bait (check_branch_info)
-# ===========================================================================
-
-
 def _advisory_branch(tmp_path, readme_text: str, docs: dict | None = None, name: str = "mybranch"):
     """A branch root with an entry point, a README and optional docs/*.md."""
     branch_root = tmp_path / name
@@ -534,10 +467,7 @@ def test_docs_index_linked_doc_not_reported(tmp_path):
 
 
 def test_docs_index_link_is_resolved_not_string_matched(tmp_path):
-    """A link that reaches the file by a path the README never spells out
-    ("docs/./audit.md") still indexes it: link targets are RESOLVED against the
-    branch root, not string-matched against the text. Without resolution the
-    lane would only ever see paths written the one canonical way."""
+    """A link written as docs/./audit.md still indexes the page: targets are resolved, not string-matched."""
     readme = "# MyBranch\n\nDepth: [audit](docs/./audit.md)\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
     assert "docs/audit.md" not in readme
@@ -588,10 +518,7 @@ def test_missing_readme_is_silence(tmp_path):
 
 
 def test_broken_readme_link_reported_by_scored_check_only(tmp_path):
-    """A dead relative link is reported — by check 8, and NOT duplicated in the
-    advisory lane. The target is branch-rooted on purpose: the advisory lane
-    would pick it up if it stopped skipping link targets, and then one dead
-    link would be told twice."""
+    """A dead relative link is reported by check 8 only, never told twice by the advisory lane."""
     readme = "# MyBranch\n\nThe gate: [gate](apps/handlers/gone.py)\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -621,8 +548,7 @@ def test_named_path_present_is_silent(tmp_path):
 
 
 def test_named_path_outside_branch_root_ignored(tmp_path):
-    """A path rooted somewhere else (a neighbour branch, an illustration) is out
-    of scope: this audit reads ONE branch and cannot tell stale from foreign."""
+    """A path rooted outside the branch is out of scope: one branch's audit cannot tell stale from foreign."""
     readme = "# MyBranch\n\nSee `lifecycle/auto_fix.py` and `/path/to/registry.json`.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -651,9 +577,7 @@ def test_rot_bait_dated_status_heading_reported(tmp_path):
 
 
 def test_rot_bait_last_updated_is_never_rot_bait(tmp_path):
-    """Last Updated carries a date and is REQUIRED by check 3 — never flagged,
-    not even when a branch writes it as a dated HEADING, which is the only
-    shape where the exemption is load-bearing."""
+    """Last Updated is required by check 3 and never rot bait, not even as a dated heading."""
     readme = "# MyBranch\n\n## Last Updated (2026-09-15)\n\nA face.\n\n**Last Updated:** 2026-09-15\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -689,8 +613,7 @@ def test_rot_bait_short_command_pointer_is_silent(tmp_path):
 
 
 def test_command_count_survives_fenced_comments(tmp_path):
-    """A bash comment inside a fence is not a markdown heading: counting must
-    not stop at '# Audit' three invocations in."""
+    """A bash comment inside a fence is not a markdown heading, so counting does not stop at it."""
     readme = (
         "# MyBranch\n\n## Commands\n\n```bash\n"
         "drone @mybranch one\n"
@@ -717,15 +640,12 @@ def test_advisory_samples_are_rich_safe(tmp_path):
 
 
 def test_branch_inputs_declares_docs_for_the_audit_cache(tmp_path):
-    """docs/*.md is declared, or a new docs file is invisible until something
-    else in the branch changes and the index line is served stale."""
+    """docs/*.md is a declared input, or a new docs file leaves the cached index line stale."""
     assert "docs/*.md" in readme_check.BRANCH_INPUTS
 
 
 def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
-    """LOAD-BEARING: a branch that trips every advisory line still scores
-    exactly what it scored before the lane existed — 8 checks, no advisory
-    finding anywhere in checks[]. CI gates every branch at 100."""
+    """A branch tripping every advisory line scores exactly the 8 checks: no advisory finding in checks[]."""
     readme = (
         "# MyBranch\n\n## Architecture\n\n```\nmybranch/\n```\n\n"
         "## Commands\n\n"
@@ -750,8 +670,7 @@ def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
         assert word not in blob
 
 
-# The README face is eight ## sections, names exact, order fixed (DPLAN-0351
-# phase 3): the fleet's de facto order, advisory before it scores.
+# The README face is eight ## sections, names exact, order fixed; advisory before it scores.
 
 _EIGHT = (
     "Quick Start",
@@ -814,15 +733,7 @@ def test_readme_sections_seedgo_own_readme_is_one_of_the_six_in_order():
     assert _sections_line(Path(__file__).resolve().parents[1]) == []
 
 
-# ===========================================================================
-# docs_page_check -- the docs/*.md page shape (DPLAN-0351)
-# ===========================================================================
-#
-# The README's depth lives in docs/, and every page there has one shape: a
-# back-link, one H1, a purpose paragraph, topic sections no deeper than ###,
-# links that resolve, a size under the context pack's cap, and a name that is
-# not a retired defect register. Six checks score; story and defect prose
-# only nominate.
+# docs_page_check: one shape per docs/*.md page; six checks score, story and defect prose only nominate.
 
 _GOOD_PAGE = (
     "[<- Back to the README](../README.md)\n\n"
@@ -901,10 +812,7 @@ def test_docs_page_a_comment_and_a_back_link_may_sit_above_the_h1(tmp_path):
 
 
 def test_docs_page_a_missing_or_low_back_link_is_red_under_the_opening_check(tmp_path):
-    """Scored since wave 0 put the back-link on every page: above the purpose paragraph, or the page is red.
-
-    The DPLAN-0347 move stamp's link sits below the purpose, which is not the slot.
-    """
+    """Scored since wave 0 put the back-link on every page: above the purpose paragraph, or the page is red."""
     stamp = "# Stamped\n\nPurpose.\n\nMoved out of README.md. Back to the [README](../README.md)\n"
     entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE, "bare.md": "# Bare\n\nPurpose.\n", "stamp.md": stamp})
 
@@ -930,11 +838,7 @@ def test_docs_page_a_missing_or_low_back_link_is_red_under_the_opening_check(tmp
     ],
 )
 def test_docs_page_the_line_under_the_h1_must_be_prose(tmp_path, under):
-    """A reader arriving at the page is told what it is for before anything else.
-
-    The three red pages in the fleet on landing day opened on a section
-    heading, a section heading and a code fence.
-    """
+    """A reader arriving at the page is told what it is for before anything else."""
     entry = _docs_branch(tmp_path / "b", {"bad.md": f"# Page\n\n{under}\n\nLater prose.\n"})
 
     failed = _failed(_docs().check_module(str(entry)))
@@ -1017,10 +921,7 @@ def test_docs_page_the_shipped_cap_is_the_context_pack_key():
 
 
 def test_docs_page_a_defect_register_under_docs_is_red_by_name(tmp_path):
-    """The owner retired the registers on 2026-09-19; one coming back under docs/ is red, however spelt.
-
-    A register in the template shape is still red: the name is the defect, not the layout.
-    """
+    """The owner retired the registers on 2026-09-19; one coming back under docs/ is red, however spelt."""
     pages = {
         "known_issues.md": _GOOD_PAGE,
         "Tech-Debt.md": _GOOD_PAGE,

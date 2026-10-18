@@ -3,20 +3,12 @@
 # Description: turn a target argument into the tree the inventory walks
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
-"""
-WHICH TREE GETS WALKED.
+"""WHICH TREE GETS WALKED.
 
-    aipass          the whole fleet - the directory the registry lives in
-    @branch         one registered citizen
-    <path>          any directory, registered or not
-
-A TARGET THAT DOES NOT RESOLVE RAISES. It never falls back to the current
-directory: a report that silently measured the wrong tree would publish a
-confidently wrong number under the right heading, and the reader has no way to
-tell. The same rule the audit-tests lane already follows, for the same reason.
+A target that does not resolve raises; it never falls back to the current directory.
 """
 
 from dataclasses import dataclass
@@ -25,7 +17,6 @@ from typing import Dict, Optional
 
 from aipass.seedgo.apps.handlers import registry_scan
 
-#: The argument that means "every citizen, one tree".
 FLEET_ARGUMENT = "aipass"
 
 
@@ -41,9 +32,7 @@ class Root:
 def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Root:
     """The tree a target argument names.
 
-    `branch_paths` is supplied by the caller rather than read here, so this
-    module resolves a name without importing the registry and stays testable
-    on a machine that has none.
+    `branch_paths` comes from the caller so this stays testable without a registry.
     """
     if argument == FLEET_ARGUMENT:
         repo = fleet_root()

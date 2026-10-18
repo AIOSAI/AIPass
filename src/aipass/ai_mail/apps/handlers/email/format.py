@@ -3,21 +3,13 @@
 # Description: Email Formatting Handler
 # Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-08-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Formatting Handler
 
-Handles email display formatting, preview generation, and text utilities.
-Independent handler - no module dependencies.
-
-Every string that comes from an email (subject, body preview, sender name,
-recipient address) is attacker-shaped input as far as the renderer is
-concerned: it is written by whoever sent the mail. These functions return
-Rich markup, so all of it is escaped here — an unescaped "[dim]" swallows
-text and an unescaped "[/rc]" raises MarkupError and takes the whole
-listing down with it. Escape at the boundary, once, for every surface.
+Every email-sourced string is sender-shaped Rich markup: escape it here, once, for every surface.
 """
 
 import json
@@ -43,14 +35,9 @@ REGISTRY_PATH = find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def lookup_branch_alias(branch_name: str) -> Optional[str]:
-    """
-    Look up a branch's alias from AIPASS_REGISTRY.json.
+    """Look up a branch's alias from AIPASS_REGISTRY.json.
 
-    Args:
-        branch_name: Branch display name (e.g., "TEAM_1", "VERA")
-
-    Returns:
-        Alias string if set, None if empty or not found
+    Returns None when there is no alias to show, including an unreadable registry.
     """
     try:
         registry = json.loads(REGISTRY_PATH.read_text())
@@ -65,19 +52,7 @@ def lookup_branch_alias(branch_name: str) -> Optional[str]:
 
 
 def format_sender_display(from_name: str, from_addr: str) -> str:
-    """
-    Format sender display with alias if available.
-
-    Shows: "Alias (@branch)" when alias is set
-    Falls back to: "BRANCH_NAME (@branch)" when no alias
-
-    Args:
-        from_name: Sender display name (e.g., "TEAM_1")
-        from_addr: Sender email address (e.g., "@team_1")
-
-    Returns:
-        Formatted sender string
-    """
+    """Format sender display with alias if available."""
     alias = lookup_branch_alias(from_name)
     if alias:
         return f"{escape(alias)} ({escape(from_addr)})"
@@ -85,16 +60,7 @@ def format_sender_display(from_name: str, from_addr: str) -> str:
 
 
 def format_email_preview(message: str, max_length: int = 100) -> str:
-    """
-    Format email message as preview text.
-
-    Args:
-        message: Full email message text
-        max_length: Maximum preview length (default: 100)
-
-    Returns:
-        Preview text with ellipsis if truncated
-    """
+    """Format email message as preview text."""
     if len(message) <= max_length:
         return message
 
@@ -102,18 +68,9 @@ def format_email_preview(message: str, max_length: int = 100) -> str:
 
 
 def format_update_count(email_data: Dict) -> int:
-    """
-    Read a message's repeat counter for display.
+    """Read a message's repeat counter for display.
 
-    Upsert messages carry ``updates``: how many times this one slot has been
-    rewritten by the same repeating signal. Returns 0 for ordinary mail and
-    for a first send, so callers can render nothing at all in the common case.
-
-    Args:
-        email_data: Message dict
-
-    Returns:
-        Update count when greater than 1, otherwise 0.
+    Returns 0 for ordinary mail and a first send, so callers render nothing in the common case.
     """
     try:
         count = int(email_data.get("updates", 0))
@@ -124,19 +81,7 @@ def format_update_count(email_data: Dict) -> int:
 
 
 def format_email_header(email_data: Dict) -> str:
-    """
-    Format email header for display.
-
-    Args:
-        email_data: Email data dict with keys:
-            - from_name: Sender display name
-            - from: Sender email address
-            - timestamp: Email timestamp
-            - subject: Email subject
-
-    Returns:
-        Formatted header string
-    """
+    """Format email header for display."""
     json_handler.log_operation("format_email_header", {"subject": email_data.get("subject", "")})
     sender = format_sender_display(email_data.get("from_name", "Unknown"), email_data.get("from", "unknown"))
     lines = [
@@ -146,9 +91,7 @@ def format_email_header(email_data: Dict) -> str:
         f"Subject: {escape(str(email_data.get('subject', 'No Subject')))}",
     ]
 
-    # Repeat counter: this one message stands in for N sends of the same
-    # signal, so the count and the last fire time have to be readable here —
-    # without them the reader sees one warning where there were thirty.
+    # One upserted message stands for N sends; without the count the reader sees one where there were thirty.
     updates = format_update_count(email_data)
     if updates:
         last = email_data.get("last_updated") or email_data.get("timestamp", "Unknown")
@@ -159,38 +102,23 @@ def format_email_header(email_data: Dict) -> str:
 
 
 def format_email_list_item(index: int, email_data: Dict, show_unread: bool = True) -> str:
-    """
-    Format email as list item for inbox/sent display.
-
-    Args:
-        index: Item number in list
-        email_data: Email data dict
-        show_unread: Whether to show unread marker (default: True)
-
-    Returns:
-        Formatted list item string
-    """
+    """Format email as list item for inbox/sent display."""
     lines = []
 
-    # Unread marker + ID for copy-paste
     msg_id = escape(str(email_data.get("id", "????????")))
     timestamp = escape(str(email_data.get("timestamp", "Unknown")))
     if show_unread:
-        # v2: check status first, fall back to read for backward compat
+        # v2 `status` wins; legacy messages carry only `read`.
         status = email_data.get("status")
         is_new = status == "new" if status else not email_data.get("read", False)
         unread_marker = "📨" if is_new else "📬"
         sender = format_sender_display(email_data.get("from_name", "Unknown"), email_data.get("from", "unknown"))
-        # x3 = this row is one repeating signal that has fired 3 times, not one
-        # event. Without it the listing understates a storm as a single ping.
         updates = format_update_count(email_data)
         repeat = f" [yellow]x{updates}[/yellow]" if updates else ""
         lines.append(f"\n{index}. {unread_marker} \\[{msg_id}] From: {sender} @ {timestamp}{repeat}")
     else:
         recipient = escape(str(email_data.get("to", "Unknown")))
-        # A sent record whose delivery was refused must not read like every
-        # delivered row next to it — that identical rendering is what let a
-        # cross-project sender take "it's in my sent folder" as proof it arrived.
+        # A refused sent record must not render like a delivered one: senders read the row as proof.
         refused = " [red]REFUSED[/red]" if email_data.get("status") == "refused" else ""
         lines.append(f"\n{index}. \\[{msg_id}] To: {recipient} @ {timestamp}{refused}")
 
@@ -200,7 +128,6 @@ def format_email_list_item(index: int, email_data: Dict, show_unread: bool = Tru
         reason = escape(str(email_data.get("refused_reason", "no reason recorded")))
         lines.append(f"   [red]Not delivered:[/red] {reason}")
 
-    # Preview
     message = email_data.get("message", "")
     preview = format_email_preview(message, 100)
     lines.append(f"   {escape(preview)}")

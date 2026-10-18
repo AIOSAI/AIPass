@@ -5,25 +5,13 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
 
-auto_fix (PostToolUse) records the errors it found; edit_gate (PreToolUse) decides
-whether they should stop the next edit. Both used to hardcode the path and their own
-reading of the contents. This module is the single definition, so the writer and the
-reader cannot drift apart.
-
-Two rules live here, both reported by @seedgo with a live repro (2026-08-13):
-
-1. A recorded error that can only be fixed in ANOTHER file must not stop edits to
-   other files. Red-first is mandated fleet-wide and the test and the implementation
-   are always in different files, so a gate that blocks the resolving edit is
-   unsatisfiable by any allowed action.
-2. A block must be a live fact, not a remembered one. Any resolving write the hook
-   does not observe (a Bash heredoc, an external editor) leaves the state behind and
-   the block outlives the error it describes.
+A cross-file error must not block other files (red-first edits the test elsewhere), and a
+block is re-checked live: a write the hook never saw (heredoc, editor) leaves stale state.
 """
 
 import hashlib
@@ -41,19 +29,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 CONSOLE = err_console
 HELP_COMMANDS = [("diagnostics_state", "Show what the edit gate remembers, re-checked live")]
 
-# One file per seat, named by a digest of the seat (hooks' choice, leg 4): no seat can
-# lose another's write, and the age rule prunes whole files. Under the system temp, as
-# the tripwire's and cadence's per-session files are. The version 1 file, one for every
-# seat, is read by nobody and removed by the next write.
+# One file per seat so no seat loses another's write; the shared version 1 file is removed on write.
 STATE_DIR = Path(tempfile.gettempdir()) / "aipass-diagnostics-state"
 LEGACY_FILE = Path(__file__).parent.parent.parent.parent / ".diagnostics_state.json"
 MAX_AGE_SECONDS = 24 * 60 * 60
 
-# Errors that, by definition, cannot be resolved inside the file that reports them:
-# the symbol or the module has to appear somewhere else. Matched on message text
-# because that is what auto_fix records — pyright's rule name is not stored, and
-# would over-match anyway (reportAttributeAccessIssue also covers a genuine local
-# typo on a local object, which IS fixable where it is reported).
+# Matched on message text: auto_fix stores no rule name, and reportAttributeAccessIssue
+# would over-match a local typo that IS fixable where it is reported.
 _CROSS_FILE_SIGNATURES = (
     "is unknown import symbol",
     "could not be resolved",
@@ -63,11 +45,7 @@ _PYRIGHT_TIMEOUT_SECONDS = 15
 
 
 def seat_key(hook_data: dict) -> str:
-    """The seat a hook call belongs to: its session, and its agent id for a sub-agent.
-
-    A payload without a session is one seat of its own, "nosession", as the tripwire
-    keys it. The key is never written anywhere: _seat_file names the file by a digest.
-    """
+    """The seat a hook call belongs to: its session, and its agent id for a sub-agent."""
     session = str(hook_data.get("session_id") or "")
     if not session:
         return "nosession"
@@ -78,8 +56,7 @@ def seat_key(hook_data: dict) -> str:
 def _now() -> float:
     """The clock the age rule reads.
 
-    A seam: the tests are the reason it exists, so an entry of 25 hours is written
-    without patching time process-wide. The decision is hooks', leg 4.
+    A test seam: lets a 25-hour-old entry be written without patching time process-wide.
     """
     return time.time()
 
@@ -91,12 +68,7 @@ def _seat_file(seat: str) -> Path:
 def load_seat(seat: str) -> dict | None:
     """Return this seat's recorded errors as {"file", "errors"}, {} when it has none.
 
-    What changed in leg 4 (devpulse's decision A): a seat is no longer refused for
-    another seat's open error, and a seat whose own error a sibling's clean edit used to
-    erase is refused again. Each seat reads its own file alone. The version 1 file shared
-    by every seat is read as nobody's, and an entry older than 24 hours is ignored:
-    sessions end without saying so. None means the seat's file could not be read (logged);
-    the gate then refuses nothing, the side a broken state errs to.
+    None means unreadable (logged): the gate then refuses nothing, the side a broken state errs to.
     """
     return _read_seat_file(_seat_file(seat))
 
@@ -121,9 +93,7 @@ def _read_seat_file(path: Path) -> dict | None:
 def save_seat(seat: str, file_path: str, errors: list[dict]) -> None:
     """Record this seat's errors whole: a temp file in the same directory, then a replace.
 
-    Only this seat's file is written, so no seat's write can lose another's. The same
-    write replaces the version 1 file and prunes seat files past the age rule. Never
-    raises: a failed write is logged and leaves the seat unrefused.
+    Never raises: a failed write is logged and leaves the seat unrefused.
     """
     temp_name = ""
     try:
@@ -170,8 +140,7 @@ def is_cross_file_error(error: dict) -> bool:
 def all_cross_file(errors: list) -> bool:
     """True when EVERY error resolves elsewhere, so blocking edits here helps nobody.
 
-    Empty means "no errors to judge", not "all resolvable elsewhere" — an empty list
-    returns False so a caller cannot read absence as permission.
+    An empty list returns False so a caller cannot read absence as permission.
     """
     if not errors:
         return False
@@ -181,18 +150,7 @@ def all_cross_file(errors: list) -> bool:
 def of_the_tree(file_path: str, errors: list[dict] | None, base: int) -> list[dict] | None:
     """*errors* less those that are not diagnostics of the tree: a template's, or a placeholder line's.
 
-    A file under a ``templates/`` directory is text a generator fills in, and a line
-    holding ``{{`` is a placeholder; neither is code the tree runs. Spawn's leg 10 was
-    refused every .py edit for a day on test_cli_routing.py:25 in its citizen template
-    (spawn 94b406f9, fleet green leg 5 queued defect a).
-
-    Args:
-        file_path: The file the errors are in.
-        errors: {line, message} entries, or None (no answer, passed through as None).
-        base: The first line's number in this checker's count: ruff 1, pyright 0.
-
-    Returns:
-        The errors that are the tree's, None when *errors* is None.
+    *base* is the checker's first line number: ruff 1, pyright 0.
     """
     if errors is None:
         return None
@@ -215,10 +173,7 @@ def of_the_tree(file_path: str, errors: list[dict] | None, base: int) -> list[di
 def pyright_cwd(file_path: str) -> str:
     """The directory pyright runs from for *file_path*: its project root, never the session's cwd.
 
-    The interpreter's ``-m`` puts the cwd first on sys.path, so a scratch ``types.py`` beside a
-    session's cwd broke the interpreter before pyright started, and the run came back
-    "unknown" (memory leg 9, fleet green leg 5). The project root is the nearest
-    ancestor holding a pyproject.toml or pyrightconfig.json, else the file's directory.
+    ``-m`` puts the cwd first on sys.path, so a stray ``types.py`` there breaks the interpreter.
     """
     start = Path(file_path).resolve().parent
     for candidate in [start, *start.parents]:
@@ -230,11 +185,7 @@ def pyright_cwd(file_path: str) -> str:
 def revalidate(file_path: str) -> list[dict] | None:
     """Re-run pyright on *file_path* and return its current errors.
 
-    Returns [] when the file is clean now, a list of {line, message} when it is not,
-    and None when the answer could not be established (pyright missing, timed out,
-    unparseable, file gone). None means "unknown" and must never be read as "clean":
-    a gate that cannot verify should fall back to what it already knows rather than
-    invent a verdict.
+    None means "unknown" (pyright missing, timed out, unparseable) and must never be read as clean.
     """
     if not Path(file_path).exists():
         return None
@@ -269,16 +220,8 @@ def revalidate(file_path: str) -> list[dict] | None:
     return errors[:10]
 
 
-# =============================================================================
-# MODULE INTERFACE (drone @hooks routing)
-# =============================================================================
-
-
 def print_introspection() -> None:
-    """Show what the gate remembers for every seat, and whether it is still true.
-
-    Seats are shown by the file they recorded, never by a session or agent id.
-    """
+    """Show what the gate remembers for every seat, and whether it is still true."""
     CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] Module")
     CONSOLE.print(f"  State directory: {STATE_DIR}")
 

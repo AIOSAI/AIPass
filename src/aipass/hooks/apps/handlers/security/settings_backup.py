@@ -5,24 +5,15 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-15
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """The tool doors of the settings-backup contract (FPLAN-0645).
 
-The owner's ruling, 2026-10-15: his personal Claude settings file never changes
-without a copy of what it was and a record of who changed it. Before an Edit,
-MultiEdit, Write, NotebookEdit or Bash call that writes ``~/.claude/settings*.json``
-goes through, this gate copies the file into ``~/.claude/.backup/settings/`` and
-appends one line to ``receipts.jsonl`` there, then allows. @aipass's Python doors
-write the same folder in the same shape; nothing is imported between the two.
-
-Failure mode: a copy or append that fails refuses the call, naming the path and
-the error; any other crash refuses it too. The engine refuses on import error and
-timeout. Stdlib only on the tool lane: a non-matching Edit costs a name match and
-one lstat. The Bash lane reads the command with the shell reader the other gates
-use (shell_reader, shell_programs), so what that reader cannot see is not backed
-up here either (bash_writes.NOT_CAUGHT).
+Contract: no ``~/.claude/settings*.json`` write without a copy and a receipt in
+``~/.claude/.backup/settings/``; @aipass's Python doors write the same shape there.
+A failed copy or append, or any crash, refuses the call. The Bash lane sees only
+what shell_reader sees (bash_writes.NOT_CAUGHT).
 """
 
 import datetime
@@ -34,7 +25,6 @@ import os
 import shutil
 from pathlib import Path
 
-#: tool name -> the contract's door name for it.
 DOORS = {
     "Edit": "edit-tool",
     "Write": "write-tool",
@@ -88,8 +78,7 @@ def _log_refusal(message: str, *args: object) -> None:
 def _settings_file(raw: str, cwd: str, claude_dir: Path) -> Path | None:
     """The ~/.claude/settings*.json file *raw* writes, spelled in that directory, or None.
 
-    ``~`` expands, a relative path joins *cwd*, and a symlink counts from either
-    end: a link in ~/.claude, or a link elsewhere that lands there.
+    A symlink counts from either end: a link in ~/.claude, or one elsewhere landing there.
     """
     spelled = Path(raw).expanduser()
     if not spelled.is_absolute():
@@ -151,11 +140,7 @@ def _ensure_folder(folder: Path) -> None:
 
 
 def _reserve(folder: Path, base: str) -> Path:
-    """Claim a backup name nobody holds: *base*, then base-2, base-3, … An existing backup is never overwritten.
-
-    The claim is exclusive: a name taken between the look and the claim raises
-    FileExistsError, an OSError, and the call is refused rather than overwrite.
-    """
+    """Claim a backup name nobody holds: *base*, then base-2, base-3, … An existing backup is never overwritten."""
     suffix = 1
     candidate = folder / base
     while candidate.exists():
@@ -205,14 +190,7 @@ def _keep(target: Path, tool_name: str, tool_input: dict, cwd: str, claude_dir: 
 
 
 def handle(hook_data: dict) -> dict:
-    """Back up every ~/.claude/settings*.json file this call writes, then allow; refuse if a backup fails.
-
-    Args:
-        hook_data: Parsed hook event dict from engine.
-
-    Returns:
-        Result dict with stdout (block JSON or empty) and exit_code.
-    """
+    """Back up every ~/.claude/settings*.json file this call writes, then allow; refuse if a backup fails."""
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     if tool_name not in DOORS:
         return _BLOCK_ALLOW

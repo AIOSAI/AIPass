@@ -3,17 +3,11 @@
 # Description: Plan Verification Module
 # Version: 0.1.0
 # Created: 2026-03-18
-# Modified: 2026-03-18
+# Modified: 2026-10-17
 # =============================================
 
 """
 Plan Verification Module
-
-Checks whether a plan has been vectorized in ChromaDB.
-
-Purpose:
-    Thin orchestration layer - calls chroma_subprocess via subprocess
-    to query the flow_plans collection for a given plan label.
 """
 
 import subprocess
@@ -35,15 +29,10 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.repo_root import module_file
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# Subprocess script for ChromaDB operations (run in memory venv)
+# ChromaDB runs in the memory venv's python, in a subprocess.
 _HANDLERS_DIR = module_file(__file__).parent.parent / "handlers"
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 
-# Memory venv python -- auto-detect from memory/.venv/ or use env var override
 _MEMORY_ROOT = module_file(__file__).parents[2]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
@@ -58,45 +47,23 @@ def _get_memory_python() -> str:
     return sys.executable
 
 
-# =============================================================================
-# COMMAND HANDLERS
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle verify commands with seedgo-compliant introspection.
-
-    Routing:
-        verify (no args)          -> print_introspection()
-        verify --help/-h/help     -> print_help()
-        verify <plan_label>       -> check plan vectorization
-
-    Args:
-        command: Command name
-        args: Additional arguments (plan label)
-
-    Returns:
-        True if command handled, False otherwise
-    """
-    # Top-level help (backward compat -- entry point may send these)
+    """Handle verify commands: no args introspects, a help flag prints help, else check the plan."""
+    # The entry point may send a bare help flag as the command.
     if command in ("--help", "-h", "help"):
         print_help()
         return True
 
     if command == "verify":
-        # No args -> introspection (seedgo standard)
         if not args:
             print_introspection()
             return True
 
-        # --help / -h / help -> full help. Bare `help` only counts in the
-        # first slot — a plan label is free text.
+        # Bare `help` counts only in the first slot: a plan label is free text.
         if wants_help(args):
             print_help()
             return True
 
-        # First arg is the plan label
         plan_label = args[0]
         _verify_plan(plan_label)
         return True
@@ -104,21 +71,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     return False
 
 
-# =============================================================================
-# VERIFICATION LOGIC
-# =============================================================================
-
-
 def _check_plan_subprocess(plan_label: str) -> dict:
-    """
-    Check plan vectorization via chroma_subprocess.
-
-    Args:
-        plan_label: Plan label to check (e.g., "FPLAN-0126")
-
-    Returns:
-        Dict with success, found, count, source_files
-    """
+    """Check plan vectorization via chroma_subprocess: success, found, count, source_files."""
     python_path = _get_memory_python()
     input_data = json.dumps(
         {
@@ -148,27 +102,12 @@ def _check_plan_subprocess(plan_label: str) -> dict:
 
 
 def is_plan_vectorized(plan_label: str) -> dict:
-    """
-    Check if a plan has been vectorized in ChromaDB.
-
-    Programmatic API for use by other modules.
-
-    Args:
-        plan_label: Plan label to check (e.g., "FPLAN-0126")
-
-    Returns:
-        Dict with keys: success, found, count, source_files
-    """
+    """Check if a plan has been vectorized in ChromaDB (programmatic API for other modules)."""
     return _check_plan_subprocess(plan_label)
 
 
 def _verify_plan(plan_label: str) -> None:
-    """
-    Verify a plan's vectorization status and display the result.
-
-    Args:
-        plan_label: Plan label to check (e.g., "FPLAN-0126")
-    """
+    """Verify a plan's vectorization status and display the result."""
     result = _check_plan_subprocess(plan_label)
 
     if not result.get("success"):
@@ -197,20 +136,8 @@ def _verify_plan(plan_label: str) -> None:
     )
 
 
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
-
-
 def _discover_handlers() -> dict[str, list[str]]:
-    """Auto-discover handler directories and their Python files.
-
-    Scans the handlers/ directory relative to this module.
-
-    Returns:
-        Dict mapping handler directory name to list of .py filenames
-        (excluding __init__.py and __pycache__).
-    """
+    """Map each handler directory to its .py files (excluding __init__.py)."""
     handlers_dir = module_file(__file__).parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
@@ -225,17 +152,12 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard).
-
-    Called when 'verify' is invoked with no arguments.
-    Shows module identity, connected handlers, and next-step hints.
-    """
+    """Display module introspection info (seedgo standard)."""
     console.print()
     console.print("[bold cyan]verify Module[/bold cyan]")
     console.print("Checks whether a plan has been vectorized in ChromaDB")
     console.print()
 
-    # Connected handlers (auto-discovered)
     handlers = _discover_handlers()
     console.print("[yellow]Connected Handlers:[/yellow]")
     if handlers:
@@ -246,7 +168,6 @@ def print_introspection() -> None:
         console.print("  [dim]No handlers found[/dim]")
     console.print()
 
-    # Next-step hints
     console.print("[yellow]Next:[/yellow]")
     console.print("  [green]drone @memory verify FPLAN-0126[/green]     [dim]# Check if plan is vectorized[/dim]")
     console.print("  [green]drone @memory verify --help[/green]         [dim]# Full usage guide[/dim]")
@@ -276,22 +197,15 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
-
 if __name__ == "__main__":
-    # No args -> introspection (seedgo standard)
     if len(sys.argv) < 2:
         handle_command("verify", [])
         sys.exit(0)
 
-    # --help -> full help
     if sys.argv[1] in ("--help", "-h", "help"):
         handle_command("verify", ["--help"])
         sys.exit(0)
 
-    # Execute command via handle_command
     command = sys.argv[1]
     if not handle_command(command, sys.argv[2:]):
         error(f"Unknown command: {command}", suggestion="Run 'drone @memory verify --help' for available commands")

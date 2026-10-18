@@ -3,30 +3,12 @@
 # Description: Tests for sender identity detection chain
 # Version: 1.2.2
 # Created: 2026-03-10
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
 
 # The identity chain is ai_mail's most critical and most fragile path.
-# Every bug from sessions 4-7 traced back to identity detection failing.
-#
-# Tests cover:
-# - AIPASS_CALLER_BRANCH env var (primary, set by drone)
-# - AIPASS_BRANCH_NAME env var (fallback, set by dispatch_monitor)
-# - CWD-based .trinity/passport.json walk-up
-# - --from flag explicit override
-# - Failure cases (no identity, wrong identity, cascade failures)
-#
-# Audit v1 (2026-03-10): 3 agents verified all tests. Fixed 7 false positives.
-# Audit v2 (2026-03-10): 5 agents found 8 more issues:
-# - 5 tests hitting live registry instead of patched fixtures
-# - Contract tests matching commented-out code (substring, not line-aware)
-# - Contract tests missing env=spawn_env verification
-# - Registry fixtures using dict format when production uses list format
-# - No test for degenerate from_branch="@"
-# - No test for corrupted registry JSON
-# All fixed in v1.2.0.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — os.environ.setdefault on the win32 import-time branch, unreachable on POSIX
@@ -45,9 +27,6 @@ from aipass.ai_mail.apps.handlers.users.branch_detection import (
 )
 from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
-
-
-# ─── Fixtures ────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -109,11 +88,7 @@ def two_branches(tmp_path):
 
 @pytest.fixture
 def temp_registry(tmp_path):
-    """Create a temporary AIPASS_REGISTRY.json with known test branches.
-
-    Uses dict format. Returns (registry_path, branch_data) so tests can
-    assert against fixture-defined values, not live production data.
-    """
+    """Create a temporary AIPASS_REGISTRY.json with known test branches."""
     branch_data = {
         "test_branch": {
             "name": "TEST_BRANCH",
@@ -145,12 +120,7 @@ def temp_registry(tmp_path):
 
 @pytest.fixture
 def list_format_registry(tmp_path):
-    """Create a registry using production list format (not dict).
-
-    Production AIPASS_REGISTRY.json uses: {"branches": [{...}, {...}]}
-    This fixture ensures the list format path is exercised.
-    Returns (branch_dir, registry_path) for CWD-based tests.
-    """
+    """Create a registry using production list format (not dict)."""
     branch_dir = tmp_path / "src" / "aipass" / "test_cwd_branch"
     trinity = branch_dir / ".trinity"
     trinity.mkdir(parents=True)
@@ -166,7 +136,6 @@ def list_format_registry(tmp_path):
         encoding="utf-8",
     )
 
-    # List format — matches production AIPASS_REGISTRY.json
     registry = {
         "branches": [
             {
@@ -197,22 +166,17 @@ def clean_env():
         "AIPASS_CALLER_BRANCH",
         "AIPASS_CALLER_CWD",
         "AIPASS_BRANCH_NAME",
-        # A credential: an ambient "passport"/"assigned" lets the identity fence
-        # accept a caller outside any branch, so leaving it set here disables the
-        # very thing these tests assert. Also stripped globally in conftest.
+        # A credential: an ambient "passport"/"assigned" lets the fence accept a caller
+        # outside any branch, disabling what these tests assert. Also stripped in conftest.
         "AIPASS_CALLER_IDENTITY_SOURCE",
     ]
     saved = {k: os.environ.pop(k, None) for k in env_keys}
     yield
-    # Restore
     for k, v in saved.items():
         if v is not None:
             os.environ[k] = v
         else:
             os.environ.pop(k, None)
-
-
-# ─── detect_branch_from_pwd() tests ─────────────────────
 
 
 class TestDetectBranchFromPwd:
@@ -241,12 +205,10 @@ class TestDetectBranchFromPwd:
         """AIPASS_CALLER_BRANCH should win even if CWD resolves to a different branch."""
         branches, registry_path = two_branches
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
-            # Point CWD to alpha, but env says beta
             os.environ["AIPASS_CALLER_BRANCH"] = "beta"
             os.environ["AIPASS_CALLER_CWD"] = str(branches["alpha"])
             result = detect_branch_from_pwd()
             assert result is not None
-            # Must be beta (env), NOT alpha (CWD)
             assert result["name"] == "BETA"
             assert result["email"] == "@beta"
 
@@ -266,19 +228,11 @@ class TestDetectBranchFromPwd:
         assert result is None
 
     def test_unknown_branch_synthesizes_from_env(self, clean_env, tmp_path, temp_registry):
-        """Unknown branch in AIPASS_CALLER_BRANCH synthesizes info from env vars.
-
-        When env branch name is not in registry or contacts, function
-        synthesizes a minimal branch_info dict from the env vars so
-        external project callers can still send mail.
-        """
+        """Unknown branch in AIPASS_CALLER_BRANCH synthesizes info from env vars."""
         registry_path, _ = temp_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
-            # External citizens carry their own passport (verified on disk:
-            # projects/*/src/*/<seat>/.trinity/passport.json for baud, earmark,
-            # finch, marketstand, aipass_site). The synthesis lane serves callers
-            # standing in their OWN branch whose name this registry does not know
-            # — not callers standing nowhere, which the identity fence refuses.
+            # Synthesis serves callers in their OWN branch (a passport) that this registry
+            # does not know, never callers standing nowhere: the fence refuses those.
             (tmp_path / ".trinity").mkdir(parents=True, exist_ok=True)
             (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
             os.environ["AIPASS_CALLER_BRANCH"] = "VERA-STUDIO"
@@ -287,9 +241,6 @@ class TestDetectBranchFromPwd:
             assert result is not None
             assert result["name"].lower() == "vera-studio"
             assert result["email"].lower() == "@vera-studio"
-
-
-# ─── find_branch_root() tests ───────────────────────────
 
 
 class TestFindBranchRoot:
@@ -335,21 +286,16 @@ class TestFindBranchRoot:
 
         assert find_branch_root(branch_a) == branch_a
         assert find_branch_root(branch_b) == branch_b
-        # Subdir of A should find A, not B
         sub_a = branch_a / "apps"
         sub_a.mkdir()
         assert find_branch_root(sub_a) == branch_a
 
 
-# ─── _lookup_branch_by_name() tests (isolated with temp registry) ──
-
-
 def _registry_answer(name: str):
     """The registry row detect_branch_from_pwd seats a caller named only by AIPASS_CALLER_BRANCH.
 
-    The name lookup is reached through the detection, not called (ai_mail, leg 14):
-    no caller cwd, so nothing is synthesized, and the address book is recorded and
-    answers nothing, so a found row can only have come from the registry.
+    No caller cwd, so nothing is synthesized; the address book is recorded and answers
+    nothing, so a found row can only have come from the registry.
     """
     asked: list[str] = []
     env = {k: v for k, v in os.environ.items() if not k.startswith("AIPASS_CALLER_")}
@@ -418,16 +364,12 @@ class TestLookupBranchByName:
             assert result["email"] == "@spawn"
 
 
-# ─── get_branch_info_from_registry() tests ───────────────
-
-
 class TestGetBranchInfoFromRegistry:
     """Tests for path-based registry lookup. Uses patched temp registry."""
 
     def test_finds_branch_by_absolute_path(self, temp_registry, temp_branch):
         """Should find branch when given its absolute path."""
         registry_path, branch_data = temp_registry
-        # Patch both the registry path AND update the registry entry to use temp_branch's actual path
         branch_data["test_branch"]["path"] = str(temp_branch)
         registry_path.write_text(json.dumps({"branches": branch_data}, indent=2), encoding="utf-8")
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
@@ -442,9 +384,6 @@ class TestGetBranchInfoFromRegistry:
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             result = get_branch_info_from_registry(tmp_path / "random" / "path")
             assert result is None
-
-
-# ─── parse_send_args() --from flag tests ─────────────────
 
 
 class TestSendArgsFromFlag:
@@ -474,9 +413,6 @@ class TestSendArgsFromFlag:
         assert result["from_branch"] is None
 
 
-# ─── resolve_sender_info() tests ─────────────────────────
-
-
 class TestResolveSenderInfo:
     """Tests for the sender resolution function in send.py."""
 
@@ -501,7 +437,6 @@ class TestResolveSenderInfo:
         )
         assert result["email_address"] == "@spawn"
         assert result["display_name"] == "SPAWN"
-        # Verify path resolution (relative path resolved against repo_root)
         assert "mailbox_path" in result
         assert str(tmp_path) in result["mailbox_path"]
 
@@ -530,16 +465,11 @@ class TestResolveSenderInfo:
             get_branch_by_email_fn=lambda e: None,  # Not found
             get_current_user_fn=lambda: {"email_address": "@ai_mail"},
         )
-        # Should still resolve, just with constructed info
         assert result["email_address"] == "@mystery"
         assert result["display_name"] == "MYSTERY"
 
     def test_from_branch_at_only_is_degenerate(self, tmp_path):
-        """from_branch="@" (just @ symbol) should produce degenerate but not crash.
-
-        This is an edge case: lstrip('@') produces empty string.
-        The system should handle it without crashing.
-        """
+        """from_branch="@" (just @ symbol) should produce degenerate but not crash."""
         result = resolve_sender_info(
             from_branch="@",
             repo_root=tmp_path,
@@ -547,27 +477,17 @@ class TestResolveSenderInfo:
             get_branch_by_email_fn=lambda e: None,
             get_current_user_fn=lambda: {"email_address": "@ai_mail"},
         )
-        # Should not crash — verify degenerate but predictable output
         assert result is not None
         assert result["email_address"] == "@"
         assert result["display_name"] == ""
         assert "mailbox_path" in result
 
 
-# ─── Dispatch env var tests ──────────────────────────────
-
-
 class TestDispatchEnvIsolation:
     """Tests for the dispatch_monitor env var contract.
 
-    dispatch_monitor.py must:
-    1. Strip AIPASS_CALLER_BRANCH (prevents parent context leak)
-    2. Strip AIPASS_CALLER_CWD (prevents stale CWD)
-    3. Set AIPASS_BRANCH_NAME (CWD-independent identity)
-    4. Pass spawn_env to subprocess.run (actually use the isolated env)
-
-    Contract tests read source code and verify critical lines exist.
-    Lines are filtered to exclude comments — commented-out code won't match.
+    Strip AIPASS_CALLER_BRANCH/CWD, set AIPASS_BRANCH_NAME, pass spawn_env to the
+    subprocess. Read from source with comment lines filtered out.
     """
 
     @staticmethod
@@ -579,22 +499,14 @@ class TestDispatchEnvIsolation:
         return "\n".join(active_lines)
 
     def test_dispatch_monitor_sets_branch_name_in_env(self):
-        """dispatch_monitor.py must set AIPASS_BRANCH_NAME from branch_email.
-
-        Checks the full assignment line (not split across assertions).
-        Comment lines are filtered out — a commented-out line won't pass.
-        """
+        """dispatch_monitor.py must set AIPASS_BRANCH_NAME from branch_email."""
         active_source = self._load_active_source()
         assert 'spawn_env["AIPASS_BRANCH_NAME"] = branch_email.lstrip("@")' in active_source, (
             "dispatch_monitor.py must set AIPASS_BRANCH_NAME = branch_email.lstrip('@') in spawn_env"
         )
 
     def test_dispatch_monitor_strips_caller_vars(self):
-        """dispatch_monitor.py must strip AIPASS_CALLER_BRANCH and AIPASS_CALLER_CWD.
-
-        Contract test — verifies the env isolation lines exist in source.
-        Checks full pop() calls including the None default.
-        """
+        """dispatch_monitor.py must strip AIPASS_CALLER_BRANCH and AIPASS_CALLER_CWD."""
         active_source = self._load_active_source()
         assert 'spawn_env.pop("AIPASS_CALLER_BRANCH", None)' in active_source, (
             "dispatch_monitor.py must strip AIPASS_CALLER_BRANCH from spawn_env"
@@ -606,14 +518,8 @@ class TestDispatchEnvIsolation:
     def test_dispatch_monitor_passes_spawn_env_to_subprocess(self):
         """dispatch_monitor.py must pass spawn_env as the subprocess env.
 
-        Without this, all env var isolation is useless — the subprocess
-        would inherit os.environ instead of the cleaned spawn_env.
-
-        MEASURED 2026-09-08: the source carries the popen_kwargs dict form and
-        ONLY that form — the direct kwarg spelling (env=spawn_env) is not in the
-        file since the sandbox broker-fd wiring landed (FPLAN-0250 Phase 6b).
-        This accepted either, so one live spelling and one dead one kept it
-        green; the dict form could have been dropped without a red.
+        Only the popen_kwargs dict form is live; accepting the dead env=spawn_env
+        spelling too would let the dict form drop without a red.
         """
         active_source = self._load_active_source()
         assert '"env": spawn_env' in active_source, "dispatch_monitor.py must pass spawn_env as the subprocess env"
@@ -621,21 +527,8 @@ class TestDispatchEnvIsolation:
     def test_detect_refuses_when_cwd_is_outside_any_branch(self, clean_env, tmp_path, list_format_registry):
         """A CALLER_BRANCH claim no longer survives a CALLER_CWD outside any branch.
 
-        POLICY CHANGE, 2026-08-21 (the owner's ruling via @devpulse, 096c9a42):
-        "ur dispatch should fail if u run from [outside] ur cwd, and if aimail was
-        run in root it should fail outright." This test previously asserted the
-        opposite — that the env var rescues a useless cwd — and that permissiveness
-        is the defect: at the repo root drone stamps CALLER_BRANCH from the PROJECT
-        directory name ('aipass'), which collides with the citizen of the same name.
-        A dispatch sent that way cost $1.41 and woke the wrong citizen (0bb77ec2).
-
-        The cost of the trade is named in the reply to @devpulse: ai_mail cannot see
-        whether drone ASSIGNED the identity (AIPASS_BRANCH_NAME, authoritative) or
-        INFERRED it from a directory name (the collision), because drone collapses
-        both into AIPASS_CALLER_BRANCH. Until drone passes that provenance, a
-        dispatched agent that cds out of its branch is refused too — loudly, with a
-        message telling it to re-run from home, which is recoverable. Sending as the
-        wrong citizen is not.
+        At the repo root drone stamps CALLER_BRANCH from the project directory name,
+        which collides with the citizen of that name; a refusal is recoverable, the wrong sender is not.
         """
         _, registry_path = list_format_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
@@ -644,13 +537,11 @@ class TestDispatchEnvIsolation:
             assert detect_branch_from_pwd() is None
 
     def test_assigned_identity_still_beats_location_inside_a_branch(self, clean_env, list_format_registry):
-        """The S102 protection survives the fence: standing in SOMEONE ELSE'S branch,
+        """The protection survives the fence: standing in SOMEONE ELSE'S branch,
         the caller is still whoever drone stamped, not whoever lives there.
 
-        The fence asks only "is the caller standing in A branch" — it never asks
-        "is it THEIR branch", which would re-break the case drone's
-        resolve_caller_identity() docstring was written for: an agent that cds into
-        another branch to read its code is still itself.
+        The fence asks "is the caller in A branch", never "THEIR branch": an agent that
+        cds into another branch to read its code is still itself.
         """
         branch_dir, registry_path = list_format_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
@@ -661,18 +552,11 @@ class TestDispatchEnvIsolation:
             assert result["email"] == "@spawn"
 
 
-# ─── Anti-regression tests ───────────────────────────────
-
-
 class TestAntiRegression:
     """Tests for specific bugs we've fixed. These must NEVER break again."""
 
     def test_no_silent_ai_mail_identity_from_cwd(self, clean_env, tmp_path, temp_registry):
-        """BUG (session 5): Path.cwd() inside ai_mail subprocess detected @ai_mail as sender.
-
-        When no env vars are set and AIPASS_CALLER_CWD points outside any branch,
-        detect_branch_from_pwd must return None — never silently detect ai_mail.
-        """
+        """BUG: Path.cwd() inside ai_mail subprocess detected @ai_mail as sender."""
         registry_path, _ = temp_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             os.environ["AIPASS_CALLER_CWD"] = str(tmp_path)
@@ -690,10 +574,7 @@ class TestAntiRegression:
             assert result is None
 
     def test_empty_caller_branch_falls_through_to_cwd(self, clean_env, list_format_registry):
-        """Empty string in AIPASS_CALLER_BRANCH should fall through to CWD detection.
-
-        Verifies the empty-string is treated as falsy and CWD path is used instead.
-        """
+        """Empty string in AIPASS_CALLER_BRANCH should fall through to CWD detection."""
         branch_dir, registry_path = list_format_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             os.environ["AIPASS_CALLER_BRANCH"] = ""
@@ -725,9 +606,6 @@ class TestAntiRegression:
         assert result["reply_to"] == "@flow"
         assert result["recipients"] == ["@spawn"]
         assert result["mode"] == "direct"
-
-
-# ─── The caller registry fallback, through get_branch_info_from_registry() ──
 
 
 def _seat_registry(registry: Path, seat: Path) -> Path:
@@ -784,9 +662,8 @@ class TestFindCallerRegistry:
     def test_skips_aipass_registry_itself(self, clean_env, tmp_path):
         """The AIPass registry found again as the caller's answers nothing a second time.
 
-        Through the public lookup the skip cannot be seen here alone (the second read
-        of the same empty registry also answers None); its proof is
-        test_prefers_external_registry_over_aipass_one, where the skip decides the answer.
+        Not visible alone (a second read of the same empty registry also answers None);
+        test_prefers_external_registry_over_aipass_one is where the skip decides the answer.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text('{"branches": []}', encoding="utf-8")
@@ -795,13 +672,8 @@ class TestFindCallerRegistry:
 
         assert _answering_registry(tmp_path / "seat", registry) is None
 
-    # ─── External project registries (VERA reply bug, S31/S33) ───
-    #
-    # External projects name their registry PROJECTNAME_REGISTRY.json. Matching the
-    # single hardcoded name meant this fallback could never fire for any external
-    # project — the only callers it exists to serve. Every test above named the file
-    # AIPASS_REGISTRY.json, so the suite encoded the same assumption as the bug and
-    # stayed green while the function was unreachable in production.
+    # External projects name their registry PROJECTNAME_REGISTRY.json; a fallback
+    # matching only AIPASS_REGISTRY.json never fires for the callers it exists to serve.
 
     def test_finds_external_project_registry(self, clean_env, tmp_path):
         """A PROJECTNAME_REGISTRY.json answers, not just AIPASS_REGISTRY.json."""
@@ -868,16 +740,11 @@ class TestFindCallerRegistry:
         assert info["email"] == "@vera"
 
 
-# ─── Caller registry fallback tests ──────────────────────
-
-
 def _caller_seated(monkeypatch, name: str, caller_cwd: Path):
     """The row detect_branch_from_pwd seats for a caller named *name* standing in *caller_cwd*.
 
-    The name lookup is reached through the detection, not called (ai_mail, leg 14).
-    The source is "assigned", a credential, so a cwd outside any branch is not
-    refused; the address book is recorded and answers nothing, so a row with an
-    email can only have come from a registry (a synthesized caller carries none).
+    The source is "assigned", so a cwd outside any branch is not refused; the address
+    book answers nothing, so a row with an email came from a registry.
     """
     asked: list[str] = []
     monkeypatch.setenv("AIPASS_CALLER_BRANCH", name)
@@ -974,15 +841,9 @@ class TestCallerRegistryFallback:
         assert result["email"] == "@vera"
 
 
-# ─── _get_contact_info() staleness guard (contacts poisoning, 2026-08-16) ───
-
-
 class TestGetContactInfo:
     """A contact row surviving after its branch directory is gone must not
-    be handed back as "verified" identity — devpulse traced a live outage
-    to exactly this: dead pytest/scratchpad rows in contacts.json were
-    resolved and trusted here, serving a fixture mailbox in place of a real
-    one.
+    be handed back as "verified" identity: a dead fixture row would serve its mailbox.
     """
 
     @staticmethod
@@ -990,8 +851,7 @@ class TestGetContactInfo:
         """Who detect_branch_from_pwd says the caller is when only AIPASS_CALLER_BRANCH names it.
 
         The registry is an empty tmp path, so the address book is the only lane
-        that can answer; with no caller cwd nothing is synthesized. The contact
-        lookup is reached through the detection, not called (ai_mail, leg 14).
+        that can answer; with no caller cwd nothing is synthesized.
         """
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH",
@@ -1028,9 +888,8 @@ class TestGetContactInfo:
     def _external_caller(monkeypatch, tmp_path, book_text):
         """An external caller whose name only the address book could vouch for.
 
-        The caller stands outside any branch with an assigned name, so a book that
-        holds no row walks on to synthesis. The book is the one conftest points
-        the contacts module at; *book_text* is written into it verbatim.
+        Outside any branch with an assigned name, so a book holding no row walks on to
+        synthesis; *book_text* goes verbatim into the book conftest points contacts at.
         """
         book = tmp_path / "contacts" / "contacts.json"
         book.parent.mkdir(parents=True, exist_ok=True)
@@ -1061,15 +920,10 @@ class TestGetContactInfo:
         assert result["email"] == "@outsider"
 
 
-# ─── Identity resolution observability (@aipass misattribution, 2026-08-07) ───
-
-
 class TestIdentityResolutionLogging:
     """Every resolution must record WHO it picked and WHICH strategy won.
 
-    A COMMONS-authored dispatch was filed under @aipass and the only log line read
-    `from_branch: null` — no resolved identity, no winning strategy. The message could
-    be traced to the wrong citizen but not to the code path that put it there.
+    A log of only `from_branch: null` traces a misattribution to no code path.
     """
 
     def _resolve_identity_records(self, calls):
@@ -1127,9 +981,7 @@ class TestIdentityResolutionLogging:
                 side_effect=lambda op, data: calls.append((op, data)),
             ),
         ):
-            # Passport present: this test is about the CONFIDENCE stamp on a
-            # synthesized identity, not about the fence. Without it the fence
-            # refuses first and the synthesis lane is never reached.
+            # Passport present, or the fence refuses before the synthesis lane is reached.
             (tmp_path / ".trinity").mkdir(parents=True, exist_ok=True)
             (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
             os.environ["AIPASS_CALLER_BRANCH"] = "NOBODY-KNOWS-ME"
@@ -1162,9 +1014,7 @@ class TestIdentityResolutionLogging:
     def test_failed_resolution_is_recorded_not_silent(self, clean_env, tmp_path):
         """An unresolved sender still records the strategy that failed.
 
-        The strategy is now ``caller_cwd:outside_branch``: a CALLER_CWD that sits
-        in no branch is refused up front rather than walked and found wanting.
-        Same outcome, earlier and by name.
+        A CALLER_CWD in no branch is refused up front as ``caller_cwd:outside_branch``.
         """
         calls = []
         with patch(
@@ -1216,15 +1066,8 @@ class TestIdentityResolutionLogging:
 
         assert not any("AMBIGUOUS" in w for w in warnings), warnings
 
-    # --- A credential is not an ambiguity -------------------------------
-    #
-    # The warning exists to name a DISAGREEMENT between two signals. When the
-    # env var carries a credential provenance, there is no disagreement to
-    # name: a credential travels and a location does not, so an agent that
-    # stands in another branch's directory is still itself (S102). 68 of these
-    # fired on correctly-resolved sweeps -- every one CALLER_BRANCH='ai_mail'
-    # with the cwd walking every branch in the fleet -- burying the signal the
-    # warning is for.
+    # A credential is not an ambiguity: a credential travels and a location does not,
+    # so an agent standing in another branch's directory is still itself.
 
     def _warn_with_source(self, monkeypatch, registry_path, branch_dir, source, caller_branch="TEST_CWD_BRANCH"):
         """Run detection with a disagreeing cwd and a given identity provenance."""
@@ -1255,11 +1098,10 @@ class TestIdentityResolutionLogging:
         assert not any("AMBIGUOUS" in w for w in warnings), warnings
 
     def test_project_provenance_still_warns(self, clean_env, list_format_registry, monkeypatch):
-        """'project' names a DIRECTORY, never a citizen -- this is the $1.41 wake.
+        """'project' names a DIRECTORY, never a citizen.
 
-        @aipass the project directory and @aipass the citizen spell the same.
-        Silencing this one would hide the exact misattribution the warning was
-        written for, so provenance is the discriminator, not "did it resolve".
+        @aipass the project directory and @aipass the citizen spell the same, so
+        provenance is the discriminator, not "did it resolve".
         """
         branch_dir, registry_path = list_format_registry
         warnings = self._warn_with_source(monkeypatch, registry_path, branch_dir, "project")
@@ -1274,8 +1116,7 @@ class TestIdentityResolutionLogging:
     def test_credential_naming_an_unregistered_branch_still_warns(self, clean_env, list_format_registry, monkeypatch):
         """A credential for a citizen nobody has heard of is a genuine conflict.
 
-        Resolution falls through to synthesis, so nothing vouched for the name
-        -- the provenance only says who STAMPED it, not that it resolves.
+        Provenance says who STAMPED the name, not that it resolves.
         """
         branch_dir, registry_path = list_format_registry
         warnings = self._warn_with_source(

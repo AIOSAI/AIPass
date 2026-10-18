@@ -3,27 +3,15 @@
 # Description: Config-verb content handler - the help page and limit blocks as lines, never printed
 # Version: 1.0.0
 # Created: 2026-09-16
-# Modified: 2026-09-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Config Verb Content Handler
 
-The words and rows the ``config`` verb shows, returned as lines of Rich markup
-for ``modules/rollover_config.py`` to print. Data in, lines out; nothing here
-prints, imports the CLI service, reads config or decides anything. The one side
-effect is the operation log line the help page writes, like every handler.
-
-WHY IT EXISTS. ``rollover_config.py`` is display code, and display code sits
-between two @seedgo standards: handlers may not print, and a module over 600
-lines fails the size band. The printing has to stay in the module. The CONTENT
-does not - a help page is literal text and a limits block is a format applied to
-rows, so both can be built here and handed back. That meets the handler rule on
-its own terms rather than dodging it: this file never prints. @seedgo's
-``rich_markup_content.py`` and ``host_leak_content.py`` are the same shape.
-
-Everything the module owns is passed in - the entry-type tuples, the bounds, the
-live ceilings - so no number or name is copied here to drift.
+Lines of Rich markup for ``modules/rollover_config.py`` to print; handlers may not
+print and the module must stay under 600 lines. Every number and name is passed in
+so nothing is copied here to drift.
 """
 
 from typing import Any, Iterable, Mapping
@@ -39,16 +27,7 @@ def fmt_count(value: object) -> str:
 def defaults_lines(
     defaults: Mapping[str, Any], display_types: Iterable[str], read_only_types: Iterable[str]
 ) -> list[str]:
-    """The global default limits block.
-
-    Args:
-        defaults: ``config_loader.get_default_limits()`` rows, keyed by entry type.
-        display_types: Entry types to show, in display order.
-        read_only_types: Types ``config set`` cannot write in v1.
-
-    Returns:
-        Lines of Rich markup, the trailing blank line included.
-    """
+    """The global default limits block."""
     read_only = set(read_only_types)
     lines = ["[bold]DEFAULTS[/bold] [dim](drone @memory config set-default <type> <count>)[/dim]"]
     for entry_type in display_types:
@@ -63,15 +42,7 @@ def defaults_lines(
 
 
 def overrides_lines(overrides: Mapping[str, Any], display_types: Iterable[str]) -> list[str]:
-    """Every branch whose effective limits deviate from the defaults.
-
-    Args:
-        overrides: ``config_loader.get_branches_with_overrides()``, keyed by branch.
-        display_types: Entry types to show, in display order.
-
-    Returns:
-        Lines of Rich markup, the trailing blank line included.
-    """
+    """Every branch whose effective limits deviate from the defaults."""
     if not overrides:
         return ["[green]>[/green] All branches at defaults — no per-branch overrides", ""]
 
@@ -96,18 +67,7 @@ def branch_limits_lines(
 ) -> list[str]:
     """One branch's EFFECTIVE limits, each marked default-or-override.
 
-    Markers are UPPERCASE on purpose: Rich reads `[default]` as a style name
-    and deletes it silently, so a lowercase marker would look right in the
-    source and be invisible on screen.
-
-    Args:
-        branch: The branch key as resolved against the registry.
-        limits: ``config_loader.get_effective_limits(branch)`` rows.
-        display_types: Entry types to show, in display order.
-        read_only_types: Types ``config set`` cannot write in v1.
-
-    Returns:
-        Lines of Rich markup, the trailing blank line included.
+    Markers are UPPERCASE: Rich reads `[default]` as a style name and deletes it.
     """
     read_only = set(read_only_types)
     lines = [f"[bold]@{branch}[/bold] [dim](effective limits — what the rollover engine applies)[/dim]", ""]
@@ -132,15 +92,7 @@ def branch_limits_lines(
 def help_lines(min_count: int, max_count: int, ceilings: Mapping[str, Any]) -> list[str]:
     """The config-verb help page below its title panel.
 
-    Args:
-        min_count: The smallest keep-count ``config set`` accepts.
-        max_count: The largest keep-count ``config set`` accepts.
-        ceilings: ``config_loader.get_count_ceilings()`` — the LIVE per-type
-            ceilings, so the BOUNDS block never prints a number the refusal
-            would contradict.
-
-    Returns:
-        Lines of Rich markup, starting after the panel's blank line.
+    ceilings are the LIVE per-type ceilings, so BOUNDS never contradicts the refusal.
     """
     json_handler.log_operation("config_help_content", {"ceilings": len(ceilings)})
     lines = [

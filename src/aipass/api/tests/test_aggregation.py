@@ -3,15 +3,10 @@
 # Description: Tests for usage aggregation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/usage/aggregation.py, the usage aggregation handler."""
-
-# Tests:
-# - get_overall_stats() no file, empty data, no usage_by_caller, valid multi-caller, exception
-# - get_caller_usage() no file, caller not found, valid caller, exception
-# - get_session_summary() no file, no session data, valid session, exception
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that aggregation.py parses and imports
@@ -32,11 +27,6 @@ from aipass.api.apps.handlers.usage.aggregation import (  # seedgo test_coverage
 _AGG_MOD = "aipass.api.apps.handlers.usage.aggregation"
 
 
-# =============================================
-# Helpers
-# =============================================
-
-
 def _write_usage_file(directory: Path, data: dict) -> Path:
     """Write a usage tracker JSON file to the given directory."""
     file_path = directory / "usage_tracker_data.json"
@@ -44,11 +34,6 @@ def _write_usage_file(directory: Path, data: dict) -> Path:
     with open(file_path, "w", encoding="utf-8") as f:
         json.dump(data, f)
     return file_path
-
-
-# =============================================
-# get_overall_stats tests
-# =============================================
 
 
 class TestGetOverallStats:
@@ -114,11 +99,6 @@ class TestGetOverallStats:
             get_overall_stats()
 
 
-# =============================================
-# get_caller_usage tests
-# =============================================
-
-
 class TestGetCallerUsage:
     """Tests for get_caller_usage()."""
 
@@ -169,11 +149,6 @@ class TestGetCallerUsage:
         file_path.write_text("{invalid", encoding="utf-8")
         with pytest.raises(ValueError):
             get_caller_usage("any")
-
-
-# =============================================
-# get_session_summary tests
-# =============================================
 
 
 class TestGetSessionSummary:

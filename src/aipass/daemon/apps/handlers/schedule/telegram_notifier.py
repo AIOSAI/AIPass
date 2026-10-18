@@ -3,27 +3,19 @@
 # Description: Scheduler lifecycle notifications via Telegram
 # Version: 3.0.1
 # Created: 2026-02-15
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Scheduler lifecycle notifications — emit running/complete/failed pings
-via the @skills telegram notifier (secret slug: telegram/scheduler).
-
-Fail-soft: if the secret is missing or the send fails, returns False
-and never raises. The tick MUST keep firing jobs regardless.
-"""
+via the @skills telegram notifier (secret slug: telegram/scheduler)."""
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
 
 def _send(message: str) -> bool:
-    """Send via skills notifier, fail-soft.
-
-    Through skills' published door (DPLAN-0404) — daemon emits lifecycle
-    pings through the skills telegram notifier.
-    """
+    """Send via skills notifier; False on any failure, never raises (the tick must keep firing jobs)."""
     try:
         from aipass.skills.apps.modules.door_notifier import send_telegram_notification
 

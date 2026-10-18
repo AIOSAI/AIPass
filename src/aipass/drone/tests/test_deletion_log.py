@@ -3,7 +3,7 @@
 # Description: Every drone delete, and every refused one, leaves a deletion record
 # Version: 1.0.4
 # Created: 2026-08-14
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py and the safe_delete path that writes it."""
@@ -25,33 +25,23 @@ from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
 
-# The owner's ruling: "if something deletes, there should be a record of it."
-# ``drone rm`` is the fleet's only sanctioned delete path, so the record is
-# written where the deleting happens, not where the CLI is parsed. Refusals are
-# records too: a blocked attempt leaves no other trace.
+# ``drone rm`` is the only sanctioned delete; refusals are records too (a blocked attempt leaves no other trace).
 
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not on
 #: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
 _PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
 _PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
 
-#: Windows makes a symlink only with Developer Mode or elevation (template item 23).
+#: Windows makes a symlink only with Developer Mode or elevation.
 _NO_SYMLINKS = sys.platform == "win32"
 _NO_SYMLINKS_REASON = "creating a symlink needs a privilege on Windows"
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
 def project(tmp_path, monkeypatch):
     """A fake project root the deletion log will resolve into.
 
-    The log path is derived from the project root the same way the broker's
-    audit path is, so chdir-ing into a tmp project is all a test needs to
-    redirect it — no env var, no injected path.
+    The log path derives from the project root, so chdir into a tmp project redirects it.
     """
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -66,11 +56,6 @@ def read_records(project_root: Path) -> list[dict]:
     if not log.exists():
         return []
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-# ---------------------------------------------------------------------------
-# The record exists at all
-# ---------------------------------------------------------------------------
 
 
 class TestDeletionIsRecorded:
@@ -132,11 +117,6 @@ class TestDeletionIsRecorded:
         assert {r["path"] for r in records} == {str(one.resolve()), str(two.resolve())}
 
 
-# ---------------------------------------------------------------------------
-# What the record has to contain
-# ---------------------------------------------------------------------------
-
-
 class TestRecordContents:
     REQUIRED = (
         "timestamp",
@@ -157,9 +137,7 @@ class TestRecordContents:
         safe_delete([str(target)])
 
         record = read_records(project)[0]
-        # The floor is asserted BEFORE the loop. REQUIRED is a class attribute
-        # and could be emptied without a single assertion firing; a loop over
-        # nothing is a silent pass, and the run reads identical either way.
+        # Floor before the loop: an emptied REQUIRED would make the loop a silent pass.
         assert len(self.REQUIRED) == 9
         for field in self.REQUIRED:
             assert field in record, f"record is missing {field!r}"
@@ -242,17 +220,11 @@ class TestRecordContents:
         assert record["path"] == str(target.resolve())
 
 
-# ---------------------------------------------------------------------------
-# Caller identity — resolved, never guessed
-# ---------------------------------------------------------------------------
-
-
 class TestCallerIdentity:
     def test_unknown_when_nothing_resolves(self, project):
         """No passport, no registry name, no assignment → UNKNOWN.
 
-        A wrong-but-plausible identity on a deletion record is worse than an
-        honest gap: it would name a citizen who did not do it.
+        A plausible wrong identity names a citizen who did not do it; an honest gap does not.
         """
         target = project / "x.txt"
         target.write_text("x", encoding="utf-8")
@@ -280,14 +252,9 @@ class TestCallerIdentity:
         assert read_records(project)[0]["caller"] == "devpulse"
 
     def test_a_project_name_is_refused_as_an_identity(self, project):
-        """todo 178: the record said `aipass` for a deletion @devpulse made.
+        """The record said `aipass` for a deletion @devpulse made.
 
-        The shared resolver's last resort is the PROJECT — a true answer to
-        WHERE the process stood, and the wrong kind of answer for a field that
-        asks WHO deleted. 33 rows in the live store carry it, one of them a
-        deletion inside @devpulse's own tree. An audit trail that names the
-        wrong actor is worse than one naming none, so `project` becomes
-        `unknown` here and the cwd field still carries the location.
+        The resolver's last resort, the PROJECT, answers WHERE, not WHO: it becomes `unknown`; cwd keeps the location.
         """
         target = project / "x.txt"
         target.write_text("x", encoding="utf-8")
@@ -318,9 +285,7 @@ class TestCallerIdentity:
     def test_passport_walkup_beats_the_directory_name(self, project, monkeypatch):
         """The directory is deliberately NOT named after the branch.
 
-        A first draft of this test put the passport inside a dir called
-        'drone' — which path-shape matching answers identically, so it proved
-        nothing. The names differ here so only a real passport read can pass.
+        A dir named 'drone' would let path-shape matching pass; only a real passport read passes here.
         """
         branch = project / "src" / "aipass" / "some-checkout"
         branch.mkdir(parents=True)
@@ -335,11 +300,6 @@ class TestCallerIdentity:
         safe_delete([str(target)])
 
         assert read_records(project)[0]["caller"] == "drone"
-
-
-# ---------------------------------------------------------------------------
-# Severity — a sanctioned delete is not an alarm (compass #273)
-# ---------------------------------------------------------------------------
 
 
 class TestSeverity:
@@ -363,11 +323,6 @@ class TestSeverity:
 
         assert log.info.called
         assert not log.error.called
-
-
-# ---------------------------------------------------------------------------
-# Bounded — a delete log must not become the runaway log
-# ---------------------------------------------------------------------------
 
 
 class TestBounded:
@@ -406,13 +361,7 @@ class TestBounded:
         assert record["measured"] == "capped"
 
 
-# ---------------------------------------------------------------------------
-# Where the log lives
-#
-# These clear the suite-wide AIPASS_DELETION_LOG isolation on purpose — they
-# are the only tests that assert the real derivation, and the autouse fixture
-# that keeps every other test off the live log would hide it.
-# ---------------------------------------------------------------------------
+# These clear the suite-wide AIPASS_DELETION_LOG isolation on purpose: only they assert the real derivation.
 
 
 class TestLogLocation:
@@ -443,12 +392,8 @@ class TestLogLocation:
     def test_a_named_project_root_beats_the_cwd_walk(self, project, monkeypatch, tmp_path):
         """A lane that KNOWS its project files the record there, not where it stands.
 
-        The broker is handed ``repo_root`` at construction and can serve a
-        repository it is not standing in. Resolving from cwd there wrote the
-        record into whichever project the process happened to sit in — which is
-        how 211 deletions performed inside /tmp sandboxes came to sit in this
-        project's own ledger, filed by a suite that never touched this tree
-        (@ai_mail's test_dispatch_monitor.py, found 2026-09-06).
+        The broker is handed ``repo_root`` and can serve a repo it is not standing in; a cwd resolve
+        files the record into whichever project the process happens to sit in.
         """
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         served = tmp_path / "another_repo"
@@ -459,8 +404,7 @@ class TestLogLocation:
     def test_env_override_outranks_a_named_project_root(self, project, monkeypatch, tmp_path):
         """Two overrides, and the operator's is the outer one.
 
-        Otherwise a lane passing its own root would quietly defeat the seam the
-        tests and containers relocate the store with.
+        Else a lane passing its own root defeats the seam tests and containers relocate the store with.
         """
         elsewhere = tmp_path / "somewhere" / "d.jsonl"
         served = tmp_path / "another_repo"
@@ -490,13 +434,8 @@ class TestLogLocation:
     def test_override_cannot_silence_the_prax_line(self, project, monkeypatch):
         """Relocating the store must not become a way to erase the event.
 
-        The unwritable target is a FILE standing where the parent directory has
-        to be, so ``_append_record``'s ``mkdir(parents=True)`` raises inside the
-        tmp project. It used to be ``/proc/nonexistent``, which raised the same
-        OSError family but reached OUTSIDE the tree under test: the two os.mkdir
-        attempts were this suite's last outside-copy records in @seedgo's
-        hygiene gate. An unwritable path does not have to be someone else's
-        filesystem to be unwritable.
+        The unwritable target is a FILE where the parent dir must be, so ``_append_record``'s mkdir
+        raises inside the tmp project; never reach outside the tree under test for an unwritable path.
         """
         blocked = project / "not_a_directory"
         blocked.write_text("a file where a directory would have to be", encoding="utf-8")
@@ -508,11 +447,6 @@ class TestLogLocation:
             safe_delete([str(target)])
 
         assert log.info.called
-
-
-# ---------------------------------------------------------------------------
-# The record must not become a new way for rm to fail
-# ---------------------------------------------------------------------------
 
 
 class TestRecordFailureIsContained:
@@ -540,10 +474,7 @@ class TestRecordFailureIsContained:
     def test_deleting_the_current_directory_still_reports_success(self, project, monkeypatch):
         """The delete worked. Losing cwd must not turn it into a failure.
 
-        ``drone rm`` on the directory you are standing in is an ordinary thing
-        to do with a scratch dir. The rmtree succeeds and the process is left
-        with no cwd — every later ``Path.cwd()`` raises ENOENT. That is the
-        record's problem to absorb, not a result the caller should see.
+        The rmtree leaves no cwd (``Path.cwd()`` raises ENOENT); the record absorbs that, not the result.
         """
         doomed = project / "scratch"
         doomed.mkdir()
@@ -559,10 +490,7 @@ class TestRecordFailureIsContained:
     def test_deleting_the_current_directory_does_not_raise(self, project, monkeypatch):
         """safe_delete returns per-path results. It must not become a crash.
 
-        The failure this pins was worse than a wrong result: the record raised
-        inside the success path, the except handler recorded the failure, and
-        the SECOND record raised the same way — straight out of safe_delete,
-        past every caller expecting a list.
+        A record raising on the success path, then again in the except handler, must not escape.
         """
         doomed = project / "scratch"
         doomed.mkdir()
@@ -598,8 +526,7 @@ class TestRecordFailureIsContained:
     def test_a_successful_delete_is_never_logged_as_a_failure(self, project, monkeypatch):
         """The log said 'deleted' and 'delete failed' for one path, one second.
 
-        Both lines were true of what the code did and only one was true of
-        what happened. Whoever reads the log next must not have to guess which.
+        Whoever reads the log next must not have to guess which line is true.
         """
         doomed = project / "scratch"
         doomed.mkdir()
@@ -617,15 +544,9 @@ class TestRecordFailureIsContained:
     def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, monkeypatch):
         """Losing cwd must not cost the durable half of the record.
 
-        The store path is derived by walking up from cwd, so the same ENOENT
-        that broke the caller's result also broke the walk — and the record of
-        the one delete most worth finding later fell to the prax line alone.
-        The env override and the tempdir home were both sitting right there,
-        unreachable because the walk raised before either was consulted.
+        The store path walks up from cwd; with cwd gone the env override or tempdir home must still answer.
         """
-        # The ledger's temp home is handed in through deletion_log._temp_dir, so
-        # the record lands in the tree the test was given and tempfile itself is
-        # left alone for every other reader in the process.
+        # Via deletion_log._temp_dir, so tempfile stays untouched for every other reader in the process.
         home = project / "tmphome"
         home.mkdir()
         monkeypatch.setattr(deletion_log, "_temp_dir", lambda: home)
@@ -636,8 +557,7 @@ class TestRecordFailureIsContained:
 
         safe_delete([str(doomed)])
 
-        # No cwd to walk up from and no AIPASS_HOME, so the tempdir home the
-        # docstring already promises is the only place left that can answer.
+        # No cwd and no AIPASS_HOME: the promised tempdir home is the only place left to answer.
         store = home / "deletions.jsonl"
         assert store.exists(), "the deletion record was lost with the directory"
         record = json.loads(store.read_text(encoding="utf-8").strip().splitlines()[-1])
@@ -645,26 +565,12 @@ class TestRecordFailureIsContained:
         assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY
 
 
-# ---------------------------------------------------------------------------
-# The same claims, on every OS
-# ---------------------------------------------------------------------------
-
-
 class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
     """What the deletable-cwd tests above claim, built the portable way.
 
-    Those tests reach the no-cwd state by deleting the directory they stand in,
-    which Windows refuses (see WINDOWS_CWD_REASON in conftest) — so on Windows
-    they are skipped and these are the only cover the record's guards have.
-
-    The state here is supplied rather than produced: router_handler's
-    ``_working_directory`` seam, the one raw read beneath ``caller_cwd`` (which
-    deletion_log imports), raises the ENOENT ``Path.cwd`` raises for real. The
-    guard above the seam always runs; a raw ``Path.cwd()`` creeping back
-    anywhere else is test_no_cwd_sweep's to catch. Weaker in exactly one way,
-    stated so nobody has to rediscover it — it cannot catch a read that reaches
-    ``os.getcwd`` inside C, the way ``Path.resolve()`` does. Stronger in one
-    way: it runs on all three operating systems.
+    Windows refuses deleting the cwd (WINDOWS_CWD_REASON in conftest), so here router_handler's
+    ``_working_directory`` seam beneath ``caller_cwd`` raises the real ENOENT instead. Weaker in one
+    way: it cannot catch an ``os.getcwd`` read inside C, as ``Path.resolve()`` does.
     """
 
     @pytest.fixture()
@@ -691,16 +597,10 @@ class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
         assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY
 
     def test_the_record_still_lands_somewhere_durable(self, no_cwd, tmp_path, monkeypatch):
-        """Losing the cwd must not cost the durable half of the record.
-
-        The store path is derived by walking up from cwd, so the same absence
-        that broke the caller's result also broke the walk — and the record of
-        the one delete most worth finding later fell to the prax line alone.
-        """
+        """Losing the cwd must not cost the durable half of the record."""
         home = tmp_path / "tmphome"
         home.mkdir()
-        # The temp home is handed in through deletion_log._temp_dir, never by
-        # replacing tempfile.tempdir for the whole process.
+        # Via deletion_log._temp_dir, never by replacing tempfile.tempdir for the whole process.
         monkeypatch.setattr(deletion_log, "_temp_dir", lambda: home)
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         monkeypatch.delenv("AIPASS_HOME", raising=False)

@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch monitor's units - rate limit, fresh cmd, startup check, kill, logs, lock, JSONL
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's units: startup check, kill, result logs, own lock, JSONL."""
@@ -137,7 +137,7 @@ def test_run_startup_check_process_exits_during_startup_with_output(tmp_path, mo
     sizes = {"seen.jsonl": 7}
     monkeypatch.setattr(mod, "_snapshot_jsonl_sizes", lambda d: sizes)
     # The activity probe is asserted on what it was asked: the projects dir and the
-    # snapshot taken before the spawn (ai_mail, leg 7)
+    # snapshot taken before the spawn
     activity = MagicMock(return_value=True)
     monkeypatch.setattr(mod, "_check_jsonl_activity", activity)
 

@@ -3,95 +3,13 @@
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
 # Version: 2.4.0
 # Created: 2026-08-19
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session.
+"""Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
 
-Public surface:
-  arm_wire(once=False, ...) -> dict
-  find_repo_root(start=None) -> Path | None
-  HEARTBEAT_FILE, HEARTBEAT_STALE_SECONDS
-  DEAD_CHECK_SECONDS, DEAD_CURSOR_NAME
-
-The arm door (``watchdog baseline`` routes here):
-  1. sweep the registry — deregister dead entries and take over EVERY live
-     wire: an existing wire proves a writer, never a listener, so only the arm
-     happening right now is known to have ears;
-  2. replay completions past the cursor as ``MISSED`` stdout lines;
-  3. follow the notification feed, one stdout line per completion THAT THIS
-     SEAT DISPATCHED, cursor advanced after every delivery;
-  4. touch the heartbeat so the statusline can tell a live wire from a hung one;
-  5. announce the dead — at sign-in and every DEAD_CHECK_SECONDS, one ``DEAD``
-     line per dispatch of this seat's whose monitor can no longer report
-     (FPLAN-0499; the hole DPLAN-0314 named "outcome M").
-
-There is no detection process to ensure, watch, or mourn. Run via the Monitor
-tool with description "watchdog".
-
-The commentary below this docstring is the history — why the daemon this file
-used to depend on no longer exists, and why delivery is a separate lifetime
-from everything else. It is long on purpose and it stays.
-"""
-
-# WHAT CHANGED IN r4 (DPLAN-0317, FPLAN-0452 P2) — read this before the r2
-# history below, because it deletes half of it.
-#
-# This file used to drain TWO sources every tick with no dedupe between them: a
-# detection daemon's events file, and @ai_mail's notification feed. They carried
-# THE SAME COMPLETIONS. The daemon polled ~19 branches every 2s to synthesise an
-# event dispatch_monitor.py had already written 1-2 seconds earlier, and both
-# lines cleared Monitor's 200ms batching window — so every dispatch completion
-# produced TWO wakes, for months. Nobody noticed, because a duplicate wake looks
-# exactly like a working wake.
-#
-# The daemon is gone. Detection by inference is replaced by detection by report:
-# the agent that finishes says so, and this file delivers what it said. Idle is
-# one stat on the feed per tick and nothing else running anywhere.
-#
-# AND THE WIRE NOW ANSWERS "WAS THIS MINE". The feed names the branch that
-# FINISHED, never the branch that SENT the work, so this seat used to be woken
-# for every citizen's completion fleet-wide. dispatches.py reads @ai_mail's
-# register — written at send time — and only ids belonging to this seat are
-# delivered. That is the owner's rule 5, and it is not satisfiable from the feed
-# alone at any price.
-#
-# KINDS: completions ONLY. The feed also carries "wake" start edges, and this
-# wire used to deliver those too. Rule 5 again: only a COMPLETION wakes,
-# because an agent may mail a report and then mail a correction — we wait for
-# it to be finished, and wake once.
-#
-# ---------------------------------------------------------------------------
-# WHY THIS FILE EXISTS AT ALL (DPLAN-0308 round 2) — still true, still the
-# reason delivery is a separate lifetime from anything else:
-#
-# The round-1 baseline was one process doing two jobs, and its delivery depended
-# on a LISTENER the process could neither see nor keep alive: witnessed live on
-# 2026-08-19, @api (11:22) and @baud (12:34) COMPLETE lines sat unread in a task
-# file while the owner watched the live session stay silent. The registry said
-# "armed", the pid was alive, and the idempotence check ("pid alive = covered")
-# re-armed into a lie.
-#
-# THE 12:34 KILLER, NAMED FROM THE TRANSCRIPT: the 10:55 arm ran under Bash
-# run_in_background — which notifies only when the command EXITS, and continuous
-# mode never exits. Zero wakes by construction, healthy session or not. The
-# Monitor tool (one notification per stdout line) is the ONLY correct wrapper
-# for the continuous wire; nothing inside this process can distinguish the two
-# wrappers, so the tripwire below refuses the combination outright. --once is
-# the run_in_background-safe shape (it exits on delivery).
-#
-# TWO ID NAMESPACES, measured 2026-08-19, do not confuse them:
-#   - conversation/session id (env CLAUDE_CODE_SESSION_ID, statusline input
-#     session_id): long-lived, survives compaction — what the statusline can
-#     check, so metadata.session records THIS one.
-#   - task-dir id (the .../<id>/tasks/ dir readlink(/proc/<pid>/fd/1) lands
-#     in): the harness's runtime namespace — on this box it never equals the
-#     conversation id. Takeover identity and diagnostics only.
-# Residual, on the record: a wire from a PREVIOUS claude process of the same
-# conversation would still session-match the statusline (green) while its
-# listener is gone. Takeover-always + the arm-at-session-start reflex bound
-# that window.
+# metadata.session is the conversation id the statusline checks; the tasks-dir id behind
+# /proc/<pid>/fd/1 is another namespace that never equals it, used for takeover only.
 
 import json
 import os
@@ -111,54 +29,22 @@ from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
 
 
-# Delivery cadence. The feed drain is ONE stat when nothing changed, so a quiet
-# system costs a syscall a second and wake latency is ~1s after the report
-# lands. Measured idle cost of this loop: 0.033% of a core.
 WIRE_POLL_SECONDS = 1.0
 
-# The statusline reads this file's mtime. It is touched by the WIRE now — under
-# r3 the daemon owned it, and deleting the daemon without moving this would
-# have painted the statusline red forever with a perfectly healthy wire (the
-# exact trap FPLAN-0451 P2 hit with a hardcoded /tmp path).
+# The statusline reads this file's mtime.
 HEARTBEAT_FILE = Path(tempfile.gettempdir()) / "aipass-watchdog-active"
 HEARTBEAT_STALE_SECONDS = 15.0
 
-# Touched at most this often. Once a second would be a WRITE per tick to buy
-# nothing: the staleness threshold above is 15s, so 5s leaves two missed
-# touches of headroom before anything reads red.
 _HEARTBEAT_INTERVAL_SECONDS = 5.0
 
-# The feed kinds this wire delivers. Completions ONLY — see the header. Passed
-# explicitly rather than taking feed.FEED_KINDS, because that default also
-# carries "wake" start edges for other readers and a silent widening here would
-# be a silent re-broadening of what wakes this seat.
+# Completions only, passed explicitly: feed.FEED_KINDS also carries "wake" start edges.
 _DELIVER_KINDS = ("dispatch",)
 
-# THE DEAD-MONITOR BACKSTOP (FPLAN-0499). A completion is pushed by the agent
-# that finishes — and a monitor that died in a host reboot, an OOM kill or a
-# SIGKILL finishes nothing, so a pure push design is blind to exactly the case
-# a watchdog exists for. DPLAN-0314 named it "outcome M" and called the
-# backstop load-bearing; on 2026-09-07 the 12:17 reboot killed two wave-3
-# agents mid-work and nothing said so for two and a half hours, although
-# dispatches.overdue() already knew — it was pull-only.
-#
-# The owner's shape (2026-09-07 15:00): five minutes, not sixty seconds, and the
-# code checks, not the seat — "the whole redesign was to cut cpu and not need
-# tokens to monitor". So: one register read through @ai_mail's door per five
-# minutes, no agent polled, no process armed, and a stdout line only when a
-# death is found. Overdue is THEIR reading: expected_by is dispatch_monitor's
-# hard timeout, which a live monitor cannot overrun (dispatches.py).
-#
-# Phase 2 (2026-09-07 17:40, ai_mail 35147916): the register now carries the
-# monitor's pid and serves ``monitor_alive`` derived from /proc at read time,
-# so a death is announced within one cadence instead of at the two-hour
-# timeout. Tri-state — see _is_dead for why None is NOT dead.
+# A dead monitor pushes nothing, so the register is read through @ai_mail's door at this
+# cadence: no agent polled, no process armed, a stdout line only when a death is found.
 DEAD_CHECK_SECONDS = 300.0
 
-# Announced once EVER per dispatch, not once per wire: a re-sign-in after the
-# reboot that caused the death must not re-deliver it. Sibling of the feed
-# cursor, same directory, its own name (feed.cursor_file_for explains why two
-# readers never share one cursor).
+# Announced once ever per dispatch, so a re-sign-in never repeats a death.
 DEAD_CURSOR_NAME = "wire_dead_cursor.json"
 _DEAD_CURSOR_CAP = 200
 
@@ -166,19 +52,12 @@ _WIRE_KIND = "baseline_wire"
 
 _REGISTRY_FILENAME = "AIPASS_REGISTRY.json"
 
-# Ceiling on the off-Linux process probes (``ps``, ``lsof``). They answer in
-# milliseconds on a healthy host; the timeout exists so a wedged one costs a
-# tick and not the wire.
+# A wedged ps or lsof costs a tick, not the wire.
 _PROBE_TIMEOUT_SECONDS = 5.0
 
 
 def find_repo_root(start: Path | None = None) -> Path | None:
-    """Walk up from ``start`` (default CWD) to the dir holding the registry.
-
-    Lived in baseline.py until r4 deleted the daemon around it; it moved here
-    rather than being re-copied, because this package already carries three
-    near-duplicate pid checks and does not need a fourth duplicated primitive.
-    """
+    """Walk up from ``start`` (default CWD) to the dir holding the registry."""
     here = (start or Path.cwd()).resolve()
     for candidate in [here, *here.parents]:
         if (candidate / _REGISTRY_FILENAME).exists():
@@ -205,13 +84,7 @@ def _sleep(seconds: float) -> None:
 
 
 def _touch_heartbeat() -> None:
-    """Say 'a wire is alive' to the statusline. Never fatal.
-
-    A failed touch must not end delivery: the heartbeat is an observability
-    signal, and losing the signal is not losing the coverage. It IS logged —
-    a statusline that goes red for a healthy wire sends someone re-arming for
-    no reason, and the log is the only place that explains why.
-    """
+    """Say 'a wire is alive' to the statusline. Never fatal."""
     try:
         HEARTBEAT_FILE.touch()
     except OSError as exc:
@@ -221,10 +94,7 @@ def _touch_heartbeat() -> None:
 def _stdout_target_via_lsof(pid: int) -> Path | None:
     """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``_stdout_target``.
 
-    ``-Fn`` is lsof's machine-readable mode: one field per line, each prefixed
-    by its field character, and ``n`` carries the name of the open file. None on
-    any failure — off Linux "cannot tell" is the honest answer, and a wrong path
-    would be read as a wrapper identity (see ``_wrapper_of``).
+    None on any failure: a wrong path would be read as a wrapper identity.
     """
     try:
         done = subprocess.run(
@@ -247,13 +117,7 @@ def _stdout_target_via_lsof(pid: int) -> Path | None:
 def _stdout_target(pid: int | None = None) -> Path | None:
     """Where a process's stdout actually goes — the wire-identity primitive.
 
-    On Linux ``/proc/<pid>/fd/1`` is the honest source for where writes LAND
-    (env only says which conversation spawned the process — a different
-    namespace, see the header). Off Linux there is no /proc, and answering None
-    for every pid armed a wire that reported "armed", recorded wrapper
-    ``foreground`` and delivered nothing forever (macOS CI 34682737363), so the
-    same question goes to ``lsof``. None when the pid is gone or fd/1 is
-    unreadable.
+    None when the pid is gone or fd/1 is unreadable: the target is unknown.
     """
     if sys.platform != "linux":
         return _stdout_target_via_lsof(os.getpid() if pid is None else pid)
@@ -266,12 +130,7 @@ def _stdout_target(pid: int | None = None) -> Path | None:
 
 
 def _session_dir_of(target: Path | None) -> Path | None:
-    """The session dir a stdout target belongs to, or None.
-
-    The harness writes background/monitor output to
-    ``.../<session-id>/tasks/<task-id>.output`` — the ``tasks`` parent is the
-    shape we key on. A tty/pipe/regular-file stdout has no session.
-    """
+    """The session dir a stdout target belongs to, or None."""
     if target is None or target.parent.name != "tasks":
         return None
     return target.parent.parent
@@ -285,18 +144,8 @@ WRAPPER_FOREGROUND = "foreground"
 def _wrapper_of(target: Path | None) -> str:
     """Which harness wrapper this wire runs under, read from stdout alone.
 
-    Measured live 2026-08-19, and it is the entire arm-time health question:
-
-      - a Monitor child's stdout is a SOCKET — one notification per line, the
-        only shape a CONTINUOUS wire can be heard through;
-      - a run_in_background child's is a REGULAR FILE under a session tasks dir
-        — notifies on exit only, which a continuous wire never reaches (the
-        12:34 miss);
-      - anything else is a terminal, which nobody is reading asynchronously.
-
-    Recorded at arm time rather than re-derived later, because deriving it needs
-    ``/proc/<pid>/fd/1`` and by the time someone asks "was that wire real" the
-    pid is usually gone. ``monitor`` is the only value that means covered.
+    A Monitor child's stdout is a socket (notifies per line); a run_in_background child's is
+    a file under a session tasks dir (notifies on exit only). Recorded at arm time: the pid is gone later.
     """
     if target is None:
         return WRAPPER_FOREGROUND
@@ -308,12 +157,7 @@ def _wrapper_of(target: Path | None) -> str:
 
 
 def _cmdline_via_ps(pid: int) -> str:
-    """``ps -p <pid> -o command=`` — the portable half of ``_cmdline``.
-
-    The trailing ``=`` suppresses the header, so a live pid prints exactly one
-    line: its command line, already space-joined. "" on any failure, and a gone
-    pid prints nothing, which is the same "" the /proc half returns.
-    """
+    """``ps -p <pid> -o command=`` — the portable half of ``_cmdline``."""
     try:
         done = subprocess.run(
             ["ps", "-p", str(pid), "-o", "command="],
@@ -329,14 +173,7 @@ def _cmdline_via_ps(pid: int) -> str:
 
 
 def _cmdline(pid: int) -> str:
-    """A process's cmdline, NUL-separated fields joined with spaces. "" on error.
-
-    Linux reads /proc as the fast path; every other host asks ``ps``. Answering
-    "" off Linux was not a graceful degradation — it made ``_looks_like_ours``
-    False for every pid, so every live wire read as a recycled pid, was left
-    alone instead of taken over, and dispatch completions were never delivered
-    (macOS CI 34682737363).
-    """
+    """A process's cmdline, NUL-separated fields joined with spaces. "" on error."""
     if sys.platform != "linux":
         return _cmdline_via_ps(pid)
     try:
@@ -350,10 +187,7 @@ def _cmdline(pid: int) -> str:
 def _looks_like_ours(pid: int) -> bool:
     """True if the pid's cmdline names the watchdog.
 
-    The registry can hold a pid the OS has recycled to an innocent process; a
-    takeover must never SIGTERM anything whose cmdline doesn't say watchdog.
-    The entry still gets deregistered — it describes a watch that no longer
-    exists — but the process is left alone.
+    A takeover must never SIGTERM a recycled pid; its entry is still deregistered.
     """
     return "watchdog" in _cmdline(pid)
 
@@ -361,20 +195,8 @@ def _looks_like_ours(pid: int) -> bool:
 def _sweep_wires(storage_path: Path | None) -> None:
     """One pass over the registry: bury the dead, take over every live wire.
 
-    Everything killed or buried is said on stderr — a slot silently reused is
-    how a dead watcher passes for a live one.
-
-    EVERY live wire is taken over, same session or not. There is no
-    "already wired" answer: a wire process writing into the current session's
-    tasks dir proves nothing about a LISTENER — witnessed live 2026-08-19, the
-    10:55 wire kept writing into the live session dir (ac044dfb) after the
-    resume killed its monitor, and @baud's 12:34 completion landed unread. Only
-    the arm happening right now is known to have ears; the process that exists
-    is always the newest arm.
-
-    r4 note: this used to also find/migrate DAEMON entries. There is no daemon
-    to find. A pre-r4 daemon still running from an older binary is swept as an
-    ordinary stale watchdog entry by ``_sweep_stale_daemons`` below.
+    Every live wire, same session or not: a wire proves a writer, never a listener;
+    only the arm happening now is known to have ears.
     """
     for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
         if watch.get("type") != _WIRE_KIND:
@@ -382,8 +204,6 @@ def _sweep_wires(storage_path: Path | None) -> None:
         pid = watch.get("pid")
         handle = watch.get("handle")
         if not isinstance(handle, str):
-            # An entry with no handle can be neither killed nor deregistered
-            # through the registry's doors — name it and move on.
             logger.warning("[watchdog.wire] registry entry without a handle: %s", watch)
             continue
 
@@ -411,10 +231,7 @@ def _sweep_wires(storage_path: Path | None) -> None:
 def _sweep_stale_daemons(storage_path: Path | None) -> int:
     """Retire any detection daemon left running by a pre-r4 binary.
 
-    Written for ONE upgrade, and deliberately not deleted after it: an operator
-    can still be running a months-old detached daemon from any checkout on the
-    box. Leaving it alive would restore the exact double-wake r4 removes, and
-    it would be invisible — the second wake looks like the first.
+    Kept after the upgrade: an old daemon left alive restores an invisible double wake.
     """
     retired = 0
     for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
@@ -441,19 +258,7 @@ def _sweep_stale_daemons(storage_path: Path | None) -> int:
 def _partition_mine(records: list[dict], seat: str) -> list[dict]:
     """Keep only the completions THIS seat dispatched — rule 5's implementation.
 
-    One field comparison per record: @ai_mail stamps ``sender`` on the feed line
-    at the terminal moment (FPLAN-0452 P1), so nothing is read and nothing is
-    joined on the delivery path.
-
-    An earlier version of this joined against the dispatch register to build an
-    id allow-list. It raced the producer — which closes the register entry and
-    writes the feed line in the same breath — and it duplicated a
-    reconstruction rule @ai_mail owns. Both were reasons to stop reading a file
-    to answer a question the record already answers.
-
-    A record with no ``sender`` is NOT mine (see ``dispatches.is_mine``): it
-    fails closed, because treating an unattributable completion as mine
-    restores the fleet-wide wake this function exists to end.
+    A record with no ``sender`` fails closed: counting it as mine restores the fleet-wide wake.
     """
     mine = [record for record in records if _dispatches.is_mine(record, seat)]
     dropped = len(records) - len(mine)
@@ -469,22 +274,12 @@ def _result(state: str, **extra) -> dict:
     return base
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# The dead-monitor backstop (FPLAN-0499)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def _dead_cursor_file(repo_root: Path) -> Path:
     return _feed.cursor_file_for(repo_root, name=DEAD_CURSOR_NAME)
 
 
 def _load_announced(path: Path) -> list[str]:
-    """The dispatch keys already announced as DEAD. Missing file = none yet.
-
-    An unreadable cursor is logged and treated as empty: the cost of that
-    failure is a repeated DEAD line, the cost of the opposite choice would be
-    a death never delivered.
-    """
+    """The dispatch keys already announced as DEAD. Missing file = none yet."""
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -523,10 +318,7 @@ def _is_dead(entry: dict) -> bool:
     """Dead = the monitor's pid is gone (``monitor_alive`` False, known within one
     check) OR the row is past ai_mail's hard timeout (``overdue``).
 
-    ``monitor_alive`` is tri-state on purpose (FPLAN-0499 phase 2): ``None`` means
-    the register never learned a pid — every row written before 2026-09-07 and
-    the systemd-scope spawn path — and those fall back to ``overdue`` exactly as
-    before. Folding ``None`` into dead would announce the whole backlog at once.
+    ``None`` (no pid ever learned) is not dead: folding it in would announce the whole backlog.
     """
     return entry.get("monitor_alive") is False or bool(entry.get("overdue"))
 
@@ -551,14 +343,7 @@ def _format_dead(entry: dict) -> str:
 def _announce_dead(root: Path, seat: str, announced: list[str]) -> int:
     """One register read; one stdout line per NEW dead dispatch of this seat's.
 
-    Reads ``outstanding`` rather than ``overdue`` on purpose: the latter logs a
-    json operation every time it finds a late row, and a row stays late until
-    @ai_mail closes it — a log write every five minutes forever is exactly the
-    idle cost this lane exists to avoid. The only write here is the cursor,
-    and only when something new was announced.
-
-    A register that cannot be read is a warning, not a dead wire: completions
-    keep flowing through the feed regardless, and the next check retries.
+    Reads ``outstanding``, not ``overdue``, which logs on every late row: a write per check forever.
     """
     try:
         rows = _dispatches.outstanding(repo_root=root)
@@ -588,35 +373,16 @@ def arm_wire(
 ) -> dict:
     """The arm door: take the wire for THIS session and deliver my completions.
 
-    Args:
-        once: Return after the first delivery (replayed MISSED events count —
-            they ARE the wake the unwired window owed; so does a DEAD line).
-        repo_root: Override the repo root holding AIPASS_REGISTRY.json.
-        storage_path: Override the watch registry path (tests).
-        max_ticks: Bound the follow loop to N ticks (tests). None = unbounded.
-        wire_poll: Seconds between delivery ticks.
-        dead_check: Seconds between register reads for the dead-monitor
-            backstop (tests pass 0 to check every tick).
-
-    Returns:
-        dict with ``state`` in {"completed", "stopped"} plus
-        ``replayed``/``delivered``/``dead``/``ticks`` counters and ``session``.
-
-    Raises:
-        SystemExit(1): after a ``BASELINE DEAD: ...`` stdout line, for any
-            failure that ends delivery. Silence must never mean covered.
+    ``once`` returns after the first delivery; a replayed MISSED or a DEAD line counts.
+    A failure that ends delivery prints ``BASELINE DEAD:`` and exits 1: silence never means covered.
     """
     root = repo_root if repo_root is not None else find_repo_root()
     if root is None:
         _stdout_event(f"BASELINE DEAD: {_REGISTRY_FILENAME} not found — no root, no coverage")
         raise SystemExit(1)
 
-    # Resolved ONCE, here, and fatal if it fails. Without an identity there is
-    # no "mine", so every completion would be filtered out and the wire would
-    # sit there looking armed while delivering nothing — silence that reads as
-    # coverage, which is the failure this whole release removes. Note the
-    # asymmetry with the register: a MISSING register is legitimate (no
-    # dispatch has ever been sent here), an unknown seat never is.
+    # Fatal: without a seat nothing is mine, and the wire would look armed while deaf.
+    # A missing register is legitimate; an unknown seat never is.
     try:
         seat = _dispatches.seat_email(repo_root=root)
     except RuntimeError as exc:
@@ -626,23 +392,11 @@ def arm_wire(
 
     my_target = _stdout_target()
     my_session = _session_dir_of(my_target)
-    # The statusline matches on the CONVERSATION id (its input's session_id);
-    # the tasks-dir id is a different namespace (see the header). Fall back to
-    # the tasks-dir name only when the env var is absent entirely.
+    # The statusline matches the conversation id; the tasks-dir name is only a fallback.
     session_name = os.environ.get("CLAUDE_CODE_SESSION_ID") or (my_session.name if my_session is not None else None)
 
-    # THE WRAPPER TRIPWIRE, measured live 2026-08-19: a Monitor child's stdout
-    # is a SOCKET; a run_in_background child's stdout is a REGULAR FILE under a
-    # session tasks dir. A continuous wire behind that file delivers nothing
-    # until exit — the 12:34 failure — so it refuses to exist. The refusal
-    # itself IS heard: bg-Bash notifies on exit, and this exits immediately.
-    # ``--once`` stays legal there (it exits on first delivery = one wake).
-    # THE UNRESOLVABLE-STDOUT TRIPWIRE (FPLAN-0554, macOS CI 34682737363). The
-    # tripwire below can only refuse a wrapper it can SEE. When the stdout
-    # target is None the wrapper is unknowable — off Linux that was every arm,
-    # and the wire went on to record wrapper "foreground"/stdout null and
-    # announce "armed" while nothing could ever hear a line of it. A continuous
-    # wire that cannot prove it has ears refuses by name instead.
+    # A continuous wire refuses when it cannot see its wrapper, or sees a run_in_background
+    # file that is heard only on exit. The refusal itself exits, so it is heard; --once stays legal.
     if not once and my_target is None:
         reason = (
             "stdout target unresolvable — this continuous wire cannot tell which wrapper carries it, "
@@ -666,9 +420,7 @@ def arm_wire(
     _sweep_wires(storage_path)
     _sweep_stale_daemons(storage_path)
 
-    # SIGTERM must run the finally below — a takeover kills the old wire with
-    # SIGTERM, and a wire that dies without deregistering leaves the stale
-    # entry the next sweep has to bury.
+    # A takeover sends SIGTERM; the finally below must still deregister.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
     handle = _registry.register(
@@ -683,8 +435,6 @@ def arm_wire(
     )
     json_handler.log_operation("arm_wire", {"handle": handle, "session": session_name, "once": once})
 
-    # The cursor is a digest set, not a byte offset, because the feed is trimmed
-    # by os.replace and offsets go stale silently across that — see feed.py.
     feed_cursor_file = _feed.cursor_file_for(root)
     feed_source = _feed.feed_file(root)
     feed_state: dict | None = None
@@ -707,8 +457,7 @@ def arm_wire(
             replayed = len(missed)
             logger.info("[watchdog.wire] replayed %s missed completions", replayed)
 
-        # Sign-in is the moment a death is most likely to be waiting: the
-        # reboot that killed the monitor killed the previous wire too.
+        # A death most likely waits at sign-in: the reboot that killed the monitor killed the old wire.
         announced = _load_announced(_dead_cursor_file(root))
         dead = _announce_dead(root, seat, announced)
         last_dead_check = time.monotonic()
@@ -718,19 +467,12 @@ def arm_wire(
             f"replayed={replayed} tick={wire_poll}s"
         )
         if my_target is not None and str(my_target).startswith("pipe:"):
-            # A pipe hides the wrapper: `baseline --once | tail` under
-            # run_in_background still wakes on exit, but it records as
-            # foreground and the statusline counts only background or monitor,
-            # so a live wire painted as none (2026-09-27 02:41).
             _stderr(
                 "watchdog wire: stdout is a pipe — this wire is recorded as foreground and the statusline "
                 "will not count it. Arm it bare, no pipe and no redirect: drone @devpulse watchdog baseline --once"
             )
             logger.warning("[watchdog.wire] armed behind a pipe handle=%s stdout=%s", handle, my_target)
         if not once:
-            # The wrapper is invisible from inside — this line is the only
-            # tripwire for the 12:34 mistake (continuous wire armed via
-            # run_in_background = zero wakes forever).
             _stderr(
                 "watchdog wire: continuous mode NOTIFIES PER STDOUT LINE ONLY UNDER THE MONITOR TOOL — "
                 "if this was armed with run_in_background, TaskStop it and re-arm via Monitor"

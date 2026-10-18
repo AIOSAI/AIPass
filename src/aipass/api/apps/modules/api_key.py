@@ -3,17 +3,10 @@
 # Description: API Key Management Module
 # Version: 1.0.2
 # Created: 2025-11-15
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-API Key Management Module
-
-Orchestrates API key and credential operations:
-- Get/validate keys
-- List providers
-- Initialize .env template
-"""
+"""API Key Management Module"""
 
 import os
 import sys
@@ -58,39 +51,23 @@ def print_introspection():
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle API key management commands
-
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle API key management commands"""
     try:
         if command not in ["get-key", "validate", "list-providers", "init", "get-secret"]:
             return False
 
-        # `validate google` is OAuth2, owned by google_client — google is not in
-        # PROVIDER_DEFAULTS. This module is discovered first, so claiming it here
-        # shadowed the documented command with "No API key found for google".
+        # `validate google` is google_client's OAuth2; this module is discovered first and would shadow it.
         if command == "validate" and args and args[0] == "google":
             return False
 
-        # Help gate — a help flag ANYWHERE means "explain", never "execute".
-        # Modules are also reachable via __main__, which bypasses the router's
-        # normalisation, so the whole-sequence check is needed here too:
-        # `get-key <provider> --help` otherwise reached get_key() and printed
-        # masked key material. Bare "help" stays a flag only in first position.
+        # A help flag anywhere means explain (__main__ bypasses the router's check), so
+        # `get-key <provider> --help` never prints key material.
         if args and (args[0] == "help" or any(arg in ("--help", "-h") for arg in args)):
             print_help()
             return True
 
-        # Log operation
         json_handler.log_operation(f"api_key_{command}", {"command": command})
 
-        # Route all commands before introspection gate
         if command == "list-providers":
             list_providers()
             return True
@@ -107,7 +84,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             validate_key(args)
             return True
 
-        # NO-ARGS GATE (seedgo standard) — only for unrecognized subcommands
         if not args:
             print_introspection()
             return True
@@ -125,7 +101,6 @@ def get_key(args: List[str]):
     header(f"Get API Key - {provider_name}")
     console.print()
 
-    # Call handler to get key
     try:
         api_key = keys.get_api_key(provider_name)
     except keys.KeyUnavailable as e:
@@ -147,7 +122,6 @@ def validate_key(args: List[str]):
     header(f"Validate API Key - {provider_name}")
     console.print()
 
-    # Get key from handler
     try:
         api_key = keys.get_api_key(provider_name)
     except keys.KeyUnavailable as e:
@@ -158,7 +132,6 @@ def validate_key(args: List[str]):
         error(f"No API key found for {provider_name}")
         return
 
-    # Validate via handler
     is_valid = keys.validate_key(api_key, provider_name)
 
     if is_valid:
@@ -190,7 +163,6 @@ def init_env():
         success(f"Environment file already exists at {env_path}")
         return
 
-    # Create .env template via handler
     if env.create_env_template():
         success(f"Environment template created at {env_path}")
     else:
@@ -261,11 +233,7 @@ def get_secret_cmd(args: List[str]):
 
 
 def fetch_api_key(provider: str = "openrouter"):
-    """Retrieve a validated API key for a provider from secrets.
-
-    Raises:
-        keys.KeyUnavailable: the secrets file could not be read (api, fleet green leg 11).
-    """
+    """Retrieve a validated API key for a provider from secrets."""
     return keys.get_api_key(provider)
 
 
@@ -328,17 +296,14 @@ if __name__ == "__main__":
     """Standalone execution mode"""
     args = sys.argv[1:]
 
-    # Show introspection when run without arguments
     if len(args) == 0:
         print_introspection()
         sys.exit(0)
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Execute command
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 

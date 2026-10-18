@@ -3,23 +3,14 @@
 # Description: Tag handler — create, push, and list release tags
 # Version: 1.2.0
 # Created: 2026-07-02
-# Modified: 2026-09-13
+# Modified: 2026-10-17
 # =============================================
 
 """Tag handler — create, push, and list release tags.
 
-Two release lanes, chosen by the repo the command will actually run in:
-
-* **AIPass's own repo** — tags ``origin/main`` after verifying that
-  ``pyproject.toml`` and ``src/aipass/__init__.py`` both already carry the
-  version being tagged. Our release flow is dev→PR→main, so the thing worth
-  tagging is what landed on main, not whatever the local checkout is sitting on.
-* **An external project seat** (``projects/baud``, any cloned repo) — tags that
-  repo's current HEAD and pushes the tag to its own origin. Version discipline
-  stays with the repo owner: their manifests are theirs (baud alone has three),
-  their branch model is theirs, and reading ours out of their tree would be an
-  invented rule. What both lanes keep is the duplicate guard — a tag that already
-  exists locally or on the remote is refused, never quietly moved.
+AIPass's repo tags ``origin/main`` once both manifests carry the version; an
+external repo tags its HEAD with no version guard (its manifests are its owner's).
+Both refuse a tag that already exists locally or on the remote, never moving it.
 """
 
 from __future__ import annotations
@@ -50,10 +41,8 @@ def _run_git(argv: list[str], repo_root: Path) -> tuple[subprocess.CompletedProc
 def _tag_external(name: str, repo_root: Path) -> dict:
     """Tag an external repo's current HEAD and push the tag to its own origin.
 
-    No version guard: an external repo's manifests and release cadence belong to
-    its owner (DPLAN-0290 item 1, the owner's ruling). The name is validated by
-    ``git check-ref-format`` rather than our ``vX.Y.Z`` rule, so a project that
-    ships ``v0.1.0-rc1`` or ``2026.08.1`` is not told its own convention is wrong.
+    The name is checked by ``git check-ref-format``, not our ``vX.Y.Z`` rule, so a
+    project's own convention (``v0.1.0-rc1``, ``2026.08.1``) is not refused.
     """
     if not name or name.startswith("-"):
         return {
@@ -67,16 +56,14 @@ def _tag_external(name: str, repo_root: Path) -> dict:
     if result.returncode != 0:
         return {"success": False, "message": f"'{name}' is not a valid tag name (git check-ref-format refused it)."}
 
-    # EXISTS GUARD — local
     result, err = _run_git(["git", "tag", "-l", name], repo_root)
     if result is None:
         return {"success": False, "message": f"Tag check failed: {err}"}
     if name in result.stdout.split():
         return {"success": False, "message": f"Tag '{name}' already exists locally."}
 
-    # EXISTS GUARD — remote. The return code is checked here because this lane has
-    # no preceding fetch to fail first: an unreachable remote answers with an empty
-    # stdout, which reads exactly like "no such tag" and would tag over it blind.
+    # The return code matters here: with no fetch to fail first, an unreachable
+    # remote's empty stdout reads exactly like "no such tag".
     result, err = _run_git(["git", "ls-remote", "--tags", "origin", f"refs/tags/{name}"], repo_root)
     if result is None:
         return {"success": False, "message": f"Remote tag check failed: {err}"}
@@ -85,7 +72,6 @@ def _tag_external(name: str, repo_root: Path) -> dict:
     if result.stdout.strip():
         return {"success": False, "message": f"Tag '{name}' already exists on remote."}
 
-    # Resolve HEAD — the commit the seat is standing on is what gets released
     result, err = _run_git(["git", "rev-parse", "HEAD"], repo_root)
     if result is None:
         return {"success": False, "message": f"Failed to resolve HEAD: {err}"}
@@ -113,12 +99,7 @@ def _tag_external(name: str, repo_root: Path) -> dict:
 
 
 def tag_release(version: str, repo_root: Path | None = None) -> dict:
-    """Create and push an annotated release tag.
-
-    Routes to the external lane when the repo it runs in is not AIPass's own —
-    see the module docstring for what each lane guarantees. *repo_root* defaults
-    to the standing repo; the external-repo door names another one.
-    """
+    """Create and push an annotated release tag, by the external lane when the repo is not AIPass's."""
     if repo_root is None:
         repo_root = find_repo_root()
     if not is_aipass_repo(repo_root):
@@ -129,7 +110,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
 
     bare_version = version[1:]  # strip leading 'v'
 
-    # Fetch latest remote state
     try:
         result = subprocess.run(
             ["git", "fetch", "origin"],
@@ -144,7 +124,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
     if result.returncode != 0:
         return {"success": False, "message": f"Fetch failed: {result.stderr.strip()}"}
 
-    # VERSION GUARD — pyproject.toml
     try:
         result = subprocess.run(
             ["git", "show", "origin/main:pyproject.toml"],
@@ -162,7 +141,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
     pyproject_match = _PYPROJECT_VERSION_RE.search(result.stdout)
     pyproject_version = pyproject_match.group(1) if pyproject_match else None
 
-    # VERSION GUARD — __init__.py
     try:
         result = subprocess.run(
             ["git", "show", "origin/main:src/aipass/__init__.py"],
@@ -191,7 +169,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
             ),
         }
 
-    # EXISTS GUARD — local
     try:
         result = subprocess.run(
             ["git", "tag", "-l", version],
@@ -206,7 +183,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
     if result.stdout.strip():
         return {"success": False, "message": f"Tag '{version}' already exists locally."}
 
-    # EXISTS GUARD — remote
     try:
         result = subprocess.run(
             ["git", "ls-remote", "--tags", "origin", f"refs/tags/{version}"],
@@ -221,7 +197,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
     if result.stdout.strip():
         return {"success": False, "message": f"Tag '{version}' already exists on remote."}
 
-    # Resolve origin/main SHA
     try:
         result = subprocess.run(
             ["git", "rev-parse", "origin/main"],
@@ -238,7 +213,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
 
     sha = result.stdout.strip()
 
-    # Create annotated tag
     try:
         result = subprocess.run(
             ["git", "tag", "-a", version, "origin/main", "-m", f"Release {version}"],
@@ -253,7 +227,6 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
     if result.returncode != 0:
         return {"success": False, "message": f"Tag creation failed: {result.stderr.strip()}"}
 
-    # Push tag
     try:
         result = subprocess.run(
             ["git", "push", "origin", version],

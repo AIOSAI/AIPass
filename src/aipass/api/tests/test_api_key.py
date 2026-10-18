@@ -3,21 +3,10 @@
 # Description: Tests for API Key Management Module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
-
-# Tests:
-# - handle_command routing for all known commands
-# - handle_command returns False for unknown commands
-# - Help gate triggers print_help
-# - Introspection gate triggers print_introspection for no-args
-# - get_key success/failure paths
-# - validate_key valid/invalid/no-key paths
-# - init_env existing/create paths
-# - list_providers workflow
-# - json_handler.log_operation called on valid commands
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that api_key.py parses and imports
@@ -38,13 +27,7 @@ from aipass.api.apps.modules import api_key
 
 @pytest.fixture(autouse=True)
 def key_source_stub(monkeypatch):
-    """
-    Replace every key source for every test in this file, so no test can read a real key.
-
-    Decision (api, fleet green leg 3): the secrets-file read in keys.py, the template
-    writer in env.py and the provider-store reads in secrets.py are recording stubs at
-    their home modules. A test that also patches api_key.keys/env sits on top of this.
-    """
+    """Replace every key source for every test in this file, so no test can read a real key."""
     stubs = {
         "read_key": MagicMock(name="_read_key_from_secrets", return_value=None),
         "create_env": MagicMock(name="create_env_template", return_value=False),
@@ -66,10 +49,6 @@ def fake_home(monkeypatch, tmp_path):
     return tmp_path
 
 
-# =============================================
-# Shared patch decorator — suppresses all CLI output
-# =============================================
-
 PATCH_CONSOLE = "aipass.api.apps.modules.api_key.console"
 PATCH_HEADER = "aipass.api.apps.modules.api_key.header"
 PATCH_SUCCESS = "aipass.api.apps.modules.api_key.success"
@@ -79,11 +58,6 @@ PATCH_JSON_HANDLER = "aipass.api.apps.modules.api_key.json_handler"
 PATCH_KEYS = "aipass.api.apps.modules.api_key.keys"
 PATCH_ENV = "aipass.api.apps.modules.api_key.env"
 PATCH_PROVIDER = "aipass.api.apps.modules.api_key.provider"
-
-
-# =============================================
-# handle_command — routing tests
-# =============================================
 
 
 @patch(PATCH_CONSOLE)
@@ -163,11 +137,6 @@ def test_handle_command_routes_init(mock_env, mock_jh, mock_error, mock_success,
     mock_error.assert_not_called()
 
 
-# =============================================
-# handle_command — gate tests
-# =============================================
-
-
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
 @patch(PATCH_JSON_HANDLER)
@@ -176,7 +145,6 @@ def test_handle_command_help_gate(mock_jh, mock_header, mock_console):
     result = api_key.handle_command("get-key", ["--help"])
 
     assert result is True
-    # Help gate fires before log_operation
     mock_jh.log_operation.assert_not_called()
 
 
@@ -238,13 +206,7 @@ def test_handle_command_list_providers_standalone(mock_jh, mock_header, mock_con
     result = api_key.handle_command("list-providers", [])
 
     assert result is True
-    # Should call "Available Providers" header, not introspection
     mock_header.assert_called_with("Available Providers")
-
-
-# =============================================
-# get_key tests
-# =============================================
 
 
 @patch(PATCH_CONSOLE)
@@ -291,11 +253,6 @@ def test_get_key_default_provider(mock_keys, mock_error, mock_success, mock_head
     api_key.get_key([])
 
     mock_keys.get_api_key.assert_called_once_with("openrouter")
-
-
-# =============================================
-# validate_key tests
-# =============================================
 
 
 @patch(PATCH_CONSOLE)
@@ -351,11 +308,6 @@ def test_validate_key_invalid(mock_keys, mock_error, mock_success, mock_header, 
     mock_success.assert_not_called()
 
 
-# =============================================
-# init_env tests
-# =============================================
-
-
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
 @patch(PATCH_SUCCESS)
@@ -408,36 +360,17 @@ def test_init_env_create_failure(mock_env, mock_error, mock_success, mock_header
     mock_success.assert_not_called()
 
 
-# =============================================
-# list_providers tests
-# =============================================
-
-
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
 def test_list_providers_prints_openrouter(mock_header, mock_console):
-    """
-    list_providers announces itself and lists the provider.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band). `test_list_providers_
-    prints_header` ran this identical call to assert the title alone. The
-    header assertion moved HERE rather than being dropped with it — the
-    sibling never checked the title, so deleting outright would have retired
-    an oracle instead of a duplicate call.
-    """
+    """list_providers announces itself and lists the provider."""
     api_key.list_providers()
 
     mock_header.assert_called_once_with("Available Providers")
 
-    # Check that console.print was called with the openrouter provider line
     print_calls = [str(c) for c in mock_console.print.call_args_list]
     found = any("openrouter" in c for c in print_calls)
     assert found, f"Expected 'openrouter' in console output, got: {print_calls}"
-
-
-# =============================================
-# log_operation tests
-# =============================================
 
 
 @pytest.mark.parametrize(
@@ -456,16 +389,8 @@ def test_list_providers_prints_openrouter(mock_header, mock_console):
 def test_handle_command_logs_operation(
     mock_keys, mock_jh, mock_error, mock_success, mock_header, mock_console, command, args
 ):
-    """
-    The audit operation name carries the VERB, whichever verb ran.
-
-    PARAMETRISED 2026-09-07 (DPLAN-0323 contested band). This was two test
-    functions with one assertion shape and a different verb each — the
-    definition of one parametrize case per verb. Kept as two CASES rather than
-    collapsed to one, because the whole property under test is that the name
-    varies with the verb, and a single case could not tell a real
-    f"api_key_{command}" from a hardcoded string.
-    """
+    """The audit operation name carries the VERB, whichever verb ran."""
+    # Two cases, not one: a single case could not tell f"api_key_{command}" from a hardcoded string.
     mock_keys.get_api_key.return_value = "FAKE-sk-test1234567890"
 
     api_key.handle_command(command, args)
@@ -476,22 +401,10 @@ def test_handle_command_logs_operation(
     )
 
 
-# =============================================
-# print_introspection tests
-# =============================================
-
-
 @patch(PATCH_CONSOLE)
 @patch(PATCH_HEADER)
 def test_print_introspection_shows_handlers(mock_header, mock_console):
-    """
-    print_introspection titles itself and lists its connected handlers.
-
-    MERGED 2026-09-07 (DPLAN-0323 contested band), same shape as
-    list_providers above: `test_print_introspection_shows_header` made this
-    identical call for the title alone, and the title assertion came with it
-    rather than being retired alongside the duplicate call.
-    """
+    """print_introspection titles itself and lists its connected handlers."""
     api_key.print_introspection()
 
     mock_header.assert_called_once_with("API Key Module Introspection")
@@ -503,11 +416,6 @@ def test_print_introspection_shows_handlers(mock_header, mock_console):
     assert found_keys, "Expected auth.keys handler listed"
     assert found_env, "Expected auth.env handler listed"
     assert found_provider, "Expected config.provider handler listed"
-
-
-# =============================================
-# handle_command — exception propagation
-# =============================================
 
 
 @patch(PATCH_KEYS)
@@ -544,11 +452,6 @@ def test_an_unreadable_secrets_file_is_named(
     mock_success.assert_not_called()
 
 
-# =============================================
-# get_validation_rules tests (via module entry point)
-# =============================================
-
-
 class TestGetValidationRulesAuthKeys:
     """Tests for api_key.get_validation_rules() — module entry point."""
 
@@ -583,14 +486,8 @@ class TestGetValidationRulesAuthKeys:
         assert "prefix" not in rules
 
     def test_each_provider_gets_its_own_prefix_rule(self):
-        """
-        The rules are the prefixes, and this asserted only isinstance(dict).
-
-        A dict is what every one of these returns whatever is in it, so the
-        old shape survived every provider collapsing onto the same rule —
-        which would mean an OpenAI key passing OpenRouter validation. Measured
-        2026-09-07, these are the real values.
-        """
+        """The rules are the prefixes, and this asserted only isinstance(dict)."""
+        # Providers collapsing onto one rule would let an OpenAI key pass OpenRouter validation.
         expected = {
             "openrouter": {"prefix": "sk-or-v1-", "min_length": 40},
             "openai": {"prefix": "sk-", "min_length": 40},
@@ -603,13 +500,8 @@ class TestGetValidationRulesAuthKeys:
             assert api_key.get_validation_rules(provider) == rule
 
     def test_an_unknown_provider_falls_back_to_the_generic_rule(self):
-        """
-        The fallback carries NO prefix, and that is the part worth pinning.
-
-        An unknown provider inheriting some other provider's prefix would
-        reject every key it was ever given, and a dict-shaped assertion could
-        not tell the two apart.
-        """
+        """The fallback carries NO prefix, and that is the part worth pinning."""
+        # An unknown provider inheriting another's prefix would reject every key it is given.
         generic = api_key.get_validation_rules("generic")
 
         assert api_key.get_validation_rules("nonexistent") == generic
@@ -618,13 +510,9 @@ class TestGetValidationRulesAuthKeys:
 
 
 class TestGoogleValidateFallsThrough:
-    """`validate google` belongs to google_client, not the generic key validator.
+    """`validate google` belongs to google_client, not the generic key validator."""
 
-    api_key is discovered before google_client, so claiming this command made
-    the documented "Validate Google OAuth2 credentials" behaviour unreachable:
-    it reported "No API key found for google" instead. google is an OAuth2
-    provider, not one of PROVIDER_DEFAULTS (openrouter, openai).
-    """
+    # api_key is discovered before google_client: claiming this would make Google OAuth2 validation unreachable.
 
     def test_validate_google_not_claimed(self):
         """api_key declines `validate google` so routing continues."""
@@ -655,13 +543,9 @@ class TestGoogleValidateFallsThrough:
 
 
 class TestTrailingHelpDoesNotExecute:
-    """A help flag must explain the command, never run it.
+    """A help flag must explain the command, never run it."""
 
-    api.py's router historically inspected only the first arg after the command,
-    and this module gated on args[0] only, so `get-key openrouter --help` reached
-    get_key() and printed masked key material instead of help. Reported by
-    @seedgo via the help_flag_safety standard.
-    """
+    # A gate on args[0] alone lets `get-key openrouter --help` reach get_key() and print masked key material.
 
     def test_get_key_with_provider_and_trailing_help_does_not_retrieve(self):
         """`get-key <provider> --help` prints help, retrieves nothing."""
@@ -676,11 +560,7 @@ class TestTrailingHelpDoesNotExecute:
         mock_help.assert_called_once()
 
     def test_no_key_material_reaches_stdout_on_help_probe(self, capsys):
-        """The security assertion: no fragment of a real key can be printed.
-
-        Uses a synthetic key — a populated machine would otherwise disclose
-        key[:6] and key[-4:] to the terminal.
-        """
+        """The security assertion: no fragment of a real key can be printed."""
         fake_key = "sk-or-v1-SYNTHETICTESTKEYNOTREAL00000000000000ZZZZ"
         with (
             patch("aipass.api.apps.modules.api_key.keys", autospec=True) as mock_keys,

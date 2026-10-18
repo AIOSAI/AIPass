@@ -3,16 +3,10 @@
 # Description: File System Monitor Handler
 # Version: 0.1.0
 # Created: 2025-11-15
-# Modified: 2026-03-09
+# Modified: 2026-10-17
 # =============================================
 
-"""
-File System Monitor Handler
-
-Watches directories for file changes using watchdog library.
-Monitors all files (including __pycache__, .pyc, etc.) to provide
-complete visibility into branch modifications.
-"""
+"""File System Monitor Handler"""
 
 from typing import List, Callable, Any
 
@@ -20,10 +14,6 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
-
-# =============================================================================
-# WATCHDOG IMPORT (external dependency)
-# =============================================================================
 
 try:
     from watchdog.observers import Observer  # type: ignore
@@ -35,7 +25,6 @@ except ImportError as e:
     logger.info(f"[monitor] watchdog not available, using placeholders: {e}")
     WATCHDOG_AVAILABLE = False
 
-    # Create placeholder classes for when watchdog not available
     class Observer:  # type: ignore
         """Placeholder when watchdog unavailable."""
 
@@ -57,46 +46,21 @@ except ImportError as e:
     class FileSystemEvent:  # type: ignore
         """Placeholder when watchdog unavailable."""
 
-# =============================================================================
-# EVENT HANDLER
-# =============================================================================
-
 
 class BranchFileHandler(FileSystemEventHandler):
-    """
-    Custom file system event handler for branch monitoring
-
-    Captures all file events and passes them to callback function.
-    Ignores log files to prevent infinite loops.
-    """
+    """Custom file system event handler for branch monitoring; ignores logs to prevent infinite loops."""
 
     def __init__(self, branch_name: str, callback: Callable):
-        """
-        Initialize handler
-
-        Args:
-            branch_name: Name of the branch being monitored
-            callback: Function to call with (branch_name, event_type, file_path)
-        """
+        """Initialize handler"""
         super().__init__()
         self.branch_name = branch_name
         self.callback = callback
 
     def _should_ignore(self, path: str) -> bool:
-        """
-        Check if file should be ignored
-
-        Args:
-            path: File path to check
-
-        Returns:
-            True if file should be ignored, False otherwise
-        """
-        # Ignore log files (prevents infinite loop)
+        """Check if file should be ignored"""
         if path.endswith(".log"):
             return True
 
-        # Ignore temporary and backup files
         if ".tmp." in path or path.endswith(".tmp"):
             return True
         if path.endswith(".backup") or path.endswith(".bak"):
@@ -106,11 +70,9 @@ class BranchFileHandler(FileSystemEventHandler):
         if path.endswith(".swp") or path.endswith(".swo"):  # Vim swap files
             return True
 
-        # Ignore log directories
         if "/logs/" in path or "/system_logs/" in path:
             return True
 
-        # Ignore system/config directories (prevents watching non-branch files)
         ignore_dirs = [
             "/.claude/",
             "/.local/",
@@ -152,22 +114,8 @@ class BranchFileHandler(FileSystemEventHandler):
             self.callback(self.branch_name, "MOVED", f"{event.src_path} → {event.dest_path}")
 
 
-# =============================================================================
-# MONITOR FUNCTIONS
-# =============================================================================
-
-
 def start_monitoring(branch_paths: List[tuple], callback: Callable) -> Any:
-    """
-    Start monitoring multiple branch directories
-
-    Args:
-        branch_paths: List of (branch_name, path) tuples
-        callback: Function to call with (branch_name, event_type, file_path)
-
-    Returns:
-        Observer instance, or None if watchdog not available
-    """
+    """Start monitoring (branch_name, path) tuples; None if watchdog is not available."""
     if not WATCHDOG_AVAILABLE:
         return None
 
@@ -188,12 +136,7 @@ def start_monitoring(branch_paths: List[tuple], callback: Callable) -> Any:
 
 
 def stop_monitoring(observer: Any) -> None:
-    """
-    Stop monitoring
-
-    Args:
-        observer: Observer instance to stop
-    """
+    """Stop monitoring"""
     if observer:
         observer.stop()
         observer.join()

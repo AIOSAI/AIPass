@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
-    "updated": "2026-10-08",
+    "updated": "2026-10-17",
     "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
     "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
     "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead.",
@@ -113,15 +113,6 @@
       "reason": "setup_handlers() is wiring, not an event handler — it handles no event, it calls trigger.on() to register the handle_{event} callbacks. Naming it handle_something would misdescribe it."
     },
     {
-      "file": "apps/handlers/events/pr_status_sync.py",
-      "standard": "unused_function",
-      "functions": [
-        "handle_pr_created",
-        "handle_pr_merged"
-      ],
-      "reason": "NAME-SCOPED AND HONOURED: unused_function_check passes the function name to is_bypassed(). TDPLAN-0007 decommissioned status-sync — registry.py's trigger.on() calls are commented out, so both handlers are unreferenced by design while the module and its tests are kept for revival. Candidate for .archive/ if revival is off the table."
-    },
-    {
       "file": "apps/handlers/medic_state.py",
       "standard": "unused_function",
       "functions": [
@@ -139,26 +130,18 @@
       "file": "apps/log_watcher_service.py",
       "standard": "encapsulation",
       "lines": [
-        26
+        17
       ],
       "pattern": "import aipass.trigger.apps.handlers.reload_sentinel",
       "reason": "LINE-SCOPED AND HONOURED: encapsulation_check is the one checker in the pack that passes a line to is_bypassed(). trigger publishes no modules/ entry point for the reload sentinel and should not - it is not a CLI surface, it is the service's own supervisor hook, while modules/ is auto-discovered for drone routing. Same shape as the ai_mail dispatch.wake exemption. Line drifts if anything above L26 changes - re-derive rather than nudge it.",
       "anchor": "import aipass.trigger.apps.handlers.reload_sentinel"
     },
     {
-      "file": "apps/log_watcher_service.py",
-      "standard": "help_text",
-      "lines": [
-        17
-      ],
-      "pattern": "python -m in module docstring",
-      "reason": "LINE-SCOPED AND HONOURED: help_text_check filters per line. L17 documents how systemd's ExecStart actually launches this module. `drone @trigger ...` would be a lie — drone does not start this unit; the line below it gives the systemctl form.",
-      "anchor": "python -m aipass.trigger.apps.log_watcher_service"
-    },
-    {
       "file": "tests/test_error_registry.py",
       "standard": "through_the_command",
-      "lines": [1101],
+      "lines": [
+        946
+      ],
       "pattern": "er._load_circuit_breaker_state() read directly",
       "reason": "No product door (@devpulse ruling, fleet green leg 10). The loader's only caller is module import (error_registry.py, _circuit_breaker = _load_circuit_breaker_state()), so the one public route to it is a re-import, and a re-import binds the live trigger_json/trigger_cb_state.json.",
       "anchor": "er._load_circuit_breaker_state()"
@@ -166,7 +149,9 @@
     {
       "file": "tests/test_error_registry.py",
       "standard": "through_the_command",
-      "lines": [1459],
+      "lines": [
+        1269
+      ],
       "pattern": "er._fingerprint_dispatch_count read directly",
       "reason": "Truly internal (trigger's reading, fleet green leg 10). The test pins that get_dispatch_count never creates an entry for an unknown fingerprint. No public answer can see the difference between an entry of 0 and no entry: get_dispatch_count answers 0 for both (correctly; it counts true, pinned at 2 after two dispatches), should_dispatch treats both as never dispatched, and the saved per_fingerprint keys come from _fingerprint_dispatch_times. What it guards is memory growth alone.",
       "anchor": "er._fingerprint_dispatch_count"
@@ -174,7 +159,10 @@
     {
       "file": "tests/test_error_detected.py",
       "standard": "import_site",
-      "lines": [535, 536],
+      "lines": [
+        477,
+        478
+      ],
       "pattern": "sys.modules entries set and dropped to re-import error_detected",
       "reason": "An import-time fallback no setattr can re-fail (@devpulse ruling, fleet green leg 10). The stubs exist only in error_detected's `except ImportError` arm around its error_registry import, so the one way to reach them is an import that fails; monkeypatch restores both entries at teardown.",
       "anchor": "sys.modules, \"aipass.trigger.apps.handlers."
@@ -182,7 +170,9 @@
     {
       "file": "tests/test_error_detected.py",
       "standard": "import_site",
-      "lines": [537],
+      "lines": [
+        479
+      ],
       "pattern": "the fresh import of error_detected inside the fixture",
       "reason": "The other half of the same fixture (fleet green leg 10 ruling): the import must run while error_registry is unimportable, so it cannot move to the top of the file.",
       "anchor": "import aipass.trigger.apps.handlers.events.error_detected as fresh"
@@ -190,7 +180,9 @@
     {
       "file": "apps/config.py",
       "standard": "logged_fallback",
-      "lines": [119],
+      "lines": [
+        60
+      ],
       "pattern": "append_trail returns False when the trail write fails",
       "reason": "False means not written in both arms, and success is True, so no caller can mistake the failure for an answer (fleet green leg 5, kept leg 10). Each caller reads False as not written: TrailLogger.dropped counts it, and error_detected, runaway_handler and startup check it. You cannot log a failure to log.",
       "anchor": "return False"
@@ -198,7 +190,9 @@
     {
       "file": "apps/modules/errors.py",
       "standard": "logged_fallback",
-      "lines": [298],
+      "lines": [
+        298
+      ],
       "pattern": "_cmd_detail returns True after an unreadable registry",
       "reason": "True there means routed, not succeeded (fleet green leg 5, kept leg 10). The failure goes out through cli error() and its failure flag, which trigger.main reads.",
       "anchor": "return True"
@@ -206,7 +200,9 @@
     {
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
-      "lines": [840],
+      "lines": [
+        529
+      ],
       "pattern": "update_status returns False on an exception",
       "reason": "The success path returns _save_registry's answer, so False is always a failure: invalid status, not found, save failed or an exception (fleet green leg 4, kept leg 10). Its callers in errors.py (suppress, unsuppress, resolve) print the failure on False and do nothing else, and the warning names the exception.",
       "anchor": "return False"
@@ -214,7 +210,9 @@
     {
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
-      "lines": [996],
+      "lines": [
+        640
+      ],
       "pattern": "update_source_fix_status returns False on an exception",
       "reason": "Fleet green leg 5, kept leg 10. Its caller, errors suppress, ignores the answer and runs after the suppression write and after the source-fix send. A raise would crash after the mail went, and a distinct value would need that caller changed.",
       "anchor": "return False"
@@ -222,7 +220,10 @@
     {
       "file": "apps/handlers/escalation.py",
       "standard": "logged_fallback",
-      "lines": [780, 895],
+      "lines": [
+        498,
+        593
+      ],
       "pattern": "digest and aged-notice send raised -> send_failed",
       "reason": "send_failed comes only from failure arms (fleet green leg 5, kept leg 10): no callback wired, the send raised, the send refused. A success returns another outcome and stamps the cooldown. A raise would reach the record path's state write and drop the occurrence; send_failed leaves no cooldown, so the next occurrence retries.",
       "anchor": "return \"send_failed\""
@@ -230,7 +231,9 @@
     {
       "file": "apps/handlers/escalation.py",
       "standard": "logged_fallback",
-      "lines": [968],
+      "lines": [
+        654
+      ],
       "pattern": "_rollup_is_due sends anyway on an unreadable stamp",
       "reason": "An unreadable stamp must not mute the manager forever (fleet green leg 5, kept leg 10). True is the decision to send, taken on purpose, and the warning names the stamp.",
       "anchor": "return True"
@@ -238,7 +241,9 @@
     {
       "file": "apps/handlers/events/error_detected.py",
       "standard": "logged_fallback",
-      "lines": [313],
+      "lines": [
+        197
+      ],
       "pattern": "_read_log_context returns empty text on a read failure",
       "reason": "Fleet green leg 5, kept leg 10. Its caller runs right before the dispatch mail. A raise would drop a dispatch over an unreadable context, while empty text drops only the context section.",
       "anchor": "return \"\""

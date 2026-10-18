@@ -3,7 +3,7 @@
 # Description: Tests for email header handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/header.py -- get_dispatch_header, prepend_dispatch_header."""
@@ -20,15 +20,8 @@ from pathlib import Path
 
 import aipass.ai_mail.apps.handlers.email.header as mod
 
-# The tree sweep's skips, written here rather than imported: seedgo's handlers
-# guard refuses a caller from another branch. dropbox and .archive are the
-# owner's ruling of 09-27 (a dropbox is a sandbox like .archive, nothing looks in);
-# __pycache__ holds no source. The sweep sees every other directory, tools, docs,
-# reports, logs and backups included: a product package of one of those names is walked.
+# Written here, not imported: seedgo's handlers guard refuses a caller from another branch.
 _SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
-
-
-# --- Fixtures --------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -37,9 +30,6 @@ def _suppress_log_operation(monkeypatch):
     mock_jh = MagicMock()
     monkeypatch.setattr(mod, "json_handler", mock_jh)
     return mock_jh
-
-
-# --- get_dispatch_header tests ---------------------------------------
 
 
 def test_get_dispatch_header_default_returns_standard():
@@ -81,9 +71,6 @@ def test_headers_are_distinct():
     assert standard != no_save
 
 
-# --- prepend_dispatch_header tests -----------------------------------
-
-
 def test_prepend_dispatch_header_default():
     """Prepends standard dispatch header to message."""
     message = "Please complete task X."
@@ -114,10 +101,7 @@ def test_prepend_dispatch_header_logs_the_no_memory_save_flag(
 ):
     """The audit payload carries whichever no_memory_save it was called with.
 
-    This was two tests asserting the same call with the flag flipped
-    (DPLAN-0323, merged FPLAN-0492). BOTH VALUES SURVIVE THE MERGE as
-    parameters: the pair is one behaviour over two inputs, and dropping either
-    row would leave the payload free to hardcode the other.
+    Keep both rows: dropping either leaves the payload free to hardcode the other.
     """
     mod.prepend_dispatch_header("test", no_memory_save=flag)
     _suppress_log_operation.log_operation.assert_called_once_with("prepend_dispatch_header", {"no_memory_save": flag})
@@ -137,8 +121,7 @@ def test_prepend_dispatch_header_result_is_header_plus_message():
 
 
 def test_dispatch_header_instructs_synchronous_subagents():
-    """Standard header tells agents to run sub-agents synchronously —
-    headless sessions are never re-invoked when background tasks finish."""
+    """Standard header tells agents to run sub-agents synchronously (headless sessions are never re-invoked)."""
     assert "SYNCHRONOUSLY" in mod.DISPATCH_HEADER
     assert "run_in_background: false" in mod.DISPATCH_HEADER
     assert "BEFORE ending your turn" in mod.DISPATCH_HEADER
@@ -151,8 +134,7 @@ def test_no_memory_save_header_instructs_synchronous_subagents():
 
 
 def test_dispatch_header_carries_culture_fence():
-    """Standard header states the fence: unexplained work is reported, never
-    given an invented author (DPLAN-0276)."""
+    """Standard header states the fence: unexplained work is reported, never given an invented author."""
     assert "never invent an author" in mod.DISPATCH_HEADER
     assert "REPORT it" in mod.DISPATCH_HEADER
     assert "attribute it to no one" in mod.DISPATCH_HEADER
@@ -165,59 +147,35 @@ def test_no_memory_save_header_carries_culture_fence():
 
 
 def test_culture_fence_reaches_the_recipient():
-    """The fence survives prepend — it is on the surface a recipient actually reads,
-    not just a module constant."""
+    """The fence survives prepend, on the surface a recipient actually reads."""
     result = mod.prepend_dispatch_header("Task body.")
     assert "never invent an author" in result
 
 
-# --- The module docstring is where Python can see it -----------------
-#
-# Found by @seedgo (2026-08-31) when they rewrote check_module_docstring off a
-# 30-line scan for a triple quote and onto ast.get_docstring. This file's
-# docstring sat AFTER the json_handler import. Python evaluates such a string,
-# discards it, and leaves __doc__ None — so the module read as documented to
-# every human opening it and to nothing that reads __doc__: help(), pydoc, and
-# seedgo's new checker. That is why the old line scan agreed with the reader
-# instead of with the interpreter, and why the verdict was 100 for eight months.
+# A docstring after an import is evaluated and discarded: __doc__ stays None for help() and seedgo.
 
 
 def test_header_module_has_a_real_docstring():
-    """The defect itself: __doc__ is populated, not silently discarded.
-
-    Goes red on the pre-fix file — the string was there, ``__doc__`` was None.
-    """
+    """The defect itself: __doc__ is populated, not silently discarded."""
     assert "Email Header Handler" in (mod.__doc__ or "")
 
 
 def test_header_docstring_opens_the_module_body():
     """The MECHANISM, separately from the outcome: the string is statement zero.
 
-    ``__doc__`` being populated is the outcome; a string literal opening the
-    body is the cause. Pinned apart so a future red names which one moved —
-    a docstring assigned some other way would satisfy the pin above and still
-    leave the shape seedgo measures wrong.
+    Pinned apart so a future red names which one moved.
     """
     tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
     first = tree.body[0]
     assert isinstance(first, ast.Expr), f"module opens with {type(first).__name__}"
     assert isinstance(first.value, ast.Constant)
     assert isinstance(first.value.value, str)
-    # The three shape checks above are satisfied by ANY opening string literal,
-    # including one sitting above a docstring assigned some other way — which is
-    # the very shape the pin above this one cannot tell apart. Tying the literal
-    # to __doc__ is what makes mechanism and outcome the same string.
+    # Any opening literal passes the shape checks; tying it to __doc__ makes mechanism and outcome one string.
     assert first.value.value == mod.__doc__, "the opening literal IS the docstring, not a string beside it"
 
 
 def _discarded_module_strings(source: str) -> list:
-    """Line numbers of module-level strings Python evaluates and throws away.
-
-    A bare string expression at the top of the body IS the docstring; anywhere
-    below it, it is a no-op the interpreter discards. Reports lines only when
-    the module has no real docstring, which is the shape that reads as
-    documentation and is not.
-    """
+    """Line numbers of module-level strings Python evaluates and throws away, when there is no real docstring."""
     tree = ast.parse(source)
     if ast.get_docstring(tree) is not None:
         return []
@@ -229,11 +187,7 @@ def _discarded_module_strings(source: str) -> list:
         and isinstance(node.value, ast.Constant)
         and isinstance(node.value.value, str)
     ]
-    # An f-string OPENING the body is the same defect one step along: it reads
-    # as the docstring to a human, ``ast.get_docstring`` refuses it (JoinedStr,
-    # not Constant), and Python leaves __doc__ None. Named by a mutant here,
-    # measured at 0 live sites in apps/ on 2026-08-31 — reachable, not armed,
-    # so the sweep watches for it rather than waiting to be surprised.
+    # An opening f-string reads as a docstring but is a JoinedStr: __doc__ stays None.
     if tree.body:
         first = tree.body[0]
         if isinstance(first, ast.Expr) and isinstance(first.value, ast.JoinedStr):
@@ -246,33 +200,19 @@ _CURED_SHAPE = '"""The docstring."""'
 
 
 def test_the_sweep_convicts_the_defect_shape():
-    """Negative control. A matcher that convicts nothing reports any tree clean.
-
-    Built from a synthetic source, never the live file, so it cannot pass for
-    the sweep's own reason — the thing it measures is present here by
-    construction whatever the tree below does.
-    """
+    """Negative control. A matcher that convicts nothing reports any tree clean."""
     guilty = f"import os\n\n{_DEFECT_SHAPE}\n"
     assert _discarded_module_strings(guilty) == [3]
 
 
 def test_the_sweep_acquits_a_real_docstring():
-    """Positive control. The cured shape — string first, import after — is clean.
-
-    Without this, a matcher that convicts unconditionally would look identical
-    to a working one from the tree sweep's green.
-    """
+    """Positive control. The cured shape — string first, import after — is clean."""
     cured = f"{_CURED_SHAPE}\n\nimport os\n"
     assert _discarded_module_strings(cured) == []
 
 
 def test_the_sweep_convicts_an_fstring_opener():
-    """The species M4 named: an f-string reads as the docstring and is not one.
-
-    Zero live sites in ``apps/`` when this was written, so the sweep's green on
-    this shape says nothing on its own — this control is what makes the tree
-    result mean something.
-    """
+    """An f-string reads as the docstring and is not one."""
     guilty = 'f"""Module {1}."""\n\nimport os\n'
     assert _discarded_module_strings(guilty) == [1]
 
@@ -280,8 +220,7 @@ def test_the_sweep_convicts_an_fstring_opener():
 def _branch_sources(root):
     """Every .py under root, never inside a dropbox, .archive or __pycache__.
 
-    Names are judged relative to root, never on the whole path: a checkout that
-    itself lives under a directory named dropbox is still walked.
+    Names are judged relative to root: a checkout under a directory named dropbox is still walked.
     """
     for source in root.rglob("*.py"):
         if not _SWEEP_SKIP_DIRS.intersection(source.relative_to(root).parts[:-1]):
@@ -291,10 +230,7 @@ def _branch_sources(root):
 def test_the_tree_walk_never_enters_a_dropbox_or_an_archive(tmp_path):
     """A file placed in a dropbox or .archive under the walked root is not visited.
 
-    apps/handlers/.archive holds retired .py files today, so the bare rglob read
-    them. The root stands inside a directory named dropbox, so a filter on the
-    whole path would drop kept.py too. The runner cannot serve a test module:
-    this pin stands on red first alone (the filter removed, both plants came back).
+    The root sits inside a dropbox, so a filter on the whole path would drop kept.py too.
     """
     root = tmp_path / "dropbox" / "root"
     (root / "live").mkdir(parents=True)
@@ -309,12 +245,7 @@ def test_the_tree_walk_never_enters_a_dropbox_or_an_archive(tmp_path):
 
 
 def test_no_module_in_the_tree_documents_itself_into_the_void():
-    """Tree-wide: the species dies everywhere in this branch, not just here.
-
-    seedgo's sweep named one ai_mail file and my own sweep agreed on one — but
-    a handed list is a starting point, never the scope, so this asks the tree
-    directly and keeps asking on every run.
-    """
+    """Tree-wide: the species dies everywhere in this branch, not just here."""
     apps = Path(__file__).resolve().parents[1] / "apps"
     scanned, offenders = 0, []
     for source in _branch_sources(apps):
@@ -323,7 +254,6 @@ def test_no_module_in_the_tree_documents_itself_into_the_void():
         if lines:
             offenders.append(f"{source.name}:{lines}")
 
-    # Arming probe: a sweep over an empty file list passes for free. A wrong
-    # root or a renamed apps/ would otherwise read as a clean tree forever.
+    # Arming probe: a wrong root or renamed apps/ would otherwise read as a clean tree.
     assert scanned > 30, f"sweep only visited {scanned} files — wrong root?"
     assert offenders == [], f"module strings Python discards: {offenders}"

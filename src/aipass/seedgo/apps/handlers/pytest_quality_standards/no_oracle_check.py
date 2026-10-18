@@ -3,36 +3,12 @@
 # Description: v5 - does a test verify anything at all
 # Version: 1.1.0
 # Created: 2026-09-01
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Does this test verify anything a reader can see?
 
-THE FIRST V5 CHECK, AND THE PACK'S REFERENCE PORT. Ten more nominators follow
-it in phase 2; this one establishes the shape they copy - scoring API, advisory
-result, evidence attached to every flag, stdlib only.
-
-WHAT IT REPLACES. v4 scored a branch by searching its test files for 99 pattern
-substrings. The match was a bare `in` over raw source, so comments and docstrings
-counted, and a file of pattern strings with no code at all scored 94 percent. It
-also could not be opted out of: the raw percentage entered the branch average and
-CI gates that average at 100, so every branch was pushed to 51 of 51 items. That
-is why `importlib.reload` appears in eighteen of eighteen branches - not drift,
-compliance. This check reads the AST instead, and asks the only question v4 never
-asked: is there an oracle.
-
-WHAT COUNTS AS AN ORACLE IS DELIBERATELY GENEROUS. An `assert`, a `pytest.raises`
-or `warns` or `fail` or `approx`, any `assert_*` method (unittest and mock), or a
-call to a locally named checking helper. Being generous is the right direction to
-be wrong in: a false flag costs a reader thirty seconds, and this tier is advisory
-either way.
-
-IT NOMINATES, IT DOES NOT CONVICT. A bare trailing call CAN be a working oracle -
-`parse(bad_input)` with no assert really does fail when `parse` starts accepting
-bad input. That is a weak oracle, not an absent one, and static analysis cannot
-tell them apart from the outside. So this file never says a test is worthless. It
-says: no oracle is visible here, and here is what the test calls.
-"""
+Reference: no_oracle.md"""
 
 import ast
 from pathlib import Path
@@ -40,32 +16,19 @@ from typing import Dict, List
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
 
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "no_oracle"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
+#: Tried in order; a project matching none of them gets a whole-tree walk.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Helper-name prefixes that mean the unit delegates its checking. A unit calling
-#: `_assert_document_is_lawful(...)` has an oracle one hop away, and flagging it
-#: would teach projects to inline their helpers to please the checker - the exact
-#: behaviour v4 produced.
+#: Flagging a delegating helper call would teach projects to inline their helpers.
 DELEGATING_PREFIXES: tuple = ("assert", "_assert", "check", "_check", "verify", "_verify", "expect", "_expect")
 
-#: How many flagged units to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
+#: The full list lives in the report artifact.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
 
 
 def _delegates(unit: corpus.TestUnit) -> str:
@@ -93,12 +56,8 @@ def _calls_made(unit: corpus.TestUnit) -> List[str]:
 def has_oracle(unit: corpus.TestUnit, oracle_helpers: frozenset = frozenset()) -> bool:
     """True when the unit verifies something a reader can see.
 
-    The public entry point for this rule - the report lane and the tests both
-    ask the question here rather than re-deriving it. ``oracle_helpers`` are
-    the call spellings (``name`` or ``self.name``) of the unit's own module
-    functions and class methods whose body holds an oracle; a call to one is
-    the unit's oracle (seedgo, fleet green leg 20).
-    """
+    The rule's public entry point: the report lane and the tests ask here.
+    ``oracle_helpers`` are same-file helper spellings (``name``/``self.name``) whose body holds an oracle."""
     if corpus.asserts_in(unit) or corpus.oracle_calls_in(unit) or _delegates(unit):
         return True
     return any(
@@ -114,9 +73,7 @@ def _helper_has_oracle(node: ast.FunctionDef | ast.AsyncFunctionDef, relpath: st
 def _oracle_helpers(test_file: corpus.TestFile) -> Dict[str, frozenset]:
     """Per class name ("" for module level), the helper call spellings that hold an oracle.
 
-    A module function is called by its name, a method of the unit's own class
-    through ``self``; both are read in the same file only.
-    """
+    Module functions by name, own-class methods through ``self``; same file only."""
     module_level = frozenset(
         node.name
         for node in test_file.tree.body
@@ -162,36 +119,16 @@ def _unoracled_in(test_file: corpus.TestFile, helpers: Dict[str, frozenset]) -> 
     return rows
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its tests verify anything.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory. A project with no tests reports not_applicable rather than a
-        number, because zero tests measured is not zero quality found.
-    """
+    ``bypass_rules`` is accepted for the scoring-API contract and not read: shadow mode gates nothing.
+    No tests reports not_applicable: zero tests measured is not zero quality found."""
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version returned "no test files found" before this ran,
-    # so a project whose ONLY test file had a syntax error reported exactly what
-    # a project with no tests at all reports. A broken file must never read as an
-    # absent one - that is the whole contract `unparseable` exists to keep, and
-    # it was defeated on the one path where nothing else could catch it.
+    # Built before the empty path: a broken only-test-file must never read as no tests.
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(

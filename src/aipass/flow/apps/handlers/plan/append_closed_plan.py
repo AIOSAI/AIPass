@@ -3,15 +3,10 @@
 # Description: Closed Plans Local Registry Handler
 # Version: 0.4.0
 # Created: 2026-03-03
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Closed Plans Append Handler
-
-Appends a closed plan entry to the branch's CLOSED_PLANS.local.json file.
-Creates the file if it doesn't exist.
-"""
+"""Closed Plans Append Handler"""
 
 import json
 import os
@@ -19,10 +14,8 @@ import re
 import time
 from pathlib import Path
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
-# External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 
@@ -37,38 +30,22 @@ _LOCK_BACKOFF_BASE = 0.05
 
 def _sleep(seconds: float) -> None:
     """time.sleep(seconds), the lock backoff's wait.
-
-    The reason is the tests alone: they patch this name so the backoff neither
-    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    A seam for tests: patching it skips the wait without replacing time.sleep process-wide.
     """
     time.sleep(seconds)
 
 
 def _create_exclusive(lock_path: Path) -> int:
     """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
-
-    It stands alone because this create is where platforms answer differently:
-    Windows answers a lock another writer is still removing (delete pending)
-    with PermissionError, which a retry wins, and Linux cannot produce that.
-    The tests (test_close_ops, the CLOSED_PLANS append tests) hand the denial
-    in through this name rather than replacing os.open for the whole process
-    (flow's decision, leg 11).
+    A seam for tests: Windows answers a delete-pending lock with PermissionError, which Linux cannot produce.
     """
     return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
 
 def _acquire_append_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
-
-    A Windows delete-pending PermissionError (another writer mid-release) is
-    a held lock: it is retried on the same budget as FileExistsError.
-
-    Returns:
-        True once acquired; False when the budget runs out on contention.
-
-    Raises:
-        PermissionError: The budget ran out and the last attempt was denied.
-            Chained from that denial, so a real permissions problem surfaces.
+    A Windows delete-pending PermissionError is a held lock and is retried. Returns False when contention
+    outlasts the budget; raises PermissionError (chained) when the last attempt was denied.
     """
     denial: PermissionError | None = None
     waited = 0.0
@@ -105,38 +82,20 @@ def _release_append_lock(lock_path: Path) -> None:
 
 
 def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) -> bool:
-    """
-    Append a closed plan entry to the branch's CLOSED_PLANS.local.json
-
-    Args:
-        plan_key: Plan number string (e.g., "0405")
-        plan_info: Plan info dict from registry (must contain 'closed', may contain 'subject', 'relative_path')
-        plan_location: Path to the directory where the plan resides (branch directory)
-
-    Returns:
-        True on success (or the entry was already there), False when the
-        lock stayed held past its budget.
-
-    Raises:
-        Exception: Whatever broke the read, the write or the lock (a denial
-            past budget is a PermissionError). It used to be logged and
-            answered False, so the caller could not tell a held lock from a
-            failure and never saw the reason (flow's decision, leg 5). The
-            one caller, close_plan_impl, catches it and reports it.
+    """Append a closed plan entry to the branch's CLOSED_PLANS.local.json
+    Returns True on success or when already present, False when the lock stayed held past its budget.
+    Raises on any other failure, so a held lock is distinguishable from a broken write.
     """
     try:
-        # Extract prefix from plan_info's file_path (e.g., FPLAN, DPLAN)
         file_path = plan_info.get("file_path", "")
         filename = Path(file_path).name if file_path else ""
         prefix_match = re.match(r"^([A-Z]+PLAN)", filename)
         prefix = prefix_match.group(1) if prefix_match else "FPLAN"
         plan_id = f"{prefix}-{plan_key}"
 
-        # Extract date (YYYY-MM-DD) from the closed ISO timestamp
         closed_raw = plan_info.get("closed", "")
         date_closed = closed_raw[:10] if closed_raw else ""
 
-        # Build the entry
         entry = {
             "plan_id": plan_id,
             "type": prefix,
@@ -145,7 +104,7 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
             "location": plan_info.get("relative_path", ""),
         }
 
-        # Locked read-modify-write to prevent lost updates under concurrent close
+        # Locked read-modify-write: concurrent closes would otherwise lose entries.
         closed_plans_path = plan_location / CLOSED_PLANS_FILE
         lock_path = closed_plans_path.with_suffix(".lock")
 

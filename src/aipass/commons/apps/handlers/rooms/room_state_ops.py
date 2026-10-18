@@ -3,14 +3,11 @@
 # Description: Room State CRUD Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Room State CRUD Handler
-
-Manages key/value state for rooms (decorations, custom properties)
-and convenience setters for room personality columns (mood, flavor, entrance).
 """
 
 import sqlite3
@@ -19,11 +16,6 @@ from typing import Dict, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.json import json_handler
-
-
-# =============================================================================
-# ROOM STATE KEY/VALUE OPERATIONS
-# =============================================================================
 
 
 def set_room_state(conn: sqlite3.Connection, room_name: str, key: str, value: str) -> bool:
@@ -68,11 +60,6 @@ def get_all_room_state(conn: sqlite3.Connection, room_name: str) -> Dict[str, st
     except Exception:
         logger.error(f"[room_state_ops] Failed to get all state for room '{room_name}'")
         return {}
-
-
-# =============================================================================
-# ROOM PERSONALITY COLUMN SETTERS
-# =============================================================================
 
 
 def set_mood(conn: sqlite3.Connection, room_name: str, mood: str) -> bool:

@@ -3,32 +3,12 @@
 # Description: nominator - assertions that may never execute (VACUOUS-GUARD, VACUOUS-LOOP)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 9 — the assertion that has never once run.
+"""TAXONOMY rule 9 — the assertion that has never once run.
 
-  VACUOUS-GUARD   the unit's only `assert` sits inside an `if` with no `else`.
-                  When the guard is false the test passes having checked
-                  nothing, and nothing in the run says so. @daemon's
-                  `test_log_operation_empty_dict_not_attached` was traced: the
-                  assertion **has never executed**.
-  VACUOUS-LOOP    the only `assert` sits inside a `for` with no floor on the
-                  iterable being non-empty. An empty `projects/` directory
-                  makes @daemon's citizen-declaration test a silent pass, and
-                  it was observed live as `478 passed, 3 skipped`.
-
-THE KNOWN-GOOD IS THE HARD PART AND IT IS EXPLICIT: *an `if` that asserts on
-BOTH branches is correct platform-divergent code and must pass.* TAXONOMY
-pins three separate examples of it. So a guard is only vacuous when the `else`
-is absent or asserts nothing — a two-sided guard is never nominated.
-
-For loops, the floor is what makes the test honest: `assert items` before the
-loop, `len(x) == 3`, a parametrised iterable, or a literal collection. Any of
-them means an empty iterable would fail the test rather than pass it.
-
-TAXONOMY rates this rule MED. It nominates.
+Reference: unentered_assert.md
 """
 
 import ast

@@ -5,42 +5,12 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-01
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Answers one question for every security gate: is this session the admin seat?
 
-Extracted from ``handlers/security/edit_gate.py`` on 2026-09-01, unchanged in
-behaviour, when a second gate (``testwrite_gate``) needed the same answer. The
-reason is the one edit_gate's own docstring already gave for consuming
-@ai_mail's rail rather than mirroring it: a contract with two readings can
-disagree with itself, and a security exemption that disagrees with itself opens
-on the weaker reading. One home, two callers.
-
-THE ONE THING A HOOK MUST SUPPLY. @ai_mail's rail reads identity from the env
-drone's router stamps (``AIPASS_CALLER_BRANCH`` / ``AIPASS_CALLER_CWD``), and a
-PreToolUse hook is not drone-invoked: neither variable exists in the hook
-process, so the rail would answer "unprovable" for devpulse and every other seat
-alike and the exemption would never open. What the hook DOES have is the
-platform's own record of the session directory, handed to it in the hook payload
-— the same species of evidence drone stamps, from the same kind of source: the
-process that launched the session, not the agent running inside it. So the
-caller cwd is stamped here and the rail does the rest (the passport walk, the
-registry-resolved certificate, the HMAC, the admin flag). An existing stamp is
-never overwritten — a drone-invoked caller keeps the identity drone gave it.
-
-Deliberately NOT a name check. :data:`ADMIN_SEAT` never decides anything: a
-session standing in a directory called devpulse with no valid grant on the
-machine is refused, which is the defect ``drone rm`` fell to.
-
-Residual, stated rather than discovered: leg 1 resolves through the session
-directory, so a session whose cwd is devpulse's tree AND a validly signed grant
-on this machine together satisfy it. That is the grant's own stated threat model
-— every agent here shares one OS user, and the signature buys tamper-EVIDENCE,
-not attack-proofing (admin_grant.py, "Security note").
-
-Fails closed at every edge: an unimportable rail, a raise, or an unprovable
-caller all return False.
+A hook is not drone-invoked, so it stamps AIPASS_CALLER_CWD for @ai_mail's verified rail; fails closed.
 """
 
 import importlib
@@ -53,49 +23,26 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-# The one seat that reaches outwards. The owner, 2026-08-30, compassed as devpulse
-# entry 322: "It is only you who can reach outwards. Nobody else."
-# Named here for the log line only — WHO is decided by the verified rail below,
-# never by this string matching a directory.
+# For the log line only: who is admin is decided by the verified rail, never by this string.
 ADMIN_SEAT = "devpulse"
 
 _RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
 
 
 def is_admin_seat(cwd: str) -> bool:
-    """True only when the 5-leg admin grant verifies for this session.
-
-    Args:
-        cwd: The session working directory from the hook payload.
-
-    Returns:
-        True when the grant verifies, False on every doubt.
-    """
+    """True only when the 5-leg admin grant verifies for this session."""
     return _verified(cwd)
 
 
 def caller_name(cwd: str) -> str | None:
     """The citizen a session belongs to, named by the passport above *cwd*, never by the path.
 
-    For refusal text and the deletion record only: a name never decides who
-    passes (is_admin_seat does). Moved here from rm_gate on 2026-09-30
-    (DPLAN-0356) so rm_gate and git_gate read the caller one way.
-
-    Args:
-        cwd: The session working directory from the hook payload.
-
-    Returns:
-        The passport's branch_name (else identity.name), or None when no
-        passport stands between *cwd* and the home directory.
-
-    Raises:
-        OSError, ValueError, AttributeError: the passport exists and cannot be
-        read as one. The gate decides what an unreadable passport costs.
+    For refusal text only: a name never decides who passes. Raises on an unreadable passport.
     """
     if not cwd:
         return None
     search = Path(cwd).resolve()
-    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
+    home = Path.home().resolve()  # both sides resolved, or a symlinked home never stops the walk
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():
@@ -109,8 +56,7 @@ def caller_name(cwd: str) -> str | None:
 def seat_of(cwd: str) -> tuple[str | None, bool]:
     """(caller name, verified admin) for one session, for the gates that refuse by seat.
 
-    An unreadable passport costs the name, never the decision: the admin answer
-    comes from the grant alone and fails closed on its own.
+    An unreadable passport costs the name, never the decision.
     """
     try:
         name = caller_name(cwd)
@@ -133,8 +79,7 @@ def _verified(cwd: str) -> bool:
         os.environ["AIPASS_CALLER_CWD"] = cwd
     try:
         return bool(vc.is_verified_admin_caller())
-    # Deliberate: every caller is a gate, where False is a refusal, so a raising verifier fails closed here.
-    # The warning names the raise, so a broken rail never reads as a working one that said no.
+    # Every caller is a gate: a raising verifier fails closed, and the warning tells it from a no.
     except Exception as exc:
         logger.warning("[HOOKS] admin_seat: admin verification raised (refusing): %s", exc)
         return False
@@ -146,10 +91,7 @@ def _verified(cwd: str) -> bool:
 def print_introspection() -> None:
     """Print module structure for drone routing.
 
-    Reports the CONTRACT, never a live verdict: answering "are you admin right
-    now" from a CLI would stamp a caller cwd from whichever directory the
-    operator happened to stand in, which is the name-check this module exists
-    to refuse.
+    The contract, never a live verdict: a CLI answer would stamp whatever cwd the operator stands in.
     """
     CONSOLE.print(f"[bold cyan]admin_seat[/bold cyan] — is this session the admin seat (@{ADMIN_SEAT})?")
     CONSOLE.print(f"[dim]Consumes {_RAIL}.is_verified_admin_caller — the 5-leg grant.[/dim]")

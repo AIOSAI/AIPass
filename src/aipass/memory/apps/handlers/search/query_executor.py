@@ -3,19 +3,11 @@
 # Description: Search Query Execution Handler
 # Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Search Query Execution Handler
-
-Contains the core search execution logic: subprocess-based vector search,
-query encoding via subprocess embedder, similarity calculation, and result filtering.
-Called by the search module which handles display/CLI concerns.
-
-Purpose:
-    Implementation logic for semantic search, separated from CLI/display
-    layer to satisfy thin-module standard.
 """
 
 import re
@@ -31,12 +23,10 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
 
-# Subprocess scripts for ML operations (run in memory venv)
 _HANDLERS_DIR = module_file(__file__).parent.parent
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 
-# Memory venv python — auto-detect from memory/.venv/ or use env var override
 _MEMORY_ROOT = module_file(__file__).parents[3]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
@@ -53,25 +43,11 @@ def _get_memory_python() -> str:
 
 MEMORY_PYTHON = _get_memory_python()
 
-# Minimum similarity threshold - filter out irrelevant results
-MIN_SIMILARITY_THRESHOLD = 0.40  # 40% minimum relevance
-
-
-# =============================================================================
-# SUBPROCESS EMBEDDING
-# =============================================================================
+MIN_SIMILARITY_THRESHOLD = 0.40
 
 
 def encode_query_subprocess(query: str) -> dict:
-    """
-    Encode query text via subprocess using memory venv's fastembed.
-
-    Args:
-        query: Search query text
-
-    Returns:
-        Dict with success, embedding (list of floats), dimension
-    """
+    """Encode query text via subprocess using memory venv's fastembed."""
     input_data = json.dumps({"texts": [query]})
 
     try:
@@ -109,11 +85,6 @@ def encode_query_subprocess(query: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# SUBPROCESS VECTOR SEARCH
-# =============================================================================
-
-
 def search_vectors_subprocess(
     query_embedding: list,
     branch: str | None = None,
@@ -121,19 +92,7 @@ def search_vectors_subprocess(
     n_results: int = 5,
     db_path: str | Path | None = None,
 ) -> dict:
-    """
-    Search vectors via subprocess.
-
-    Args:
-        query_embedding: Query embedding vector (list of floats)
-        branch: Optional branch filter
-        memory_type: Optional memory type filter
-        n_results: Number of results to return
-        db_path: Path to Chroma database (None for global)
-
-    Returns:
-        Dict with success status and search results
-    """
+    """Search vectors via subprocess (db_path None means the global store)."""
     input_data = {
         "operation": "search_vectors",
         "query_embedding": query_embedding,
@@ -167,37 +126,13 @@ def search_vectors_subprocess(
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# RESULT PROCESSING
-# =============================================================================
-
-
 def _calculate_similarity(distance: float) -> float:
-    """
-    Calculate similarity from ChromaDB cosine distance.
-
-    ChromaDB cosine distance: 0=identical, 2=opposite.
-
-    Args:
-        distance: Cosine distance from ChromaDB
-
-    Returns:
-        Similarity score between 0 and 1
-    """
+    """Similarity 0..1 from ChromaDB cosine distance (0=identical, 2=opposite)."""
     return max(0, 1 - (distance / 2))
 
 
 def _filter_results(results: list, n_results: int) -> list:
-    """
-    Filter search results by similarity threshold and quality.
-
-    Args:
-        results: Raw search results from subprocess
-        n_results: Maximum number of results to return
-
-    Returns:
-        List of filtered result dicts with similarity scores added
-    """
+    """Filter search results by similarity threshold and quality."""
     filtered = []
     for result in results[:n_results]:
         document = result.get("document", "")
@@ -216,10 +151,6 @@ def _filter_results(results: list, n_results: int) -> list:
     return filtered
 
 
-# =============================================================================
-# PLAN-ID EXACT MATCHING
-# =============================================================================
-
 _PLAN_ID_RE = re.compile(
     r"(?:^|\b)((?:d|f|p|td|a)plan)[\s\-_]*(\d{3,5})\b",
     re.IGNORECASE,
@@ -237,13 +168,7 @@ def _extract_plan_id(query: str) -> str | None:
 
 
 def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list | None:
-    """Fetch plan chunks directly from ChromaDB by source_file metadata.
-
-    Returns:
-        The matching chunks ([] when none carries the plan ID), or None when the
-        store could not answer. A failure is warned here, so it is never read as
-        "no match" (leg 8 of DPLAN-0354).
-    """
+    """Fetch plan chunks by source_file metadata: [] for no match, None (warned) when the store cannot answer."""
     skipped = f"[search] Plan metadata fetch failed for {plan_id}"
     input_data = {
         "operation": "get_by_source",
@@ -272,11 +197,7 @@ def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list | None:
 
 
 def _pin_plan_id_matches(query: str, filtered: list, n_results: int) -> list:
-    """Pin exact plan-ID matches to the top of results.
-
-    If the query contains a plan-ID pattern, fetch matching chunks directly
-    from ChromaDB metadata (bypassing embedding similarity) and pin them.
-    """
+    """Pin exact plan-ID matches (fetched by metadata, not similarity) to the top of results."""
     plan_id = _extract_plan_id(query)
     if not plan_id:
         return filtered
@@ -295,32 +216,10 @@ def _pin_plan_id_matches(query: str, filtered: list, n_results: int) -> list:
     return (exact + rest)[:n_results]
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def execute_search(
     query: str, branch: str | None = None, memory_type: str | None = None, n_results: int = 5
 ) -> Dict[str, Any]:
-    """
-    Execute semantic search: encode query, search vectors, filter results.
-
-    Workflow:
-    1. Encode query to embedding vector via subprocess (memory venv)
-    2. Search ChromaDB via subprocess
-    3. Filter and score results by similarity
-
-    Args:
-        query: Search query text
-        branch: Optional branch filter
-        memory_type: Optional memory type filter
-        n_results: Number of results to return
-
-    Returns:
-        Dict with success, results, collections_searched, total_results
-    """
-    # Step 1: Encode query via subprocess
+    """Execute semantic search: encode query, search vectors, filter results."""
     embed_result = encode_query_subprocess(query)
 
     if not embed_result["success"]:
@@ -335,7 +234,6 @@ def execute_search(
     query_embedding = embed_result["embedding"]
     logger.info(f"[search] Encoded query to {len(query_embedding)}-dim vector")
 
-    # Step 2: Search via subprocess
     search_result = search_vectors_subprocess(
         query_embedding=query_embedding, branch=branch, memory_type=memory_type, n_results=n_results
     )
@@ -355,10 +253,8 @@ def execute_search(
 
     logger.info(f"[search] Found {total_results} results across {collections_searched} collections")
 
-    # Step 3: Filter and score results
     filtered_results = _filter_results(raw_results, n_results)
 
-    # Step 4: Pin exact plan-ID matches to the top
     filtered_results = _pin_plan_id_matches(query, filtered_results, n_results)
 
     logger.info(f"[search] Filtered to {len(filtered_results)} relevant results")

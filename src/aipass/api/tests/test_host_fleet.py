@@ -3,20 +3,13 @@
 # Description: Tests for the host API fleet lane — baud --snapshot contract
 # Version: 1.1.4
 # Created: 2026-08-14
-# Modified: 2026-10-12
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
 
-# Tests for the Host API Fleet Lane
-#
-# The contract under test is @baud's, delivered 2026-08-14: `baud --snapshot`, one
-# JSON envelope on stdout, three exit codes with distinct meanings.
-#
-# NOTHING HERE INVOKES THE REAL BINARY. It is a GUI application that this suite has
-# no business launching, and a test that shells a 5MB desktop binary is a test that
-# fails on a machine which has never built it. Every test drives a mocked
-# subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411.
+# The contract is @baud's: one JSON envelope on stdout, three exit codes. Nothing here
+# runs the real binary (a GUI app); every test drives a mocked subprocess.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that fleet.py parses and imports
@@ -126,12 +119,7 @@ class TestTheGate:
     """
     The gate is OPEN as of the 2026-08-14 rebuild.
 
-    It used to be closed because the shipped m12 binary did not know the flag and
-    would fall through to tauri and open a GUI window, hanging the request. That
-    hazard is GONE: the owner rebuilt, ran the release binary himself, and I
-    re-verified from this branch — exit 0, one JSON envelope, 17 branches, no
-    window. The constant stays in the code as an operational kill switch, so the
-    refusal path below is still real behaviour worth pinning.
+    The constant stays as an operational kill switch, so its refusal path is pinned.
     """
 
     def test_gate_allows_the_exec(self) -> None:
@@ -180,12 +168,7 @@ def _executable(path: Path, mode: int = 0o755) -> Path:
 
 @pytest.fixture
 def places(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """
-    Every place the lookup reads, as empty temp stand-ins.
-
-    The config store, the home directory, the checkout and PATH — so no case
-    reads this machine's real baud_bin, ~/.aipass, build or PATH.
-    """
+    """Every place the lookup reads, as empty temp stand-ins."""
     home = tmp_path / "home"
     repo = tmp_path / "repo"
     home.mkdir()
@@ -205,20 +188,11 @@ class TestBinaryResolution:
     """
     FPLAN-0589: which baud binary the host lanes exec, first hit wins.
 
-    (1) the configured baud_bin, refused by name when unusable; (2) the installed
-    ~/.aipass/baud/bin/baud-cli; (3) the checkout's baud-cli; (4) the checkout's
-    desktop baud, the file the owner's launcher execs; (5) baud-cli on PATH; (6)
-    baud on PATH. The desktop binary links GTK even for --snapshot, which is why
-    the headless one outranks it wherever both could be found.
+    The desktop binary links GTK even for --snapshot, so the headless one outranks it.
     """
 
     def test_the_six_step_order(self, places: SimpleNamespace) -> None:
-        """
-        Each step answers only when every step above it is empty.
-
-        All six are filled, then emptied from the top one at a time, so any swap
-        in the order changes which binary answers at some rung.
-        """
+        """Each step answers only when every step above it is empty."""
         configured = _executable(places.elsewhere / "baud-cli")
         installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
         headless = _executable(places.repo / host_fleet.CHECKOUT_HEADLESS_RELATIVE)
@@ -252,12 +226,7 @@ class TestBinaryResolution:
         assert host_fleet.locate_binary().source == host_fleet.SOURCE_MISSING
 
     def test_a_configured_binary_that_is_gone_is_refused_by_name(self, places: SimpleNamespace) -> None:
-        """
-        Never fallen past: the installed binary is right there and is still not used.
-
-        A setting somebody chose that silently stops mattering is how a host ends
-        up running a binary nobody picked.
-        """
+        """Never fallen past: the installed binary is right there and is still not used."""
         configured = _executable(places.elsewhere / "baud-cli")
         _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
         host_config.set_baud_bin(configured)
@@ -354,9 +323,7 @@ class TestExitZero:
         """
         The root-resolution trap @baud warned would bite first.
 
-        BAUD walks UP from its CWD looking for a tree containing src/aipass. A
-        server started from / or a systemd unit would fail even with a valid
-        --project, so the exec is pinned to the root we are seated in.
+        BAUD walks UP from its CWD looking for src/aipass, so a server started from / fails.
         """
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(SNAPSHOT))) as run:
             host_fleet.read_snapshot()
@@ -371,12 +338,7 @@ class TestExitZero:
         assert run.call_args.args[0] == ["baud", "--snapshot"]
 
     def test_project_passes_through_case_intact(self, ready: None, seated: Path) -> None:
-        """
-        Project names are case-sensitive keys in BAUD's census.
-
-        Helpfully lowercasing 'BAUD' to 'baud' would turn a valid request into a
-        refusal. The string is the caller's; it travels verbatim.
-        """
+        """Project names are case-sensitive keys in BAUD's census."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(SNAPSHOT))) as run:
             host_fleet.read_snapshot(project="BAUD")
 
@@ -410,8 +372,7 @@ class TestExitOne:
     def test_stderr_is_never_parsed(self, ready: None, seated: Path) -> None:
         """
         stderr is a mirror for humans tailing a log. Their contract says so, and
-        a parser that reads it would break the day they reword a log line.
-        """
+        a parser that reads it would break the day they reword a log line."""
         envelope = {"error": "the real reason", "branches": [], "live_agent_sessions": []}
 
         with patch.object(
@@ -461,8 +422,7 @@ class TestExecFailures:
         """
         The window-hang hazard in one test.
 
-        If the wrong build is ever reached, it opens a GUI and never returns. The
-        timeout is what stops that from parking a request forever.
+        The wrong build opens a GUI and never returns; the timeout bounds the request.
         """
         with patch.object(
             host_fleet.subprocess,
@@ -496,9 +456,7 @@ class TestRooms:
         """
         Deliberately NOT joined to the branch list.
 
-        Matching 'baud-devpulse' to branch 'devpulse' would mean implementing
-        BAUD's session-naming convention over here — a second place that has to
-        change when they rename. Both lists are served raw; the client joins.
+        Joining would copy BAUD's session-naming convention here; the client joins.
         """
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(SNAPSHOT))):
             rooms = host_fleet.read_rooms()
@@ -539,21 +497,8 @@ class TestThreeFieldsThreeQuestions:
     """
     @baud's sharp edge, pinned at their request.
 
-    has_room, outside_room and live_agent_sessions answer three DIFFERENT
-    questions, and conflating the first with the third is the exact bug their m12
-    badge work existed to kill — a green circle over a room with nobody in it.
-
-        has_room            a session BAUD named for this branch EXISTS. Name
-                            match only. An empty room is has_room true.
-        outside_room        an agent is seated here in a session BAUD did not
-                            create. Null when has_room is true.
-        live_agent_sessions an INTERACTIVE claude is actually alive, decided by
-                            the process table. A dispatched headless claude looks
-                            like the same 'claude' in a pane, so panes alone lie.
-
-    This server cannot enforce what a client renders. What it CAN guarantee is
-    that it never manufactures an aliveness signal of its own, so the only thing
-    a client can read aliveness from is the field that means it.
+    has_room (session exists), outside_room (seated elsewhere) and live_agent_sessions
+    (alive) are three questions; this server never manufactures an aliveness signal.
     """
 
     def test_an_empty_room_is_still_a_room(self, ready: None, seated: Path) -> None:
@@ -565,24 +510,14 @@ class TestThreeFieldsThreeQuestions:
         assert "ghost" in listed
 
     def test_the_empty_room_is_not_reported_as_alive(self, ready: None, seated: Path) -> None:
-        """
-        The lie this test exists to prevent.
-
-        'ghost' has a room and is absent from live_agent_sessions. Nothing in the
-        payload may suggest otherwise.
-        """
+        """The lie this test exists to prevent."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
             rooms = host_fleet.read_rooms()
 
         assert "ghost" not in str(rooms["live_agent_sessions"])
 
     def test_no_aliveness_field_is_invented_anywhere(self, ready: None, seated: Path) -> None:
-        """
-        No synthesised 'alive'/'online'/'active' key, on the payload or the cards.
-
-        If one ever appears, a client will render it, and it will be this
-        server's guess rather than BAUD's process-table read.
-        """
+        """No synthesised 'alive'/'online'/'active' key, on the payload or the cards."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
             rooms = host_fleet.read_rooms()
 
@@ -592,13 +527,7 @@ class TestThreeFieldsThreeQuestions:
             assert not invented & set(card.keys())
 
     def test_outside_room_is_not_a_room_baud_made(self, ready: None, seated: Path) -> None:
-        """
-        'squatter' is seated somewhere BAUD did not create, so it is not a room.
-
-        Its outside_room still travels on the full card via /v1/fleet — that is
-        where a client asks "which session is this agent in". /v1/rooms answers
-        the narrower question and says so.
-        """
+        """'squatter' is seated somewhere BAUD did not create, so it is not a room."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROOM))):
             rooms = host_fleet.read_rooms()
 
@@ -612,10 +541,6 @@ class TestThreeFieldsThreeQuestions:
         squatter = [card for card in snapshot["branches"] if card["name"] == "squatter"][0]
         assert squatter["outside_room"] == "some-other-session"
 
-
-# ==============================================
-# END-ROOM — the second headless verb
-# ==============================================
 
 ENDED = {
     "project": "AIPASS",
@@ -635,8 +560,7 @@ REFUSED = {**ENDED, "room": None, "ended": False, "detail": None, "error": "no b
 class TestEndRoomInvocation:
     """
     The command line handed to their binary. It is short, and every part of it
-    is load-bearing.
-    """
+    is load-bearing."""
 
     def test_the_flag_and_the_branch_are_what_they_published(self, seated: Path) -> None:
         """`baud --end-room <branch>`, exactly."""
@@ -646,12 +570,7 @@ class TestEndRoomInvocation:
         assert run.call_args.args[0][:3] == ["baud", "--end-room", "cli"]
 
     def test_the_project_travels_verbatim(self, seated: Path) -> None:
-        """
-        A key in BAUD's census, so its case is theirs and not ours to fix.
-
-        The read lane already passes it through raw; a kill that normalised it
-        would refuse for a reason that looks like a missing project.
-        """
+        """A key in BAUD's census, so its case is theirs and not ours to fix."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
             host_fleet.end_room("cli", "AIPASS")
 
@@ -660,10 +579,7 @@ class TestEndRoomInvocation:
     def test_the_two_headless_verbs_are_never_sent_together(self, seated: Path) -> None:
         """
         Their exit-2 rule, honoured by construction: this never builds a line
-        carrying both. A caller who wrote a read AND a kill in one invocation
-        does not know what they asked for, and guessing is how a read becomes a
-        kill.
-        """
+        carrying both."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ENDED))) as run:
             host_fleet.end_room("cli", "AIPASS")
 
@@ -688,8 +604,7 @@ class TestEndRoomContract:
     """
     @baud's envelope, passed through rather than interpreted. `detail` and
     `error` are mutually exclusive by construction, and `ended` is a fact rather
-    than a success flag.
-    """
+    than a success flag."""
 
     def test_a_real_kill_comes_back_whole(self, seated: Path) -> None:
         """Their envelope, unchanged — this module adapts nothing."""
@@ -699,12 +614,7 @@ class TestEndRoomContract:
         assert envelope == ENDED
 
     def test_nothing_to_end_is_exit_zero_and_stays_a_success(self, seated: Path) -> None:
-        """
-        A room already gone IS the goal state, so it is not an error here.
-
-        Turning this into a raise would tell an operator their kill failed when
-        the thing they wanted is already true.
-        """
+        """A room already gone IS the goal state, so it is not an error here."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(NOTHING_TO_END))):
             envelope = host_fleet.end_room("cli", "AIPASS")
 
@@ -712,12 +622,7 @@ class TestEndRoomContract:
         assert envelope["error"] is None
 
     def test_a_refusal_arrives_as_a_whole_envelope_not_an_exception(self, seated: Path) -> None:
-        """
-        Exit 1 still carries a full envelope, so their sentence survives.
-
-        Raising here would replace their diagnosis with ours, which is the one
-        thing this lane is not allowed to do.
-        """
+        """Exit 1 still carries a full envelope, so their sentence survives."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(REFUSED))):
             envelope = host_fleet.end_room("nosuch", "AIPASS")
 
@@ -738,13 +643,7 @@ class TestEndRoomContract:
                 host_fleet.end_room("cli", "AIPASS")
 
     def test_a_wedged_binary_cannot_park_the_request(self, seated: Path) -> None:
-        """
-        The window-hang hazard, on the verb where it would hurt most.
-
-        If a build that does not know the flag is ever reached, it falls through
-        to tauri and opens a GUI. The timeout is what stops that from holding a
-        phone request open forever.
-        """
+        """The window-hang hazard, on the verb where it would hurt most."""
         with patch.object(
             host_fleet.subprocess,
             "run",
@@ -763,10 +662,6 @@ class TestEndRoomContract:
 
         assert "baud" in str(excinfo.value).lower()
 
-
-# ==============================================
-# ROUTES
-# ==============================================
 
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
@@ -839,12 +734,7 @@ class TestFleetRoutes:
         monkeypatch: pytest.MonkeyPatch,
         path: str,
     ) -> None:
-        """
-        A failed read is 503 with a code — not 404, and never an empty fleet.
-
-        This is the behaviour the kill switch existed to guarantee while the seam
-        was held, and it has to survive the seam being opened.
-        """
+        """A failed read is 503 with a code — not 404, and never an empty fleet."""
         monkeypatch.setattr(host_fleet, "SNAPSHOT_READY", False)
 
         response = client.get(path, headers=auth)
@@ -853,13 +743,7 @@ class TestFleetRoutes:
         assert response.json()["error"]["code"] == "fleet_unavailable"
 
 
-# ============================================================================
-# The roster lane — `baud --roster`, DPLAN-0300 (spec relayed 2026-08-16)
-# ============================================================================
-
-# @baud's roster envelope: the same BranchStatus rows as a snapshot, but
-# spanning EVERY project, and with no project/root/live_agent_sessions keys
-# because the answer is not seated anywhere.
+# Snapshot rows across EVERY project, so no project/root/live_agent_sessions keys.
 ROSTER = {
     "branches": [
         {
@@ -914,19 +798,14 @@ class TestTheRosterIsOneSweepAcrossEveryProject:
     """
     The roster answers a question /v1/fleet structurally cannot.
 
-    A snapshot is SEATED — one project per read. The phone's live and dispatched
-    wheels span all of them, so aliasing the roster onto the fleet gave a wheel
-    that looks full and is wrong. This lane execs @baud's own sweep, one process
-    and one ranking behind both faces.
+    A snapshot is SEATED — one project per read; the roster spans them all.
     """
 
     def test_the_invocation_carries_exactly_one_argument(self, ready: None, seated: Path) -> None:
         """
         `baud --roster`, nothing else.
 
-        The binary REFUSES a project on this verb (exit 2, empty stdout, stderr
-        naming the argument) — verified against the release build. Anything this
-        server appends is a usage error it inflicted on itself.
+        The binary REFUSES a project on this verb (exit 2).
         """
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
             host_fleet.read_roster()
@@ -949,12 +828,7 @@ class TestTheRosterIsOneSweepAcrossEveryProject:
         assert set(result["branches"][0].keys()) == set(SNAPSHOT["branches"][0].keys())
 
     def test_an_empty_roster_is_an_answer_not_a_failure(self, ready: None, seated: Path) -> None:
-        """
-        Nobody working anywhere is TRUE, and the wheels must be able to say it.
-
-        Turning it into an error would make the quietest state of the system
-        look like a broken lane.
-        """
+        """Nobody working anywhere is TRUE, and the wheels must be able to say it."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(EMPTY_ROSTER))):
             result = host_fleet.read_roster()
 
@@ -964,10 +838,7 @@ class TestTheRosterIsOneSweepAcrossEveryProject:
         """
         The kill switch governs every exec of that binary, not just the snapshot.
 
-        The subprocess is mocked to a VALID envelope on purpose: without it,
-        removing the gate makes the lane exec a binary that is not on this
-        machine's PATH, which raises FleetUnavailable anyway — and the test
-        passes while guarding nothing. Mutation caught exactly that.
+        Mocked to a VALID envelope: an absent binary would raise FleetUnavailable anyway.
         """
         monkeypatch.setattr(host_fleet, "SNAPSHOT_READY", False)
 
@@ -978,12 +849,7 @@ class TestTheRosterIsOneSweepAcrossEveryProject:
         run.assert_not_called()
 
     def test_exit_one_carries_their_sentence(self, ready: None, seated: Path) -> None:
-        """
-        Their words reach the phone, not my paraphrase of them.
-
-        Exit 1 means BAUD ran and could not answer; the envelope holds the
-        reason and branches is empty.
-        """
+        """Their words reach the phone, not my paraphrase of them."""
         failed = {"branches": [], "generated_at": "2026-08-16T16:57:31Z", "error": "registry is unreadable"}
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(1, json.dumps(failed))):
             with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
@@ -995,8 +861,7 @@ class TestTheRosterIsOneSweepAcrossEveryProject:
         """
         Exit 2 with nothing on stdout is a usage error — this server called it wrong.
 
-        A distinct exception, because the honest status code differs: 503 says
-        'try later', and nothing about a malformed argv gets better with time.
+        A distinct exception: 503 says 'try later', and a malformed argv never improves.
         """
         rejected = _completed(2, "", "baud: unknown argument '--project'")
         with patch.object(host_fleet.subprocess, "run", return_value=rejected):
@@ -1063,12 +928,7 @@ class TestTheRosterRoute:
         assert response.json()["error"] is None
 
     def test_a_project_filter_is_refused_never_ignored(self, client, auth: dict, seated: Path) -> None:
-        """
-        THE point of the refusal: a dropped scope reads as a filter that worked.
-
-        A phone asking for one project's roster and silently receiving every
-        project's would show a wheel it believes is filtered. 400, naming it.
-        """
+        """THE point of the refusal: a dropped scope reads as a filter that worked."""
         with patch.object(host_fleet.subprocess, "run", return_value=_completed(0, json.dumps(ROSTER))) as run:
             response = client.get("/v1/roster?project=AIPASS", headers=auth)
 
@@ -1078,12 +938,7 @@ class TestTheRosterRoute:
         assert run.call_count == 0, "the binary was executed for a request that should have been refused"
 
     def test_any_parameter_is_refused_not_only_project(self, client, auth: dict, seated: Path) -> None:
-        """
-        The route takes NO parameters, so nothing is quietly dropped.
-
-        Naming only `project` would leave the next filter someone invents to be
-        ignored in silence — the same failure under a different key.
-        """
+        """The route takes NO parameters, so nothing is quietly dropped."""
         response = client.get("/v1/roster?branch=api", headers=auth)
 
         assert response.status_code == 400
@@ -1129,12 +984,7 @@ class TestTheRosterRoute:
         assert "no project registry found" not in response.text
 
     def test_a_usage_error_is_500_because_it_is_ours(self, client, auth: dict, seated: Path) -> None:
-        """
-        Exit 2 is this server's bug, and 503 would blame the wrong side.
-
-        503 tells a client to retry something that will fail identically every
-        time; 500 says the fault is here.
-        """
+        """Exit 2 is this server's bug, and 503 would blame the wrong side."""
         rejected = _completed(2, "", "baud: unknown argument '--project'")
         with patch.object(host_fleet.subprocess, "run", return_value=rejected):
             response = client.get("/v1/roster", headers=auth)
@@ -1170,10 +1020,7 @@ def _macos_vitals(sampled_at: str = "2026-09-13T07:20:00.000+00:00") -> dict:
     """
     What machine_vitals() answers on a Mac running macOS, manufactured here.
 
-    psutil defines neither sensors_temperatures nor sensors_fans on macOS, so the
-    skill answers `platform` for both and a number for everything else. The
-    suite never needs a sensor chip: this box's applesmc plays no part.
-    """
+    psutil has no sensors_temperatures/sensors_fans on macOS, so both answer `platform`."""
     return {
         "ok": True,
         "schema": 1,
@@ -1215,10 +1062,7 @@ class TestTheMachineRoute:
         """
         The manufactured macOS host: temp and fan answer `platform`, the rest are numbers.
 
-        Absence is the answer, not an error, and it arrives with the skill's own
-        sentence and a None where a zero would have been a lie. The whole body is
-        compared, so any adapter anywhere in the request path goes red.
-        """
+        Absence carries the skill's sentence and a None where a zero would lie."""
         machine_door.return_value = _macos_vitals()
         assert all(name in machine_door.return_value for name in system_status.SECTIONS), "stand-in drifted"
 

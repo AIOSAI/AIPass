@@ -3,17 +3,10 @@
 # Description: Bypass Configuration Handler
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Bypass Configuration Handler
-
-Handles file I/O for the .seedgo/bypass.json configuration system.
-Reads registry, loads bypass rules, ensures config files exist.
-
-Returns dicts, NEVER prints.
-"""
+"""Bypass Configuration Handler"""
 
 import json
 from pathlib import Path
@@ -24,10 +17,6 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers import registry_scan
 
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
 
 BYPASS_TEMPLATE = {
     "metadata": {"version": "1.0.0", "created": "", "description": "Standards bypass configuration for this branch"},
@@ -51,23 +40,14 @@ BYPASS_TEMPLATE = {
 }
 
 
-# =============================================================================
-# REGISTRY DISCOVERY
-# =============================================================================
-
-
 def _find_registry() -> Path:
     """Find *_REGISTRY.json — CWD-first for external project support, then __file__ fallback."""
-    # Delegates: the name is the contract, the private glob walk was the disease.
-    # parent.glob("*_REGISTRY.json") folds case on Windows and default macOS, so
-    # a flow_json plan counter could be served as the trust anchor.
+    # A private parent.glob folds case on Windows/macOS and can serve a plan counter as the registry.
     return registry_scan.find_registry()
 
 
-#: Registries this process could not read, path -> why. get_branch_from_path
-#: still answers None (devpulse's ruling, seedgo fleet green leg 15: no raise,
-#: the verdict path stays); the checklist and the audit each print one note
-#: from registry_notes() so the failure is said where the verdicts are read.
+#: Registries this process could not read, path -> why; get_branch_from_path answers None, never raises,
+#: so the checklist and audit print registry_notes() where the verdicts are read.
 UNREADABLE_REGISTRIES: Dict[str, str] = {}
 
 
@@ -79,23 +59,8 @@ def registry_notes() -> List[str]:
     ]
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
-    """
-    Detect which branch a file belongs to using AIPASS_REGISTRY.
-
-    Args:
-        file_path: Absolute path to file being checked
-
-    Returns:
-        Branch dict with name, path, etc. or None if not in a branch. None
-        too when the registry cannot be read; that failure is recorded in
-        UNREADABLE_REGISTRIES for registry_notes().
-    """
+    """Detect which branch a file belongs to using AIPASS_REGISTRY."""
     registry_path: Optional[Path] = None
     try:
         registry_path = _find_registry()
@@ -116,7 +81,7 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
                 p = (registry_dir / p).resolve()
             return str(p)
 
-        # Sort branches by resolved path length (longest first) to match most specific
+        # Longest path first so a nested branch wins over its parent.
         branches = sorted(
             registry.get("branches", []),
             key=lambda b: len(_resolve(b.get("path", ""))),
@@ -136,23 +101,13 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
 
 
 def ensure_seedgo_config(branch_path: str) -> Path:
-    """
-    Ensure .seedgo/bypass.json exists for a branch, create if missing.
-
-    Args:
-        branch_path: Path to branch root
-
-    Returns:
-        Path to bypass.json file
-    """
+    """Ensure .seedgo/bypass.json exists for a branch, create if missing."""
     seedgo_dir = Path(branch_path) / ".seedgo"
     bypass_file = seedgo_dir / "bypass.json"
 
     try:
-        # Create .seedgo directory if needed
         seedgo_dir.mkdir(exist_ok=True)
 
-        # Create bypass.json if missing
         if not bypass_file.exists():
             template = BYPASS_TEMPLATE.copy()
             template["metadata"]["created"] = datetime.now().isoformat()
@@ -169,15 +124,7 @@ def ensure_seedgo_config(branch_path: str) -> Path:
 
 
 def load_bypass_rules(branch_path: str) -> List[Dict[str, Any]]:
-    """
-    Load bypass rules from branch's .seedgo/bypass.json.
-
-    Args:
-        branch_path: Path to branch root
-
-    Returns:
-        List of bypass rule dicts
-    """
+    """Load bypass rules from branch's .seedgo/bypass.json."""
     bypass_file = ensure_seedgo_config(branch_path)
 
     try:
@@ -202,26 +149,9 @@ def is_bypassed(file_path: str, branch_path: str, standard: str, line: Optional[
     """
     Check if a specific violation should be bypassed.
 
-    NOT the checkers' matcher. That is
-    ``bypass.utils.is_bypassed(file_path, standard, line, bypass_rules, name)``
-    -- note the different parameter ORDER: this one takes ``branch_path``
-    second, and it matches a rule's ``file`` against the branch-relative path
-    exactly rather than as a substring. No production code calls this; it is
-    kept for the .seedgo config surface it sits beside. Call the shared matcher
-    from a checker, never this, and never read one's call site against the
-    other's signature.
-
-    Args:
-        file_path: Absolute path to file
-        branch_path: Path to branch root
-        standard: Standard name (cli, imports, etc.)
-        line: Line number of violation (optional)
-        bypass_rules: List of bypass rules
-
-    Returns:
-        True if this violation should be bypassed
+    NOT the checkers' matcher (``bypass.utils.is_bypassed``): different parameter
+    ORDER, and exact branch-relative match rather than substring. Checkers call utils.
     """
-    # Get relative path from branch root (use forward slashes for cross-platform matching)
     try:
         rel_path = Path(file_path).relative_to(branch_path).as_posix()
     except ValueError:
@@ -229,23 +159,20 @@ def is_bypassed(file_path: str, branch_path: str, standard: str, line: Optional[
         rel_path = Path(file_path).as_posix()
 
     for rule in bypass_rules:
-        # Check if rule matches this file and standard
         rule_file = rule.get("file") or ""
         rule_standard = rule.get("standard") or ""
 
-        # Active only when it names both a file and a standard (owner, 2026-09-25 18:55).
+        # Active only when it names both a file and a standard.
         if not rule_file or rule_file != rel_path:
             continue
         if rule_standard != standard:
             continue
 
-        # Check line-specific bypass
         rule_lines = rule.get("lines", [])
         if rule_lines and line is not None:
             if line in rule_lines:
                 return True
         elif not rule_lines:
-            # No line restriction - bypass all violations for this file/standard
             return True
 
     return False

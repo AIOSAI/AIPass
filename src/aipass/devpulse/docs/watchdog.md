@@ -6,13 +6,13 @@ The deep reference, for when watchdog misbehaves. Day to day you only need the s
 
 ## Who may call it
 
-The project OWNER only — the first agent, seated as `owner: true` in the project's sealed `*_REGISTRY.json`. Portable: `@devpulse` in AIPass, `@vera` in Vera Studio, whoever owns elsewhere. A refusal means your project's owner isn't seated — run `aipass doctor` to see why and `aipass doctor --fix` to repair (DPLAN-0239).
+The project OWNER only — the first agent, seated as `owner: true` in the project's sealed `*_REGISTRY.json`. Portable: `@devpulse` in AIPass, `@vera` in Vera Studio, whoever owns elsewhere. A refusal means your project's owner isn't seated — run `aipass doctor` to see why and `aipass doctor --fix` to repair.
 
-## The model — a login, not a service (r4, DPLAN-0317)
+## The model — a login, not a service
 
 Watchdog is always on because nothing runs. Dispatching registers the job at send time; the agent that finishes **reports**; `@ai_mail` writes that report to a durable notification feed, where it **queues** whether anyone is listening or not. A conversation **signs in** to receive.
 
-## The sign-in — one shot, in the background (DPLAN-0348)
+## The sign-in — one shot, in the background
 
 Nothing happening, nothing happens. Arm with the Bash tool, `run_in_background: true`:
 
@@ -24,15 +24,13 @@ It syncs whatever queued while you were logged out (`MISSED` lines), then sits s
 
 Arm it bare: no pipe and no redirect after the command. The wire reads its own stdout to tell which wrapper carries it; behind a pipe it still wakes on exit, but it records `foreground`, the statusline does not count it, and the wire says so on stderr at arm time.
 
-Why not the Monitor tool: Claude Code 2.1.271 changed Monitor watches "to always have a deadline (at most 30 minutes…) and notify Claude to re-arm, replacing the no-timeout `persistent` option". No setting restores it. A continuous wire under Monitor therefore dies every 30 minutes and wakes the seat to say so — measured at 33 empty wakes across one 15-hour absence, enough to force an auto-compact. Background Bash has no timer on it, survives `/compact`, and notifies exactly once, on exit — which is the shape `--once` was built for.
+Why not the Monitor tool: Claude Code caps every Monitor watch at 30 minutes and notifies the seat to re-arm; no setting restores a persistent watch. A continuous wire under Monitor therefore dies every 30 minutes and wakes the seat to say so, and over a long absence those empty wakes alone can force an auto-compact. Background Bash has no timer on it, survives `/compact`, and notifies exactly once, on exit, which is the shape `--once` is built for.
 
-Measured proof, 2026-09-16: a `--once` wire armed at 20:33 stayed silent for 31 minutes — past the Monitor cap — and exited once, at 21:03, with `DISPATCH @hooks title="@hooks completed"` and `delivered=1 ticks=1875`. No wake before it.
+**The one thing that does end it: the harness reaps background shells under memory pressure.** Its idea of pressure is not the kernel's `available` figure, so a reap can land on a box with gigabytes free. It happens only while the session is idle, it says nothing about the wire's own memory (a few MB), and it arrives as one `killed` notification, so the seat is woken and knows. The harness's own instruction is not to restart it unprompted. The off-switch is an environment variable Claude Code must be **started** with, `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`; setting it from a shell command inside the session has no effect. A reaped wire with work still out is the case to watch: re-arm when the owner says so, or run with the switch set.
 
-**The one thing that does end it: the harness reaps background shells under memory pressure.** Measured 2026-09-16: a wire armed at 22:40 with nothing out was stopped at 23:57, 77 minutes in, with "stopped because the system is running low on memory" — on a box showing 13 GB available, 1.1 GB free and no swap in use, so the harness's idea of pressure is not `available`. It happens only while the session is idle, it says nothing about the wire's own memory (a few MB), and it arrives as one `killed` notification, so the seat is woken and knows. The harness's own instruction is not to restart it unprompted. The off-switch is an environment variable Claude Code must be **started** with — `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`; setting it from a shell command inside the session has no effect. A reaped wire with work still out is the case to watch: re-arm when the owner says so, or run with the switch set.
+Not covered: what `/clear`, `/resume` or closing the terminal do to a live wire. Reports keep queueing regardless, and the next sign-in replays them; a lost receiver costs latency, never a report. After a compact, check TaskList for a live wire before arming a second.
 
-Not yet settled: what `/clear`, `/resume` or closing the terminal do to a live wire. Reports keep queueing regardless, and the next sign-in replays them — a lost receiver costs latency, never a report. After a compact, check TaskList for a live wire before arming a second.
-
-The continuous form (`watchdog baseline`, no `--once`) still exists for a harness whose Monitor tool is uncapped. It **refuses** background Bash by design: that wrapper notifies only on exit, and a continuous wire never exits — zero wakes by construction (the 2026-08-19 failure). The refusal names the one-shot.
+The continuous form (`watchdog baseline`, no `--once`) exists for a harness whose Monitor tool is uncapped. It **refuses** background Bash by design: that wrapper notifies only on exit, and a continuous wire never exits, so it would give zero wakes by construction. The refusal names the one-shot.
 
 ## Statusline
 
@@ -44,7 +42,7 @@ Green needs the registered wire's `metadata.wrapper` to be `monitor` or `backgro
 
 ai_mail's wake-back spawns a new headless process and can never inject into a live interactive session (`BLOCKED — interactive session` in the logs is that guard working as designed; it only serves senders whose session closed). Dispatch and idle without signing in and nothing will ever wake you — the report just queues.
 
-## Dead-monitor backstop (FPLAN-0499, DPLAN-0314 "outcome M")
+## Dead-monitor backstop
 
 A dispatch whose monitor died — host reboot, OOM, kill — can never report, so the receiver announces it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once (no agent is polled, no process is armed) and pushes one line per dispatch of yours whose monitor is gone: `monitor_alive` false (ai_mail records the monitor's pid and checks `/proc` at read time — a death is announced within one cadence, wording "its monitor (pid N) is gone before the hard timeout"), or past `expected_by` (ai_mail's hard timeout — a live monitor cannot overrun it). `monitor_alive` is tri-state; `None` (a row that never learned a pid) keeps the overdue rule only:
 
@@ -57,20 +55,16 @@ Each death is announced once ever (cursor `devpulse_json/wire_dead_cursor.json`)
 ## Two rules the receiver enforces
 
 - **Only completions wake.** The feed also carries *start* edges, and there are two sorts. A direct wake writes `kind="wake"`, dropped by kind — the receiver reads `dispatch` only. The daemon's start edge is `kind="dispatch"`, the same as a completion, so kind cannot filter it: it is dropped because it carries no `sender`, and rule two fails it closed. You are woken once, when the work is actually finished.
-- **Only YOUR dispatches wake you.** The feed names the branch that *finished*, never the branch that *sent*, so every citizen's completion used to wake this seat fleet-wide. `@ai_mail` stamps `sender` on the completion line and the receiver compares it against this project's sealed owner. A record with no sender is **not** yours — unattributable fails closed.
+- **Only YOUR dispatches wake you.** The feed names the branch that *finished*, never the branch that *sent*, so the sender has to be stamped: `@ai_mail` writes `sender` on the completion line and the receiver compares it against this project's sealed owner. Without that stamp every citizen's completion would wake this seat fleet-wide. A record with no sender is **not** yours; unattributable fails closed.
 
 ## Crash coverage needs nothing running
 
 Every dispatch is registered at send time with an `expected_by` taken from dispatch_monitor's hard timeout. An entry past that with no completion means the monitor *died* — a fact about a file, true whether or not anything is looking. `watchdog status` reads it.
 
-## History — rounds 1–3 had a detection daemon; r4 deleted it
+## No detection daemon
 
-Commit `5444dd9a`. It polled ~19 branches' `.dispatch.lock` every 2 s to synthesize an event that `dispatch_monitor.py` had already reported 1–2 s earlier — every completion produced **two wakes**, for months, unnoticed because a duplicate wake looks exactly like a working wake. Idle cost: 7.72 % of a core. The source is preserved in git history at the removing commit, deliberately not in `.archive/` (gitignored disposal, cleaned without warning). `watchdog baseline --daemon` is refused by name.
+`watchdog baseline --daemon` is refused by name. A poller that synthesizes completion events from the branches' `.dispatch.lock` files reports what `dispatch_monitor.py` has already written to the feed, so every completion would wake the seat **twice**, and a duplicate wake looks exactly like a working one, so nobody notices. It also costs CPU at idle. The feed is the only source.
 
 ## Stall detection on one long job
 
-`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. Under background Bash its per-line events land in the task's output file and are read when it exits (a 72-minute watch ran that way on 2026-09-25), so it does not need the Monitor tool. It is not the sign-in: on 2026-09-25 a day of `watchdog agent` wires with no `baseline --once` armed left 27 completions queued as `MISSED` while the statusline read `idle`, so the verb now says at arm time whether this session holds a sign-in wire, and names it. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.
-
-## Known caveat
-
-A wire armed *before* the 2026-09-07 statusline change carries no `wrapper` field and never paints green; re-arm it.
+`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. Under background Bash its per-line events land in the task's output file and are read when it exits, so it does not need the Monitor tool. It is not the sign-in: `watchdog agent` wires with no `baseline --once` armed leave every completion queued as `MISSED` while the statusline reads `idle`, so the verb says at arm time whether this session holds a sign-in wire, and names it. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.

@@ -3,7 +3,7 @@
 # Description: Unit tests for the checklist module
 # Version: 1.3.4
 # Created: 2026-03-24
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -23,31 +23,13 @@ from aipass.seedgo.apps.handlers.bypass import bypass_handler
 from aipass.seedgo.apps.modules import checklist
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Default seams checklist reads, so a test that does not override them
-    stays deterministic and never touches the live repo's registry or the
-    real checker packs.
-
-    discover_checkers -> {} is the "no checkers discovered" floor most of the
-    tests below assert on. get_branch_from_path -> None and load_bypass_rules
-    -> [] keep branch/bypass resolution off the live AIPASS_REGISTRY.json
-    (template item 17). Tests that need a real branch or real checkers
-    override the seam themselves, on the same module object.
-    """
+    stays deterministic and never touches the live repo's registry or the real checker packs."""
     monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {})
     monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: None)
     monkeypatch.setattr(checklist, "load_bypass_rules", lambda branch_path: [])
-
-
-# ---------------------------------------------------------------------------
-# Tests — handle_command
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -78,13 +60,7 @@ def test_handle_command_help_flag():
 
 
 def test_handle_command_h_flag():
-    """A help flag AFTER a file explains the run instead of performing it.
-
-    The cured defect this pins, stated in handle_command itself: `checklist
-    <file> --help` used to run the full per-file audit it was being asked to
-    describe. Only the position of the flag distinguishes the two, and the
-    return value is True either way.
-    """
+    """A help flag AFTER a file explains the run instead of performing it."""
     with (
         patch.object(checklist, "print_help") as helped,
         patch.object(checklist, "run_checklist") as ran,
@@ -103,11 +79,6 @@ def test_handle_command_help_word():
         assert checklist.handle_command("checklist", ["help"]) is True
     helped.assert_called_once_with()
     assert ran.call_args_list == []
-
-
-# ---------------------------------------------------------------------------
-# Tests — run_checklist
-# ---------------------------------------------------------------------------
 
 
 def test_run_checklist_file_not_found(tmp_path):
@@ -131,10 +102,7 @@ def test_run_checklist_non_python_file(tmp_path):
 
 
 def test_run_checklist_python_file_no_checkers(tmp_path, monkeypatch):
-    """A Python file with no checkers to run is a failing error row, never a silent pass.
-
-    Mutant: the empty-pack guard (if not checkers) removed in apps/modules/checklist.py — killed.
-    """
+    """A Python file with no checkers to run is a failing error row, never a silent pass."""
     # tmp_path sits under the system temp root, which the lane skips as throwaway
     # before it ever loads a pack; neutered so the empty pack is what is measured.
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
@@ -146,11 +114,7 @@ def test_run_checklist_python_file_no_checkers(tmp_path, monkeypatch):
 
 
 def test_a_door_passes_every_standard_on_the_checklist(tmp_path, monkeypatch):
-    """The door shape (DPLAN-0404 leg 1) passes the real pack: no CLI, no introspection, no logic asked.
-
-    A re-export of its own handlers with __all__ seated in memory's modules; the
-    seat has no apps/__init__.py and no handlers/, so the guard row is not asked.
-    """
+    """The door shape (DPLAN-0404 leg 1) passes the real pack: no CLI, no introspection, no logic asked."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     monkeypatch.setattr(checklist, "discover_checkers", branch_audit.discover_checkers)
     door = tmp_path / "aipass" / "memory" / "apps" / "modules" / "door_entry_limits.py"
@@ -171,12 +135,9 @@ def test_a_door_passes_every_standard_on_the_checklist(tmp_path, monkeypatch):
 
     results = checklist.run_checklist(str(door))
     assert [r["standard"] for r in results if not r["passed"]] == []
-    # +2 on 2026-10-10: clear_text_secret_logging, exception_text_in_response.
-    # +1 on 2026-10-11: module_scope_side_effect now judges production files (signal_disposition).
     assert len(results) == 42
 
-    # The same door with a function in it is a wrong shape: modules FAILS on the
-    # checklist, not a tick at 80 (DPLAN-0404, measured on a CLI-shaped door 10-07)
+    # The same door with a function in it is a wrong shape: modules FAILS on the checklist, not a tick at 80.
     door.write_text(door.read_text(encoding="utf-8") + "\n\ndef helper():\n    return 1\n", encoding="utf-8")
     assert "modules" in [r["standard"] for r in checklist.run_checklist(str(door)) if not r["passed"]]
 
@@ -208,21 +169,16 @@ def test_run_checklist_scratchpad_path_skipped(tmp_path):
 
 
 def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch, capsys):
-    """--prototype skips all standards.
-
-    Mutant: handle_command drops --prototype (prototype = False) in apps/modules/checklist.py — killed.
-    """
+    """--prototype skips all standards."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
     f = tmp_path / "poc.py"
     f.write_text("x = 1\n", encoding="utf-8")
     assert checklist.handle_command("checklist", ["--prototype", str(f)]) is True
     shown = capsys.readouterr().out
-    # A skip row prints no detail. Without the flag this file reaches the
-    # (stubbed, empty) pack and prints an (error) row instead of the skip.
+    # A skip row prints no detail; without the flag this reaches the stubbed pack and prints an (error) row.
     assert "(skip)" in shown
     assert "(error)" not in shown
-    # The row the flag hands back, read from the public function it drives.
     results = checklist.run_checklist(str(f), prototype=True)
     assert len(results) == 1
     assert results[0]["passed"] is True
@@ -264,26 +220,16 @@ def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
     f = tmp_path / "real_code.py"
     f.write_text("def main(): pass\n", encoding="utf-8")
     results = checklist.run_checklist(str(f))
-    # Floor: the audit lane produced exactly one row (the mocked pack discovers
-    # no checkers), so the loop below cannot pass over an empty list.
+    # Floor: the mocked pack yields exactly one row, so the loop below cannot pass over an empty list.
     assert len(results) == 1
-    # Should NOT get throwaway/prototype skip
     for r in results:
         detail = r.get("detail", "")
         assert "throwaway" not in detail.lower()
         assert "prototype" not in detail.lower()
 
 
-# ---------------------------------------------------------------------------
-# Tests — print_introspection / print_help
-# ---------------------------------------------------------------------------
-
-
 def test_print_introspection_runs(capsys):
-    """The no-args introspection names the packs it discovered.
-
-    Mutant: pack discovery matches no *_standards dir in apps/modules/checklist.py — killed.
-    """
+    """The no-args introspection names the packs it discovered."""
     assert checklist.handle_command("checklist", []) is True
     shown = capsys.readouterr().out
     assert "Discovered Packs:" in shown
@@ -292,26 +238,15 @@ def test_print_introspection_runs(capsys):
 
 
 def test_print_help_runs(capsys):
-    """--help prints the usage, the --pack line included.
-
-    Mutant: print_help drops its --pack usage line in apps/modules/checklist.py — killed.
-    """
+    """--help prints the usage, the --pack line included."""
     assert checklist.handle_command("checklist", ["--help"]) is True
     shown = capsys.readouterr().out
     assert "USAGE:" in shown
     assert "drone @seedgo checklist --pack" in shown
 
 
-# ---------------------------------------------------------------------------
-# Tests — internal helpers
-# ---------------------------------------------------------------------------
-
-
 def test_is_entry_point_detection(tmp_path, monkeypatch):
-    """An entry_point row runs on apps/{name}.py files only.
-
-    Mutant: _is_entry_point answers True for any .py under apps/ in apps/modules/checklist.py — killed.
-    """
+    """An entry_point row runs on apps/{name}.py files only."""
     # Through run_checklist: an entry_point-scoped row runs on apps/{name}.py only.
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     entry = SimpleNamespace(AUDIT_SCOPE="entry_point", check_module=lambda path, bypass_rules=None: {"passed": True})
@@ -365,25 +300,12 @@ def test_format_failure_multiple_failures(tmp_path, monkeypatch):
     assert "+1 more" in result
 
 
-# ---------------------------------------------------------------------------
-# Tests — a finding must be countable by a script (FPLAN, @spawn mail)
-#
-# Every assertion below is made against bytes read back out of the product's
-# real console, through capsys. A MagicMock console records the arguments
-# -- those were always correct, that is not the defect -- and renders nothing.
-# The marker has to survive Rich's markup parser, and only rendered bytes can
-# prove that: an unescaped "[FAIL]" is eaten at render time and the recorded
-# call argument still looks perfect.
-# ---------------------------------------------------------------------------
+# A finding must be countable by a script. Asserted on bytes from the real console via capsys: a MagicMock
+# records correct arguments and renders nothing, and an unescaped "[FAIL]" is eaten at render time.
 
 
 def _rendered_results(tmp_path, monkeypatch, capsys, messages):
-    """handle_command's output on one file, one all_files row per entry of messages.
-
-    A message of True is a passing row; any other value is the message of the
-    row's one failing check, and None is how a failing row reaches the terminal
-    with no detail (_format_failure hands back the message it was given).
-    """
+    """handle_command's output on one file, one all_files row per entry of messages."""
 
     def row(message):
         failing = {"passed": False, "checks": [{"passed": False, "message": message}]}
@@ -404,26 +326,17 @@ _MIXED_RESULTS = {"handlers": "3 functions outside handlers/", "cli": True, "rea
 
 def test_each_finding_carries_a_greppable_marker(tmp_path, monkeypatch, capsys):
     """@spawn grepped this output for a cross, got zero hits across 18 files, and
-    nearly deleted 41 bypass rules on that 'proof'. The marker a script counts
-    must be a plain ASCII token that is present once per finding -- not a
-    decorative em dash a reader has to guess at.
-
-    Mutant: the detailed failure line drops _FINDING_MARKUP in apps/modules/checklist.py — killed.
-    """
+    nearly deleted 41 bypass rules: the marker a script counts must be a plain ASCII token, once per finding."""
     rendered = _rendered_results(tmp_path, monkeypatch, capsys, _MIXED_RESULTS)
 
     assert rendered.count("[FAIL]") == 2, f"one marker per finding, got: {rendered!r}"
-    # The published constant is the contract callers grep for, so it is pinned to
-    # the bytes that actually reach a terminal -- not to what was handed to Rich.
+    # The published constant is the contract callers grep for, pinned to the bytes that reach a terminal.
     assert checklist.FINDING_MARKER == "[FAIL]"
     assert rendered.count(checklist.FINDING_MARKER) == 2
 
 
 def test_the_marker_is_not_printed_on_passing_standards(tmp_path, monkeypatch, capsys):
-    """The other direction: a count that includes passes is as wrong as zero.
-
-    Mutant: the pass line prints _FINDING_MARKUP before its check mark in apps/modules/checklist.py — killed.
-    """
+    """The other direction: a count that includes passes is as wrong as zero."""
     rendered = _rendered_results(tmp_path, monkeypatch, capsys, _MIXED_RESULTS)
 
     passing = [line for line in rendered.splitlines() if "cli" in line]
@@ -431,10 +344,7 @@ def test_the_marker_is_not_printed_on_passing_standards(tmp_path, monkeypatch, c
 
 
 def test_the_marker_appears_on_a_detail_free_finding(tmp_path, monkeypatch, capsys):
-    """Both failure branches emit it -- a finding with no detail still counts.
-
-    Mutant: the detail-free failure line drops _FINDING_MARKUP in apps/modules/checklist.py — killed.
-    """
+    """Both failure branches emit it -- a finding with no detail still counts."""
     rendered = _rendered_results(tmp_path, monkeypatch, capsys, {"readme_quality": None})
 
     assert rendered.count("[FAIL]") == 1, rendered
@@ -442,10 +352,7 @@ def test_the_marker_appears_on_a_detail_free_finding(tmp_path, monkeypatch, caps
 
 
 def test_the_human_layout_survives_the_marker(tmp_path, monkeypatch, capsys):
-    """The em dash stays: this output is read by people between hook runs.
-
-    Mutant: the detailed failure line trades its em dash for a hyphen in apps/modules/checklist.py — killed.
-    """
+    """The em dash stays: this output is read by people between hook runs."""
     rendered = _rendered_results(tmp_path, monkeypatch, capsys, _MIXED_RESULTS)
 
     assert rendered.count("—") == 2, rendered
@@ -454,21 +361,13 @@ def test_the_human_layout_survives_the_marker(tmp_path, monkeypatch, capsys):
 
 
 def test_help_documents_the_marker(capsys):
-    """A signal scripts are meant to key on is only stable if it is published.
-
-    Mutant: the help's grep line counts '\\[X]' instead of '\\[FAIL]' in apps/modules/checklist.py — killed.
-    """
+    """A signal scripts are meant to key on is only stable if it is published."""
     assert checklist.handle_command("checklist", ["--help"]) is True
     shown = capsys.readouterr().out
 
     assert "[FAIL]" in shown
     # The published count recipe itself, not only the OUTPUT FORMAT sample row.
     assert "grep -c '[FAIL]'" in shown
-
-
-# ---------------------------------------------------------------------------
-# Help-flag safety (help_flag_safety: a flag ANYWHERE explains)
-# ---------------------------------------------------------------------------
 
 
 def test_help_after_the_file_path_does_not_run_the_checklist(monkeypatch):
@@ -511,14 +410,7 @@ def test_checklist_does_not_answer_for_another_command():
     assert checklist.handle_command("audit", ["--help"]) is False
 
 
-# ---------------------------------------------------------------------------
-# Branch-level rows the checklist cannot judge are named, not silently dropped
-#
-# backup's conftest printed "All 37 standards passed" here while the audit
-# convicted it under unused_conftest_fixture -- a branch_level checker with no
-# check_module(), which this lane skips by design. The skip stays; the silence
-# does not.
-# ---------------------------------------------------------------------------
+# Branch-level rows the checklist cannot judge (no check_module()) are named, never silently dropped.
 
 
 def _fake_pack():
@@ -591,10 +483,7 @@ def _rendered_command(monkeypatch, capsys, target, pack=None):
 
 
 def test_the_not_judged_line_leaves_the_count_alone(tmp_path, monkeypatch, capsys):
-    """Through the command: one unwrapped line, after the summary, and the pass count is unchanged.
-
-    Mutant: _print_not_judged drops soft_wrap=True in apps/modules/checklist.py — killed.
-    """
+    """Through the command: one unwrapped line, after the summary, and the pass count is unchanged."""
     rendered = _rendered_command(monkeypatch, capsys, _write(tmp_path, "branch/tests/conftest.py"))
     lines = rendered.splitlines()
 
@@ -609,10 +498,7 @@ def test_the_not_judged_line_leaves_the_count_alone(tmp_path, monkeypatch, capsy
 
 
 def test_the_not_judged_line_is_fenced_off_from_the_last_finding(tmp_path, monkeypatch, capsys):
-    """hooks' auto_fix rejoins a finding's wrapped detail until a blank line, so one must come first.
-
-    Mutant: _print_not_judged drops its leading blank console.print() in apps/modules/checklist.py — killed.
-    """
+    """hooks' auto_fix rejoins a finding's wrapped detail until a blank line, so one must come first."""
     pack = _fake_pack()
     pack["per_file"] = SimpleNamespace(
         AUDIT_SCOPE="all_files",
@@ -630,12 +516,8 @@ def test_the_not_judged_line_is_fenced_off_from_the_last_finding(tmp_path, monke
     assert rendered.count("[FAIL]") == 1
 
 
-# ---------------------------------------------------------------------------
-# Inert bypass rules (fleet green leg 13): a lines rule against a checker that
-# passes no line closes nothing; the checklist names it, and changes no verdict.
-# The scope map is the real one, read from the checker sources: todo passes no
-# line, cli does.
-# ---------------------------------------------------------------------------
+# Inert bypass rules: a lines rule against a checker that passes no line closes nothing; the checklist names
+# it and changes no verdict. The scope map is read from the checker sources.
 
 
 def _with_rules(tmp_path, monkeypatch, capsys, rules, passing=True):
@@ -654,12 +536,7 @@ def _with_rules(tmp_path, monkeypatch, capsys, rules, passing=True):
 
 
 def test_a_lines_rule_on_a_checker_that_passes_no_line_is_named(tmp_path, monkeypatch, capsys):
-    """Red first: the rule sat in bypass.json and the checklist said nothing at all.
-
-    Mutants in apps/handlers/bypass/inert.py and apps/modules/checklist.py, each
-    killed at an assert here or below: inert_notes returns []; the standard match
-    is dropped; the result never carries the notes.
-    """
+    """Red first: the rule sat in bypass.json and the checklist said nothing at all."""
     rules = [{"file": "thing.py", "standard": "todo", "lines": [3], "reason": "r"}]
     rendered, results = _with_rules(tmp_path, monkeypatch, capsys, rules)
 
@@ -700,12 +577,6 @@ def test_the_inert_note_is_fenced_off_from_the_last_finding(tmp_path, monkeypatc
     assert lines[at - 1] == ""
     assert lines[at - 2].endswith("[FAIL] — todo: bad")
     assert rendered.count("[FAIL]") == 2
-
-
-# ---------------------------------------------------------------------------
-# An unreadable registry (fleet green leg 15, devpulse's ruling): no raise, the
-# verdicts stay as they are, and the checklist says it once after them.
-# ---------------------------------------------------------------------------
 
 
 def _unreadable_registry(tmp_path, monkeypatch):

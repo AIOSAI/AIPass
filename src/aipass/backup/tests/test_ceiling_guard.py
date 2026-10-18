@@ -3,7 +3,7 @@
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
 # Version: 1.0.6
 # Created: 2026-08-20
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
@@ -39,9 +39,6 @@ def _files(tmp_path: Path, rel_paths: list[str], size: int = 8) -> list[tuple[st
         p.write_bytes(b"x" * size)
         out.append((str(p), rel))
     return out
-
-
-# --- measurement ---
 
 
 class TestCheckCeiling:
@@ -123,7 +120,7 @@ class TestCheckCeiling:
         assert breach is not None
         assert breach.reason == "file_count"
         assert breach.measured == 7
-        # Anchored to the log literal at apps/handlers/scan/ceiling.py:149; reword it and this goes vacuous.
+        # Anchored to scan/ceiling.py's log literal; reword it and this goes vacuous.
         assert [line for line in measured if "Ceiling measure skipped" in line] == []
 
     def test_vanished_file_does_not_abort_measurement(self, tmp_path: Path) -> None:
@@ -143,9 +140,6 @@ class TestCheckCeiling:
         assert breach.reason == "file_count"
         assert breach.measured == DEFAULT_MAX_FILES + 1
         assert breach.limit == DEFAULT_MAX_FILES
-
-
-# --- offender naming ---
 
 
 class TestOffenderReporting:
@@ -197,9 +191,6 @@ class TestOffenderReporting:
         assert breach.summary() == "6 files exceeds the 5-file ceiling"
 
 
-# --- refusal is enforced end-to-end ---
-
-
 class TestRunRefusal:
     """A breach must stop the run before a single byte is copied."""
 
@@ -235,9 +226,7 @@ class TestRunRefusal:
         assert result.files_copied == 0
         assert "refused" in result.errors[0].lower()
 
-        # Measured 2026-09-08 on a fresh tree: the refusal DOES leave the
-        # snapshot directory behind (setup scaffolds .backup/snapshots before
-        # the ceiling is read) and leaves it completely empty.
+        # The snapshot dir survives the refusal, empty: setup scaffolds it before the ceiling is read.
         dest = build_snapshot_path(str(root))
         assert dest.exists() is True
         assert list(dest.rglob("*")) == []
@@ -251,8 +240,7 @@ class TestRunRefusal:
         assert result.success is False
         assert result.files_copied == 0
 
-        # Measured: versioned refuses BEFORE it scaffolds, so unlike snapshot
-        # the store directory is never created at all.
+        # Versioned refuses BEFORE it scaffolds, so unlike snapshot the store is never created.
         store = build_versioned_store(str(root))
         assert store.exists() is False
 
@@ -265,7 +253,6 @@ class TestRunRefusal:
 
         assert result.success is False
 
-        # Same world as the un-scanned call: nothing scaffolded, nothing written.
         store = build_versioned_store(str(root))
         assert store.exists() is False
 
@@ -275,9 +262,7 @@ class TestRunRefusal:
         root = self._project(tmp_path)
         assert handle_command("all", [str(root), "--quiet"]) is True
 
-        # Measured on a fresh tree, both worlds named rather than or-ed:
-        # 'all' refuses on its own shared scan, so versioned is never even
-        # scaffolded, while the snapshot directory exists and is empty.
+        # 'all' refuses on its shared scan: versioned never scaffolded, snapshot dir present and empty.
         store = build_versioned_store(str(root))
         dest = build_snapshot_path(str(root))
         assert store.exists() is False

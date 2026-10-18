@@ -3,7 +3,7 @@
 # Description: trinity_check entry shapes, caps and numbering: drift classes D1-D16 (split from test_trinity_check.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -31,20 +31,8 @@ from aipass.seedgo.tests.support_trinity_check import (
 
 pytestmark = pytest.mark.usefixtures("_mock_infrastructure")
 
-# The OTHER side of the SHAPE guard (FPLAN-0593 Phase 2). @memory's push
-# derives its required/optional rules from the same
-# ``entry_types.<type>.fields`` map this checker now reads, and @memory's
-# ``draft_target()`` answers what the renderer will write beside a cap.
-# Reached exactly like the renderer above -- by looking for the file rather
-# than by catching an ImportError, and before the autouse mock swaps
-# aipass.prax in sys.modules.
-#
-# ``draft_target`` comes through ``memory/apps/modules/limits.py``, the door
-# @memory published on 2026-09-15, not through its ``handlers`` package: that
-# is what seedgo's own check_handler_independence tells cross-branch callers
-# to do, and this suite scores the branch that wrote the rule. The MODULE is
-# held, never the symbol, so a signature change surfaces here as an
-# AttributeError instead of a wrong number downstream.
+# @memory's push reads the same entry_types.<type>.fields map; found by file, before the autouse mock swaps aipass.prax.
+# limits comes through memory/apps/modules (its published door); the module is held, not the symbol, so drift raises AttributeError.
 _PUSH_RELATIVE = ("src", "aipass", "memory", "apps", "modules", "door_trinity_push.py")
 _entry_rules = None
 _memory_limits = None
@@ -68,11 +56,6 @@ def _strings_in(value) -> set:
     if isinstance(value, (list, tuple, set, frozenset)):
         return set().union(*(_strings_in(item) for item in value)) if value else set()
     return set()
-
-
-# ===========================================================================
-# B. Per-drift-class regression tests (MASTER_LIST D1-D16)
-# ===========================================================================
 
 
 class TestDriftClassRegressions:
@@ -343,22 +326,11 @@ class TestDriftClassRegressions:
         assert trinity.check_branch_info(str(branch)) == []
 
 
-# ===========================================================================
-# FPLAN-0593 Phase 2 -- THE ENTRY SHAPE IS READ, NEVER REMEMBERED
-# ===========================================================================
+# The entry shape is read from @memory, never remembered.
 
 
 class TestTheEntryShapeComesFromTheConfig:
-    """The shape has one home and it is @memory's config, not this branch.
-
-    ``trinity_groups._ENTRY_RULES`` was a hand-kept copy of the four entry
-    shapes: correct on the day it was written, and one @memory config edit away
-    from wrong on any day after -- the third copy of a contract that already had
-    two. Phase 1 published the closed map at
-    ``entry_limits.entry_types.<type>.fields``; Phase 2 makes this checker read
-    it. These tests move the CONFIG and watch the measured shape follow, which
-    no mirror can fake.
-    """
+    """The shape has one home and it is @memory's config, not this branch."""
 
     def test_a_new_required_field_in_the_config_is_required_here(self, trinity, tmp_path, monkeypatch):
         """Move the config, the shape moves. The canonical fixture now misses a field."""
@@ -441,12 +413,7 @@ class TestTheEntryShapeComesFromTheConfig:
     def test_a_config_with_no_usable_fields_map_fails_closed_naming_the_key(
         self, trinity, tmp_path, section, mangle, monkeypatch
     ):
-        """The Char caps contract, applied to the shape: it is never assumed.
-
-        Every arm leaves a PERFECTLY canonical branch on disk, so the only way
-        the group can fail is by refusing to measure -- which is the point. A
-        fallback to a remembered shape would score every one of these 100.
-        """
+        """The Char caps contract, applied to the shape: it is never assumed."""
         broken = copy.deepcopy(_CONFIG)
         mangle(broken["entry_limits"]["entry_types"][section])
         branch = _write_branch(tmp_path)
@@ -458,11 +425,7 @@ class TestTheEntryShapeComesFromTheConfig:
         _assert_failed(check, f"cannot measure shapes for '{section}'", f"entry_types.{section}.fields")
 
     def test_an_empty_container_cannot_hide_the_refusal(self, trinity, tmp_path, monkeypatch):
-        """The silent-pass hole Char caps had: no entries, so nothing to divide by.
-
-        A group holding a refusal record never scores 100 whatever the
-        denominator says -- pinned here for shapes as it is for caps.
-        """
+        """The silent-pass hole Char caps had: no entries, so nothing to divide by."""
         broken = copy.deepcopy(_CONFIG)
         del broken["entry_limits"]["entry_types"]["observations"]["fields"]
         observations = _canonical_observations()
@@ -522,15 +485,7 @@ class TestTheEntryShapeComesFromTheConfig:
         )
 
     def test_the_derived_shape_is_byte_identical_to_what_memorys_push_derives(self, trinity):
-        """The cross-implementation guard, for the shape.
-
-        @memory's push prunes entries this checker scores. Both now read
-        ``entry_types.<type>.fields`` off the LIVE config, and if the two
-        derivations ever disagree the push removes entries the standard
-        accepts, or leaves ones it does not. Read from the live config on both
-        sides on purpose -- a fixture would pin the derivation and miss the
-        disagreement.
-        """
+        """The cross-implementation guard, for the shape."""
         assert _entry_rules is not None, (
             f"@memory's trinity_push is the OTHER side of this guard and it is unreachable "
             f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the shape agreement cannot be checked, which is a "
@@ -547,18 +502,7 @@ class TestTheEntryShapeComesFromTheConfig:
 
     @pytest.mark.parametrize("cap", [300, 200, 150, 77, 1])
     def test_the_draft_target_matches_memorys_own_answer_on_the_live_config(self, trinity, cap):
-        """The tab's draft number agrees with @memory's, through @memory's door.
-
-        Was ``test_the_draft_percent_is_memorys_own_number``, the guard over a
-        ``_DRAFT_PERCENT = 80`` mirror that existed only because @memory
-        published the percent as a module constant. It publishes
-        ``entry_limits.draft_percent`` now and the mirror is gone, so this
-        pins the surviving claim: for the LIVE config, what this checker
-        composes is what @memory's ``draft_target`` answers -- computed there,
-        read here, never copied.
-
-        Mutant: expected_meta_line drops the prose after the tab, in trinity_groups.py — killed.
-        """
+        """The tab's draft number agrees with @memory's, through @memory's door."""
         assert _memory_limits is not None, (
             f"@memory's limits gateway is the source of the draft number and it is unreachable "
             f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the draft target has nothing to be checked against"

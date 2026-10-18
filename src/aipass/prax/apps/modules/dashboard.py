@@ -3,16 +3,12 @@
 # Description: Dashboard Section Utilities
 # Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Dashboard Section Utilities
+"""Dashboard Section Utilities
 
-Provides utilities for services to update their sections in branch
-DASHBOARD.local.json files. Each service manages only its own section.
-
-Run via: drone @prax dashboard
+Reference: docs/dashboard.md
 """
 
 __all__ = [
@@ -51,13 +47,11 @@ if sys.platform == "win32":
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 
-# Import handlers
 from aipass.prax.apps.handlers.dashboard.operations import (
     update_section as handler_update_section,
     write_section,  # re-exported: used by ai_mail.apps.handlers.email.dashboard_sync
     get_dashboard_path,
-    # Re-exported dashboard limits: handlers are internal, so every writer
-    # outside prax — @flow's push, the devpulse plugin — reads the caps here.
+    # Re-exported: handlers are internal, so writers outside prax read the caps here.
     SUBJECT_CAP,
     DASHBOARD_CHAR_BUDGET,
     cap_subject,
@@ -68,10 +62,8 @@ from aipass.prax.apps.handlers.dashboard.status import (
     resolve_branch_path,
 )
 
-# Import refresh handler - exposed as public API
 from aipass.prax.apps.handlers.dashboard.refresh import refresh_all_dashboards, refresh_single_dashboard
 
-# Import template handlers
 from aipass.prax.apps.handlers.dashboard.template_pusher import push_dashboard_template, get_template_status
 from aipass.prax.apps.handlers.dashboard.template_differ import diff_dashboard_template
 from aipass.prax.apps.handlers.json import json_handler
@@ -79,9 +71,6 @@ from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
 
 
-# ============================================
-# DASHBOARD SCHEMA
-# ============================================
 DASHBOARD_TEMPLATE = {
     "branch": "",
     "last_updated": "",
@@ -101,25 +90,8 @@ DASHBOARD_TEMPLATE = {
 }
 
 
-# ============================================
-# MODULE-LEVEL WRAPPER FUNCTIONS
-# ============================================
 def update_section(branch_path: Path, section_name: str, section_data: Dict) -> bool:
-    """
-    Update a specific section in branch dashboard (legacy wrapper).
-
-    For new integrations, prefer write_section() from
-    aipass.prax.apps.handlers.dashboard.operations
-    which is self-contained and dependency-free.
-
-    Args:
-        branch_path: Path to branch root
-        section_name: Section to update (flow, ai_mail, etc)
-        section_data: New data for section
-
-    Returns:
-        True if updated successfully
-    """
+    """Update a specific section in branch dashboard (legacy wrapper); prefer write_section()."""
     try:
         return handler_update_section(
             branch_path, section_name, section_data, DASHBOARD_TEMPLATE, calculate_quick_status
@@ -129,9 +101,6 @@ def update_section(branch_path: Path, section_name: str, section_data: Dict) -> 
         return False
 
 
-# ============================================
-# CLI INTERFACE
-# ============================================
 def print_introspection():
     """Display module info"""
     console.print()
@@ -211,18 +180,8 @@ def print_template():
 def _caller_dir() -> "Path | None":
     """The directory the CALLER stands in, which under drone is not this process's cwd.
 
-    drone runs every branch with its cwd set to the TARGET branch
-    (``router_handler.execute_command(cwd=branch_path)``), so inside prax
-    ``Path.cwd()`` is prax's own directory wherever the caller stood. Measured
-    2026-09-11: a bare ``drone @prax dashboard refresh`` from ``src/aipass/flow``
-    refreshed PRAX. drone hands the caller's directory over as
-    ``AIPASS_CALLER_CWD``, so that answers first. The process cwd is the answer
-    only when ``apps/prax.py`` is run directly, where it IS the caller's.
-
-    This is prax's one sanctioned working-directory read (the allowlist in
-    tests/test_repo_root.py names this file), so it lives here, not in a
-    handler. An empty variable is absence, not a location. A deleted working
-    directory is no answer, never a crash.
+    drone runs prax with its cwd at prax and hands the caller's directory as AIPASS_CALLER_CWD.
+    prax's one sanctioned cwd read (allowlisted in tests/test_repo_root.py); keep it here.
     """
     raw = os.environ.get("AIPASS_CALLER_CWD")
     if raw:
@@ -235,45 +194,19 @@ def _caller_dir() -> "Path | None":
 
 
 def _resolve_branch_path(branch_ref: str) -> Path:
-    """
-    Resolve @branch reference to filesystem path: AIPASS_REGISTRY.json, then the caller's project registry.
-
-    Delegates to handler for file I/O (seedgo modules standard), handing it the
-    caller's directory so an external project's branch resolves from inside it.
-
-    Args:
-        branch_ref: Branch reference like "@flow" or "@vera"
-
-    Returns:
-        Path to the branch directory
-
-    Raises:
-        FileNotFoundError: If registry missing or branch not found
-    """
+    """Resolve @branch reference to filesystem path: AIPASS_REGISTRY.json, then the caller's project registry."""
     return resolve_branch_path(branch_ref, _caller_dir())
 
 
 def _handle_refresh(args: List[str]) -> None:
-    """
-    Handle dashboard refresh command.
-
-    Supports:
-        refresh            - refresh current branch (CWD-based)
-        refresh @branch    - refresh specific branch
-        refresh --all      - refresh all branches
-
-    Args:
-        args: Command arguments
-    """
-    # --all flag: refresh every branch
+    """Handle dashboard refresh: no args (caller's branch), @branch, or --all."""
     if args and args[0] == "--all":
         console.print("[dim]Refreshing all branch dashboards...[/dim]")
         result = refresh_all_dashboards()
         if result["status"] == "success":
             console.print(f"[green]Refreshed {result['branches_updated']} branches[/green]")
         elif result["status"] == "partial":
-            # error(), not warning(): a partial refresh left branches stale, and
-            # only error() marks the command failed for the exit seam in main().
+            # error(), not warning(): only error() marks the command failed for main()'s exit.
             error(f"Refreshed {result['branches_updated']} branches, {result['branches_failed']} failed")
             for err in result.get("errors", []):
                 error(str(err))
@@ -283,7 +216,6 @@ def _handle_refresh(args: List[str]) -> None:
                 error(str(err))
         return
 
-    # @branch arg: refresh specific branch
     if args and args[0].startswith("@"):
         try:
             branch_path = _resolve_branch_path(args[0])
@@ -299,21 +231,16 @@ def _handle_refresh(args: List[str]) -> None:
             error(f"Failed: {result.get('error', 'unknown')}")
         return
 
-    # No args: refresh the CALLER's branch. Not Path.cwd(): drone runs prax
-    # with its cwd at prax, so that refreshed PRAX from anywhere (2026-09-11).
     cwd = _caller_dir()
     if cwd is None:
         error("No caller directory, so no branch to refresh. Name it: drone @prax dashboard refresh @branch")
         return
-    # Walk up to find a directory that has DASHBOARD.local.json or is a branch
     branch_path = cwd
-    # Try CWD itself first, then walk up
     while branch_path != branch_path.parent:
         if (branch_path / "DASHBOARD.local.json").exists() or (branch_path / ".aipass").exists():
             break
         branch_path = branch_path.parent
     else:
-        # Fallback to CWD
         branch_path = cwd
 
     console.print(f"[dim]Refreshing {branch_path.name.upper()} dashboard...[/dim]")
@@ -325,16 +252,7 @@ def _handle_refresh(args: List[str]) -> None:
 
 
 def _handle_push_template(args: List[str]) -> None:
-    """
-    Handle push-template command.
-
-    Supports:
-        push-template            - push template to all branches
-        push-template --dry-run  - preview changes without writing
-
-    Args:
-        args: Command arguments
-    """
+    """Handle push-template command (--dry-run previews without writing)."""
     dry_run = "--dry-run" in args
     mode = "DRY RUN" if dry_run else "PUSH"
     console.print(f"[dim]Running dashboard template {mode.lower()}...[/dim]")
@@ -371,16 +289,7 @@ def _handle_push_template(args: List[str]) -> None:
 
 
 def _handle_diff_template(args: List[str]) -> None:
-    """
-    Handle diff-template command.
-
-    Supports:
-        diff-template                    - diff all branches
-        diff-template --branch BRANCHNAME - diff single branch
-
-    Args:
-        args: Command arguments
-    """
+    """Handle diff-template command (--branch NAME diffs one branch)."""
     branch_name = None
     if "--branch" in args:
         idx = args.index("--branch")
@@ -457,24 +366,7 @@ def _handle_template_status() -> None:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle drone-routed commands.
-
-    Supported commands:
-        dashboard status          - Show dashboard status for all branches
-        dashboard template        - Show dashboard template structure
-        dashboard refresh         - Refresh dashboard(s) from central files
-        dashboard push-template   - Push template to all branches
-        dashboard diff-template   - Diff template against branch dashboards
-        dashboard template-status - Show template version info
-
-    Args:
-        command: The command to execute
-        args: Additional arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle drone-routed commands. True if handled, False otherwise."""
     if command != "dashboard":
         return False
 
@@ -482,9 +374,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A dashed help flag ANYWHERE wins: gating at args[0] only let
-    # `dashboard refrsh --help` fall through to the refusal below, which
-    # answers a question with a failure.
+    # A help flag anywhere wins, so `dashboard refrsh --help` is not refused.
     if wants_help(args):
         print_help()
         return True
@@ -502,8 +392,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     }
     handler = dispatch.get(subcmd)
     if handler is None:
-        # Printing help and returning True read as success to every caller —
-        # `drone @prax dashboard refrsh` silently did nothing and exited 0.
+        # Refuse, not help-and-True: a typo must not exit 0.
         refuse("dashboard", subcmd, "drone @prax dashboard --help")
     handler()
     return True
@@ -513,12 +402,10 @@ def main():
     """Main entry point"""
     args = sys.argv[1:] if len(sys.argv) > 1 else []
 
-    # No args = show introspection
     if not args:
         print_introspection()
         return
 
-    # --help = show commands
     if "--help" in args or "-h" in args:
         print_help()
         return

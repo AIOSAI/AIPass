@@ -65,7 +65,7 @@ apps/
     └── tests_lane/              # retire_ops (the .backup move), template_ops (gold + receipts)
 ```
 
-Two lanes, and a finding can exist in one and not the other: the **audit** walks `apps/**/*.py` only (`tests/` is not in its corpus), while the PostToolUse **checklist** hook checks `tests/`. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
+Two lanes: the **audit** walks `apps/`, `shared/` and collectable `tests/` files (`branch_audit.py` `_collect_py_files`), each checker scoring only the files its `APPLIES_TO` names; the PostToolUse **checklist** hook checks one file as it is written. Advisory arms (`check_branch_info`) print lines and never score. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
 
 ## How I Work — Standards Reasoning
 
@@ -94,6 +94,6 @@ Seedgo + devpulse have **system-wide file access**. "No cross-branch edits" rule
 - `standards_query` uses full dir name: `standards_query aipass_standards`
 - Rich markup only — never bare `print()`, never captured ANSI drone output
 - `standard ruff` answers "Unknown standard": the audit shows `ruff` (file `ruff_check.py` minus `_check`), the query surface takes `ruff_check` (its content/md names). Two names, one checker
-- The tree above is the ONLY copy — README is the face, not the map, and is off the startup read (DPLAN-0347)
+- The tree above is the ONLY copy — README is the face, not the map, and is off the startup read
 - Depth is `docs/` (indexed from README): standards pack, v5 pack, startup budget, audit engine, checklist+hooks, proof+coverage, tech debt
-- `templates/` is the fleet's GOLD test template (owner 2026-09-20, DPLAN-0354): `templates.json` versions it, `test_template_v1.md` is the page, `readme_update_model.py` is the model. Never collected by pytest. A branch's receipt is its `tests/.template_version.json`; a test's BODY is never distributed
+- `templates/` is the fleet's GOLD test template: `templates.json` versions it, `test_template_v1.md` is the page, `readme_update_model.py` is the model. Never collected by pytest. A branch's receipt is its `tests/.template_version.json`; a test's BODY is never distributed

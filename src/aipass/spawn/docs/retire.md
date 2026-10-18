@@ -38,11 +38,10 @@ Since `create` writes `registered: true`, a branch is protected from the moment 
 There is no force flag: retiring a citizen means clearing that passport flag first, which
 is a deliberate, visible act rather than an argument on a command line.
 
-Verified live (APLAN-0007): the infrastructure and active-citizen refusals both fire and
-exit non-zero. The registry-owner layer is **unreachable in the live fleet** — the only
-entry carrying `owner: true` short-circuits at layer 1, so no branch reaches layer 2. It is
-covered by unit tests against a synthetic registry, not by live behaviour, and that is
-stated rather than papered over.
+The infrastructure and active-citizen refusals both exit non-zero. The registry-owner
+layer is **unreachable in the live fleet** — the only entry carrying `owner: true`
+short-circuits at layer 1, so no branch reaches layer 2. It is covered by unit tests
+against a synthetic registry, not by live behaviour.
 
 ---
 
@@ -53,4 +52,4 @@ clean up mail or plans that named the branch. Those live with the branches that 
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17

@@ -3,25 +3,11 @@
 # Description: watch module routing, help, session start/failure, runner handler, introspection
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/modules/watch.py and handlers/monitor/watch_runner.py."""
-
-# Tests for the watch module (APLAN-0010 encapsulation item).
-#
-# `watch` used to be a built-in on the entry point, which imported two monitor
-# handlers directly — the encapsulation violation on apps/memory.py. It is now a
-# module like every other command.
-#
-# Covers:
-#   - Routing: only the 'watch' command is claimed, everything else declines
-#   - Help interception via the shared wants_help() predicate, in any slot
-#   - No args starts the watcher (the live contract — 'drone @memory watch')
-#   - Unknown argument errors and does NOT start the watcher
-#   - Watcher start failure is reported, not swallowed
-#   - Introspection names the monitor handlers it is wired to
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — the SIGINT handler _start_session installs via signal.signal; needs a real signal
@@ -36,21 +22,9 @@ from aipass.memory.apps.handlers.monitor import watch_runner as _watch_runner
 from aipass.memory.apps.modules import watch as _watch
 
 
-# ---------------------------------------------------------------------------
-# Helpers: the real module, its monitor handlers patched at the edge
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def watch_module(monkeypatch):
-    """modules/watch.py with the runner's two monitor handlers replaced by mocks.
-
-    The watcher and the detector are the edge: a real start_memory_watcher
-    would observe live .trinity files, so the runner's bound names are patched.
-
-    Returns:
-        Tuple of (module, mocks) where mocks holds the patched handler functions.
-    """
+    """modules/watch.py with the runner's monitor handlers mocked: a real watcher observes live .trinity files."""
     watcher_mod = MagicMock()
     detector_mod = MagicMock()
     watcher_mod.start_memory_watcher.return_value = {"success": True, "count": 17}
@@ -69,11 +43,6 @@ def watch_module(monkeypatch):
     monkeypatch.setattr(module, "json_handler", MagicMock())
     monkeypatch.setattr(runner, "json_handler", MagicMock())
     return module, {"watcher": watcher_mod, "detector": detector_mod, "runner": runner}
-
-
-# ---------------------------------------------------------------------------
-# Routing
-# ---------------------------------------------------------------------------
 
 
 class TestWatchRouting:
@@ -99,11 +68,6 @@ class TestWatchRouting:
         helped.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Help interception
-# ---------------------------------------------------------------------------
-
-
 class TestWatchHelp:
     """A help flag is never an instruction — it must never start the watcher."""
 
@@ -122,11 +86,6 @@ class TestWatchHelp:
             assert module.handle_command("watch", ["now", "--help"]) is True
         helped.assert_called_once()
         started.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# Arguments
-# ---------------------------------------------------------------------------
 
 
 class TestWatchArguments:
@@ -161,17 +120,8 @@ class TestWatchArguments:
         logged.assert_called_once_with("watch_rejected", {"argument": "forever", "args": ["forever"]})
 
 
-# ---------------------------------------------------------------------------
-# Watcher startup
-# ---------------------------------------------------------------------------
-
-
 class TestWatchSession:
-    """The session reports what it is watching, and fails loudly.
-
-    Display lives in the module; the lifecycle calls it delegates to live in
-    handlers/monitor/watch_runner.py (cli separation standard).
-    """
+    """The session reports what it is watching, and fails loudly."""
 
     def test_session_starts_the_watcher_and_blocks(self, watch_module, capsys):
         """Mutant (2026-09-27, killed): the reported count read as 0 instead of the watcher's."""
@@ -183,8 +133,7 @@ class TestWatchSession:
         assert "Watching 17 branch directories" in capsys.readouterr().out
 
     def test_session_reports_failure_and_never_blocks(self, watch_module):
-        """A failed start must not fall through into the wait loop, where it
-        would look like a healthy watcher doing nothing."""
+        """A failed start must not fall through into the wait loop and pose as a healthy idle watcher."""
         module, mocks = watch_module
         mocks["watcher"].start_memory_watcher.return_value = {"success": False, "error": "no registry"}
 
@@ -238,11 +187,6 @@ class TestWatchRunnerHandler:
         _, mocks = watch_module
         source = Path(mocks["runner"].__file__).read_text(encoding="utf-8")
         assert "console.print" not in source
-
-
-# ---------------------------------------------------------------------------
-# Introspection
-# ---------------------------------------------------------------------------
 
 
 class TestWatchIntrospection:

@@ -3,40 +3,26 @@
 # Description: Usage data retention and cleanup
 # Version: 0.1.2
 # Created: 2025-11-16
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Usage Data Cleanup Handler
+"""Usage Data Cleanup Handler"""
 
-Manages data retention policies and cleanup operations.
-Removes old generation tracking data based on retention rules.
-"""
-
-# Infrastructure
 from pathlib import Path
 
-# Standard library
 import json
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 
-# Logging
 from aipass.prax import logger
 
-# JSON handler
 from aipass.api.apps.handlers.json import json_handler
 
-# Default retention period
 DEFAULT_RETENTION_DAYS = 30
 
 
 def _read_json(file_path: Path) -> Optional[Dict]:
-    """Read a JSON file; None only when it is absent.
-
-    A read or parse error raises: None means 'no store', so a failure may not
-    wear it and have cleanup report nothing to clean (api, fleet green leg 3).
-    """
+    """Read a JSON file; None only when it is absent."""
     if not file_path.exists():
         return None
     with open(file_path, "r", encoding="utf-8") as f:
@@ -46,14 +32,8 @@ def _read_json(file_path: Path) -> Optional[Dict]:
 def _write_json(file_path: Path, data: Dict) -> bool:
     """Write a JSON file, creating its parent; True once written.
 
-    A failed write raises, so no caller counts a cleanup that never landed (api, fleet green leg 3).
-
-    The text is built first and written to a sibling file in the same directory,
-    which then replaces the store in one step, so a failed dump or write never
-    leaves a cut store; the sibling is removed on any failure (api, fleet green
-    leg 4). On Windows the replace fails with PermissionError while another
-    process holds the store open (Python's own open never shares delete access):
-    the store then stays whole, the sibling is removed and the error is raised.
+    Written to a sibling then replaced, so a failed write never leaves a cut store. On Windows the replace
+    raises PermissionError while another process holds the store open; the store stays whole.
     """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=2, ensure_ascii=False)
@@ -68,29 +48,15 @@ def _write_json(file_path: Path, data: Dict) -> bool:
 
 
 def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTION_DAYS) -> int:
-    """
-    Remove usage data older than retention period.
-
-    Args:
-        data_file_path: Path to the usage data JSON file
-        retention_days: Number of days to retain data (default: 30)
-
-    Returns:
-        int: Number of generation entries cleaned up; 0 only when there was nothing to clean
-
-    Raises:
-        ValueError or OSError when the store cannot be read, parsed or written (api, fleet green leg 3).
-    """
+    """Remove usage data older than retention period."""
     try:
         cutoff_date = datetime.now() - timedelta(days=retention_days)
         data = _read_json(data_file_path)
         if not data:
             return 0
 
-        # Extract the actual data content (handle wrapper structure)
         data_content = data.get("data", data)
 
-        # Identify and remove old generation tracking entries
         old_generations = _identify_old_generations(data_content.get("generation_tracking", {}), cutoff_date)
 
         if not old_generations:
@@ -99,7 +65,6 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
         for gen_id in old_generations:
             del data_content["generation_tracking"][gen_id]
 
-        # Update wrapper if needed
         if "data" in data:
             data["data"] = data_content
             data["timestamp"] = datetime.now().isoformat()
@@ -110,8 +75,7 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
         logger.error(f"Cleanup failed: {e}")
         raise
 
-    # The store is cleaned on disk from here on: a failing audit line is logged and
-    # never reported as a failed cleanup (api, fleet green leg 4).
+    # The store is cleaned on disk from here on: a failing audit line is logged, never reported as a failed cleanup.
     logger.info(f"Cleaned up {len(old_generations)} generation entries older than {retention_days} days")
     try:
         json_handler.log_operation(

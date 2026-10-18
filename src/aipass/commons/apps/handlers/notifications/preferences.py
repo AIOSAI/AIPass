@@ -3,19 +3,11 @@
 # Description: Notification Preferences Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Notification Preferences Handler
-
-Database query functions for notification preferences.
-Manages watch/track/mute preferences per agent per target (room, post, thread).
-
-Notification levels:
-- watch: Get notified of ALL activity in the target
-- track: Get notified only of @mentions and direct replies (DEFAULT)
-- mute: No notifications for this target
 """
 
 import sqlite3
@@ -26,12 +18,7 @@ from aipass.commons.apps.handlers.json import json_handler
 
 
 def get_preference(conn: sqlite3.Connection, agent_name: str, target_type: str, target_id: str) -> Optional[str]:
-    """
-    Get the notification preference level for an agent on a target.
-
-    Returns:
-        Level string ('watch', 'track', 'mute') or None (meaning default 'track')
-    """
+    """Get an agent's preference level on a target; None means the default, 'track'."""
     row = conn.execute(
         "SELECT level FROM notification_preferences WHERE agent_name = ? AND target_type = ? AND target_id = ?",
         (agent_name, target_type, target_id),
@@ -49,18 +36,7 @@ def set_preference(
     target_id: str,
     level: str,
 ) -> bool:
-    """
-    Set a notification preference for an agent on a target.
-
-    Returns:
-        True if set; False for an invalid target type or level.
-
-    Raises:
-        Whatever the write raises, logged first, so a failed write is never the
-        False of invalid input. The one caller, notification_ops
-        _set_notification_level, names it in its answer (commons' decision,
-        DPLAN-0354 leg 5).
-    """
+    """Set a preference; False only for an invalid type or level, a failed write raises."""
     valid_types = ("room", "post", "thread")
     valid_levels = ("watch", "track", "mute")
 
@@ -105,14 +81,7 @@ def should_notify(
     target_id: str,
     event_type: str,
 ) -> bool:
-    """
-    Determine whether an agent should be notified for an event on a target.
-
-    Logic:
-        - mute -> False for all events
-        - watch -> True for all events
-        - track (default) -> True only for 'mention' and 'reply'
-    """
+    """Determine whether an agent should be notified for an event on a target."""
     level = get_preference(conn, agent_name, target_type, target_id)
 
     if level is None:

@@ -3,7 +3,7 @@
 # Description: Snapshot module — full-copy backup of a project
 # Version: 2.2.0
 # Created: 2026-04-17
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -89,13 +89,7 @@ def _build_saved_timestamps(
 ) -> dict:
     """Build the {rel_path: mtime} dict to persist after a snapshot run.
 
-    Deliberately more forgiving than _build_current_timestamps: a live tree
-    changes under us, so a file scanned a moment ago may already be gone
-    (another process's temp file, an editor swap). That file simply gets no
-    entry — never an abort. Omitting it is also correct for the next
-    quick-check: a file that stays deleted is absent from both sides and
-    compares equal, and one that comes back is absent from prev only, so the
-    mismatch triggers the full snapshot it needs.
+    A file gone since the scan gets no entry, never an abort; the next quick-check then sees the mismatch.
     """
     timestamps: dict[str, float] = {}
     for abs_p, rel_p in filtered:
@@ -113,24 +107,8 @@ def _persist_timestamps(
 ) -> None:
     """Save the timestamp map for the next quick-check, reporting a lost map.
 
-    Called AFTER the changelog entry and the ``snapshot_complete`` audit line,
-    and that ordering is the whole point. ``save_timestamps`` raises
-    WriteFailed, so while it ran first a run whose files were already copied to
-    the destination left the branch's own history saying nothing had happened:
-    no changelog entry, no audit record, and an exception out of run_snapshot on
-    top. The map is state for the NEXT run; the record is the evidence for THIS
-    one, and losing the map must not cost the record.
-
-    The failure is reported, never swallowed: on the result (so the summary
-    shows it), on stderr through ``error()`` (which marks the command failed, so
-    the CLI exits non-zero), and in the audit trail. A stale map only costs a
-    full re-copy next run, so raising here — after the copy is on disk and
-    recorded — would abort a run that in every other respect succeeded.
-
-    Args:
-        project_root: Absolute path to the project root.
-        filtered: The (absolute, relative) file pairs this run copied.
-        result: The run's result, which carries any failure back to the caller.
+    Runs after the changelog and audit record: losing the map must not cost this run's record. A failure
+    is reported (result, error(), trail), never raised: a stale map only costs a full re-copy next run.
     """
     try:
         save_timestamps(project_root, _build_saved_timestamps(filtered))
@@ -178,22 +156,11 @@ def _quick_check_early_return(
 
 
 def run_snapshot(project_root: str, show_panels: bool = True, verb: str = PRIMARY_COMMAND) -> BackupResult:
-    """Run a full snapshot backup for a project.
-
-    The run announces itself in ``.backup/running/snapshot.json`` and turns
-    SIGTERM into a stop between files (DPLAN-0412); the file goes on every
-    exit path.
-
-    Args:
-        project_root: Absolute path to the project.
-        show_panels: Whether to show rich CLI output.
-        verb: What was invoked, for the running file: snapshot, or all.
-    """
+    """Run a full snapshot backup for a project."""
     start = time.time()
 
-    # create_backup_dir refuses a non-directory by returning None. Respect that
-    # refusal here: the rest of the pipeline would otherwise mkdir the whole
-    # tree and "back up" the .backupignore it had just written.
+    # Respect create_backup_dir's None refusal: the pipeline would otherwise mkdir the tree
+    # and back up the .backupignore it had just written.
     if create_backup_dir(project_root) is None:
         return refuse_missing_root("snapshot", project_root, show_panels)
 
@@ -221,13 +188,11 @@ def _snapshot_run(
     all_files = list(walk_project(project_root))
     filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
-    # Ceiling BEFORE any copying: a run this large is an ignore-pattern miss,
-    # not a big project. Refusing costs seconds; the alternative was 7.5h.
+    # Ceiling before any copying: a run this large is an ignore-pattern miss, not a big project.
     breach = check_ceiling(filtered, config)
     if breach is not None:
         return refuse_oversized_run("snapshot", project_root, breach, show_panels)
 
-    # Quick-check: skip if nothing changed since last snapshot
     prev_timestamps = load_timestamps(project_root)
     if prev_timestamps:
         current_timestamps = _build_current_timestamps(filtered)
@@ -271,9 +236,8 @@ def _snapshot_run(
     result.duration_seconds = duration
     result.errors = copy_result.get("errors", [])
 
-    # Stopped by request: no changelog entry (lanes.snapshot.last means a run
-    # that completed) and no timestamp map (a partial copy must not read as
-    # current to the next quick-check). The stopped line is the last word.
+    # Stopped: no changelog entry (lanes.snapshot.last means a completed run) and no timestamp map
+    # (a partial copy must not read as current to the next quick-check).
     if copy_result.get("stopped"):
         result.add_warning("stopped by request")
         report_stopped(
@@ -298,8 +262,7 @@ def _snapshot_run(
     )
     logger.info(f"[backup] Snapshot complete: {result.files_copied} files")
 
-    # Last, and deliberately: the copy is on disk and in the record before the
-    # map that only the next run reads is allowed to fail anything.
+    # Last: the copy is on disk and recorded before the map only the next run reads can fail anything.
     _persist_timestamps(project_root, filtered, result)
 
     if show_panels:
@@ -319,11 +282,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
         return True
@@ -332,8 +292,6 @@ def handle_command(command: str, args: list) -> bool:
     run_snapshot(project_root)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

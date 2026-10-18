@@ -3,18 +3,16 @@
 # Description: Registry repair — thin CLI layer for registry synchronization
 # Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
 
-Thin CLI module that parses arguments and delegates to the sync handler.
-All implementation logic lives in apps/handlers/sync_registry_ops.py.
+Reference: docs/registry_and_repair.md
 """
 
 from aipass.prax import logger
 
-# CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, err_console, error, warning
 
 from aipass.spawn.apps.handlers.sync_registry_ops import (
@@ -40,25 +38,11 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "sync-registry")
-        args: List of arguments for the command
-
-    Returns:
-        True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "sync-registry":
         return False
 
-    # No args → introspection
     if not args:
         print_introspection()
         return True
@@ -70,23 +54,8 @@ def handle_command(command: str, args: list) -> bool:
     return handle_sync_registry(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_sync_registry(args: list[str]) -> int:
     """Parse args and execute sync.
-
-    Args patterns:
-        []                          -> report only (show mismatches)
-        ["--fix"]                   -> auto-repair mismatches + owner/identity reconcile
-        ["--check"]                 -> read-only owner/identity health check
-        ["--check", "--json"]       -> machine-readable check output
-        ["--fix", "--dry-run"]      -> show planned owner/identity fixes without applying
-
-    An optional positional path can precede any flag to target
-    a specific project registry (default: CWD-based discovery).
 
     Returns exit code (0=success/clean, 1=failure/issues).
     """
@@ -198,11 +167,6 @@ def _handle_fix(registry_path, dry_run=False) -> int:
     return 0
 
 
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
-
-
 def _print_summary(result: dict) -> None:
     """Print a rich summary of the sync operation."""
     stale = result.get("stale", [])
@@ -214,13 +178,12 @@ def _print_summary(result: dict) -> None:
     console.print("[bold]Registry Sync Report[/bold]")
     console.print()
 
-    # Healthy
     if healthy:
         console.print(f"  [green]Healthy ({len(healthy)}):[/green]")
         for name in sorted(healthy):
             console.print(f"    {name}")
 
-    # Stale — names follow their header onto stderr, or stdout files them under Healthy
+    # Stale and unregistered names follow their header onto stderr, or stdout files them under Healthy.
     if stale:
         error(f"Stale ({len(stale)}): registered but missing/invalid")
         for name in sorted(stale):
@@ -228,7 +191,6 @@ def _print_summary(result: dict) -> None:
     else:
         console.print("  [green]No stale entries[/green]")
 
-    # Unregistered — same rule as stale
     if unregistered:
         warning(f"Unregistered ({len(unregistered)}): on disk but not in registry")
         for name in sorted(unregistered):
@@ -236,7 +198,6 @@ def _print_summary(result: dict) -> None:
     else:
         console.print("  [green]No unregistered branches[/green]")
 
-    # Fix status
     ids_fixed = result.get("ids_fixed", [])
     if fixed or ids_fixed:
         console.print()

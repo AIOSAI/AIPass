@@ -3,50 +3,13 @@
 # Description: Stale Header Date Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-09-25
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 Stale Header Date Standards Checker Handler
 
-Test template v1 item 5 puts the META header on top of every test file, and
-the header says ``# Modified: <date>``. The date is a claim about the file,
-and it goes stale the moment a change lands without moving it. The 2026-09-24
-review of @backup's tests found 14 of 14 headers reading 2026-09-22 after
-b92e0361 rewrote every one of them on 2026-09-23.
-
-THE DATE OF TRUTH IS VERSION CONTROL'S. A file is stale when its ``Modified:``
-date is older than the author date of the last commit that touched it. A
-file with uncommitted changes, or one never committed, is judged as of TODAY:
-its content is newer than any commit, so a change that did not move the date
-is convicted at the edit (the checklist hook runs on every write) and a change
-that moved it passes at once. That is also what keeps a verdict stable across
-the commit that follows, which matters because the audit's incremental cache
-keys a file's result on its (mtime, size), and a commit changes neither.
-
-THIS IS THE FIRST CHECKER IN THE PACK TO READ GIT, and it reads only:
-``rev-parse``, ``log``, ``diff --name-only`` and ``ls-files``, one batch per
-directory, cached for the process. Where the history cannot answer, it
-DECLINES rather than passes -- the file is reported not applicable and stays
-out of the average, because a 100 would claim a measurement that never
-happened:
-
-  * no git on PATH, or the file is not in a work tree (an installed wheel, a
-    tarball);
-  * a SHALLOW clone, where every file's last commit is the one HEAD commit.
-    CI's seedgo-audit job checks out with ``fetch-depth: 0`` (ci.yml), so the
-    gate sees full history and matches a local audit; any other shallow
-    checkout declines the whole lane rather than convict or acquit on a
-    history it does not have;
-  * a file git has no history for and does not list as changed (ignored).
-
-A file with no ``Modified:`` line is not this rule's business: item 5 owns the
-header's presence, and ``file_top`` convicts its absence.
-
-CHECK FIRST, measured 2026-09-25 over the fleet's 561 test files: 422 carry a
-``Modified:`` line, 320 of them are older than their last commit, and 182 of
-those by more than 30 days. The number is large because the date has never
-been read by anything; nothing is tuned to make it smaller.
+Reference: stale_header_date.md
 """
 
 import datetime
@@ -188,15 +151,7 @@ def _declined(reason: str) -> Dict:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file's ``Modified:`` date against the file's own history.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file's ``Modified:`` date against the file's own history."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 

@@ -3,30 +3,14 @@
 # Description: renders an audit-tests artifact to the terminal
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 The lane's terminal output. Language-neutral: it renders the ARTIFACT.
 
-Nothing here knows what pytest is. It reads `group_list`, `groups`, `harness`
-and `refusal` — the vocabulary every ecosystem's adapter fills — so a Rust
-adapter's run renders through this file unchanged. That is the same seam the
-core keeps everywhere else, and rendering is where it is easiest to lose:
-one `if ecosystem == "pytest"` here and the second ecosystem is a rewrite.
-
-THREE RULES THIS FILE EXISTS TO ENFORCE VISUALLY:
-
-  1. A SCORE NEVER PRINTS ALONE. Law S8 in its rendered form. `100` on its own
-     reads as "this suite is clean"; printed beside the count of child
-     processes and sqlite handles nobody watched, it reads as what it is — no
-     violation SEEN.
-  2. A `not_applicable` GROUP PRINTS ITS REASON. Law S1. A group rendered as a
-     dash is indistinguishable from a group that scored zero, and the whole
-     point of the status vocabulary is that those differ.
-  3. A NOMINATION IS NEVER RENDERED AS A VERDICT. Law M1 and Law M11. The
-     lines say "suspect" and "improve", the delete family never appears, and
-     the deletion-safety probe's absence is stated rather than implied.
+No ecosystem branches here. A score never prints alone (S8), a `not_applicable`
+group prints its reason (S1), and a nomination never renders as a verdict (M1).
 """
 
 from typing import Dict, List
@@ -34,12 +18,9 @@ from typing import Dict, List
 from aipass.cli import console
 from aipass.cli.apps.modules import error, success, warning
 
-#: How many nomination rows to print per group before summarising the rest.
-#: The ARTIFACT is always untruncated; this is a terminal courtesy and the
-#: line below it says exactly how many were withheld from the screen.
+#: Terminal preview only; the artifact is always untruncated.
 NOMINATION_PREVIEW = 5
 
-#: Status colours, so a reader scanning the block sees shape before words.
 STATUS_STYLE: Dict[str, str] = {
     "measured": "green",
     "not_applicable": "dim",
@@ -116,9 +97,6 @@ def _render_group_line(name: str, group: dict) -> None:
     style = STATUS_STYLE.get(status, "yellow")
 
     if status == "not_applicable":
-        # Law S1 rendered: the reason prints, always. A dash here and a zero
-        # would look the same on the screen, which is the confusion the whole
-        # status vocabulary exists to prevent.
         console.print(f"  [{style}]{name:34}[/{style}] [dim]not_applicable - {group.get('reason', '')[:80]}[/dim]")
         return
 

@@ -3,18 +3,10 @@
 # Description: Tests for bridge contract registry module
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/bridge.py, the contract registry."""
-
-# Tests:
-# - register + resolve: round-trip registration
-# - resolve unknown: returns None
-# - list_contracts: sorted listing
-# - clear: empties registry
-# - print_introspection: with and without contracts
-# - handle_command: always returns False
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that bridge.py parses and imports
@@ -38,11 +30,7 @@ from aipass.api.apps.modules import bridge as bridge_module
 
 
 def _spy_on_header(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Record the titles bridge hands to header at api's own border, calling the real header.
-
-    The assert reads what api hands over, never cli's private trigger, so a change
-    inside cli does not turn a test of api red (api, fleet green leg 4).
-    """
+    """Record the titles bridge hands to header at api's own border, calling the real header."""
     titles: list = []
     real_header = bridge_module.header
 
@@ -62,11 +50,6 @@ def _clean_registry():
     clear()
 
 
-# =============================================
-# register + resolve
-# =============================================
-
-
 class TestRegisterResolve:
     """Verifies contract registration and resolution."""
 
@@ -82,11 +65,6 @@ class TestRegisterResolve:
     def test_resolve_unknown_returns_none(self) -> None:
         """Unregistered contract resolves to None."""
         assert resolve("nonexistent") is None
-
-
-# =============================================
-# list_contracts
-# =============================================
 
 
 class TestListContracts:
@@ -105,11 +83,6 @@ class TestListContracts:
         assert list_contracts() == ["alpha", "middle", "zebra"]
 
 
-# =============================================
-# clear
-# =============================================
-
-
 class TestClear:
     """Verifies registry clearing."""
 
@@ -122,18 +95,11 @@ class TestClear:
         assert list_contracts() == []
 
 
-# =============================================
-# print_introspection
-# =============================================
-
-
 class TestPrintIntrospection:
     """Verifies introspection output for empty and populated registries."""
 
     def test_with_contracts(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
-        """Introspection prints registered contract names.
-        The title is handed to cli's header at api's border (api, fleet green leg 4).
-        Mutant that reddens it: header replaced by a plain print of the same title."""
+        """Introspection prints registered contract names."""
         register("search", lambda: None)
         register("memory", lambda: None)
         titles = _spy_on_header(monkeypatch)
@@ -161,11 +127,6 @@ class TestPrintIntrospection:
         assert "Registered contracts:" not in out
 
 
-# =============================================
-# handle_command
-# =============================================
-
-
 class TestHandleCommand:
     """Verifies that handle_command always returns False and stays silent."""
 
@@ -176,8 +137,7 @@ class TestHandleCommand:
     def test_silent_no_args(self, capsys: object) -> None:
         """Bridge owns no commands — a no-arg command must not print its banner.
 
-        Bridge is discovered before the module that owns the command, so any
-        output here leaks into every no-arg command's output.
+        Bridge is discovered first, so any output here leaks into every command.
         """
         handle_command("get-key", [])
 

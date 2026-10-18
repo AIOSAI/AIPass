@@ -3,16 +3,11 @@
 # Description: SEEDGO - Standards Platform for AIPass
 # Version: 2.0.3
 # Created: 2026-03-05
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 SEEDGO - Standards Platform for AIPass
-
-Routes commands to seedgo modules for standards compliance.
-- 'audit aipass' → standards_audit module (pack-aware compliance scanning)
-- 'standards_query aipass_standards architecture' → content query module
-- Modules auto-discovered from modules/ directory
 """
 
 import sys
@@ -25,16 +20,10 @@ from aipass.cli import console, header
 from aipass.cli.apps.modules import error
 from aipass.seedgo.apps.modules import CommandRefused
 
-# The header above and this constant are the two places a version lives; --version
-# and the README read this one. They disagreed (2.1.0 vs 2.0.0) until 2026-09-06.
+# The header and this constant both carry the version; --version and the README read this one.
 VERSION = "2.0.1"
 SEEDGO_ROOT = Path(__file__).parent
 MODULES_DIR = SEEDGO_ROOT / "modules"
-
-
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 
 def discover_modules() -> List[Any]:
@@ -65,11 +54,8 @@ def discover_modules() -> List[Any]:
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """Route command to appropriate module.
 
-    A CommandRefused is NOT a module error. It is the module's answer, carrying
-    the exit code the shell must see, so it passes through the catch-all below
-    untouched - logging it and moving to the next module would print the
-    refusal, swallow its code, and then let some later module claim the same
-    command.
+    A CommandRefused is the module's answer, not an error: it passes the catch-all untouched so its exit
+    code reaches the shell and no later module claims the same command.
     """
     for module in modules:
         try:
@@ -82,17 +68,8 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# PACK DISCOVERY (handler-based)
-# =============================================================================
-
-
 def discover_handler_packs() -> list:
-    """Discover checker packs from handlers/*_standards/ directories.
-
-    Returns list of dicts with name, path, check_count, content_count.
-    Used by introspection and help displays.
-    """
+    """Discover checker packs from handlers/*_standards/ directories."""
     handlers_dir = SEEDGO_ROOT / "handlers"
     packs = []
     if not handlers_dir.exists():
@@ -114,11 +91,6 @@ def discover_handler_packs() -> list:
     return packs
 
 
-# =============================================================================
-# DISPLAY
-# =============================================================================
-
-
 def print_introspection() -> None:
     """Display discovered modules and handler packs."""
     modules = discover_modules()
@@ -129,7 +101,6 @@ def print_introspection() -> None:
     console.print(f"  Version: {VERSION}")
     console.print()
 
-    # Discovered modules
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(modules)}")
     for module in modules:
         name = getattr(module, "__name__", "unknown").split(".")[-1]
@@ -139,7 +110,6 @@ def print_introspection() -> None:
         console.print("  [dim]No modules discovered[/dim]")
     console.print()
 
-    # Discovered handler packs
     if packs:
         console.print(f"[yellow]Checker Packs:[/yellow] {len(packs)}")
         for pack in packs:
@@ -170,7 +140,6 @@ def print_help() -> None:
     console.print("─" * 70)
     console.print()
 
-    # What is seedgo
     console.print("[bold cyan]WHAT IS SEEDGO?[/bold cyan]")
     console.print()
     console.print("Seedgo is the [bold]AIPass Standards Platform[/bold] — it:")
@@ -180,7 +149,6 @@ def print_help() -> None:
     console.print("  [cyan]•[/cyan] Supports bypass rules for deliberate exceptions")
     console.print()
 
-    # Handler packs
     if packs:
         console.print("[bold cyan]CHECKER PACKS:[/bold cyan]")
         console.print()
@@ -194,7 +162,6 @@ def print_help() -> None:
     console.print("─" * 70)
     console.print()
 
-    # Usage
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
 
@@ -331,23 +298,16 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def main() -> int:
     """Main entry point - routes to modules."""
     try:
         modules = discover_modules()
         args = sys.argv[1:]
 
-        # No args → introspection (discovery mode)
         if not args:
             print_introspection()
             return 0
 
-        # Help flag in the command slot → full branch help with usage
         if args[0] in ["--help", "-h", "help"]:
             print_help()
             return 0
@@ -359,14 +319,9 @@ def main() -> int:
         command = args[0]
         remaining = args[1:] if len(args) > 1 else []
 
-        # A help flag ANYWHERE after the command is a question about that
-        # command, not an instruction. Reading remaining[0] only meant
-        # `seedgo checklist <file> --help` routed and RAN. Scanned inline
-        # rather than through handlers/cli/help_flags.py: the encapsulation
-        # standard says an entry point uses modules, never handlers, and the
-        # modules below carry the shared predicate. The bare word is left to
-        # them too — it can be a legitimate value in a later slot, and each
-        # module already answers for it at position 0.
+        # A help flag anywhere after the command is a question about it, never an instruction to run.
+        # Scanned inline because an entry point uses modules, never handlers; the bare word `help` is
+        # left to the modules, where a later slot may legitimately hold it.
         if any(arg in ("--help", "-h") for arg in remaining):
             for module in modules:
                 if module.handle_command(command, ["--help"]):
@@ -374,17 +329,13 @@ def main() -> int:
             print_help()
             return 0
 
-        # Route to modules
         if route_command(command, remaining, modules):
             return 0
 
         error(f"Unknown command: {command}", suggestion="Run 'seedgo --help' for usage")
         return 1
     except CommandRefused as refused:
-        # The module already printed why. The owner's standing ruling, fleet
-        # sweep 2026-09-07: an unknown command or argument FAILS. Until this
-        # arm existed, `audit --bogus-flag` printed "exit code: 7" and handed
-        # the shell a 0 on the next line.
+        # The module already printed why; an unknown command or argument exits non-zero.
         return refused.code
     except Exception as exc:
         logger.error("[seedgo] Unhandled error in main: %s", exc)

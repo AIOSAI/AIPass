@@ -3,26 +3,12 @@
 # Description: Stop module — ends a project's running lanes by request, and the stopped report every lane prints
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Stop Module — ``stop <project_root|@name> [lane]`` ends the lanes running for a project.
 
-Reads the project's running files (``.backup/running/<lane>.json``), sends
-SIGTERM to the named lane's process, or to every running lane's when none is
-named, waits up to STOP_WAIT_SECONDS for it to go and sends SIGKILL after. One
-stdout line per stopped lane: ``stopped <lane> (pid N)``, exit 0. Nothing
-running: one line, ``nothing running for <project>`` or ``<lane> is not running
-for <project>``, exit non-zero. ``<project>`` is the name status --json reports.
-
-A pid is signalled only when its process started no later than the lane and
-its command line is backup running that verb for that root
-(handlers/state/lane_process.py); anything else is refused on stderr.
-
-The lane side is :func:`report_stopped`, which every lane calls when it
-honours the stop flag: the trail row ``<lane>_stopped``, the stopped line as the
-run's last stdout line, and the mark the entry point turns into exit 130.
-The contract is devpulse's backup_door_contract.md, "stop".
+Reference: docs/cli.md
 """
 
 import os
@@ -60,8 +46,7 @@ USAGE = "stop <project_root|@name> [lane]"
 #: How long a lane is given to go after SIGTERM before SIGKILL.
 STOP_WAIT_SECONDS = 30
 
-#: The words a lane may be named by: the three that do work, and all, which
-#: names whatever sub-lane an all run is in.
+#: The words a lane may be named by; all names whatever sub-lane an all run is in.
 LANE_WORDS = ("snapshot", "versioned", "drive_sync", "all")
 
 __all__ = ["STOPPED_EXIT", "reset_stop_state", "run_was_stopped", "report_stopped", "stop_lanes", "handle_command"]
@@ -94,17 +79,7 @@ def report_stopped(
     failed: int,
     bytes_done: int,
 ) -> None:
-    """A lane honoured the stop flag: record it, say it last, and mark the run stopped.
-
-    Args:
-        lane: The lane that stopped.
-        verb: What was invoked (the lane, or all).
-        project_root: The project.
-        done: Files gone through before the stop.
-        total: Files the run had planned.
-        failed: Of done, the files that failed.
-        bytes_done: Bytes copied or uploaded before the stop.
-    """
+    """A lane honoured the stop flag: record it, say it last, and mark the run stopped."""
     trail.log_operation(
         f"{lane}_stopped",
         {
@@ -155,17 +130,7 @@ def _end_entry(entry: dict, project_root: str, wait_seconds: float) -> bool:
 
 
 def stop_lanes(project_root: str, lane: str | None = None, wait_seconds: float = STOP_WAIT_SECONDS) -> bool:
-    """Stop a project's running lanes, or the one named.
-
-    Args:
-        project_root: Absolute project root.
-        lane: One of LANE_WORDS, or None for every running lane.
-        wait_seconds: How long SIGTERM is given before SIGKILL.
-
-    Returns:
-        True when every chosen lane was stopped. Nothing running, or a pid
-        refused by the guard, is False and marks the command failed.
-    """
+    """Stop a project's running lanes, or the one named."""
     project = _project_name(project_root)
     running = read_running(project_root)
     if lane is None:
@@ -222,8 +187,6 @@ def handle_command(command: str, args: list) -> bool:
     stop_lanes(project_root, lane)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

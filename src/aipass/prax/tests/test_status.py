@@ -3,15 +3,10 @@
 # Description: Unit tests for PRAX status module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
-
-# Tests for prax status module command routing, help text, and introspection.
-#
-# status is imported at the top and its collaborators are doubled where status
-# binds them; the console is the real one, read with capsys (prax, leg 9).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(error_handling) — sync_status's error on an absent or unreadable registry, covered by that row
@@ -29,11 +24,6 @@ from aipass.prax.apps.handlers.status import sync as status_sync
 from aipass.prax.apps.modules import status as status_module
 
 
-# =============================================
-# HELPERS
-# =============================================
-
-
 def _status_block(last_scan):
     """What get_system_status answers, with the Last Scan block the test names."""
     return {
@@ -49,12 +39,7 @@ def _status_block(last_scan):
 
 @pytest.fixture
 def sync_calls(monkeypatch):
-    """status with its collaborators doubled where status binds them (prax, leg 9).
-
-    The console stays the real one, so what the command prints is read with
-    capsys; the conftest's header recorder keeps the trigger bus closed.
-    Returns the list each sync_status call appends to.
-    """
+    """status with its collaborators doubled where status binds them; returns the sync call log."""
     calls = []
 
     def fake_sync_status():
@@ -71,11 +56,6 @@ def sync_calls(monkeypatch):
     monkeypatch.setattr(status_module, "logger", MagicMock())
     monkeypatch.setattr(status_module, "get_system_status", lambda: _status_block({}))
     return calls
-
-
-# =============================================
-# TESTS
-# =============================================
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h", "help"])
@@ -100,12 +80,7 @@ def test_handle_command_no_args_shows_system_status(sync_calls, capsys):
 
 
 def test_handle_command_unknown_sub_argument_is_refused(sync_calls, capsys):
-    """An unknown sub-argument is refused by name — the quietest swallow of the set.
-
-    `status bogus` printed the normal status block with no complaint and exited
-    0, so a typo'd subcommand was indistinguishable from the real thing
-    (@devpulse's fleet CLI sweep, 2026-09-07).
-    """
+    """An unknown sub-argument is refused by name, not answered with the status block."""
     with pytest.raises(UnknownArgument) as refusal:
         status_module.handle_command("status", ["bogus"])
 
@@ -149,17 +124,8 @@ def test_handle_command_sync_routes_to_handler(sync_calls, capsys):
     assert "3 branches scanned" in captured.out + captured.err
 
 
-# =============================================
-# The Last Scan line (DPLAN-0339 step 4)
-# =============================================
-
-
 def _last_scan_line(monkeypatch, capsys, last_scan):
-    """The Last Scan line as bare `status` prints it (prax, leg 6: through the command).
-
-    get_system_status is stubbed where status looks, carrying the given block;
-    the line is read off the real console with capsys (prax, leg 9).
-    """
+    """The Last Scan line as bare `status` prints it, read off the real console."""
     monkeypatch.setattr(status_module, "get_system_status", lambda: _status_block(last_scan))
     capsys.readouterr()
 
@@ -175,9 +141,7 @@ def test_last_scan_never_run_says_how_to_run_it(sync_calls, monkeypatch, capsys)
 
 
 def test_last_scan_shows_the_stamp_and_both_deltas(sync_calls, monkeypatch, capsys):
-    """The line that replaced `File Watcher`, which reported the calling
-    process and therefore read Inactive on every run while discovery was
-    healthy."""
+    """The Last Scan line carries the stamp and both deltas."""
     line = _last_scan_line(
         monkeypatch,
         capsys,
@@ -188,39 +152,21 @@ def test_last_scan_shows_the_stamp_and_both_deltas(sync_calls, monkeypatch, caps
 
 
 def test_last_scan_survives_a_block_missing_its_counts(sync_calls, monkeypatch, capsys):
-    """A registry written by an older prax has a timestamp and no deltas; the
-    status command must still print a line rather than raise."""
+    """An older registry with a timestamp and no deltas still prints a line rather than raise."""
     line = _last_scan_line(monkeypatch, capsys, {"timestamp": "2026-09-12T07:57:47+00:00"})
 
     assert line == "2026-09-12T07:57:47+00:00 (+? / -?)"
 
 
 def test_last_scan_unreadable_is_not_reported_as_never(sync_calls, monkeypatch, capsys):
-    """None is load_last_scan's answer for a registry it could not read (prax, leg 7).
-
-    Printed as "never" it told the operator to scan a registry that had been
-    scanned. The pin's proof is its mutant (None folded back into "never").
-    """
+    """None (load_last_scan could not read the registry) must not print as "never"."""
     line = _last_scan_line(monkeypatch, capsys, None)
 
     assert line == "unreadable — the registry could not be read; see the prax log"
 
 
-# =============================================
-# The decommissioned STATUS flow (@devpulse ruling 2026-09-15)
-# =============================================
-
-
 class TestSyncDoesNotResurrectTheRootFile:
-    """TDPLAN-0007 decommissioned the STATUS flow and the fleet deleted the file.
-
-    The trigger registration was unwired; the CLI subcommand was not, so
-    `status sync` still walked every branch and wrote STATUS.md back to the repo
-    root — the 2026-08-13 audit recreated it by running the command, and prax's
-    own docs carried it as an open defect. @devpulse ruled on 2026-09-15: stop.
-    The engine stays revivable (the scan, the registry read and the parse are
-    untouched); what it must not do is write.
-    """
+    """The STATUS flow is decommissioned: `status sync` still scans but must never write STATUS.md."""
 
     def _sync_module(self, monkeypatch, repo_root):
         monkeypatch.setattr(status_sync, "_find_repo_root", lambda: repo_root)

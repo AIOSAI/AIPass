@@ -33,6 +33,10 @@ of 17 / 51 and this rule's 13 / 22.
 
 `autouse=True` is never convicted. Nothing requests it by design; that is what autouse means.
 
+A retired test requests nothing. `tests/.archive` and the other `SOURCE_SKIP_DIRS` are not
+read: `.archive` is git-ignored, so CI never sees it, and a request from there passes locally
+and fails on every CI runner.
+
 ---
 
 ## Built alone, not inside `conftest_fixtures`

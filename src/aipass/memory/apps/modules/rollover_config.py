@@ -3,43 +3,14 @@
 # Description: The `config` verb surface over rollover limits - get / set / set-default
 # Version: 1.3.0
 # Created: 2026-09-15
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rollover Config Verbs (DPLAN-0302)
 
-The `config` verb surface over the rollover entry-count limits in
-memory.config.json, lifted out of ``modules/rollover.py`` when that module
-reached the seedgo length standard. The code here is the code that was there:
-the routing, the validation, the rendered views and the introspection and help
-pages. The TEXT of the help page and the limit blocks is built by
-``handlers/cli/config_content.py``, which returns lines and never prints; this
-module prints them. That kept the module under @seedgo's 600-line band without a
-bypass, a rename or a fourth split (FPLAN-0593 Phase 5).
-
-WHY IT SITS IN ``modules/`` AND NOT ``handlers/``. This is DISPLAY code - it is
-almost nothing but ``console.print``. ``apps/handlers/`` is private
-implementation and may not print: @seedgo's ``cli`` standard fails any file
-under that tree that calls ``console.print()`` or imports
-``aipass.cli.apps.modules``, because a handler is supposed to return data and
-let a module render it. There is no rendering-free version of a help page, so
-the verbs belong in the public tier that is allowed to speak.
-
-IT DESCRIBES A VERB, IT DOES NOT OWN ONE. ``modules/rollover.py`` keeps owning
-the ``config`` word, routes it through ``_handle_config`` here, and re-exports
-every name below, because the CLI and the tests reach them through
-``rollover.<name>``. The dependency runs one way - this module never imports
-``rollover``. The ``handle_command`` at the foot answers only the module's own
-name and prints the introspection page: ``apps/memory.py::discover_modules``
-duck-types on that function, and ``modules/fleet.py`` records why a modules/
-file without one is the wrong answer - three @seedgo standards fail it. It
-executes no config work, for the same reason the split happened: one word, one
-router.
-
-THE ``--json`` EMITTER IS NEXT DOOR. ``_Json``, ``_emit`` and ``_refuse`` live
-in ``modules/rollover_json.py`` and are imported here and re-exported by
-``rollover.py``, because both halves of the old module answer through them.
+Display code, so it lives in modules/ (handlers may not print); help text comes from handlers/cli/config_content.py.
+rollover.py owns the `config` word and re-exports every name here; this module never imports rollover.
 """
 
 from typing import List
@@ -55,9 +26,7 @@ from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_jso
 from aipass.memory.apps.handlers.cli import config_content
 from aipass.memory.apps.handlers.monitor import detector
 
-# The `--json` emitter moved to modules/rollover_json.py when this module reached
-# the seedgo length standard. The arrow runs one way — that module imports nothing
-# from here, which is why the entry-type tuples moved with it and come back in.
+# rollover_json imports nothing from here, so the entry-type tuples live there and come back in.
 from aipass.memory.apps.modules.rollover_json import (
     _DISPLAY_TYPES,
     _ENTRY_TYPES,
@@ -71,8 +40,6 @@ from aipass.memory.apps.modules.rollover_json import (
 )
 
 
-# `config` is the verb surface over rollover limits — the rollover module owns
-# rollover config, so nothing has to hand-edit memory.config.json (DPLAN-0302).
 _CONFIG_SUBCOMMANDS = {
     "get": "Show effective limits — all branches, or one with @branch",
     "set": "Set one branch's limit: set @branch <type> <count>",
@@ -88,36 +55,19 @@ _VERB_CONFIG_GET = "config get"
 _VERB_CONFIG_SET = "config set"
 _VERB_CONFIG_SET_DEFAULT = "config set-default"
 
-# =============================================================================
-# CONFIG VERBS — ROUTING
-# =============================================================================
-
 
 def _handle_config(args: List[str]) -> bool:
-    """Route the `config` verb. Always returns True — this module owns the word.
-
-    Args:
-        args: Tokens after `config`.
-
-    Returns:
-        True — every path either displays, refuses, or writes.
-    """
-    # No args → introspection (seedgo standard)
+    """Route the `config` verb. Always returns True — this module owns the word."""
     if not args:
         print_config_introspection()
         return True
 
-    # A help flag ANYWHERE wins — asking about `set` must never write.
-    # No config subcommand takes free text, so a bare `help` counts too.
-    # This is evaluated BEFORE --json: `set ... --help --json` is still a
-    # question, so it prints help and writes neither config nor payload.
+    # A help flag ANYWHERE wins, before --json: asking about `set` must never write.
     if wants_help(args, allow_bare_word=True):
         print_config_help()
         return True
 
-    # Machine output is read and REMOVED before positional parsing, so
-    # `set @memory sessions 12 --json` parses identically to the same line
-    # without it, whichever slot the flag rode in.
+    # --json is removed before positional parsing, whichever slot it rode in.
     json_mode = wants_json(args)
     args = strip_json_flag(args)
     if not args:
@@ -146,24 +96,10 @@ def _handle_config(args: List[str]) -> bool:
     return True
 
 
-# =============================================================================
-# CONFIG VERBS — VALIDATION
-# =============================================================================
-
-
 def _resolve_branch(raw: str, ctx: _Json) -> str | None:
-    """Match *raw* against the registry, or refuse.
+    """Match *raw* against the registry case-insensitively; the lowercase key, or None after refusing.
 
-    Registry is truth. Matching is case-INSENSITIVE because the registry
-    carries uppercase names (BACKUP, DAEMON) while per_branch keys are
-    lowercase; the refusal echoes the branch exactly as the operator typed it.
-
-    Args:
-        raw: A `@branch` or bare branch token.
-        ctx: Verb name and machine-output mode for the refusal.
-
-    Returns:
-        The lowercase branch key, or None when the refusal was emitted.
+    The registry carries uppercase names (BACKUP, DAEMON) while per_branch keys are lowercase.
     """
     name = raw[1:] if raw.startswith("@") else raw
 
@@ -209,23 +145,9 @@ def _validate_type(entry_type: str, ctx: _Json) -> bool:
 
 
 def _validate_count(raw: str, entry_type: str, ctx: _Json, branch: str | None = None) -> int | None:
-    """Parse and bound-check a limit, emitting its own refusal.
+    """Parse and bound-check a limit, emitting its own refusal; None when refused.
 
-    Three bounds, widening in what each one knows: the count is a whole
-    number, it is inside ``_MIN_COUNT``/``_MAX_COUNT``, and the file it grows
-    still fits its budget. Only the third depends on the entry type and on
-    what its CO-TENANTS hold — a keep-count multiplies an entry cap, and
-    local.json's 25,000 chars are shared by three families.
-
-    Args:
-        raw: The count token as typed.
-        entry_type: The type the count is for — the ceiling is per type.
-        ctx: Verb name and machine-output mode for the refusal.
-        branch: The branch being written, whose own counts are the co-tenants.
-            None for ``set-default``, where the fleet defaults are.
-
-    Returns:
-        The count, or None when the refusal was emitted.
+    The budget bound depends on co-tenants: local.json's 25,000 chars are shared by three families.
     """
     try:
         count = int(raw)
@@ -265,11 +187,6 @@ def _validate_count(raw: str, entry_type: str, ctx: _Json, branch: str | None = 
     return count
 
 
-# =============================================================================
-# CONFIG VERBS — GET
-# =============================================================================
-
-
 def _show_defaults(defaults: dict) -> None:
     """Print the global default limits block — content built by handlers/cli/config_content."""
     for line in config_content.defaults_lines(defaults, _DISPLAY_TYPES, _READ_ONLY_TYPES):
@@ -289,16 +206,10 @@ def _show_branch_limits(branch: str, limits: dict) -> None:
 
 
 def handle_config_get(args: List[str], ctx: _Json) -> None:
-    """Show rollover limits — defaults plus deviations, or one branch.
-
-    Args:
-        args: Optional `@branch` (or bare branch name) in the first slot.
-        ctx: Verb name and whether to answer as JSON instead of on screen.
-    """
+    """Show rollover limits — defaults plus deviations, or one branch."""
     from aipass.memory.apps.handlers.json import config_loader
 
-    # Resolve BEFORE the banner: a refusal that prints a title panel first
-    # reads as a report that then failed, rather than a request declined.
+    # Resolve BEFORE the banner: a refusal under a title panel reads as a failed report.
     branch = None
     if args:
         branch = _resolve_branch(args[0], ctx)
@@ -355,18 +266,8 @@ def handle_config_get(args: List[str], ctx: _Json) -> None:
     json_handler.log_operation("config_get", {"branches_deviating": len(overrides), "json": ctx.on})
 
 
-# =============================================================================
-# CONFIG VERBS — SET
-# =============================================================================
-
-
 def handle_config_set(args: List[str], ctx: _Json) -> None:
-    """Write one branch's rollover limit override.
-
-    Args:
-        args: `@branch <type> <count>`.
-        ctx: Verb name and whether to answer as JSON instead of on screen.
-    """
+    """Write one branch's rollover limit override."""
     from aipass.memory.apps.handlers.json import config_loader
 
     if len(args) < 3:
@@ -421,12 +322,7 @@ def handle_config_set(args: List[str], ctx: _Json) -> None:
 
 
 def handle_config_set_default(args: List[str], ctx: _Json) -> None:
-    """Write one global default rollover limit, leaving per_branch alone.
-
-    Args:
-        args: `<type> <count>`.
-        ctx: Verb name and whether to answer as JSON instead of on screen.
-    """
+    """Write one global default rollover limit, leaving per_branch alone."""
     from aipass.memory.apps.handlers.json import config_loader
 
     if len(args) < 2:
@@ -473,11 +369,6 @@ def handle_config_set_default(args: List[str], ctx: _Json) -> None:
     json_handler.log_operation("config_set_default", {"entry_type": entry_type, "count": count, "json": ctx.on})
 
 
-# =============================================================================
-# CONFIG VERBS — THE META LINE FOLLOWS THE WRITE (DPLAN-0414 T7)
-# =============================================================================
-
-
 def _rerender(entry_type: str, before: dict) -> List[str]:
     """Re-render the meta lines the write moved (tab_renderer decides whose); each left stale is a warning."""
     from aipass.memory.apps.handlers.json import config_loader
@@ -492,20 +383,10 @@ def _rerender(entry_type: str, before: dict) -> List[str]:
     return result["branches"]
 
 
-# =============================================================================
-# CONFIG VERBS — INTROSPECTION & HELP
-# =============================================================================
-
-
 def print_config_introspection() -> None:
     """Display config-verb introspection — the page under the CLI's name for it.
 
-    Two names for one page, and the body lives under the OTHER one. @seedgo's
-    introspection standard reads the source for ``console.print`` calls inside
-    a function literally named ``print_introspection``, so a delegation there
-    reads as a module that prints nothing. ``rollover.py`` re-exports this name
-    and routes the bare ``config`` verb to it, and the verb's name is part of
-    the CLI contract — so this is the alias and that is the body.
+    The alias, not the body: seedgo reads console.print calls inside print_introspection literally.
     """
     print_introspection()
 
@@ -541,12 +422,7 @@ def print_introspection() -> None:
 
 
 def print_config_help() -> None:
-    """Display config-verb help — the BOUNDS block reads the LIVE ceilings.
-
-    The page's text lives in handlers/cli/config_content.py, which returns it as
-    lines and never prints; the panel and the printing stay here, where the cli
-    standard allows them (FPLAN-0593 Phase 5).
-    """
+    """Display config-verb help — the BOUNDS block reads the LIVE ceilings."""
     from aipass.memory.apps.handlers.json import config_loader
 
     console.print()
@@ -565,15 +441,7 @@ def print_config_help() -> None:
 def handle_command(command: str, args: list) -> bool:
     """Entry point for drone module discovery — describes the `config` verb, never runs it.
 
-    The verb itself is ``drone @memory config``, owned and routed by
-    ``modules/rollover.py``; this module is where its implementation lives
-    after the FPLAN-0593 Phase 5 split. Discovery is duck-typed on this
-    function, and ``fleet.py`` records the branch convention it settled on:
-    a modules/ file that is invisible to discovery fails three @seedgo
-    standards, so it is discoverable and answers introspection only.
-
-    Executing config work from here would be a second entry to the same verb,
-    which is the drift the split was meant to avoid — one word, one router.
+    Running config work here would be a second entry to the verb rollover.py routes: one word, one router.
     """
     if command != "rollover_config":
         return False

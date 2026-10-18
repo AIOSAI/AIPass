@@ -3,29 +3,14 @@
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
 # Version: 1.0.1
 # Created: 2026-07-20
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Adopt Handler — PRIVATE implementation
 
-Business logic for `aipass adopt`. Turns an EXISTING directory at
-<host>/projects/<name> into a full AIPass project: sealed registry,
-resident agent, .aipass/.claude scaffold.
-
-Unlike `aipass new` (which births a brand-new directory), adopt starts
-from a directory that already has its own content — possibly its own
-git repo, possibly public. Every write is existence-guarded; nothing
-already present is ever overwritten. .gitignore is the one file that's
-patched rather than skipped, since AIPass local state (.trinity/,
-mailbox, *.local.json) must never leak into a tracked commit.
-
-RULES:
-  - Additive only — never overwrite a file that already exists
-  - Never touch the target's git history (no git init/add/commit)
-  - gitignore safety runs BEFORE any other AIPass file is written
-  - Registry-first: mint the project registry before spawning the agent
-  - dry_run performs zero filesystem writes and never calls spawn_agent
+Additive only, and never the target's git history. .gitignore alone is patched rather
+than skipped: AIPass local state must never leak into a tracked commit.
 """
 
 from __future__ import annotations
@@ -83,19 +68,7 @@ def _write_if_missing(path: Path, content: str, *, dry_run: bool, planned: list[
 def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False) -> dict:
     """Adopt an existing directory at <host>/projects/<name> as a full AIPass project.
 
-    Args:
-        target: Existing directory to adopt — must be <host>/projects/<name>.
-        no_agent: Skip resident-agent creation.
-        dry_run: Report what WOULD happen; performs zero filesystem writes and
-            never calls spawn_agent.
-
-    Returns:
-        dict with name, target, host, dry_run, registry_id, registry_file,
-        files, gitignore_action, agent_created, agent_home, spawn_result.
-
-    Raises:
-        RuntimeError: target missing, not a projects/ child, already adopted,
-            or a resident-agent home path collision.
+    ``dry_run`` performs zero filesystem writes and never calls spawn_agent.
     """
     target = target.resolve()
     if not target.is_dir():
@@ -125,18 +98,16 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
     aipass_home = _detect_aipass_home()
     files: list[str] = []
 
-    # gitignore safety FIRST — nothing AIPass-managed gets written before the
-    # target is confirmed to ignore it (target may be a public repo).
+    # First: the target may be a public repo, so nothing AIPass-managed lands before it is ignored.
     gitignore_action = _gitignore_safety(target, dry_run=dry_run)
 
-    # Registry — sealed, minted BEFORE spawn (registry-first rule)
+    # Minted before spawn: registry-first.
     registry_id = None
     registry_filename = f"{reg}_REGISTRY.json"
     if not dry_run:
         registry_id, registry_filename = _write_registry(target, name)
     files.append(registry_filename)
 
-    # .aipass/ — tier files, hooks.json, CLAUDE.md/AGENTS.md
     aipass_dir = target / ".aipass"
     if aipass_home:
         for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
@@ -170,12 +141,10 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
         if md_name == "AGENTS.md":
             _write_if_missing(dest, sc.agents_md(reg), dry_run=dry_run, planned=files)
 
-    # .claude/settings.json — tracked, permissions only
     claude_dir = target / ".claude"
     _write_if_missing(claude_dir / "settings.json", _claude_settings(), dry_run=dry_run, planned=files)
 
-    # .claude/settings.local.json — machine-local AIPASS_HOME + claudeMdExcludes
-    # fence (gitignored). adopt only runs on <host>/projects/<name> (checked above).
+    # nested=True holds: adopt only runs on <host>/projects/<name>, checked above.
     if aipass_home and not is_throwaway_path(aipass_home):
         _write_if_missing(
             claude_dir / "settings.local.json",
@@ -184,10 +153,8 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
             planned=files,
         )
 
-    # .claude/commands/prep.md
     _write_if_missing(claude_dir / "commands" / "prep.md", sc.prep_md(), dry_run=dry_run, planned=files)
 
-    # .venv symlink → AIPass shared runtime
     if aipass_home:
         venv = Path(aipass_home) / ".venv"
         venv_link = target / ".venv"
@@ -196,17 +163,14 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
                 venv_link.symlink_to(venv)
             files.append(str(venv_link))
 
-    # .aipass/scaffold_manifest.json — records which AIPass version wrote which
-    # file, so a later `init update` can tell the template moving on from the
-    # project editing the file (DPLAN-0335). Adopt stamps only what it wrote:
-    # an adopted tree's pre-existing files are the project's, not ours.
+    # The manifest lets `init update` tell a template change from a project edit; adopt
+    # stamps only what it wrote, since the tree's pre-existing files are the project's.
     if not dry_run:
         manifest_file = sm.write_manifest(target, _managed_manifest_entries(target))
         files.append(str(manifest_file))
     else:
         files.append(str(sm.manifest_path(target)))
 
-    # Resident agent — registry MUST exist first (dry_run never spawns)
     spawn_result = None
     agent_created = False
     will_have_agent = not no_agent

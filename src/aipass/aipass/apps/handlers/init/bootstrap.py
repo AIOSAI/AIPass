@@ -3,31 +3,14 @@
 # Description: Init handler — bootstrap an AIPass project in any directory
 # Version: 2.0.3
 # Created: 2026-03-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 Init Bootstrap Handler - PRIVATE implementation
 
-Business logic for `aipass init`. Creates the project scaffold:
-   1. {NAME}_REGISTRY.json            — project registry with UUID
-   2. .aipass/tier0_kernel.md         — tier 0 kernel prompt (every turn)
-   2b..aipass/tier1_navmap.md         — tier 1 navigation map (periodic)
-   3. CLAUDE.md                       — project prompt (Claude Code reads this)
-   4. AGENTS.md                       — Codex equivalent of CLAUDE.md
-   5. README.md                       — getting started guide
-   6. .gitignore                      — standard AIPass ignores
-   7. .claude/settings.json           — Claude Code hooks configuration
-   8. src/                            — directory where agents live
-   9. .ai_mail.local/inbox.json       — empty project mailbox
-
-Projects are NOT citizens — no .trinity/ directory. Identity lives in the
-registry JSON. Init is re-runnable: existing files are skipped, not errors.
-
-RULES:
-  - Pure Python only (no module/prax/cli imports)
-  - Returns dict, raises exceptions on errors
-  - No hardcoded paths
+Projects are not citizens (no .trinity/); identity lives in the registry JSON.
+Init is re-runnable: existing files are skipped, not errors. No module/prax/cli imports.
 """
 
 import json
@@ -57,9 +40,7 @@ _STALE_MANAGED_FILES: list[Path] = [
     Path(".aipass") / "aipass_global_prompt.md",
 ]
 
-#: Scaffold files the manifest records a hash for. These are the files AIPass
-#: writes into a project; everything else in the tree belongs to the project.
-#: Order is display order in the plan.
+#: Scaffold files the manifest hashes, in plan display order; the rest of the tree is the project's.
 _MANIFEST_TRACKED: tuple = (
     ".aipass/tier0_kernel.md",
     ".aipass/tier1_navmap.md",
@@ -73,11 +54,7 @@ _MANIFEST_TRACKED: tuple = (
 
 
 def _sanitize_name(raw: str) -> str:
-    """Sanitize a project name for use in filenames.
-
-    Replaces non-alphanumeric characters (except underscore/hyphen) with
-    underscores and strips leading/trailing underscores.
-    """
+    """Sanitize a project name for use in filenames."""
     return re.sub(r"[^A-Z0-9_-]", "_", raw.upper()).strip("_")
 
 
@@ -93,9 +70,7 @@ def _hook_fingerprint(hook_entry: dict) -> str:
 def _merge_settings(existing: dict, generated: dict) -> dict:
     """Merge AIPass-generated settings with existing user settings.
 
-    Hooks are no longer distributed to projects (provider handles them).
-    On update, strip any previously-injected AIPass hooks from project
-    settings while preserving genuine user hooks.
+    The provider owns hooks now: strip previously-injected AIPass hooks, keep user hooks.
     """
     merged = {}
 
@@ -119,13 +94,11 @@ def _merge_settings(existing: dict, generated: dict) -> dict:
         if cleaned_hooks:
             merged["hooks"] = cleaned_hooks
 
-    # env: AIPASS_HOME is machine-local — never tracked (see settings.local.json).
-    # Strip it from any previously-tracked settings.json; preserve other user vars.
+    # AIPASS_HOME is machine-local (settings.local.json) and must never stay in the tracked file.
     existing_env = {k: v for k, v in existing.get("env", {}).items() if k != "AIPASS_HOME"}
     if existing_env:
         merged["env"] = existing_env
 
-    # Merge permissions: union deny/ask lists
     existing_perms = existing.get("permissions", {})
     generated_perms = generated.get("permissions", {})
     merged_perms: dict[str, list] = {}
@@ -143,7 +116,6 @@ def _merge_settings(existing: dict, generated: dict) -> dict:
     if merged_perms:
         merged["permissions"] = merged_perms
 
-    # Preserve any other top-level keys from existing settings
     for key in existing:
         if key not in merged:
             merged[key] = existing[key]
@@ -200,20 +172,14 @@ def _merge_hooks_json(existing: dict, template: dict) -> dict:
 def _guard_init(target: Path, *, allow_projects_child: bool = False) -> None:
     """Block init if target is inside an agent branch or existing project.
 
-    When *allow_projects_child* is True, the nested-project checks are
-    skipped for targets that are ``<host>/projects/<name>``.  This is used
-    by ``aipass new`` to create projects inside the installation.
-
-    Raises RuntimeError with explanation if init should not proceed.
+    *allow_projects_child* skips the nested-project checks for ``<host>/projects/<name>`` (``aipass new``).
     """
     target = target.resolve()
-    # Block: target IS an agent branch (has passport)
     if (target / ".trinity" / "passport.json").is_file():
         raise RuntimeError(
             f"BLOCKED: '{target}' is an agent branch (has .trinity/passport.json). "
             "Agents are managed by 'drone @spawn', not 'aipass init'."
         )
-    # Block: target is INSIDE an agent branch (passport above us)
     for parent in target.parents:
         if (parent / ".trinity" / "passport.json").is_file():
             raise RuntimeError(
@@ -222,7 +188,6 @@ def _guard_init(target: Path, *, allow_projects_child: bool = False) -> None:
             )
         if parent == parent.parent:
             break
-    # Block: target already has a registry (is already a project)
     for f in target.iterdir() if target.is_dir() else []:
         if f.is_file() and f.name.endswith("_REGISTRY.json"):
             if allow_projects_child and is_projects_child(target):
@@ -231,7 +196,6 @@ def _guard_init(target: Path, *, allow_projects_child: bool = False) -> None:
                 f"BLOCKED: '{target}' is already an AIPass project (has {f.name}). "
                 "Use 'aipass init update' to upgrade an existing project."
             )
-    # Block: target is inside an existing project
     for parent in target.parents:
         if not parent.is_dir():
             continue
@@ -255,17 +219,7 @@ def init_project(
 ) -> dict:
     """Initialize an AIPass project in the target directory.
 
-    Args:
-        target: Directory to initialize
-        project_name: Name for the registry (defaults to directory name)
-        allow_projects_child: When True, allow init inside ``<host>/projects/<name>``.
-
-    Returns:
-        dict with registry_id, registry_file, project_name, target, created_files
-
-    Raises:
-        ValueError: If project name is empty after sanitization
-        RuntimeError: If target is inside an agent branch or existing project
+    Raises ValueError on an empty sanitized name, RuntimeError inside a branch or project.
     """
     target = target.resolve()
     _guard_init(target, allow_projects_child=allow_projects_child)
@@ -282,11 +236,9 @@ def init_project(
     created = []
     aipass_home = _detect_aipass_home()
 
-    # 1. Registry (skip if exists — init is re-runnable)
     registry_filename = f"{name}_REGISTRY.json"
     registry_path = target / registry_filename
     if registry_path.exists():
-        # Read existing registry to get its ID
         existing = json.loads(registry_path.read_text(encoding="utf-8"))
         registry_id = existing["metadata"]["id"]
     else:
@@ -304,23 +256,18 @@ def init_project(
         sm.write_text_lf(registry_path, json.dumps(registry_data, indent=2, ensure_ascii=False) + "\n")
         created.append(str(registry_path))
 
-    # 2. .aipass/
     aipass_dir = target / ".aipass"
     aipass_dir.mkdir(exist_ok=True)
 
-    # 2. .aipass/tier0_kernel.md + tier1_navmap.md — tiered prompt injection
     for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
         tier_dest = aipass_dir / tier_file
         if not tier_dest.exists() and aipass_home:
             tier_src = Path(aipass_home) / ".aipass" / tier_file
             if tier_src.is_file():
-                # Read-then-write, not copy2: copy2 would carry a CRLF checkout
-                # of AIPASS_HOME straight into the project, and the manifest
-                # would then hold a hash no template comparison could match.
+                # Not copy2: a CRLF checkout of AIPASS_HOME would land a hash no template comparison matches.
                 sm.write_text_lf(tier_dest, tier_src.read_text(encoding="utf-8"))
                 created.append(str(tier_dest))
 
-    # 2b. .aipass/hooks.json — project hook config from template
     hooks_json_path = aipass_dir / "hooks.json"
     if not hooks_json_path.exists() and aipass_home:
         template = Path(aipass_home) / ".aipass" / "project_hooks.json"
@@ -331,7 +278,6 @@ def init_project(
         else:
             logger.info("hooks template not found at %s — skipping", template)
 
-    # 3-5. CLAUDE.md, AGENTS.md — project templates or AIPass source
     for md_name in ("CLAUDE.md", "AGENTS.md"):
         dest = target / md_name
         if dest.exists():
@@ -352,20 +298,18 @@ def init_project(
             else:
                 logging.getLogger(__name__).warning("Source %s not found at AIPASS_HOME, skipping", md_name)
 
-    # 6. README.md
     readme_md_path = target / "README.md"
     if not readme_md_path.exists():
         readme_content = sc.readme_md(name).replace("{date}", today)
         sm.write_text_lf(readme_md_path, readme_content)
         created.append(str(readme_md_path))
 
-    # 7. .gitignore
     gitignore_path = target / ".gitignore"
     if not gitignore_path.exists():
         sm.write_text_lf(gitignore_path, sc.gitignore())
         created.append(str(gitignore_path))
 
-    # 9. .claude/settings.json — tracked, permissions only (no machine-local paths)
+    # settings.json is tracked: permissions only, machine-local paths go in settings.local.json.
     claude_dir = target / ".claude"
     claude_dir.mkdir(exist_ok=True)
 
@@ -374,15 +318,13 @@ def init_project(
         sm.write_text_lf(settings_path, _claude_settings())
         created.append(str(settings_path))
 
-    # 9b. .claude/settings.local.json — machine-local AIPASS_HOME (gitignored)
     if aipass_home and not is_throwaway_path(aipass_home):
         local_settings_path = claude_dir / "settings.local.json"
         if not local_settings_path.exists():
             sm.write_text_lf(local_settings_path, claude_local_settings(aipass_home, nested=is_projects_child(target)))
             created.append(str(local_settings_path))
 
-    # 9c. .claude/commands/prep.md — /prep session wrap-up slash command
-    # Only prep.md here — memo.md belongs at provider level (~/.claude/commands/)
+    # Only prep.md here: memo.md belongs at provider level (~/.claude/commands/).
     commands_dir = claude_dir / "commands"
     commands_dir.mkdir(exist_ok=True)
     prep_path = commands_dir / "prep.md"
@@ -390,9 +332,8 @@ def init_project(
         sm.write_text_lf(prep_path, sc.prep_md())
         created.append(str(prep_path))
 
-    # 10. src/<project>/ package structure (pip-installable from day one)
-    # From the sanitized name, never the raw one: a raw name nested a slash, kept
-    # punctuation no import accepts, and crashed on Windows on a trailing dot.
+    # Sanitized name, never raw: a raw one can nest a slash, carry unimportable
+    # punctuation, or end in a dot Windows rejects.
     package_name = name.lower().replace("-", "_")
     src_dir = target / "src"
     src_dir.mkdir(exist_ok=True)
@@ -405,7 +346,6 @@ def init_project(
         sm.write_text_lf(init_py, f'"""{raw_name} — created with aipass init."""\n')
         created.append(str(init_py))
 
-    # 10b. pyproject.toml — pytest config + package metadata
     pyproject_path = target / "pyproject.toml"
     if not pyproject_path.exists():
         sm.write_text_lf(
@@ -415,7 +355,6 @@ def init_project(
         )
         created.append(str(pyproject_path))
 
-    # 10c. tests/ directory with conftest
     tests_dir = package_dir / "tests"
     if not tests_dir.exists():
         tests_dir.mkdir(parents=True)
@@ -423,7 +362,6 @@ def init_project(
         sm.write_text_lf(conftest, '"""Pytest fixtures for ' + raw_name + '."""\n')
         created.append(str(tests_dir))
 
-    # 11. .venv symlink → AIPass shared runtime
     venv_link = target / ".venv"
     if not venv_link.exists() and aipass_home:
         aipass_venv = Path(aipass_home) / ".venv"
@@ -431,9 +369,7 @@ def init_project(
             venv_link.symlink_to(aipass_venv)
             created.append(f".venv (symlink to AIPass runtime: {aipass_venv})")
 
-    # 12. .aipass/scaffold_manifest.json — records which AIPass version wrote
-    # which file, so a later `init update` can tell "the template moved on"
-    # from "the project edited this file" (DPLAN-0335, the conffile rule).
+    # The manifest lets `init update` tell "the template moved on" from "the project edited this file".
     manifest_file = sm.write_manifest(target, _managed_manifest_entries(target))
     created.append(str(manifest_file))
 
@@ -450,8 +386,7 @@ def init_project(
 def _seed_content(md_name: str, name: str, aipass_home: str | None) -> str | None:
     """Content a seed file is created with, or None when no source is available.
 
-    Shared by init and update so a project that lost its ``CLAUDE.md`` gets the
-    same file back that init would have minted.
+    Shared with update so a lost ``CLAUDE.md`` comes back as init would have minted it.
     """
     template = Path(aipass_home) / ".aipass" / f"project_{md_name}" if aipass_home else None
     if template and template.is_file():
@@ -476,8 +411,7 @@ def _read_text(path: Path) -> str | None:
 def _managed_manifest_entries(target: Path) -> dict:
     """Hashes of every tracked scaffold file that exists in *target*.
 
-    Used by ``init_project`` to stamp the manifest for a project AIPass just
-    wrote in full, where every file on disk is by definition ours.
+    Init-only: after a full write, every tracked file on disk is by definition ours.
     """
     entries: dict = {}
     for rel in _MANIFEST_TRACKED:
@@ -490,38 +424,17 @@ def _managed_manifest_entries(target: Path) -> dict:
 def update_project(target: Path, *, apply: bool = True) -> dict:
     """Plan -- and optionally apply -- a scaffold update for an AIPass project.
 
-    Plan mode (``apply=False``) performs ZERO filesystem writes: no mkdir, no
-    manifest stamp, no trust enrolment. Every decision is a read. This is what
-    ``aipass init update --dry-run`` runs, and what makes the preview
-    trustworthy enough to paste to the owner for a go.
-
-    Args:
-        target: Directory containing the AIPass project to update.
-        apply: When False, compute the plan and write nothing.
-
-    Returns:
-        The plan dict. ``files`` carries one entry per managed file
-        (``create`` / ``update`` / ``current`` / ``kept-local`` / ``retire``),
-        ``handlers`` one per hook handler added or retired, plus the version
-        stamp and the legacy ``updated_files`` / ``already_current`` /
-        ``skipped_files`` / ``removed_files`` lists.
-
-    Raises:
-        ValueError: If target is the AIPass source repo, or has no
-            ``*_REGISTRY.json`` (not a project, or init has not been run).
+    Plan mode (``apply=False``) performs ZERO filesystem writes (no mkdir, stamp or
+    trust enrolment): ``init update --dry-run`` is only trustworthy because of it.
     """
     target = target.resolve()
 
-    # Guard: refuse to update the AIPass source repo itself. The source repo
-    # has hand-maintained production files that must not be overwritten with
-    # generic templates. External projects created via `aipass init` are fine.
+    # The source repo's files are hand-maintained; templates must never overwrite them.
     if (target / "src" / "aipass").is_dir() and (target / "pyproject.toml").exists():
         raise ValueError(
             "Cannot update the AIPass source repository — its files are hand-maintained, not template-generated"
         )
 
-    # Locate the project registry to confirm this is an AIPass project and
-    # derive the project name without parsing JSON (filename encodes the name).
     registry_files = registries_in(target)
     if not registry_files:
         raise ValueError("No AIPass project found — run 'aipass init' first")
@@ -548,18 +461,14 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     def record(rel: str, dest: Path, action: str, reason: str, content: str | None = None) -> None:
         """Add one file to the plan and queue whatever write it implies.
 
-        ``.updateignore`` outranks everything, including the seed rule and the
-        hash rule (the owner, 2026-09-09): if the project owner has claimed a file, the
-        update has no opinion about it at all -- no write, no backup, no
-        sidecar, and no drift reported against it.
+        ``.updateignore`` outranks the seed and hash rules: a claimed file gets no
+        write, backup, sidecar or drift report.
         """
         nonlocal manifest_next
         if sm.is_ignored(rel, ignored):
             files.append({"path": rel, "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME, "writes": False})
-            # No manifest entry on purpose. Recording the on-disk hash would
-            # make a later un-ignore read as "unmodified since AIPass wrote it"
-            # and overwrite the very file the owner protected; leaving it out
-            # is what actually gives un-ignore the backfill behaviour asked for.
+            # No manifest entry on purpose: the on-disk hash would make a later
+            # un-ignore read as "unmodified" and overwrite the protected file.
             return
         writes_before = len(writes)
         if action in (sm.ACTION_CREATE, sm.ACTION_UPDATE):
@@ -570,29 +479,19 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             if digest is not None:
                 manifest_next[rel] = digest
         elif action == sm.ACTION_KEPT_LOCAL:
-            # A kept file whose sidecar already matches the template needs no
-            # write at all, and saying otherwise made Vera-Studio preview
-            # "would change / exit 2" forever after the first apply. The file
-            # is still KEPT — the owner still has an unresolved edit — but the
-            # plan must not claim a write it would not perform.
+            # A sidecar already matching the template means no write; claiming
+            # one would preview "would change / exit 2" forever after one apply.
             sidecar = sm.sidecar_path(dest)
             if sm.hash_file(sidecar) == sm.sha256_text(content or ""):
                 reason = f"{reason} (template already beside it)"
             else:
                 writes.append((sidecar, content))
-            # The manifest records what AIPASS wrote, not what is on disk.
-            # Adopting the edited hash here would make the NEXT update read
-            # "unmodified since AIPass wrote it" and overwrite the manager's
-            # work on the second run — the exact loss this rule prevents.
+            # The manifest records what AIPass wrote: adopting the edited hash
+            # would let the next update overwrite the manager's edit.
             if rel in recorded:
                 manifest_next[rel] = recorded[rel]
-        # "writes" is the honest answer to "would this run touch the file?",
-        # which the verdict alone cannot give: a kept file with a current
-        # sidecar is KEPT and writes nothing. The plan's counts and its exit
-        # code both read this, so they can never disagree.
+        # The plan's counts and exit code both read "writes", so they never disagree.
         files.append({"path": rel, "action": action, "reason": reason, "writes": len(writes) > writes_before})
-
-    # --- Managed files copied verbatim from a template (the conffile rule) ---
 
     managed: list[tuple] = []
     for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
@@ -607,8 +506,6 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         action, reason = sm.decide(current_hash, template_hash, recorded.get(rel))
         record(rel, dest, action, reason, template_text)
 
-    # --- Seeds: created once, never rewritten. They exist to be filled in. ---
-
     for md_name in sm.SEED_FILES:
         dest = target / md_name
         if dest.exists():
@@ -620,9 +517,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             continue
         record(md_name, dest, sm.ACTION_CREATE, "seed absent", content)
 
-    # --- Merge files: user values are preserved by the merge itself, so the ---
-    # --- conffile rule does not apply. They are never "kept (local edits)". ---
-
+    # Merge files keep user values through the merge itself, so they are never "kept (local edits)".
     settings_path = claude_dir / "settings.json"
     generated_settings = _claude_settings()
     existing_settings_text = _read_text(settings_path)
@@ -647,8 +542,6 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         else:
             record(".claude/settings.json", settings_path, sm.ACTION_CURRENT, "merge is a no-op")
 
-    # settings.local.json (gitignored) — machine-local AIPASS_HOME + claudeMdExcludes
-    # fence. Retrofit-safe: merges into existing content, never clobbers.
     if aipass_home and not is_throwaway_path(aipass_home):
         local_path = claude_dir / "settings.local.json"
         generated = json.loads(claude_local_settings(aipass_home, nested=is_projects_child(target)))
@@ -675,8 +568,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             else:
                 record(".claude/settings.local.json", local_path, sm.ACTION_CURRENT, "merge is a no-op")
 
-    # hooks.json — union-merge (preserve user enabled, add new handlers), then
-    # prune retired handlers. The union alone can only ever grow a project.
+    # Prune after the union: the union alone can only ever grow a project's hooks.
     hooks_path = aipass_dir / "hooks.json"
     template_path = Path(aipass_home) / ".aipass" / "project_hooks.json" if aipass_home else None
     if template_path and template_path.is_file():
@@ -711,8 +603,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     elif hooks_path.exists():
         record(".aipass/hooks.json", hooks_path, sm.ACTION_CURRENT, "no template available — nothing to compare")
 
-    # --- Retired managed files: renamed, never unlinked (the owner, DPLAN-0264) ---
-
+    # Retired managed files are renamed, never unlinked.
     for rel in _STALE_MANAGED_FILES:
         stale_path = target / rel
         if sm.is_ignored(rel.as_posix(), ignored):
@@ -729,8 +620,6 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
                 }
             )
             retires.append(stale_path)
-
-    # --- .venv symlink → AIPass shared runtime (create if missing) ---
 
     venv_link = target / ".venv"
     if not venv_link.exists() and aipass_home:
@@ -757,16 +646,11 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     stamp_pending = stamped != installed
     file_writes = bool(writes or retires or symlinks or handlers)
     pending = file_writes or stamp_pending
-    # Stamp-only: nothing in the project changes but the manifest's record of
-    # which AIPass last looked at it. The owner, 2026-09-10 (DPLAN-0337 R1): this
-    # one case applies without a go, because the receipt — not the go — is the
-    # contract, and a go spent on a plan that touches no file is a go that
-    # teaches people to approve without reading. Derived from the same queues
-    # as ``pending`` so the two can never disagree about what apply would do.
+    # Stamp-only applies without a go: the receipt is the contract, and a go on a plan
+    # touching no file teaches approval without reading. Same queues as ``pending``.
     stamp_only = stamp_pending and not file_writes
 
-    # --- Apply: every write in this run happens below this line ---
-
+    # Every write in this run happens below this line.
     backup_dir: Path | None = None
     if apply:
         aipass_dir.mkdir(exist_ok=True)
@@ -821,9 +705,7 @@ def _handler_names(hooks: dict) -> set:
 def _handler_reason(handlers: list) -> str:
     """One-line summary of the handler changes driving a hooks.json update.
 
-    Counts, not names: the names are printed in full directly below in the
-    plan, and a nine-handler list here wraps the reason column into noise on
-    any normal terminal.
+    Counts, not names: the plan prints the names below, and a list here wraps the column.
     """
     added = sum(1 for h in handlers if h["action"] == "add")
     retired = sum(1 for h in handlers if h["action"] == "retire")
@@ -838,9 +720,7 @@ def _handler_reason(handlers: list) -> str:
 def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> Path | None:
     """Perform the planned writes, backing up anything overwritten first.
 
-    Returns the backup directory, or None when nothing needed backing up.
-    Backups land in ``.aipass/.backup/scaffold_<stamp>/`` mirroring the project
-    tree, so a manager can diff or restore by path.
+    Backups mirror the project tree under ``.aipass/.backup/scaffold_<stamp>/`` so restore is by path.
     """
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup_root = target / sm.BACKUP_REL / f"scaffold_{stamp}"
@@ -857,8 +737,7 @@ def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> 
         used = True
 
     for dest, content in writes:
-        # A .aipass-new sidecar is ours and disposable — backing it up would
-        # fill the backup tree with copies of copies on every apply.
+        # Sidecars are disposable; backing them up fills the tree with copies of copies.
         if not dest.name.endswith(sm.NEW_SUFFIX):
             backup(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)

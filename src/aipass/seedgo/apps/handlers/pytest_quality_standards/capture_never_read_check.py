@@ -3,96 +3,12 @@
 # Description: v5 - did the test read the output it arranged to capture
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """Did this test look at the output it asked for?
 
-PORTED FROM THE TAXONOMY NOMINATOR of the same name. Where `no_oracle` asks
-whether a unit verifies anything and `assertion_shape` asks whether its
-assertions can fail, this one asks a narrower and more embarrassing question:
-the unit went to the trouble of arranging to SEE something, and then never
-looked.
-
-TWO SHAPES, ONE SPECIES.
-
-CAPTURE-NEVER-READ is the exact static tell, and it is exact because requesting
-the fixture is a declaration of intent that costs a line of source. A unit takes
-`capsys` or `capfd` in its signature and never calls `readouterr()` anywhere in
-its body. There is no reading of that shape which is correct: the fixture does
-nothing at all unless it is read, so the parameter is either a leftover from a
-deleted assertion or a test that was never finished. One live example survived a
-probe that changed what the program prints.
-
-RECEIPT-ONLY is the judgement call. A unit's SOLE assertion is `is True` or
-`== 0` on a call to a function that names itself an output function -
-`print_summary`, `show_status`, `report_totals`. The whole job of such a function
-is what it emits; its return value is a receipt saying the call happened, not
-evidence that anything was printed correctly.
-
-SOLE IS THE SPECIES, and this is the direction in which getting it wrong would
-do real damage. Nine `assert result is True` lines in one branch's suite are each
-paired with a `mock.assert_called_once_with(...)`, and every one of them is
-correct. Five `is_ssl_error(x) is True` assertions are correct because there the
-boolean IS the behaviour - a predicate under test, not a router's receipt. So a
-receipt standing beside ANY other assertion, or beside any oracle-shaped call,
-is never flagged, and a callee that does not name itself an output function is
-never flagged either.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM.
-
-It does not follow calls ACROSS MODULES. Resolving a helper through an import
-means executing the import graph, which is an interpreter and not a reader.
-
-IT DOES FOLLOW THE MODULE-LEVEL DEFS OF ONE FILE, FROM 2026-09-07. A unit that
-hands `capsys` to a helper defined in the same test module, where that helper
-reads `readouterr()` off the parameter it arrived in, HAS read its capture - and
-flagging it said the opposite of the truth. So does a unit whose helper forwards
-the parameter to a SECOND same-file helper that reads it, which is why this
-follows to a fixed point rather than one hop: @devpulse's suite is the one-hop
-spelling (`_output(capsys)`) and @memory's is the two-hop one (`_payload` hands
-its own parameter to `_raw_stdout`). Stopping at one hop would have called 34 of
-@memory's units unfinished while every one of them looks.
-
-The candidate set is the file's own module-level defs, fixed before the loop
-starts, and each pass can only add to a bounded set - so it terminates, and
-recursion is harmless. Nothing is imported, nothing is executed, and a helper
-reached through any other spelling - an import, an attribute, a class method, a
-variable holding the function - is still invisible, on purpose.
-
-  reported by @devpulse (`_output(capsys)` in test_compass_command.py),
-  confirmed here. Measured across 22 branches: 132 rows fleet-wide before, 9
-  after. Two branches move - devpulse 25 to 1 and memory 98 to 1 - plus this
-  one, 2 to 0. Six other branches carry a single row each and keep it, because
-  a helper that does not read the fixture still leaves its caller flagged.
-
-The delegated read is the same shape `no_oracle` already recognises for a
-delegated assertion, so the pack now answers "did somebody look?" the same way
-twice instead of two different ways.
-
-IT DOES NOT COVER `caplog`, DESPITE WHAT THE RULE'S NAME SUGGESTS. `capsys` has
-a read method - a call site a reader can find. `caplog` is read by touching
-`.records` or `.text`, which is ordinary attribute access and looks exactly like
-every other attribute access in the body; the same mechanism cannot decide it.
-Naming a fixture this rule cannot judge would turn a precise tell into a guess,
-so the fixture set stops where the tell stops.
-
-THE OUTPUT-PREFIX LIST IS A MEASURED UNDER-COUNT. A hand audit recorded 24
-receipt-only units in one branch and this rule finds none of them, because that
-branch's receipts sit on `handle_command`, a ROUTER. Widening the prefixes to
-catch routers would also catch every predicate under test, which is the known-
-good family above. The gap is published rather than closed by guessing.
-
-THE RECEIPT CONSTANT SET IS WIDER THAN ITS NAME. `RECEIPT_CONSTANTS` is
-`(True, 0)` and membership in Python is decided by equality, so `is False` and
-`== 1` read as receipts too. That is stated here rather than discovered later:
-the nominator this file ports named only two of the four in its docstring while
-its code matched all four. All four are receipts by the same argument - a bare
-boolean or exit code from a function whose work is what it prints - so the
-behaviour is kept and the description is corrected.
-
-STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, and the
-pack's own corpus reader. That constraint is the reason the pack exists.
+Reference: capture_never_read.md
 """
 
 import ast
@@ -101,61 +17,30 @@ from typing import Dict, List, Set
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
 
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "capture_never_read"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Fixtures that capture output. Requesting one is a declaration of intent -
-#: the fixture does nothing whatever unless it is read.
 CAPTURE_FIXTURES: frozenset = frozenset({"capsys", "capfd", "capsysbinary", "capfdbinary"})
 
-#: The method that actually reads what was captured.
 READ_METHOD: str = "readouterr"
 
-#: Callee-name prefixes whose real work is what they EMIT, not what they return.
 OUTPUT_PREFIXES: tuple = ("print_", "show_", "report_", "render_", "display_", "emit_")
 
-#: Right-hand sides that make a comparison a receipt rather than a claim. See
-#: the module docstring: `False` and `1` match these by equality, on purpose.
+#: `False` and `1` match these by equality, on purpose (see capture_never_read.md).
 RECEIPT_CONSTANTS: tuple = (True, 0)
 
-#: How many flagged units to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
+#: The full list lives in the report artifact; the check message stays readable.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
 
 
 def _requested_fixtures(unit: corpus.TestUnit) -> List[str]:
     """The capture fixtures this unit's signature asks pytest for.
 
-    Positional parameters only, because that is how pytest injects a fixture
-    into a function or a method. The pack's corpus keeps the function node
-    rather than a pre-extracted parameter list, so the signature is read here
-    rather than in the shared reader.
-
-    NO `self` FILTER, AND THAT IS DELIBERATE. A method's first parameter is not
-    a fixture, but the intersection below already excludes it - `self` is not a
-    capture fixture and never can be. A filter that no input can make matter is
-    the kind of careful-looking line that survives review and gets pinned by a
-    test which can never go red.
-
-    Args:
-        unit: The test unit to read.
-
-    Returns:
-        The capture fixture names, sorted, or an empty list.
+    Positional parameters only; no `self` filter, the intersection already excludes it.
     """
     return sorted({arg.arg for arg in unit.node.args.args} & CAPTURE_FIXTURES)
 
@@ -163,30 +48,8 @@ def _requested_fixtures(unit: corpus.TestUnit) -> List[str]:
 def _reads_capture(unit: corpus.TestUnit) -> bool:
     """True when the unit reads its capture anywhere in its body.
 
-    THE ATTRIBUTE ARM IS THE ONE THAT DECIDES, AND THE CALL ARM IS ALL BUT
-    INERT. That is measured, not assumed: deleting the call arm leaves every
-    behavioural pin in this rule green. `ast.walk` yields a Call before the
-    Attribute in its own `func`, so the call arm answers first for the ordinary
-    `capsys.readouterr()` - but the walk reaches that Attribute a moment later
-    regardless, and the second arm gives the same answer. The call arm's only
-    exclusive input is a call through a BARE NAME whose spelling ends in
-    `readouterr`, which no pytest suite writes, so nothing here pins it.
-
-    The attribute arm is not redundant in the other direction: it is the only
-    thing that sees `read = capsys.readouterr` handed to a helper or passed as
-    a callback, where the call site carries a name this reader cannot resolve.
-    Without it, a unit that does read its capture is reported as one that never
-    did - and that pin is real and red when the arm is blinded.
-
-    The call arm is kept because it states the shape the rule is looking for,
-    and deleting it would leave the rule resting entirely on an ordering
-    property of `ast.walk` that nothing in this file controls.
-
-    Args:
-        unit: The test unit to read.
-
-    Returns:
-        True if a read of the capture is visible.
+    The attribute arm decides (it also sees `read = capsys.readouterr` passed on);
+    the call arm is kept so the rule does not rest on `ast.walk` ordering alone.
     """
     for node in ast.walk(unit.node):
         if isinstance(node, ast.Call) and corpus.dotted_name(node.func).endswith(READ_METHOD):
@@ -199,36 +62,8 @@ def _reads_capture(unit: corpus.TestUnit) -> bool:
 def capture_readers(tree: ast.Module) -> Dict[str, Set[int]]:
     """Which same-file helpers read a capture, and out of which parameter.
 
-    THE PART OF THE CALL GRAPH THIS RULE FOLLOWS: module-level defs in ONE file,
-    to a fixed point. A `def _output(capsys)` whose body calls
-    `capsys.readouterr()` is a reader, and so is a `def _payload(verbs, capsys)`
-    that hands its own parameter to `_raw_stdout`, which reads it. Both were
-    found live - @memory's config suite is the two-hop spelling and @devpulse's
-    compass suite is the one-hop - and a rule that followed only the first would
-    have called 34 of @memory's units unfinished when every one of them looks.
-
-    The mapping is keyed by parameter POSITION because that is how the caller
-    passes it: `_payload(verbs, capsys, *args)` reads parameter 1, and a helper
-    that takes the fixture first is a different claim from one that takes it
-    second.
-
-    THE CLOSURE TERMINATES BY CONSTRUCTION and is not a call graph in general.
-    The candidate set is the file's module-level defs, which is finite and fixed
-    before the loop starts; each pass can only ADD positions to a bounded set,
-    so the loop stops when a pass adds none. Recursion and mutual recursion are
-    therefore harmless - they add nothing on the second pass. Nothing is
-    imported, nothing is executed, and no name is resolved outside this tree.
-
-    Only module-level defs are read. A helper nested inside a test is already
-    inside the unit the direct reader walks, and a method on a class would need
-    a receiver resolved, which is the interpreting this rule refuses to do.
-
-    Args:
-        tree: One parsed test module.
-
-    Returns:
-        Helper name -> the parameter positions whose value gets read. Empty
-        when the file defines no such helper, which is the common case.
+    Module-level defs of ONE file, to a fixed point; keyed by parameter position.
+    Terminates: the candidate set is fixed and each pass only adds, so recursion is harmless.
     """
     defs = {node.name: node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     readers: Dict[str, Set[int]] = {}
@@ -254,16 +89,7 @@ def capture_readers(tree: ast.Module) -> Dict[str, Set[int]]:
 
 
 def _forwards_name(node: ast.AST, name: str, readers: Dict[str, Set[int]]) -> bool:
-    """True when this body hands `name` to a helper that reads what it is given.
-
-    Args:
-        node: The function node to read.
-        name: The parameter name being traced.
-        readers: What is known so far - grows across passes.
-
-    Returns:
-        True if the parameter reaches a reading position of a known reader.
-    """
+    """True when this body hands `name` to a helper that reads what it is given."""
     for child in ast.walk(node):
         if not isinstance(child, ast.Call) or not isinstance(child.func, ast.Name):
             continue
@@ -276,15 +102,7 @@ def _forwards_name(node: ast.AST, name: str, readers: Dict[str, Set[int]]) -> bo
 
 
 def _reads_name(node: ast.AST, name: str) -> bool:
-    """True when this body calls `<name>.readouterr()` somewhere inside it.
-
-    Args:
-        node: The helper's function node.
-        name: The parameter name to look for.
-
-    Returns:
-        True if the parameter is read as a capture.
-    """
+    """True when this body calls `<name>.readouterr()` somewhere inside it."""
     for child in ast.walk(node):
         if not isinstance(child, ast.Attribute) or child.attr != READ_METHOD:
             continue
@@ -294,16 +112,7 @@ def _reads_name(node: ast.AST, name: str) -> bool:
 
 
 def _delegated_reader(unit: corpus.TestUnit, requested: List[str], readers: Dict[str, Set[int]]) -> str:
-    """The same-file helper this unit handed its capture to, or "".
-
-    Args:
-        unit: The test unit to read.
-        requested: The capture fixtures the unit's signature asked for.
-        readers: What `capture_readers` found in this unit's own module.
-
-    Returns:
-        The helper's name, or "" when the unit delegated to nobody.
-    """
+    """The same-file helper this unit handed its capture to, or ""."""
     wanted = set(requested)
     for node in ast.walk(unit.node):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
@@ -320,18 +129,7 @@ def _delegated_reader(unit: corpus.TestUnit, requested: List[str], readers: Dict
 
 
 def _receipt_callee(node: ast.Assert) -> str:
-    """The output function this assert takes a receipt from, or "".
-
-    Matches a single comparison of a call against one of RECEIPT_CONSTANTS
-    with `is` or `==`, where the callee names itself an output function.
-    Anything else returns "" - the rule refuses to guess which functions print.
-
-    Args:
-        node: One assert statement from the unit.
-
-    Returns:
-        The dotted callee name, or "" when this assert is not a receipt.
-    """
+    """The output function this assert takes a receipt from, or ""."""
     test = node.test
     if not isinstance(test, ast.Compare) or len(test.ops) != 1:
         return ""
@@ -351,19 +149,7 @@ def _receipt_callee(node: ast.Assert) -> str:
 
 
 def _receipt_finding(unit: corpus.TestUnit) -> Dict:
-    """A RECEIPT-ONLY finding for this unit, or {} when the receipt has company.
-
-    The pairing check is the whole correctness of this shape. A second
-    assertion beside the receipt, or any oracle-shaped call such as a mock's
-    `assert_called_once_with`, means the unit checks behaviour and the receipt
-    is incidental.
-
-    Args:
-        unit: The test unit to judge.
-
-    Returns:
-        A finding row, or {} when nothing is flagged.
-    """
+    """A RECEIPT-ONLY finding for this unit, or {} when the receipt has company."""
     asserts = corpus.asserts_in(unit)
     if len(asserts) != 1:
         return {}
@@ -384,39 +170,15 @@ def _receipt_finding(unit: corpus.TestUnit) -> Dict:
 
 
 def _finding(species: str, unit: corpus.TestUnit, line: int, reason: str) -> Dict:
-    """One finding row. Flat and stringy so any reporter can render it.
-
-    Args:
-        species: Which of the two shapes was found.
-        unit: The unit the finding belongs to.
-        line: The line a reader should open.
-        reason: What the reader will see when they get there.
-
-    Returns:
-        The finding row.
-    """
+    """One finding row. Flat and stringy so any reporter can render it."""
     return {"nodeid": unit.nodeid, "line": line, "species": species, "reason": reason}
 
 
 def unit_flags(unit: corpus.TestUnit, readers: Dict[str, Set[int]] | None = None) -> List[Dict]:
     """Every capture-never-read finding in one unit, with its evidence.
 
-    The public entry point for this rule - the report lane and the tests both
-    ask the question here rather than re-deriving it. A unit that captured
-    without reading is not additionally judged for a receipt: it has already
-    earned a reader's attention, and a second row for the same unit only makes
-    a triage list longer.
-
-    Args:
-        unit: The test unit to judge.
-        readers: What `capture_readers` found in this unit's OWN module. Omitted
-            means "this file defines no capture-reading helper", which is the
-            honest default for a caller holding a unit and no tree - it can only
-            ever produce MORE findings, never fewer, so a caller that does not
-            know cannot accidentally acquit.
-
-    Returns:
-        Zero or one finding rows.
+    A unit that captured without reading is not also judged for a receipt.
+    `readers` omitted means no same-file reader: it can only add findings, never acquit.
     """
     requested = _requested_fixtures(unit)
     if requested and not _reads_capture(unit) and not _delegated_reader(unit, requested, readers or {}):
@@ -435,18 +197,9 @@ def unit_flags(unit: corpus.TestUnit, readers: Dict[str, Set[int]] | None = None
 
 
 def find_unread_captures(scanned: corpus.Corpus) -> List[Dict]:
-    """Every capture-never-read finding in the corpus, unit order preserved.
-
-    Args:
-        scanned: The parsed corpus.
-
-    Returns:
-        Finding rows across every unit.
-    """
+    """Every capture-never-read finding in the corpus, unit order preserved."""
     rows: List[Dict] = []
     for parsed in scanned.files:
-        # Read once per FILE, not once per unit. A module with sixty units and
-        # one helper would otherwise re-walk its whole tree sixty times.
         readers = capture_readers(parsed.tree)
         for unit in parsed.units:
             rows.extend(unit_flags(unit, readers))
@@ -456,17 +209,7 @@ def find_unread_captures(scanned: corpus.Corpus) -> List[Dict]:
 def flagged_nodeids(rows: List[Dict]) -> List[str]:
     """The distinct units named by a list of findings, first-seen order.
 
-    THE SCORE IS PER UNIT, NOT PER FINDING. A unit can only produce one row
-    today, but the scorer must not depend on that: the day a second shape is
-    added, counting rows would let one unit be subtracted twice and push the
-    flagged total past the unit total, which reports a NEGATIVE score that no
-    caller checks for.
-
-    Args:
-        rows: Finding rows.
-
-    Returns:
-        Distinct nodeids in the order they were first seen.
+    Per unit, not per row, so the flagged total can never exceed the unit total.
     """
     seen: List[str] = []
     for row in rows:
@@ -475,37 +218,16 @@ def flagged_nodeids(rows: List[Dict]) -> List[str]:
     return seen
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its tests read the output they capture.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory. A project with no tests reports not_applicable rather than a
-        number, because zero tests measured is not zero quality found.
+    bypass_rules is accepted for the scoring-API contract and unread: shadow mode gates nothing.
     """
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version of the reference check returned "no test files
-    # found" before this ran, so a project whose ONLY test file had a syntax
-    # error reported exactly what a project with no tests at all reports. A
-    # broken file must never read as an absent one - that is the whole contract
-    # `unparseable` exists to keep, and it was defeated on the one path where
-    # nothing else could catch it. The ordering here is the fix, inherited.
+    # Built before the empty-corpus return: an unparseable-only project must not read as one without tests.
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(

@@ -3,12 +3,11 @@
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
 # Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
 
-# Tests for the standards_audit module.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(standard) — each checker's own verdict; every <row>_check.py has its own test file
@@ -22,14 +21,7 @@ from pathlib import Path
 from typing import cast
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-#: The REAL discovery handler. `standards_audit`'s own `discovery` binding is
-#: replaced per-test below (see `_mock_infrastructure`), so this stays the
-#: genuine module for the tests that exercise discovery's own rules directly.
+#: The real discovery handler: standards_audit's own `discovery` binding is a per-test stand-in (`_mock_infrastructure`).
 from aipass.seedgo.apps.handlers.audit import discovery as real_discovery
 from aipass.seedgo.apps.handlers.bypass import bypass_handler
 from aipass.cli.apps.modules import display
@@ -49,10 +41,8 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     mock_normalize = MagicMock(side_effect=lambda x: x.lstrip("@").upper())
 
     mock_discovery = MagicMock()
-    # Pack discovery and the pack-kind refusal live in the handler. A bare
-    # MagicMock answers both with a MagicMock, which is truthy, iterates empty
-    # and reads as "packs found, none of them" - so the return values are
-    # spelled out rather than inherited from the mock's willingness to answer.
+    # A bare MagicMock answers pack discovery with a truthy, empty-iterating mock that reads as "packs found, none of them",
+    # so the return values are spelled out.
     mock_discovery.discover_packs = MagicMock(return_value={"aipass": Path("handlers/aipass_standards")})
     mock_discovery.non_scoring_packs = MagicMock(return_value={"tests_pytest": "execution"})
 
@@ -61,11 +51,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(standards_audit, "error", MagicMock())
     monkeypatch.setattr(standards_audit, "warning", MagicMock())
     monkeypatch.setattr(standards_audit, "json_handler", MagicMock())
-    # Rebound to a stand-in object rather than mutated in place: the real
-    # discovery module is the SAME object as `real_discovery` above (both name
-    # the one import), and several tests below exercise `real_discovery`'s own
-    # functions for real -- patching attributes onto the shared module would
-    # mock those tests out from under them too.
+    # Rebound, not mutated: the real discovery module is the same object as `real_discovery`, which other tests run for real.
     monkeypatch.setattr(standards_audit, "discovery", mock_discovery)
     monkeypatch.setattr(standards_audit, "discover_branches", MagicMock(return_value=[]))
     monkeypatch.setattr(standards_audit, "_is_branch_private", MagicMock(return_value=False))
@@ -78,11 +64,6 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(standards_audit, "write_audit_artifact", MagicMock(return_value=tmp_path / "last_audit.json"))
     monkeypatch.setattr(standards_audit, "load_bypass_rules", MagicMock(return_value=[]))
     monkeypatch.setattr(standards_audit, "normalize_branch_arg", mock_normalize)
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -116,14 +97,7 @@ def test_handle_command_help_flag():
 
 
 def test_handle_command_h_flag():
-    """A help flag anywhere in the line answers before anything executes.
-
-    `audit aipass -h` puts the flag past args[0], so only the wider scan in
-    handle_command catches it. That scan is the whole point of
-    help_flag_safety — "a question must never execute" — and a fleet audit is
-    the most expensive thing this branch can be tricked into running. Both
-    outcomes return True.
-    """
+    """A help flag anywhere in the line answers before anything executes."""
     with (
         patch.object(standards_audit, "print_help") as helped,
         patch.object(standards_audit, "audit_branch_incremental") as audited,
@@ -145,16 +119,7 @@ def test_handle_command_help_word():
 
 
 def test_print_introspection_runs(capsys: pytest.CaptureFixture[str]) -> None:
-    """print_introspection names the module and both pack lanes.
-
-    "console.print OR header was called" is true of a function that prints one
-    blank line, so it measured nothing. The three strings here were read off a
-    real run (2026-09-07). The third is the one that matters most: this module
-    scores STANDARDS packs and must say out loud which discovered packs it is
-    NOT scoring, or a reader takes the absence of `tests_pytest` for a missing
-    pack rather than another lane. Read from stdout through capsys since 2026-09-27.
-    Mutant: `Not scored here (other lanes):` to `Not scored here:` — killed.
-    """
+    """print_introspection names the module and both pack lanes."""
     capsys.readouterr()
     result = standards_audit.print_introspection()
     printed = capsys.readouterr().out
@@ -165,14 +130,7 @@ def test_print_introspection_runs(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_print_help_runs(capsys: pytest.CaptureFixture[str]) -> None:
-    """print_help prints its banner and the honest-score flag.
-
-    Same reason as the introspection test above. `--no-bypass` is pinned rather
-    than a decorative line: it is the flag that produces the second number every
-    APLAN publishes, and help that stops documenting it is the reason a branch
-    reports only its bypassed score.
-    Mutant: help's `audit aipass --no-bypass` example to `audit aipass` — killed.
-    """
+    """print_help prints its banner and the honest-score flag."""
     capsys.readouterr()
     result = standards_audit.print_help()
     printed = capsys.readouterr().out
@@ -182,12 +140,7 @@ def test_print_help_runs(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_handle_command_unknown_pack():
-    """An unknown pack REFUSES with a non-zero code, it does not return quietly.
-
-    This is the defect the 2026-09-07 fleet sweep found on this branch:
-    `drone @seedgo audit not_a_real_subarg_xyz` printed the ❌ line and exited
-    0, so a script checking $? read it as a clean audit.
-    """
+    """An unknown pack REFUSES with a non-zero code, it does not return quietly."""
     with pytest.raises(CommandRefused) as refused:
         standards_audit.handle_command("audit", ["nonexistent_pack"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
@@ -195,13 +148,7 @@ def test_handle_command_unknown_pack():
 
 
 def test_discover_packs_returns_dict(tmp_path):
-    """Pack discovery finds *_standards dirs holding *_check.py files.
-
-    Exercises the HANDLER directly, through the reference bound at import time:
-    the autouse fixture mocks the handler wholesale, so asserting through the
-    module - or importing inside the test body - would only prove the mock
-    answered, and the discovery rules this test is about would never run.
-    """
+    """Pack discovery finds *_standards dirs holding *_check.py files."""
     handlers_dir = tmp_path / "handlers"
     handlers_dir.mkdir()
 
@@ -231,22 +178,13 @@ def test_handle_command_unknown_command_returns_false():
     assert standards_audit.handle_command("invalid_command", []) is False
 
 
-# ---------------------------------------------------------------------------
-# --no-bypass -- the honest score, every bypass rule switched off
-# ---------------------------------------------------------------------------
-
 # What load_bypass_rules() hands back on a normal run. A --no-bypass run must
 # audit with [] instead -- never with these.
 _LOADED_RULES = [{"file": "apps/flow.py", "standard": "cli", "reason": "legacy"}]
 
 
 def _wire_branches(monkeypatch, *names):
-    """Point the mocked discovery/bypass/audit handlers at fake branches.
-
-    Returns the audit_branch_incremental mock, so a test can read back the
-    bypass_rules each branch was actually audited with — the only place the
-    flag's effect is observable.
-    """
+    """Point the mocked discovery/bypass/audit handlers at fake branches."""
     tmp = tempfile.gettempdir()
     discover = MagicMock(
         return_value=[
@@ -279,12 +217,7 @@ def test_no_bypass_after_branch_arg_disables_every_rule(monkeypatch):
 
 
 def test_no_bypass_before_branch_arg_disables_every_rule(monkeypatch):
-    """Reverse order — 'audit aipass --no-bypass @flow' must not swallow the flag.
-
-    Unknown flags are dropped silently by the arg loop, so a flag that is not
-    really parsed still produces a normal-looking audit. Both orders are
-    asserted because only one of them could ever be the one that works.
-    """
+    """Reverse order — 'audit aipass --no-bypass @flow' must not swallow the flag."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     assert standards_audit.handle_command("audit", ["aipass", "--no-bypass", "@flow", "--no-artifact"]) is True
     assert _rules_per_branch(audit_mock) == [[]]
@@ -305,10 +238,7 @@ def test_normal_run_still_applies_the_loaded_bypass_rules(monkeypatch):
 
 
 def test_no_bypass_run_announces_itself(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """A suppressed-rules run says so — no reader may mistake it for a normal one.
-
-    Mutant: the summary's `if no_bypass:` announcement to `if False:` — killed.
-    """
+    """A suppressed-rules run says so — no reader may mistake it for a normal one."""
     _wire_branches(monkeypatch, "FLOW")
     standards_audit.handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"])
     text = _console_text(capsys).upper()
@@ -323,12 +253,7 @@ def test_normal_run_makes_no_bypass_claim(monkeypatch, capsys: pytest.CaptureFix
 
 
 def _audit_reading_the_registry(tmp_path, monkeypatch, content):
-    """An audit whose branch run reads the registry through the real get_branch_from_path.
-
-    The registry sits under a 100-character directory: macOS's tmp path pushed
-    the note past the pinned console width and the path wrapped (PR #774). The
-    consoles are pinned wider than any path, so no line search depends on a wrap.
-    """
+    """An audit whose branch run reads the registry through the real get_branch_from_path."""
     registry = tmp_path / ("d" * 100) / "AIPASS_REGISTRY.json"
     registry.parent.mkdir()
     registry.write_text(content, encoding="utf-8")
@@ -374,12 +299,7 @@ def test_help_documents_the_no_bypass_flag(capsys: pytest.CaptureFixture[str]) -
 
 
 def test_help_text_at_prefix_consistency():
-    """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix).
-
-    Scans help text strings in seedgo.py and all modules for branch name
-    patterns that should use @ prefix but don't.
-    Mutant: help's `audit aipass @flow --no-bypass` to `audit aipass flow --no-bypass` — killed.
-    """
+    """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix)."""
     import re
 
     branch_root = Path(__file__).resolve().parents[1]
@@ -388,9 +308,6 @@ def test_help_text_at_prefix_consistency():
         *sorted((branch_root / "apps" / "modules").glob("*.py")),
     ]
 
-    # Pattern: 'audit aipass <word>' or 'diagnostics <word>' where <word> is
-    # a known branch name without @ prefix. We check for bare branch names
-    # after command keywords in string literals.
     known_branches = {
         "drone",
         "seedgo",
@@ -408,7 +325,6 @@ def test_help_text_at_prefix_consistency():
         "commons",
         "skills",
     }
-    # Match: a command keyword followed by a bare branch name (no @)
     bare_branch_re = re.compile(
         r"(?:audit\s+aipass|diagnostics(?:_audit)?|readme(?:_update)?)\s+"
         r"(" + "|".join(known_branches) + r")\b"
@@ -420,7 +336,6 @@ def test_help_text_at_prefix_consistency():
             continue
         source = fpath.read_text(encoding="utf-8")
         for i, line in enumerate(source.splitlines(), 1):
-            # Only check inside string literals (lines with quotes)
             if '"' not in line and "'" not in line:
                 continue
             match = bare_branch_re.search(line)
@@ -433,12 +348,7 @@ def test_help_text_at_prefix_consistency():
 
 
 def test_artifact_flag_does_not_swallow_a_help_token(monkeypatch):
-    """'audit aipass --artifact --help' must explain, not run and write to '--help'.
-
-    The arg loop scans the whole list for help, but the --artifact branch
-    consumes the NEXT token before that check is reached, so the flag became a
-    destination path and a full audit ran. A help flag anywhere means explain.
-    """
+    """'audit aipass --artifact --help' must explain, not run and write to '--help'."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     assert standards_audit.handle_command("audit", ["aipass", "--artifact", "--help"]) is True
     assert audit_mock.call_count == 0
@@ -451,18 +361,8 @@ def test_artifact_flag_still_takes_a_real_destination(monkeypatch):
     assert audit_mock.call_count == 1
 
 
-# ---------------------------------------------------------------------------
-# Law ARGV -- an argument nobody recognises is refused by name, never dropped
-# ---------------------------------------------------------------------------
-
-
 def _refusal_text():
-    """Everything the module sent to error() this test, as one string.
-
-    The autouse fixture's error() is a MagicMock, so the message arrives whole
-    -- a real console would wrap the line and split the very command the
-    assertions are about.
-    """
+    """Everything the module sent to error() this test, as one string."""
     calls = cast(MagicMock, standards_audit.error).call_args_list
     return "\n".join(str(call.args[0]) if call.args else "" for call in calls)
 
@@ -473,26 +373,14 @@ def _refused_argv() -> bool:
 
 
 def _refuse(argv: list):
-    """Run the audit verb expecting a refusal, and hand back what it carried.
-
-    Since 2026-09-07 a refusal is RAISED, not returned: `handle_command` used
-    to answer True on every path and `seedgo.py` turned that into exit 0, so
-    the shell could not tell a refusal from an audit. Every test below that
-    used to read `handle_command(...) is True` now reads the code instead -
-    the same claim, made where it is now load-bearing.
-    """
+    """Run the audit verb expecting a refusal, and hand back what it carried."""
     with pytest.raises(CommandRefused) as refused:
         standards_audit.handle_command("audit", argv)
     return refused.value
 
 
 def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
-    """`audit -tests @backup` -- a space where a hyphen belonged.
-
-    The token was dropped, `@backup` was read as the branch, and a cached
-    standards audit printed as though it were the execution lane. Twenty
-    minutes were spent reading one lane's numbers as another's.
-    """
+    """`audit -tests @backup` -- a space where a hyphen belonged."""
     audit_mock = _wire_branches(monkeypatch, "BACKUP")
 
     assert _refuse(["-tests", "@backup"]).code == 7
@@ -516,9 +404,7 @@ def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch, capsys: pytest.C
     refused = _refuse(["-tests", "@backup"])
 
     assert _refusal_text().startswith("REFUSED: [ARGV]")
-    # The code is printed beside the law, and it is not a pass — AND the
-    # process leaves with it. Printing "exit code: 7" over an exit 0 was the
-    # defect the 2026-09-07 fleet sweep named.
+    # The code is printed beside the law, never as a pass, and the process exits with it.
     assert "exit code: 7" in _console_text(capsys)
     assert refused.code == 7
 
@@ -581,19 +467,8 @@ def test_every_valid_non_auditing_invocation_still_answers(monkeypatch, argv):
     assert not _refused_argv(), f"{argv} is documented usage and must not be refused"
 
 
-# ---------------------------------------------------------------------------
-# `audit tests <target>` -- the canonical surface for the execution lane
-# ---------------------------------------------------------------------------
-
-
 def _wire_lane(monkeypatch):
-    """Stand in for the execution lane and record what it was handed.
-
-    The lane is replaced rather than run: this file is about the PARSING seam,
-    and a test that actually ran a suite would prove the copy-runner works
-    while proving nothing about the word that reached it.
-
-    """
+    """Stand in for the execution lane and record what it was handed."""
     calls: list = []
 
     def _record(command, args):
@@ -615,11 +490,7 @@ def _forwarded(monkeypatch, argv):
 
 
 def test_audit_tests_reaches_the_lane_with_the_target(monkeypatch):
-    """The owner's ask: `audit tests @backup`, a plain word where a hyphen was.
-
-    The hyphen was the whole defect -- `audit -tests @backup` was one keystroke
-    from correct and ran the wrong lane. A word cannot be mistyped as a flag.
-    """
+    """The owner's ask: `audit tests @backup`, a plain word where a hyphen was."""
     audit_mock = _wire_branches(monkeypatch, "BACKUP")
 
     assert _forwarded(monkeypatch, ["tests", "@backup"]) == ["@backup"]
@@ -628,11 +499,7 @@ def test_audit_tests_reaches_the_lane_with_the_target(monkeypatch):
 
 
 def test_the_lane_is_claimed_under_its_own_verb_name(monkeypatch):
-    """The hand-off names `audit-tests`, so the lane's own refusals stay truthful.
-
-    A lane told it was invoked as `audit` would build did-you-means against the
-    wrong flag list -- the drift Law ARGV exists to prevent.
-    """
+    """The hand-off names `audit-tests`, so the lane's own refusals stay truthful."""
     calls = _wire_lane(monkeypatch)
     standards_audit.handle_command("audit", ["tests", "@backup"])
 
@@ -655,24 +522,12 @@ def test_the_lane_is_claimed_under_its_own_verb_name(monkeypatch):
     ],
 )
 def test_every_lane_argument_is_forwarded_verbatim(monkeypatch, tail):
-    """Whatever follows `tests` is handed on untouched, in order.
-
-    Verbatim is the contract: this verb parses ONE word and then stops reading.
-    A flag rewritten, reordered or dropped here would be a lane measuring
-    something other than what was asked for -- and looking normal doing it.
-    """
+    """Whatever follows `tests` is handed on untouched, in order."""
     assert _forwarded(monkeypatch, ["tests", *tail]) == tail
 
 
 def test_the_forwarded_line_parses_exactly_as_the_alias_does(monkeypatch):
-    """`audit tests X` and `audit-tests X` reach the lane's parser identically.
-
-    Asserted through the lane's OWN parser, not through a restated
-    expectation: the two spellings are the same command only if the thing that
-    reads them cannot tell them apart. Reached through the lane's `audit-tests`
-    command since 2026-09-27; runner.run is the recorder, so no suite runs.
-    Mutant: standards_audit's `handle_command("audit-tests", args[1:])` to `args[2:]` — killed.
-    """
+    """`audit tests X` and `audit-tests X` reach the lane's parser identically."""
     argv = ["@backup", "--budget", "300", "--prove-refusal"]
 
     forwarded = _forwarded(monkeypatch, ["tests", *argv])
@@ -709,11 +564,7 @@ def test_the_lane_word_is_recognised_before_pack_validation(monkeypatch):
 
 
 def test_the_space_typo_now_suggests_the_canonical_two_word_form(monkeypatch):
-    """`audit -tests @backup` still refuses -- and points at `audit tests`.
-
-    The hyphen form remains valid, but a did-you-mean that offers the spelling
-    one keystroke from the typo invites the typo back.
-    """
+    """`audit -tests @backup` still refuses -- and points at `audit tests`."""
     audit_mock = _wire_branches(monkeypatch, "BACKUP")
 
     assert _refuse(["-tests", "@backup"]).code == 7
@@ -723,19 +574,8 @@ def test_the_space_typo_now_suggests_the_canonical_two_word_form(monkeypatch):
     assert "did you mean: drone @seedgo audit tests @backup" in _refusal_text()
 
 
-# ---------------------------------------------------------------------------
-# THE COLLISION GUARD -- one word, two meanings, and neither picked quietly
-# ---------------------------------------------------------------------------
-
-
 def _collide(monkeypatch):
-    """Make a scoring pack named `tests` resolve, so the word means two things.
-
-    No such pack exists today and the guard therefore cannot fire in
-    production. That is exactly why it is simulated: a guard nobody has ever
-    seen fire is a guard nobody knows works, and the day someone adds
-    `handlers/tests_standards/` is the day it has to be right the first time.
-    """
+    """Make a scoring pack named `tests` resolve, so the word means two things."""
     monkeypatch.setattr(
         standards_audit.discovery,
         "discover_packs",
@@ -788,10 +628,7 @@ def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(
 
 
 def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """The existing vocabulary, not a parallel one: same law, same code 7.
-
-    Mutant: the `law: ... exit code: {refused.code}` console line to `pass` — killed.
-    """
+    """The existing vocabulary, not a parallel one: same law, same code 7."""
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
@@ -804,11 +641,7 @@ def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch, capsys:
 
 
 def test_a_pack_named_tests_is_still_reachable_by_its_directory_name(monkeypatch):
-    """The advice the refusal prints has to work, or it is not advice.
-
-    `audit tests_standards` names the directory, which no lane answers to, so
-    the collision has an exit for the pack as well as for the lane.
-    """
+    """The advice the refusal prints has to work, or it is not advice."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     calls = _wire_lane(monkeypatch)
     _collide(monkeypatch)
@@ -856,32 +689,14 @@ def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv)
     assert not _refused_argv()
 
 
-# ---------------------------------------------------------------------------
-# THE CONTEXT PACK -- `audit context` is the startup-budget fleet table
-# ---------------------------------------------------------------------------
-#
-# The verb strips the `_standards` suffix, so `handlers/context_standards/`
-# IS `drone @seedgo audit context`. That is the whole reason the pack carries
-# that directory name (DPLAN-0347, seedgo's row 1): one rule that measures six
-# files per branch must not drag the 47 rules of aipass_standards over every
-# branch's source to answer.
+# The verb strips `_standards`, so handlers/context_standards/ IS `audit context`: six files per branch, not the aipass rules.
 
-#: This branch's real `handlers/` directory, reached through the real discovery
-#: handler bound above -- `standards_audit.discovery` is a per-test stand-in
-#: (see `_mock_infrastructure`), so asking for the path through it would hand
-#: back a MagicMock.
+#: This branch's real handlers/ dir via the real discovery: the per-test stand-in would hand back a MagicMock.
 _HANDLERS_DIR = Path(real_discovery.__file__).resolve().parent.parent
 
 
 def test_the_context_pack_is_discovered_as_the_context_verb():
-    """`handlers/context_standards/` must reach the audit as the word `context`.
-
-    Pins the DIRECTORY NAME against the verb, and the manifest's `kind` against
-    the lane. A pack that declared `kind: execution` would vanish from the
-    scoring audit entirely and `drone @seedgo audit context` would refuse as an
-    unknown pack -- the same silent disappearance discover_packs() publishes
-    non_scoring_packs() to prevent.
-    """
+    """`handlers/context_standards/` must reach the audit as the word `context`."""
     packs = real_discovery.discover_packs(_HANDLERS_DIR)
 
     assert "context" in packs, f"the context pack must be offered for scoring; found {sorted(packs)}"
@@ -891,12 +706,7 @@ def test_the_context_pack_is_discovered_as_the_context_verb():
 
 
 def test_the_context_pack_holds_only_the_startup_budget_checker():
-    """One rule, its own pack -- the point of giving it a pack at all.
-
-    `audit context` exists so the startup budget can be asked without running
-    the other 47 rules. A second checker landing here without that being the
-    intent would make the cheap question expensive again.
-    """
+    """One rule, its own pack -- the point of giving it a pack at all."""
     pack = real_discovery.discover_packs(_HANDLERS_DIR)["context"]
 
     assert [f.name for f in sorted(pack.glob("*_check.py"))] == ["startup_budget_check.py"]
@@ -910,12 +720,7 @@ def _wire_context_pack(monkeypatch):
 
 
 def test_audit_context_with_no_branch_audits_every_branch(monkeypatch):
-    """`drone @seedgo audit context` is the FLEET table -- no branch argument.
-
-    A pack name with nothing after it must not be read as a missing branch: the
-    fleet run is the command the owner asks for, and the table is one row per
-    citizen.
-    """
+    """`drone @seedgo audit context` is the FLEET table -- no branch argument."""
     audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")
     _wire_context_pack(monkeypatch)
     assert standards_audit.handle_command("audit", ["context", "--no-artifact"]) is True
@@ -932,13 +737,7 @@ def test_audit_context_standards_reaches_the_same_pack(monkeypatch):
 
 
 def test_audit_context_refuses_an_unknown_branch_by_name(monkeypatch):
-    """A branch that does not exist REFUSES, names itself, and audits nothing.
-
-    Same contract as `audit aipass @nope`, asserted for the new verb because a
-    pack reached through a different code path is a pack whose refusal nobody
-    has watched: printing the ❌ line and exiting 0 is the exact defect the
-    2026-09-07 fleet sweep found here.
-    """
+    """A branch that does not exist REFUSES, names itself, and audits nothing."""
     audit_mock = _wire_branches(monkeypatch, "FLOW")
     _wire_context_pack(monkeypatch)
 
@@ -950,28 +749,14 @@ def test_audit_context_refuses_an_unknown_branch_by_name(monkeypatch):
     assert audit_mock.call_count == 0, "nothing may be audited once the target is unknown"
 
 
-# ===========================================================================
-# The CI gate script -- .github/scripts/seedgo_audit.py (DPLAN-0347 phase 5)
-# ===========================================================================
-#
-# The script has no importable surface: it is top-level code that audits the
-# whole fleet the moment it is imported. So it is pinned the way CI meets it --
-# RUN, in a subprocess, against a throwaway tree. That is also the only way to
-# prove the ratchet reached the exit code, rather than proving that a line of
-# source exists.
-#
-# The tree is a fixture, never the live fleet: growing a real README to watch a
-# gate go red leaves the repo one forgotten restore away from a phantom failure.
+# The CI gate script has no importable surface (it audits on import), so it runs in a subprocess against a fixture tree,
+# never the live fleet.
 
 CI_GATE = Path(__file__).resolve().parents[4] / ".github" / "scripts" / "seedgo_audit.py"
 
 
 def _fixture_fleet(root, **branches):
-    """A tree shaped like the repo: src/aipass/<branch>/apps plus gated files.
-
-    src/aipass is created even with no branches, because that is the shape the
-    script walks: a checkout without it is a broken checkout, not an empty fleet.
-    """
+    """A tree shaped like the repo: src/aipass/<branch>/apps plus gated files."""
     (root / "src" / "aipass").mkdir(parents=True, exist_ok=True)
     for name, files in branches.items():
         (root / "src" / "aipass" / name / "apps").mkdir(parents=True, exist_ok=True)
@@ -998,11 +783,7 @@ def _run_ci_gate(cwd):
 
 
 def test_the_ci_gate_goes_red_when_a_gated_readme_grows_past_its_cap(tmp_path):
-    """The whole point: CI fails, and the line says which file, how big, and whose cap.
-
-    Run end to end through the real script, so what is pinned is the exit code
-    a workflow step reads -- not a helper somebody could stop calling.
-    """
+    """The whole point: CI fails, and the line says which file, how big, and whose cap."""
     cap, reason = startup_budget_check.readme_cap()
     assert cap is not None, f"the shipped pack.json must publish a README cap: {reason}"
     fleet = _fixture_fleet(tmp_path, overgrown={"README.md": "x" * (cap + 1)})
@@ -1018,12 +799,7 @@ def test_the_ci_gate_goes_red_when_a_gated_readme_grows_past_its_cap(tmp_path):
 
 
 def test_the_ratchet_runs_before_the_audit_and_short_circuits_it(tmp_path):
-    """A red ratchet stops the job before pyright walks eighteen branches.
-
-    An over-cap README is self-diagnosing; spending the audit's minutes on a run
-    that is already red buys nothing. The pin is that no audit output reached
-    the log at all -- neither a branch row nor the pack-count tripwire.
-    """
+    """A red ratchet stops the job before pyright walks eighteen branches."""
     fleet = _fixture_fleet(tmp_path, overgrown={"README.md": "x" * 100000})
 
     done = _run_ci_gate(fleet)
@@ -1034,12 +810,7 @@ def test_the_ratchet_runs_before_the_audit_and_short_circuits_it(tmp_path):
 
 
 def test_the_ci_gate_reaches_the_audit_when_the_ratchet_is_green(tmp_path):
-    """Under cap, the job carries on to the standards audit, exactly as before.
-
-    An empty fleet is the cleanest way to say it: nothing to gate, nothing to
-    audit, and the script's own closing line proves control flowed past the
-    ratchet rather than exiting at it.
-    """
+    """Under cap, the job carries on to the standards audit, exactly as before."""
     done = _run_ci_gate(_fixture_fleet(tmp_path))
 
     assert done.returncode == 0, done.stdout + done.stderr
@@ -1048,14 +819,7 @@ def test_the_ci_gate_reaches_the_audit_when_the_ratchet_is_green(tmp_path):
 
 
 def test_the_name_ratchet_is_advisory_so_its_red_never_fails_the_job(tmp_path):
-    """DPLAN-0350 lands advisory: a red name ratchet prints and the job carries on.
-
-    The fixture tree is not a git checkout, so the name ratchet cannot list
-    what is tracked and is red -- the honest verdict. The pin is that the red
-    reached the log AND the audit's own verdict line still followed it with a
-    zero exit. When @devpulse flips NAME_RATCHET_GATES, this is the test that
-    moves with it.
-    """
+    """DPLAN-0350 lands advisory: a red name ratchet prints and the job carries on."""
     done = _run_ci_gate(_fixture_fleet(tmp_path))
 
     assert "NAME RATCHET" in done.stdout and "advisory" in done.stdout, done.stdout
@@ -1065,14 +829,7 @@ def test_the_name_ratchet_is_advisory_so_its_red_never_fails_the_job(tmp_path):
 
 
 def test_the_ci_gate_keeps_its_tripwire_and_its_hundred_percent_threshold():
-    """The ratchet was added BESIDE the existing gates, never instead of them.
-
-    EXPECTED_STANDARDS catches a standard leaving the audit silently, and
-    THRESHOLD holds every branch at 100. What is pinned is that both are still
-    DECLARED and still COMPARED -- not the pack count itself, which moves by
-    hand every time a standard is added or retired and would make this a false
-    red in somebody else's lane.
-    """
+    """The ratchet was added BESIDE the existing gates, never instead of them."""
     import re
 
     source = CI_GATE.read_text(encoding="utf-8")
@@ -1084,11 +841,7 @@ def test_the_ci_gate_keeps_its_tripwire_and_its_hundred_percent_threshold():
 
 
 def test_the_ci_gate_holds_no_cap_of_its_own(tmp_path):
-    """No number lives in .github/. The gate reads the owner's config at run time.
-
-    A constant here would be a third copy of a cap -- unreachable from the
-    owner, unmoved by a diet, and green long after the ruling changed.
-    """
+    """No number lives in .github/. The gate reads the owner's config at run time."""
     import ast
 
     literals = {

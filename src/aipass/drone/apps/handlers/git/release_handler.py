@@ -3,20 +3,13 @@
 # Description: release list — a repo's published GitHub releases, read-only, through gh's API
 # Version: 1.0.0
 # Created: 2026-10-15
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """``drone @git release list``: a repo's published GitHub releases, newest first.
 
-The read-only twin of ``gh release list`` plus each release's notes. Since the
-2026-10-04 lockdown raw gh is refused for every seat, and @vera's
-release_watch shelled gh to read AIPass's release tags and bodies (feedback
-b44c7003; the owner's go, 2026-10-15 22:51). Every seat may read: public data
-only, so a private repo is refused even when gh's account could see it.
-
-Backed by ``gh api repos/OWNER/NAME/releases``, one page of 100 at a time,
-because ``gh release list`` carries no bodies. Drafts are skipped: they are
-not published.
+Every seat may read, so public data only: a private repo is refused even when gh's account sees it.
+Uses ``gh api`` because ``gh release list`` carries no bodies.
 """
 
 from __future__ import annotations
@@ -111,12 +104,7 @@ def _read_json(repo: str, path: str) -> object:
 def list_releases(repo: str, since: str | None, limit: int) -> list[dict]:
     """Up to *limit* published releases of *repo*, newest first, stopping before *since* (exclusive).
 
-    With *since*, the pages are read on past *limit* until the tag is seen, so
-    a mistyped tag is refused instead of hidden behind a full page of rows.
-
-    Raises:
-        _Refusal: the repo is private or unknown, gh is absent or failed, or
-            *since* names no published release in the pages read.
+    With *since*, reading continues past *limit* until the tag is seen, so a mistyped tag is refused.
     """
     meta = _read_json(repo, f"repos/{repo}")
     if not isinstance(meta, dict) or meta.get("private") is not False:
@@ -164,8 +152,7 @@ def render(rows: list[dict]) -> str:
 def release_command(args: list[str]) -> dict:
     """``release list [--repo OWNER/NAME] [--since TAG] [--limit N] [--json]``, as a routing result.
 
-    With --json, stdout is one document carrying ``ok``, refusals included,
-    the shape every @git read door gives a machine caller.
+    With --json, stdout is one document carrying ``ok``, refusals included (every @git read door's shape).
     """
     as_json = wants_json(args)
     args = strip_json_flag(args)

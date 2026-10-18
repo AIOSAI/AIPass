@@ -3,7 +3,7 @@
 # Description: Tests the handler-mtime reload sentinel that keeps the watcher on shipped code
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/reload_sentinel.py, the handler-mtime reload sentinel."""
@@ -35,16 +35,9 @@ def _join_sentinel_loops() -> None:
 def sentinel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The module under test, with its trail pinned inside tmp_path.
 
-    evaluate() logs through a module-level trail logger. Left unpatched every
-    test that detects a change appends to the branch's LIVE
-    logs/reload_sentinel.jsonl — operational evidence manufactured by a test
-    suite, which is exactly the trap that sent me hunting a reload warning no
-    service had written.
+    Unpatched, every detecting test writes reload warnings into the LIVE trail and trigger_json/.
     """
     monkeypatch.setattr(reload_sentinel, "logger", trail_logger(tmp_path / "reload_sentinel.jsonl"))
-    # Same reasoning one layer down: log_operation() writes into the branch's
-    # live trigger_json/ operational logs, so an unmocked test run files
-    # invented reload events alongside real ones.
     monkeypatch.setattr(reload_sentinel, "json_handler", MagicMock())
     return reload_sentinel
 
@@ -65,13 +58,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sentinel) -> Path:
 def stop_event():
     """A stop event that is ALWAYS set on teardown.
 
-    start() spawns a daemon thread that loops until this is set. A test that
-    leaves one running outlives its own monkeypatch: WATCHED_ROOTS reverts to
-    the real handler tree while the thread still holds a baseline built from
-    tmp_path, so every real module reads as changed and the loop writes a
-    spurious reload warning into the live trail. That is not hypothetical —
-    it happened on 2026-08-12 and cost a forensic detour to explain a log line
-    no service had written.
+    A loop that outlives its monkeypatch sees the real tree against a tmp baseline and logs a false reload.
     """
     event = threading.Event()
     yield event
@@ -83,11 +70,6 @@ def _age(path: Path, seconds: float) -> None:
     """Backdate a file's mtime so it reads as settled."""
     stamp = path.stat().st_mtime - seconds
     os.utime(path, (stamp, stamp))
-
-
-# ---------------------------------------------------------------------------
-# Snapshot
-# ---------------------------------------------------------------------------
 
 
 class TestSnapshot:
@@ -109,10 +91,7 @@ class TestSnapshot:
         assert sentinel.snapshot() == {}
 
     def test_an_archive_a_dropbox_and_a_pycache_are_not_loaded_code(self, sentinel, tree) -> None:
-        """A file moved into a sandbox is no change the watcher must restart for.
-
-        Red first 2026-09-29: rglob took all three into the snapshot.
-        """
+        """A file moved into a sandbox is no change the watcher must restart for."""
         for sandbox in (tree / ".archive", tree / "x" / "dropbox", tree / "__pycache__"):
             sandbox.mkdir(parents=True)
             (sandbox / "retired.py").write_text("# retired\n", encoding="utf-8")
@@ -132,11 +111,6 @@ class TestSnapshot:
         monkeypatch.setattr(sentinel, "WATCHED_ROOTS", (root,))
 
         assert set(sentinel.snapshot()) == {root / "escalation.py"}
-
-
-# ---------------------------------------------------------------------------
-# Change detection + the settle window
-# ---------------------------------------------------------------------------
 
 
 class TestChangeDetection:
@@ -185,11 +159,6 @@ class TestChangeDetection:
         _age(touched, sentinel.SETTLE_SECONDS * 3)  # then well into the past
 
         assert sentinel.changed_since(baseline) == [touched]
-
-
-# ---------------------------------------------------------------------------
-# The supervision guard — the half that prevents making things worse
-# ---------------------------------------------------------------------------
 
 
 class TestSupervisionGuard:
@@ -241,9 +210,7 @@ class TestReloadDecision:
     def test_the_exit_code_is_non_zero(self, sentinel) -> None:
         """The unit ships Restart=on-failure, so exit 0 would NOT bring us back.
 
-        This is the one constant that must track the systemd unit. If the unit
-        ever moves to Restart=always, a clean 0 becomes correct and this test is
-        the reminder to change both together.
+        Tracks the systemd unit: under Restart=always a clean 0 becomes correct; change both together.
         """
         assert sentinel.RELOAD_EXIT_CODE != 0
 

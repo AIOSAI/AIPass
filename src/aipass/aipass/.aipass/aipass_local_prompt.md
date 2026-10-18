@@ -13,7 +13,7 @@ Not suggestions. Violating one is a bug.
 
  - No writes outside your own branch: no code, docs, configs, or another branch's memories.
  - No git, ever. Not `git status`, not `drone @git anything`.
- - Dispatch focused work with `drone @ai_mail dispatch` to the ONE owning branch, as the user's voice, with detailed feedback; track the loop and report. Not an orchestrator, no fleets — that is devpulse. A fix in another branch goes to its owner.
+ - Dispatch focused work with `drone @ai_mail dispatch` to the ONE owning branch, as the user's voice, with detailed feedback; track the loop and report. No fleets — that is devpulse.
  - No registry, hooks or shared-config edits. Exception: your own `.seedgo/bypass.json`. Before deleting a rule, control-run BOTH lanes, audit and checklist: a rule dead in one can be live in the other.
 
 # What I do
@@ -33,7 +33,7 @@ aipass help [q]     # Q&A over the fleet's docs
 aipass --version    # resolved live, never hand-typed
 ```
 
-`drone @aipass` does not resolve, by design: this branch is the user's CLI, installed on PATH, shipped publicly. Citizen creation is still `drone @spawn create`.
+`drone @aipass` does not resolve, by design: this is the user's CLI on PATH. Citizen creation is `drone @spawn create`.
 
 # Test-convention emails
 
@@ -103,7 +103,7 @@ aipass/
 # Integration
 
  - Depends on: @drone (routing), @spawn (agent creation, registry sync, identity repair), @hooks (feedback, trust registry, hook status), @ai_mail, @prax (logging), @trigger (soft, degrades), pytest, the CLI tools.
- - Serves humans; nothing in the fleet drives this CLI, except @spawn importing three `shared/` modules — hence stdlib-only by contract, docs/shared_contract.md.
+ - Serves humans. Fleet importers: @spawn, three `shared/` modules (stdlib-only by contract, docs/shared_contract.md); @api, `apps/modules/new_project` (the phone's project door).
 
 # Working habits
 
@@ -127,7 +127,7 @@ Trigger: the first message mentions a fresh AIPass install, or the context reads
 
 # Known gotchas
 
- - Bare `init`, `handoff` and `feedback` print usage and module info, not status: `init run` walks the stages, `handoff --info` is the status. `doctor --json` alone gives the normal report; JSON comes from `doctor --fix --json`.
- - Run the suite from this branch or the repo root; from `src/aipass` four subprocess tests fail on import shadowing (pre-existing).
- - `python apps/aipass.py` fails on package imports; use the installed entry point, from any directory.
+ - Bare `init`, `handoff`, `feedback` print usage, not status: `init run` walks the stages, `handoff --info` is the status. `doctor --json` alone gives the normal report; JSON comes from `doctor --fix --json`.
+ - Run the suite from this branch or the repo root; from `src/aipass` four subprocess tests fail on import shadowing.
+ - `python apps/aipass.py` fails on package imports; use the installed `aipass`.
  - `init update` can replace files: a decision, not a repair. The plan goes to a human first, stamp-only plans excepted.

@@ -2,7 +2,7 @@
 
 # Docs
 
-Tracked public reference for the `hooks` branch — the **depth** layer of the DPLAN-0347 contract: one
+Tracked public reference for the `hooks` branch — the **depth** layer: one
 file per module or handler group, each small enough for one read, each linked from the branch README,
 opened when something breaks.
 
@@ -23,8 +23,7 @@ shelf is committed — write it as if it ships.
 | [diagnostics.md](diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [sandbox.md](sandbox.md) | The kernel filesystem boundary: policy generation, what is writable per role, and the launch seam |
 | [boot_shim.md](boot_shim.md) | The one script in this branch that writes outside the repo |
-| [cadence_investigation.md](cadence_investigation.md) | The per-turn injection counter: session keying, the execution model, and the fragility that was already true |
-| [cadence_redo_brief.md](cadence_redo_brief.md) | The brief that rebuilt cadence after the suite modelled the wrong execution model — kept as the record of why the counter is deduped |
+| [cadence_investigation.md](cadence_investigation.md) | The per-turn injection counter: session keying, the execution model, and the dedup |
 
 The live inventory of modules and commands is not written down here — it is `drone @hooks` and
 `drone @hooks --help`, generated from code. The directory tree lives in the branch prompt

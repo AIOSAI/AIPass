@@ -3,14 +3,11 @@
 # Description: Welcome & Onboarding Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Welcome & Onboarding Handler
-
-Provides database query functions for welcoming new branches
-and nudging inactive members to engage with The Commons.
 """
 
 import sqlite3
@@ -21,24 +18,9 @@ from aipass.commons.apps.handlers.json import json_handler
 
 
 def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[int]:
-    """
-    Create a system welcome post in the general room for a new branch.
+    """Create a system welcome post in the general room for a new branch.
 
-    Also creates a mention record so the welcomed branch sees the notification.
-
-    Args:
-        conn: Database connection
-        branch_name: The branch name to welcome
-
-    Returns:
-        Post ID of the created welcome post, or None if the branch was already welcomed
-
-    Raises:
-        sqlite3.Error: the post or its mention could not be written. The transaction is rolled back first,
-            so no half-written welcome post is left for a later commit to publish (commons' decision,
-            DPLAN-0354 leg 3: None used to mean both "already welcomed" and "failed", and the scan could
-            not tell a failure from a skip).
-    """
+    None means already welcomed only; a failed write rolls back, then raises sqlite3.Error."""
     if has_been_welcomed(conn, branch_name):
         return None
 
@@ -72,16 +54,7 @@ def create_welcome_post(conn: sqlite3.Connection, branch_name: str) -> Optional[
 
 
 def has_been_welcomed(conn: sqlite3.Connection, branch_name: str) -> bool:
-    """
-    Check if a welcome post already exists for this branch.
-
-    Args:
-        conn: Database connection
-        branch_name: The branch name to check
-
-    Returns:
-        True if a welcome post exists, False otherwise
-    """
+    """Check if a welcome post already exists for this branch."""
     row = conn.execute(
         "SELECT id FROM posts WHERE author = 'SYSTEM' AND title LIKE 'Welcome @' || ? || '%' LIMIT 1",
         (branch_name,),
@@ -91,16 +64,7 @@ def has_been_welcomed(conn: sqlite3.Connection, branch_name: str) -> bool:
 
 
 def get_onboarding_nudge(conn: sqlite3.Connection, branch_name: str) -> Optional[str]:
-    """
-    Get an onboarding nudge message for branches that haven't engaged yet.
-
-    Args:
-        conn: Database connection
-        branch_name: The branch name to check
-
-    Returns:
-        A tip string if the branch needs encouragement, or None if active
-    """
+    """Get an onboarding nudge message for branches that haven't engaged yet."""
     row = conn.execute(
         "SELECT post_count, comment_count FROM agents WHERE branch_name = ?",
         (branch_name,),
@@ -121,19 +85,9 @@ def get_onboarding_nudge(conn: sqlite3.Connection, branch_name: str) -> Optional
 
 
 def welcome_new_branches(conn: sqlite3.Connection, failed: Optional[List[str]] = None) -> List[str]:
-    """
-    Scan agents table and create welcome posts for any unwelcomed branches.
+    """Scan agents table and create welcome posts for any unwelcomed branches.
 
-    Skips the SYSTEM agent. A branch whose welcome post raises sqlite3.Error is logged, appended to
-    `failed` when the caller passes a list, and the scan goes on to the next branch.
-
-    Args:
-        conn: Database connection
-        failed: Optional list the scan appends the name of every branch it failed to welcome to
-
-    Returns:
-        List of branch names that were newly welcomed
-    """
+    A branch that fails is appended to `failed` (if given) and the scan goes on."""
     rows = conn.execute("SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'").fetchall()
 
     failures = failed if failed is not None else []

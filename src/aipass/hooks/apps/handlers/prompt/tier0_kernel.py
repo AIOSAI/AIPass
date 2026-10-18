@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Loads .aipass/tier0_kernel.md — tiny always-on identity + reflex block."""
@@ -16,20 +16,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 def _kernel_and_banner(hook_data: dict, cadence_down: str | None = None) -> tuple[str, str]:
     """The kernel, and the degraded banner when grounding this seat was promised did not load.
 
-    The kernel is the floor every beat carries, so it is where a session flying
-    on partial grounding hears about it (DPLAN-0347, hooks row 1). When the
-    kernel itself is the missing part, the banner goes out alone: a handler with
-    nothing to inject says why instead of going quiet.
-
-    The log line is WARNING on turn 0 only — a fresh context, which is when the
-    session is re-told. Every later beat carries the banner to the agent but
-    logs at info, so one lasting hole is one warning per context, not a repeat
-    signature every five turns.
-
-    When cadence itself is down (*cadence_down* carries why), this is the
-    degraded fail mode the room ruled: the kernel fires alone on every turn, so
-    "Carried" is the kernel and nothing else, and the banner says which loaders
-    were withheld. cadence has already logged that turn's one WARNING.
+    Turn 0 logs WARNING, later beats info: one lasting hole is one warning per context.
+    With cadence down the kernel fires alone every turn and the banner names the withheld loaders.
     """
     import importlib
 
@@ -56,9 +44,7 @@ def _kernel_and_banner(hook_data: dict, cadence_down: str | None = None) -> tupl
 def _turn_or_none() -> int | None:
     """The current turn, or None when cadence cannot say — never a reason to drop the kernel.
 
-    Only the log LEVEL depends on it. A cadence that will not import is already
-    warned about at the top of handle(), and the kernel is exactly what must
-    still go out when it is broken.
+    Only the log level depends on it; the kernel must still go out when cadence is broken.
     """
     import importlib
 

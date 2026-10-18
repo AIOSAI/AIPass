@@ -3,22 +3,12 @@
 # Description: Auto-discovery walker for apps/integrations/*/driver.py
 # Version: 1.0.1
 # Created: 2026-04-15
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 """
 Driver auto-discovery for @api integrations layer.
 
-On first call to load_drivers(), walks apps/integrations/*/driver.py, imports each module,
-and calls its register() hook. Subsequent calls are no-ops (idempotent via _loaded flag).
-
-Each driver module is expected to:
-  1. Import bridge: from aipass.api.apps.modules.bridge import register
-  2. Implement a register() function that calls bridge.register(contract_name, fn)
-
-Failure modes — all non-fatal:
-  - Empty integrations/ dir → no drivers loaded, no log noise
-  - Folder without driver.py → skipped silently
-  - Import error → logged as WARNING, driver skipped, no crash
+A driver's register() hook calls bridge.register(contract_name, fn); a driver that fails to import is skipped.
 """
 
 import importlib.util
@@ -47,15 +37,7 @@ def print_introspection() -> None:
 
 
 def load_drivers(integrations_dir: Path | None = None) -> int:
-    """
-    Walk integrations_dir and load all driver.py files.
-
-    Args:
-        integrations_dir: Override path for testing. Defaults to apps/integrations/.
-
-    Returns:
-        Number of drivers successfully loaded.
-    """
+    """Walk integrations_dir and load all driver.py files."""
     global _loaded
     if _loaded and integrations_dir is None:
         return 0  # idempotent for production path
@@ -85,15 +67,9 @@ def load_drivers(integrations_dir: Path | None = None) -> int:
 
 
 def _import_driver(driver_path: Path, project_name: str) -> None:
-    """Import a single driver.py and call its register() hook.
-
-    The ImportError for a missing spec is a guard no input through load_drivers
-    reaches: every path it passes ends in driver.py, and the stdlib gives any .py
-    path a spec with a source loader, present on disk or not (api, fleet green leg 3).
-    """
+    """Import a single driver.py and call its register() hook."""
     module_name = f"_aipass_integration_{project_name}"
 
-    # Remove stale module if present (supports reload in tests)
     sys.modules.pop(module_name, None)
 
     spec = importlib.util.spec_from_file_location(module_name, driver_path)
@@ -106,14 +82,11 @@ def _import_driver(driver_path: Path, project_name: str) -> None:
 
     if hasattr(module, "register"):
         module.register()
-    # If no register() hook, driver is still loaded (might use bridge.register directly at module level)
 
 
 def handle_command(command: str, args: list) -> bool:
     """Registry is a utility module — no drone commands. Always returns False.
 
-    Stays silent: registry is discovered before the modules that own the real
-    commands, so printing here would prepend its banner to their output.
-    Introspection is reachable via __main__ instead.
+    Silent: registry is discovered first, so a print here would prepend its banner to other commands' output.
     """
     return False

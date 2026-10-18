@@ -3,7 +3,7 @@
 # Description: Line-scoped seedgo waivers must still point at their reason
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests that .seedgo/bypass.json line waivers still hit their anchor in apps/log_watcher_service.py and kin."""
@@ -16,25 +16,8 @@ from pathlib import Path
 
 import pytest
 
-# A line-scoped seedgo waiver fails OPEN and SILENT when its line moves.
-#
-# MEASURED HERE 2026-08-31, round 5. The round-4 dead-cwd sweep added comment
-# lines to files that carried waivers keyed on line numbers. Every waived line
-# shifted - the log_watcher_service prints by +1, runaway_handler by -8 where a
-# dead _find_repo_root copy was deleted - and all four rules silently stopped
-# matching. The suppressed violations resurfaced and read as fresh breakage in
-# files nobody had touched semantically. Nothing warned: a rule matching no line
-# is indistinguishable from a rule doing its job.
-#
-# Re-deriving fixed that day and left the next edit free to break it the same way,
-# so the waivers now carry an `anchor` - the literal text the waived line must
-# contain - and this file reds when a line moves out from under one. seedgo does
-# NOT read `anchor` (bypass_handler matches on `lines` alone); this test is the
-# only thing that does, which is why it lives here rather than in the standard.
-#
-# The structural fix belongs in the checker - waivers anchored on CONTENT, not
-# line numbers - and is queued with @seedgo pending the owner's GO. This is the
-# local reference, built the same way @drone built theirs.
+# A line-scoped waiver fails open and silent when its line moves. seedgo matches on `lines`
+# alone and never reads `anchor`, so this test is the only check that does.
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 BYPASS_FILE = BRANCH_ROOT / ".seedgo" / "bypass.json"
@@ -48,21 +31,11 @@ def _rule_id(rule: dict) -> str:
 
 
 def test_there_is_something_to_anchor():
-    """Arming probe, and it must probe the list that is actually parametrized.
-
-    pytest reports a parametrize over an EMPTY list as one skipped/deselected
-    entry, so a collector that silently finds nothing produces a green summary
-    for an instrument that checked nothing (@drone's surviving mutant, relayed
-    2026-08-31). Asserting the RAW bypass list is non-empty is not enough - it
-    stays full of file-scoped rules while the line-scoped subset goes to zero.
-    """
+    """Arming probe, and it must probe the list that is actually parametrized."""
     assert len(_ALL_RULES) >= 1, f"no bypass rules parsed at all from {BYPASS_FILE}"
 
-    # Recount from the RAW file rather than from the collector under judgement
-    # (@drone's cure, relayed by @seedgo). Asserting LINE_SCOPED is non-empty
-    # only catches a collector blinded ENTIRELY; a filter that quietly drops one
-    # rule leaves a non-empty list and every remaining anchor still passing, so
-    # the dropped waiver goes unwatched with a green board above it.
+    # Recount from the raw file: an empty parametrize reads green, and a filter that drops
+    # one rule leaves a non-empty list with every remaining anchor passing.
     raw = json.loads(BYPASS_FILE.read_text(encoding="utf-8"))["bypass"]
     expected = sum(1 for rule in raw if rule.get("lines"))
     assert len(LINE_SCOPED) == expected, (
@@ -110,12 +83,7 @@ def test_every_waived_line_still_contains_its_anchor(rule: dict):
 
 
 def test_an_anchor_that_moved_is_actually_caught():
-    """The negative control: prove the check can fail, on a synthetic rule.
-
-    Without this, a bug in the loop above (a `for` that never iterates, an
-    anchor read off the wrong key) leaves every real rule passing for no reason.
-    This rule is synthetic on purpose - it cannot be fixed by editing the tree.
-    """
+    """The negative control: prove the check can fail, on a synthetic rule."""
     drifted = {
         "file": "apps/log_watcher_service.py",
         "standard": "synthetic",

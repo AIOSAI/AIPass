@@ -32,9 +32,8 @@ ask the reference how to call it.
 `handle_command` returning `True` means "handled", not "worked". `main()` clears
 the shared failure flag first and returns `resolve_exit(True)`, so a refusal
 printed through the shared `error()` becomes exit 2 rather than a silent 0. A
-refusal that exits 0 is a lie to every non-human caller, and this branch told
-that lie for every routed command until the note store's parse refusal needed
-the flip. Refusal text goes to stderr; stdout stays empty.
+refusal that exits 0 is a lie to every non-human caller. Refusal text goes to
+stderr; stdout stays empty.
 
 ## Subcommand help never executes
 
@@ -42,25 +41,13 @@ The `<command> --help` check runs against the remaining arguments *before*
 routing, so the help path cannot fall through into the command. A stub module
 pins it: help rendered, command not run.
 
-## What the help pages were missing
+The entry point checks the first position only. Every module goes further:
 
-Before deleting this page's predecessor — a hand-typed command table in the
-README — the table was diffed against the dispatcher in both directions. The
-table itself was accurate: every row routed, every exit code matched, no
-documented verb was dead. The gap was the other way round.
-
-Routed by the module, named on no help page:
-
-- a bare `drone @canary note`, which prints the module's own map and its store path
-- `note help` as a bare word, alongside the two flag spellings
-- `note -h`
-- `--help` or `-h` *anywhere* in a subcommand's arguments, so `note add --help`
-  prints help and stores nothing
-
-Routed by the entry point, missing from its own reference: the third help form
-`help`, which the flags block never listed, and the exit-code contract above,
-which lived only in the README. Both help pages were cured at the source rather
-than described on a page; the entry point and the note module carry the fix.
+- a bare `drone @canary <command>` prints that module's short map (`note` adds
+  its store path)
+- `<command> help` as a bare word answers like the two flag spellings
+- `--help` or `-h` *anywhere* in a command's arguments prints help and runs
+  nothing, so `note add --help` stores nothing
 
 ## Versions
 
@@ -74,8 +61,8 @@ pins the rendered output against the constant, not against a literal.
 A module that raises inside `handle_command` is misreported. `route_command`
 catches the exception, logs it through the shared logger and answers `False`, so
 `main()` prints `Unknown command: <cmd>` and exits 1 for a command that exists.
-Read in source, unfixed, kept deliberately: this branch reports defects rather
-than quietly repairing them, and the note module catches its own errors so no
-live verb takes that path today.
+This branch reports defects rather than repairing them quietly. No live verb
+takes that path: each of the five modules turns its handler's errors, unreadable
+files included, into a refusal that exits 2.
 
 [<- Back to the branch README](../README.md)

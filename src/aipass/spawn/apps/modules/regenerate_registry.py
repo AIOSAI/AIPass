@@ -3,14 +3,10 @@
 # Description: CLI module for regenerating template registries
 # Version: 1.0.0
 # Created: 2026-03-25
-# Modified: 2026-03-25
+# Modified: 2026-10-17
 # =============================================
 
-"""Regenerate template registry — thin CLI layer.
-
-Parses arguments and delegates to regenerate_registry_ops handler.
-All implementation logic lives in apps/handlers/regenerate_registry_ops.py.
-"""
+"""Regenerate template registry — thin CLI layer."""
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
@@ -41,25 +37,11 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "regenerate-registry")
-        args: List of arguments for the command
-
-    Returns:
-        True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "regenerate-registry":
         return False
 
-    # No args → introspection
     if not args:
         print_introspection()
         return True
@@ -71,22 +53,8 @@ def handle_command(command: str, args: list) -> bool:
     return handle_regenerate_registry(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_regenerate_registry(args: list[str]) -> int:
-    """Parse args and execute template registry regeneration.
-
-    Args patterns:
-        []              -> regenerate the default class's template (specialist)
-        ["specialist"]  -> regenerate that class's template
-        ["--all"]       -> regenerate every distinct template registry
-        ["--help"]      -> show help
-
-    Returns exit code (0=success, 1=failure).
-    """
+    """Parse args and execute template registry regeneration."""
     if args and args[0] in ["--help", "-h"]:
         _print_help()
         return 0
@@ -94,9 +62,7 @@ def handle_regenerate_registry(args: list[str]) -> int:
     regen_all = "--all" in args
 
     if regen_all:
-        # Iterate TEMPLATE DIRECTORIES, not classes. Both classes share one
-        # template dir now (DPLAN-0319), so walking classes would hash the same
-        # template twice and report it as two templates.
+        # Walk template dirs, not classes: classes share one dir, so walking classes double-counts it.
         template_dirs = get_template_dirs()
         all_results: list[dict] = []
         had_error = False
@@ -124,7 +90,6 @@ def handle_regenerate_registry(args: list[str]) -> int:
             )
         return 1 if had_error else 0
 
-    # Single class — default to the registered default class
     clean_args = [a for a in args if not a.startswith("--")]
     class_name = clean_args[0] if clean_args else get_default_class()
 
@@ -159,11 +124,6 @@ def handle_regenerate_registry(args: list[str]) -> int:
     return 0
 
 
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
-
-
 def _print_help() -> None:
     """Print usage help for regenerate-registry command."""
     console.print("[bold cyan]Usage:[/bold cyan] drone @spawn regenerate-registry \\[class_name | --all]")
@@ -195,7 +155,6 @@ def _print_summary(result: dict) -> None:
     console.print(f"  Directories tracked: {dirs_tracked} [dim](was {prev_dirs})[/dim]")
     console.print(f"  Registry path:       [dim]{registry_path}[/dim]")
 
-    # Show file list
     files = result.get("files", {})
     if files:
         console.print()
@@ -206,7 +165,6 @@ def _print_summary(result: dict) -> None:
             placeholder = " [yellow](placeholder)[/yellow]" if finfo.get("has_branch_placeholder") else ""
             console.print(f"    {fid}: {path}{placeholder}")
 
-    # Show directory list
     directories = result.get("directories", {})
     if directories:
         console.print()

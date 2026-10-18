@@ -3,14 +3,11 @@
 # Description: Email Close Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Close Operations Handler
-
-Handles batch close operations and post-close cleanup.
-Independent handler - no module or display dependencies.
 """
 
 from pathlib import Path
@@ -25,17 +22,9 @@ def batch_close(
     message_ids: List[str],
     mark_closed_fn: Callable,
 ) -> Tuple[List[Tuple[str, bool, str]], int, int]:
-    """
-    Close multiple emails by ID.
+    """Close multiple emails by ID.
 
-    Args:
-        branch_path: Path to branch directory
-        message_ids: List of message IDs to close
-        mark_closed_fn: Callable(branch_path, msg_id, skip_post_ops=bool) -> (bool, str)
-
-    Returns:
-        Tuple of (results_list, closed_count, failed_count)
-        results_list contains (message_id, success, message) tuples
+    Returns (results, closed_count, failed_count); results holds (message_id, success, message).
     """
     json_handler.log_operation("batch_close", {"branch_path": str(branch_path), "count": len(message_ids)})
     batch_mode = len(message_ids) > 1
@@ -59,14 +48,7 @@ def batch_close_post_ops(
     update_central_fn: Optional[Callable] = None,
     purge_deleted_fn: Optional[Callable] = None,
 ) -> None:
-    """
-    Run post-operations after a batch close (central update + purge).
-
-    Args:
-        branch_path: Path to branch directory
-        update_central_fn: Optional update_central callable
-        purge_deleted_fn: Optional purge_deleted_folder callable
-    """
+    """Run post-operations after a batch close (central update + purge)."""
     if update_central_fn:
         try:
             update_central_fn()

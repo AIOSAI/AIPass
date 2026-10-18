@@ -3,86 +3,54 @@
 # Description: Per-File Standards Checklist Module
 # Version: 1.4.0
 # Created: 2026-03-15
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Per-File Standards Checklist Module
+"""Per-File Standards Checklist Module
 
-Quick pass/fail standards check for a single file.
-Designed for hook consumption — runs after every file edit.
-
-Run: drone @seedgo checklist <file>
+Designed for hook consumption: runs after every file edit.
 """
 
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# CLI services (display/output formatting)
 from aipass.cli import console
 from aipass.cli.apps.modules import error
 
-# Checker discovery (reuse existing infrastructure)
 from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
 
-# Bypass system
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
     get_branch_from_path,
     load_bypass_rules,
     registry_notes,
 )
 
-# Which checkers judge a file, and how a failure reads (split out at the 600-line cap, leg 15)
 from aipass.seedgo.apps.handlers.checklist.verdicts import (
     format_failure as _format_failure,
     is_applicable as _is_applicable,
     is_skip_or_error as _is_skip_or_error,
 )
 
-# Throwaway / prototype detection
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_prototype_file, is_throwaway_path
 
-# Where each standard applies (production / tests / everywhere) — shared with the audit lane
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
 
-# .seedgoignore — gitignore-style per-directory + global default (tools/)
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
 
-# Bypass rules whose scope the checker cannot honour (a lines rule on a checker that passes no line)
 from aipass.seedgo.apps.handlers.bypass import inert
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.modules import CommandRefused
 
-# Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
 
-# =============================================================================
-# PATH HELPERS
-# =============================================================================
-
-
 def _get_repo_root() -> Path | None:
-    """Return the git repo root derived from this file's location.
-
-    Walks up from this module's directory to find the repo root
-    (the parent that contains the .git directory).  Falls back to
-    None if not inside a git repo.
-    """
+    """Return the git repo root derived from this file's location."""
     current = Path(__file__).resolve().parent
     for parent in (current, *current.parents):
         if (parent / ".git").exists():
@@ -93,16 +61,7 @@ def _get_repo_root() -> Path | None:
 def not_judged_here(file_path: str, pack_name: str = "aipass") -> List[str]:
     """Branch-level standards that apply to this file but the checklist cannot run.
 
-    A ``branch_level`` checker with no ``check_module()`` only judges a whole
-    branch, so :func:`_is_applicable` drops it here without a trace. The result
-    was a clean "All N standards passed" on backup's conftest while the audit
-    convicted that same file under ``unused_conftest_fixture``. Naming the rows
-    that were not judged is what keeps a pass here from reading as a pass there.
-
-    Applicability still gates the list, so a production file never names a
-    tests-only row and vice versa. ``entry_point`` rows are deliberately not
-    listed: every one implements ``check_module()`` and runs here on the only
-    files it judges (``apps/{name}.py``); elsewhere it has nothing to say.
+    Named so a pass here never reads as a pass in the audit, which judges them.
     """
     resolved = str(Path(file_path).resolve())
     if not resolved.endswith(".py") or not Path(resolved).exists():
@@ -121,24 +80,11 @@ def not_judged_here(file_path: str, pack_name: str = "aipass") -> List[str]:
     return names
 
 
-# =============================================================================
-# CORE LOGIC
-# =============================================================================
-
-
 def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = False) -> List[Dict]:
     """Run applicable standards checkers against a single file.
 
-    Args:
-        file_path: Absolute path to the file to check.
-        pack_name: Checker pack to use (default: "aipass").
-        prototype: If True, skip all standards (disposable code).
-
-    Returns:
-        List of result dicts: [{"standard": str, "passed": bool, "detail": str|None}].
-        A result also carries "bypass_notes" (list of str) when a bypass rule for
-        this file and standard has a scope the checker cannot honour; the notes
-        never change "passed".
+    A result may carry "bypass_notes" for a bypass whose scope the checker cannot honour;
+    the notes never change "passed".
     """
     resolved = str(Path(file_path).resolve())
 
@@ -153,9 +99,7 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if is_throwaway_path(resolved):
         return [{"standard": "(skip)", "passed": True, "detail": "Throwaway path (temp/scratchpad) — skipped"}]
 
-    # Retired code is not lintable. The audit lane has always skipped .archive/;
-    # this lane did not, so touching an archived file raised standards nobody
-    # can act on without un-retiring the code.
+    # Retired code is not lintable, matching the audit lane's .archive/ skip.
     if applicability.is_retired_path(resolved):
         return [{"standard": "(skip)", "passed": True, "detail": "Retired path (archived/deprecated) — skipped"}]
 
@@ -166,20 +110,16 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if branch_path is not None and is_seedgo_ignored(resolved, branch_path):
         return [{"standard": "(skip)", "passed": True, "detail": "Ignored via .seedgoignore"}]
 
-    # Discover pack path
     pack_path = _resolve_pack_path(pack_name)
     if pack_path is None:
         return [{"standard": "(error)", "passed": False, "detail": f"Pack '{pack_name}' not found"}]
 
-    # Load checkers
     checkers = discover_checkers(pack_path)
     if not checkers:
         return [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
 
-    # Resolve branch and bypass rules
     bypass_rules = _load_bypass_for_file(resolved)
 
-    # Run applicable checkers
     results = []
     for name, checker in sorted(checkers.items()):
         if not _is_applicable(checker, resolved):
@@ -196,7 +136,6 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
         detail = None
 
         if not passed:
-            # Extract concise failure detail from checks
             detail = _format_failure(r)
 
         result = {"standard": name, "passed": passed, "detail": detail}
@@ -256,32 +195,15 @@ def _load_bypass_for_file(file_path: str) -> list:
     return load_bypass_rules(str(bp))
 
 
-# =============================================================================
-# OUTPUT FORMATTING
-# =============================================================================
-
-# The token a script counts findings by. This lane is consumed by machines as
-# much as by people (edit hooks, sweeps over a whole branch), and until now the
-# only thing marking a finding was the em dash below -- decoration, not a
-# contract. @spawn scripted against it by grepping for a cross, got zero hits
-# across all 18 files of a branch, and nearly deleted 41 bypass rules on that
-# "proof". Plain ASCII, one per finding, never on a pass.
+# The token scripts count findings by: plain ASCII, one per finding, never on a pass.
 FINDING_MARKER = "[FAIL]"
 
-# ...and the same token spelled for Rich. The leading bracket MUST be escaped:
-# unescaped, Rich reads "[FAIL]" as a style tag and deletes it at render time,
-# leaving output that looks clean while the recorded call argument still reads
-# perfectly right. That is the exact failure mode this marker exists to end.
+# The bracket must be escaped: Rich reads "[FAIL]" as a style tag and drops it at render.
 _FINDING_MARKUP = "[red]\\[FAIL][/red]"
 
 
 def _print_results(results: List[Dict], file_path: str) -> None:
-    """Print concise pass/fail output for hook consumption.
-
-    Each finding carries :data:`FINDING_MARKER` so a caller can count findings
-    with a literal grep. The em dash stays where it was: it is the human
-    layout, and a marker is an addition to it, not a replacement for it.
-    """
+    """Print concise pass/fail output for hook consumption."""
     p = Path(file_path)
     console.print(f"[dim]{p.name}[/dim]")
 
@@ -301,9 +223,7 @@ def _print_results(results: List[Dict], file_path: str) -> None:
     if all_passed:
         console.print(f"[green]All {len(results)} standards passed[/green]")
 
-    # Notes, never the finding marker: each verdict above is the checker's. Fenced
-    # off by a blank line because hooks' auto_fix rejoins a finding's wrapped
-    # detail until one, and a note is no part of any finding.
+    # Behind a blank line: hooks' auto_fix rejoins a finding's wrapped detail until one.
     notes = [(r["standard"], note) for r in results for note in r.get("bypass_notes", [])]
     if notes:
         console.print()
@@ -314,13 +234,8 @@ def _print_results(results: List[Dict], file_path: str) -> None:
 def _print_not_judged(names: List[str]) -> None:
     """One line naming the branch-level rows this lane did not judge.
 
-    ``soft_wrap`` keeps it one physical line at any console width, so a grep
-    for a standard's name finds the whole list rather than a wrapped fragment.
-
-    Printed AFTER the verdicts and behind a blank line: hooks' auto_fix parser
-    rejoins wrapped finding details until a blank line, a check or "All ", so
-    a line directly under the last finding would be glued onto it. It never
-    carries :data:`FINDING_MARKER` and never touches the pass count.
+    ``soft_wrap`` keeps one physical line; printed after a blank line so auto_fix never glues it
+    onto the last finding.
     """
     if not names:
         return
@@ -333,52 +248,27 @@ def _print_not_judged(names: List[str]) -> None:
 
 
 def _print_registry_notes(notes: List[str]) -> None:
-    """Each unreadable-registry note once, after every verdict, behind a blank line.
-
-    Devpulse's ruling (seedgo fleet green leg 15): a registry nobody could read
-    changes no verdict and is said here instead, never with the finding marker.
-    """
+    """Each unreadable-registry note once, after every verdict, behind a blank line."""
     if notes:
         console.print()
     for note in notes:
         console.print(f"[yellow]note[/yellow] — {note}", highlight=False, soft_wrap=True)
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle 'checklist' command — per-file standards check.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-            [] -> print_introspection() (standard no-args gate)
-            ["--help"] -> print_help()
-            ["<file>"] -> run checklist on file
-            ["--pack", "<pack>", "<file>"] -> run with specific pack
-
-    Returns:
-        True if handled, False if not this module's command
-    """
+    """Handle 'checklist' command — per-file standards check."""
     if command != "checklist":
         return False
 
-    # No args -> introspection
     if not args:
         print_introspection()
         return True
 
-    # A help flag ANYWHERE means explain: `checklist <file> --help` used to run
-    # the full per-file audit it was being asked to describe.
+    # A help flag anywhere means explain, never run.
     if wants_help(None, args):
         print_help()
         return True
 
-    # Parse arguments
     pack_name = "aipass"
     file_path = None
     prototype = False
@@ -401,21 +291,18 @@ def handle_command(command: str, args: List[str]) -> bool:
         error("No file specified", suggestion="Usage: drone @seedgo checklist <file>")
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "checklist with no target")
 
-    # Resolve path — try absolute, then repo root, then CWD
+    # Absolute, then repo root (cross-CWD invocations), then CWD.
     resolved = Path(file_path)
     if resolved.is_absolute():
         resolved = resolved.resolve()
     else:
-        # Try relative to git repo root first (handles cross-CWD invocations)
         repo_root = _get_repo_root()
         candidate = (repo_root / resolved).resolve() if repo_root else None
         if candidate and candidate.exists():
             resolved = candidate
         else:
-            # Fallback: resolve relative to CWD
             resolved = (Path.cwd() / resolved).resolve()
 
-    # Directory mode — run checklist on all .py files in directory
     if resolved.is_dir():
         py_files = sorted(resolved.glob("*.py"))
         py_files = [f for f in py_files if not f.name.startswith("_") and "(disabled)" not in f.name]
@@ -432,21 +319,14 @@ def handle_command(command: str, args: List[str]) -> bool:
         _print_registry_notes(registry_notes())
         return True
 
-    # Single file mode
     results = run_checklist(str(resolved), pack_name=pack_name, prototype=prototype)
 
-    # Print results
     _print_results(results, str(resolved))
     if not _is_skip_or_error(results):
         _print_not_judged(not_judged_here(str(resolved), pack_name=pack_name))
     _print_registry_notes(registry_notes())
 
     return True
-
-
-# =============================================================================
-# INTROSPECTION & HELP
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -456,7 +336,6 @@ def print_introspection() -> None:
     console.print("Per-file standards check — quick pass/fail for hook consumption")
     console.print()
 
-    # Show discovered packs
     handlers_dir = Path(__file__).parent.parent / "handlers"
     packs = {}
     if handlers_dir.exists():
@@ -544,28 +423,20 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
-
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Confirm Prax logger connection
     logger.info("Prax logger connected to checklist")
 
-    # No args -> introspection
     if len(sys.argv) < 2:
         print_introspection()
         sys.exit(0)
 
-    # Run checklist
     handle_command("checklist", sys.argv[1:])

@@ -3,7 +3,7 @@
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
 # Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""
@@ -104,11 +104,7 @@ class TestTheAcquittedSeams:
 
     @pytest.mark.parametrize("target", ["sys.argv", "sys.stdout", "os.environ", "sys.modules", "sys.meta_path"])
     def test_the_interpreters_own_tables_are_seams(self, target):
-        """argv, the streams, the import tables and the environment are process state.
-
-        sys.meta_path joins sys.path and sys.modules: the import system's tables
-        are one rule (seedgo, fleet green leg 9; spawn's 3103/3119/3129).
-        """
+        """argv, the streams, the import tables and the environment are process state."""
         assert _scored(f"def test_it():\n    patch('{target}')\n") == []
 
     @pytest.mark.parametrize(
@@ -120,12 +116,7 @@ class TestTheAcquittedSeams:
         ],
     )
     def test_the_object_spellings_of_a_table_are_the_same_seam(self, call):
-        """The object and its attribute named apart are judged as the string form.
-
-        Red first: the scan read the first argument alone and convicted these
-        as a patch of all of sys (cli test_cli_routing:68, daemon 17 lines;
-        seedgo, fleet green leg 9).
-        """
+        """The object and its attribute named apart are judged as the string form."""
         assert _scored(f"import sys\ndef test_it(monkeypatch):\n    {call}\n") == []
 
     @pytest.mark.parametrize("call", ['patch.object(sys, "exit")', 'monkeypatch.setattr(sys, "platform", "win32")'])
@@ -159,13 +150,7 @@ class TestTheNameCollisionDefence:
 
 
 class TestAStdlibClassReachedThroughAProductBinding:
-    """@backup's finding, 2026-09-23: the same replacement, spelled two ways.
-
-    ``patch("pathlib.Path.resolve")`` scored and
-    ``monkeypatch.setattr(upload.Path, "resolve", ...)`` acquitted, though both
-    replace ``pathlib.Path.resolve`` for the whole process. A branch could turn
-    the row green one character at a time.
-    """
+    """@backup's finding, 2026-09-23: the same replacement, spelled two ways."""
 
     def test_backups_exact_form_is_convicted(self):
         """monkeypatch.setattr(product_module.Path, 'resolve') — the specimen."""
@@ -218,11 +203,7 @@ class TestWhatItRefusesToJudge:
         assert stdlib_patch_check.scan("def test_it(:\n") == ([], 0)
 
     def test_a_product_module_that_does_not_parse_is_not_judged_not_acquitted(self, tmp_path, monkeypatch):
-        """An import list nobody could read says nothing about what Path is.
-
-        Red first: the parse failure answered "" and the target was acquitted
-        uncounted (seedgo fleet green leg 15). Now it is counted as not judged.
-        """
+        """An import list nobody could read says nothing about what Path is."""
         package = tmp_path / "aipass" / "zz_leg15_specimen"
         package.mkdir(parents=True)
         (tmp_path / "aipass" / "__init__.py").write_text("", encoding="utf-8")
@@ -321,12 +302,7 @@ class TestTheBypass:
 
 
 class TestALineRuleAcquitsItsLineAlone:
-    """A rule with ``lines`` acquits those rows and no others (seedgo, fleet green leg 16).
-
-    check_module asked is_bypassed once with no line, and a lines rule asked
-    with no line answers False, so every line rule for this standard was inert:
-    hooks wrote three in good faith and the checker never read them.
-    """
+    """A rule with ``lines`` acquits those rows and no others (seedgo, fleet green leg 16)."""
 
     BODY = "def test_a():\n    patch('time.time')\ndef test_b():\n    patch('json.dump')\n"
 
@@ -358,13 +334,7 @@ class TestALineRuleAcquitsItsLineAlone:
 
 
 class TestAnFStringTargetWithAModuleConstantHead:
-    """``patch(f"{_MOD}.shutil.which")`` was unresolved, counted and never judged (seedgo, fleet green leg 17).
-
-    An f-string whose every field is a name bound ONCE at module level to a
-    string constant reads as the joined string; any other shape stays
-    unresolved and counted. patch.object and setattr forms are held unchanged by
-    TestAStdlibClassReachedThroughAProductBinding above.
-    """
+    """``patch(f"{_MOD}.shutil.which")`` was unresolved, counted and never judged (seedgo, fleet green leg 17)."""
 
     HEAD = f'_MOD = "{WATCHDOG}.agent"\n'
 

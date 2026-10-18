@@ -3,21 +3,13 @@
 # Description: Caller Auto-Provisioning Handler
 # Version: 1.0.1
 # Created: 2025-11-16
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Caller Auto-Provisioning Handler
 
-Internal-only handler — not wired as a CLI command.
-Called automatically by client.get_response() via ensure_caller_config().
-
-Business logic for provisioning OpenRouter API configs:
-- Auto-create caller API configurations
-- Provision JSON folder structure
-- Set default model/temperature/max_tokens
-- Initialize caller-specific tracking files
-- Ensure caller has complete 3-file JSON structure
+Internal-only, not a CLI command: client.get_response() calls ensure_caller_config().
 """
 
 import json
@@ -29,31 +21,14 @@ from aipass.prax import logger
 
 from aipass.api.apps.handlers.openrouter.caller import detect_caller_from_stack
 
-# JSON handler
 from aipass.api.apps.handlers.json import json_handler
-
-
-# ===========================================
-# JSON UTILITIES
-# ===========================================
 
 
 def read_json(file_path: Path) -> Optional[Dict[str, Any]]:
     """
     Read JSON file safely
 
-    Args:
-        file_path: Path to JSON file
-
-    Returns:
-        Parsed JSON dict, or None when the file is absent.
-
-    Raises:
-        ValueError: The file does not parse (JSONDecodeError, UnicodeDecodeError).
-        OSError: The file exists but could not be read. Raised, never None:
-            ensure_caller_config used to read None as corrupt and regenerate,
-            so a transient read error overwrote a good config (api, fleet
-            green leg 3). Only the caller decides what corrupt means.
+    None only when absent; an unreadable file raises, else a transient read error regenerates a good config.
     """
     if not file_path.exists():
         return None
@@ -63,16 +38,7 @@ def read_json(file_path: Path) -> Optional[Dict[str, Any]]:
 
 
 def write_json(file_path: Path, data: Dict[str, Any]) -> bool:
-    """
-    Write JSON file safely with formatting
-
-    Args:
-        file_path: Path to JSON file
-        data: Dict to write as JSON
-
-    Returns:
-        True if successful, False otherwise
-    """
+    """Write JSON file safely with formatting"""
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -85,25 +51,13 @@ def write_json(file_path: Path, data: Dict[str, Any]) -> bool:
         return False
 
 
-# ===========================================
-# DEFAULT CONFIGURATION
-# ===========================================
-
-
 def get_default_caller_config() -> Dict[str, Any]:
-    """
-    Get default config template for new callers
-
-    NOTE: No default ai_model - callers must set their own model in their branch config
-
-    Returns:
-        Dict with default OpenRouter configuration (model must be set by caller)
-    """
+    """Get default config template for new callers"""
     return {
         "module_name": "openrouter",
         "timestamp": datetime.now().isoformat(),
         "config": {
-            "ai_model": "",  # Caller must set their own model
+            "ai_model": "",  # no default: the caller sets its own model
             "ai_temperature": 0.7,
             "ai_max_tokens": 4000,
             "enabled": True,
@@ -112,12 +66,7 @@ def get_default_caller_config() -> Dict[str, Any]:
 
 
 def get_default_caller_data() -> Dict[str, Any]:
-    """
-    Get default data template for tracking caller usage
-
-    Returns:
-        Dict with initial usage tracking data
-    """
+    """Get default data template for tracking caller usage"""
     return {
         "module_name": "openrouter",
         "timestamp": datetime.now().isoformat(),
@@ -132,30 +81,12 @@ def get_default_caller_data() -> Dict[str, Any]:
 
 
 def get_default_caller_log() -> Dict[str, Any]:
-    """
-    Get default log template for caller operations
-
-    Returns:
-        Dict with empty log structure
-    """
+    """Get default log template for caller operations"""
     return {"module_name": "openrouter", "timestamp": datetime.now().isoformat(), "logs": []}
 
 
-# ===========================================
-# PROVISIONING FUNCTIONS
-# ===========================================
-
-
 def provision_json_folder(json_folder: Path) -> bool:
-    """
-    Create JSON folder structure if missing
-
-    Args:
-        json_folder: Path to caller's JSON folder
-
-    Returns:
-        True if folder exists or created, False on error
-    """
+    """Create JSON folder structure if missing"""
     try:
         if json_folder.exists():
             return True
@@ -170,27 +101,11 @@ def provision_json_folder(json_folder: Path) -> bool:
 
 
 def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
-    """
-    Create new caller configuration with defaults
-
-    Creates complete 3-file JSON structure:
-    - openrouter_config.json (API settings)
-    - openrouter_data.json (usage tracking)
-    - openrouter_log.json (operation log)
-
-    Args:
-        caller: Name of calling module
-        json_folder: Path to caller's JSON folder
-
-    Returns:
-        Dict with created config or empty dict on error
-    """
+    """Create new caller configuration with defaults"""
     try:
-        # Ensure JSON folder exists
         if not provision_json_folder(json_folder):
             return {}
 
-        # Create config file
         config_file = json_folder / "openrouter_config.json"
         config = get_default_caller_config()
 
@@ -200,7 +115,6 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
         logger.info(f"Created API config for {caller}: {config_file}")
         logger.info(f"Created config: {config_file.name}")
 
-        # Create data file
         data_file = json_folder / "openrouter_data.json"
         data = get_default_caller_data()
 
@@ -208,7 +122,6 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
             logger.info(f"Created data file for {caller}: {data_file}")
             logger.info(f"Created data: {data_file.name}")
 
-        # Create log file
         log_file = json_folder / "openrouter_log.json"
         log_data = get_default_caller_log()
 
@@ -228,20 +141,8 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
 
 
 def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
-    """
-    Ensure caller has API configuration, create if missing
-
-    Auto-detects caller if not provided. Creates complete 3-file
-    JSON structure with default OpenRouter settings.
-
-    Args:
-        caller: Optional caller name (auto-detected if None)
-
-    Returns:
-        Dict with config or empty dict if unable to provision
-    """
+    """Ensure caller has API configuration, create if missing"""
     try:
-        # Auto-detect caller if not provided
         json_folder = None
         if not caller:
             detected_caller, json_folder = detect_caller_from_stack()
@@ -252,14 +153,12 @@ def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
                 logger.warning("Could not detect caller module")
                 return {}
 
-        # Get JSON folder path if not already detected
         if not json_folder:
             _, json_folder = detect_caller_from_stack()
             if not json_folder:
                 logger.error(f"Could not find JSON folder for '{caller}'")
                 return {}
 
-        # Check if config already exists
         config_file = json_folder / "openrouter_config.json"
 
         if config_file.exists():
@@ -274,7 +173,6 @@ def ensure_caller_config(caller: str | None = None) -> Dict[str, Any]:
             else:
                 logger.warning(f"Config file corrupted for {caller}, regenerating")
 
-        # Create new config
         return create_caller_config(caller, json_folder)
 
     except Exception as e:

@@ -3,7 +3,7 @@
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
 # Version: 1.0.5
 # Created: 2026-09-21
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -25,20 +25,9 @@ from aipass.seedgo.apps.handlers.tests_lane import template_ops
 from aipass.seedgo.apps.modules import CommandRefused, tests_lane
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def fleet(tmp_path, monkeypatch):
-    """A whole repo the test built: two branches, a registry, no live paths.
-
-    The seam is registry_scan, which both discovery and retire_ops resolve
-    through, so one patch moves the repo root AND the branch list at once.
-    The root sits 60 characters deep: macOS's long tmp path pushed a printed
-    receipt path past the pinned console width and it wrapped (PR #774).
-    """
+    """A whole repo the test built: two branches, a registry, no live paths."""
     root = tmp_path / ("d" * 60)
     for name in ("alpha", "beta"):
         branch = root / "src" / "aipass" / name
@@ -117,20 +106,11 @@ def refused_receipts(monkeypatch) -> list:
 
 
 def bumped(dry_run: bool, stamped: int, branches: str) -> tuple:
-    """The one event a bump announces, as the bus recorder holds it.
-
-    Spelled out in full, the event's name included, so a renamed event or two
-    keys swapped reddens every bump test (seedgo, fleet green leg 4).
-    """
+    """The one event a bump announces, as the bus recorder holds it."""
     return (
         "test_template_bumped",
         {"dry_run": dry_run, "stamped": stamped, "branches": branches, "versions": '{"test_template": "9.9.9"}'},
     )
-
-
-# ---------------------------------------------------------------------------
-# handle_command — the routing a user actually types
-# ---------------------------------------------------------------------------
 
 
 class TestHandleCommand:
@@ -159,11 +139,6 @@ class TestHandleCommand:
         printed = capsys.readouterr().out
         assert "COMMANDS:" in printed
         assert "test_old.py" not in printed
-
-
-# ---------------------------------------------------------------------------
-# tests retired — the retire lane, through the command
-# ---------------------------------------------------------------------------
 
 
 class TestRetiredListing:
@@ -201,11 +176,6 @@ class TestRetiredListing:
         printed = capsys.readouterr().out
         assert "test_unlogged.py" in printed
         assert "nothing recorded it" in printed
-
-
-# ---------------------------------------------------------------------------
-# tests restore — a move back, never a copy
-# ---------------------------------------------------------------------------
 
 
 class TestRestore:
@@ -254,11 +224,6 @@ class TestRestore:
         assert "Usage: drone @seedgo tests restore <name>" in capsys.readouterr().err
 
 
-# ---------------------------------------------------------------------------
-# tests template-status — receipts against gold
-# ---------------------------------------------------------------------------
-
-
 class TestTemplateStatus:
     def test_a_branch_with_no_receipt_is_named_as_unstamped(self, capsys, fleet, gold):
         tests_lane.handle_command("tests", ["template-status"])
@@ -292,11 +257,6 @@ class TestTemplateStatus:
         tests_lane.handle_command("tests", ["template-status"])
 
         assert "No gold versions" in capsys.readouterr().err
-
-
-# ---------------------------------------------------------------------------
-# tests template bump — the write, and the report that precedes it
-# ---------------------------------------------------------------------------
 
 
 class TestTemplateBump:
@@ -352,10 +312,7 @@ class TestTemplateBump:
         ]
 
     def test_a_stamp_that_cannot_land_is_reported_failed_with_its_error(self, fleet, gold):
-        """A failed write came back as the action text "failed: <error>", a string no caller compares.
-
-        Mutant: _stamp's old `except Exception: return f"failed: {exc}"` — killed.
-        """
+        """A failed write came back as the action text "failed: <error>", a string no caller compares."""
         tests_dir = fleet / "src" / "aipass" / "alpha" / "tests"
         (tests_dir / "TEST_TEMPLATE.md").mkdir()
 
@@ -367,13 +324,7 @@ class TestTemplateBump:
         assert not (tests_dir / template_ops.RECEIPT_FILE).exists()
 
     def test_a_receipt_that_does_not_land_is_failed_and_never_reads_current(self, fleet, gold, refused_receipts):
-        """The receipt is written LAST, so a branch whose receipt did not land is stamped again next time.
-
-        The receipt is the claim "this branch carries gold"; a later bump sees
-        it and calls the branch current. Written first, a receipt beside a page
-        that then failed would read current for ever (seedgo's order, leg 4).
-        Mutant T2: the raise condition made always false — killed (leg 4).
-        """
+        """The receipt is written LAST, so a branch whose receipt did not land is stamped again next time."""
         branch = fleet / "src" / "aipass" / "alpha"
 
         outcome = template_ops.bump(confirm=True, only="alpha")
@@ -388,12 +339,7 @@ class TestTemplateBump:
         assert template_ops.read_receipt(branch) is None
 
     def test_a_page_that_is_not_utf8_stops_the_bump_before_any_branch_is_stamped(self, fleet, gold):
-        """The page is read once, before the fleet: an unreadable page is the bump's error.
-
-        It was read per branch inside the loop, and a UnicodeDecodeError (a
-        ValueError, not an OSError) escaped bump() with no outcome returned
-        (seedgo's decision, leg 4).
-        """
+        """The page is read once, before the fleet: an unreadable page is the bump's error."""
         page = gold / "test_template_v1.md"
         page.write_bytes(b"\xff\xfe not utf-8 \x80")
         with pytest.raises(UnicodeDecodeError) as unreadable:
@@ -410,18 +356,7 @@ class TestTemplateBump:
         assert template_ops.read_receipt(fleet / "src" / "aipass" / "alpha") is None
 
     def test_the_command_prints_the_error_of_a_failed_stamp(self, capsys, fleet, gold, refused_receipts, monkeypatch):
-        """A failed row's reason reaches the user, and the shell reads the failure.
-
-        The command exited 0 with a branch unstamped, so drone and a script
-        saw success (seedgo's decision, leg 4: exit 2, a lane that could not run).
-        Mutant L1: _run_bump's error print replaced by pass — killed (leg 4).
-        The console is pinned wider than any path, so the line search below does
-        not depend on where Rich wraps (PR #774, macOS). The pin lands on the
-        console tests_lane prints through, never display.CONSOLE: cli's
-        test_display reloads display in the serial run, display.CONSOLE becomes
-        a new object at width 80 while tests_lane keeps the old one, and the
-        path wrapped (PR #774 coverage job, round two).
-        """
+        """A failed row's reason reaches the user, and the shell reads the failure."""
         monkeypatch.setattr(tests_lane.console, "width", 10_000)
         with pytest.raises(CommandRefused) as refusal:
             tests_lane.handle_command("tests", ["template", "bump", "@alpha", "--confirm"])

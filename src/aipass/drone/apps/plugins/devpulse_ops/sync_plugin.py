@@ -3,7 +3,7 @@
 # Description: Smart sync — fetch, detect divergence, rebase if needed
 # Version: 1.0.0
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-10-17
 # =============================================
 
 """Smart sync — fetch, detect divergence, rebase if needed.
@@ -23,14 +23,7 @@ from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
 
 def smart_sync(caller: str) -> dict:
-    """Fetch origin and rebase local main if behind.
-
-    Args:
-        caller: The verified caller name (e.g. ``"devpulse"``).
-
-    Returns:
-        Dict with success, ahead, behind, rebased, and message.
-    """
+    """Fetch origin and rebase local main if behind; *caller* must already be verified by auth."""
     repo_root = find_repo_root()
 
     result: dict = {
@@ -42,7 +35,6 @@ def smart_sync(caller: str) -> dict:
     }
 
     try:
-        # Step 1: Fetch origin
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
             capture_output=True,
@@ -54,7 +46,6 @@ def smart_sync(caller: str) -> dict:
             logger.error(result["message"])
             return result
 
-        # Step 2: Check divergence
         rev_list = subprocess.run(
             ["git", "rev-list", "--left-right", "--count", "main...origin/main"],
             capture_output=True,
@@ -72,10 +63,9 @@ def smart_sync(caller: str) -> dict:
         result["ahead"] = ahead
         result["behind"] = behind
 
-        # Step 3: Sync if behind
         if behind > 0:
             if ahead > 0:
-                # Diverged — merge instead of rebase
+                # Diverged: merge, so local commits are never rewritten.
                 merge = subprocess.run(
                     ["git", "merge", "origin/main", "--no-edit"],
                     capture_output=True,
@@ -83,7 +73,6 @@ def smart_sync(caller: str) -> dict:
                     cwd=str(repo_root),
                 )
                 if merge.returncode != 0:
-                    # Merge conflict — abort and report
                     diff = subprocess.run(
                         ["git", "diff", "--name-only", "--diff-filter=U"],
                         capture_output=True,
@@ -107,7 +96,6 @@ def smart_sync(caller: str) -> dict:
                 result["success"] = True
                 result["message"] = f"Merged origin/main (was {ahead} ahead, {behind} behind)"
             else:
-                # Only behind — rebase is safe
                 rebase = subprocess.run(
                     ["git", "rebase", "origin/main"],
                     capture_output=True,

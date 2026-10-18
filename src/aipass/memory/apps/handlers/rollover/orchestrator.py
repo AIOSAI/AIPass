@@ -3,19 +3,13 @@
 # Description: Rollover Orchestration Handler
 # Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rollover Orchestration Handler
 
-Contains the core rollover execution logic: trigger detection, extraction,
-embedding, vector storage, and line count sync. Called by the rollover
-module which handles display/CLI concerns.
-
-Purpose:
-    Implementation logic for rollover workflow, separated from CLI/display
-    layer to satisfy thin-module standard.
+Reference: docs/rollover_pipeline.md
 """
 
 import subprocess
@@ -29,9 +23,6 @@ from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 
-# logger imported from aipass.prax
-
-# Handler imports (relative within the memory package)
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable
 from aipass.memory.apps.handlers.rollover import extractor
@@ -39,12 +30,11 @@ from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reaso
 from aipass.memory.apps.handlers.tracking import line_counter
 from aipass.memory.apps.handlers.repo_root import module_file
 
-# Subprocess scripts for ML operations (run in memory venv)
+# ML runs in the memory venv's python, in a subprocess.
 _HANDLERS_DIR = module_file(__file__).parent.parent
 CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
 EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
 
-# Memory venv python — auto-detect from memory/.venv/ or use env var override
 _MEMORY_ROOT = module_file(__file__).parents[3]
 _MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
 
@@ -62,59 +52,24 @@ def _get_memory_python() -> str:
 MEMORY_PYTHON = _get_memory_python()
 
 
-# =============================================================================
-# REPO ROOT DISCOVERY
-# =============================================================================
-
-
 def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
-
-    Kept as a local name because callers and tests patch it here. The body is a
-    delegation on purpose: this function used to be one of ten byte-identical
-    copies, so the first cure landed on one file and CI went red on the next.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
-    """
+    """Repo root for this lane; a local name because tests patch it, the body lives in ``repo_root.py``."""
     return repo_root.find_repo_root(caller="orchestrator")
 
 
 _REPO_ROOT = _find_repo_root()
 
 
-# =============================================================================
-# VECTOR STORAGE (SUBPROCESS)
-# =============================================================================
-
-
 def store_vectors_subprocess(
     branch: str, memory_type: str, embeddings: list, documents: list, metadatas: list, db_path: str | Path | None = None
 ) -> dict:
-    """
-    Store vectors via subprocess.
-
-    This ensures ChromaDB compatibility regardless of calling Python version.
-
-    Args:
-        branch: Branch name
-        memory_type: Type of memory (e.g., 'sessions', 'observations')
-        embeddings: List of embedding vectors
-        documents: List of text documents
-        metadatas: List of metadata dicts
-        db_path: Path to Chroma database (None for global)
-
-    Returns:
-        Dict with success status and storage details
-    """
-    # A branch-local store is refused HERE, before the child that would write it starts
+    """Store vectors via subprocess, so ChromaDB works whatever the calling Python; ``db_path=None`` is global."""
+    # Fence here: the child that would write the store has not started yet.
     if db_path:
         refusal = write_fence.fence_write(db_path, lane="store_vectors_local")
         if refusal is not None:
             return {"success": False, "error": refusal}
 
-    # Convert numpy arrays to lists for JSON serialization
     embeddings_serializable = [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
 
     input_data = {
@@ -151,21 +106,8 @@ def store_vectors_subprocess(
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# EMBEDDING VIA SUBPROCESS
-# =============================================================================
-
-
 def encode_batch_subprocess(texts: list) -> dict:
-    """
-    Encode texts via subprocess using memory venv's fastembed.
-
-    Args:
-        texts: List of text strings to encode
-
-    Returns:
-        Dict with success, embeddings, count, dimension
-    """
+    """Encode texts via subprocess using memory venv's fastembed."""
     input_data = json.dumps({"texts": texts})
 
     try:
@@ -195,33 +137,16 @@ def encode_batch_subprocess(texts: list) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# PATH HELPERS
-# =============================================================================
-
-
-# Why a lookup found no local store. The push report names it, so a push that
-# reached the global store only says which of the two it was (leg 6 of DPLAN-0354).
+# Why a lookup found no local store; the push report names which.
 LOCAL_STORE_REGISTRY_UNREADABLE = "registry unreadable"
 LOCAL_STORE_ABSENT = "no local store"
 
 
 def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
-    """
-    Find a branch's local .chroma, and say why when there is none
+    """Find a branch's local .chroma: ``(path, None)`` or ``(None, reason)``.
 
-    Args:
-        branch_name: Branch name (e.g., "SEEDGO", "AIPASS")
-
-    Returns:
-        ``(path, None)`` for the branch's local .chroma directory, or
-        ``(None, reason)``: LOCAL_STORE_REGISTRY_UNREADABLE with an error logged
-        when the registry cannot be read, else LOCAL_STORE_ABSENT (no name, not
-        listed, no directory, or the fence refused the store). Never raises on
-        an unreadable registry: the local store is the second store,
-        execute_rollover reaches it after the file is trimmed, and a raise here
-        left the entries in neither store (DPLAN-0354 leg 3b). The global store
-        still takes them.
+    Never raises on an unreadable registry: this runs after the file is trimmed,
+    and a raise would leave the entries in neither store.
     """
     if not branch_name:
         return None, LOCAL_STORE_ABSENT
@@ -237,10 +162,9 @@ def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
             branch_path = Path(branch.get("path", ""))
             if branch_path.exists():
                 chroma_path = branch_path / ".chroma"
-                # Existing is not permission: the local store writes into whatever is handed out
+                # Existing is not permission: the store writes wherever it is handed.
                 if write_fence.fence_write(chroma_path, lane="local_chroma") is not None:
                     return None, LOCAL_STORE_ABSENT
-                # Auto-create .chroma directory if missing
                 if not chroma_path.exists():
                     chroma_path.mkdir(parents=True, exist_ok=True)
                     logger.info(f"[rollover] Created local .chroma directory for {branch_name}")
@@ -251,51 +175,20 @@ def local_store_lookup(branch_name: str) -> tuple[Path | None, str | None]:
 
 
 def get_branch_local_chroma_path(branch_name: str) -> Path | None:
-    """
-    Get local .chroma path for branch
-
-    Args:
-        branch_name: Branch name (e.g., "SEEDGO", "AIPASS")
-
-    Returns:
-        The path local_store_lookup finds, or None for every reason it gives
-        (logged there). For a caller that needs the path alone.
-    """
+    """The path ``local_store_lookup`` finds, or None for every reason it gives."""
     return local_store_lookup(branch_name)[0]
 
 
-# =============================================================================
-# TEXT EXTRACTION HELPERS
-# =============================================================================
-
-
 def extract_text_from_memories(memories: List[Dict]) -> List[str]:
-    """
-    Extract text content from memory items for vectorization
-
-    Memory items have different structures:
-    - sessions: 'activities' array (join into text)
-    - observations: might have 'content' or 'text' field
-    - generic: convert to JSON string
-
-    Args:
-        memories: List of memory items
-
-    Returns:
-        List of text strings for embedding
-    """
+    """Extract the text of each memory item for vectorization, by whichever shape it has."""
     texts = []
 
     for memory in memories:
-        # Try common text fields
         if "activities" in memory and isinstance(memory["activities"], list):
-            # Sessions type (v1) - join activities
             text = "\n".join(str(a) for a in memory["activities"])
         elif "summary" in memory:
-            # Sessions type (v2) - summary field
             text = str(memory["summary"])
         elif "key" in memory and "value" in memory:
-            # Key learnings (unified) - key:value pair
             text = f"{memory.get('key', '')}: {memory.get('value', '')}"
         elif "content" in memory:
             text = str(memory["content"])
@@ -304,7 +197,6 @@ def extract_text_from_memories(memories: List[Dict]) -> List[str]:
         elif "message" in memory:
             text = str(memory["message"])
         else:
-            # Fallback - convert to string representation
             text = str(memory)
 
         texts.append(text)
@@ -312,29 +204,8 @@ def extract_text_from_memories(memories: List[Dict]) -> List[str]:
     return texts
 
 
-# =============================================================================
-# ROLLOVER EXECUTION
-# =============================================================================
-
-
 def execute_rollover() -> Dict[str, Any]:
-    """
-    Execute rollover workflow for all triggered branches.
-
-    Workflow:
-    1. Check all branches for triggers
-    2. For each trigger:
-       - Create backup
-       - Extract oldest entries
-       - Generate embeddings
-       - Store in local + global Chroma
-       - Update line counts
-    3. Return results
-
-    Returns:
-        Dict with success status, counts, and details for each trigger
-    """
-    # Step 1: Detect triggers
+    """Execute rollover for all triggered branches: backup, extract, embed, store local + global."""
     triggers_result = detector.check_all_branches()
 
     if not triggers_result["success"]:
@@ -350,10 +221,8 @@ def execute_rollover() -> Dict[str, Any]:
         }
 
     triggers = triggers_result.get("triggers", [])
-    # Files over a limit that no run can drain (a 2.0.0 dict container). Not
-    # triggers - there is nothing to back up or extract - but carried on every
-    # return, the empty-run one included, so the caller can say so. The
-    # detector has already logged each one.
+    # Over a limit no run can drain (a dict container): not triggers, but carried on
+    # every return so the caller can say so.
     undrainable = [str(item) for item in triggers_result.get("undrainable", [])]
     if not triggers:
         logger.info("[rollover] No rollover triggers detected")
@@ -369,14 +238,12 @@ def execute_rollover() -> Dict[str, Any]:
 
     logger.info(f"[rollover] Found {len(triggers)} files ready for rollover")
 
-    # Process each trigger
     success_count = 0
     failed = []
     skipped = []
     results = []
 
     for trigger in triggers:
-        # Step 1: CREATE BACKUP (safety net)
         backup_result = extractor.create_rollover_backup(trigger.file_path)
 
         if not backup_result["success"]:
@@ -387,14 +254,12 @@ def execute_rollover() -> Dict[str, Any]:
 
         logger.info(f"[rollover] {backup_result.get('message')}")
 
-        # Step 2: Extract memories (auto-calculates percentage)
         extract_result = extractor.extract_with_metadata(trigger.file_path)
 
         if not extract_result["success"]:
             error_msg = extract_result.get("error", "Unknown error")
             logger.error(f"[rollover] Extraction failed for {trigger}: {error_msg}")
 
-            # RESTORE from backup
             restore_result = extractor.restore_from_backup(trigger.file_path)
             if restore_result["success"]:
                 logger.info("[rollover] Restored from backup after extraction failure")
@@ -403,11 +268,8 @@ def execute_rollover() -> Dict[str, Any]:
             continue
 
         if extract_result.get("skipped"):
-            # Reported, never dropped. A trigger that increments neither tally
-            # produced "0/1 successful" beside an empty failure list — a count
-            # saying something broke and a list saying nothing did. The skip is
-            # also not reliably a no-op: the extractor persists a newest-first
-            # order repair on its way out of this same branch.
+            # Reported, never dropped: a trigger in neither tally reads "0/1" beside no
+            # failures, and a skip may still have persisted an order repair.
             reason = extract_result.get("message", "no excess")
             logger.info(f"[rollover] Extraction skipped for {trigger}: {reason}")
             skipped.append({"trigger": str(trigger), "reason": reason})
@@ -426,17 +288,14 @@ def execute_rollover() -> Dict[str, Any]:
 
         logger.info(f"[rollover] Extracted {len(memories)} items from {trigger} ({old_lines} -> {new_lines} lines)")
 
-        # Convert memory items to text for vectorization
         texts = extract_text_from_memories(memories)
 
-        # Step 3: Generate embeddings (via subprocess in memory venv)
         embed_result = encode_batch_subprocess(texts)
 
         if not embed_result["success"]:
             error_msg = embed_result.get("error", "Unknown error")
             logger.error(f"[rollover] Embedding failed for {trigger}: {error_msg}")
 
-            # RESTORE from backup
             restore_result = extractor.restore_from_backup(trigger.file_path)
             if restore_result["success"]:
                 logger.info("[rollover] Restored from backup after embedding failure")
@@ -448,7 +307,7 @@ def execute_rollover() -> Dict[str, Any]:
         if not embeddings:
             logger.error(f"[rollover] No embeddings generated for {trigger}")
 
-            # RESTORE from backup (file was already trimmed but data not vectorized)
+            # The file is already trimmed; without a restore the entries are lost.
             restore_result = extractor.restore_from_backup(trigger.file_path)
             if restore_result["success"]:
                 logger.info("[rollover] Restored from backup after empty embeddings")
@@ -460,14 +319,12 @@ def execute_rollover() -> Dict[str, Any]:
 
         logger.info(f"[rollover] Generated {len(embeddings)} embeddings for {trigger}")
 
-        # Step 4: Prepare metadata for vectorization
         metadatas = []
         for memory in memories:
             metadata = memory.get("_metadata", {})
             metadata["timestamp"] = memory.get("timestamp", "")
             metadatas.append(metadata)
 
-        # Step 5: Store in LOCAL branch Chroma (via subprocess)
         branch_str: str = branch
         memory_type_str: str = memory_type
         embeddings_list: list = embeddings
@@ -487,25 +344,22 @@ def execute_rollover() -> Dict[str, Any]:
 
             if not local_store_result["success"]:
                 logger.warning(f"[rollover] Local storage failed for {branch}: {local_store_result.get('error')}")
-                # Continue anyway - global storage is primary
+                # Global storage is primary; a local failure does not restore.
             else:
                 logger.info(f"[rollover] Stored {len(embeddings)} vectors in local Chroma for {branch}")
 
-        # Step 6: Store in GLOBAL Memory Chroma (via subprocess)
         global_store_result = store_vectors_subprocess(
             branch=branch_str,
             memory_type=memory_type_str,
             embeddings=embeddings_list,
             documents=texts,
             metadatas=metadatas,
-            # db_path=None means global
         )
 
         if not global_store_result["success"]:
             error_msg = global_store_result.get("error", "Unknown error")
             logger.error(f"[rollover] Global storage failed for {trigger}: {error_msg}")
 
-            # RESTORE from backup (CRITICAL - file was modified but storage failed)
             restore_result = extractor.restore_from_backup(trigger.file_path)
             if restore_result["success"]:
                 logger.info("[rollover] Restored from backup after storage failure")
@@ -517,7 +371,6 @@ def execute_rollover() -> Dict[str, Any]:
 
         logger.info(f"[rollover] Stored {len(embeddings)} vectors in global Chroma for {branch}")
 
-        # Step 7: Update line count metadata
         update_result = line_counter.update_line_count(trigger.file_path)
         if update_result["success"]:
             logger.info(f"[rollover] Updated line count metadata for {trigger.file_path.name}")
@@ -526,7 +379,6 @@ def execute_rollover() -> Dict[str, Any]:
                 f"[rollover] Failed to update line count for {trigger.file_path.name}: {update_result.get('error')}"
             )
 
-        # Success!
         success_count += 1
         global_collection = global_store_result.get("collection")
         global_total = global_store_result.get("total_vectors")
@@ -549,17 +401,12 @@ def execute_rollover() -> Dict[str, Any]:
             f"[rollover] Successfully rolled over {trigger}: {len(memories)} items, {old_lines} -> {new_lines} lines"
         )
 
-    # Summary logging
     if success_count > 0:
         logger.info(f"[rollover] Rollover complete: {success_count}/{len(triggers)} successful")
     if failed:
         logger.error(f"[rollover] {len(failed)} operations failed")
 
-    # =========================================================================
-    # Post-rollover processing chain
-    # =========================================================================
     if success_count > 0:
-        # Post-rollover: fire event for trigger system
         try:
             # The published door is the instance; aliased, `trigger` is this function's loop name.
             from aipass.trigger.apps.modules.core import trigger as trigger_bus
@@ -571,7 +418,6 @@ def execute_rollover() -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"[orchestrator] Failed to fire rollover_complete event: {e}")
 
-        # Post-rollover: update central stats
         try:
             from aipass.memory.apps.handlers.central_writer import update_central
 
@@ -583,7 +429,6 @@ def execute_rollover() -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"[rollover] Central writer unavailable: {e}")
 
-        # Post-rollover: process memory pool if files waiting
         try:
             from aipass.memory.apps.handlers.intake.pool_processor import process_memory_pool
 
@@ -593,11 +438,8 @@ def execute_rollover() -> Dict[str, Any]:
         except Exception as e:
             logger.info(f"[rollover] Memory pool check: {e}")
 
-    # Gated on success_count alone, a run whose every trigger was legitimately
-    # SKIPPED reported failure while nothing had gone wrong -- "nothing needed
-    # archiving" is an outcome, not a fault. The existing contract that a mixed
-    # run still succeeds is deliberately preserved: partial progress with the
-    # failures printed by name is not the same as a broken run.
+    # An all-skipped run is not a fault, and a mixed run still succeeds (its failures
+    # are reported by name).
     run_ok = not failed or success_count > 0
 
     json_handler.log_operation(
@@ -622,28 +464,8 @@ def execute_rollover() -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# LINE COUNT SYNC
-# =============================================================================
-
-
 def sync_line_counts() -> Dict[str, Any]:
-    """
-    Measure line counts for every branch memory file. READ-ONLY.
-
-    The name is kept because this is the handler seam the module still calls;
-    the behaviour is a report. Nothing is written: the one write this lane ever
-    had was `document_metadata.status.last_health_check`, and the whole `status`
-    block left the standard on 2026-08-25 (health is computed at run time, never
-    stored). The `current_lines` field it claimed to update never existed in the
-    files either — the count was computed, returned, and dropped.
-
-    The verb in front of it is now `rollover report-lines`; see
-    `modules/rollover.RENAMED_VERBS`.
-
-    Returns:
-        Dict with success status, measured count, and failures
-    """
+    """Measure line counts for every branch memory file. READ-ONLY; the old name is the module's seam."""
     result = line_counter.update_all_memory_files()
 
     if result["success"]:

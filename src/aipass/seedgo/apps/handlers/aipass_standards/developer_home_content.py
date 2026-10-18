@@ -3,25 +3,16 @@
 # Description: Developer Home Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Developer Home Standards Content Handler
-
-Provides formatted developer_home standards content.
-Module orchestrates, handler implements.
-"""
+"""Developer Home Standards Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_developer_home_standards() -> str:
-    """Return formatted developer_home standards content with Rich markup.
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted developer_home standards content with Rich markup."""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  AIPass is a PUBLIC repo. No tracked text file names a person, and a home",

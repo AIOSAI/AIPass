@@ -3,27 +3,12 @@
 # Description: System Status skill handler - disk, memory, uptime, processes, battery, machine_vitals(), machine_processes()
 # Version: 2.6.0
 # Created: 2026-03-07
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 System Status skill handler.
-
-Provides system health information: disk usage, memory, uptime, processes -
-as text actions for the runner, and as one published dict, machine_vitals(),
-for in-process callers (the host API's /v1/machine route, FPLAN-0561).
-
-Disk comes from `shutil.disk_usage`, which is portable on its own. The other
-three used to read /proc directly, which made them Linux-only: on the macOS
-runner every one of them answered success=False and `summary` reported
-success=True over the wreckage (FPLAN-0554). They now ask psutil - a declared
-dependency of this project (psutil>=5.9) - which answers the same three
-questions on Linux, macOS and Windows. When psutil cannot be imported the
-actions refuse by name and give the install recipe; they never answer a
-partial.
-
-Called by: drone @skills run system_status <action>
-Published: machine_vitals(), machine_processes() - from aipass.skills.lib.system_status import handler
+Reference: docs/system_status.md
 """
 
 import configparser
@@ -37,42 +22,23 @@ from time import monotonic as _monotonic
 
 from aipass.prax import logger
 
-# psutil is declared in pyproject (psutil>=5.9), so this import normally
-# succeeds. A host that lacks it still gets disk usage; the three actions that
-# need it refuse by name rather than answering a partial.
+# Without psutil, disk still answers; the psutil actions refuse by name, never a partial.
 try:
     import psutil
 except ImportError:
     psutil = None
     logger.warning("psutil not importable — system_status memory/uptime/processes will refuse")
 
-# What to tell a caller whose host has no psutil. Naming the recipe is the
-# point: "not available" sent the reader looking at their kernel.
 PSUTIL_RECIPE = "psutil is not importable on this host - install it with: pip install 'psutil>=5.9'"
 
 
 def _host_platform():
-    """The platform this process runs on: sys.platform, read at the call.
-
-    One door for every platform branch in this module, so a test can name the
-    host it builds (macOS, Windows, FreeBSD) on this module alone instead of
-    replacing sys.platform for every reader in the process (skills, fleet
-    green leg 3).
-    """
+    """sys.platform read at the call; tests patch this one door, not sys.platform process-wide."""
     return sys.platform
 
 
 def run(action, args=None, config=None):
-    """Execute a system status action.
-
-    Args:
-        action: One of: disk, memory, uptime, processes, battery, summary
-        args: Dict of action arguments (unused for this skill)
-        config: Dict of resolved config values (unused for this skill)
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Execute a system status action: {success, output, error}."""
     args = args or {}
     config = config or {}
 
@@ -108,11 +74,6 @@ def run(action, args=None, config=None):
 def get_actions():
     """List available actions for this skill."""
     return ["disk", "memory", "uptime", "processes", "battery", "summary"]
-
-
-# ---------------------------------------------------------------------------
-# Action implementations
-# ---------------------------------------------------------------------------
 
 
 def _format_bytes(num_bytes):
@@ -153,8 +114,7 @@ def _memory_info():
     virtual = psutil.virtual_memory()
     swap = psutil.swap_memory()
 
-    # used = total - available, the same definition the /proc reader used, and
-    # the one psutil's own `percent` is computed from.
+    # used = total - available: the definition psutil's own `percent` uses.
     mem_used = virtual.total - virtual.available
     mem_percent = (mem_used / virtual.total * 100) if virtual.total > 0 else 0
     swap_percent = (swap.used / swap.total * 100) if swap.total > 0 else 0
@@ -166,9 +126,7 @@ def _memory_info():
         f"  Available: {_format_bytes(virtual.available)}",
     ]
 
-    # buffers/cached exist on Linux and BSD, not on macOS or Windows. Report
-    # them where the platform has them rather than printing a zero that reads
-    # like a measurement.
+    # buffers/cached exist on Linux and BSD only; elsewhere a zero would read as a measurement.
     for label, field in (("Buffers", "buffers"), ("Cached", "cached")):
         value = getattr(virtual, field, None)
         if value is not None:
@@ -252,13 +210,7 @@ def _battery_info():
 
 
 def _summary():
-    """Combine all status checks into one report.
-
-    A section that fails makes the whole summary a failure. The old version
-    returned success=True with the failures printed in an Errors trailer, so on
-    a host where three of the four sections were unreadable a caller that
-    checks `success` read a good answer over a disk line and nothing else.
-    """
+    """Combine all status checks into one report; any failed section makes the summary a failure."""
     sections = []
     errors = []
 
@@ -281,9 +233,6 @@ def _summary():
     output = "\n---\n".join(sections)
 
     if errors:
-        # The sections that did answer are still handed back - they are real -
-        # but success says the report is incomplete, and error names which
-        # sections are missing.
         return {
             "success": False,
             "output": output,
@@ -293,19 +242,11 @@ def _summary():
     return {"success": True, "output": output, "error": None}
 
 
-# ---------------------------------------------------------------------------
-# Published: machine_vitals() - the in-process door (FPLAN-0561 row 1)
-#
-# The host API proxies this dict verbatim on /v1/machine and BAUD's phone
-# draws it. The meaning lives here and only here: which sensor is the CPU,
-# which rows are nonsense, what an absence is called and what sentence says so.
-# ---------------------------------------------------------------------------
-
+# The host API relays machine_vitals() verbatim on /v1/machine; its meaning lives only here.
 SKILL_NAME = "system_status"
 VITALS_SCHEMA = 2
 
-# Every section's values, beside the available/reason/sentence/detail every
-# section carries. A value the host cannot give is None, never a zero.
+# A value the host cannot give is None, never a zero.
 _SECTION_VALUES = {
     "cpu": ("percent", "window_s", "cores", "logical", "physical", "mhz", "mhz_max"),
     "load": ("one", "five", "fifteen"),
@@ -320,8 +261,7 @@ _SECTION_VALUES = {
 
 SECTIONS = tuple(_SECTION_VALUES)
 
-# The closed set of reason codes, one sentence each. The route relays the
-# sentence and the face prints it, so neither has to guess what an absence is.
+# Closed set: the route relays each sentence and the face prints it verbatim.
 REASONS = {
     "platform": "This operating system does not expose this reading at all, so no host running it ever answers.",
     "no_sensor": "This host exposes the reading but reported no sensor or device to take it from.",
@@ -344,45 +284,31 @@ REASONS = {
     ),
 }
 
-# Allowlists are data, keyed by chip AND label - never by a row's position,
-# which moves between hosts, and never by a value threshold: on the MacBook this
-# was measured on, applesmc carries five rows reading -127 and a pair that
-# drifted from -34.25 to -30.0 inside twenty minutes (DPLAN-0341). BAT0 is a
-# battery, not a CPU. Growing a list is a change here, never on a face.
-#
-# chip -> the headline label, then the label family ("Core " + an integer)
-# whose hottest member stands in when the headline row is absent.
+# Keyed by chip AND label, never row position (moves between hosts) or a value
+# threshold (bogus rows read -127). Headline label, else the hottest of the family.
 TEMP_ALLOWLIST = {
     "coretemp": {"headline": "Package id 0", "family": "Core "},
 }
 
-# Chips whose fans are published. Every fan on a listed chip is read.
 FAN_ALLOWLIST = ("applesmc",)
 
-# Where Linux publishes hwmon chips. A chip is found by the name file beside its
-# fan input, never by the hwmonN index - that numbering is boot order.
+# A chip is found by the name file beside its fan input, never the hwmonN index (boot order).
 HWMON_ROOT = Path("/sys/class/hwmon")
 
-# Where Linux publishes batteries. Only the status file is read, and only to
-# name the state the kernel already knows (Full, Charging, Discharging).
 POWER_SUPPLY_ROOT = Path("/sys/class/power_supply")
 
-# The battery lines the host publishes. A face tones a ring only against a line
-# the host chose; a threshold made up here would be an invented scale.
+# Battery lines come from the host's UPower config, never a threshold invented here.
 UPOWER_CONF = Path("/etc/UPower/UPower.conf")
 # UPower's compiled-in values when its config file leaves a key out.
 UPOWER_DEFAULTS = {"PercentageLow": 20.0, "PercentageCritical": 5.0}
 BATTERY_STATES = ("charging", "discharging", "full")
 
-# Held samples, one per rate. Owned here rather than borrowed from
-# psutil.cpu_percent(interval=None), whose baseline is a psutil module global
-# keyed by thread id: any other caller in the process silently moves its window
-# (37.5 then 21.9 in a fresh process, DPLAN-0341).
+# Owned here, not psutil.cpu_percent(interval=None): its baseline is a psutil
+# module global, so any other caller in the process silently moves the window.
 _BASELINES = {}
 _BASELINE_LOCK = threading.Lock()
 
-# machine_processes(): how long the CPU sample waits between its two reads, the
-# most it lists, and the sleep it waits with (a test spends it on its own clock).
+# _sleep is a seam: tests spend the sample window on their own clock.
 PROCESS_SAMPLE_S = 0.5
 PROCESS_LIMIT_MAX = 100
 MIB = 1024**2
@@ -390,15 +316,7 @@ _sleep = time.sleep
 
 
 def machine_vitals():
-    """Read the machine's vitals as one dict. Never raises for a reading.
-
-    Returns:
-        dict: {"ok": True, "schema": 2, "sampled_at": ISO-8601 UTC, and one entry
-            per SECTIONS}, each section carrying available, reason, sentence and
-            detail beside its values. Or a whole-function refusal
-            {"ok": False, "reason": "switched_off" | "psutil_missing", "detail": str}.
-    """
-    # This door is imported directly, so it asks the switch itself (_gate).
+    """Read the machine's vitals as one dict. Never raises for a reading."""
     refusal = _gate("machine_vitals")
     if refusal is not None:
         return refusal
@@ -432,33 +350,21 @@ def machine_vitals():
 
 
 def machine_processes(limit=20):
-    """The busiest processes by sampled CPU: what is running when the fan spins up.
-
-    Args:
-        limit: How many to list, clamped to 1..100.
-
-    Returns:
-        dict: {"sampled_at": ISO-8601 UTC, "window_ms": int, "total": every pid
-            seen, "sort": "cpu", "processes": [{pid, name, cpu_pct, mem_pct,
-            mem_mb, user, state}]}, busiest first, ties by mem_pct. Or the same
-            whole-function refusal machine_vitals() answers (contract C-B,
-            DPLAN-0414 theme 3).
-    """
+    """The busiest processes by sampled CPU: what is running when the fan spins up."""
     refusal = _gate("machine_processes")
     if refusal is not None:
         return refusal
 
     limit = min(max(int(limit), 1), PROCESS_LIMIT_MAX)
-    pids = psutil.pids()
-    vanished = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)
+    pids = psutil.pids()  # pyright: ignore[reportOptionalMemberAccess]
+    vanished = (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess)  # pyright: ignore[reportOptionalMemberAccess]
 
-    # A process's first cpu_percent is a cold zero, so every process is primed,
-    # the sample waits, and only the second read is published.
+    # A process's first cpu_percent is a cold zero: prime, wait, publish the second read.
     started = _monotonic()
     primed = []
     for pid in pids:
         try:
-            proc = psutil.Process(pid)
+            proc = psutil.Process(pid)  # pyright: ignore[reportOptionalMemberAccess]
             proc.cpu_percent(None)
         except vanished as exc:
             logger.debug("machine_processes: pid %s left the sample before priming (%s)", pid, _describe(exc))
@@ -467,9 +373,8 @@ def machine_processes(limit=20):
     _sleep(PROCESS_SAMPLE_S)
     window_ms = int(round((_monotonic() - started) * 1000))
 
-    # psutil reports per-process CPU against one core (a busy 4-core box sums to
-    # ~400); dividing by the logical count normalises it to the machine (~100).
-    cores = psutil.cpu_count(logical=True) or 1
+    # psutil's per-process CPU is per core (4 busy cores sum to ~400); normalise to the machine.
+    cores = psutil.cpu_count(logical=True) or 1  # pyright: ignore[reportOptionalMemberAccess]
     rows = []
     for proc in primed:
         try:
@@ -508,14 +413,9 @@ def _process_user(proc, vanished):
 
 
 def _gate(door):
-    """The refusal a published door answers before any reading, or None to proceed.
-
-    The runner gates on the switch before it imports a handler (DPLAN-0306).
-    The published doors are imported directly, so they ask for themselves -
-    otherwise an in-process caller reads a skill an operator switched off.
-    Imported here so the text actions, and every importer that never calls a
-    door, stay stdlib + psutil + prax.
-    """
+    """The refusal a published door answers before any reading, or None to proceed."""
+    # The doors are imported directly, bypassing the runner's gate, so they ask the
+    # switch themselves. Imported lazily so text-action importers stay stdlib + psutil + prax.
     from aipass.skills.apps.handlers.switch_handler import STATE_FILENAME, SwitchStateUnreadable, is_enabled
 
     try:
@@ -547,19 +447,7 @@ def _refusal(reason, detail):
 
 
 def _section(name, reason=None, detail=None, available=None, **values):
-    """Build one section with its full, stable key set.
-
-    Args:
-        name: Section name, a key of _SECTION_VALUES.
-        reason: Reason code from REASONS, or None for a clean reading.
-        detail: Error text or explanation beside the code, if any.
-        available: Override for a section that answers WITH a reason (a fan
-            whose speed is real but whose range is not). Defaults to reason is None.
-        **values: The section's values; anything not given is None.
-
-    Returns:
-        dict: available, reason, sentence, detail, then every value key.
-    """
+    """Build one section with its full, stable key set; available overrides "reason is None"."""
     unknown = set(values) - set(_SECTION_VALUES[name])
     if unknown:
         raise KeyError(f"section {name!r} has no value named {sorted(unknown)}")
@@ -576,12 +464,8 @@ def _section(name, reason=None, detail=None, available=None, **values):
 
 
 def _describe(exc):
-    """Name an exception the way detail carries it: its class, never its words.
-
-    detail travels verbatim to the handset through api's host server, so the
-    exception's own text (paths, OS messages) stays in the host log, where each
-    site that caught it logs it with exc_info (CodeQL py/stack-trace-exposure).
-    """
+    """Name an exception the way detail carries it: its class, never its words."""
+    # detail is published verbatim to the handset; exception text stays in the host log (CodeQL).
     return type(exc).__name__
 
 
@@ -591,16 +475,7 @@ def _clamp_percent(value):
 
 
 def _swap_baseline(key, sample):
-    """Hold this sample as the rate's baseline and hand back the one it replaces.
-
-    Args:
-        key: Which rate ("cpu" or "network").
-        sample: The sample just taken.
-
-    Returns:
-        tuple: (previous sample, seconds since it was taken), or (None, 0.0) on
-            the first call in this process.
-    """
+    """Hold this sample as the baseline; return (previous, seconds since), or (None, 0.0) first."""
     taken_at = _monotonic()
     with _BASELINE_LOCK:
         previous = _BASELINES.get(key)
@@ -612,32 +487,21 @@ def _swap_baseline(key, sample):
 
 
 def _cpu_busy_and_total(times):
-    """Split one CPU's cpu_times() tuple into busy and total seconds.
-
-    Guest time is already counted inside user and nice on Linux, so it comes
-    back out of the total; iowait is idle. The same accounting psutil's own
-    cpu_percent uses, applied to samples this skill holds.
-    """
+    """Split one CPU's cpu_times() tuple into busy and total seconds."""
+    # psutil's own accounting: guest is already inside user/nice on Linux; iowait is idle.
     total = sum(times) - getattr(times, "guest", 0.0) - getattr(times, "guest_nice", 0.0)
     idle = times.idle + getattr(times, "iowait", 0.0)
     return total - idle, total
 
 
 def _read_cpu(ps):
-    """CPU busy percent, per logical CPU and in total, over the window since this skill's last sample.
-
-    One sample per read - cpu_times(percpu=True) - and the headline percent is
-    summed from the same per-CPU deltas the cores are, so the headline and the
-    bars agree by construction (FPLAN-0586). The counts and the frequency are
-    instant readings, so they are published even while the rate is warming.
-    """
+    """CPU busy percent, per logical CPU and in total, over the window since this skill's last sample."""
+    # Headline and cores come from the same per-CPU deltas, so they agree by construction.
     sample = ps.cpu_times(percpu=True)
     facts, detail = _cpu_facts(ps)
     previous, window_s = _swap_baseline("cpu", sample)
     if previous is None or len(previous) != len(sample) or window_s <= 0:
-        # The first sample in this process, or the CPU set changed between the
-        # two (hotplug): the held sample measures nothing now, and this one has
-        # replaced it.
+        # First sample, or the CPU set changed (hotplug): this one becomes the baseline.
         return _section("cpu", "warming", detail=detail, **facts)
 
     deltas = []
@@ -661,12 +525,7 @@ def _read_cpu(ps):
 
 
 def _cpu_facts(ps):
-    """The CPU counts and frequency - instant readings, None where the host gives none.
-
-    Returns:
-        tuple: (dict of logical, physical, mhz and mhz_max; detail naming a
-            frequency read that raised, or None).
-    """
+    """The CPU counts and frequency - instant readings, None where the host gives none."""
     facts = {
         "logical": ps.cpu_count(),
         "physical": ps.cpu_count(logical=False),
@@ -679,8 +538,7 @@ def _cpu_facts(ps):
     try:
         freq = ps.cpu_freq()
     except (OSError, NotImplementedError) as exc:
-        # psutil's Linux reader raises both when a cpufreq file is missing. The
-        # frequency is lost; the percent and the cores are not.
+        # psutil's Linux reader raises both when a cpufreq file is missing.
         logger.warning("machine_vitals: the cpu frequency read failed: %s", exc, exc_info=True)
         return facts, f"cpu_freq read failed ({_describe(exc)}); the error is in the host log."
 
@@ -705,7 +563,6 @@ def _read_network(ps):
     recv = counters.bytes_recv - previous.bytes_recv
     if sent < 0 or recv < 0:
         # A counter that went backwards was reset (an interface came and went).
-        # The held sample measures nothing now, and this one has replaced it.
         return _section("network", "warming")
 
     return _section(
@@ -718,8 +575,7 @@ def _read_network(ps):
 
 def _read_load(ps):
     """1, 5 and 15 minute load averages."""
-    # On Windows psutil emulates load with a sampler thread that reads 0 until
-    # it warms. That 0 is not a measurement, so the platform is named instead.
+    # Windows load is emulated and reads 0 until warm: not a measurement.
     if _host_platform() == "win32" or not hasattr(ps, "getloadavg"):
         return _section("load", "platform")
 
@@ -760,8 +616,7 @@ def _in_family(label, stem):
 
 def _read_temp(ps):
     """The CPU temperature headline, from allowlisted chip and label only."""
-    # Off Linux and FreeBSD psutil does not define the function at all - calling
-    # it would raise AttributeError, not return an empty dict.
+    # Off Linux and FreeBSD psutil does not define it (AttributeError, not an empty dict).
     if not hasattr(ps, "sensors_temperatures"):
         return _section("temp", "platform")
 
@@ -803,8 +658,7 @@ def _read_fan(ps):
         listed_but_empty = any(chip in chips for chip in FAN_ALLOWLIST)
         return _section("fan", "no_sensor" if listed_but_empty else "no_allowlisted_sensor", seen=sorted(chips))
 
-    # The headline is the fan working hardest against its own range. A fan with
-    # no range can only be ranked by rpm, and never above one that has a scale.
+    # Hardest-working fan against its range; a rangeless fan never outranks a ranged one.
     headline = max(
         fans,
         key=lambda fan: (fan["percent_of_range"] is not None, fan["percent_of_range"] or 0.0, fan["current"]),
@@ -836,8 +690,7 @@ def _fan_entry(chip, fan):
         "detail": detail,
     }
     if fan_range is None:
-        # The rpm is still real. Carrying the range separately is what keeps a
-        # fan at its floor (0%) distinguishable from a fan with no scale at all.
+        # The rpm is real; None (not 0%) keeps "no scale" distinct from "at its floor".
         entry["reason"] = "no_range"
         entry["sentence"] = REASONS["no_range"]
     else:
@@ -847,21 +700,8 @@ def _fan_entry(chip, fan):
 
 
 def _fan_range(chip, label):
-    """Read one fan's min and max from Linux sysfs - read-only, and only those two.
-
-    fanN_manual and fanN_output sit in the same directory and are root-writable
-    on the host this was built on. Nothing here opens them, and nothing here
-    opens any file for writing (pinned in tests/test_machine_vitals.py).
-
-    Args:
-        chip: Chip name psutil reported the fan under.
-        label: The fan's label as psutil reported it.
-
-    Returns:
-        tuple: ({"min": int, "max": int}, None), or (None, why) when there is no
-            usable range - off Linux, not found, missing, unreadable, or min not
-            below max.
-    """
+    """Read one fan's min and max from Linux sysfs - read-only, and only those two."""
+    # fanN_manual/fanN_output beside them are root-writable: never opened (pinned in tests).
     if _host_platform() != "linux":
         return None, "The fan range is read from Linux sysfs, and this host is not Linux."
 
@@ -892,17 +732,8 @@ def _fan_range(chip, label):
 
 
 def _locate_fan(chip, label):
-    """Find the sysfs directory and fanN stem for a chip's labelled fan.
-
-    Walks the way psutil's own sensors_fans does - the hwmon directories first,
-    their device/ subdirectories only when those hold no fan files at all - so
-    the files read here are the ones psutil's current came from. On the MacBook
-    this was built on, hwmon2 has no name file and the chip's name lives at
-    hwmon2/device/name.
-
-    Raises:
-        LookupError: No input, or more than one, carries this chip and label.
-    """
+    """Find the sysfs directory and fanN stem for a chip's labelled fan; LookupError unless exactly one."""
+    # Walks as psutil's sensors_fans does (hwmon*, else hwmon*/device), so these are its files.
     entries = sorted(HWMON_ROOT.glob("hwmon*/fan*_*")) or sorted(HWMON_ROOT.glob("hwmon*/device/fan*_*"))
 
     names = {}
@@ -969,12 +800,7 @@ def _read_battery(ps):
 
 
 def _battery_state(ps, percent, plugged, secsleft):
-    """Name the battery state: the kernel's word when it is one of three, else derived.
-
-    Returns:
-        tuple: (state, note) - state is one of BATTERY_STATES or "unknown", and
-            note says why the kernel's word was not used, or None.
-    """
+    """Name the battery state: the kernel's word when it is one of three, else derived."""
     kernel = _battery_sysfs_status()
     if kernel is not None:
         if kernel.lower() in BATTERY_STATES:
@@ -998,11 +824,7 @@ def _battery_state(ps, percent, plugged, secsleft):
 
 
 def _battery_sysfs_status():
-    """The kernel's status word for the first BAT* supply, or None off Linux or without one.
-
-    Raises:
-        OSError: A status file exists and cannot be read - the read_failed path.
-    """
+    """The kernel's status word for the first BAT* supply, or None off Linux or without one."""
     if _host_platform() != "linux":
         return None
     for folder in sorted(POWER_SUPPLY_ROOT.glob("BAT*")):
@@ -1013,13 +835,7 @@ def _battery_sysfs_status():
 
 
 def _battery_lines():
-    """The low and critical percentages UPower publishes, read from its config file.
-
-    Returns:
-        tuple: (low, critical, note) - floats when the host publishes the lines,
-            (None, None, None) off Linux or without the file, and (None, None,
-            why) when the file is there but gives no usable percentage line.
-    """
+    """The low and critical percentages UPower publishes, read from its config file."""
     if _host_platform() != "linux":
         return None, None, None
     try:
@@ -1043,11 +859,7 @@ def _battery_lines():
 
 
 def _read_sysfs(path):
-    """Read one sysfs attribute as stripped text. Always opens read-only.
-
-    Raises:
-        OSError: The attribute is missing or unreadable.
-    """
+    """Read one sysfs attribute as stripped text. Always opens read-only."""
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read().strip()
 

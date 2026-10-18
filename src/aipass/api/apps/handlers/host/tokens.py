@@ -3,78 +3,13 @@
 # Description: Host API Token Handler — bearer token issue, verify, revoke
 # Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Host API Token Handler
 
-The app-layer half of FPLAN-0411's two-layer auth (design call D2). The network
-boundary is the other half; neither is trusted alone — Tailscale's own docs say
-identity headers are spoofable, so a token sits behind the tunnel.
-
-Store: ~/.secrets/aipass/host_api/tokens.json, through this branch's existing
-secrets door (0o700 dir, 0o600 file, already proven).
-
-THREE PROPERTIES THIS FILE OWES THE PHONE:
-
-1. The raw token is returned ONCE, at issue, and never stored. Records carry a
-   sha256 hash, so a reader of the store cannot authenticate with it.
-2. Verification is constant-time (hmac.compare_digest) — a hash comparison that
-   short-circuits leaks the hash one byte at a time.
-3. Revocation is server-side and effective on the NEXT REQUEST. The store is
-   re-read per verification, so revoking needs no restart and no cooperation
-   from the phone. This is the answer to the iOS keychain surviving an app
-   uninstall: a token the phone keeps forever is inert once the host stops
-   honouring it.
-
-Scopes: 'read' and 'operate'. operate implies read. Destructive verbs (Phase 3)
-require operate; the client is expected to gate those behind biometrics too, but
-the server never relies on that — scope is enforced here.
-
-THREE ACCOUNTABILITY FIELDS (devpulse's ruling, 2026-08-14)
-------------------------------------------------------------------------
-Added after an operate-scoped token appeared on this machine and the store could
-not say who minted it. The C1 audit knew exactly who FAILED auth; nothing knew
-who ISSUED.
-
-    minted_by   - best-effort provenance, from the caller identity drone sets.
-                  PROVENANCE, NEVER PERMISSION: the value comes from the
-                  caller's own environment, so trusting it to authorise
-                  anything would be trusting the caller about the caller.
-    revoked_at  - written since Phase 1; it was the LISTING that never showed
-                  it. My own correction — I read the projection and called it
-                  the store.
-    last_used   - whether a live token is actually live, or merely un-revoked.
-
-THE DANGER IN `last_used`, WHICH IS WHY PHASE 1 RESERVED IT
-------------------------------------------------------------------------
-It means a write on every authenticated request, to the same file issue and
-revoke write. The obvious risk is a lost update. The real risk is worse: a
-telemetry write holding a record list read BEFORE a revoke landed would write
-that stale list back and UN-REVOKE the token. A revoked device starts working
-again because something looked at a timestamp.
-
-So every read-modify-write here happens under a lock and re-reads inside it, the
-store is written atomically (a truncated store reads as empty, and an empty
-store denies every request), and a touch that cannot take the lock is DROPPED
-rather than raised — telemetry never fails an authenticated request.
-
-Writes coalesce inside a window, because the question is "is this credential
-still in use", not "at which second". A phone polling the feed would otherwise
-rewrite the whole store every few seconds.
-
-Functions:
-    issue_token()  - Mint a token, return (record, raw_value)
-    verify_token() - Resolve a raw token to its record, or None
-    touch_token()  - Best-effort 'this token was used just now'
-    revoke_token() - Revoke by id
-    list_tokens()  - Records for display, hashes stripped
-    load_tokens()  - Raw store read
-    lock_path()    - Where the store's write lock lives
-    store_lock()   - The write lock, shared with the pairing store
-    write_private_json() - The atomic owner-only write, shared with it too
-    receipt_path() - Where a label's raw receipt belongs, fenced
+Reference: docs/host_api.md (two auth layers, the store, last_used).
 """
 
 import hashlib
@@ -96,47 +31,34 @@ from aipass.api.apps.handlers.auth import secrets as secrets_store
 TOKEN_PROVIDER = "host_api"
 TOKEN_SLUG = "tokens"
 
-# Bumped when the stored record shape changes in a way a reader must notice.
-# 2 adds minted_by. Version 1 records keep verifying, listing and revoking.
+# Version 1 records (no minted_by) keep verifying, listing and revoking.
 STORE_VERSION = 2
 
-# Drone names the calling branch in the child environment. Absent when this
-# module is driven in-process or from a bare shell.
 CALLER_ENV = "AIPASS_CALLER_BRANCH"
 UNKNOWN_MINTER = "unknown"
 
-# How coarse `last_used` is allowed to be. A minute answers live-or-dormant and
-# turns a per-request store rewrite into a per-minute one.
+# Coalesces last_used writes: a per-request store rewrite becomes a per-minute one.
 LAST_USED_GRANULARITY_SECONDS = 60
 
-# How long before a lock left behind by a dead process is broken. Bounded
-# staleness beats a permanent outage: the worst case for breaking a stale lock
-# is a lost timestamp; the worst case for honouring one forever is a server that
-# can never issue or revoke again.
+# Breaking a stale lock risks a lost timestamp; honouring it forever means no revoke ever again.
 LOCK_STALE_SECONDS = 30
 
-# How long a writer waits for the lock. Callers that must not be lost (issue,
-# revoke) surface a failure; callers that must not delay a request (touch) skip.
 LOCK_WAIT_SECONDS = 5.0
 LOCK_POLL_SECONDS = 0.02
 
-# What a presented token turned out to be. THESE ARE AUDIT VOCABULARY, NEVER
-# RESPONSE VOCABULARY — revoked and unknown are refused identically at the door,
-# and the difference exists so the trail can answer 'was that device ever ours?'
-# after the fact. Answering it in the response would hand a prober an oracle.
+# AUDIT vocabulary, never response vocabulary: revoked and unknown answer identically,
+# or a prober learns which guesses were once real.
 STATUS_ACTIVE = "active"
 STATUS_REVOKED = "revoked"
 STATUS_UNKNOWN = "unknown"
 
 SCOPES = ("read", "operate")
 
-# operate implies read; read implies nothing else.
 _SCOPE_IMPLIES: Dict[str, Tuple[str, ...]] = {
     "read": ("read",),
     "operate": ("read", "operate"),
 }
 
-# 32 bytes of urlsafe randomness. Long enough that the tunnel is the slow lane.
 _TOKEN_BYTES = 32
 
 
@@ -144,19 +66,8 @@ class TokenError(Exception):
     """A token operation was refused."""
 
 
-# ==============================================
-# STORE
-# ==============================================
-
-
 def load_tokens() -> List[Dict[str, Any]]:
-    """
-    Read every token record from the store.
-
-    Returns:
-        List of records. Missing or malformed store reads as empty — which
-        denies every request rather than admitting one.
-    """
+    """Read every token record from the store."""
     stored = secrets_store.get_secret(TOKEN_PROVIDER, TOKEN_SLUG, as_json=True)
 
     if stored is None:
@@ -175,30 +86,12 @@ def load_tokens() -> List[Dict[str, Any]]:
 
 
 def store_path() -> Path:
-    """
-    Where the token store lives.
-
-    Returns:
-        Path to tokens.json, whether or not it exists yet.
-    """
+    """Where the token store lives."""
     return secrets_store.SECRETS_BASE / TOKEN_PROVIDER / f"{TOKEN_SLUG}.json"
 
 
 def prepare_receipt_dir(target: Path) -> None:
-    """
-    Make sure a receipt's directory exists and is owner-only.
-
-    Args:
-        target: The receipt file that is about to be written.
-
-    Raises:
-        OSError: The directory could not be created or secured.
-
-    Note:
-        Here rather than in the CLI because a secret's directory mode is part
-        of the store's contract, not part of how a command prints things — and
-        0700 is the same promise SECRETS_BASE already makes.
-    """
+    """Make sure a receipt's directory exists and is owner-only."""
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if os.name == "posix":
@@ -206,35 +99,7 @@ def prepare_receipt_dir(target: Path) -> None:
 
 
 def receipt_path(label: str) -> Path:
-    """
-    Where a freshly minted token's raw value belongs, given its label.
-
-    THE RECEIPT IS A SECRET AND BELONGS WITH THE SECRETS. The owner found three
-    raw bearer receipts sitting in his home root on 2026-08-19 (43-byte files
-    from the August phone-setup mints), and they were there because this
-    branch's own help text said `--out ~/pixel.token`. Nobody chose the home
-    root; the documentation did. So the default is here, beside the hashed
-    store it belongs next to, and the examples now point at it.
-
-    Args:
-        label: The token's label, exactly as issued.
-
-    Returns:
-        SECRETS_BASE/host_api/<label>.token — the same 0o700 provider directory
-        the hashed store already lives in.
-
-    Raises:
-        TokenError: The label cannot be a filename. A label is a NAME and this
-            function turns it into a path, which is the one place a free-form
-            label could reach outside the secrets directory.
-
-    Note:
-        Fenced twice, and deliberately: a cheap up-front refusal that can NAME
-        what is wrong with the label, and a post-resolution containment check
-        that does not care how the escape was spelled. The same two-gate shape
-        the read lane uses (handlers/host/reads.py) — the first gate exists to
-        give a good sentence, the second to be right.
-    """
+    """Where a freshly minted token's raw value belongs, given its label."""
     wanted = (label or "").strip()
     if not wanted:
         raise TokenError("Token label is required — an unlabelled token cannot be revoked with confidence")
@@ -250,6 +115,7 @@ def receipt_path(label: str) -> Path:
             f"Label {label!r} would write a hidden receipt — a secret nobody can see is a secret nobody rotates"
         )
 
+    # Gate two, not redundant: post-resolve containment holds however the escape was spelled.
     provider_dir = secrets_store.SECRETS_BASE / TOKEN_PROVIDER
     candidate = (provider_dir / f"{wanted}.token").resolve()
 
@@ -260,66 +126,27 @@ def receipt_path(label: str) -> Path:
 
 
 def lock_path() -> Path:
-    """
-    Where the store's write lock lives.
-
-    Returns:
-        Path to the lock file, whether or not it is held.
-    """
+    """Where the store's write lock lives."""
     return secrets_store.SECRETS_BASE / TOKEN_PROVIDER / f"{TOKEN_SLUG}.lock"
 
 
 def save_tokens(records: List[Dict[str, Any]]) -> str:
-    """
-    Persist token records ATOMICALLY.
-
-    Wrapped in a versioned envelope so the store can gain fields later without a
-    reader having to guess which shape it is holding.
-
-    Written to a temporary file in the same directory and renamed into place, so
-    a concurrent reader sees the old file or the new one and never part of
-    either. That matters more than it looks: load_tokens() treats an unparseable
-    store as EMPTY, and an empty store denies every request. Before `last_used`
-    the truncation window opened only when an operator ran a command; now it
-    would open on every authenticated request.
-
-    Args:
-        records: Full record list to write.
-
-    Returns:
-        Path to the written file, as a string.
-    """
+    """Persist token records ATOMICALLY."""
+    # A torn write reads as EMPTY in load_tokens(), which denies every request.
     envelope: Dict[str, Any] = {"version": STORE_VERSION, "tokens": records}
     return write_private_json(store_path(), envelope)
 
 
 def write_private_json(target: Path, document: Dict[str, Any]) -> str:
-    """
-    Write a JSON document owner-only and atomically: save_tokens' write, shared.
-
-    The pairing store (pairings.py) keeps the same promises as the token store,
-    so it writes through the same function rather than a copy of it.
-
-    Args:
-        target: The file to replace.
-        document: What to write.
-
-    Returns:
-        Path to the written file, as a string.
-    """
+    """Write a JSON document owner-only and atomically: save_tokens' write, shared."""
     target.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(target.parent, 0o700)
 
-    # Same directory, so the rename cannot cross a filesystem boundary — and
-    # 0o600 is set at creation rather than chmod'd after, so the content is
-    # never briefly world-readable.
+    # Same directory, so the rename cannot cross a filesystem boundary.
     temporary = target.parent / f".{target.stem}.{os.getpid()}.tmp"
     content = json.dumps(document, indent=2).encode("utf-8")
 
-    # The low-level descriptor call rather than the builtin, because the mode
-    # argument is the point: creating with 0o600 means the bytes are never
-    # briefly readable by anyone else, which a chmod-after cannot promise.
-    # Content is already UTF-8 encoded above.
+    # os.open for the mode: 0o600 at creation, never briefly readable as a chmod-after would be.
     descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # encoding=utf-8 done above
     try:
         os.write(descriptor, content)
@@ -330,18 +157,10 @@ def write_private_json(target: Path, document: Dict[str, Any]) -> str:
     try:
         os.replace(str(temporary), str(target))
     except OSError:
-        # Leave nothing behind for the next writer to trip over. A failure to
-        # clean up is not the story here — the failed rename is, and it is
-        # re-raised below — but it is still worth a line, because a temp file
-        # nobody can unlink is how a full or read-only secrets dir announces
-        # itself before the next writer trips over it.
         try:
             os.unlink(str(temporary))
         except OSError as cleanup_error:
-            # Named in words, never by its path: a path inside the secrets base
-            # reads as a secret's location (seedgo clear_text_secret_logging).
-            # Two stores write through here now (tokens, pairings); both live
-            # in the one provider directory, so the words still find it.
+            # Named in words, never by path: a secrets-base path reads as a secret's location (seedgo).
             logger.warning("[host_api] could not remove a host_api store's temp file: %s", cleanup_error)
         raise
 
@@ -350,51 +169,17 @@ def write_private_json(target: Path, document: Dict[str, Any]) -> str:
 
 @contextmanager
 def store_lock() -> Iterator[None]:
-    """
-    The token store's write lock, for the pairing store that shares it.
-
-    One lock for both files: pairings.py marks a code used under it, releases
-    it, and only then mints through issue_token(), which takes it again.
-
-    Yields:
-        None, with the lock held.
-
-    Raises:
-        OSError: The lock could not be taken within LOCK_WAIT_SECONDS.
-    """
+    """The token store's write lock, for the pairing store that shares it."""
+    # Not reentrant: pairings.py must release it before issue_token(), which takes it again.
     with _store_lock():
         yield
 
 
 @contextmanager
 def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
-    """
-    Hold an exclusive write lock on the token store.
-
-    O_CREAT|O_EXCL rather than fcntl, because this has to work on Windows too.
-    A lock older than LOCK_STALE_SECONDS is broken: a process that died holding
-    it must not lock out every future issue and revoke. The worst case for
-    breaking a stale lock is a lost timestamp; the worst case for honouring one
-    forever is a server that can never revoke a credential again.
-
-    Windows answers a create against a lock another writer is still removing
-    (delete pending) with ACCESS DENIED rather than FILE EXISTS. That is the
-    lock still held, so it is polled the same way, inside the same wait.
-
-    Args:
-        wait: Seconds to keep trying before giving up. None, what every
-            caller passes, is LOCK_WAIT_SECONDS read at the call rather than
-            bound at def time, so the tests shorten the wait through the
-            public writers without reaching this function by name
-            (api, fleet green leg 14).
-
-    Yields:
-        None, with the lock held.
-
-    Raises:
-        OSError: The lock could not be taken within *wait*, because it stayed
-            held or because access stayed denied.
-    """
+    """Hold an exclusive write lock on the token store."""
+    # O_CREAT|O_EXCL rather than fcntl: this has to work on Windows too.
+    # wait=None reads LOCK_WAIT_SECONDS at call time, not def time: the tests shorten it there.
     wait = LOCK_WAIT_SECONDS if wait is None else wait
     path = lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -413,12 +198,8 @@ def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
                 raise OSError(f"Token store lock held longer than {wait}s at {path}") from None
             time.sleep(LOCK_POLL_SECONDS)
         except PermissionError as e:
-            # The Windows delete-pending answer (CI 35192484222: the revoke
-            # thread died here, and a revoked credential stayed live). Polled
-            # inside the wait only, and never checked for staleness — a stale
-            # lock answers FILE EXISTS. A directory this process truly cannot
-            # write answers this way forever, so past the wait it surfaces as
-            # the denial it is.
+            # Windows answers a delete-pending lock with ACCESS DENIED: still held, so poll it.
+            # Never a staleness check (a stale lock answers FILE EXISTS); past the wait, a real denial.
             if time.monotonic() >= deadline:
                 raise OSError(f"Token store lock at {path} still denied access after {wait}s: {e}") from e
             time.sleep(LOCK_POLL_SECONDS)
@@ -426,31 +207,16 @@ def _store_lock(wait: Optional[float] = None) -> Iterator[None]:
     try:
         yield
     finally:
-        # Released even when the body raised — a lock left behind by a failed
-        # write wedges every write after it until the staleness timeout.
         os.close(descriptor)
         _drop_lock(path)
 
 
 def _lock_is_stale(path: Path) -> bool:
-    """
-    Whether a held lock is old enough to be broken.
-
-    Args:
-        path: The lock file.
-
-    Returns:
-        True if the lock is older than LOCK_STALE_SECONDS, or has vanished.
-    """
+    """Whether a held lock is old enough to be broken."""
     try:
         age = time.time() - path.stat().st_mtime
     except OSError as e:
-        # Gone between the failed create and this stat — not stale, just raced.
-        # Windows answers a stat on a lock being deleted with ACCESS DENIED,
-        # which lands here too and means the same thing.
-        # Logged rather than passed over: this is the ordinary outcome of two
-        # writers meeting, but if it ever repeats in a burst it is the trace
-        # that says so.
+        # Gone (or Windows delete-pending ACCESS DENIED) since the failed create: raced, not stale.
         logger.debug("[host_api] token store lock vanished while checking its age: %s", e)
         return False
 
@@ -458,47 +224,18 @@ def _lock_is_stale(path: Path) -> bool:
 
 
 def _drop_lock(path: Path) -> None:
-    """
-    Remove a lock file, tolerating its absence.
-
-    Args:
-        path: The lock file.
-    """
+    """Remove a lock file, tolerating its absence."""
     try:
         os.unlink(str(path))
     except FileNotFoundError as e:
-        # Tolerated: a stale-lock break may have removed it already.
         logger.debug("[host_api] the token store lock was already gone: %s", e)
     except OSError as e:
-        # Not gone: refused, which is also Windows' answer for a lock already
-        # being deleted. Never raised — a release that throws would mask
-        # whatever the body was doing — but a warning, because a lock that
-        # cannot be removed wedges every write until the staleness timeout.
+        # Never raised: a release that throws would mask whatever the body was doing.
         logger.warning("[host_api] could not remove the token store lock: %s", e)
 
 
-# ==============================================
-# ISSUE / VERIFY / REVOKE
-# ==============================================
-
-
 def issue_token(label: str, scope: str = "read") -> Tuple[Dict[str, Any], str]:
-    """
-    Mint a bearer token.
-
-    The raw value is returned to the caller and NOT stored — this is the only
-    moment it exists outside the phone.
-
-    Args:
-        label: Human name for the device, e.g. "pixel-8".
-        scope: 'read' or 'operate'.
-
-    Returns:
-        Tuple of (stored record, raw token value).
-
-    Raises:
-        TokenError: Empty label or unknown scope.
-    """
+    """Mint a bearer token."""
     if not label or not label.strip():
         raise TokenError("Token label is required — an unlabelled token cannot be revoked with confidence")
 
@@ -523,7 +260,7 @@ def issue_token(label: str, scope: str = "read") -> Tuple[Dict[str, Any], str]:
         records.append(record)
         save_tokens(records)
 
-    # id, label and minter only. The raw value never reaches a log.
+    # The raw value never reaches a log.
     logger.info(
         "[host_api] token issued: id=%s label=%s scope=%s by=%s",
         record["id"],
@@ -540,52 +277,15 @@ def issue_token(label: str, scope: str = "read") -> Tuple[Dict[str, Any], str]:
 
 
 def current_minter() -> str:
-    """
-    Best-effort name for whoever is running this command.
-
-    drone names the calling branch in the child environment. Absent when this
-    module is driven in-process or from a bare shell, and 'unknown' is the
-    honest answer then — a field that vanishes when it has nothing to say reads
-    as though nobody thought to record it.
-
-    THIS IS PROVENANCE, NEVER PERMISSION. The value comes from the caller's own
-    environment, so treating it as authorisation would be trusting the caller
-    about the caller. It records what happened; it decides nothing.
-
-    Returns:
-        The calling branch name, or 'unknown'.
-    """
+    """Best-effort name for whoever is running this command."""
+    # PROVENANCE, NEVER PERMISSION: it comes from the caller's own environment.
     return (os.environ.get(CALLER_ENV) or "").strip() or UNKNOWN_MINTER
 
 
 def resolve_token(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
-    """
-    Resolve a raw bearer token to its record AND to what it turned out to be.
-
-    Re-reads the store on every call, which is what makes revocation effective
-    on the next request.
-
-    WHY THIS EXISTS SEPARATELY FROM verify_token: on 2026-08-16 the owner's phone
-    was refused for nine minutes and the trail said only token_unrecognised.
-    The store was provably intact, so the one thing that would have closed the
-    investigation — did that device present a credential we once issued, or
-    garbage? — was exactly what the log could not say. A revoked record was
-    skipped silently and became indistinguishable from a token nobody had ever
-    minted.
-
-    So the revoked match is now FOUND, not skipped. The caller gets the record
-    for the trail and the status for the decision, and it is the caller's job to
-    refuse anything that is not active — which is why the record comes back
-    paired with a status rather than alone.
-
-    Args:
-        raw: The bearer value presented by the client.
-
-    Returns:
-        (record, status). Status is active, revoked, or unknown. The record is
-        present for active and revoked, and None for unknown. A record returned
-        alongside 'revoked' IS NOT A GRANT.
-    """
+    """Resolve a raw bearer token to its record AND to what it turned out to be."""
+    # A record returned alongside 'revoked' IS NOT A GRANT; the caller refuses non-active.
+    # The store is re-read per call: that is what makes revocation effective next request.
     if not raw or not isinstance(raw, str):
         return None, STATUS_UNKNOWN
 
@@ -608,48 +308,16 @@ def resolve_token(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
 
 
 def verify_token(raw: str) -> Optional[Dict[str, Any]]:
-    """
-    Resolve a raw bearer token to its record, or None.
-
-    The narrow door: a record comes back only when the token is usable RIGHT
-    NOW. Callers that want to know why a refusal happened use resolve_token;
-    callers that only want the yes-or-no keep this one and cannot accidentally
-    honour a revoked record, because a revoked token never leaves here as a
-    truthy value.
-
-    Args:
-        raw: The bearer value presented by the client.
-
-    Returns:
-        The matching, non-revoked record, or None.
-    """
+    """Resolve a raw bearer token to its record, or None."""
     record, status = resolve_token(raw)
     return record if status == STATUS_ACTIVE else None
 
 
 def touch_token(token_id: str) -> None:
-    """
-    Record that a token was just used. Best-effort, and never fatal.
-
-    THE RULE THIS FUNCTION OBEYS: telemetry never undoes security, and telemetry
-    never fails a request.
-
-    So the record list is re-read INSIDE the lock. A list read before a revoke
-    landed, written back afterwards, would resurrect a revoked device — a
-    security property destroyed by a timestamp. And if the lock cannot be taken,
-    the write is dropped with a log line rather than raised: a missing timestamp
-    is a small loss, a 500 on a properly authenticated request is not.
-
-    Writes coalesce inside LAST_USED_GRANULARITY_SECONDS, because the question
-    this field answers is "is this credential still in use", not "at which
-    second". A phone polling the feed would otherwise rewrite the whole store
-    every few seconds.
-
-    Args:
-        token_id: The record id to stamp.
-    """
+    """Record that a token was just used. Best-effort, and never fatal."""
     try:
         with _store_lock():
+            # Re-read INSIDE the lock: a list read before a revoke, written back, resurrects the token.
             records = load_tokens()
 
             for record in records:
@@ -663,35 +331,20 @@ def touch_token(token_id: str) -> None:
                 save_tokens(records)
                 return
     except OSError as e:
-        # Deliberately swallowed. See the rule above. No id on the line: it is
-        # read out of the credential store, and nothing read from there reaches
-        # a log (CodeQL py/clear-text-logging-sensitive-data, PR #774 r10).
+        # Swallowed: telemetry never fails a request. No id: nothing read from the store reaches a log (CodeQL).
         logger.warning("[host_api] could not record last_used for the presented token: %s", e)
 
 
 def _is_due(last_used: Any) -> bool:
-    """
-    Whether a token's last_used is old enough to rewrite.
-
-    Args:
-        last_used: The stored timestamp, or None.
-
-    Returns:
-        True if the store should be rewritten. An unparseable value counts as
-        due — a stamp nobody can read is not a stamp.
-    """
+    """Whether a token's last_used is old enough to rewrite."""
+    # An unparseable value counts as due: a stamp nobody can read is not a stamp.
     if not last_used:
         return True
 
     try:
         age = (datetime.now() - datetime.fromisoformat(str(last_used))).total_seconds()
     except ValueError as e:
-        # Due, not fatal: an unreadable stamp gets overwritten with a readable
-        # one on this request. Logged because the only way this fires is a
-        # hand-edited store or a shape change nobody migrated, and both are
-        # things an operator should see once rather than never. The stamp itself
-        # stays off the line, and so does ValueError's text, which quotes it:
-        # it is a value read out of the credential store (PR #774 r10).
+        # Type name only: ValueError's text quotes the stamp, a value read from the credential store.
         logger.warning("[host_api] unreadable last_used stamp, treating as due (%s)", type(e).__name__)
         return True
 
@@ -699,16 +352,7 @@ def _is_due(last_used: Any) -> bool:
 
 
 def revoke_token(token_id: str) -> bool:
-    """
-    Revoke a token by id.
-
-    Args:
-        token_id: The record id.
-
-    Returns:
-        True if a record was revoked, False if the id was unknown or already
-        revoked.
-    """
+    """Revoke a token by id."""
     with _store_lock():
         records = load_tokens()
         changed = False
@@ -730,20 +374,8 @@ def revoke_token(token_id: str) -> bool:
 
 
 def list_tokens() -> List[Dict[str, Any]]:
-    """
-    Token records for display, with hashes stripped.
-
-    Every accountability field is projected here. `revoked_at` was written from
-    Phase 1 onward and simply never surfaced, which is how I came to report it
-    as a missing field — I read the projection and called it the store.
-
-    `minted_by` is None rather than 'unknown' for a record written before the
-    field existed: nobody was ever asked, and "unknown" would claim they were.
-
-    Returns:
-        List of records carrying id, label, scope, created, minted_by,
-        last_used, revoked and revoked_at.
-    """
+    """Token records for display, with hashes stripped."""
+    # minted_by stays None for pre-v2 records: "unknown" would claim someone was asked.
     return [
         {
             "id": record.get("id"),
@@ -760,32 +392,10 @@ def list_tokens() -> List[Dict[str, Any]]:
 
 
 def scope_allows(record_scope: str, required: str) -> bool:
-    """
-    Check whether a token's scope satisfies a requirement.
-
-    Args:
-        record_scope: Scope carried by the token.
-        required: Scope the endpoint demands.
-
-    Returns:
-        True if allowed. An unknown scope allows nothing.
-    """
+    """Check whether a token's scope satisfies a requirement."""
     return required in _SCOPE_IMPLIES.get(record_scope, ())
 
 
-# ==============================================
-# PRIVATE HELPERS
-# ==============================================
-
-
 def _hash_token(raw: str) -> str:
-    """
-    Hash a raw token for storage and comparison.
-
-    Args:
-        raw: Raw token value.
-
-    Returns:
-        Hex sha256 digest.
-    """
+    """Hash a raw token for storage and comparison."""
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

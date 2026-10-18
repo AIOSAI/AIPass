@@ -3,38 +3,18 @@
 # Description: OpenRouter Caller Detection Handler
 # Version: 1.0.2
 # Created: 2025-11-16
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-OpenRouter Caller Detection Handler
+"""OpenRouter Caller Detection Handler"""
 
-Stack-based caller detection with JSON folder path resolution.
-Supports flow, prax, and skills module detection.
-
-Usage:
-    from aipass.api.apps.handlers.openrouter.caller import get_caller_info
-
-    caller_info = get_caller_info()
-    if caller_info:
-        caller_name = caller_info['caller_name']
-        json_folder = caller_info['json_folder']
-"""
-
-# Standard library imports
 import inspect
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
-# Logging
 from aipass.prax import logger
 
-# JSON handler
 from aipass.api.apps.handlers.json import json_handler
-
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "openrouter.caller"
 MODULE_VERSION = "1.0.0"
@@ -44,25 +24,13 @@ CALLER_PATTERNS = {
     "prax": "prax_json",
 }
 
-# =============================================
-# CALLER DETECTION FUNCTIONS
-# =============================================
-
 
 def get_caller_info() -> Optional[Dict[str, Any]]:
     """
     Detect calling module via stack inspection.
 
-    Returns dict with: caller_name, caller_path, json_folder, category, detection_method
-    Returns None if detection fails.
-
-    A failure answers the same None as no caller found, on purpose (api, fleet
-    green leg 5). Every caller does the right thing for a failure with that
-    None: client.get_response names the caller 'unknown' and sends the request,
-    and provision.ensure_caller_config answers {} (its own outer catch answers
-    {} as well). A raise, or a catch narrowed to a named list, would let an
-    error end client.get_response before its request is sent. What tells the
-    two apart is the error line logged here.
+    A failure answers None like no caller, on purpose: a raise (or a narrowed catch) would end
+    client.get_response before its request is sent. The logged error line tells the two apart.
     """
     try:
         stack = inspect.stack()
@@ -87,12 +55,7 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
 
 
 def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
-    """
-    Compatibility wrapper for provision handler.
-
-    Returns:
-        Tuple of (caller_name, json_folder_path) or (None, None)
-    """
+    """Compatibility wrapper for provision handler."""
     caller_info = get_caller_info()
     if caller_info:
         return caller_info.get("caller_name"), caller_info.get("json_folder")
@@ -100,11 +63,7 @@ def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
 
 
 def detect_caller_category(caller_path: Path) -> str:
-    """Categorize caller based on file path.
-
-    No try: a Path cannot raise from its parts, so the catch guarded nothing
-    (api, fleet green leg 4).
-    """
+    """Categorize caller based on file path."""
     path_parts = caller_path.parts
 
     if "flow" in path_parts:
@@ -113,11 +72,6 @@ def detect_caller_category(caller_path: Path) -> str:
         return "prax"
     else:
         return "unknown"
-
-
-# =============================================
-# INTERNAL DETECTION HELPERS
-# =============================================
 
 
 def _detect_flow_caller(frame_path: Path) -> Dict[str, Any]:
@@ -180,11 +134,6 @@ def _create_fallback_info(frame_path: Path) -> Dict[str, Any]:
         "category": category,
         "detection_method": "fallback",
     }
-
-
-# =============================================
-# MODULE INITIALIZATION
-# =============================================
 
 
 def _initialize():

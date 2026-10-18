@@ -3,21 +3,13 @@
 # Description: PRAX Public API
 # Version: 1.4.1
 # Created: 2025-11-15
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 PRAX Logger - Public API
 
-This is the main entry point for PRAX logging system.
-Other branches import from here:
-    from aipass.prax.apps.modules.prax_logger import system_logger
-
-Provides:
-- system_logger: Auto-routing logger for all modules
-- get_direct_logger / direct_log: Event-pipeline-bypass logging for infrastructure
-- Lifecycle functions: initialize, shutdown
-- Status and control functions
+Reference: docs/logging_api.md
 """
 
 __all__ = [
@@ -42,10 +34,7 @@ __all__ = [
 import logging
 from typing import Dict, Any
 
-# NOTE: CLI imports are done lazily inside functions to avoid circular dependency.
-# CLI imports prax logger, so prax logger must not import CLI at module level.
-
-# Import from handlers - internal implementation
+# CLI imports prax logger, so CLI is imported lazily inside functions, never here.
 from aipass.prax.apps.handlers.logging.setup import (
     setup_individual_logger,
     get_captured_loggers_count,
@@ -64,25 +53,17 @@ from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_l
 from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
 from aipass.prax.apps.handlers.json import json_handler
 
-# Stdlib logger for except-block compliance (seedgo requires variable named 'logger')
-# SystemLogger methods shadow this with local 'logger = get_system_logger()' which is fine
+# seedgo requires a module-level 'logger'; SystemLogger methods shadow it on purpose.
 logger = logging.getLogger(__name__)
 
-# Module constants
 MODULE_NAME = "prax_logger"
 DATA_FILE = PRAX_JSON_DIR / f"{MODULE_NAME}_data.json"
-
-# =============================================
-# SYSTEM LOGGER - THE MAIN EXPORT
-# =============================================
 
 
 def get_system_logger():
     """Get logger that automatically routes to correct module log file.
 
-    Uses a single stack walk to detect module name, path, and branch
-    together, avoiding the double-walk problem where separate calls
-    could resolve different external callers at different stack depths.
+    One stack walk for name, path and branch: separate walks can disagree on depth.
     """
     module_name, caller_path, branch = get_caller_info()
     return setup_individual_logger(module_name, caller_path=caller_path, caller_branch=branch)
@@ -96,26 +77,9 @@ class SystemLogger:
     def _ensure_watcher(self):
         """Keep an explicitly started discovery watcher honest. Starts nothing.
 
-        Until 2026-09-12 the first log line of every process started a recursive
-        inotify watch over the whole ecosystem on an unjoined daemon thread.
-        That is gone (DPLAN-0339 step 4): discovery is a scheduled scan now
-        (`drone @prax discover`, daily), so a process that merely logs costs the
-        machine no watches and no thread. Logging itself never depended on the
-        watcher — a module gets its log file when it logs, not when it is
-        discovered.
-
-        What is left is the liveness check, and it still has a job: a process
-        that opens the explicit door (`initialize_logging_system()`, which starts
-        the watcher synchronously and keeps it for the life of that process) must
-        still find out if the watchdog dispatcher dies under it — DPLAN-0305,
-        where it died in six processes at once and nobody knew for 15 hours. In
-        every other process the check answers "no watcher here" and costs a
-        throttled boolean.
-
-        `_watcher_started` is therefore no longer a "did we start it" flag; it
-        means "this process is past its first log line", which is the one moment
-        a watcher cannot yet exist. No lock guards it any more: it gates nothing
-        but a cheap check, and a racing double-set is the same value twice.
+        Only a process that called initialize_logging_system() has a watcher; this
+        reports one that died under it. `_watcher_started` means "past the first log
+        line"; unlocked, since a racing double-set writes the same value.
         """
         if SystemLogger._watcher_started:
             check_file_watcher_liveness()  # Throttled; ~1 real check/60s.
@@ -143,63 +107,21 @@ class SystemLogger:
     def debug(self, message, *args, **kwargs):
         """Log debug message to calling module's log file.
 
-        Silent under the default INFO level — nothing reaches a log file
-        until the level is lowered via AIPASS_LOG_LEVEL or the log_level
-        config key. That is the point: use this for the verbose trail you
-        want available on demand but absent from normal operation.
-
-        The level binds when a module's logger is first created, so a
-        long-running process picks up a change on restart, not mid-flight.
+        Silent at the default INFO level; the level binds when a module's logger is created.
         """
         self._ensure_watcher()
         logger = get_system_logger()
         logger.debug(message, *args, **kwargs)
 
 
-# Export the logger object - this is what other branches import
 system_logger = SystemLogger()
 
-# =============================================
-# LIFECYCLE FUNCTIONS
-# =============================================
-#
-# These two are the explicit system lifecycle doors seedgo's trigger standard
-# names (trigger.md Pattern 9, `initialize_*_system` / `shutdown_*_system`), so
-# each announces itself on trigger's bus: `logging_system_initialized` and
-# `logging_system_shutdown`. The standard's event table names no lifecycle
-# event, so those two names are prax's, following its rules (lowercase,
-# underscore-separated, past tense).
-#
-# BOTH IMPORT TRIGGER INSIDE THEMSELVES, never at module level, and that is the
-# whole design. `from aipass.prax import logger` and every log line the fleet
-# writes must stay clear of the aipass.trigger import graph: DPLAN-0339 step 3
-# took a fire off the first log line of every process and it was worth 0.339 s
-# of that line's 0.361 s, nearly all of it importing that graph. A door called
-# deliberately, once, can afford what a hot path cannot.
-#
-# Each fire is guarded (ImportError, OSError) exactly as the removed one was:
-# these doors must still work on a host where trigger cannot import or inotify
-# is exhausted. A fire that fails is a warning, never a failed initialize.
-#
-# Nothing listens to either event today, by design — the point of the standard
-# is that a handler can plug in later without prax changing again.
+# The lifecycle doors import trigger inside themselves: the log path must stay clear
+# of the aipass.trigger import graph. See docs/logging_api.md.
 
 
 def initialize_logging_system():
-    """Initialize the complete logging system
-
-    Steps:
-    1. Create config file if missing
-    2. Discover all Python modules
-    3. Save module registry
-    4. Setup system logger
-    5. Install logger override
-    6. Start file watcher
-    7. Fire `logging_system_initialized`
-
-    MODULE orchestration pattern: Thin wrapper that delegates to handler.
-    See the section header above for why the trigger import is local.
-    """
+    """Initialize the complete logging system"""
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_initialize
 
@@ -220,15 +142,7 @@ def initialize_logging_system():
 def shutdown_logging_system():
     """Shutdown logging system cleanly
 
-    Steps:
-    1. Stop file watcher
-    2. Restore original logger
-    3. Log shutdown operation
-    4. Fire `logging_system_shutdown`
-
-    MODULE orchestration pattern: Thin wrapper that delegates to handler.
-    Fired last on purpose: the event says the system IS down, not that it is
-    going down, so a handler that reacts by writing is not racing the teardown.
+    Fires last on purpose: the event says the system IS down, not going down.
     """
     from aipass.cli.apps.modules import console
     from aipass.prax.apps.handlers.logging.lifecycle import run_shutdown
@@ -247,29 +161,12 @@ def shutdown_logging_system():
         logger.warning("Trigger logging_system_shutdown fire skipped (not available or inotify full): %s", e)
 
 
-# =============================================
-# STATUS AND CONTROL
-# =============================================
-
-
 def get_system_status() -> Dict[str, Any]:
-    """Get current logging system status
-
-    Returns:
-        Dict with system status information:
-        - total_modules: Number of discovered modules, None if the registry could not be read
-        - individual_loggers: Number of active loggers
-        - module_logs_dir: Path to prax module logs
-        - registry_file: Path to module registry
-        - file_watcher_active: Watcher status in THIS process (see status.py)
-        - last_scan: what the last `drone @prax discover` reported, {} if never,
-          None if the registry could not be read
-        - logger_override_active: Override status
-    """
+    """Get current logging system status"""
     modules = load_module_registry()
 
     return {
-        # None when the registry cannot be read, never a count of 0 (prax, leg 15).
+        # None when the registry cannot be read, never a count of 0.
         "total_modules": None if modules is None else len(modules),
         "individual_loggers": get_captured_loggers_count(),
         "system_logs_dir": str(get_system_logs_dir()),
@@ -336,11 +233,7 @@ def print_introspection():
 
 
 def handle_command(_command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Logger is a service module with no user-facing commands.
-    All interaction happens through the system_logger API.
-    """
+    """Handle commands routed by the entry point."""
     json_handler.log_operation("logger_handle_command", {"args": args})
     if not args:
         print_introspection()

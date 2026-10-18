@@ -3,35 +3,13 @@
 # Description: README Standards Checker Handler
 # Version: 1.3.3
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 README Standards Checker Handler
 
-Validates README.md completeness and freshness for AIPass branches.
-
-Checks:
-1. README exists at branch root
-2. Required sections present (Architecture, Commands, Integration Points)
-3. Last Updated freshness (within 7 days of newest code change)
-4. Directory tree accuracy (mentioned directories exist on disk)
-5. Module list completeness (all modules in apps/modules/ mentioned)
-6. Command list presence (commands/usage section is not empty)
-7. Test count accuracy (claimed count vs actual def test_ functions)
-8. Markdown link validity (relative links point to existing paths)
-
-ADVISORY, NON-SCORED (check_branch_info, DPLAN-0347):
-- docs/ index: every docs/*.md reachable from the branch README
-- named paths: branch-rooted paths the README claims that are absent
-- rot bait: count claims, dated status headings, a Commands section that
-  re-types --help
-- sections: the eight ## sections of README_SECTIONS, names exact, order
-  fixed (DPLAN-0351) - missing, renamed, out of order, or a stranger
-
-Nothing in that lane carries a score, a pass or a violation. See the section
-banner at the foot of this module for why it is that channel and not a ninth
-check.
+Reference: readme.md
 """
 
 import os
@@ -45,17 +23,13 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
-# Audit scope: entry points only (apps/{name}.py)
 # APPLIES_TO: README.md through the entry point.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 
-# Runtime / generated paths that legitimately may be absent in a clean
-# checkout (e.g. CI) while present in a working tree. A README documenting
-# one of these is not a violation when it's missing from disk.
-# Pure local-file check — never consults git or .gitignore. (A standards
-# audit reads the files that are there; git is a separate concern.)
+# Runtime / generated paths that may be absent in a clean checkout (e.g. CI): a README naming one is not a
+# violation when it is missing. Pure local-file check, never git or .gitignore.
 _RUNTIME_ARTIFACTS = {
     "logs",
     "artifacts",
@@ -81,24 +55,9 @@ def _is_runtime_artifact(path: Path) -> bool:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if branch README follows standards
-
-    Args:
-        module_path: Path to branch entry point (e.g., src/aipass/seedgo/apps/branch.py)
-        bypass_rules: Optional list of bypass rules to skip certain checks
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str
-        }
-    """
+    """Check if branch README follows standards"""
     checks = []
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "readme", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -111,12 +70,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     entry_path = Path(module_path)
     branch_root = entry_path.parent.parent
 
-    # Check 1: README exists
     readme_path = branch_root / "README.md"
     readme_exists_check = check_readme_exists(readme_path)
     checks.append(readme_exists_check)
 
-    # If README doesn't exist, all other checks fail
     if not readme_exists_check["passed"]:
         for name in [
             "Required sections",
@@ -135,7 +92,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
         return {"passed": score >= 75, "checks": checks, "score": score, "standard": "README"}
 
-    # Read README content
     try:
         content = readme_path.read_text(encoding="utf-8")
         lines = content.split("\n")
@@ -148,35 +104,27 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "README",
         }
 
-    # Check 2: Required sections present
     sections_check = check_required_sections(lines, module_path, bypass_rules)
     checks.append(sections_check)
 
-    # Check 3: Last Updated freshness
     freshness_check = check_last_updated_freshness(lines, module_path, bypass_rules)
     checks.append(freshness_check)
 
-    # Check 4: Directory tree accuracy
     tree_check = check_directory_tree(lines, branch_root, module_path, bypass_rules)
     checks.append(tree_check)
 
-    # Check 5: Module list completeness
     modules_check = check_module_list(lines, branch_root, module_path, bypass_rules)
     checks.append(modules_check)
 
-    # Check 6: Command list presence
     commands_check = check_command_list(lines, module_path, bypass_rules)
     checks.append(commands_check)
 
-    # Check 7: Test count accuracy
     test_count_check = check_test_count_accuracy(lines, branch_root, module_path, bypass_rules)
     checks.append(test_count_check)
 
-    # Check 8: Markdown link validity
     link_check = check_markdown_links(lines, branch_root, module_path, bypass_rules)
     checks.append(link_check)
 
-    # Calculate score
     passed_checks = sum(1 for c in checks if c["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
@@ -194,28 +142,18 @@ def check_readme_exists(readme_path: Path) -> Dict:
 
 
 def check_required_sections(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check for required section headers (case-insensitive, ## markdown headers).
-
-    Required (at least one from each group):
-    - Architecture OR Directory Structure
-    - Commands OR Usage
-    - Integration Points OR Depends On OR Provides To
-    """
+    """Check for required section headers (case-insensitive, ## markdown headers)."""
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Required sections", "passed": True, "message": "Bypassed by bypass rules"}
 
     content_lower = "\n".join(lines).lower()
 
-    # Group 1: Architecture / Directory Structure
     group1_patterns = ["architecture", "directory structure"]
     group1_found = any(re.search(r"^#{1,3}\s+.*" + re.escape(p), content_lower, re.MULTILINE) for p in group1_patterns)
 
-    # Group 2: Commands / Usage
     group2_patterns = ["commands", "usage"]
     group2_found = any(re.search(r"^#{1,3}\s+.*" + re.escape(p), content_lower, re.MULTILINE) for p in group2_patterns)
 
-    # Group 3: Integration Points / Depends On / Provides To
     group3_patterns = ["integration points", "depends on", "provides to"]
     group3_found = any(re.search(r"^#{1,3}\s+.*" + re.escape(p), content_lower, re.MULTILINE) for p in group3_patterns)
 
@@ -237,20 +175,8 @@ def check_last_updated_freshness(lines: List[str], file_path: str, bypass_rules:
     """
     Check that the README declares a well-formed "Last Updated" date.
 
-    It took branch_root like its sibling checks and never read it: the date is
-    judged from the README's lines alone. Dropped (seedgo, fleet green leg 8).
-
-    Local-file only: verifies the field is present and parseable. Does NOT
-    compare against code history — recency is not a property of the files on
-    disk, so it has no place in a local standards audit (and would diverge
-    between a working tree and a clean CI checkout). A "code changed, re-check
-    your README" nudge, if wanted, belongs outside the audit as its own flag.
-
-    Looks for patterns:
-    - *Last Updated: YYYY-MM-DD*
-    - *Last Updated*: YYYY-MM-DD
-    - **Last Updated:** YYYY-MM-DD
-    - **Last Updated**: YYYY-MM-DD
+    Local-file only: present and parseable, never compared against code history (that would score a working
+    tree and a clean CI checkout differently).
     """
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Last Updated freshness", "passed": True, "message": "Bypassed by bypass rules"}
@@ -279,18 +205,10 @@ def check_last_updated_freshness(lines: List[str], file_path: str, bypass_rules:
 
 
 def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check directory tree accuracy.
-
-    If README contains a fenced code block after a "Directory Structure" or
-    "Architecture" heading, verify that directories mentioned in the tree
-    actually exist on disk.
-    """
+    """Check directory tree accuracy."""
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Directory tree accuracy", "passed": True, "message": "Bypassed by bypass rules"}
 
-    # Find the tree section: look for a heading with architecture/directory structure,
-    # then find the next fenced code block
     content = "\n".join(lines)
     tree_block = _extract_tree_block(content)
 
@@ -302,33 +220,25 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
             "message": "No directory tree block found (optional check)",
         }
 
-    # Extract directory names from tree block, line by line
-    # Strip inline comments (text after #) to avoid false positives
-    # Skip the first non-empty line (root label, e.g., "seedgo/" or "src/aipass/.../spawn/")
-    # Common tree formats: "apps/", "├── apps/", "│   ├── handlers/", "  apps/"
+    # Skip the root label line; strip inline comments. Tree formats: "apps/", "├── apps/", "│   ├── handlers/".
     dir_pattern = re.compile(r"[\w\-_.]+/")
     branch_name = branch_root.name.lower()
     mentioned_dirs = set()
     tree_lines = tree_block.split("\n")
 
-    # Skip the first non-empty line (it's the tree root label)
     first_content_skipped = False
     for tree_line in tree_lines:
         if not first_content_skipped and tree_line.strip():
             first_content_skipped = True
             continue
-        # Strip inline comments to avoid matching words in comments
         if "#" in tree_line:
             tree_line = tree_line[: tree_line.index("#")]
         for match in dir_pattern.finditer(tree_line):
             dir_name = match.group().rstrip("/")
-            # Skip the branch root name itself
-            # (trees typically start with the branch name, e.g., "seedgo/")
             if dir_name.lower() == branch_name:
                 continue
             if dir_name in ("__pycache__", ".git", "node_modules"):
                 continue
-            # Skip hidden directories (start with .)
             if dir_name.startswith("."):
                 continue
             # Skip glob/wildcard patterns (e.g., "*_check.py" produces "*_check/")
@@ -339,13 +249,11 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
     if not mentioned_dirs:
         return {"name": "Directory tree accuracy", "passed": True, "message": "No directories detected in tree block"}
 
-    # Check which mentioned directories exist somewhere under branch root
     missing_dirs = []
     # Recorded, not skipped: a directory "not found" under a subtree the walk
     # could not list is unverified, and the message has to say which subtree.
     unreadable: List[OSError] = []
     for dir_name in mentioned_dirs:
-        # Check if this directory exists anywhere in the branch
         found = False
         for _, dirs, _ in os.walk(str(branch_root), onerror=unreadable.append):
             if dir_name in dirs:
@@ -375,18 +283,12 @@ def check_directory_tree(lines: List[str], branch_root: Path, file_path: str, by
 
 
 def _extract_tree_block(content: str) -> Optional[str]:
-    """
-    Extract the fenced code block following an Architecture/Directory Structure heading.
-
-    Returns the code block content, or None if not found.
-    """
-    # Find heading line
+    """Extract the fenced code block following an Architecture/Directory Structure heading."""
     heading_pattern = re.compile(r"^#{1,3}\s+.*(architecture|directory\s+structure)", re.IGNORECASE | re.MULTILINE)
     heading_match = heading_pattern.search(content)
     if not heading_match:
         return None
 
-    # Look for next fenced code block after the heading
     after_heading = content[heading_match.end() :]
     fence_pattern = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
     fence_match = fence_pattern.search(after_heading)
@@ -397,12 +299,7 @@ def _extract_tree_block(content: str) -> Optional[str]:
 
 
 def check_module_list(lines: List[str], branch_root: Path, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that all modules in apps/modules/ are mentioned in the README.
-
-    Scans apps/modules/*.py (excluding __init__.py) and checks if each
-    module name appears somewhere in the README content.
-    """
+    """Check that all modules in apps/modules/ are mentioned in the README."""
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Module list completeness", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -414,7 +311,6 @@ def check_module_list(lines: List[str], branch_root: Path, file_path: str, bypas
             "message": "No apps/modules/ directory found (skipped)",
         }
 
-    # Get actual module files
     module_files = []
     for py_file in sorted(modules_dir.glob("*.py")):
         if py_file.name == "__init__.py":
@@ -426,13 +322,10 @@ def check_module_list(lines: List[str], branch_root: Path, file_path: str, bypas
     if not module_files:
         return {"name": "Module list completeness", "passed": True, "message": "No module files found in apps/modules/"}
 
-    # Check if each module name appears in README
     content_lower = "\n".join(lines).lower()
     missing_modules = []
     for module_name in module_files:
-        # Check for module name (with underscores or spaces or as-is)
         name_lower = module_name.lower()
-        # Also check with underscores replaced by spaces
         name_spaced = name_lower.replace("_", " ")
         if name_lower not in content_lower and name_spaced not in content_lower:
             missing_modules.append(module_name)
@@ -454,13 +347,7 @@ def check_module_list(lines: List[str], branch_root: Path, file_path: str, bypas
 def check_test_count_accuracy(
     lines: List[str], branch_root: Path, file_path: str, bypass_rules: list | None = None
 ) -> Dict:
-    """
-    Check that test count claims in README match actual test function count.
-
-    Scans README for patterns like "N tests", "N test functions", etc.
-    Counts actual `def test_` functions in tests/ directory.
-    Flags when claimed count drifts >10% from actual.
-    """
+    """Check that test count claims in README match actual test function count."""
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Test count accuracy", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -546,12 +433,7 @@ def _count_test_functions(tests_dir: Path) -> int:
 
 
 def check_markdown_links(lines: List[str], branch_root: Path, file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that relative markdown links point to existing paths.
-
-    Parses [text](path) links where path is relative (not http/https/mailto/#).
-    Verifies each path exists relative to branch root.
-    """
+    """Check that relative markdown links point to existing paths."""
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Markdown link validity", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -601,16 +483,10 @@ def _extract_relative_links(content: str) -> List[tuple]:
 
 
 def check_command_list(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that README has a non-empty commands/usage section.
-
-    Finds the Commands or Usage heading and checks that there is content
-    between it and the next heading.
-    """
+    """Check that README has a non-empty commands/usage section."""
     if is_bypassed(file_path, "readme", None, bypass_rules):
         return {"name": "Command list presence", "passed": True, "message": "Bypassed by bypass rules"}
 
-    # Find Commands or Usage heading
     command_heading_idx = None
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -625,14 +501,11 @@ def check_command_list(lines: List[str], file_path: str, bypass_rules: list | No
             "message": "No Commands/Usage section found in README",
         }
 
-    # Check for content between this heading and next heading (or EOF)
     content_lines = 0
     for i in range(command_heading_idx + 1, len(lines)):
         stripped = lines[i].strip()
-        # Stop at next heading
         if re.match(r"^#{1,3}\s+", stripped):
             break
-        # Count non-empty lines
         if stripped:
             content_lines += 1
 
@@ -646,55 +519,19 @@ def check_command_list(lines: List[str], file_path: str, bypass_rules: list | No
     return {"name": "Command list presence", "passed": False, "message": "Commands/Usage section is empty"}
 
 
-# =============================================================================
-# ADVISORY LANE — docs index + rot bait (DPLAN-0347, boardroom thread 16)
-# =============================================================================
-#
-# WHY THIS IS NOT A CHECK
-# -----------------------
-# The room's contract makes the README the FACE for strangers plus an index of
-# docs/, with the depth in docs/ (one file per module or handler group) and the
-# live inventory in `drone @<branch>` / `--help`. Today 17 of 18 branches have
-# no docs index at all. `readme` is a SCORED standard and CI gates every branch
-# at 100 (.github/scripts/seedgo_audit.py, THRESHOLD = 100), so a ninth SCORED
-# check would put the whole fleet red on the commit that landed it — the exact
-# mistake of 2026-09-13, when a renderer change reded 17 of 18 branches. The
-# ruling is "advisory, then ratchet".
-#
-# WHY check_branch_info() AND NOT THE OTHER TWO CHANNELS
-# ------------------------------------------------------
-#   * `ADVISORY = True` is a MODULE flag: branch_audit drops the whole standard
-#     out of the gating average. On a scored standard that would move every
-#     branch's average — the opposite of the requirement.
-#   * `check_branch_observe()` carries a would-be score and writes a dated
-#     series to branch_observe_log.json, but audit_display renders NOTHING from
-#     it. These findings exist to be READ by the owner doing the diet, per
-#     branch, so a channel with no renderer cannot carry them. Observe is for a
-#     check that already scored and was de-scored pending a ruling
-#     (log_structure); this one has never scored.
-#   * `check_branch_info()` is rendered for every branch at any score
-#     (audit_display._render_info_lines, deliberately shown even at 100), and
-#     carries no score and no pass/fail, so nothing here can move a number.
-#
-# Every line is prefixed "(advisory)" because info lines are stored and
-# re-rendered ONE AT A TIME (audit artifact, audit_display): a line quoted on
-# its own must still arrive marked as advice, not as a finding.
+# ADVISORY LANE: docs index, named paths, rot bait, sections. Reported through check_branch_info(), never
+# scored; why this channel and not a ninth check is in readme.md, "Advisory Lane".
 
-#: docs/*.md added or deleted must bust the audit's incremental cache, or the
-#: index line is served stale from a run that predates the new file. README.md
-#: is already watched by _collect_watch_files; docs/ was not.
+#: docs/*.md added or deleted must bust the audit's incremental cache, or the index line is served stale.
 BRANCH_INPUTS = ("docs/*.md",)
 
 _DOCS_DIRNAME = "docs"
 
-#: An advisory that could not read what it reads says so in one line, never the
-#: [] of a branch with nothing to report (seedgo fleet green leg 15).
+#: An advisory that could not read what it reads says so in one line, never the [] of a clean branch.
 UNREAD = "readme advisory not run: cannot read "
 
-#: Nouns whose count in a README rots the moment code lands. Deliberately NOT
-#: a duplicate of check 7: that check scores whether a TEST count is accurate
-#: today; this one says the number should not live in the face at all, because
-#: `drone @<branch>` regenerates it from code and never goes stale.
+#: Nouns whose count in a README rots the moment code lands. Not check 7's duplicate: that one scores a test
+#: count's accuracy; this one says the number belongs in `drone @<branch>`, not the face.
 _ROT_COUNT_RE = re.compile(
     r"\b(\d[\d,]*)\s+(tests?|rules?|standards?|modules?|handlers?|checkers?|checks?"
     r"|commands?|branches|files?|lines?|entries|hooks?|packs?)\b",
@@ -712,11 +549,8 @@ _STATUS_LABEL_RE = re.compile(
 
 _HEADING_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$")
 
-#: A markdown link, for the SPANS of its target. _extract_relative_links above
-#: answers "which paths are linked"; this lane needs "where in the text the
-#: link targets sit", so it can leave them to check 8 instead of telling one
-#: dead link twice. The scored helper keeps its own copy: this row does not
-#: reach into the lane that carries the number.
+#: A markdown link, for the SPANS of its target, so this lane can leave link targets to check 8. The scored
+#: helper keeps its own copy: this row does not reach into the lane that carries the number.
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
 #: A path-shaped token: at least one "/" and a file extension. Directories are
@@ -736,24 +570,17 @@ _PATH_EXTENSIONS = frozenset(
 #: Segments that mark an illustrative path in prose ("/path/to/registry.json").
 _PLACEHOLDER_SEGMENTS = frozenset({"path", "to", "your", "example", "examples", "foo", "bar", "tmp"})
 
-#: A line in a Commands section that invokes the branch rather than describing
-#: it. Written as a pattern, not as a tuple of string prefixes: a source
-#: literal of the form "python -m " reads to the help_text standard as advice
-#: telling a user to run python, which is exactly what that standard exists to
-#: catch. This one is a detector, and it reads as one.
+#: A line in a Commands section that invokes the branch. A pattern, not string prefixes: a literal like
+#: "python -m " reads to the help_text standard as advice to run python.
 _INVOCATION_RE = re.compile(r"^(?:drone|python3?)\s+\S")
 
 #: Below this, a Commands section is a pointer rather than a copy of --help.
 _COMMAND_LIST_MIN = 3
 
-#: How many names one info line carries before it says "and N more". A silent
-#: cap would hand back an unactionable count (inert.py learned this the hard way).
+#: How many names one info line carries before it says "and N more": a silent cap hands back an unactionable count.
 _SAMPLE_LIMIT = 6
 
-#: The README face: eight ## sections, names exact, order fixed (DPLAN-0351).
-#: The fleet's de facto order, carried exactly by 6 of 18 READMEs on the day it
-#: was written down. Advisory for the reason the docs index is: scored, it would
-#: red 12 branches on the commit that landed it.
+#: The README face: eight ## sections, names exact, order fixed. Advisory: scored, it would red most branches.
 README_SECTIONS: Tuple[str, ...] = (
     "Quick Start",
     "What It Does",
@@ -769,15 +596,7 @@ README_SECTIONS: Tuple[str, ...] = (
 def check_branch_info(branch_path: str) -> List[str]:
     """Non-scored advisory lines: the docs/ index, named paths, rot bait, and the eight sections.
 
-    Never returns a score, a pass or a violation — see the section banner for
-    why this channel and not the scored lane.
-
-    Args:
-        branch_path: Branch root to inspect.
-
-    Returns:
-        Zero or more advisory lines. Empty when the branch has no README, no
-        docs/ directory and nothing that rots — silence is the clean state.
+    Never returns a score, a pass or a violation. Empty when there is nothing to report: silence is the clean state.
     """
     branch_root = Path(branch_path)
     readme_path = branch_root / "README.md"
@@ -823,9 +642,7 @@ def _sample(names: List[str]) -> str:
 def _fence_mask(lines: List[str]) -> List[bool]:
     """Per-line True when the line is inside (or is) a fenced code block.
 
-    Without this a bash comment inside a ```fence``` reads as a markdown
-    heading: "# Audit" in seedgo's own Commands block ended the section scan
-    four lines in, and the section measured 4 invocations instead of 31.
+    Without this a bash comment inside a ```fence``` reads as a markdown heading and ends the section scan.
     """
     mask: List[bool] = []
     inside = False
@@ -841,16 +658,8 @@ def _fence_mask(lines: List[str]) -> List[bool]:
 def _docs_index_lines(branch_root: Path, content: str) -> List[str]:
     """One line on whether every docs/*.md is reachable from the README.
 
-    A docs file counts as indexed when a relative markdown link resolves to it
-    OR the literal path "docs/<name>" appears in the README: either one makes
-    it findable by a reader and by grep, and a checker that demanded link
-    syntax would report a true index as broken. docs/README.md is additionally
-    covered by a link to the docs/ directory itself — that is how a directory
-    index renders.
-
-    No docs/ directory, or no *.md in it, is SILENCE: a branch that keeps its
-    depth in the README has nothing to index yet, and saying so every audit
-    would be noise on 17 branches.
+    Indexed when a relative markdown link resolves to it OR the literal "docs/<name>" appears (a link to docs/
+    covers docs/README.md). No docs/ directory, or no *.md in it, is SILENCE.
     """
     docs_dir = branch_root / _DOCS_DIRNAME
     if not docs_dir.is_dir():
@@ -894,16 +703,9 @@ def _docs_index_lines(branch_root: Path, content: str) -> List[str]:
 def _named_path_lines(branch_root: Path, content: str) -> List[str]:
     """One line naming branch-rooted paths the README claims that are absent.
 
-    SCOPE, stated because the boundary is the whole point: only a token whose
-    first segment is a real top-level entry of THIS branch. A path relative to
-    somewhere deeper ("handlers/chroma_client.py"), a neighbour's file
-    ("lifecycle/auto_fix.py", which lives in @hooks) and an illustration
-    ("src/main.py") are all left alone — an audit of one branch cannot tell a
-    stale reference from a neighbour's real file, and guessing produced 16 to
-    38 false lines per branch in the measurement that set this rule.
-
-    Targets of markdown links are skipped: check 8 scores those already.
-    Directories are skipped: check 4 scores the ones named in the tree.
+    SCOPE: only a token whose first segment is a real top-level entry of THIS branch; an audit of one branch
+    cannot tell a stale reference from a neighbour's real file. Link targets (check 8) and directories (check 4)
+    are skipped.
     """
     try:
         tops = {entry.name for entry in branch_root.iterdir()}

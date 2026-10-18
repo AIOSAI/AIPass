@@ -3,13 +3,12 @@
 # Description: Room management operations
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Room Operations Handler
 
-Create, list, and join rooms in The Commons.
 All functions return dicts and never print directly.
 """
 
@@ -22,26 +21,8 @@ from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# ROOM OPERATIONS
-# =============================================================================
-
-
 def create_room(args: List[str]) -> dict:
-    """
-    Create a new room in The Commons.
-
-    Parses room name and description from args. The room name is the
-    first positional argument; remaining args form the description.
-
-    Args:
-        args: List of string arguments. First element is room name,
-              rest is the description.
-
-    Returns:
-        Dict with success status, room name, description, and creator.
-        On error: dict with success=False and error message.
-    """
+    """Create a new room in The Commons: args[0] is the name, the rest the description."""
 
     if not args:
         return {"success": False, "error": "Room name required. Usage: create_room <name> [description...]"}
@@ -49,11 +30,9 @@ def create_room(args: List[str]) -> dict:
     room_name = args[0].lower().strip()
     description = " ".join(args[1:]) if len(args) > 1 else ""
 
-    # Validate room name
     if not room_name:
         return {"success": False, "error": "Room name cannot be empty"}
 
-    # Get caller identity
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:
@@ -69,23 +48,19 @@ def create_room(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # Check if room already exists
         existing = conn.execute("SELECT name FROM rooms WHERE name = ?", (room_name,)).fetchone()
 
         if existing:
             close_db(conn)
             return {"success": False, "error": f"Room '{room_name}' already exists"}
 
-        # Create display name from room name
         display_name = room_name.replace("-", " ").replace("_", " ").title()
 
-        # Insert the room
         conn.execute(
             "INSERT INTO rooms (name, display_name, description, created_by) VALUES (?, ?, ?, ?)",
             (room_name, display_name, description, caller_name),
         )
 
-        # Auto-subscribe creator to the new room
         conn.execute(
             "INSERT OR IGNORE INTO subscriptions (agent_name, room_name) VALUES (?, ?)",
             (caller_name, room_name),
@@ -110,16 +85,7 @@ def create_room(args: List[str]) -> dict:
 
 
 def list_rooms() -> dict:
-    """
-    List all visible rooms in The Commons with member and post counts.
-
-    Hidden rooms are excluded from the listing.
-
-    Returns:
-        Dict with success status and list of room dicts including
-        member_count and post_count.
-        On error: dict with success=False and error message.
-    """
+    """List all non-hidden rooms in The Commons with member and post counts."""
 
     try:
         conn = get_db()
@@ -145,17 +111,7 @@ def list_rooms() -> dict:
 
 
 def join_room(args: List[str]) -> dict:
-    """
-    Subscribe the calling agent to a room.
-
-    Args:
-        args: List of string arguments. First element is the room name
-              to join.
-
-    Returns:
-        Dict with success status, room name, and agent name.
-        On error: dict with success=False and error message.
-    """
+    """Subscribe the calling agent to the room named in args[0]."""
 
     if not args:
         return {"success": False, "error": "Room name required. Usage: join_room <name>"}
@@ -165,7 +121,6 @@ def join_room(args: List[str]) -> dict:
     if not room_name:
         return {"success": False, "error": "Room name cannot be empty"}
 
-    # Get caller identity
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:
@@ -181,14 +136,12 @@ def join_room(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # Verify room exists
         room = conn.execute("SELECT name FROM rooms WHERE name = ?", (room_name,)).fetchone()
 
         if not room:
             close_db(conn)
             return {"success": False, "error": f"Room '{room_name}' does not exist"}
 
-        # Check if already subscribed
         existing = conn.execute(
             "SELECT agent_name FROM subscriptions WHERE agent_name = ? AND room_name = ?",
             (caller_name, room_name),
@@ -198,7 +151,6 @@ def join_room(args: List[str]) -> dict:
             close_db(conn)
             return {"success": False, "error": f"{caller_name} is already a member of '{room_name}'"}
 
-        # Subscribe
         conn.execute(
             "INSERT INTO subscriptions (agent_name, room_name) VALUES (?, ?)",
             (caller_name, room_name),
@@ -220,17 +172,7 @@ def join_room(args: List[str]) -> dict:
 
 
 def leave_room(args: List[str]) -> dict:
-    """
-    Unsubscribe the calling agent from a room.
-
-    Args:
-        args: List of string arguments. First element is the room name
-              to leave.
-
-    Returns:
-        Dict with success status, room name, and agent name.
-        On error: dict with success=False and error message.
-    """
+    """Unsubscribe the calling agent from the room named in args[0]."""
     if not args:
         return {"success": False, "error": "Room name required. Usage: leave_room <name>"}
 
@@ -239,7 +181,6 @@ def leave_room(args: List[str]) -> dict:
     if not room_name:
         return {"success": False, "error": "Room name cannot be empty"}
 
-    # Get caller identity
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:
@@ -255,14 +196,12 @@ def leave_room(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # Verify room exists
         room = conn.execute("SELECT name FROM rooms WHERE name = ?", (room_name,)).fetchone()
 
         if not room:
             close_db(conn)
             return {"success": False, "error": f"Room '{room_name}' does not exist"}
 
-        # Check if subscribed
         existing = conn.execute(
             "SELECT agent_name FROM subscriptions WHERE agent_name = ? AND room_name = ?",
             (caller_name, room_name),
@@ -275,7 +214,6 @@ def leave_room(args: List[str]) -> dict:
                 "error": f"{caller_name} is not a member of '{room_name}'",
             }
 
-        # Unsubscribe
         conn.execute(
             "DELETE FROM subscriptions WHERE agent_name = ? AND room_name = ?",
             (caller_name, room_name),

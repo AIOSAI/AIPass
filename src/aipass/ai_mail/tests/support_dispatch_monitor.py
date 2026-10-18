@@ -3,7 +3,7 @@
 # Description: Shared helpers for test_dispatch_monitor.py and its siblings - the one-identity send check, a main() run, a foreign project
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Helper for the tests of apps/handlers/dispatch/dispatch_monitor.py (no test_ prefix: never collected)."""
@@ -22,10 +22,7 @@ import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
 
 
 def _run_main(monkeypatch, argv, tmp_path, attempts):
-    """Run main() with attempt N played by attempts[N-1], which gets the stdout log path and returns the exit code.
-
-    Returns (main's exit code, the time mock): the pauses between attempts are recorded, never slept.
-    """
+    """Run main() with attempt N played by attempts[N-1], which gets the stdout log path and returns the exit code."""
     queue = list(attempts)
 
     def fake_run(cmd, stdout_log, *args, **kwargs):
@@ -38,16 +35,12 @@ def _run_main(monkeypatch, argv, tmp_path, attempts):
     monkeypatch.setattr("aipass.ai_mail.apps.handlers.paths.find_repo_root", MagicMock(return_value=tmp_path / "repo"))
     with pytest.raises(SystemExit) as exc_info:
         mod.main()
+    # The time mock records the pauses between attempts; nothing sleeps.
     return exc_info.value.code, clock
 
 
 def _assert_sent_as_ai_mail(run_mock):
-    """The one drone send ran in ai_mail's home under ai_mail's name: one identity claim.
-
-    Drone logged a conflict on every bounce and wake-back while the send ran in
-    the woken branch's home under the monitor's inherited name (reported by
-    @drone, 2026-10-04). The home is checked by the monitor's own file inside it.
-    """
+    """The one drone send ran in ai_mail's home under ai_mail's name: one identity claim."""
     sends = [c for c in run_mock.call_args_list if c.args and c.args[0][:3] == ["drone", "@ai_mail", "send"]]
     assert len(sends) == 1
     kwargs = sends[0].kwargs

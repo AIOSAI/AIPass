@@ -3,21 +3,13 @@
 # Description: CLI handoff orchestration — aipass handoff command
 # Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """
 aipass handoff — pass the user to their chosen CLI in a new session
 
-Thin coordinator. Delegates platform dispatch to handlers/handoff_platform/
-which handles tmux (Linux/Mac), wt.exe (Windows), or prints fallback command.
-
-Usage:
-    aipass handoff                    # show this usage
-    aipass handoff --info             # show status / introspection
-    aipass handoff launch             # launch with stored profile settings
-    aipass handoff launch --cli claude --cwd src/my-agent
-    aipass handoff --help
+Platform dispatch (tmux, wt.exe, printed fallback) lives in handlers/handoff_platform/.
 """
 
 from __future__ import annotations
@@ -151,8 +143,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     if args[0] == "launch":
         cli, cwd, flag_variant = _parse_launch_args(args[1:])
         if cli not in CLI_CHOICES:
-            # A refusal: nothing was launched, so this cannot exit 0. The message
-            # names the rejected token and the valid set (FPLAN-0492 wave 6).
+            # A refusal: nothing was launched, so this cannot exit 0.
             error(f"Unknown CLI '{cli}'. Valid options: {', '.join(CLI_CHOICES)}")
             raise SystemExit(1)
         do_handoff(cli=cli, cwd=cwd, flag_variant=flag_variant)

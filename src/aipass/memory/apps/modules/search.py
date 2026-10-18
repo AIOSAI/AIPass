@@ -3,20 +3,11 @@
 # Description: Search Orchestration Module
 # Version: 0.5.1
 # Created: 2025-11-27
-# Modified: 2026-08-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Search Orchestration Module
-
-Coordinates semantic search workflow by calling handlers in sequence:
-1. Encode query text to embedding (vector/embedder)
-2. Search Chroma collections (storage/chroma via subprocess)
-3. Format and display results (Rich panels)
-
-Purpose:
-    Thin orchestration layer - no business logic implementation.
-    All domain logic lives in handlers.
 """
 
 import os
@@ -38,59 +29,30 @@ from aipass.cli.apps.modules import console, error, success, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
 
-# Handler imports
 from aipass.memory.apps.handlers.search.query_executor import (
     execute_search as _handler_execute_search,
 )
 from aipass.memory.apps.handlers.repo_root import module_file
 
 
-# =============================================================================
-# COMMAND HANDLERS
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle search commands with seedgo-compliant introspection.
-
-    Routing:
-        search (no args)          -> print_introspection()
-        search --help/-h/help     -> print_help()
-        search <query> [options]  -> execute query
-
-    Backward-compatible top-level commands (routed from entry point):
-        --help, -h, help          -> print_help()
-
-    Args:
-        command: Command name
-        args: Additional arguments (query text, options)
-
-    Returns:
-        True if command handled, False otherwise
-    """
-    # Top-level help (backward compat — entry point may send these)
+    """Handle search commands with seedgo-compliant introspection."""
+    # The entry point may still route top-level help here.
     if command in ("--help", "-h", "help"):
         print_help()
         return True
 
     if command == "search":
-        # No args → introspection (seedgo standard)
         if not args:
             print_introspection()
             return True
 
-        # --help / -h / help → full help. Bare `help` only counts in the
-        # first slot — later tokens are query words.
+        # Bare `help` only counts in the first slot; later tokens are query words.
         if wants_help(args):
             print_help()
             return True
 
-        # Parse arguments
         query_parts = []
         branch = None
         memory_type = None
@@ -163,31 +125,14 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# SEARCH RESULTS DISPLAY
-# =============================================================================
-
-
 def show_search_results(
     query: str, branch: str | None = None, memory_type: str | None = None, n_results: int = 5
 ) -> bool:
-    """
-    Execute semantic search via handler and display results with Rich.
-
-    Args:
-        query: Search query text
-        branch: Optional branch filter
-        memory_type: Optional memory type filter
-        n_results: Number of results to return
-
-    Returns:
-        True if search successful, False otherwise
-    """
+    """Execute semantic search via handler and display results with Rich."""
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Semantic Search[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
-    # Display query info
     console.print(f"[cyan]Query:[/cyan] {query}")
     if branch:
         console.print(f"[cyan]Branch:[/cyan] {branch}")
@@ -197,7 +142,6 @@ def show_search_results(
 
     console.print("[dim]Searching... (first run may take 30s for model loading)[/dim]")
 
-    # Delegate to handler
     try:
         result = _handler_execute_search(query=query, branch=branch, memory_type=memory_type, n_results=n_results)
     except Exception as exc:
@@ -213,7 +157,6 @@ def show_search_results(
     total_results = result.get("total_results", 0)
     filtered_results = result.get("results", [])
 
-    # Display summary
     success(f"Found {total_results} results in {collections_searched} collections")
     console.print()
 
@@ -238,23 +181,18 @@ def show_search_results(
         metadata = item.get("metadata", {})
         similarity = item.get("similarity", 0)
 
-        # Parse collection name
         parts = collection.split("_")
         branch_name = parts[0].upper() if parts else "UNKNOWN"
         mem_type = parts[1] if len(parts) > 1 else "unknown"
 
-        # Build metadata display. Entry identity first: it is what tells a
-        # citizen WHICH of its entries this was, so a recovered one can be
-        # named instead of matched on text that may not stay unique.
+        # Entry identity first: a recovered entry is named, not matched on text that may not stay unique.
         meta_lines = []
         entry_number = metadata.get("entry_number")
         if entry_number is not None:
             meta_lines.append(f"[dim]Entry:[/dim] #{entry_number}")
         if metadata.get("entry_date"):
             meta_lines.append(f"[dim]Dated:[/dim] {metadata['entry_date']}")
-        # Truthiness, not key presence: rollover writes timestamp="" for every
-        # .trinity entry (they carry date, not timestamp), which rendered a
-        # bare "Time:" on every archived result.
+        # Truthiness, not key presence: rollover writes timestamp="" for every .trinity entry.
         if metadata.get("timestamp"):
             meta_lines.append(f"[dim]Time:[/dim] {metadata['timestamp']}")
         if metadata.get("source"):
@@ -262,7 +200,6 @@ def show_search_results(
 
         meta_text = " | ".join(meta_lines) if meta_lines else ""
 
-        # Create panel for each result
         panel_title = f"Result {i} - {branch_name} ({mem_type}) - Similarity: {similarity:.2%}"
 
         panel_content = document
@@ -283,20 +220,8 @@ def show_search_results(
     return True
 
 
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
-
-
 def _discover_handlers() -> dict[str, list[str]]:
-    """Auto-discover handler directories and their Python files.
-
-    Scans the handlers/ directory relative to this module.
-
-    Returns:
-        Dict mapping handler directory name to list of .py filenames
-        (excluding __init__.py and __pycache__).
-    """
+    """Map each handlers/ subdirectory to its .py files, __init__.py excluded."""
     handlers_dir = module_file(__file__).parent.parent / "handlers"
     result: dict[str, list[str]] = {}
     if not handlers_dir.exists():
@@ -311,17 +236,12 @@ def _discover_handlers() -> dict[str, list[str]]:
 
 
 def print_introspection() -> None:
-    """Display module introspection info (seedgo standard).
-
-    Called when 'search' is invoked with no arguments.
-    Shows module identity, connected handlers, and next-step hints.
-    """
+    """Display module introspection info (seedgo standard)."""
     console.print()
     console.print("[bold cyan]search Module[/bold cyan]")
     console.print("Orchestrates semantic search across memory collections via vector embeddings and ChromaDB")
     console.print()
 
-    # Connected handlers (auto-discovered)
     handlers = _discover_handlers()
     console.print("[yellow]Connected Handlers:[/yellow]")
     if handlers:
@@ -332,7 +252,6 @@ def print_introspection() -> None:
         console.print("  [dim]No handlers found[/dim]")
     console.print()
 
-    # Next-step hints
     console.print("[yellow]Next:[/yellow]")
     console.print('  [green]drone @memory search "your query"[/green]              [dim]# Semantic search[/dim]')
     console.print('  [green]drone @memory search "query" --branch SEEDGO[/green]     [dim]# Filter by branch[/dim]')
@@ -340,22 +259,15 @@ def print_introspection() -> None:
     console.print()
 
 
-# =============================================================================
-# STANDALONE EXECUTION
-# =============================================================================
-
 if __name__ == "__main__":
-    # No args → introspection (seedgo standard)
     if len(sys.argv) < 2:
         handle_command("search", [])
         sys.exit(0)
 
-    # --help → full help
     if sys.argv[1] in ("--help", "-h", "help"):
         handle_command("search", ["--help"])
         sys.exit(0)
 
-    # Execute command via handle_command
     command = sys.argv[1]
     if not handle_command(command, sys.argv[2:]):
         error(f"Unknown command: {command}", suggestion="Run 'drone @memory search --help' for available commands")

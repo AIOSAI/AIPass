@@ -3,31 +3,12 @@
 # Description: nominator - the no-oracle pass (NO-ORACLE)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 7 — a test that checks nothing at all.
+"""TAXONOMY rule 7 — a test that checks nothing at all.
 
-No `assert`. No `pytest.raises`. No `assert_*` on a mock. No `pytest.fail`.
-The unit calls production code and then stops. It passes unless the call
-raises, which makes it a smoke test wearing a test's name.
-
-THIS RULE IS THE CLEAREST STATEMENT OF LAW M1 IN THE WHOLE CATALOG, and
-TAXONOMY marks it explicitly: *MED as a verdict, LOW as a nomination — a bare
-trailing call CAN be a working exception oracle; nominate only, let the probe
-convict.* A test that calls `parse(bad_input)` with no assert really does fail
-when `parse` starts accepting bad input. It is a weak oracle, not an absent
-one, and static analysis cannot tell those apart from the outside.
-
-So this file never says a test is worthless. It says: this unit has no
-oracle a reader can see, and here is what it calls. The execution tier decides.
-
-WHAT COUNTS AS AN ORACLE IS DELIBERATELY GENEROUS. `corpus.oracle_calls_in()`
-accepts `pytest.raises`, `pytest.warns`, `pytest.fail`, `pytest.approx`, and
-any method whose name starts with `assert_`. Being generous here is the right
-direction to be wrong in: a false nomination costs a reader thirty seconds, a
-missed one costs nothing visible at all, and the whole tier is advisory.
+Reference: no_oracle.md
 """
 
 import ast
@@ -37,9 +18,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
 
 GROUP = "static_no_oracle"
 
-#: Helper-name prefixes that mean the unit delegates its checking. A unit
-#: calling `_assert_document_is_lawful(...)` has an oracle behind one hop, and
-#: nominating it would teach branches to inline their helpers.
+#: An oracle one hop away; nominating it would teach branches to inline their helpers.
 DELEGATING_PREFIXES: tuple = ("assert", "_assert", "check", "_check", "verify", "_verify", "expect", "_expect")
 
 SPECIFICATION = {

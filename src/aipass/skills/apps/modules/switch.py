@@ -1,16 +1,12 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill off-switch module.
-
-Thin orchestration layer - delegates to switch_handler for state,
-declaration parsing, and systemd actuation. Designed in DPLAN-0306.
-"""
+"""Skill off-switch module."""
 
 from aipass.cli.apps.modules import console, error, warning
 from aipass.prax import logger
@@ -25,15 +21,7 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The subcommand to execute (on, off, switch).
-        args: List of additional arguments.
-
-    Returns:
-        bool: True if the command succeeded.
-    """
+    """Handle commands routed by the entry point (on, off, switch)."""
     if not args:
         print_introspection()
         return True
@@ -42,15 +30,9 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command == "on":
-        if not args:
-            error("Error: skill name required. Usage: skills on <name>")
-            return False
         return switch_on(args[0])
 
     if command == "off":
-        if not args:
-            error("Error: skill name required. Usage: skills off <name> [reason]")
-            return False
         reason = " ".join(args[1:]) if len(args) > 1 else None
         return switch_off(args[0], reason)
 
@@ -61,14 +43,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def switch_on(name: str) -> bool:
-    """Switch a skill on and start its declared processes.
-
-    Args:
-        name: Skill to switch on.
-
-    Returns:
-        bool: True when the skill is on and every declared unit is running.
-    """
+    """Switch a skill on and start its declared processes; True only when every unit runs."""
     result = turn_on(name)
     _report(result)
     logger.info("switch: turned '%s' on (success=%s)", name, result["success"])
@@ -77,15 +52,7 @@ def switch_on(name: str) -> bool:
 
 
 def switch_off(name: str, reason: str | None = None) -> bool:
-    """Switch a skill off and stop its declared processes.
-
-    Args:
-        name: Skill to switch off.
-        reason: Optional note kept with the recorded state.
-
-    Returns:
-        bool: True when the skill is off and no declared unit is running.
-    """
+    """Switch a skill off and stop its declared processes; True only when no unit runs."""
     result = turn_off(name, reason=reason)
     _report(result)
     logger.info("switch: turned '%s' off (success=%s)", name, result["success"])
@@ -94,14 +61,7 @@ def switch_off(name: str, reason: str | None = None) -> bool:
 
 
 def show_switch(name: str | None = None) -> bool:
-    """Display the on/off state of every skill, or one skill.
-
-    Args:
-        name: Optional single skill to report.
-
-    Returns:
-        bool: True when the state could be read.
-    """
+    """Display the on/off state of every skill, or one skill."""
     try:
         rows = switch_rows()
     except SwitchStateUnreadable as exc:
@@ -124,19 +84,14 @@ def show_switch(name: str | None = None) -> bool:
         if row["reason"]:
             console.print(f"        reason: {row['reason']}")
         if row["live_units"]:
-            # State says dark, machine says alive. Never collapse this into the
-            # state's own claim — the discrepancy is the reason to look.
+            # Off in state but alive on the machine: show the discrepancy, never hide it.
             warning(f"        STILL RUNNING: {', '.join(row['live_units'])}")
     console.print()
     return True
 
 
 def _report(result: dict) -> None:
-    """Print a handler result, routing failures to stderr.
-
-    Args:
-        result: {"success": bool, "output": str, "error": str|None}
-    """
+    """Print a handler result, routing failures to stderr."""
     if result["output"]:
         for line in result["output"].splitlines():
             console.print(f"  {line}")

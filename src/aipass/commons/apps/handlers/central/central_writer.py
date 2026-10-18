@@ -3,23 +3,13 @@
 # Description: COMMONS Central File Writer
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Central Writer Handler
 
-Aggregates per-branch commons activity stats from aipass.commons.db and writes to
-.ai_central/COMMONS.central.json.
-
-This file serves as The Commons' API output for AIPass dashboard integration.
-DevPulse reads this when refreshing branch dashboards.
-
-Architecture:
-- Queries commons.db for per-branch mention counts, post/comment counts
-- Uses last_checked from each branch's dashboard for "since last visit" counts
-- Writes aggregated stats to .ai_central/COMMONS.central.json
-- Atomic write via temp file + rename
+COMMONS.central.json is an output contract: DevPulse reads it when refreshing branch dashboards.
 """
 
 import json
@@ -32,10 +22,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
 
 
 def _find_project_root() -> str:
@@ -54,22 +40,8 @@ CENTRAL_FILE = os.path.join(AI_CENTRAL_DIR, "COMMONS.central.json")
 BRANCH_REGISTRY_PATH = os.path.join(_PROJECT_ROOT, "AIPASS_REGISTRY.json")
 
 
-# =============================================================================
-# REGISTRY FUNCTIONS
-# =============================================================================
-
-
 def get_registered_branches() -> Dict[str, str]:
-    """
-    Load registered branches from BRANCH_REGISTRY.json.
-
-    Returns:
-        Dict mapping branch name to branch path string.
-
-    Raises:
-        FileNotFoundError: If BRANCH_REGISTRY.json doesn't exist
-        json.JSONDecodeError: If BRANCH_REGISTRY.json is malformed
-    """
+    """Load registered branches as name -> path; a missing or malformed registry raises."""
     with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
         registry = json.load(f)
 
@@ -82,23 +54,8 @@ def get_registered_branches() -> Dict[str, str]:
     return branches
 
 
-# =============================================================================
-# DASHBOARD READING
-# =============================================================================
-
-
 def _read_last_checked(branch_path: str) -> str:
-    """
-    Read last_checked timestamp from a branch's dashboard commons_activity section.
-
-    Falls back to epoch if the dashboard doesn't exist or has no timestamp.
-
-    Args:
-        branch_path: Path to the branch directory
-
-    Returns:
-        ISO timestamp string
-    """
+    """Read last_checked from a branch's dashboard commons_activity section, epoch when absent."""
     epoch = "1970-01-01T00:00:00Z"
     dashboard_file = os.path.join(branch_path, "DASHBOARD.local.json")
 
@@ -117,11 +74,6 @@ def _read_last_checked(branch_path: str) -> str:
     except (json.JSONDecodeError, OSError):
         logger.warning(f"[central_writer] Failed to read dashboard last_checked for {branch_path}")
         return epoch
-
-
-# =============================================================================
-# DATABASE QUERIES
-# =============================================================================
 
 
 def _count_unread_mentions(conn: sqlite3.Connection, branch_name: str) -> int:
@@ -152,16 +104,7 @@ def _count_new_comments(conn: sqlite3.Connection, since_time: str) -> int:
 
 
 def _query_top_threads(conn: sqlite3.Connection, limit: int = 3) -> list:
-    """
-    Query the most recently active threads by last comment timestamp.
-
-    Args:
-        conn: SQLite connection
-        limit: Maximum number of threads to return (default 3)
-
-    Returns:
-        List of dicts with keys: id, title, room, comment_count, last_activity
-    """
+    """Query the most recently active threads by last comment timestamp."""
     rows = conn.execute(
         "SELECT p.id, p.title, p.room_name, p.comment_count, "
         "MAX(c.created_at) as last_activity "
@@ -189,23 +132,8 @@ def _query_top_threads(conn: sqlite3.Connection, limit: int = 3) -> list:
     return threads
 
 
-# =============================================================================
-# AGGREGATION
-# =============================================================================
-
-
 def aggregate_branch_stats() -> Dict[str, Dict[str, Any]]:
-    """
-    Aggregate commons activity stats for all registered branches.
-
-    For each branch:
-    - Count unread @mentions
-    - Count new posts since last visit
-    - Count new comments since last visit
-
-    Returns:
-        Dict mapping branch names to their stats.
-    """
+    """Aggregate commons activity stats for all registered branches."""
     branches = get_registered_branches()
     stats = {}
     now = datetime.now(timezone.utc).isoformat()
@@ -235,12 +163,7 @@ def aggregate_branch_stats() -> Dict[str, Dict[str, Any]]:
 
 
 def query_top_threads() -> list:
-    """
-    Query top threads from aipass.commons.db.
-
-    Returns:
-        List of dicts with keys: id, title, room, comment_count, last_activity
-    """
+    """Query top threads from aipass.commons.db."""
     conn = get_db()
     try:
         return _query_top_threads(conn, limit=3)
@@ -252,16 +175,7 @@ def build_central_data(
     branch_stats: Dict[str, Dict[str, Any]],
     top_threads: Optional[list] = None,
 ) -> Dict[str, Any]:
-    """
-    Build the complete COMMONS.central.json data structure.
-
-    Args:
-        branch_stats: Per-branch statistics from aggregate_branch_stats()
-        top_threads: Optional list of top active threads
-
-    Returns:
-        Complete data structure ready for JSON serialization
-    """
+    """Build the complete COMMONS.central.json data structure."""
     data: Dict[str, Any] = {
         "service": "the_commons",
         "last_updated": datetime.now(timezone.utc).isoformat(),
@@ -271,21 +185,8 @@ def build_central_data(
     return data
 
 
-# =============================================================================
-# FILE WRITING
-# =============================================================================
-
-
 def write_central_file(data: Dict[str, Any]) -> None:
-    """
-    Write data to COMMONS.central.json using atomic temp file + rename.
-
-    Args:
-        data: Complete central file data structure
-
-    Raises:
-        OSError: If file write or rename fails
-    """
+    """Write data to COMMONS.central.json using atomic temp file + rename."""
     os.makedirs(AI_CENTRAL_DIR, exist_ok=True)
 
     tmp_path = CENTRAL_FILE + ".tmp"
@@ -294,25 +195,8 @@ def write_central_file(data: Dict[str, Any]) -> None:
     os.replace(tmp_path, CENTRAL_FILE)
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def update_central() -> Dict[str, Any]:
-    """
-    Update COMMONS.central.json with current per-branch commons stats.
-
-    This is the primary public function. Should be called after posts,
-    comments, mentions, or votes to keep the central file in sync.
-
-    Returns:
-        The data written to central file (for logging/verification)
-
-    Raises:
-        OSError: If filesystem operations fail
-        sqlite3.OperationalError: If database query fails
-    """
+    """Update COMMONS.central.json; call after posts, comments, mentions or votes to keep it in sync."""
     branch_stats = aggregate_branch_stats()
     top_threads = query_top_threads()
     central_data = build_central_data(branch_stats, top_threads=top_threads)

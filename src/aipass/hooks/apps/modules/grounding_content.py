@@ -5,16 +5,10 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating.
-
-Shared by apps/handlers/prompt/{tier0_kernel,navmap,branch_loader,identity}.py
-(their own cadence-gated UserPromptSubmit handlers) and
-apps/handlers/lifecycle/post_compact_regrounding.py (the PostToolUse backstop,
-which fires unconditionally once per compact regardless of cadence).
-"""
+"""Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating."""
 
 import json
 import os
@@ -25,11 +19,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-# The ACTIVE half of grounding. The passive half (kernel/navmap/branch/identity)
-# re-injects itself on fresh context and after a compact; re-reading .trinity and
-# refreshing the dashboard only ever happened because a greeting triggered the
-# startup protocol. A mid-task continuation never gets a greeting, so without this
-# the agent resumes with re-injected prompts but stale memory of its own state.
+# A mid-task continuation never gets the greeting that runs the startup protocol;
+# without this the agent resumes with stale memory of its own state.
 STARTUP_REGROUND_INSTRUCTION = (
     "ACTIVE RE-GROUNDING — do this BEFORE resuming the task, silently, no narration:\n"
     " 1. Read your memory: .trinity/passport.json, .trinity/local.json, .trinity/observations.json\n"
@@ -44,16 +35,9 @@ STARTUP_REGROUND_INSTRUCTION = (
 )
 
 
-#: Ceiling for the rendered branch block — the branch prompt plus its header.
-#: The owner ruled the layer contract on 2026-09-15 (DPLAN-0347): 9,000 chars, one
-#: under the 10,000 the harness persists behind a 2,000-char preview. A prompt
-#: that crosses that line is not read by the model at all; truncation here is
-#: what keeps the first 9,000 chars of it live.
+#: Under the 10,000 chars the harness persists behind a preview, past which the model never reads it.
 BRANCH_CHAR_BUDGET = 9000
 
-#: Each apps/integrations/*/private_prompt.md, appended after the branch prompt.
-#: Zero live fleet-wide today, uncapped and ungated until now: the first one
-#: written is the one that would have pushed the block over the persist line.
 INTEGRATION_CHAR_BUDGET = 2000
 
 
@@ -65,21 +49,7 @@ def print_introspection() -> None:
 def _truncate_block(text: str, limit: int, source: Path | str) -> str:
     """Cut a rendered block to *limit* chars, ending with a marker that names *source*.
 
-    The marker is the point. A block that simply stops reads as a corrupted
-    prompt and the agent has no way to find the rest; a marker naming the file
-    turns a cut into a pointer — and gives whoever wrote past the cap the one
-    line they need to see in the transcript.
-
-    The cut lands on the last line boundary in the window when there is one past
-    the halfway mark, so a truncated block never ends mid-sentence.
-
-    Args:
-        text: The rendered block.
-        limit: Maximum characters for the result, marker included.
-        source: The file the block was rendered from, named in the marker.
-
-    Returns:
-        The text unchanged when it fits, else the kept head plus the marker.
+    A block that simply stops reads as corrupted; the marker turns the cut into a pointer.
     """
     if len(text) <= limit:
         return text
@@ -87,8 +57,6 @@ def _truncate_block(text: str, limit: int, source: Path | str) -> str:
     marker = f"\n[… cut at {limit} chars by @hooks — the rest of this block is in {source}]"
     keep = limit - len(marker)
     if keep <= 0:
-        # A budget smaller than its own marker cannot say where the rest went;
-        # a bare cut is the honest answer rather than a marker with no content.
         return text[:limit]
 
     window = text[:keep]
@@ -119,8 +87,7 @@ def _find_project_file(filename: str) -> Path | None:
 def _is_user_state_dir(candidate: Path) -> bool:
     """True when *candidate* is the per-user ~/.aipass (trust registry, commons.db), not a stamped tree.
 
-    Compared by samefile, not by spelling: a Windows TEMP can reach the same
-    directory through an 8.3 name (C:\\Users\\RUNNER~1) that no string compare matches.
+    samefile, not spelling: Windows can reach the same directory through an 8.3 name.
     """
     try:
         return candidate.samefile(Path.home() / ".aipass")
@@ -131,11 +98,7 @@ def _is_user_state_dir(candidate: Path) -> bool:
 def _find_project_dir() -> Path | None:
     """Walk up from CWD to the nearest .aipass/ directory — the mark of a stamped tree.
 
-    The per-user ~/.aipass is skipped. Any tree under home walks up through it,
-    so counting it made every unstamped tree under home "promise" a kernel. The
-    Windows CI runner measured that: its temp dir is under home, so tests that
-    expected silence got the degraded banner (2026-09-16). Linux never saw it,
-    because /tmp is not under home.
+    The per-user ~/.aipass is skipped: every tree under home walks through it and would "promise" a kernel.
     """
     cwd = Path.cwd()
     for parent in [cwd, *cwd.parents]:
@@ -148,14 +111,7 @@ def _find_project_dir() -> Path | None:
 
 
 def _tier_file(filename: str) -> Path | None:
-    """The .aipass/<filename> this session reads: AIPASS_HOME's when inside it, else the nearest.
-
-    Args:
-        filename: The tier file's name, e.g. "tier0_kernel.md".
-
-    Returns:
-        The path when it exists, else None.
-    """
+    """The .aipass/<filename> this session reads: AIPASS_HOME's when inside it, else the nearest."""
     aipass_home = os.environ.get("AIPASS_HOME", "")
     cwd = str(Path.cwd())
 
@@ -221,7 +177,7 @@ def load_branch(hook_data: dict) -> str:
 def _find_passport(cwd: str) -> Path | None:
     """Walk up from CWD looking for .trinity/passport.json."""
     search = Path(cwd).resolve()
-    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
+    home = Path.home().resolve()  # both sides resolved, or a symlinked home never stops the walk
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():
@@ -230,34 +186,14 @@ def _find_passport(cwd: str) -> Path | None:
     return None
 
 
-#: Ceiling for the whole rendered identity block, in characters. Not a hard
-#: platform limit — a budget. This block is injected on every cadence beat, so a
-#: passport that grows without bound quietly taxes the whole session. Declared
-#: 2026-09-08 and read by nothing until DPLAN-0347: a budget no code enforces is
-#: documentation, and the largest passport in the fleet had already reached 5,461.
+#: Injected every cadence beat: a passport that grows without bound taxes the whole session.
 IDENTITY_CHAR_BUDGET = 4000
 
-#: What a facet may spend before it is cut at a sentence boundary. Sized so the
-#: richest passport in the fleet (Vera's six facets) fits under the budget with
-#: the rest of the block intact.
 FACET_CHAR_BUDGET = 320
 
 
 def _truncate_at_sentence(text: str, limit: int) -> str:
-    """Cut *text* to <= *limit* chars, preferring the last sentence boundary.
-
-    Dropping a whole facet would lose a claim the passport makes about the
-    citizen; cutting one mid-word makes it read as corrupted. Cutting at the
-    last full sentence keeps every facet present and every kept word true.
-
-    Args:
-        text: The facet body.
-        limit: Maximum characters to keep.
-
-    Returns:
-        The text unchanged when it already fits, else the longest prefix ending
-        at a sentence boundary, else a hard cut with an ellipsis.
-    """
+    """Cut *text* to <= *limit* chars, preferring the last sentence boundary."""
     if len(text) <= limit:
         return text
 
@@ -265,25 +201,12 @@ def _truncate_at_sentence(text: str, limit: int) -> str:
     cut = max(window.rfind(". "), window.rfind("! "), window.rfind("? "))
     if cut > 0:
         return window[: cut + 1]
-    # No sentence boundary in the window — hard cut. The ellipsis has to come
-    # out of the budget, not be added on top of it, or a facet with no full stop
-    # in range renders one char OVER the limit it was cut to.
+    # The ellipsis comes out of the budget, or the result renders one char over *limit*.
     return text[: limit - 1].rstrip() + "…"
 
 
 def _personality_lines(personality: object) -> list[str]:
-    """One 'Facet: text' line per personality facet, in the passport's order.
-
-    Only a dict renders. A string, a list or None yields nothing, so a passport
-    that does not carry the key — every AIPass passport today — renders exactly
-    as it did before this function existed.
-
-    Args:
-        personality: The raw identity.personality value, whatever shape it has.
-
-    Returns:
-        Rendered lines, empty when there is nothing to render.
-    """
+    """One 'Facet: text' line per personality facet, in the passport's order. Only a dict renders."""
     if not isinstance(personality, dict) or not personality:
         return []
 
@@ -319,11 +242,7 @@ def _format_identity(data: dict) -> str:
     if identity.get("purpose"):
         lines.append(f"Purpose: {identity['purpose']}")
 
-    # Personality reads AFTER purpose and BEFORE the Do/Don't pair, so the
-    # facets sit with who-I-am rather than with what-I-handle. Insertion order
-    # is the passport author's order and is kept: the facets are written as a
-    # progression (core, then voice, then how I decide, then how I hold up),
-    # and sorting them would silently rewrite that argument.
+    # Facets keep the author's order: they are written as a progression, and sorting rewrites it.
     lines.extend(_personality_lines(identity.get("personality")))
 
     what_i_do = identity.get("what_i_do", [])
@@ -334,19 +253,11 @@ def _format_identity(data: dict) -> str:
     if what_i_dont_do:
         lines.append("Don't: " + " | ".join(what_i_dont_do[:3]))
 
-    # Anti-traits follow the Don't line because they are the same kind of
-    # statement one level up: Don't names tasks that belong to someone else,
-    # Never names ways of BEING that the citizen rejects. Old Vera's own
-    # recorded insight was that the anti-traits, not the traits, were what
-    # kept her out of generic-assistant drift — so they are worth the line.
     anti_traits = identity.get("anti_traits")
     if isinstance(anti_traits, list) and anti_traits:
         lines.append("Never: " + " | ".join(str(a) for a in anti_traits))
 
-    # Passport 1.0 keeps principles at the top level, 2.0 moves them inside
-    # identity (DPLAN-0319). Read the new home first, fall back to the old one —
-    # same dual-location shape as the traits read above. Without the fallback the
-    # line vanishes silently on whichever layout is not being read.
+    # Passport 2.0 keeps principles inside identity, 1.0 at the top level: read both.
     principles = identity.get("principles") or data.get("principles") or []
     if principles:
         lines.append("Principles: " + " * ".join(principles))
@@ -381,11 +292,7 @@ def _unhomed(text: str) -> str:
 
 
 def _tier_failure(label: str, filename: str) -> str | None:
-    """Why a tier file is missing, or None when nothing was expected here.
-
-    An unstamped tree has no .aipass/ at all and was never promised a kernel;
-    a stamped one that cannot produce the file has lost something it had.
-    """
+    """Why a tier file is missing, or None when nothing was expected here."""
     if _find_project_dir() is None:
         return None
     return f"{label}: this tree is AIPass-stamped but .aipass/{filename} is missing or unreadable"
@@ -402,7 +309,7 @@ def _branch_failure(hook_data: dict) -> str | None:
 def _branch_has_trinity(cwd: str) -> Path | None:
     """The nearest .trinity/ above *cwd*, stopping at home."""
     search = Path(cwd).resolve()
-    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
+    home = Path.home().resolve()  # both sides resolved, or a symlinked home never stops the walk
     while search != home and search.parent != search:
         candidate = search / ".trinity"
         if candidate.is_dir():
@@ -432,24 +339,7 @@ _FAILURE_OF = {
 def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]:
     """Every grounding section that loaded, and one line per section that was expected and did not.
 
-    Two different empties, kept apart on purpose (DPLAN-0347, hooks row 1). A
-    seat that is not a branch has no branch prompt to lose: that is the shape of
-    the tree, not a defect, and measured on 2026-09-16 it is the common case —
-    four of four stamped projects on this machine carry a kernel and a navmap
-    and no .trinity/ or branch prompt at all. Warning on those every beat is the
-    false-alarm class this branch is curing elsewhere, so they are silent.
-
-    A seat that IS a branch and still gets no branch prompt has lost something it
-    was promised, and doctrine is that it fails loud rather than quietly running
-    on less. A loader that RAISES is always a failure — a reader that cannot
-    parse its own input never gets to call the result "not applicable".
-
-    Args:
-        hook_data: The hook payload; only "cwd" is read.
-
-    Returns:
-        (sections, failures) — sections as (label, content) in SECTION_ORDER,
-        failures as one already-worded line each, safe to inject verbatim.
+    A section the tree never had is silent; one it was promised fails loud; a loader that raises always fails.
     """
     loaders = {"branch": load_branch, "identity": load_identity, "kernel": load_kernel, "navmap": load_navmap}
     sections: list[tuple[str, str]] = []
@@ -470,18 +360,7 @@ def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]
 
 
 def degraded_banner(failures: list[str], loaded: list[str]) -> str:
-    """The loud line for a session flying on partial grounding — what is missing and why.
-
-    Substitutes nothing. A fallback that hands back a different answer than the
-    one asked for is banned here, so this names the hole instead of filling it.
-
-    Args:
-        failures: Already-worded lines from grounding_report.
-        loaded: Labels of the sections that did load.
-
-    Returns:
-        The banner, or "" when nothing was lost.
-    """
+    """The loud line for a session flying on partial grounding — what is missing and why. Substitutes nothing."""
     if not failures:
         return ""
     return "\n".join(

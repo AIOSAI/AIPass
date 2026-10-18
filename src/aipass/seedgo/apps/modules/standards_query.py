@@ -3,74 +3,36 @@
 # Description: Standards Query Module
 # Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-08-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Standards Query Module
-
-Auto-discovering content query module for standards packs.
-Replaces 15 dead _standard.py modules with one pack-aware module.
-
-Serves two command forms:
-  standards_query <pack> <standard>  - explicit, pack-addressed (canonical)
-  standard <standard>                - short alias, resolves the pack itself
-
-Run: seedgo standards_query
 """
 
 import importlib.util
 from pathlib import Path
 from typing import List
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Whole-sequence help detection (help_flag_safety)
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.modules import CommandRefused
 
-# =============================================================================
-# COMMAND NAMES
-# =============================================================================
-
 QUERY_COMMAND = "standards_query"
 
-# Short alias: `standard <name>` resolves the owning pack itself. Exists because
-# the guide pointer embedded in audit output must be paste-and-go — the pack
-# argument is a detail the reader should not need to know to follow a signpost.
+# Short alias: the guide pointer in audit output must be paste-and-go without knowing the pack.
 ALIAS_COMMAND = "standard"
 
 
-# =============================================================================
-# PACK DISCOVERY
-# =============================================================================
-
-
 def _discover_packs() -> dict:
-    """Discover available checker packs from handlers/ directory.
-
-    Convention: directories named *_standards/ containing *_check.py files.
-    Pack identifier is the full directory name (e.g., "aipass_standards").
-
-    Returns:
-        Dict mapping pack name to Path, e.g. {"aipass_standards": Path("handlers/aipass_standards")}
-    """
+    """Discover available checker packs from handlers/ directory."""
     handlers_dir = Path(__file__).parent.parent / "handlers"
     packs = {}
     if not handlers_dir.exists():
@@ -80,52 +42,23 @@ def _discover_packs() -> dict:
             continue
         if not d.name.endswith("_standards"):
             continue
-        # Must contain at least one *_check.py at top level
         check_files = list(d.glob("*_check.py"))
         if check_files:
             packs[d.name] = d
     return packs
 
 
-# =============================================================================
-# STANDARD DISCOVERY
-# =============================================================================
-
-
 def _discover_standards(pack_path: Path) -> dict:
-    """Discover available standards content files within a pack.
-
-    Globs *_content.py from the pack directory.
-
-    Returns:
-        Dict mapping standard name to Path,
-        e.g. {"architecture": Path("architecture_content.py"), ...}
-    """
+    """Discover available standards content files within a pack."""
     standards = {}
     for f in sorted(pack_path.glob("*_content.py")):
-        # Strip _content.py suffix to get standard name
         standard_name = f.stem.removesuffix("_content")
         standards[standard_name] = f
     return standards
 
 
-# =============================================================================
-# ALIAS RESOLUTION
-# =============================================================================
-
-
 def _resolve_standard(standard_name: str) -> list:
-    """Find every pack that defines a standard of this name.
-
-    Powers the short `standard <name>` alias, which carries no pack argument.
-
-    Args:
-        standard_name: Bare standard name, e.g. "json_structure"
-
-    Returns:
-        List of (pack_name, content_file) tuples. Empty if the name is unknown;
-        longer than one if two packs define the same name (ambiguous).
-    """
+    """Find every pack that defines a standard of this name."""
     matches = []
     for pack_name, pack_path in _discover_packs().items():
         standards = _discover_standards(pack_path)
@@ -143,23 +76,8 @@ def _all_standard_names() -> dict:
     return names
 
 
-# =============================================================================
-# CONTENT LOADING
-# =============================================================================
-
-
 def _load_content(content_file: Path, standard_name: str) -> str | None:
-    """Load and return formatted standards content from a content handler.
-
-    Imports the content file and calls get_{standard_name}_standards().
-
-    Args:
-        content_file: Path to the *_content.py file
-        standard_name: Name of the standard (e.g., "architecture")
-
-    Returns:
-        Rich-formatted string, or None on failure
-    """
+    """Load and return formatted standards content from a content handler."""
     try:
         spec = importlib.util.spec_from_file_location(content_file.stem, content_file)
         if spec is None or spec.loader is None:
@@ -180,11 +98,6 @@ def _load_content(content_file: Path, standard_name: str) -> str | None:
         logger.error(f"[standards_query] Failed to load {content_file.name}: {e}")
         error(f"Failed to load content: {e}")
         return None
-
-
-# =============================================================================
-# DISPLAY HELPERS
-# =============================================================================
 
 
 def _show_pack_standards(pack_path: Path, pack_name: str) -> None:
@@ -244,13 +157,10 @@ def _display_content(pack_name: str, standard_name: str, content_file: Path) -> 
     content = _load_content(content_file, standard_name)
     json_handler.log_operation("standard_queried", {"pack": pack_name, "standard": standard_name})
     if not content:
-        # `_load_content` already said why on stdout. Returning quietly here
-        # had the process exit 0 on a standard it never printed - a caller
-        # piping this into a doc build could not tell empty from broken.
+        # `_load_content` already said why; a quiet return would exit 0 on a standard never printed.
         raise CommandRefused(refusal.EXIT_UNPROVEN, f"{pack_name}/{standard_name}")
 
     console.print()
-    # Handle both str and List[str] return types from content handlers
     if isinstance(content, list):
         for line in content:
             console.print(line)
@@ -259,29 +169,13 @@ def _display_content(pack_name: str, standard_name: str, content_file: Path) -> 
     console.print()
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def _handle_alias(args: List[str]) -> bool:
-    """Handle the short `standard [<name>]` form — pack resolved automatically.
-
-    Args:
-        args: Additional arguments
-            [] → list every standard across all packs
-            ["json_structure"] → show that standard's content
-            ["--help"] → alias help
-
-    Returns:
-        True — the alias always handles its own command.
-    """
+    """Handle the short `standard [<name>]` form — pack resolved automatically."""
     if not args:
         _show_all_standards()
         return True
 
-    # A help flag ANYWHERE means explain: `standard cli --help` used to print
-    # the whole standard instead of the alias help.
+    # A help flag anywhere means explain, never print the whole standard.
     if wants_help(None, args):
         print_alias_help()
         return True
@@ -312,20 +206,6 @@ def _handle_alias(args: List[str]) -> bool:
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'standards_query' command with pack-aware drill-down.
-
-    Also handles the short 'standard <name>' alias, which resolves the owning
-    pack itself so an embedded pointer stays paste-and-go.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-            [] → show introspection (available packs)
-            ["aipass_standards"] → list standards in pack
-            ["aipass_standards", "architecture"] → show content
-            ["--help"] → help
-
-    Returns:
-        True if handled, False if not this module's command
     """
     if command == ALIAS_COMMAND:
         return _handle_alias(args)
@@ -337,13 +217,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # A help flag ANYWHERE means explain: `standards_query <pack> --help` used
-    # to look up a standard named '--help'.
+    # A help flag anywhere means explain, never a standard named '--help'.
     if wants_help(None, args):
         print_help()
         return True
 
-    # First arg = pack name
     packs = _discover_packs()
     pack_name = args[0]
     if pack_name not in packs:
@@ -355,12 +233,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, pack_name)
 
-    # No second arg = list standards in pack
     if len(args) < 2:
         _show_pack_standards(packs[pack_name], pack_name)
         return True
 
-    # Second arg = standard name
     standard_name = args[1]
     standards = _discover_standards(packs[pack_name])
     if standard_name not in standards:
@@ -372,14 +248,8 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, standard_name)
 
-    # Load and display content
     _display_content(pack_name, standard_name, standards[standard_name])
     return True
-
-
-# =============================================================================
-# INTROSPECTION & HELP
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -389,7 +259,6 @@ def print_introspection() -> None:
     console.print("Pack-aware content query — browse standards by pack and name")
     console.print()
 
-    # Show discovered packs
     packs = _discover_packs()
     console.print("[yellow]Discovered Packs:[/yellow]")
     for name, pack_path in packs.items():
@@ -407,7 +276,6 @@ def print_introspection() -> None:
             console.print(f"    [dim]- {std_path.name} (get_{std_name}_standards)[/dim]")
     console.print()
 
-    # Navigation hints with drone commands
     if packs:
         console.print("[yellow]Next:[/yellow]  Pick a pack to see its standards")
         for name in packs:

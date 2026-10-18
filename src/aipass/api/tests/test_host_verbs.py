@@ -1,25 +1,14 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
 
-# Tests for the Verb Lane
-#
-# Phase 3. The read lane could only ever return the wrong bytes; this lane spawns
-# agents, ends sessions and locks a machine. So the tests here are mostly about
-# what this server REFUSES to do.
-#
-# The through-line is D0: this server owns the pipe and never the meaning. Every
-# verb is a proxy to the branch that owns the mechanism, and a test in this file
-# reads the module's own source to prove no mechanism was quietly reimplemented
-# here — no tmux, no loginctl, no send-keys. That check is deliberately crude,
-# because the failure it guards against is somebody helpfully inlining "just the
-# one line" on a night when the seam is missing.
+# D0: every verb proxies the branch that owns the mechanism; the source-reading checks below are crude on purpose.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that verbs.py parses and imports
@@ -54,9 +43,7 @@ PATCH_RESOLVE = "aipass.api.apps.handlers.host.verbs.host_reads.resolve_branch_r
 PATCH_SEATED = "aipass.api.apps.handlers.host.verbs.host_reads.seated_project"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
 
-# @baud sends the project on every target-bearing verb, in their own casing.
-# Pinned here as a mismatched case on purpose: their wire log says AIPASS, the
-# directory says AIPass, and a case-sensitive compare would refuse every wake.
+# Mismatched case on purpose: @baud sends AIPASS, the directory says AIPass; a case-sensitive compare refuses all.
 PROJECT = "aipass"
 PROJECT_AS_SENT = "AIPASS"
 
@@ -105,11 +92,6 @@ def _argv(door: Any) -> list:
     return [call.args[0]] + [call.args[1]] + list(call.args[2])
 
 
-# ==============================================
-# WAKE
-# ==============================================
-
-
 class TestWakeGoesThroughThePublicDoor:
     """The mechanism belongs to @ai_mail. This lane only knocks."""
 
@@ -149,12 +131,7 @@ class TestWakeGoesThroughThePublicDoor:
             host_verbs.wake_branch("", PROJECT)
 
     def test_a_failed_wake_is_never_reported_as_ok(self, quiet: Any, tmp_path: Path) -> None:
-        """
-        drone exiting non-zero means the wake did not happen.
-
-        @ai_mail fixed exactly this bug in their own lane once — a dead wake
-        exited 0 and read as success. Never re-file it on this side.
-        """
+        """drone exiting non-zero means the wake did not happen."""
         with patch(PATCH_VERBS_DRONE) as door:
             door.route_command.return_value = MagicMock(exit_code=2, stdout="", stderr="Wake failed for @memory")
             with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
@@ -163,15 +140,8 @@ class TestWakeGoesThroughThePublicDoor:
         assert result["ok"] is False
 
     def test_the_doors_own_sentence_survives_a_refusal(self, quiet: Any, tmp_path: Path) -> None:
-        """
-        @baud renders `detail` verbatim on the chip, so this is what the
-        operator reads. A status word would tell them nothing they can act on.
-
-        This is also what retired an imprecision I shipped an hour earlier:
-        @ai_mail reports one non-zero exit for 'refused by policy' and 'the
-        spawn died', and I had mapped both to 503. Both are answers from a door
-        that responded — so both are ok=false, and their sentence says which.
-        """
+        """@baud renders `detail` verbatim on the chip, so this is what the
+        operator reads; a door that responded is ok=false, never a 503."""
         blocked = "target @devpulse is protected from manual wake"
         with patch(PATCH_VERBS_DRONE) as door:
             door.route_command.return_value = MagicMock(exit_code=1, stdout="", stderr=blocked)
@@ -189,14 +159,8 @@ class TestWakeGoesThroughThePublicDoor:
 
 
 class TestTheProjectAlwaysTravels:
-    """
-    @baud's rule, paid for with a killed session (their learning 22): a room name
-    carries its project scope, and resolving it against anything else names a
-    DIFFERENT room.
-
-    Stricter than the read lane on purpose. Reading the wrong project returns the
-    wrong bytes; ending a session in the wrong one ends somebody's work.
-    """
+    """@baud's rule: a room name carries its project scope, and resolving it
+    against anything else names a DIFFERENT room."""
 
     def test_wake_without_a_project_is_refused(self, quiet: Any) -> None:
         """Never optional, never inferred from this server's seat."""
@@ -209,12 +173,7 @@ class TestTheProjectAlwaysTravels:
             host_verbs.kill_room("memory", "")
 
     def test_the_project_comparison_ignores_case(self, routed: Any) -> None:
-        """
-        Their wire log says AIPASS; the directory says AIPass.
-
-        A case-sensitive compare would refuse every verb they send, and the
-        failure would look like a permission problem rather than a spelling one.
-        """
+        """Their wire log says AIPASS; the directory says AIPass."""
         result = host_verbs.wake_branch("memory", PROJECT_AS_SENT)
 
         assert result["ok"] is True
@@ -229,16 +188,8 @@ class TestTheProjectAlwaysTravels:
 
 
 class TestAdminIsUnreachableNotJustUnset:
-    """
-    devpulse asked for `admin=False` pinned by test. It is stronger than that.
-
-    `wake_branch()`'s own docstring calls `admin` "an ALREADY-DECIDED verdict"
-    from a caller that ran the five-leg grant check. A phone cannot run that
-    check, so the design question was how to guarantee the parameter is never
-    True. Hardcoding False guarantees it until somebody edits the line. Routing
-    through the CLI guarantees it structurally: `dispatch wake` has no admin
-    flag, so there is no string a network request could send that expresses it.
-    """
+    """`dispatch wake` has no admin flag, so routing through the CLI makes admin
+    structurally unexpressible from a network request, not merely unset."""
 
     def test_no_argument_mentions_admin(self, routed: Any) -> None:
         """The whole command line, checked — not just the parameters we chose."""
@@ -252,30 +203,14 @@ class TestAdminIsUnreachableNotJustUnset:
 
         argv = _argv(routed)
 
-        # The old shape was `count == 0 or index > 3`, which cannot fail in the
-        # way that matters: if the string never reaches argv at all the first
-        # arm is true and nothing about POSITION is ever checked, and if it does
-        # reach argv the disjunction still passes on a technicality. What the
-        # verb actually promises is narrower and checkable — the text travels as
-        # the message VALUE, never as a bare flag in a position drone would read.
         assert "--admin" in argv, "the message text never reached the argv at all"
 
-        # Measured 2026-09-07, the argv really is
-        # ['@ai_mail', 'dispatch', 'wake', '@memory', '--admin'] — the message
-        # travels as the trailing POSITIONAL, not behind a --message flag. So
-        # the promise is about where it lands: past the verb and past the
-        # branch, in the slot drone reads as text rather than as an option.
+        # The message is the trailing POSITIONAL (no --message flag), the slot drone reads as text.
         assert argv.index("--admin") == len(argv) - 1, f"the message text is not the trailing positional: {argv}"
         assert argv.index("--admin") > 3, f"the message value landed where drone reads options: {argv}"
 
     def test_this_module_never_imports_wake_branch_directly(self) -> None:
-        """
-        The in-process import is the one that CAN pass admin.
-
-        @daemon imports it under DPLAN-0204 and that is their ruling to hold.
-        Here it would put a privilege-bearing keyword one edit away from a
-        network request, so this lane does not have the import at all.
-        """
+        """The in-process import is the one that CAN pass admin."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
         imports = [line for line in source.splitlines() if line.startswith(("import ", "from "))]
 
@@ -283,10 +218,7 @@ class TestAdminIsUnreachableNotJustUnset:
         assert "handlers.dispatch.wake" not in source
 
     def test_no_identity_claim_is_forwarded(self, routed: Any) -> None:
-        """
-        `--sender` reaches a privilege-bearing parameter behind a verified-caller
-        check. An unverified network claim never gets to try it.
-        """
+        """`--sender` reaches a privilege-bearing parameter; a network claim never tries it."""
         host_verbs.wake_branch("memory", PROJECT)
 
         assert "--sender" not in _argv(routed)
@@ -308,11 +240,7 @@ class TestTheContractSpeaksNoVendorWords:
         assert "--model" not in _argv(routed)
 
     def test_no_vendor_name_appears_in_this_module(self) -> None:
-        """
-        A zero-vendor-word contract is checkable, so check it.
-
-        If a profile shape ever lands it will name profiles, not products.
-        """
+        """A zero-vendor-word contract is checkable, so check it."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8").lower()
 
         for vendor in ("sonnet", "haiku", "gpt", "gemini"):
@@ -346,16 +274,8 @@ class TestTheMessageIsPayloadNotProtocol:
         assert "--fresh" in _argv(routed)
 
 
-# ==============================================
-# KILL
-# ==============================================
-
-
 class TestKillNeverPicksItsOwnTarget:
-    """
-    Purchased with an incident: Telegram's bare /kill defaulted to a live
-    session. A destructive verb that can guess is a destructive verb that will.
-    """
+    """A destructive verb that can guess is a destructive verb that will."""
 
     def test_a_missing_branch_is_refused(self, quiet: Any) -> None:
         """There is no 'kill the obvious one'."""
@@ -368,12 +288,7 @@ class TestKillNeverPicksItsOwnTarget:
             host_verbs.kill_room("   ", PROJECT)
 
     def test_the_target_is_validated_before_the_seam_is_consulted(self, quiet: Any) -> None:
-        """
-        Refusal order matters for the day the seam lands.
-
-        If the gate answered first, the target check would go untested until the
-        exec was live — the same shape as the CI false-green I chased today.
-        """
+        """Refusal order: the target is checked before the gate, so it is never untested."""
         with patch(PATCH_RESOLVE) as resolve:
             with pytest.raises(host_verbs.VerbRefused):
                 host_verbs.kill_room("", PROJECT)
@@ -382,15 +297,8 @@ class TestKillNeverPicksItsOwnTarget:
 
 
 class TestTheKillSwitchIsOperationalNotStructural:
-    """
-    For one day this verb answered 503 naming a seam that did not exist, and the
-    gate was the right call — `tmux kill-session` was one line away and would
-    have been a SECOND door. @baud shipped `--end-room` the same evening.
-
-    The constant stays, in the role fleet.SNAPSHOT_READY plays for the read: an
-    operational switch. Closed means an honest 503 that says the switch is
-    closed — never a session quietly not ended and reported as fine.
-    """
+    """KILL_SEAM_READY is an operational switch, like fleet.SNAPSHOT_READY: closed
+    means an honest 503, never a session quietly not ended and reported as fine."""
 
     def test_the_seam_is_open(self) -> None:
         """The door exists now, and the switch reflects that."""
@@ -404,12 +312,7 @@ class TestTheKillSwitchIsOperationalNotStructural:
                     host_verbs.kill_room("memory", PROJECT)
 
     def test_a_closed_switch_never_reaches_the_binary(self, quiet: Any, tmp_path: Path) -> None:
-        """
-        Checked BEFORE the exec, which is the entire point of a kill switch.
-
-        A switch consulted after the mechanism ran would be a log line, not a
-        control.
-        """
+        """Checked BEFORE the exec, which is the entire point of a kill switch."""
         with patch.object(host_verbs, "KILL_SEAM_READY", False):
             with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 with patch(PATCH_VERBS_FLEET) as door:
@@ -419,13 +322,7 @@ class TestTheKillSwitchIsOperationalNotStructural:
                     assert not door.end_room.called
 
     def test_a_closed_switch_says_the_switch_is_closed(self, quiet: Any, tmp_path: Path) -> None:
-        """
-        The refusal must not still claim a missing seam.
-
-        A stale reason is worse than a vague one: an operator reads it, files a
-        second ask with @baud for something they already shipped, and the real
-        cause — a flag on this host — goes unlooked-at.
-        """
+        """The refusal must not still claim a missing seam; it names the flag on this host."""
         with patch.object(host_verbs, "KILL_SEAM_READY", False):
             with patch(PATCH_RESOLVE, return_value=tmp_path / "branch"):
                 with pytest.raises(host_verbs.VerbUnavailable) as caught:
@@ -435,11 +332,8 @@ class TestTheKillSwitchIsOperationalNotStructural:
 
 
 class TestKillRoutesThroughTheOneDoor:
-    """
-    The exec lives in fleet.py, which already owns @baud's binary — one
-    resolution, one cwd rule, one parser. This lane calls a published function,
-    which is why it can still import no subprocess machinery at all.
-    """
+    """The exec lives in fleet.py, which already owns @baud's binary; this lane
+    calls a published function and imports no subprocess machinery."""
 
     def test_the_kill_reaches_bauds_door(self, killer: Any) -> None:
         """One hop, and it is theirs."""
@@ -448,34 +342,19 @@ class TestKillRoutesThroughTheOneDoor:
         assert killer.end_room.called
 
     def test_the_target_travels_as_a_name_never_an_address(self, killer: Any) -> None:
-        """
-        Their door takes names and refuses separators, in their own words.
-
-        '@memory' would arrive as a name they have never heard of, and the
-        refusal would read as a missing branch rather than our formatting.
-        """
+        """Their door takes names and refuses separators, in their own words."""
         host_verbs.kill_room("@memory", PROJECT_AS_SENT)
 
         assert killer.end_room.call_args.args[0] == "memory"
 
     def test_the_project_travels_verbatim_not_normalised(self, killer: Any) -> None:
-        """
-        It is a key in BAUD's census, so this server does not touch its case.
-
-        Normalising another branch's key here is how a working name turns into
-        'no project named that' — the read lane already passes it through raw.
-        """
+        """It is a key in BAUD's census, so this server does not touch its case."""
         host_verbs.kill_room("memory", PROJECT_AS_SENT)
 
         assert killer.end_room.call_args.args[1] == PROJECT_AS_SENT
 
     def test_a_door_that_could_not_run_is_never_an_ok(self, killer: Any) -> None:
-        """
-        Binary missing, wedged or a bad invocation — none of those ran a kill.
-
-        That is a status code, not an ok: nothing answered, so there is no
-        sentence for the operator to read.
-        """
+        """Binary missing, wedged or a bad invocation — none of those ran a kill."""
         killer.FleetUnavailable = host_fleet.FleetUnavailable
         killer.end_room.side_effect = host_fleet.FleetUnavailable("baud is not available")
 
@@ -484,12 +363,8 @@ class TestKillRoutesThroughTheOneDoor:
 
 
 class TestEndedIsAFactNotASuccessFlag:
-    """
-    @baud asked for this explicitly: `ended: false` with no error means there was
-    nothing to end, which is exit 0 because a room already gone IS the goal
-    state. Both outcomes are successes and they are different facts — the phone
-    shows different sentences, and flattening them here makes that impossible.
-    """
+    """@baud's contract: `ended: false` with no error means nothing to end, a
+    success distinct from ending a live room; flattening them hides which happened."""
 
     def test_ending_a_live_room_reports_both_ok_and_ended(self, killer: Any) -> None:
         """The ordinary case, and the one that must never be ambiguous."""
@@ -517,12 +392,7 @@ class TestEndedIsAFactNotASuccessFlag:
         assert result["detail"] == "nothing to end"
 
     def test_a_refusal_carries_their_sentence_and_never_ok(self, killer: Any) -> None:
-        """
-        Exit 1: they ran and said no. 200 with ok false, their words verbatim.
-
-        `detail` and `error` are mutually exclusive by construction, so reading
-        one field can never be misled about whether the kill happened.
-        """
+        """Exit 1: they ran and said no. 200 with ok false, their words verbatim."""
         killer.end_room.return_value = {
             "project": PROJECT_AS_SENT,
             "branch": "nosuch",
@@ -539,11 +409,7 @@ class TestEndedIsAFactNotASuccessFlag:
         assert result["detail"] == "no branch named nosuch in project AIPASS"
 
     def test_a_refusal_never_reads_as_nothing_to_end(self, killer: Any) -> None:
-        """
-        Their rule, and it is the sharp one: both show room null and they are
-        OPPOSITE facts. One means a stale name is being held; the other means
-        the goal is reached. `ok` is what tells them apart.
-        """
+        """Both show room null and they are OPPOSITE facts; `ok` tells them apart."""
         killer.end_room.return_value = {
             "room": None,
             "ended": False,
@@ -561,11 +427,8 @@ class TestEndedIsAFactNotASuccessFlag:
 
 
 class TestKillCarriesTheRoomsOwnProject:
-    """
-    @baud's near-miss: a roster attach left the terminal holding another
-    project's room, and resolving under the seat would have ended a session the
-    operator never named. The scope travels with the target, not the caller.
-    """
+    """The scope travels with the target, not the caller: resolving under the
+    seat can end a session the operator never named."""
 
     def test_the_project_is_accepted_as_a_parameter(self) -> None:
         """It exists so a client can name it — that is the whole point."""
@@ -574,13 +437,7 @@ class TestKillCarriesTheRoomsOwnProject:
         assert "project" in inspect.signature(host_verbs.kill_room).parameters
 
     def test_the_project_is_checked_before_the_target(self, quiet: Any) -> None:
-        """
-        Scope first, then identity.
-
-        A branch name is only meaningful inside a project, so validating the
-        name against a project we have not accepted would be answering the
-        wrong question.
-        """
+        """Scope first, then identity."""
         with patch(PATCH_RESOLVE) as resolve:
             with pytest.raises(host_verbs.VerbRefused):
                 host_verbs.kill_room("memory", "")
@@ -588,17 +445,8 @@ class TestKillCarriesTheRoomsOwnProject:
             assert not resolve.called
 
 
-# ==============================================
-# LOCK
-# ==============================================
-
-
 class TestLockIsNeverGated:
-    """
-    @skills' doctrine, adopted verbatim: a destructive action never fires from a
-    locked screen, and lock itself must work from anywhere — that is its whole
-    point. So this verb asks no questions before firing.
-    """
+    """@skills' doctrine: lock must work from anywhere, so this verb asks no questions before firing."""
 
     def test_lock_calls_the_skill(self, quiet: Any) -> None:
         """The mechanism is @skills'. This is a proxy and nothing else."""
@@ -610,11 +458,7 @@ class TestLockIsNeverGated:
             assert skill.lock_screen.called
 
     def test_lock_checks_no_precondition(self, quiet: Any) -> None:
-        """
-        Not screen state, not a desktop environment, not a session id.
-
-        A gated lock is a lock that fails when you need it most.
-        """
+        """Not screen state, not a desktop environment, not a session id."""
         with patch.object(host_verbs, "screen_lock") as skill:
             skill.lock_screen.return_value = {"locked": True, "method": "dbus", "session": None, "error": None}
 
@@ -625,18 +469,12 @@ class TestLockIsNeverGated:
 
 
 class TestTheSkillOwnsTheFailureText:
-    """
-    A screen that never locked can never be acked as locked. The skill decides
-    whether it locked; this lane reports what it was told.
-    """
+    """A screen that never locked can never be acked as locked."""
 
     def test_a_failed_lock_is_never_ok(self, quiet: Any) -> None:
-        """
-        The one thing that must never happen: a padlock drawn over a live desk.
+        """The one thing that must never happen: a padlock drawn over a live desk.
 
-        `ok: false` rather than a raise, because the mechanism DID run and
-        answered — the operator needs to read that answer, not a status word.
-        A seam that was never reached stays a status code; this is not that.
+        `ok: false` rather than a raise: the mechanism DID run and answered.
         """
         with patch.object(host_verbs, "screen_lock") as skill:
             skill.lock_screen.return_value = {
@@ -657,12 +495,7 @@ class TestTheSkillOwnsTheFailureText:
             assert host_verbs.lock_screen()["detail"] == sentence
 
     def test_a_lock_with_no_error_text_still_says_something(self, quiet: Any) -> None:
-        """
-        A falsy 'locked' with an empty error must not render as a blank chip.
-
-        @baud shows `detail` verbatim, so an empty string is a failure the
-        operator cannot see — which is indistinguishable from success on screen.
-        """
+        """A falsy 'locked' with an empty error must not render as a blank chip."""
         with patch.object(host_verbs, "screen_lock") as skill:
             skill.lock_screen.return_value = {"locked": False, "method": None, "session": None, "error": None}
 
@@ -679,53 +512,24 @@ class TestTheSkillOwnsTheFailureText:
             assert host_verbs.lock_screen()["method"] == "dbus"
 
 
-# ==============================================
-# D0 — THE PIPE OWNS NO MECHANISM
-# ==============================================
-
-
 class TestNoMechanismIsReimplementedHere:
-    """
-    The review test for charter drift, written as an assertion.
-
-    Every verb in this lane belongs to another branch. The temptation is always
-    the same and always local: the seam is missing, the fix is one line, nobody
-    would notice for weeks. This is what notices.
-    """
+    """The review test for charter drift, written as an assertion."""
 
     def test_the_verb_lane_executes_nothing_itself(self) -> None:
-        """
-        The sharpest form of the rule: this module cannot run a program.
-
-        No subprocess import means no tmux kill-session, no loginctl, no
-        send-keys — not because each was individually forbidden, but because the
-        capability to invent one is absent. Every verb here reaches its
-        mechanism through a door another branch published.
-        """
+        """The sharpest form of the rule: this module cannot run a program."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
 
         assert "import subprocess" not in source
         assert "Popen" not in source
         assert "os.system" not in source
-        # The other doors a program can be run through, which the terminal-lane
-        # pin below does not watch: the exec and spawn families, and the
-        # from-import spelling that dodges "import subprocess".
+        # The exec/spawn families and the from-import spelling that dodges "import subprocess".
         assert "from subprocess" not in source
         assert "os.exec" not in source
         assert "os.spawn" not in source
         assert "os.popen" not in source
 
     def test_the_verb_lane_still_executes_nothing_after_the_terminal_lane(self) -> None:
-        """
-        The terminal lane arrived on 2026-08-14 and this module did not gain a
-        mechanism from it. Typing now rides a PTY, and that PTY lives in
-        attach.py — a named exec module, like fleet.py — rather than leaking
-        into the lane whose whole job is validating before it proxies.
-
-        The rule was never "no typing". It was "no mechanism of OUR own, in the
-        module that decides". This file may name tmux in prose, because
-        explaining another branch's mechanism is how a proxy documents itself.
-        """
+        """The terminal lane's PTY lives in attach.py, never in the module that decides."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
 
         assert "import subprocess" not in source
@@ -734,39 +538,25 @@ class TestNoMechanismIsReimplementedHere:
         assert "import pty" not in source
 
     def test_the_fleet_module_is_the_only_way_out(self) -> None:
-        """
-        Every mechanism import in this file, enumerated.
-
-        A fourth door appearing here is how a lane that proxies quietly becomes
-        a lane that implements. The list is short on purpose and this test is
-        what makes adding to it a decision rather than an edit.
-        """
+        """Every mechanism import in this file, enumerated, so adding one is a decision."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
         imports = [line for line in source.splitlines() if line.startswith(("import ", "from "))]
         mechanisms = [line for line in imports if "aipass.api" not in line and "typing" not in line]
 
         assert mechanisms == [
+            "import re",
             "from aipass.prax import logger",
             "import aipass.drone as drone",
             "from aipass.skills.lib.screen_lock import handler as screen_lock",
+            "from aipass.aipass.apps.modules import new_project as project_door",
         ]
 
     def test_every_verb_names_the_branch_that_owns_it(self) -> None:
-        """
-        A proxy whose docstring does not name its owner drifts into a component.
-
-        Cheap to satisfy, and it keeps the next reader from having to guess who
-        to mail when a verb misbehaves.
-        """
+        """A proxy whose docstring does not name its owner drifts into a component."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
 
         for owner in ("@ai_mail", "@baud", "@skills"):
             assert owner in source
-
-
-# ==============================================
-# ROUTES
-# ==============================================
 
 
 @pytest.fixture
@@ -799,12 +589,7 @@ def _body(**extra: Any) -> dict:
 
 @fastapi_required
 class TestTheScopeWallCarriesProductionWeight:
-    """
-    The first endpoints in AIPass that a read token must NOT reach.
-
-    Until tonight the scope wall was proven only against a route invented by a
-    test. These are real, and one of them ends a session.
-    """
+    """The first endpoints in AIPass that a read token must NOT reach."""
 
     @pytest.mark.parametrize("verb", ["wake", "kill", "lock"])
     def test_a_read_token_is_refused_by_every_verb(self, client: Any, verb: str) -> None:
@@ -845,15 +630,8 @@ class TestTheScopeWallCarriesProductionWeight:
 
 
 @fastapi_required
-class TestTheVerbRouteTableIsExactlyThreeThings:
-    """
-    The route table read back, so a verb cannot arrive quietly.
-
-    Every reservation in this plan was written down before it was built. A verb
-    appearing on the app without a round that owns it is the failure this
-    catches — and it also pins the methods, because the day one of these answers
-    a GET is the day a destructive action becomes a link.
-    """
+class TestTheVerbRouteTableIsExactlyFourThings:
+    """The route table read back, so a verb cannot arrive quietly."""
 
     def _verb_routes(self) -> dict:
         """Path to (endpoint name, methods) for everything under /v1/verbs."""
@@ -864,16 +642,14 @@ class TestTheVerbRouteTableIsExactlyThreeThings:
             if getattr(route, "path", "").startswith("/v1/verbs")
         }
 
-    def test_exactly_three_verbs_are_registered(self) -> None:
-        """
-        wake, kill, lock. A fourth briefly existed and was cut.
-
-        /v1/verbs/keys shipped under the Round 18 capture design and the owner
-        superseded it four minutes later: keystrokes ride the attach PTY, not a
-        send-keys proxy. This test is what makes leaving it mounted impossible —
-        a superseded surface that still answers is the second door.
-        """
-        assert set(self._verb_routes()) == {"/v1/verbs/wake", "/v1/verbs/kill", "/v1/verbs/lock"}
+    def test_exactly_four_verbs_are_registered(self) -> None:
+        """wake, kill, lock and new-project; keystrokes ride the attach PTY, never a /v1/verbs/keys proxy."""
+        assert set(self._verb_routes()) == {
+            "/v1/verbs/wake",
+            "/v1/verbs/kill",
+            "/v1/verbs/lock",
+            "/v1/verbs/new-project",
+        }
 
     def test_verb_wake_is_post_only(self) -> None:
         """A wake spawns a real agent — never something a browser can prefetch."""
@@ -963,13 +739,7 @@ class TestTheVerbRoutesAnswer:
         assert response.json()["ok"] is True
 
     def test_a_failed_lock_is_a_200_carrying_ok_false(self, client: Any) -> None:
-        """
-        @baud's decoder, and it is the right shape.
-
-        The mechanism ran and said no. That is an answer with a sentence in it,
-        rendered verbatim on their chip — not a server fault. What would be
-        wrong is ok=true, and no path produces that from a false lock.
-        """
+        """The mechanism ran and said no: an answer for @baud's chip, not a server fault."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
         with patch.object(host_verbs, "screen_lock") as skill:
@@ -983,21 +753,11 @@ class TestTheVerbRoutesAnswer:
 
 @fastapi_required
 class TestTheClientIsNeverTrusted:
-    """
-    @baud's assumption (b), confirmed as a property rather than a promise: their
-    confirm dialog and lock-screen check are pocket-safety, not security. They
-    will never send a `confirmed` field, and this server would not honour one.
-    """
+    """@baud's confirm dialog and lock-screen check are pocket-safety, not
+    security; this server honours no `confirmed` field."""
 
     def test_a_confirmed_flag_reaches_nothing_on_the_kill_lane(self, client: Any, tmp_path: Path) -> None:
-        """
-        Their confirm dialog is pocket-safety, not a gate this server honours.
-
-        Now that the seam is open this matters more, not less: the kill runs on
-        the token's scope and the named target, and the ONLY thing that reaches
-        @baud's door is the branch and the project. A client-asserted UI state
-        cannot add to it or subtract from it.
-        """
+        """Their confirm dialog is pocket-safety, not a gate this server honours."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
         with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_RESOLVE, return_value=tmp_path / "b"):
@@ -1029,35 +789,19 @@ class TestTheClientIsNeverTrusted:
 
 
 class TestOneTerminalReachesAnyAgent:
-    """
-    The owner's one-terminal ruling, 2026-08-16: "the flow is ONE terminal; it
-    hosts the agent I choose, no matter where I spawn it. The terminal is not
-    linked to a project... Baud is an aipass tenant in projects/, vera is
-    outside, external - that should NOT matter. When you block you create
-    friction."
-
-    The read lanes followed this ruling earlier the same evening. These are the
-    operate verbs following it: the ruling widens WHO can be reached and never
-    what a request may contain, so the project is STILL required, still never
-    inferred, and a garbage target still dies in front of the mechanism.
-    """
+    """One terminal reaches any agent in any project: WHO can be reached widens,
+    but the project is STILL required, never inferred, and a garbage target still dies."""
 
     @pytest.fixture
     def census(self, quiet: Any, tmp_path: Path):
-        """
-        @baud's census, standing in for a branch in another project.
+        """@baud's census, standing in for a branch in another project.
 
-        Patched in TWO places on purpose, and the reason is the design: kill
-        calls verbs' own module-level `host_fleet` for end_room, while branch
-        resolution goes through the READ lane, which imports the census off the
-        package inside the function. One mock behind both names, so a test can
-        never pass because it happened to patch the door that was not used.
+        Patched in TWO places: kill uses verbs' module-level `host_fleet`, branch
+        resolution imports it off the package inside the read lane.
         """
         with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_HOST_FLEET, door):
             door.FleetUnavailable = host_fleet.FleetUnavailable
-            # A REAL directory: the resolver checks that the census's path
-            # exists, so a made-up one would fail for the wrong reason and hide
-            # whether the census was consulted at all.
+            # A REAL directory: the resolver checks the census path exists.
             elsewhere = tmp_path / "projects" / "baud" / "src" / "baud"
             elsewhere.mkdir(parents=True)
             door.resolve_branch.return_value = {"name": "baud", "path": str(elsewhere)}
@@ -1072,10 +816,7 @@ class TestOneTerminalReachesAnyAgent:
             yield door
 
     def test_wake_reaches_a_branch_in_another_project(self, census: Any) -> None:
-        """
-        The unambiguous half of the ruling: a sleeping agent must be able to
-        appear in the one seat, wherever it lives.
-        """
+        """A sleeping agent must be able to appear in the one seat, wherever it lives."""
         with patch(PATCH_VERBS_DRONE) as door:
             door.route_command.return_value = MagicMock(exit_code=0, stdout="woken", stderr="")
             result = host_verbs.wake_branch("baud", "BAUD")
@@ -1084,11 +825,7 @@ class TestOneTerminalReachesAnyAgent:
         assert result["project"] == "BAUD"
 
     def test_a_foreign_branch_is_resolved_through_the_census(self, census: Any) -> None:
-        """
-        Two doors, same discipline as the read lane. The seated registry does
-        not know a tenant's branches at all — drone.get_branch_info('baud')
-        raises BranchNotFound — so this is the only door that can answer.
-        """
+        """The seated registry does not know a tenant's branches, so the census is the only door."""
         with patch(PATCH_VERBS_DRONE) as door:
             door.route_command.return_value = MagicMock(exit_code=0, stdout="woken", stderr="")
             host_verbs.wake_branch("baud", "BAUD")
@@ -1096,12 +833,7 @@ class TestOneTerminalReachesAnyAgent:
         census.resolve_branch.assert_called_once_with("BAUD", "baud")
 
     def test_the_seat_never_pays_for_a_census(self, routed: Any, census: Any) -> None:
-        """
-        The local registry stays the fast path for the project we stand in.
-
-        Same reason as the read lane: routing the seat through the census puts
-        @baud's snapshot gate in front of every verb the phone sends.
-        """
+        """The local registry stays the fast path for the project we stand in."""
         host_verbs.wake_branch("memory", PROJECT_AS_SENT)
 
         census.resolve_branch.assert_not_called()
@@ -1116,12 +848,7 @@ class TestOneTerminalReachesAnyAgent:
         assert "BAUD" in str(exc.value) and "nosuch" in str(exc.value)
 
     def test_an_unknown_project_carries_the_census_sentence(self, census: Any) -> None:
-        """
-        Unavailable, not refused, and phrased by the branch that knows.
-
-        @baud's census already says "no project named X" — the most actionable
-        words this failure has, and not mine to paraphrase.
-        """
+        """Unavailable, not refused, and phrased by the branch that knows."""
         census.resolve_branch.side_effect = host_fleet.FleetUnavailable("no project named 'nope' in BAUD's census")
 
         with pytest.raises(host_verbs.VerbUnavailable) as exc:
@@ -1130,15 +857,7 @@ class TestOneTerminalReachesAnyAgent:
         assert "no project named 'nope'" in str(exc.value)
 
     def test_kill_reaches_another_projects_room(self, census: Any) -> None:
-        """
-        The counterpart of attach on the same card.
-
-        My read of the ruling, stated so it can be overruled: if the phone
-        shows BAUD's cards and can attach to them, a kill button that refuses
-        "not my project" is the friction the owner named. The mechanism was
-        always safe for it — @baud's door takes the project and resolves the
-        room itself, so this server never names a room.
-        """
+        """The counterpart of attach on the same card; @baud's door resolves the room itself."""
         with patch.object(host_verbs, "KILL_SEAM_READY", True):
             result = host_verbs.kill_room("baud", "BAUD")
 
@@ -1146,24 +865,13 @@ class TestOneTerminalReachesAnyAgent:
         census.end_room.assert_called_once_with("baud", "BAUD")
 
     def test_the_project_is_still_required_on_every_verb(self, quiet: Any) -> None:
-        """
-        The rule that did NOT change, and the one bought with a killed session.
-
-        Resolving a room name against the wrong project names a different room.
-        Widening which projects are reachable makes an inferred seat MORE
-        dangerous, not less.
-        """
+        """The rule that did NOT change: widening reach makes an inferred seat MORE dangerous."""
         for verb in (host_verbs.wake_branch, host_verbs.kill_room):
             with pytest.raises(host_verbs.VerbRefused):
                 verb("memory", "")
 
     def test_no_verb_says_it_does_not_serve_the_project(self) -> None:
-        """
-        The sentence is gone from this lane.
-
-        Grep-shaped on purpose: one helper carried it for both verbs, so a
-        future editor restoring it anywhere puts the friction back on both.
-        """
+        """The sentence is gone from this lane."""
         source = Path(host_verbs.__file__).read_text(encoding="utf-8")
 
         assert "does not serve project" not in source

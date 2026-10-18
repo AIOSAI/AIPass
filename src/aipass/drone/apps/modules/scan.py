@@ -3,7 +3,7 @@
 # Description: Module orchestrator for branch command scanning
 # Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Module orchestrator for branch command scanning.
@@ -33,20 +33,10 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Standard module interface
-# ---------------------------------------------------------------------------
-
-
 def handle_command(command: str | None = None, args: list[str] | None = None) -> bool:
     """Route scan subcommands to handler functions.
 
-    Args:
-        command: The subcommand string (currently unused -- scans are positional).
-        args: List of arguments; first element is the ``@target``.
-
-    Returns:
-        True if the command succeeded, False otherwise.
+    Scans are positional: *command* is unused and ``args[0]`` is the ``@target``.
     """
     if not args:
         if command is None:
@@ -115,19 +105,10 @@ def print_help() -> None:
     console.print("  drone scan @flow       Scan flow for commands")
 
 
-# ---------------------------------------------------------------------------
-# Core operation
-# ---------------------------------------------------------------------------
-
-
 def scan(target: str) -> list[dict] | None:
     """Resolve ``@target``, scan for commands, display and return results.
 
-    Args:
-        target: Symbolic branch name (e.g. ``@seedgo``).
-
-    Returns:
-        List of discovered command dicts, or None on resolution failure.
+    None means the target did not resolve; an empty list means no commands were found.
     """
     branch_name = target.lstrip("@").lower()
 

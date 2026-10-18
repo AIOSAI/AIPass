@@ -3,14 +3,10 @@
 # Description: Project config handler — load/save per-project backup config
 # Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Project configuration handler.
-
-Reads and writes the per-project ``.backup/config.json`` that stores mode
-preferences, size limits, and drive-sync settings.
-"""
+"""Project configuration handler."""
 
 from aipass.prax import logger
 
@@ -32,19 +28,8 @@ DEFAULTS = {
 
 
 def load_project_config(project_root: str) -> dict:
-    """Load the backup configuration for a project.
-
-    Args:
-        project_root: Absolute path to the project root.
-
-    Returns:
-        Dict containing config keys, merged with defaults for any missing keys.
-
-    Raises:
-        InvalidDocument: The config exists but cannot be read as a JSON object.
-            Falling back to DEFAULTS would quietly reset the project's own
-            size ceilings and ignore rules mid-backup.
-    """
+    """Load the backup configuration for a project."""
+    # Never fall back to DEFAULTS on an unreadable file: that quietly resets the project's own ceilings.
     config_path = builder.build_config_path(project_root)
     config = json_handler.read_json(config_path)
     if config is None:
@@ -59,15 +44,7 @@ def load_project_config(project_root: str) -> dict:
 
 
 def save_project_config(project_root: str, config: dict) -> bool:
-    """Persist the backup configuration for a project.
-
-    Args:
-        project_root: Absolute path to the project root.
-        config: Configuration payload to serialize to JSON.
-
-    Returns:
-        True when the write succeeded, False otherwise.
-    """
+    """Persist the backup configuration for a project."""
     config_path = builder.build_config_path(project_root)
     if not json_handler.write_json(config_path, config):
         logger.warning(f"Failed to save config for {project_root} at {config_path}")
@@ -81,24 +58,8 @@ def save_project_config(project_root: str, config: dict) -> bool:
 
 
 def set_project_setting(project_root: str, key: str, value: object) -> bool:
-    """Write one key into the project's config document, leaving the rest as written.
-
-    The raw document is read, not the DEFAULTS-merged view: saving the merged
-    view would freeze every default into the file, and a later change to a
-    default would never reach this project.
-
-    Args:
-        project_root: Absolute path to the project root.
-        key: Config key to set.
-        value: Value to store under it.
-
-    Returns:
-        True when the write succeeded, False otherwise.
-
-    Raises:
-        InvalidDocument: The config exists but cannot be read as a JSON object.
-            Writing over it would erase every setting it held.
-    """
+    """Write one key into the project's config document, leaving the rest as written."""
+    # The raw document, not the merged view: saving that would freeze every default into the file.
     config_path = builder.build_config_path(project_root)
     config = json_handler.read_json(config_path)
     if config is None:
@@ -109,6 +70,3 @@ def set_project_setting(project_root: str, key: str, value: object) -> bool:
         raise json_handler.InvalidDocument(f"Project config is not a JSON object: {config_path}")
     config[key] = value
     return save_project_config(project_root, config)
-
-
-# =============================================

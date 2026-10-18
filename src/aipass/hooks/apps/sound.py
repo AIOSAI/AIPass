@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Shared sound functions for hook handlers. Checks mute flag before playing."""
@@ -42,15 +42,7 @@ def is_muted() -> bool:
 def mute() -> bool:
     """Mute all hook sounds. Idempotent.
 
-    Returns:
-        The resulting muted state — always True, so a caller can flip and
-        verify in one call instead of writing then reading back.
-
-    Note:
-        Exported so callers stop shelling out to `drone @hooks hooksound off`
-        just to flip a flag (@api asked; their words were "I would rather that
-        than shell out"). This module owns MUTE_FLAG, so the write belongs
-        beside the read that already lived here.
+    Returns the resulting muted state (always True); @api imports this directly.
     """
     MUTE_FLAG.touch()
     logger.info("[HOOKS] sound: muted")
@@ -58,11 +50,7 @@ def mute() -> bool:
 
 
 def unmute() -> bool:
-    """Unmute all hook sounds. Idempotent — a missing flag is already unmuted.
-
-    Returns:
-        The resulting muted state — always False, mirroring mute().
-    """
+    """Unmute all hook sounds. Idempotent — a missing flag is already unmuted."""
     MUTE_FLAG.unlink(missing_ok=True)
     logger.info("[HOOKS] sound: unmuted")
     return False
@@ -71,13 +59,7 @@ def unmute() -> bool:
 def speak(text: str, tmp_dir: str | None = None) -> None:
     """Generate speech via Piper TTS and play it. Skips if muted.
 
-    Args:
-        text: What to say.
-        tmp_dir: Where the wav is staged; None is tempfile's own default. A seam:
-            the tests are the reason it exists, so they hand in a directory of
-            their own in place of patching tempfile, which replaces it
-            process-wide. Every caller passes nothing. The decision is hooks',
-            fleet green leg 7.
+    tmp_dir is a test seam: tests pass their own dir instead of patching tempfile process-wide.
     """
     if is_muted():
         return

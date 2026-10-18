@@ -3,7 +3,7 @@
 # Description: Tests for cli's entry point routing, help and introspection
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/cli.py — routing, help, introspection and the exit seam."""
@@ -16,12 +16,7 @@ import pytest
 from aipass.cli.apps import cli as branch_entry
 from aipass.cli.apps.modules import display
 
-# Covers the four things the entry point promises: no-args shows introspection,
-# --help shows help without executing anything, a subcommand's --help never runs
-# that subcommand, and an unknown command fails loudly with a non-zero code.
-#
-# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-# shell reads as success, so the refusal path is pinned by test rather than assumed.
+# A refusal that exits 0 is one the shell reads as success; exit codes are pinned here.
 
 
 class _StubModule:
@@ -41,13 +36,7 @@ class _StubModule:
 
 @pytest.fixture(autouse=True)
 def _clean_failure_flag():
-    """Leave the process-level failure flag as this file found it.
-
-    display.mark_command_failed() sets module state that outlives the test, so a
-    seam test that trips it would otherwise decide the exit code of whatever
-    runs next. main() resets on entry, but run_cli() tests and any future caller
-    that skips main() would not.
-    """
+    """Leave the process-level failure flag as this file found it; run_cli() skips main()'s reset."""
     display.reset_command_state()
     yield
     display.reset_command_state()
@@ -76,11 +65,6 @@ def _raise(exc):
     return _boom
 
 
-# =============================================================================
-# HELP AND INTROSPECTION OUTPUT
-# =============================================================================
-
-
 def test_print_introspection_renders_identity_and_help_pointer(capsys):
     """print_introspection names the branch and points at --help."""
     branch_entry.print_introspection()
@@ -92,11 +76,7 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
 
 
 def test_print_help_has_usage_and_commands(capsys):
-    """print_help carries the two sections cli's help actually renders.
-
-    Asserted in cli's own spelling (USAGE:/COMMANDS:, not Usage:/Examples:) --
-    the entry point is the contract, and a test does not get to rename it.
-    """
+    """print_help carries the two sections cli's help actually renders, in cli's own spelling."""
     branch_entry.print_help()
 
     out = capsys.readouterr().out
@@ -105,12 +85,8 @@ def test_print_help_has_usage_and_commands(capsys):
 
 
 def test_print_help_keeps_its_literal_markup_example(capsys):
-    """The console example shows the tags a reader types, not what they render.
-
-    A styled literal carrying literal brackets: escape() on the line would eat
-    the dim styling too, markup=False would print the dim tags, so the one
-    bracket is hand-escaped. It rendered console.print('Hello') until 2026-09-17.
-    """
+    """The console example shows the tags a reader types, not what they render."""
+    # escape() would eat the dim styling and markup=False prints it: the bracket is hand-escaped.
     branch_entry.print_help()
 
     out = capsys.readouterr().out
@@ -118,11 +94,7 @@ def test_print_help_keeps_its_literal_markup_example(capsys):
 
 
 def test_print_help_publishes_escape_and_scopes_show(capsys):
-    """The page names the published escape and says show is top-level only.
-
-    `display show` exits 1, so a page that calls show an alias of display
-    without saying where the alias stops invites a refused command.
-    """
+    """The page names the published escape and says show is top-level only (`display show` exits 1)."""
     branch_entry.print_help()
 
     out = capsys.readouterr().out
@@ -131,23 +103,14 @@ def test_print_help_publishes_escape_and_scopes_show(capsys):
 
 
 def test_discovery_hands_main_the_imported_modules_not_copies():
-    """A routed module's error() must trip the flag main() reads, or a refusal exits 0.
-
-    discover_modules() executed each file a second time as a fresh copy, so the
-    routed display kept its own failure flag apart from the one resolve_exit reads
-    (measured fleet green leg 3). Mutant: discovery back to spec_from_file_location.
-    """
+    """A routed module's error() must trip the flag main() reads, or a refusal exits 0."""
+    # Mutant: discovery back to spec_from_file_location, which loads a second display copy.
     discovered = {module.__name__.rsplit(".", 1)[-1]: module for module in branch_entry.discover_modules()}
 
     discovered["display"].mark_command_failed()
 
     assert display.command_failed() is True
     assert branch_entry.resolve_exit(True) == 2
-
-
-# =============================================================================
-# TOP-LEVEL ROUTING
-# =============================================================================
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -175,11 +138,6 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     out = capsys.readouterr().out
     assert "CLI" in out
     assert branch_entry.VERSION in out
-
-
-# =============================================================================
-# COMMAND ROUTING - SUCCESS AND FAILURE PATHS
-# =============================================================================
 
 
 def test_route_command_returns_true_for_known_command(stub_module):
@@ -226,22 +184,11 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     assert "Unknown command" in capsys.readouterr().err
 
 
-# =============================================================================
-# THE EXIT SEAM - reset_command_state / resolve_exit
-#
-# This branch owns these three names, so these are the fleet's contract for
-# them, not just cli's own routing tests. The documented codes: 0 routed and
-# clean, 2 routed but a refusal went through error(), 1 not routed at all.
-# =============================================================================
+# The fleet's exit-seam contract: 0 routed and clean, 2 routed but error() ran, 1 not routed.
 
 
 def test_routed_command_that_refuses_exits_two(monkeypatch, capsys):
-    """A routed command that calls error() is handled AND failed -> 2.
-
-    This is the whole point of the seam. Before it was wired, the module below
-    printed a red refusal and main() returned 0, so every shell and every caller
-    read the run as a success.
-    """
+    """A routed command that calls error() is handled AND failed -> 2."""
 
     class _Refusing:
         __name__ = "refusing"
@@ -257,11 +204,7 @@ def test_routed_command_that_refuses_exits_two(monkeypatch, capsys):
 
 
 def test_unroutable_command_keeps_its_own_one(monkeypatch, stub_module, capsys):
-    """The not-handled 1 is decided before the flag, so error() cannot make it 2.
-
-    resolve_exit() checks handled first. A refusal that was never routed is a 1,
-    and the seam must not upgrade it just because error() also tripped the flag.
-    """
+    """The not-handled 1 is decided before the flag, so error() cannot make it 2."""
     assert _run(monkeypatch, ["invalid_command"]) == 1
 
     assert display.command_failed() is True
@@ -269,11 +212,7 @@ def test_unroutable_command_keeps_its_own_one(monkeypatch, stub_module, capsys):
 
 
 def test_main_resets_a_stale_failure_flag(monkeypatch, stub_module):
-    """A failure recorded before main() must not colour this command's exit code.
-
-    The flag is process-level. Without the reset on entry, one refused command
-    would make every later command in the same process exit 2.
-    """
+    """A failure recorded before main() must not colour this command's exit code."""
     display.mark_command_failed()
 
     assert _run(monkeypatch, ["probe"]) == 0
@@ -307,11 +246,6 @@ def test_run_cli_passes_a_clean_run_through(monkeypatch, stub_module):
     assert stub_module.calls == [("probe", [])]
 
 
-# =============================================================================
-# SUBCOMMAND HELP
-# =============================================================================
-
-
 def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
     """`cli probe --help` asks the module for help; it never runs bare."""
     assert _run(monkeypatch, ["probe", "--help"]) == 0
@@ -320,13 +254,7 @@ def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
 
 
 def test_subcommand_help_on_unknown_command_falls_back_to_general_help(monkeypatch, stub_module, capsys):
-    """`cli ghost --help` shows the general help and exits 0.
-
-    Pinned as cli WROTE it, not as the template wished: when no module claims
-    the command, main() falls through to print_help() and returns 0. A help
-    request answered with help is not a refusal, so there is nothing here for a
-    non-zero exit to mean. The entry point is not bent to fit the test.
-    """
+    """`cli ghost --help` shows the general help and exits 0: help answered with help is no refusal."""
     result = _run(monkeypatch, ["nonexistent", "--help"])
 
     assert result == 0

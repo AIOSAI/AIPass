@@ -1,40 +1,9 @@
 """Spawn handlers package - the fence.
 
-A branch's handlers are its own. Any code outside this branch reaches it
-through aipass.spawn.apps.modules, never by importing these handlers:
-an agent cannot change a module it does not own to suit its needs, so the
-only honest door is the one the owner publishes. This file is the fence. It
-reads the stack once, at import time, and refuses a foreign importer with an
-ImportError that names the caller, the file and the line.
-
-What the walk sees, from this file outward, in three kinds:
-  kin        a frame whose file lives under /aipass/spawn/ - this branch
-  transport  Python's own machinery between an importer and this file:
-             importlib and the frozen bootstrap, any standard-library module
-             (unittest.mock, pkgutil, runpy, pickle), and third-party
-             libraries under site-packages (pytest's monkeypatch); none of
-             these is anybody's code in the sense the rule means
-  foreign    everything else: another branch, a project, a user's script
-
-The first foreign frame decides. It is refused when no kin frame stood
-between it and this file (it imported the handlers itself, by any route,
-import_module and a variable name included) or when its own source line
-names these handlers (an import that reached here through this branch's
-package __init__ chain). It is allowed when kin code asked for the import
-on its behalf - that is the modules door working.
-
-Measured 2026-04-25 and traced 2026-10-07: mock.patch on a handlers path
-imports the package from unittest/mock.py's frame, and a fence that read
-that frame as the caller refused the branch's own tests on Python 3.10. The
-fix then was 'from . import handlers' in every apps/__init__.py, which made
-this package's own parent the first frame every time, and the fence
-decorative for five months. The transport rule above is the right cure.
-
-A limit, stated: an import-time fence fires on the FIRST import of this
-package in a process. Once kin code has imported it, a later foreign import
-is served from sys.modules and no import machinery sees it. The write-time
-rule (drone @seedgo audit: handlers and encapsulation) is the wall; this
-is the door.
+Another branch reaches these handlers only through aipass.spawn.apps.modules; this refuses a foreign importer.
+Frames are kin (this branch), transport (importlib, stdlib such as unittest.mock, site-packages) or foreign.
+The first foreign frame is refused unless kin code imported on its behalf and its line does not name the handlers.
+Fires only on a process's first import; the wall is drone @seedgo audit (handlers, encapsulation).
 """
 
 import linecache
@@ -53,27 +22,18 @@ try:
     _THIS_FILE = str(Path(__file__).resolve()).replace("\\", "/")
 except OSError:
     _THIS_FILE = str(__file__).replace("\\", "/")
-# .../aipass/<branch>/apps/handlers/__init__.py: the branch is three parents up,
-# the fleet one more. Exact prefixes, never a substring: a directory that happens
-# to share a branch's name is not that branch, and an installed wheel's copy of
-# this file knows its own branch root the same way.
+# Exact prefixes, never a substring: a directory that merely shares a branch's name is not that branch.
 _BRANCH_ROOT = _THIS_FILE.rsplit("/", 3)[0] + "/"
 _FLEET_ROOT = _THIS_FILE.rsplit("/", 4)[0] + "/"
 
 
 def _frame_path(frame) -> str:
-    """The frame's file as a forward-slash absolute path, or its raw spelling.
-
-    A pseudo filename (<frozen importlib._bootstrap>, <string>, <stdin>) is
-    not a path and is never resolved: relative, it would resolve against the
-    process cwd, and with the cwd inside this branch every bootstrap frame
-    would read as kin (measured 2026-10-08, devpulse's flip).
-    Path.resolve routes through ntpath.realpath, which reads os.getcwd
-    unconditionally; a process whose cwd was deleted must not die here.
-    """
+    """The frame's file as a forward-slash absolute path, or its raw spelling."""
     raw = frame.f_code.co_filename
+    # A pseudo filename resolved against a cwd inside this branch would make every bootstrap frame kin.
     if raw.startswith("<"):
         return raw
+    # resolve() reads os.getcwd (ntpath.realpath); a process whose cwd was deleted must not die here.
     try:
         return str(Path(raw).resolve()).replace("\\", "/")
     except OSError:
@@ -81,11 +41,8 @@ def _frame_path(frame) -> str:
 
 
 def _classify(frame, path: str) -> str:
-    """'self', 'kin', 'transport' or 'foreign' - see the module docstring.
-
-    Order matters: a branch path under site-packages (the installed wheel)
-    is that branch, never transport.
-    """
+    """'self', 'kin', 'transport' or 'foreign' - see the module docstring."""
+    # Order matters: a branch path under site-packages (the installed wheel) is that branch, never transport.
     raw = frame.f_code.co_filename
     if path == _THIS_FILE or raw == __file__:
         return "self"
@@ -162,5 +119,4 @@ def _guard_branch_access() -> None:
     )
 
 
-# Run the fence at import time
 _guard_branch_access()

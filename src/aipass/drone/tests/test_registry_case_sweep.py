@@ -3,7 +3,7 @@
 # Description: A case-insensitive filesystem must not widen what counts as a registry
 # Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/router_handler.py registries_in and every *_REGISTRY.json walk under apps/."""
@@ -23,39 +23,14 @@ import aipass.drone.apps as drone_apps
 from aipass.drone.tests import conftest as drone_conftest
 
 
-# ``*_REGISTRY.json`` is a name, not a spelling the filesystem gets to choose.
-#
-# THE DEFECT. ``Path.glob`` asks the FILESYSTEM to match. On a case-insensitive
-# one — Windows, and macOS by default — ``*_REGISTRY.json`` also matches
-# ``*_registry.json``, and this repository is full of files with that ending:
-# ``drone_command_registry.json`` beside the drone package, ten
-# ``flow_json/*_registry.json`` plan counters, a ``.spawn/.template_registry.json``
-# in every branch (pathlib's ``*`` matches dotfiles, unlike the ``glob`` module).
-# Windows CI found it as a test red — ``find_registry()`` returned
-# ``D:/a/AIPass/AIPass/src/aipass/drone/drone_command_registry.json`` — and the
-# red was the smaller half of it.
-#
-# WHY IT IS NOT COSMETIC. A ``*_REGISTRY.json`` is a project's trust anchor. The
-# walks in this tree use it to answer "which installation is this caller a citizen
-# of", "what project name goes on their identity", "where is the project root the
-# delete lane may write a record into". A plan-id counter answering those is not a
-# near miss; it is a different question. And every walk in the tree carried its
-# own copy of the glob, so the fix had to land on all of them at once — the same
-# species as the dead-cwd sweep, which is why this file is shaped like that one.
-#
-# THE INSTRUMENT. A case-insensitive filesystem is not available on the Linux box
-# this was fixed on, so the fixture below supplies exactly what one returns: the
-# directory listing, matched with ``re.IGNORECASE``. That is the state, not a mock
-# of the guard — ``registries_in`` is never patched, and the pins run red against
-# the unfixed code on every OS rather than only on the runner where it happened to
-# show.
+# Path.glob lets a case-insensitive filesystem (Windows, default macOS) match *_registry.json
+# for *_REGISTRY.json, and a registry is a project's trust anchor. The fixture supplies that
+# folded listing; registries_in is never patched, so the pins red on every OS.
 
-# A name that ends with the suffix in the wrong case. Real, tracked, and sitting
-# in this branch's own directory — see TestTheDecoyIsLive.
+# Wrong-case suffix, real and tracked in this branch's directory (TestTheDecoyIsLive).
 DECOY_NAME = "drone_command_registry.json"
 
-# The naming convention itself, written here rather than read from the product,
-# so a product that changed the suffix's case is caught instead of followed.
+# Written here, not read from the product, so a product that changes the suffix case is caught.
 REGISTRY_SUFFIX = "_REGISTRY.json"
 
 
@@ -63,13 +38,8 @@ REGISTRY_SUFFIX = "_REGISTRY.json"
 def case_insensitive_filesystem(monkeypatch):
     """The filesystem's answer folds case, the way NTFS and default APFS do.
 
-    Supplied at ``_registry_candidates`` — the host's untrusted listing — so
-    the name check in ``registries_in`` above it runs unpatched, and nothing
-    else in the process sees a changed ``Path.glob``.
-
-    Real ``Path.glob`` swallows an unreadable directory; this deliberately does
-    not. A walk that cannot read a directory it passes is something a test
-    should be told about, not something an instrument should hide.
+    Patched at ``_registry_candidates`` so the name check above it runs unpatched. Unlike
+    ``Path.glob`` it does not swallow an unreadable directory: a test should hear of that.
     """
     matcher = re.compile(fnmatch.translate(f"*{REGISTRY_SUFFIX}"), re.IGNORECASE)
 
@@ -115,9 +85,7 @@ class TestTheFilterIsInPython:
     def test_the_stem_case_is_not_constrained(self, tmp_path, case_insensitive_filesystem):
         """Only the SUFFIX is the convention; mutant killed: the product's suffix constant lower-cased.
 
-        External projects name the registry after themselves and nothing
-        promises the project name is uppercase — matching on the whole filename
-        would fence out the citizens the glob was widened for in the first place.
+        External projects name the registry after themselves, in any case.
         """
         odd = tmp_path / f"vera-studio{REGISTRY_SUFFIX}"
         odd.write_text("{}", encoding="utf-8")
@@ -136,11 +104,7 @@ class TestTheFilterIsInPython:
 
 
 class TestTheDecoyIsLive:
-    """This is not a hypothetical filesystem property — the bait is checked in.
-
-    If this ever fails because the file was renamed, the filter below it is
-    still right; what changed is that the tree stopped demonstrating why.
-    """
+    """This is not a hypothetical filesystem property — the bait is checked in (a rename fails only this)."""
 
     def test_the_branch_ships_a_wrong_case_registry_name(self):
 
@@ -155,20 +119,12 @@ class TestTheDecoyIsLive:
 
 
 class TestTheWindowsRedIsReproduced:
-    """The exact CI failure, on Linux, with the filesystem property supplied.
-
-    ``test_registry_handler.py::test_the_walk_that_calls_it_reaches_it_at_all``
-    failed on Windows because with no cwd the walk starts at this package and
-    climbs — and the first directory it passes is the branch root, which holds
-    the decoy. Nothing about that depends on the operating system except whether
-    the glob matched, so nothing about the pin has to either.
-    """
+    """The exact CI failure, on Linux: with no cwd the walk first passes the branch root's decoy."""
 
     def test_find_registry_never_returns_a_wrong_case_name(self, no_cwd, case_insensitive_filesystem, monkeypatch):
         """Mutant killed (runner): registries_in's name check removed.
 
-        AIPASS_HOME is unset as on the CI runner: with it set, the home registry
-        answers before the package walk ever passes the decoy.
+        AIPASS_HOME is unset: set, the home registry answers before the walk reaches the decoy.
         """
         monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
         monkeypatch.delenv("AIPASS_HOME", raising=False)
@@ -184,13 +140,7 @@ class TestTheWindowsRedIsReproduced:
 
 
 class TestTheSweepIsComplete:
-    """One reader. The count is a test, for the same reason it is in the cwd sweep.
-
-    Every walk in this tree carried its own ``glob("*_REGISTRY.json")``: the
-    entry point, the delete lane, the deletion record, the broker, the git lock,
-    the registry resolver, and the caller-identity fallback. Fixing the one
-    Windows named would have left six.
-    """
+    """One reader: every registry walk routes through registries_in; a private glob is case-widened."""
 
     _CALL = re.compile(r"r?glob\(\s*f?[\"'][^\"']*_registry\.json", re.IGNORECASE)
 

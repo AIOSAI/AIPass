@@ -3,18 +3,10 @@
 # Description: Tests for caller auto-provisioning handler
 # Version: 1.0.0
 # Created: 2026-03-20
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/openrouter/provision.py, caller auto-provisioning."""
-
-# Tests for provision.py — caller auto-provisioning.
-#
-# Tests:
-# - create_caller_config() creates 3 JSON files with correct defaults
-# - ensure_caller_config() provisions on first call, returns existing on second
-# - Idempotency: second call doesn't overwrite existing config
-# - Config defaults match expected values
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — detect_caller_from_stack, mocked here; tests/test_caller_detection.py
@@ -37,11 +29,6 @@ from aipass.api.apps.handlers.openrouter.provision import (
     read_json,
     write_json,
 )
-
-
-# =============================================
-# create_caller_config tests
-# =============================================
 
 
 def test_create_caller_config_creates_three_files(tmp_path: Path):
@@ -108,11 +95,6 @@ def test_create_caller_config_creates_folder(tmp_path: Path):
     assert json_folder.exists()
 
 
-# =============================================
-# provision_json_folder tests
-# =============================================
-
-
 def test_provision_json_folder_creates(tmp_path: Path):
     """Should create folder when it doesn't exist."""
     folder = tmp_path / "new_folder"
@@ -132,11 +114,6 @@ def test_provision_json_folder_existing(tmp_path: Path):
     result = provision_json_folder(folder)
 
     assert result is True
-
-
-# =============================================
-# ensure_caller_config tests (mocked stack detection)
-# =============================================
 
 
 @patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")
@@ -159,11 +136,9 @@ def test_ensure_caller_config_returns_existing(mock_detect, tmp_path: Path):
     json_folder = tmp_path / "caller_json"
     mock_detect.return_value = ("test_caller", json_folder)
 
-    # First call — creates config
     first_result = ensure_caller_config("test_caller")
     assert first_result != {}
 
-    # Read the created config and modify it to detect overwrites
     config_path = json_folder / "openrouter_config.json"
     config = read_json(config_path)
     assert config is not None
@@ -171,7 +146,6 @@ def test_ensure_caller_config_returns_existing(mock_detect, tmp_path: Path):
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
-    # Second call — should return existing (modified) config, not overwrite
     second_result = ensure_caller_config("test_caller")
     assert second_result["config"]["ai_model"] == "test/modified-model"
 
@@ -180,10 +154,7 @@ def test_ensure_caller_config_returns_existing(mock_detect, tmp_path: Path):
 def test_a_config_that_cannot_be_read_is_never_regenerated_over(mock_detect, tmp_path: Path, monkeypatch):
     """A read error that is not a parse error is never answered by regenerating.
 
-    The folder is writable and the config a real file, so a regeneration would
-    succeed here; only the reader fails, through a stand-in raising the error it
-    is handed (api, fleet green leg 4). Mutants that redden it: read_json answering
-    None for every error, and the caller's catch widened to the read error.
+    The folder is writable, so a regeneration would succeed; only the reader fails.
     """
     json_folder = tmp_path / "caller_json"
     json_folder.mkdir()
@@ -209,11 +180,7 @@ def test_a_config_that_cannot_be_read_is_never_regenerated_over(mock_detect, tmp
 
 
 def test_read_json_raises_on_a_file_that_does_not_parse(tmp_path: Path):
-    """A parse error raises, never None: None is the absent file's answer only.
-
-    Green from its first run; its proof is the mutant of read_json answering None
-    for a parse error, which the caller's own tests cannot see (api, fleet green leg 4).
-    """
+    """A parse error raises, never None: None is the absent file's answer only."""
     broken = tmp_path / "broken.json"
     broken.write_text("{not json", encoding="utf-8")
 
@@ -245,11 +212,6 @@ def test_ensure_caller_config_no_folder_detected(mock_detect):
     assert result == {}
 
 
-# =============================================
-# get_default_caller_config tests
-# =============================================
-
-
 def test_get_default_caller_config_structure():
     """Default config should have expected structure."""
     config = get_default_caller_config()
@@ -259,11 +221,6 @@ def test_get_default_caller_config_structure():
     assert "config" in config
     assert isinstance(config["config"], dict)
     assert set(config["config"].keys()) == {"ai_model", "ai_temperature", "ai_max_tokens", "enabled"}
-
-
-# =============================================
-# write_json tests
-# =============================================
 
 
 def test_write_json_creates_file(tmp_path: Path):
@@ -302,9 +259,7 @@ def test_write_json_uses_indent_and_ensure_ascii(tmp_path: Path):
     write_json(target, data)
 
     raw = target.read_text(encoding="utf-8")
-    # indent=2 means keys are indented
     assert '  "name"' in raw
-    # ensure_ascii=False means unicode is preserved literally
     assert "caf\u00e9" in raw
 
 
@@ -321,7 +276,6 @@ def test_write_json_overwrites_existing(tmp_path: Path):
 
 def test_write_json_returns_false_on_error(tmp_path: Path):
     """write_json returns False when writing fails."""
-    # Use a path where the parent is a file, not a directory
     blocker = tmp_path / "blocker"
     blocker.write_text("not a dir", encoding="utf-8")
     target = blocker / "sub" / "data.json"
@@ -329,11 +283,6 @@ def test_write_json_returns_false_on_error(tmp_path: Path):
     result = write_json(target, {"key": "value"})
 
     assert result is False
-
-
-# =============================================
-# get_default_caller_data tests
-# =============================================
 
 
 def test_get_default_caller_data_structure():
@@ -353,13 +302,7 @@ def test_get_default_caller_data_structure():
 
 
 def test_get_default_caller_data_timestamp_is_iso():
-    """
-    The stamp parses AND is the moment it was made.
-
-    "Should not raise" is not an oracle: fromisoformat's return value was
-    thrown away, so the test proved the string was parseable and nothing
-    about whether it was a real timestamp. A hardcoded 1970 stamp passed it.
-    """
+    """The stamp parses AND is the moment it was made."""
     from datetime import datetime
 
     before = datetime.now()
@@ -369,11 +312,6 @@ def test_get_default_caller_data_timestamp_is_iso():
     stamped = datetime.fromisoformat(data["timestamp"])
 
     assert before <= stamped <= after, f"the stamp is not the moment it was made: {stamped}"
-
-
-# =============================================
-# get_default_caller_log tests
-# =============================================
 
 
 def test_get_default_caller_log_structure():
@@ -387,13 +325,7 @@ def test_get_default_caller_log_structure():
 
 
 def test_get_default_caller_log_timestamp_is_iso():
-    """
-    The log's stamp parses AND is the moment it was made.
-
-    Same shape as the caller-data stamp above and the same hole: the parsed
-    value was discarded, so nothing here could tell a live stamp from a
-    constant.
-    """
+    """The log's stamp parses AND is the moment it was made."""
     from datetime import datetime
 
     before = datetime.now()

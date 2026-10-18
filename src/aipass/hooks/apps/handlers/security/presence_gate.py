@@ -5,43 +5,14 @@
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-29
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Single-session gate — blocks duplicate Claude runtimes per branch.
 
-Failure mode: OPEN, by decision (DPLAN-0356) — a broken presence gate would refuse every prompt in every
+Failure mode: OPEN, by decision — a broken presence gate would refuse every prompt in every
 seat, the owner's included, and the prompt it refuses is the one that would fix it.
-
-Sources truth from CC-native ~/.claude/sessions/<pid>.json (resume-aware,
-exit-aware) instead of PRESENCE.central.json. Resume-aware because /resume
-keeps the same PID; exit-aware because CC deletes the file on clean exit.
-
-Fires on UserPromptSubmit: checks CC sessions for another live brain in the
-same branch. If occupied by a different PID, blocks. If free, allows.
-
-handle_stop is a no-op (Stop fires every turn, not just session end; CC-native
-session files handle cleanup on exit).
-
-Skips true sub-agents (Explore/general-purpose/Plan/etc.) and
-dispatched/daemon session types.
-
-ENFORCING since 2026-08-18 (the owner: "flip it"). Ruling (a) rides with the
-flip: one brain means one INTERACTIVE brain, so a background occupant never
-gates — it is a job, not a seat, and there is no per-job bg stop in the CLI, so
-blocking on one would be unsatisfiable. _OBSERVE_ONLY remains as the switch
-back; when True the gate logs its would-blocks and allows.
-
-Exactly one of two competing seats is refused: the incumbent (older start)
-passes and the newer seat is told who holds the branch. Without that tiebreak
-each seat sees the other and enforcement refuses BOTH, which bricks the branch
-— the blocked prompt is the very thing that would run the remedy.
-
-Occupant PID claims are identity-checked, not just liveness-checked:
-cc_sessions.find_live_for_cwd() cross-verifies each session's recorded
-procStart against the live process's actual start time before treating
-a PID as a genuine occupant, so a PID recycled after the original
-session died can never satisfy a stale claim.
+One brain means one INTERACTIVE brain: a bg occupant never gates, and of two seats the newer is refused.
 """
 
 import importlib
@@ -54,8 +25,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 _ALLOW = {"exit_code": 0, "stdout": ""}
 _NON_BLOCKING_SESSION_TYPES = frozenset({"dispatched", "daemon"})
 
-# Flipped 2026-08-18 on the owner's ruling (DPLAN-0310, "flip it"): enforcement ON.
-# Ruling (a) rides with it below — one brain means one INTERACTIVE brain.
+# True logs would-blocks and allows: the switch back from enforcement.
 _OBSERVE_ONLY = False
 
 _SUB_AGENT_TYPES = frozenset(
@@ -109,9 +79,7 @@ def _format_session_age(session: dict) -> str:
 def _session_start(session: dict) -> float | None:
     """Epoch seconds this session began, or None when it cannot be told.
 
-    CC writes startedAt as epoch milliseconds; older files carry an ISO string.
-    A session whose start cannot be read is not guessed at — the caller treats
-    an unknown start as "cannot rank", never as "younger".
+    An unreadable start means "cannot rank", never "younger".
     """
     started = session.get("startedAt") or session.get("started", "")
     if not started:
@@ -130,13 +98,7 @@ def _session_start(session: dict) -> float | None:
 def _we_are_the_incumbent(ours: dict | None, occupant: dict) -> bool:
     """True when OUR session predates the occupant — so we are not the intruder.
 
-    Without this, two live seats on one branch each see the OTHER as occupant
-    (verified: find_occupant returns the first non-self match, and nothing
-    breaks the tie), so enforcement refuses BOTH and the branch is bricked with
-    no in-band recovery — the blocked prompt is the very thing that would run
-    the remedy. Ranking by start time makes the refusal land on exactly one
-    side: the seat that arrived second. Unknown start ranks nobody, so an
-    unreadable clock can never silently promote us to incumbent.
+    Without the tiebreak both seats refuse each other and brick the branch; an unknown start ranks nobody.
     """
     if not ours:
         return False
@@ -148,13 +110,7 @@ def _we_are_the_incumbent(ours: dict | None, occupant: dict) -> bool:
 
 
 def _describe_arriver(session: dict | None, pid: int | None) -> str:
-    """Name the session the gate is judging — the half the soak log was missing.
-
-    496 would-blocks were recorded over five weeks and every line named only the
-    occupant, so "was this a real second brain or our own tooling?" could not be
-    answered from the evidence at all. A gate that observes must record BOTH
-    sides or the soak cannot rule on itself.
-    """
+    """Name the session the gate is judging — the half the soak log was missing."""
     if not session:
         return f"PID {pid}" if pid else "unknown arriver"
     age = _format_session_age(session)
@@ -168,12 +124,7 @@ def _describe_arriver(session: dict | None, pid: int | None) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """UserPromptSubmit gate — enforce one live session per branch.
-
-    Sources truth from CC-native ~/.claude/sessions/<pid>.json.
-    Resume-aware: /resume keeps the same PID, so exclude_pid correctly
-    identifies re-entry. Exit-aware: CC deletes the file on clean exit.
-    """
+    """UserPromptSubmit gate — enforce one live session per branch."""
     try:
         agent_type = hook_data.get("agent_type", "")
         if agent_type in _SUB_AGENT_TYPES:
@@ -193,12 +144,8 @@ def handle(hook_data: dict) -> dict:
         if occupant is None:
             return _ALLOW
 
-        # Ruling (a), DPLAN-0310 (the owner, 2026-08-18): one brain = one INTERACTIVE
-        # brain. A bg session is a job, not a seat — it never gates, because there is
-        # no per-job bg stop in the CLI and an unsatisfiable block only teaches
-        # routing around the gate. Known seam (owner to close): find_occupant returns
-        # the FIRST non-self match, so a bg occupant here can shadow a second
-        # interactive occupant behind it.
+        # A bg session is a job, not a seat: there is no per-job bg stop, so a block would be unsatisfiable.
+        # Known seam: find_occupant returns the FIRST non-self match, so a bg occupant can shadow an interactive one.
         if occupant.get("kind") in ("bg", "background"):
             logger.info(
                 "[presence_gate] %s: occupant PID %s is bg — a job, not a seat (ruling a, DPLAN-0310)",
@@ -223,8 +170,6 @@ def handle(hook_data: dict) -> dict:
         age = _format_session_age(occupant)
         age_str = f" · {age} old" if age else ""
 
-        # bg occupants were skipped above (ruling a) — every occupant that reaches
-        # here is a stoppable, attachable seat, so the remedy is always satisfiable.
         remedy = f"  Attach to that session, or run: drone @hooks sessions reclaim @{branch}"
 
         arriver = _describe_arriver(ours, our_pid)
@@ -236,13 +181,7 @@ def handle(hook_data: dict) -> dict:
         )
 
         if _OBSERVE_ONLY:
-            # INFO, and no sound: observe-only is the gate DECLINING to act, which is
-            # chosen behavior, not something going wrong — the same call banked in
-            # compass #277. Measured before reclassing: 26 would-blocks over 3.6h, all
-            # naming ONE occupant PID, so the WARNING was 26 alarms for one situation.
-            # INFO is retained on disk (verified in S155), so the evidence survives;
-            # it just stops escalating. The sound was worse than the log line — audio
-            # for a decision the gate is not making.
+            # INFO, no sound: observe-only is the gate declining to act, chosen behavior, not a fault.
             logger.info("[presence_gate] OBSERVE-ONLY would-block: %s | arriver: %s", reason, arriver)
             return _ALLOW
 

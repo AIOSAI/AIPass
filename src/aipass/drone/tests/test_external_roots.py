@@ -3,7 +3,7 @@
 # Description: Declared roots are the third resolution source
 # Version: 1.0.4
 # Created: 2026-08-30
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
@@ -25,24 +25,8 @@ from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set
 from aipass.drone.apps.modules.resolver import BranchNotFoundError, resolve_branch
 
 
-# Citizens in declared roots resolve, and never at a local citizen's expense.
-#
-# FPLAN-0460 phase 3. @memory owns AIPASS_ROOTS.json and is its ONLY reader; this
-# branch consumes the records their gateway returns and decides precedence.
-#
-# Two rulings from @devpulse are pinned here rather than described:
-#
-#   DECLARATION IS THE CREDENTIAL — an external registry can never satisfy the
-#   metadata.id check, because the ids differ by construction. The gate asks an
-#   intra-installation question and a cross-repo answer is not available to it.
-#
-#   PRECEDENCE — AIPass local always wins; declaration order breaks ties among
-#   externals; collisions are logged on both sides rather than resolved quietly.
-
-
-# ---------------------------------------------------------------------------
-# Fixtures — stand-in roots, never a write into a sibling repo
-# ---------------------------------------------------------------------------
+# @memory alone reads AIPASS_ROOTS.json. Declaration is the credential: an external metadata.id never matches.
+# Precedence: AIPass local always wins, declaration order breaks external ties, collisions log both sides.
 
 
 def _make_root(base: Path, repo: str, branches: list[tuple[str, str]]) -> Path:
@@ -66,22 +50,8 @@ def _make_root(base: Path, repo: str, branches: list[tuple[str, str]]) -> Path:
 def local_world(tmp_path, monkeypatch):
     """A complete stand-in AIPass installation — registry, citizens, passport.
 
-    CI has no ``AIPASS_REGISTRY.json``. It is gitignored and machine-local, so a
-    clean checkout has neither it nor ``AIPASS_ROOTS.json``. Four tests below
-    used the REAL machine's registry as their "local wins" baseline: green on
-    every developer box, red on every bare runner, with the failure reading
-    ``primary registry unavailable`` rather than anything about precedence.
-
-    The hermeticity pass that preceded this one pinned both states of the ROOTS
-    file and assumed the REGISTRY existed. Half a world is not a world. What
-    these tests pin is precedence BETWEEN sources, which is a rule about the
-    resolver and not a fact about this machine — so the local source is now
-    built rather than borrowed.
-
-    The world is self-consistent on purpose: ``metadata.id`` matches the
-    passport ``registry_id`` and ``caller_cwd`` points inside it, so the
-    credential gate passes on MERIT. A stand-in that simply omitted the id would
-    pass by being unverifiable, which is a different reason with the same colour.
+    CI has no ``AIPASS_REGISTRY.json`` (gitignored), so the world is built; its ``metadata.id`` matches
+    the passport ``registry_id`` and ``caller_cwd`` is inside it, so the credential gate passes on merit.
     """
     world = tmp_path / "StandInAIPass"
     registry_id = "standin-registry-id"
@@ -136,26 +106,11 @@ def standin(tmp_path):
     return home
 
 
-# ---------------------------------------------------------------------------
-# The unblessed file — today's behaviour, pinned
-# ---------------------------------------------------------------------------
-
-
 class TestTheStandInWorldIsSealed:
     """The fixture's isolation is a test, not a hope.
 
-    ``local_world`` unsets AIPASS_HOME because that is the SECOND resolution
-    source and a stand-in world that still answers through the real machine is
-    not a stand-in. Every other test here hits the primary registry first, so
-    dropping the ``delenv`` changed no result anywhere and the guard survived
-    mutation — an isolation nobody can observe is an isolation that quietly
-    stops working.
-
-    Observable now: a citizen of the REAL installation, absent from the
-    stand-in, must not resolve inside it. On a bare runner AIPASS_HOME is unset
-    and this passes for the trivial reason; on a developer machine it passes
-    only because the fixture sealed the world. Both are correct answers to the
-    same question, which is what makes it safe to run in both.
+    ``local_world`` unsets AIPASS_HOME (the second source); a real citizen absent from the
+    stand-in must not resolve inside it, or the seal stops working unobserved.
     """
 
     def test_a_real_citizen_absent_from_the_stand_in_does_not_resolve(self, local_world):
@@ -166,12 +121,7 @@ class TestTheStandInWorldIsSealed:
 class TestNothingMovesUntilTheOwnerBlesses:
     """The tier is driven by the declared file and by nothing else.
 
-    This class first pinned "declared_roots() is empty on this machine", which
-    was true for about twenty minutes. AIPASS_ROOTS.json was blessed mid-build
-    and the pin went red — correctly, because it asserted a machine STATE rather
-    than a rule. A test that a file has not been created yet expires the moment
-    someone creates it. What is durable is that a project with no declared roots
-    resolves exactly as it did before the tier existed.
+    A rule, not a machine state: a project with no declared roots resolves as if the tier did not exist.
     """
 
     def test_a_project_with_no_declared_roots_sees_no_externals(self, local_world):
@@ -196,11 +146,6 @@ class TestNothingMovesUntilTheOwnerBlesses:
     def test_an_unknown_name_is_still_not_found(self, local_world):
         with patch.object(fleet, "external_branches", return_value=[]):
             assert registry_handler.get_branch_by_name("nosuchbranch") is None
-
-
-# ---------------------------------------------------------------------------
-# The third source
-# ---------------------------------------------------------------------------
 
 
 class TestDeclaredRootsResolve:
@@ -243,21 +188,12 @@ class TestDeclaredRootsResolve:
         assert {"alpha_agent", "beta_agent"} <= names
 
 
-# ---------------------------------------------------------------------------
-# Precedence — @devpulse's ruling
-# ---------------------------------------------------------------------------
-
-
-# A path these records merely CARRY — never resolved, never touched. Named once
-# so the four malformed cases below say "the path is not what is wrong here".
+# A path the malformed records below merely carry: never resolved, never what is wrong.
 _SOME_PATH = Path(tempfile.gettempdir()) / "x" / "src" / "a"
 
 
 def _external(name: str, root: str) -> dict:
-    # tempfile.gettempdir() rather than a "/tmp" literal: Windows CI runs this
-    # suite and has no /tmp. The path is never touched on disk — only matched by
-    # substring — so the literal broke nothing, which is exactly why it survived
-    # two sessions in a file that has been red on Windows the whole time.
+    # tempfile.gettempdir(), not a "/tmp" literal: Windows CI runs this suite and has no /tmp.
     return {
         "name": name,
         "path": Path(tempfile.gettempdir()) / root / "src" / name,
@@ -265,31 +201,12 @@ def _external(name: str, root: str) -> dict:
         "email": f"@{name}",
         "residency": fleet.RESIDENCY_EXTERNAL,
     }
-    # Five keys, matching registry_scope 4.0.0 exactly. `scheduler` was here
-    # until @memory dropped it: it reported ONE filename while @daemon reads
-    # .daemon/*.json, so a consumer pre-filtering on it would silently lose
-    # every job in a differently-named file. A stand-in more generous than the
-    # real reader is how a guard stops being observable — the same species as
-    # the name_from mutant that survived because this fixture once gave a
-    # directory and its registry row the same name.
+    # Exactly registry_scope's keys: a stand-in more generous than the real reader hides guards.
 
 
 class TestPrecedence:
     def test_aipass_local_always_wins(self, local_world):
-        """An external named 'memory' must never shadow the local @memory.
-
-        Stated as "the impostor changes nothing", not as "the answer lives under
-        this file's tree". The first cut asked the second question and it failed
-        the moment the suite ran anywhere but here: @seedgo's hygiene gate runs
-        it from an rsync'd copy in /tmp, where resolution answers correctly
-        through AIPASS_HOME with a path in the REAL tree and the proxy assertion
-        called that a loss. The impostor never won in either run — only the
-        yardstick moved.
-
-        With a built world the yardstick is nailed down, so the stronger
-        assertion is available again and made: the answer is the stand-in's own
-        citizen, by path.
-        """
+        """An external named 'memory' must never shadow the local @memory."""
         with patch.object(fleet, "external_branches", return_value=[]):
             undisturbed = registry_handler.get_branch_by_name("memory")
 
@@ -321,11 +238,6 @@ class TestPrecedence:
         assert any("memory" in str(c) for c in collisions)
 
 
-# ---------------------------------------------------------------------------
-# The gateway is another branch's code — it must not take routing down
-# ---------------------------------------------------------------------------
-
-
 class TestGatewayFailureIsContained:
     def test_local_resolution_survives_a_broken_gateway(self, local_world):
         with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
@@ -341,9 +253,7 @@ class TestGatewayFailureIsContained:
     def test_a_lost_tier_answers_none_and_an_empty_fleet_answers_empty(self, local_world):
         """A lost tier and a fleet with no externals are two answers, not one.
 
-        Both used to answer []: a caller could not tell "the gateway failed"
-        from "nothing is declared". Mutant killed (runner): the gateway
-        failure's None put back to [].
+        Mutant killed (runner): the gateway failure's None put back to [].
         """
         with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
             lost = registry_handler.external_branches()
@@ -364,25 +274,17 @@ class TestGatewayFailureIsContained:
     def test_a_lost_tier_still_refuses_an_unknown_name_through_resolve_branch(self, local_world):
         """resolve_branch's lookup reads the lost tier as no externals, never as a crash.
 
-        Mutant killed (runner): _external_branches handing the lost tier's
-        None straight to get_branch_with_registry's loop.
+        Mutant killed (runner): the lost tier's None handed straight to get_branch_with_registry's loop.
         """
         with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
             with pytest.raises(BranchNotFoundError, match="not found in registry"):
                 resolve_branch("@nosuchbranch")
 
 
-# ---------------------------------------------------------------------------
-# The gateway's shape is another branch's contract — it can move
-# ---------------------------------------------------------------------------
-
-
 class TestMalformedRecordsAreSkippedNotTrusted:
     """A record missing what resolution needs is refused BY NAME, never routed.
 
-    @memory's record grew from three keys to six today. If it moves again, a
-    row this branch cannot key on must drop out with a line saying so — routing
-    a citizen whose path is None is a crash somewhere further from the cause.
+    The record shape is @memory's contract and can move; a citizen routed with path None crashes far away.
     """
 
     @pytest.mark.parametrize(
@@ -420,21 +322,12 @@ class TestMalformedRecordsAreSkippedNotTrusted:
         assert names == {"drone", "memory", "keeper"}
 
 
-# ---------------------------------------------------------------------------
-# The whole chain, not just the lookup
-# ---------------------------------------------------------------------------
-
-
 class TestResolutionEndToEnd:
     def test_an_external_citizen_resolves_all_the_way_through_resolve_branch(self, standin):
         """resolve_branch is the door every routed command comes through.
 
-        The link worth pinning is the LAST one: _validate_branch_path refuses a
-        branch path that escapes its project root, and an external citizen's
-        path escapes OURS by definition. It passes because the root it is
-        checked against is the external registry's own parent, not AIPass —
-        which is only true because get_branch_with_registry hands back the
-        sealed registry the entry was read from.
+        _validate_branch_path refuses a path escaping its project root; an external passes only because
+        get_branch_with_registry hands back the sealed registry the entry was read from.
         """
         with patch.object(
             fleet,
@@ -443,9 +336,7 @@ class TestResolutionEndToEnd:
         ):
             resolved = resolve_branch("@alpha_agent")
 
-        # Path parts, not a string suffix — Windows CI runs this suite and its
-        # separator is not "/". This pin predates tonight and would have red
-        # there whatever the resolver did.
+        # Path parts, not a string suffix: Windows CI's separator is not "/".
         assert Path(resolved).parts[-4:] == ("alpha", "src", "alpha", "worker"), resolved
 
     def test_an_undeclared_repo_is_still_refused(self, standin):
@@ -459,22 +350,10 @@ class TestResolutionEndToEnd:
 
 
 class TestTheTierIsScopedToTheProjectBeingResolved:
-    """The real machine's declared roots must not leak into another project.
-
-    This is the regression that got through: the tier read THIS checkout's
-    AIPASS_ROOTS.json no matter which registry the caller had pointed at, so the
-    moment the file was blessed, eight enumeration tests across two files began
-    seeing six real external citizens. The suite already isolated the AIPASS_HOME
-    source with a fixture that unsets its env var — a third source with no
-    equivalent scope is a third source nobody can test around.
-    """
+    """The real machine's declared roots must not leak into another project."""
 
     def test_enumeration_scopes_the_tier_to_the_registry_it_was_handed(self, standin, monkeypatch):
-        """get_all_branches must read the roots beside ITS registry, not the process cwd.
-
-        Pointed at a stand-in home, enumeration returns that home's two declared
-        citizens and none of this machine's — the leak, stated as an assertion.
-        """
+        """get_all_branches must read the roots beside ITS registry, not the process cwd."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)  # the SECOND source, isolated the way the suite already does
         registry = standin / "AIPASS_REGISTRY.json"
         registry.write_text(
@@ -518,15 +397,8 @@ class TestTheTierIsScopedToTheProjectBeingResolved:
 class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
     """A MISS in the AIPASS_HOME registry must not end the search.
 
-    Found by running the suite from a machine whose AIPass home is not the
-    project registry — the state @devpulse asked me to prove green. Two pins in
-    this file went red there and neither was about the roots file: on that
-    layout ``home_path != primary_path``, and ``get_branch_by_name`` RETURNED
-    the home registry's lookup whether or not it found anything, so the external
-    tier below it was unreachable. Its sibling ``get_branch_with_registry``
-    guards the same lookup with ``if branch is not None`` and falls through.
-    Two functions answering the same question two ways is the defect; the
-    external tier just made it observable.
+    When ``home_path != primary_path``, ``get_branch_by_name`` must fall through on a home miss as
+    ``get_branch_with_registry`` does (``if branch is not None``), or the external tier is unreachable.
     """
 
     def test_a_home_registry_miss_still_reaches_a_declared_root(self, tmp_path, monkeypatch):
@@ -561,14 +433,7 @@ class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
 
 
 class TestTheStandInMatchesTheRealReader:
-    """The fixture's shape is pinned to @memory's reader, not to my memory of it.
-
-    The record moved twice in one day — three keys to six, then six to five —
-    and both times I learned about it by mail. A stand-in that describes a shape
-    the reader no longer produces is how a guard stops being observable, so the
-    comparison is a test now: @memory's REAL reader runs against a stand-in root
-    here, and its keys must be exactly the keys ``_external`` builds.
-    """
+    """The fixture's shape is pinned to @memory's reader, not to my memory of it."""
 
     def test_the_helper_builds_exactly_the_keys_the_gateway_returns(self, standin):
         produced = registry_scope.external_branches(standin)
@@ -582,24 +447,9 @@ class TestTheStandInMatchesTheRealReader:
 class TestTheGatewaysImportCannotTakeDroneDown:
     """Containment must hold at IMPORT, not only at the call.
 
-    ``TestGatewayFailureIsContained`` pinned a gateway that RAISES when called.
-    The import itself was not pinned, and it was the unguarded half:
-    ``registry_handler`` carried ``from aipass.memory.apps.modules import fleet``
-    at module level, so anything raising inside @memory's import chain killed
-    every import of drone — the router, ``drone rm``, ``drone systems``, all of
-    it — before a single guard in this branch could run.
-
-    Not hypothetical, and it is the CI red this class was written for.
-    @memory's ``registry_scope.py`` runs ``REPO_ROOT = find_repo_root()`` at
-    module level, and ``find_repo_root`` falls back to ``Path.cwd()`` when the
-    walk up from ``__file__`` finds no ``AIPASS_REGISTRY.json``. A clean
-    checkout has no registry (it is gitignored and machine-local), so a bare
-    runner takes that fallback — and a process whose directory was deleted
-    raises ENOENT there. Reported to @memory as theirs to fix; contained here
-    because a consumer that dies with its dependency has no containment at all.
-
-    The finder is a real import failure, not a mock: nothing this branch can
-    patch reproduces a module that will not import.
+    Anything raising in @memory's import chain must not kill drone's import: on a bare runner,
+    registry_scope's module-level find_repo_root falls back to Path.cwd(), ENOENT in a deleted cwd.
+    The finder is a real import failure: no patch reproduces a module that will not import.
     """
 
     def test_drone_imports_when_the_gateway_module_cannot_be_imported(self):
@@ -630,8 +480,7 @@ class TestTheGatewaysImportCannotTakeDroneDown:
     def test_a_gateway_that_will_not_import_is_contained_and_loud(self, local_world):
         """The tier is lost, resolution is not; mutant killed: the lost-tier error line removed.
 
-        The refusal is supplied at registry_handler's one import door for the
-        gateway, not by replacing ``builtins.__import__`` for the whole process.
+        Refused at registry_handler's one import door, not by replacing ``builtins.__import__``.
         Mutant killed (runner): the gateway imported inline, past the door.
         """
 

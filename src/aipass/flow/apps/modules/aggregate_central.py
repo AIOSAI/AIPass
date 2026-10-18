@@ -3,7 +3,7 @@
 # Description: Aggregate Central Plans Module
 # Version: 1.4.0
 # Created: 2025-11-30
-# Modified: 2026-08-16
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -42,7 +42,6 @@ if sys.platform == "win32":
 from pathlib import Path
 from typing import List
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
 
 _PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
@@ -51,36 +50,21 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 from aipass.cli.apps.modules import console, error
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# JSON handler for operation tracking
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_unknown
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-# Implementation handler
 from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_all_branch_dashboards
 from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "aggregate_central"
 
-# Everything `aggregate` reads. Named once so the refusal, the help
-# text and the parsing cannot drift apart.
+# One list so the refusal and the parsing cannot drift apart.
 AGGREGATE_FLAGS = ("--heal", "--no-heal", "--sweep-cards")
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="aggregate_central")
 
 
@@ -89,32 +73,13 @@ AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
 CENTRAL_FILE = AI_CENTRAL_DIR / "PLANS.central.json"
 
 
-# =============================================
-# MAIN AGGREGATION FUNCTION (thin orchestrator)
-# =============================================
-
-
 def aggregate_central(heal: bool = True) -> bool:
-    """Aggregate and validate central plans (thin orchestrator)
-
-    Delegates all business logic to aggregate_ops handler.
-
-    Args:
-        heal: If True, auto-close plans with missing files in their registries
-
-    Returns:
-        True on success, False on failure
-    """
+    """Aggregate and validate central plans (thin orchestrator)"""
     return aggregate_central_impl(
         heal=heal,
         central_file=CENTRAL_FILE,
         central_dir=AI_CENTRAL_DIR,
     )
-
-
-# =============================================
-# DISPLAY FUNCTIONS
-# =============================================
 
 
 def print_introspection():
@@ -159,21 +124,8 @@ def print_help():
     console.print()
 
 
-# =============================================
-# COMMAND INTERFACE
-# =============================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle module commands
-
-    Args:
-        command: Command name ('aggregate' or 'aggregate_central')
-        args: Additional arguments (e.g., ['--heal'])
-
-    Returns:
-        True if command handled successfully
-    """
+    """Handle module commands"""
     if command != "aggregate":
         return False
 
@@ -181,15 +133,11 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag ANYWHERE in the sequence
     if wants_help(args):
         print_help()
         return True
 
-    # Every token this verb reads. Anything else is refused BY NAME rather than
-    # ignored: measured 2026-09-07, `aggregate <typo>` ran the real
-    # cross-branch write and reported success, so a mistyped flag looked like
-    # the aggregation the caller asked for (ruling 2026-09-07).
+    # Refused by name: an ignored typo would run the real cross-branch write and report success.
     unknown = [token for token in args if token not in AGGREGATE_FLAGS]
     if unknown:
         try:
@@ -198,10 +146,8 @@ def handle_command(command: str, args: List[str]) -> bool:
             error(exc.message, suggestion=exc.usage)
             raise SystemExit(1) from exc
 
-    # Log the operation
     json_handler.log_operation("central_aggregated", {"command": command, "args": args})
 
-    # Check for --heal flag (default is True)
     heal = True
     if "--no-heal" in args:
         heal = False
@@ -213,8 +159,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.error("[aggregate_central] Central plans aggregation failed")
         error("Central plans aggregation failed")
 
-    # Branch cards are written on plan events, so a quiet branch keeps whatever
-    # shape it last received. --sweep-cards re-pushes every one of them.
     if "--sweep-cards" in args:
         counts = push_flow_to_all_branch_dashboards()
         console.print(
@@ -226,14 +170,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     return result
 
 
-# =============================================
-# MAIN ENTRY POINT
-# =============================================
-
-
 def main():
     """Main entry point for standalone execution"""
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)

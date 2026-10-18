@@ -4,14 +4,16 @@
 
 **Branch** hooks · **Code** `apps/handlers/security/testwrite_gate.py`, `apps/modules/testgate_policy.py`, `apps/modules/testwrite_targets.py`
 
+The gate that refuses agent-created test files: its policy file, why it fails closed, what it misses,
+and the template pointer line it carries.
+
 ---
 
-## The test-write gate — agents do not create tests right now
+## The test-write gate — agents do not create tests
 
-The owner ruled on 2026-09-01 (@devpulse `DPLAN-0323`) that agents are stripped of self-directed test
-creation while @seedgo's `test_quality` v5 pack lands: the corpus being culled — tests written to
-satisfy a checker rather than to pin a defect — regrows faster than a standards pack can cull it.
-`security/testwrite_gate.py` is what stops the regrowth while the cull runs.
+Agents do not create tests on their own initiative: tests written to satisfy a checker rather than to
+pin a defect regrow faster than @seedgo's `test_quality` pack can cull them.
+`security/testwrite_gate.py` is what stops the regrowth.
 
 **Blocked:** *creation* of a pytest-collectable file (`test_*.py`, `*_test.py`, `conftest.py`) inside
 a `tests/` tree, on **both** lanes — Edit/Write/MultiEdit/NotebookEdit and Bash (via the same
@@ -52,11 +54,10 @@ policy file. A crash inside the gate refuses the write it was checking (`GATE_CR
 engine refuses on import error and timeout: the gate fails closed like every gate in
 `handlers/config/gates.FAIL_CLOSED` (see [engine.md](engine.md)).
 
-**Naming a path is not writing it (1.2.0, 2026-09-19).** `bash_writes` reports every path an
+**Naming a path is not writing it.** `bash_writes` reports every path an
 interpreter is handed, which is the right breadth for `edit_gate`'s fence and the wrong breadth for
-this gate's narrower question. Three seats were refused for commands that created nothing — @seedgo
-for a one-liner that PRINTED a test path while measuring the fleet, @canary for a path literal in a
-heredoc, this branch for both (devpulse DPLAN-0352). The reader now looks at the interpreter's OWN
+this gate's narrower question: a one-liner that prints a test path, or a path literal in a heredoc,
+creates nothing. The reader looks at the interpreter's OWN
 text for a write verb, **in the grammar that text is written in** — `>` is a redirection in a shell
 and a comparison in python — and appends `NO_WRITE_VERB` to the reason when it finds none. This gate
 reads that marker and stands down; `edit_gate` ignores it and keeps the full breadth, because a path
@@ -83,9 +84,10 @@ printed by `drone @hooks testwrite`, so this list and the code cannot drift apar
 
 **New projects inherit it.** `.aipass/project_hooks.json` — the template `aipass init` stamps —
 carries the `testwrite_gate` entry, so the ruling is fleet-wide rather than AIPass-tree-wide.
-`init` does **not** yet stamp a `test_write_policy.json`, so a freshly-created project lands on the
-fail-closed missing-policy path; that refusal names the owner's ruling and the one-file opt-in, and
-`TestTheProjectTemplateCarriesTheTestWriteGate` in `tests/test_live_config_timeouts.py` pins the
+The scaffold (`aipass init <target>`) does **not** stamp a `test_write_policy.json`, so a project
+created that way lands on the fail-closed missing-policy path; the guided `aipass init` setup stamps a
+default policy (create-only, never over an existing file) in its first stage. The missing-policy
+refusal names the owner's ruling and the one-file opt-in, and `TestTheProjectTemplateCarriesTheTestWriteGate` in `tests/test_live_config_timeouts.py` pins the
 template entry against silent drift. Stamping a default policy is @aipass's call, not this branch's.
 
 `registry_gate` is deliberately **not** in that template. It matches on filename shape alone
@@ -93,11 +95,11 @@ template entry against silent drift. Stamping a default policy is @aipass's call
 correct inside AIPass, wrong advice for an unrelated project that happens to own its own
 `FOO_REGISTRY.json`. That needs its own measurement, not a ride-along.
 
-## The template pointer — one line, PostToolUse (1.3.0, 2026-09-21)
+## The template pointer — one line, PostToolUse
 
 @seedgo houses the fleet's test template (`src/aipass/seedgo/templates/`) and distributes it as a page
-in each branch's own `tests/TEST_TEMPLATE.md`, beside a receipt `tests/.template_version.json`. Their
-contract, this branch's hook (DPLAN-0354, devpulse c3ab29d2): on a PostToolUse touching `tests/**`,
+in each branch's own `tests/TEST_TEMPLATE.md`, beside a receipt `tests/.template_version.json`. The
+contract this branch's hook keeps: on a PostToolUse touching `tests/**`,
 inject exactly one line — `Test template v1: <branch>/tests/TEST_TEMPLATE.md - then drone @seedgo
 checklist <file>`, both paths rendered project-relative.
 
@@ -122,8 +124,8 @@ event. A defect in the pointer costs the line and nothing else: it runs after th
 courtesy, never a wall.
 
 **Wiring:** it needs its own PostToolUse entry in the project's `.aipass/hooks.json`, a project-level
-file and therefore @devpulse's to apply (owner's ruling, 2026-09-18). Until that entry lands the
-handler is built, tested and dark.
+file and therefore @devpulse's to apply. That file carries no such entry, so the handler is built,
+tested and not wired.
 
 ---
 

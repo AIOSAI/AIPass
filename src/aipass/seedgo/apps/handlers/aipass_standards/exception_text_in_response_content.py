@@ -3,25 +3,16 @@
 # Description: Exception Text In Response Standards Content Handler
 # Version: 1.0.0
 # Created: 2026-10-10
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Exception Text In Response Standards Content Handler
-
-Provides formatted Exception Text In Response standards content.
-Module orchestrates, handler implements.
-"""
+"""Exception Text In Response Standards Content Handler"""
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_exception_text_in_response_standards() -> str:
-    """Return formatted exception_text_in_response standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted exception_text_in_response standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  An exception's text is written for the operator: paths, module names, argv, state.",

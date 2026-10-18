@@ -3,108 +3,13 @@
 # Description: Tests for the roots roster and the widened name fence
 # Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence and the /v1/roots route."""
 
-# Tests for the four-kind name fence and /v1/roots (FPLAN-0443 Phase 1).
-#
-# The owner, 2026-08-18: "rn I can only see into agent files... I cant explore
-# home. or project files outside agents."
-#
-# THE FENCE IS NOT DELETED HERE, IT LEARNS MORE WORDS. The client still sends a
-# NAME and the server still decides what it means; what changed is that there are
-# now four kinds of name instead of one. So every test below that proves a root
-# resolves is paired with one proving the containment underneath still refuses —
-# a wider fence that stopped fencing would be the whole point thrown away.
-#
-# THE EXPOSURE IS ON THE RECORD, not smuggled: with a `home` root and the owner's
-# FULLY OPEN ruling (FPLAN-0443 Notes, his standing S247 line), a read-scope token
-# reads ~/.ssh and friends from the phone. The fixture below builds a `.ssh` and
-# the tests read through it deliberately, because a test suite that quietly
-# avoided the case would leave the ruling undocumented in the one place that runs.
-#
-# Tests — resolve_root, the four kinds:
-# - branch kind answers exactly what resolve_branch_root answers
-# - branch kind with no name is refused (the existing sentence, unchanged)
-# - home kind resolves to the home directory
-# - aipass kind resolves to the seat's own repository root
-# - project kind resolves through @baud's census, never a composed path
-# - project kind matches the census spelling exactly, refusing a near miss
-# - an unknown kind is refused and the sentence names the four
-# - an EMPTY kind is refused here — the branch default lives in the read lane
-# - project kind with no name is refused
-# - census failure is ReadUnavailable in @baud's own words
-# - unknown project name is ReadRefused, not a 503
-# - a census row pointing nowhere is ReadUnavailable
-# - a census row naming no path is ReadUnavailable, never the server's cwd
-# - a registry row naming no path is ReadUnavailable, never the server's cwd
-# - a home that is not a directory is ReadUnavailable
-#
-# Tests — kinds that name nothing refuse a name:
-# - a nameless root may name ITSELF (branch=home&root=home) — the carve-out
-# - the stand-in must equal the kind exactly, not merely resemble it
-# - a read stands on home through the stand-in, the wire shape end to end
-# - home with any OTHER name is refused rather than silently ignoring it
-# - aipass with a name is refused
-# - home with a project is refused (a project cannot scope a home directory)
-# - project kind with a project parameter is refused
-# - branch kind still honours project (the foreign-branch lane, untouched)
-#
-# Tests — the fence covers every root:
-# - '..' refused under home
-# - an absolute name refused under a project root
-# - a symlink out of home refused by the post-resolution check
-# - an ordinary nested read under home is allowed (the fence is not a wall)
-#
-# Tests — reads standing on a root:
-# - list_dir on home lists home's own level
-# - read_file on home returns the file's bytes
-# - the answer names the root it stood on
-# - noise directories are still filtered outside a branch
-# - the audit record names the root, so a home read is not indistinguishable
-#   from a branch read in the trail
-#
-# Tests — absent root is today's answer plus the floor (the pin, re-frozen):
-# - list_dir's document is its four keys plus `floor`, nothing else moved
-# - read_file's document is its five keys plus `floor`
-#
-# Tests — the floor (@devpulse's rider, the copy-path button):
-# - every lane carries the absolute path of the root it stood on
-# - the floor is absolute, and follows the ROOT rather than the descent
-# - floor + entry path is a real file — the composition the face performs
-# - a file read carries it too, for the Reader's own button
-# - naming the branch kind explicitly answers the same thing plus the root
-#
-# Tests — the roster:
-# - carries home, aipass and every project the census knows
-# - the anchor project is not published twice under two kinds
-# - labels: home says home, aipass and projects say their own directory
-# - no branch rows — agents already have a door, and a branch row could not
-#   carry the project that qualifies it
-# - a census failure refuses the WHOLE roster rather than serving a partial one
-# - every published row resolves (the roster cannot advertise a floor the fence
-#   would refuse)
-#
-# Tests — the route roll-call (found while adding a door):
-# - every registered /v1 route is named in the record create_app writes
-# - a new door appears in it without being added by hand
-#
-# Tests — routes:
-# - GET /v1/roots: 401 without a token
-# - GET /v1/roots: 200 with the roster
-# - GET /v1/roots: 503 when the census cannot be produced
-# - GET /v1/dir: root=home lists home
-# - GET /v1/dir: branch=home&root=home — the phone's actual request, served
-# - GET /v1/dir: branch=aipass&root=aipass — the other stand-in
-# - GET /v1/files: a file reads through the stand-in
-# - GET /v1/files: root=home reads a file
-# - GET /v1/dir: an unknown root is 400 in the error envelope
-# - GET /v1/dir: root=home with a branch is 400, never a silent drop
-# - GET /v1/files: no root and no branch is 400 from the fence, not 422 from
-#   validation — the one visible shift this round
-# - GET /v1/dir: no root at all answers the pre-roots document exactly
+# Each root that resolves is paired with a test that the containment under it still refuses.
+# A read-scope token reads ~/.ssh by the owner's FULLY OPEN ruling; the suite reads it on purpose.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(duplicate_test) — the branch read lane with no root, tests/test_host_read_lane.py
@@ -149,12 +54,7 @@ class _RegistryBroken(Exception):
 def world(tmp_path: Path):
     """A registry, a branch, a home and a census — every root kind, all fake.
 
-    Nothing here touches the operator's real home or the real census: the two
-    doors this handler resolves through (@drone's registry, @baud's exec) are
-    both stood in for, and the handler's own home_root is pointed at tmp. A
-    test that read the real home would be reading the machine it happens to run
-    on. home_root, not pathlib's Path.home: a patch of Path.home replaces it
-    for every reader in the process while it stands (api, fleet green leg 9).
+    home_root, not pathlib's Path.home: a patch of Path.home replaces it for every reader in the process.
     """
     root = tmp_path / "FakeRepo"
     branch = root / "src" / "aipass" / "demo"
@@ -169,11 +69,8 @@ def world(tmp_path: Path):
     (home / "todo.txt").write_text("buy milk", encoding="utf-8")
     (home / "notes").mkdir()
     (home / "notes" / "day.md").write_text("# day", encoding="utf-8")
-    # The owner's FULLY OPEN ruling, built rather than described. See the module
-    # docstring: this is reachable by design, and the suite says so out loud.
     (home / ".ssh").mkdir()
     (home / ".ssh" / "id_ed25519").write_text("PRIVATE KEY", encoding="utf-8")
-    # Noise is machine residue wherever it sits, not only inside a branch.
     (home / "__pycache__").mkdir()
 
     other = tmp_path / "Projects" / "Vera-Studio"
@@ -250,10 +147,8 @@ class TestTheRootKinds:
         assert host_reads.resolve_root(host_reads.ROOT_PROJECT, "VERA-STUDIO") == world["other"].resolve()
 
     def test_project_matches_the_census_spelling_exactly(self, world: dict) -> None:
-        """The name came from a roster this server published from the census
-        itself, so an exact comparison IS the census's own spelling. A fourth
-        case rule in a file that already documents three would be worse than a
-        refusal that names where the right spelling comes from."""
+        """The name came from a roster published from the census, so exact
+        comparison IS the census's spelling; the refusal names the roster."""
         with pytest.raises(host_reads.ReadRefused) as exc:
             host_reads.resolve_root(host_reads.ROOT_PROJECT, "vera-studio")
 
@@ -266,8 +161,6 @@ class TestTheRootKinds:
 
         said = str(exc.value)
 
-        # ROOT_KINDS emptying would make this loop vacuous and the test green
-        # while the refusal named nothing at all.
         assert host_reads.ROOT_KINDS, "the vocabulary is empty — the refusal was checked against nothing"
 
         for kind in host_reads.ROOT_KINDS:
@@ -278,10 +171,7 @@ class TestTheRootKinds:
         request that named no root. A resolver that guessed would make every
         typo resolve to somebody's branch.
 
-        THE REFUSAL MUST BE ABOUT THE KIND. Written as a bare `raises` first,
-        this passed even with the kind guard letting an empty string through —
-        the empty kind fell to the project arm and was refused for naming no
-        project. Same wrong-reason species as the traversal test above.
+        The refusal must be about the kind: a bare `raises` passes on the project arm's refusal.
         """
         with pytest.raises(host_reads.ReadRefused) as exc:
             host_reads.resolve_root("", "demo")
@@ -316,18 +206,14 @@ class TestTheRootKinds:
                 host_reads.resolve_root(host_reads.ROOT_PROJECT, "GONE")
 
     def test_a_census_row_with_no_path_is_unavailable_never_the_servers_cwd(self, world: dict) -> None:
-        """A row that names no path must NOT resolve to wherever this process
-        happens to be standing: Path("") resolves to the cwd, which is a real
-        directory, so the read would succeed and serve the wrong tree."""
+        """Path("") resolves to the cwd, a real directory, so the read would serve the wrong tree."""
         census = {"projects": [{"name": "BLANK", "root": ""}], "error": None}
         with patch.object(host_fleet, "list_projects", return_value=census):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_reads.resolve_root(host_reads.ROOT_PROJECT, "BLANK")
 
     def test_a_registry_row_with_no_path_is_unavailable_never_the_servers_cwd(self, world: dict) -> None:
-        """The same species one door along, found while widening the fence and
-        fixed here rather than left: a citizen registered without a path would
-        have resolved to this process's cwd and read as that branch's root."""
+        """A citizen registered without a path must not resolve to this process's cwd."""
         world["drone"].get_branch_info.side_effect = None
         world["drone"].get_branch_info.return_value = {"name": "DEMO", "path": ""}
 
@@ -344,23 +230,14 @@ class TestTheRootKinds:
 class TestKindsThatNameNothingRefuseAName:
     """A parameter that cannot mean anything is refused, never dropped.
 
-    Same doctrine as /v1/roster's blanket refusal: a silently ignored argument
-    lets a caller believe an answer is scoped when it is not.
+    A silently ignored argument lets a caller believe an answer is scoped when it is not.
     """
 
     def test_a_nameless_root_may_name_itself(self, world: dict) -> None:
         """THE CARVE-OUT (@devpulse's ruling, 2026-08-18), measured not guessed.
 
-        @baud's picker sends the first path component for EVERY root, and the
-        kinds that name nothing stand in for themselves rather than send an
-        empty component that composes a leading slash their own transport
-        refuses (`name: root.name || root.kind`, PhoneApp.tsx). So the wire
-        carries branch=home&root=home.
-
-        That is not a parameter which cannot mean anything — it names the root
-        itself, straight off the roster row. It is accepted and stripped; any
-        OTHER name stays refused exactly as before, so the doctrine holds:
-        nothing meaningless is dropped, nothing meaningful is refused.
+        @baud's picker sends `name: root.name || root.kind` (PhoneApp.tsx), so the wire
+        carries branch=home&root=home; that name is accepted, any OTHER stays refused.
         """
         assert host_reads.resolve_root(host_reads.ROOT_HOME, host_reads.ROOT_HOME) == world["home"].resolve()
         assert host_reads.resolve_root(host_reads.ROOT_AIPASS, host_reads.ROOT_AIPASS) == world["root"].resolve()
@@ -370,9 +247,7 @@ class TestKindsThatNameNothingRefuseAName:
         roster this server published, so an exact comparison is a comparison
         against our own spelling — the same rule the project names follow.
 
-        And the refusal names the way through, because @baud's face prints it
-        verbatim: a sentence that said 'send no name' while a name was in fact
-        accepted would be a small lie told to whoever hits it next.
+        The refusal names the way through, because @baud's face prints it verbatim.
         """
         with pytest.raises(host_reads.ReadRefused) as exc:
             host_reads.resolve_root(host_reads.ROOT_HOME, "HOME")
@@ -423,12 +298,8 @@ class TestTheFenceCoversEveryRoot:
     def test_parent_traversal_refused_under_home(self, world: dict) -> None:
         """The one gate that must never care which root it is standing on.
 
-        THE TARGET EXISTS, and the refusal must not be about its absence.
-        Written the obvious way first — a '..' at a file that was not there —
-        this passed with the whole '..' gate deleted, because the read was
-        refused for being missing rather than for being outside. A traversal
-        test that can be satisfied by an empty directory is not a traversal
-        test (S89's species: green for the wrong reason).
+        THE TARGET EXISTS, so the refusal cannot be about its absence: a '..'
+        at a missing file passes with the whole '..' gate deleted.
         """
         outside = world["root"] / "secret.txt"
         assert outside.is_file(), "fixture broken: the traversal target must exist"
@@ -450,17 +321,10 @@ class TestTheFenceCoversEveryRoot:
     def test_symlink_out_of_home_refused(self, world: dict) -> None:
         """The post-resolution check — the only gate that sees a symlink out.
 
-        This is the gate that carries the class. Deleting the '..' check alone
-        leaves every test here green, and that is the three gates overlapping
-        by design rather than a hole: containment still refuses. Deleting THIS
-        one turns the whole class red (mutation-checked 2026-08-18).
+        This gate carries the class: deleting it turns the whole class red.
         """
         link = world["home"] / "escape.txt"
-        # No try/except around the symlink: a machine that CAN make one and
-        # then fails to must go red rather than skip. Windows is decided by the
-        # marker above, which reads sys.platform — the machine — instead of
-        # letting an OSError from the subject's own fixture turn the gate that
-        # carries this class into a silent green (seedgo self_skip, 2026-09-07).
+        # No try/except: a machine that can make a symlink and fails to must go red, not skip.
         link.symlink_to(world["root"] / "secret.txt")
 
         with pytest.raises(host_reads.ReadRefused) as exc:
@@ -487,9 +351,7 @@ class TestReadsStandingOnARoot:
         assert "notes" in names
 
     def test_the_home_exposure_is_real_and_deliberate(self, world: dict) -> None:
-        """The owner's ruling, executed rather than described. If this test ever
-        has to change, the ruling changed — which is exactly when someone
-        should have to come here and say so."""
+        """The owner's FULLY OPEN ruling, executed; if this test changes, the ruling changed."""
         result = host_reads.read_file("", ".ssh/id_ed25519", root=host_reads.ROOT_HOME)
 
         assert result["content"] == "PRIVATE KEY"
@@ -518,16 +380,7 @@ class TestReadsStandingOnARoot:
 class TestAbsentRootIsTodaysAnswerPlusTheFloor:
     """The no-regression pin, RE-FROZEN once and deliberately.
 
-    It was written to guard the roots round: absent root = the pre-roots
-    document, key for key. @devpulse's rider (2026-08-18) adds exactly one key
-    to every lane — `floor`, the absolute path of the root the answer stands
-    on — because the owner wants a copy-path button and the ABSOLUTE path is what
-    pastes into a terminal, which is server knowledge the face cannot compose.
-
-    So the pin now says: today's document plus `floor`, nothing else moved. It
-    is still a whole-key-set assertion rather than a spot check, because the
-    point of it is that a SECOND key cannot arrive unannounced — the day one
-    does, this test is where the argument has to be had.
+    A whole-key-set assertion, so no further key can arrive unannounced.
     """
 
     def test_list_dirs_document_is_todays_plus_the_floor(self, world: dict) -> None:
@@ -558,10 +411,7 @@ class TestAbsentRootIsTodaysAnswerPlusTheFloor:
 class TestTheFloorTravels:
     """The absolute path of the root the answer stands on (@devpulse's rider).
 
-    THE FACE CANNOT COMPOSE IT. It knows `<root>/<relative>` and nothing about
-    where the root sits on disk — that is server knowledge, and a copy-path
-    button that pasted a relative path into a terminal would be a button that
-    quietly does not work.
+    The face cannot compose it: where a root sits on disk is server knowledge.
     """
 
     def test_every_lane_carries_its_own_floor(self, world: dict) -> None:
@@ -583,9 +433,6 @@ class TestTheFloorTravels:
         path that exists on disk. This is the whole feature in one assertion."""
         answer = host_reads.list_dir(root=host_reads.ROOT_HOME)
 
-        # A listing that came back EMPTY would satisfy the loop below without
-        # composing a single path — the whole feature unmeasured, reported
-        # green (seedgo unentered_assert, 2026-09-07).
         assert answer["entries"], "the listing was empty, so no floor+path join was ever performed"
 
         for entry in answer["entries"]:
@@ -620,9 +467,7 @@ class TestTheRoster:
         assert "VERA-STUDIO" in names
 
     def test_the_anchor_project_is_not_published_twice(self, world: dict) -> None:
-        """'aipass' and the anchor census row are the SAME floor. Two rows
-        pointing at one directory is a roster that lies about how many places
-        there are — the duplicate goes, the resolution for both stays."""
+        """'aipass' and the anchor census row are the SAME floor: one row, both resolve."""
         rows = host_reads.list_roots()["roots"]
 
         assert "FAKEREPO" not in [row["name"] for row in rows]
@@ -645,10 +490,8 @@ class TestTheRoster:
         assert host_reads.ROOT_BRANCH not in [row["kind"] for row in host_reads.list_roots()["roots"]]
 
     def test_a_broken_census_refuses_the_whole_roster(self, world: dict) -> None:
-        """MEASURED AGAINST THE CONSUMER, not assumed: @baud's RootsScreen
-        renders `body.roots` and ignores every other field, so a partial roster
-        carrying an error nobody reads would print as 'there are no projects'.
-        A refusal it shows in our own words is the honest answer."""
+        """@baud's RootsScreen renders only `body.roots`, so a partial roster with
+        an error field would print as 'there are no projects'."""
         with patch.object(host_fleet, "list_projects", side_effect=host_fleet.FleetUnavailable("no census today")):
             with pytest.raises(host_reads.ReadUnavailable) as exc:
                 host_reads.list_roots()
@@ -660,8 +503,6 @@ class TestTheRoster:
         the picker draws and the browse then denies is worse than no row."""
         published = host_reads.list_roots()["roots"]
 
-        # A roster that published NOTHING would pass this loop trivially, and a
-        # picker with no rows is a defect rather than a vacuous success.
         assert published, "the roster advertised no roots at all"
 
         for row in published:
@@ -694,15 +535,7 @@ def client(tmp_path: Path):
 class TestTheRollCallIsDerivedNotWrittenDown:
     """Found while adding a route: the list that names them had drifted.
 
-    `create_app` logged and audited a hand-written `routes = [...]`. It named
-    18 doors while the app registered nearly forty — /v1/dir, /v1/projects,
-    every git route and every settings route were missing, and had been for as
-    long as they had existed. A roll-call that claims to name every door and
-    names half is worse than no roll-call: it reads as a complete answer.
-
-    Same species as the status codes and the manifest count — a written-down
-    copy of a truth that has its own source. So it is derived from the app's
-    own routing table, and this test is what stops it being written down again.
+    The roll-call is derived from the app's routing table; this stops it being hand-written again.
     """
 
     def _routes_logged(self) -> list:
@@ -798,11 +631,7 @@ class TestRootRoutes:
     def test_the_phones_actual_home_request_is_served(self, client: Any, world: dict) -> None:
         """THE WIRE SHAPE @baud SENDS, verbatim: branch=home&root=home.
 
-        Their picker composes the first path component for every root and the
-        nameless kinds stand in for themselves. This test exists because the
-        first cut of the fence 400'd exactly this request — the collision was
-        found by probing the two trees against each other, not by reading
-        either one (@devpulse, 2026-08-18).
+        The nameless kinds stand in for themselves as the first path component.
         """
         api, raw = client
 
@@ -882,12 +711,8 @@ class TestRootRoutes:
     def test_a_branchless_request_on_the_branch_lane_is_now_a_400(self, client: Any, world: dict) -> None:
         """THE ONE VISIBLE SHIFT THIS ROUND, pinned rather than mentioned.
 
-        `branch` had to stop being required by the signature, because `home`
-        and `aipass` name nothing. So a request that names neither a root nor a
-        branch is refused by the fence (400; its words in the host log under a
-        ref) where validation used to refuse it (422). Both are refusals in the
-        same envelope; the shape of the answer moved, and this is where that is
-        written down.
+        `branch` is optional because `home` and `aipass` name nothing, so naming
+        neither root nor branch is the fence's 400, not validation's 422.
         """
         api, raw = client
 
@@ -900,7 +725,6 @@ class TestRootRoutes:
         assert response.status_code == 400
         error = response.json()["error"]
         assert error["code"] == "read_refused"
-        # seedgo exception_text_in_response, PR #774: the fence's sentence stays in the log.
         assert error["message"] == host_denials.SENTENCES["read_refused"]
         assert re.fullmatch("[0-9a-f]{12}", error["ref"])
         assert "branch name is required" not in response.text

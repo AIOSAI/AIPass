@@ -5,15 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-07-15
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Trusted-project registry for hook config loading.
 
-Single source of truth for which projects are trusted to have their
-.aipass/hooks.json loaded by the hook engine. Registry lives at
-~/.aipass/trusted_projects.json. @aipass CLI (init/trust/revoke)
-imports this module for enrollment operations.
+@aipass CLI (init/trust/revoke) imports this module for enrollment.
 """
 
 import hashlib
@@ -32,8 +29,7 @@ REGISTRY_ENV = "AIPASS_TRUST_REGISTRY"
 def registry_path() -> Path:
     """The registry file, resolved at each call: $AIPASS_TRUST_REGISTRY when set and non-empty, else REGISTRY_PATH.
 
-    The environment read is the public seam (DPLAN-0404 leg 12): aipass's test_trust redirects every
-    verb with one setenv instead of patching this module's global from another branch. Hooks' decision.
+    The environment read is the public seam: aipass's test_trust redirects every verb with one setenv.
     """
     override = os.environ.get(REGISTRY_ENV, "")
     return Path(override) if override else REGISTRY_PATH
@@ -119,11 +115,7 @@ def is_trusted(project_dir: str) -> bool:
 def is_unenrolled(project_dir: str) -> bool:
     """True when a project has hooks.json but no registry entry at all.
 
-    Distinct from is_hash_mismatch() — that flags an existing enrollment gone
-    stale. This flags the normal first-run state: hooks.json exists, nobody
-    has ever run `aipass init update` for this project, so hooks are
-    silently off. Mutually exclusive with is_hash_mismatch() (an entry can't
-    be both absent and present).
+    The normal first-run state, not a break; mutually exclusive with is_hash_mismatch().
     """
     project_path = str(Path(project_dir).resolve())
     registry = read_registry()
@@ -136,9 +128,7 @@ def is_unenrolled(project_dir: str) -> bool:
 def prune_stale(registry: dict) -> tuple[dict, int]:
     """Drop registry entries whose project path no longer exists on disk.
 
-    Generic dead-path detection, not tmpdir-pattern matching -- catches any
-    deleted or moved project, not just pytest tmp dirs. Returns the pruned
-    registry and the number of entries dropped.
+    Dead-path detection, not tmpdir matching: catches any deleted or moved project.
     """
     live = {path: entry for path, entry in registry["projects"].items() if Path(path).exists()}
     dropped = len(registry["projects"]) - len(live)
@@ -148,10 +138,7 @@ def prune_stale(registry: dict) -> tuple[dict, int]:
 def is_hash_mismatch(project_dir: str) -> bool:
     """True only when a project WAS enrolled but its hooks.json hash has since changed.
 
-    Distinct from is_trusted()==False for a never-enrolled project (normal
-    first-run state, not a break). This flags a genuine trust break — an
-    existing enrollment gone stale — so callers can warn loudly instead of
-    treating it the same as "not set up yet".
+    A genuine trust break, distinct from never-enrolled, so callers can warn loudly.
     """
     project_path = str(Path(project_dir).resolve())
     registry = read_registry()
@@ -167,8 +154,7 @@ def is_hash_mismatch(project_dir: str) -> bool:
 def bootstrap() -> bool:
     """Bootstrap the registry with ONLY the AIPass install. Returns True on success.
 
-    Called when the registry file does not exist. Enrolls the AIPass
-    install identified by $AIPASS_HOME — never the current CWD.
+    Enrolls the install named by $AIPASS_HOME, never the current CWD.
     """
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:

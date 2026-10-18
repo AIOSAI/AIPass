@@ -3,22 +3,11 @@
 # Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
 # Version: 1.8.0
 # Created: 2026-03-09
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 Trigger package path configuration.
-
-Provides package-relative paths for trigger data directories.
-Works in both pip-installed and development environments.
-
-Also provides migrate_json_file() — the lossless move used to get
-hand-written live state OFF the trio-owned filename pattern in
-trigger_json/. json_handler owns every `<module>_<config|data|log>.json`
-in that directory: it validates such a file against a template and
-REGENERATES it when the shape does not match. Live state parked on one of
-those names is one caller-name resolution away from being overwritten with
-a blank template.
 """
 
 import json
@@ -36,40 +25,14 @@ try:
 except Exception:
     _append_jsonl = None
 
-# Resolve failures, recorded rather than logged: module_file runs before this
-# module has a logger at all (TrailLogger is defined below it), and in the world
-# that reaches its guard EVERY module import takes it — one line per module
-# would describe a single condition N times. Introspectable instead.
+# Recorded, not logged: module_file runs before any logger exists, once per module import.
 UNRESOLVED: list[str] = []
 
 
 def module_file(file: str) -> Path:
-    """A module's own path, absolute, resolved when the filesystem allows.
-
-    ``Path(__file__).resolve()`` reached at IMPORT is a working-directory read on
-    Windows: ntpath.realpath calls ``os.getcwd()`` UNCONDITIONALLY — not only for
-    relative paths, the way posixpath does — and ``Path.resolve()`` routes
-    through it. So a process whose cwd was deleted cannot import the module at
-    all. Measured on the Windows CI gate 2026-08-31 (@memory's finding);
-    @prax's import chain died inside trigger's handler guard and took every
-    consumer of the prax logger with it.
-
-    ``.resolve()`` is still attempted, because normalising symlinks is why the
-    call is there and it succeeds on every healthy machine. The fallback is only
-    reached in the world where the alternative is a dead import, and it is
-    sound: ``__file__`` has been absolute since Python 3.9, so the return is the
-    right file either way — just spelled through the symlink rather than past it.
-
-    It lives in config.py rather than in a handler because config.py is where
-    this branch's package paths are defined and because config.py must not
-    import handlers: TRIGGER_ROOT below is its first caller.
-
-    Args:
-        file: A module's ``__file__``.
-
-    Returns:
-        The module's path, resolved if the filesystem could be asked.
-    """
+    """A module's own path, absolute, resolved when the filesystem allows."""
+    # On Windows Path.resolve() always calls os.getcwd(), so a deleted cwd kills the import;
+    # the fallback is sound because __file__ is absolute (3.9+), just not symlink-resolved.
     path = Path(file)
     try:
         return path.resolve()
@@ -78,65 +41,29 @@ def module_file(file: str) -> Path:
         return path
 
 
-# Trigger package root: .../aipass/trigger/
-#
-# module_file, not resolve(): this line runs at IMPORT. See module_file above.
+# module_file, not resolve(): this line runs at IMPORT.
 TRIGGER_ROOT = module_file(__file__).parents[1]
 
 _CONFIG_LOG = TRIGGER_ROOT / "logs" / "config.jsonl"
 
 
 def append_trail(path: Path, entry: dict) -> bool:
-    """Append one JSONL line to a sidecar file, reporting whether it landed.
-
-    The raw counterpart to TrailLogger, for the trails whose readers parse
-    named fields and so cannot carry a level/msg shape — medic_suppressed,
-    rate_limited, runaway_suppressed. Returns False rather than raising, so a
-    caller reports the miss through its own recursion-safe logger instead of
-    wrapping every call in an except block that has nothing to call.
-
-    It lives here because config.py is the one trigger module that cannot
-    import the prax logger at all (circular dependency), so the guarded import
-    and the one unloggable except block exist once, here, rather than repeated
-    in every handler that needs a sidecar.
-
-    Args:
-        path: Sidecar file to append to — use a `.jsonl` name so the branch log
-            watcher, which reads only `*.log`, cannot feed it back.
-        entry: JSON-serialisable line to append.
-
-    Returns:
-        True if the line was written, False if prax is absent or the write failed
-    """
+    """Append one JSONL line to a sidecar file, reporting whether it landed."""
+    # Never raises. Use a `.jsonl` path: the log watcher reads only `*.log` and would feed it back.
     if _append_jsonl is None:
         return False
     try:
         _append_jsonl(path, entry)
         return True
     except Exception:
-        # You cannot log a failure to log. Reported by return value instead —
-        # callers surface it (TrailLogger.dropped, escalation.get_stats()).
+        # A failure to log cannot be logged; callers surface the return value.
         return False
 
 
 class TrailLogger:
-    """A logger that writes JSONL to a sidecar file instead of through prax.
+    """A logger that writes JSONL to a sidecar file instead of through prax."""
 
-    Trigger's log watchers read prax output. Code that runs ON that path —
-    the event handlers and the config readers they call — cannot log through
-    prax without being detected, fired back as an event, and re-entering
-    itself. So it logs here: `.jsonl`, which the watchers skip because they
-    only read `*.log`.
-
-    config.py is where this lives because config.py is the one trigger module
-    that CANNOT import the prax logger at all (circular dependency), so the
-    single except block that has no logger to call — the sidecar's own write
-    failure — is already accounted for here rather than repeated in every
-    caller. Failed writes are counted on `.dropped`, not discarded silently.
-
-    The method names are the fleet's logger API on purpose: call sites read
-    the same as everywhere else in AIPass.
-    """
+    # Code on the watched event path would re-enter itself through prax; watchers skip `.jsonl`.
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -147,8 +74,6 @@ class TrailLogger:
         entry: dict[str, Any] = {"ts": datetime.now().isoformat(), "level": level, "msg": message}
         entry.update(fields)
         if not append_trail(self.path, entry):
-            # Counted rather than vanished — callers surface .dropped
-            # (see escalation.get_stats()).
             self.dropped += 1
 
     def info(self, message: str, **fields: Any) -> None:
@@ -165,41 +90,26 @@ class TrailLogger:
 
 
 def trail_logger(path: Path) -> TrailLogger:
-    """Build a recursion-safe logger writing to *path*.
-
-    Args:
-        path: Sidecar file to append to — use a `.jsonl` name so the branch
-            log watcher, which reads only `*.log`, cannot feed it back.
-
-    Returns:
-        A logger exposing .info/.warning/.error
-    """
+    """Build a recursion-safe logger writing to *path*."""
     return TrailLogger(path)
 
 
 logger = TrailLogger(_CONFIG_LOG)
 
 
-# AIPass package root: .../aipass/
 AIPASS_PKG_ROOT = TRIGGER_ROOT.parent
 
-# Runtime state directory — also the directory json_handler's trio machinery owns.
+# json_handler regenerates any `<module>_<config|data|log>.json` here whose shape mismatches.
 TRIGGER_JSON_DIR = TRIGGER_ROOT / "trigger_json"
 
-# Retired files land here rather than being deleted.
 ARCHIVE_DIR_NAME = ".archive"
 
 
-# Bounded retry for os.replace. Windows raises PermissionError while an AV
-# scanner or indexer holds the destination open; POSIX never takes this path.
-# Bounded and raising on exhaustion because one stuck replace ate the whole
-# Windows CI lane at the 45-minute wall (2026-08-18). Mirrors the canonical
-# helper @commons, @api, @flow, @drone and @prax already carry.
+# Windows raises PermissionError while an AV scanner holds the file; bounded so it raises, not hangs.
 _REPLACE_ATTEMPTS = 40
 _REPLACE_BACKOFF_SECONDS = 0.005
 
-# Bounded wait for a contended lock. Windows has no blocking flock, so the
-# win32 path polls; POSIX blocks in the kernel and never uses these.
+# win32 only: no blocking flock there, so it polls.
 _LOCK_ATTEMPTS = 100
 _LOCK_BACKOFF_SECONDS = 0.05
 
@@ -210,24 +120,8 @@ def replace_with_retry(
     replace_fn: Optional[Callable[[str, str], None]] = None,
     sleep_fn: Optional[Callable[[float], None]] = None,
 ) -> None:
-    """Move a staged file into place, tolerating Windows sharing violations.
-
-    Public, where the fleet's copies are module-private: config.py IS this
-    branch's shared helper module, and config_loader imports this by name
-    rather than staging its own move.
-
-    Args:
-        source: Staged file to move.
-        destination: The live document being replaced.
-        replace_fn: The move; None (every product caller) is os.replace.
-        sleep_fn: The backoff wait; None (every product caller) is time.sleep.
-            Both exist for the tests alone: a sharing violation is handed in
-            without replacing os.replace or time.sleep for the whole process.
-
-    Raises:
-        PermissionError: Still blocked after every attempt.
-        OSError: Any non-sharing failure, immediately.
-    """
+    """Move a staged file into place, tolerating Windows sharing violations."""
+    # replace_fn and sleep_fn are test seams; None is os.replace and time.sleep.
     replace = replace_fn or os.replace
     sleep = sleep_fn or time.sleep
     for attempt in range(_REPLACE_ATTEMPTS):
@@ -246,31 +140,8 @@ def read_text_with_retry(
     read_fn: Optional[Callable[..., str]] = None,
     sleep_fn: Optional[Callable[[float], None]] = None,
 ) -> str:
-    """Read a document, tolerating Windows sharing violations.
-
-    The mirror of replace_with_retry, and the half that was missing. While one
-    writer swaps a document into place, another process opening that same
-    document is refused by Windows with PermissionError — the identical
-    transient, seen from the reading side. Hardening only the write left every
-    reader exposed, and json_handler's readers answered a refused open by
-    regenerating the file from a template.
-
-    Args:
-        path: Document to read.
-        encoding: Text encoding.
-        read_fn: The read, called as read_fn(path, encoding=encoding); None
-            (every product caller) is path.read_text, the object's own method.
-        sleep_fn: The backoff wait; None (every product caller) is time.sleep.
-            Both exist for the tests alone: a refused read is handed in
-            without replacing Path.read_text or time.sleep for the whole process.
-
-    Returns:
-        The file's contents.
-
-    Raises:
-        PermissionError: Still refused after every attempt.
-        OSError: Any non-sharing failure, immediately.
-    """
+    """Read a document, tolerating Windows sharing violations."""
+    # Windows refuses a read mid-replace, and json_handler answers a refused open by regenerating.
     sleep = sleep_fn or time.sleep
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
@@ -285,18 +156,7 @@ def read_text_with_retry(
 
 
 def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = True, encoding: str = "utf-8") -> None:
-    """Write JSON data to a file atomically using write-to-tmp + os.replace.
-
-    Prevents file corruption from process crashes mid-write by writing to
-    a temp file in the same directory first, then atomically renaming.
-
-    Args:
-        path: Target file path
-        data: JSON-serializable data
-        indent: JSON indent level
-        ensure_ascii: JSON ensure_ascii flag
-        encoding: File encoding
-    """
+    """Write JSON data to a file atomically using write-to-tmp + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
@@ -311,11 +171,7 @@ def atomic_write_json(path: Path, data, indent: int = 2, ensure_ascii: bool = Tr
         raise
 
 
-# The lock primitives, bound once at import, so the arm a lock call takes is
-# decided before any test pretends another platform. Every host lacks one of
-# the two. The None is not logged: a trail line per import would describe one
-# host N times. The arm that needs a missing primitive raises instead, naming
-# the host (_lock_primitive).
+# Bound once at import, before any test pretends another platform; a missing one raises at use.
 try:
     import fcntl
 except ImportError:
@@ -328,35 +184,14 @@ except ImportError:
 
 
 def _lock_primitive(module: Any, name: str) -> Any:
-    """The module-level lock primitive, or an ImportError naming the host.
-
-    Args:
-        module: The binding made at import (fcntl or msvcrt), None when absent.
-        name: The module's name, for the message.
-
-    Returns:
-        The module, when this host has it.
-
-    Raises:
-        ImportError: This host has no such module. Running unlocked is not one
-            of the outcomes.
-    """
+    """The module-level lock primitive, or an ImportError naming the host."""
     if module is None:
         raise ImportError(f"{name} is unavailable on this host ({sys.platform}); json_file_lock cannot lock")
     return module
 
 
 def _try_lock_win32(lock_file, msvcrt_module: Any = None) -> bool:
-    """One non-blocking attempt at the sidecar's byte lock.
-
-    Args:
-        lock_file: Open file object for the sidecar.
-        msvcrt_module: The locking primitive; None is the module-level msvcrt binding.
-            The seam exists for the tests, which drive the win32 arm on any host.
-
-    Returns:
-        True if the lock was taken, False if someone else holds it.
-    """
+    """One non-blocking attempt at the sidecar's byte lock."""
     if msvcrt_module is None:
         msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
 
@@ -371,22 +206,8 @@ def _try_lock_win32(lock_file, msvcrt_module: Any = None) -> bool:
 def _acquire_lock_win32(
     lock_file, msvcrt_module: Any = None, sleep_fn: Optional[Callable[[float], None]] = None
 ) -> None:
-    """Poll for the lock — Windows has no blocking flock.
-
-    Locking a byte past EOF is legal on Windows, which is why the sidecar
-    needs no contents.
-
-    Args:
-        lock_file: Open file object for the sidecar.
-        msvcrt_module: The locking primitive; None is the module-level msvcrt binding.
-        sleep_fn: The wait between attempts; None is time.sleep at call time.
-            Both seams exist for the tests: patching time.sleep or sys.modules
-            reaches every reader in the process.
-
-    Raises:
-        OSError: Still held after _LOCK_ATTEMPTS tries.
-        ImportError: No seam was handed and this host has no msvcrt.
-    """
+    """Poll for the lock — Windows has no blocking flock."""
+    # Locking a byte past EOF is legal on Windows, so the sidecar needs no contents.
     if msvcrt_module is None:
         msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
     sleep = sleep_fn or time.sleep
@@ -396,9 +217,7 @@ def _acquire_lock_win32(
             return
         sleep(_LOCK_BACKOFF_SECONDS)
 
-    # The final attempt is deliberately unguarded: the caller gets the real
-    # OSError from the OS rather than a synthesised one, and the one outcome
-    # this function must never have is returning without the lock.
+    # Unguarded on purpose: the caller gets the real OSError; never return without the lock.
     lock_file.seek(0)
     msvcrt_module.locking(lock_file.fileno(), msvcrt_module.LK_NBLCK, 1)
 
@@ -409,19 +228,7 @@ def _acquire_lock(
     msvcrt_module: Any = None,
     sleep_fn: Optional[Callable[[float], None]] = None,
 ) -> None:
-    """Take an exclusive OS lock on an open .lock sidecar.
-
-    Args:
-        lock_file: Open file object for the sidecar.
-        platform: The platform name; None reads sys.platform at call time.
-        msvcrt_module: Handed to the win32 arm; None is the module-level msvcrt there.
-        sleep_fn: Handed to the win32 arm; None is time.sleep there.
-            The seams exist for the tests, which drive the win32 arm on any host.
-
-    Raises:
-        OSError: The lock was still held after every attempt.
-        ImportError: The arm taken needs a primitive this host does not have.
-    """
+    """Take an exclusive OS lock on an open .lock sidecar."""
     if platform == "win32" or (platform is None and sys.platform == "win32"):
         _acquire_lock_win32(lock_file, msvcrt_module, sleep_fn)
     else:
@@ -430,17 +237,7 @@ def _acquire_lock(
 
 
 def _release_lock(lock_file, platform: Optional[str] = None, msvcrt_module: Any = None) -> None:
-    """Release the lock taken by _acquire_lock.
-
-    Args:
-        lock_file: The same open file object that was locked.
-        platform: The platform name; None reads sys.platform at call time.
-        msvcrt_module: The locking primitive; None is the module-level msvcrt binding.
-            The seams exist for the tests, which drive the win32 arm on any host.
-
-    Raises:
-        ImportError: The arm taken needs a primitive this host does not have.
-    """
+    """Release the lock taken by _acquire_lock."""
     if platform == "win32" or (platform is None and sys.platform == "win32"):
         if msvcrt_module is None:
             msvcrt_module = _lock_primitive(msvcrt, "msvcrt")
@@ -459,36 +256,12 @@ def json_file_lock(
     msvcrt_module: Any = None,
     sleep_fn: Optional[Callable[[float], None]] = None,
 ):
-    """Acquire exclusive lock for a JSON file's read-modify-write cycle.
-
-    A .lock sidecar is held for the whole cycle, so two processes cannot each
-    read a document, change it, and write back a copy missing the other's
-    change. Pair with atomic_write_json: atomic stops a TORN file, this stops
-    a LOST update, and having only the first is what makes the second look
-    handled.
-
-    On win32 this used to `yield` with no lock at all — every caller believed
-    it was serialised and none of them were. Windows CI measured the result on
-    2026-08-18, the first run that ever completed there: 26 of 100 concurrent
-    increments survived. The win32 path now locks a byte of the sidecar through
-    msvcrt and RAISES when its bounded wait is exhausted. Running unlocked is
-    not one of the outcomes.
-
-    Args:
-        path: The JSON file to lock (lock acquired on path.with_suffix('.lock'))
-        platform: The platform name; None reads sys.platform at call time.
-        msvcrt_module: The win32 locking primitive; None imports msvcrt at call time.
-        sleep_fn: The win32 wait between attempts; None is time.sleep at call time.
-            The three seams exist for the tests, which drive the win32 arm on
-            any host; no product caller hands them in.
-
-    Raises:
-        OSError: The lock could not be acquired within the bounded wait.
-    """
+    """Acquire exclusive lock for a JSON file's read-modify-write cycle."""
+    # Pair with atomic_write_json: atomic stops a torn file, this stops a lost update.
+    # win32 raises OSError when its bounded wait runs out; it never yields unlocked.
     lock_path = path.with_suffix(".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    # "a+" not "w": truncating a sidecar another process holds a byte lock on
-    # is a sharing violation on Windows, and the file's contents are irrelevant.
+    # "a+" not "w": truncating a byte-locked sidecar is a sharing violation on Windows.
     with open(lock_path, "a+", encoding="utf-8") as lock_f:
         _acquire_lock(lock_f, platform, msvcrt_module, sleep_fn)
         try:
@@ -498,17 +271,7 @@ def json_file_lock(
 
 
 def _archive_legacy_file(path: Path) -> bool:
-    """Move a retired state file into a sibling .archive/ directory.
-
-    Never deletes. A name collision keeps both copies by suffixing the
-    archived file with the source mtime.
-
-    Args:
-        path: The file to retire (must exist)
-
-    Returns:
-        True if the file was moved
-    """
+    """Move a retired state file into a sibling .archive/ directory."""
     archive_dir = path.parent / ARCHIVE_DIR_NAME
     archive_dir.mkdir(parents=True, exist_ok=True)
     target = archive_dir / path.name
@@ -524,37 +287,9 @@ def _archive_legacy_file(path: Path) -> bool:
 
 
 def migrate_json_file(legacy_path: Path, new_path: Path) -> bool | None:
-    """Move live JSON state from a legacy path to its new home, losslessly.
-
-    Idempotent and safe to call on every read — it stats the legacy path and
-    returns immediately when there is nothing to move. Behaviour:
-
-    - new present               -> no-op, whatever the legacy name holds. The
-                                   move already happened, so that name belongs
-                                   to json_handler's trio machinery again — a
-                                   blank template it regenerates there is its
-                                   file, not stale state of ours. Archiving it
-                                   on every read would fight the trio owner
-                                   forever and grow .archive/ without bound.
-    - new absent, legacy present-> copy contents to new, archive legacy
-    - legacy missing            -> no-op
-    - legacy unreadable         -> left in place untouched, warning logged.
-                                   Fail honest: a human decides, not a guess.
-
-    The lock is taken on the LEGACY path, not the new one: the legacy file is
-    the resource being claimed, and callers already hold the new file's lock
-    around their own read-modify-write cycles — flock on a second descriptor
-    for the same file would deadlock the process against itself.
-
-    Args:
-        legacy_path: Old file location
-        new_path: New file location
-
-    Returns:
-        True if the legacy file was migrated or archived on this call. False
-        if there was nothing to move. None if the legacy file was unreadable
-        and left in place: a migration left undone, not one that was unneeded.
-    """
+    """Move live JSON state from a legacy path to its new home, losslessly."""
+    # New present is a no-op: the legacy name is json_handler's again. None means unreadable, left in place.
+    # Locks the LEGACY path: callers already hold the new file's lock, and a second flock would deadlock.
     if new_path.exists() or not legacy_path.exists():
         return False
     with json_file_lock(legacy_path):
@@ -586,7 +321,7 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.warning("CLI console not available, using rich fallback")
         from rich.console import Console

@@ -3,25 +3,14 @@
 # Description: Tests for help_flag_safety_check.py
 # Version: 1.0.2
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/help_flag_safety_check.py."""
 
 # A help flag ANYWHERE must explain, never execute.
-#
-# Red-first: every failing case below was written and run against a missing
-# checker, then against the checker, before the implementation satisfied it.
-#
-# Real-world cases are pinned as inline SHAPES, transcribed from the branches
-# named in each comment. They deliberately do NOT read live fleet files. An
-# earlier version of this file asserted "these branches are still broken"; @api
-# fixed their defect within the hour and turned this suite red for it, which made
-# the tests punish the exact outcome the standard exists to produce. Fleet state
-# is a MEASUREMENT (see the calibration table in APLAN-0005), never an assertion.
-#
-# The single exception is seedgo's own defect below — this branch owns both sides,
-# so that one is a deliberate tripwire, not a dependency on someone else's churn.
+# Real-world cases are pinned as inline SHAPES, never read from live fleet files: a test asserting
+# "branch X is still broken" goes red when X is fixed. Fleet state is a measurement, never an assertion.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — APPLIES_TO and AUDIT_SCOPE, the scope the audit reads
@@ -43,10 +32,7 @@ FLEET = Path(__file__).resolve().parents[2]
 def _mock_infrastructure(monkeypatch):
     """Mock heavy infrastructure the checker reads, at the seam it reads it from.
 
-    ``is_bypassed`` is left real: it is a pure function of the ``bypass_rules``
-    argument each call already passes explicitly (``None`` here, a literal list
-    in ``test_bypass_respected``), and with no rules it returns ``None`` before
-    touching a filesystem -- there is no live state for a stub to protect.
+    ``is_bypassed`` stays real: with no rules it returns ``None`` before touching a filesystem.
     """
     monkeypatch.setattr(help_flag_safety_check, "logger", MagicMock())
     monkeypatch.setattr(help_flag_safety_check, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
@@ -73,10 +59,6 @@ def _fleet_file(rel):
         pytest.skip(f"fleet file absent: {rel}")
     return p
 
-
-# =============================================================================
-# SHAPE (a) — module gate that reads args[0] only
-# =============================================================================
 
 VULNERABLE = """\
 def handle_command(command, args):
@@ -154,11 +136,6 @@ def _route(args):
     assert "_route" in result["checks"][0]["message"]
 
 
-# =============================================================================
-# SHAPE (c) — the flag lands in a value slot
-# =============================================================================
-
-
 def test_names_the_value_slot_when_flag_becomes_data(tmp_path):
     src = """\
 def handle_command(command, args):
@@ -175,11 +152,6 @@ def handle_command(command, args):
     assert result["passed"] is False
     detail = " ".join(c["message"] for c in result["checks"])
     assert "value slot" in detail
-
-
-# =============================================================================
-# MUST PASS — the module itself scans the whole argument list
-# =============================================================================
 
 
 def test_passes_membership_scan(tmp_path):
@@ -264,10 +236,6 @@ def handle_command(command, args):
     assert result["passed"] is True
 
 
-# =============================================================================
-# MUST PASS — the branch router normalises before the module ever sees args
-# =============================================================================
-
 NORMALISING_ENTRY = """\
 import sys
 
@@ -316,11 +284,6 @@ def main():
     assert result["passed"] is False
 
 
-# =============================================================================
-# MUST PASS — nothing for a stray flag to hide behind
-# =============================================================================
-
-
 def test_passes_dispatch_only_command(tmp_path):
     src = """\
 def handle_command(command, args):
@@ -352,11 +315,6 @@ def handle_command(command, args):
 """
     result = _check(_branch(tmp_path, src))
     assert result["passed"] is True
-
-
-# =============================================================================
-# SCOPE — only apps/modules/*.py routing files are scored
-# =============================================================================
 
 
 def test_entry_point_not_scored(tmp_path):
@@ -398,11 +356,6 @@ def test_init_file_skipped(tmp_path):
     assert result["passed"] is True
 
 
-# =============================================================================
-# INFRASTRUCTURE — shape, bypass, unreadable input
-# =============================================================================
-
-
 def test_result_shape(tmp_path):
     result = _check(_branch(tmp_path, VULNERABLE))
     assert set(result) >= {"passed", "checks", "score", "standard"}
@@ -435,18 +388,6 @@ def test_bypass_respected(tmp_path):
     assert result["score"] == 100
 
 
-# =============================================================================
-# REAL-WORLD NEGATIVES — the branches fixed on 2026-08-13 must stay fixed
-# =============================================================================
-
-
-# These pin SHAPES, transcribed from the named branches on 2026-08-13. They do
-# NOT read the live fleet. A test that asserts "branch X is still broken" fails
-# the moment X is fixed — it makes the suite punish the outcome the standard
-# exists to produce, and it did: @api shipped the whole-sequence guard within an
-# hour of being told, and this file went red for it. Fleet state is a
-# MEASUREMENT (see the calibration table in APLAN-0005), never an assertion.
-
 _ROUTER_NORMALISES = (
     "def main(argv):\n"
     "    cmd, *remaining = argv\n"
@@ -475,9 +416,7 @@ _SAFE_SHAPES = {
         "    load(args[0])\n"
         "    return True\n"
     ),
-    # seedgo/apps/modules/diagnostics_audit.py — positional gate, and the only
-    # path past it is an error message. A stray flag reaches nothing that runs,
-    # so the positional gate is sufficient. Must stay at 100.
+    # seedgo/apps/modules/diagnostics_audit.py — positional gate; past it is only an error message.
     "gate_then_error_output_only": (
         "def handle_command(command, args):\n"
         "    if command not in ('diagnostics', 'diagnostics_audit'):\n"
@@ -493,9 +432,7 @@ _SAFE_SHAPES = {
         "    console.print('Diagnostics runs through the audit pipeline.')\n"
         "    return True\n"
     ),
-    # cli/apps/modules/display.py — dispatches on `command`, never reads args,
-    # and every path past the dispatch only SHOWS text. No gate is needed
-    # because nothing past the dispatch runs. Must stay at 100.
+    # cli/apps/modules/display.py — dispatches on `command`, never reads args; past it only SHOWS text.
     "command_dispatch_display_only": (
         "def handle_command(command, args):\n"
         "    if command not in ('display', 'show'):\n"
@@ -506,9 +443,7 @@ _SAFE_SHAPES = {
         "    error('unknown display command')\n"
         "    return False\n"
     ),
-    # Dispatches on `command`, never reads args, and DOES reach a work call --
-    # but a whole-list scan answers the question first, so the exemption that
-    # short-circuits every other arm must short-circuit this one too.
+    # Dispatches on `command` and reaches a work call, but a whole-list scan answers the question first.
     "command_dispatch_but_scans_the_command_line": (
         "import sys\n\n"
         "def handle_command(command, args):\n"
@@ -520,8 +455,7 @@ _SAFE_SHAPES = {
         "        return True\n"
         "    return False\n"
     ),
-    # seedgo/apps/modules/permissions.py — positional gate, then `return False`.
-    # The module declines the command; nothing downstream of the gate runs.
+    # seedgo/apps/modules/permissions.py — positional gate, then `return False`: nothing past it runs.
     "gate_then_declines": (
         "def handle_command(command, args):\n"
         "    if command != 'permissions':\n"
@@ -578,11 +512,8 @@ _DEFECTIVE_SHAPES = {
         "    run_test(verbose)\n"
         "    return True\n"
     ),
-    # seedgo/apps/modules/inbox_audit.py — `audit inbox-ids --help` runs a
-    # repo-root-wide rglob. THE MISSED CLASS: args[0] is only ever COMPARED,
-    # never bound, sliced, iterated or forwarded, so every value-slot probe
-    # comes back empty and the file scored 100. The subcommand still lives at
-    # args[0], so the flag lands at args[1] where nothing looks.
+    # seedgo/apps/modules/inbox_audit.py — `audit inbox-ids --help` runs a repo-wide rglob: args[0] is
+    # only COMPARED, never bound, so the flag lands at args[1] where no value-slot probe looks.
     "positional_subcommand_then_work_call": (
         "def handle_command(command, args):\n"
         "    if command == 'inbox_audit':\n"
@@ -599,15 +530,7 @@ _DEFECTIVE_SHAPES = {
         "    _run_inbox_id_scan()\n"
         "    return True\n"
     ),
-    # flow/apps/modules/registry_monitor.py — `registry scan --help` reached
-    # scan_plan_files(), which WRITES the plan registry. Same missed class: the
-    # conditional binding is an IfExp, not an Assign-from-Subscript, so the
-    # value-slot probe skipped it, and the executing call takes no arguments.
-    # cli/apps/modules/display.py as it stood on 2026-08-13, reported by @cli.
-    # THE THIRD ARM: there is no gate ANYWHERE. `drone @cli demo --help` arrives
-    # as command="demo", args=["--help"] -- the verb sits in the COMMAND slot and
-    # `args` is never read anywhere in the routing closure, so the router's
-    # rewrite to ["--help"] is thrown away and run_demo() executes.
+    # cli/apps/modules/display.py — no gate anywhere: the verb is in the COMMAND slot and args is never read.
     "command_dispatch_never_reads_args": (
         "def handle_command(command, args):\n"
         "    if command == 'demo':\n"
@@ -615,6 +538,7 @@ _DEFECTIVE_SHAPES = {
         "        return True\n"
         "    return False\n"
     ),
+    # flow/apps/modules/registry_monitor.py — `registry scan --help` reached scan_plan_files(), which WRITES.
     "conditional_subcommand_then_mutating_call": (
         "def handle_command(command, args):\n"
         "    if command != 'registry':\n"
@@ -656,24 +580,7 @@ def test_defective_shapes_fail(tmp_path, shape):
 
 
 def test_seedgo_is_in_scope_for_its_own_standard():
-    """seedgo is not exempt from the standard it owns.
-
-    This used to read `check_module(seedgo/apps/modules/checklist.py).passed is
-    False` — an assertion that a live fleet file is STILL BROKEN, which is the
-    exact anti-pattern the header of this file warns about. It was allowed on
-    the premise that seedgo owns both sides and so cannot churn under the
-    suite. That premise failed on 2026-08-13: checklist.py grew a
-    `wants_help(None, args)` whole-sequence scan and this test went red for the
-    fix. Fleet state is a MEASUREMENT, never an assertion — including seedgo's.
-
-    What is stable, and what the tripwire was actually protecting, is SCOPE:
-    seedgo's own routing modules are scored by this checker like every other
-    branch's. The defect that motivated it lives on as a pinned shape
-    (_DEFECTIVE_SHAPES["positional_subcommand_then_work_call"], transcribed
-    from seedgo's own inbox_audit.py).
-
-    Mutant: seedgo's modules (or checklist.py alone) declined in apps/handlers/aipass_standards/help_flag_safety_check.py — killed.
-    """
+    """seedgo is not exempt from the standard it owns."""
     modules = FLEET / "seedgo" / "apps" / "modules"
     if not modules.is_dir():
         pytest.skip("fleet file absent: seedgo/apps/modules")
@@ -683,16 +590,8 @@ def test_seedgo_is_in_scope_for_its_own_standard():
     assert scored == routing, "every seedgo routing module must be scored by seedgo's own standard"
 
 
-# =============================================================================
-# THE MISSED CLASS — a positional subcommand, and a work call past the gate
-# =============================================================================
-#
-# The original rule fired only when the un-scanned tail flowed into a VALUE
-# SLOT. That is not the only harm: the harm is that a work call executes at
-# all. @flow's checker run named 5 modules where a whole-branch grep found 8,
-# @hooks' named 2 where a class grep found 9 — and one of the misses was
-# `sessions reclaim --help`, which stopped live sessions. The misses outnumbered
-# the hits, so the discriminator was wrong, not merely noisy.
+# A work call executing at all is the harm, not only an un-scanned tail flowing into a VALUE SLOT:
+# the value-slot rule alone missed more modules than it caught.
 
 
 def test_names_the_executing_call_when_there_is_no_value_slot(tmp_path):
@@ -731,17 +630,8 @@ def test_work_call_widening_still_honours_a_whole_list_scan(tmp_path):
     assert result["score"] == 100
 
 
-# =============================================================================
-# THE THIRD ARM — no gate at all, because the verb is in the COMMAND slot
-# =============================================================================
-#
-# Both gate arms above require a fixed-position help gate to EXIST before
-# anything fires. @cli found the shape where there is none: `handle_command`
-# dispatches on `command`, `args` is never read anywhere in the routing closure,
-# and a work call runs. `drone @cli demo --help` arrives as command="demo",
-# args=["--help"] — the router did its job and rewrote `remaining`, and the
-# module threw the result away. Measured across the fleet on 2026-08-13 by @cli:
-# 0 of 152 modules carry it, because @cli fixed theirs before reporting.
+# No fixed-position gate exists: handle_command dispatches on `command` and never reads `args`,
+# so the router's rewrite to ["--help"] is thrown away and the work call runs.
 
 
 def test_names_the_command_word_when_args_is_never_read(tmp_path):
@@ -784,20 +674,8 @@ def test_unread_args_arm_does_not_fire_without_a_command_dispatch(tmp_path):
     assert result["passed"] is True, result["checks"]
 
 
-# =============================================================================
-# STANDALONE REACHABILITY — the router exemption does not cover `python mod.py`
-# =============================================================================
-
-
-# The router exemption assumed a module is only ever reached THROUGH the
-# router. It is not: `if __name__ == "__main__": handle_command(CMD,
-# sys.argv[1:])` hands raw argv straight to the gate and never touches the
-# router. @api proved it live — `python apps/modules/api_key.py get-key
-# openrouter --help` still reached the retrieval path with the router already
-# normalised. So the exemption may only stand for a module that is NOT
-# independently reachable with raw arguments.
-#
-# Shapes again, not fleet files (see the note above _SAFE_SHAPES).
+# The router exemption stands only for a module not reachable with raw argv: a `__main__` calling
+# handle_command(CMD, sys.argv[1:]) never touches the router.
 
 _STANDALONE_MAIN = "\n\nif __name__ == '__main__':\n    handle_command('thing', sys.argv[1:])\n"
 
@@ -877,9 +755,6 @@ def test_standalone_main_flagged_even_without_a_router(tmp_path):
     src = _POSITIONAL_MODULE + _STANDALONE_MAIN
     result = _check(_branch(tmp_path, src))
     assert result["passed"] is False, result["checks"]
-
-
-# --- the exemption must SURVIVE these ---------------------------------------
 
 
 def test_main_delegate_that_normalises_keeps_exemption(tmp_path):

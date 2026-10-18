@@ -5,30 +5,13 @@
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-30
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Gates are not injectors (DPLAN-0356 item 2).
 
-The engine's crash isolation ("one broken hook never blocks the rest") was
-written for injectors in May and applied to gates unchanged, so a gate that
-failed to import, raised or timed out simply stepped aside. Four gate crashes
-and ~140 subagent_gate timeouts were allowed that way.
-
-This list is CODE, not a config flag: config is data an agent might reach, and a
-gate's failure mode is not something a config may relax.
-
-  - :data:`FAIL_CLOSED`: a handler here that fails to import, raises, times out
-    or exits 2 without a decision is answered with a BLOCK carrying
-    :data:`BROKEN_GATE`, and the engine logs it at ERROR, the line @trigger
-    escalates.
-  - :data:`FAIL_OPEN`: gates whose failure is allowed, each with its reason. A
-    block in their event cannot be cured from inside the session it blocks.
-
-Anything in neither list is an injector and keeps the skip-on-error rule.
-
-:func:`builtin_config` is the gate set that runs when no readable AIPass config
-exists. :func:`gate_config` cuts the gate set out of a config.
+Gate failure modes live in CODE, not config: config is data an agent might reach.
+FAIL_CLOSED gates that crash answer BLOCK with BROKEN_GATE; anything in neither list skips on error.
 """
 
 import copy
@@ -143,11 +126,7 @@ def builtin_config() -> dict:
 
 
 def guarded_tools() -> frozenset[str]:
-    """Every tool a built-in PreToolUse gate guards — what the provider's PreToolUse matcher must reach (R7).
-
-    Read off the gate set's own matchers, so a gate that starts guarding a new
-    tool names it here without a second list to keep in step.
-    """
+    """Every tool a built-in PreToolUse gate guards — what the provider's PreToolUse matcher must reach (R7)."""
     tools: set[str] = set()
     for entry in _BUILTIN.get("PreToolUse", {}).values():
         if isinstance(entry, dict) and entry.get("handler") in FAIL_CLOSED:
@@ -156,12 +135,7 @@ def guarded_tools() -> frozenset[str]:
 
 
 def gate_config(config: dict) -> dict:
-    """The gate entries of *config*, every event, as a config of their own (a fresh copy).
-
-    Returns:
-        ``{"hooks_enabled": True, <event>: {<name>: <entry>}}`` holding only the
-        entries whose handler is a gate. Empty of events when *config* holds none.
-    """
+    """The gate entries of *config*, every event, as a config of their own (a fresh copy)."""
     out: dict = {"hooks_enabled": True}
     for event, entries in config.items():
         if not isinstance(entries, dict):
@@ -182,11 +156,7 @@ def has_gates(config: dict) -> bool:
 
 
 def enforce(config: dict, gate_set: dict) -> dict:
-    """*config* with every gate of *gate_set* forced on over it, and the master switch on.
-
-    For a project config that may not switch the AIPass gates off. A project
-    entry under a gate's name is replaced by the gate's own entry.
-    """
+    """*config* with every gate of *gate_set* forced on over it, and the master switch on."""
     out = copy.deepcopy(config)
     out["hooks_enabled"] = True
     for event, entries in gate_set.items():

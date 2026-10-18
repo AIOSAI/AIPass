@@ -3,19 +3,12 @@
 # Description: All module — full cycle: snapshot + versioned + drive (shared scan)
 # Version: 4.2.0
 # Created: 2026-04-17
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """All Module — runs snapshot then versioned backup with shared scan, then drive sync when the project has it on.
 
-``all --registered`` runs the cycle for every project in the registry, in
-registry order, and ends with one summary line per project. One project's
-failure never stops the next; any failure makes the exit non-zero. This is the
-line the nightly daemon job runs.
-
-A stop (DPLAN-0412) ends the sub-lane in flight and starts no other: each
-sub-lane writes its own running file with verb ``all``, and the entry point
-exits 130. ``all --registered`` starts no further project after a stop.
+Reference: docs/cli.md
 """
 
 import os
@@ -69,17 +62,7 @@ def print_help():
 
 
 def run_all(project_root: str, show_panels: bool = True) -> dict:
-    """Run the full cycle for one project.
-
-    Args:
-        project_root: Absolute path to the project.
-        show_panels: False under --quiet; the Drive step's panels follow it.
-
-    Returns:
-        Dict with ok, snapshot_files, versioned_files, drive (uploaded,
-        skipped or failed), seconds, and stopped (True when a stop ended the
-        cycle; the sub-lanes after it never started).
-    """
+    """Run the full cycle for one project."""
     with catch_sigterm():
         return _all_run(project_root, show_panels)
 
@@ -112,20 +95,14 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
 
     logger.info(f"[backup] Running full backup cycle for {project_root}")
 
-    # Scaffold BEFORE the shared scan. create_backup_dir is what writes the
-    # seed .backupignore, and it used to run first inside run_snapshot — after
-    # this scan had already been taken. On a project's first run that meant
-    # load_spec() read a file that did not exist yet, returned an empty spec,
-    # and handed versioned every path the seed was about to exclude. Snapshot
-    # rescanned and looked correct; versioned took the pre-seed list and
-    # copied the artifacts anyway. Idempotent: nothing is overwritten.
+    # Scaffold before the shared scan: create_backup_dir writes the seed .backupignore, and a scan
+    # taken before it hands versioned every path the seed excludes. Idempotent.
     if create_backup_dir(project_root) is None:
         refuse_missing_root("all", project_root, show_panels)
         summary["seconds"] = time.monotonic() - start
         return summary
 
-    # ONE scan shared between both modes (single-scan rule). The scan is the
-    # snapshot lane's first work, so it is announced as that lane, verb all.
+    # One scan shared by both modes; it is the snapshot lane's first work, so it announces as that lane.
     with LaneProgress(project_root, "snapshot", PRIMARY_COMMAND):
         config = load_project_config(project_root)
         spec = load_spec(project_root)
@@ -134,10 +111,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
         all_files = list(walk_project(project_root))
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
-    # Refuse the whole cycle here, not just inside the sub-modules. A refusal
-    # from run_snapshot alone does not stop this function: it would fall
-    # straight through to run_versioned and write the store it just refused
-    # to mirror.
+    # Refuse the whole cycle here: a refusal inside run_snapshot alone falls through to run_versioned.
     breach = check_ceiling(filtered, config)
     if breach is not None:
         refuse_oversized_run("all", project_root, breach, show_panels)
@@ -160,9 +134,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
     if run_was_stopped():
         return _stopped_summary(summary, start)
 
-    # Drive step, only when the project's drive_sync setting is on (DPLAN-0411).
-    # A real True, not a truthy value: a hand-edited "false" string must not
-    # send the store off the machine. Fail honestly if no creds.
+    # drive_sync must be a real True: a hand-edited "false" string must not send the store off the machine.
     drive_result: dict = {}
     drive_on = config.get("drive_sync") is True
     if not drive_on:
@@ -181,9 +153,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
             if run_was_stopped():
                 summary["drive"] = "stopped"
                 return _stopped_summary(summary, start)
-            # A headroom refusal has already printed its sentence as the Drive
-            # step's last line (error_shown); repeating it would push it off
-            # the end of the run, where the contract puts it.
+            # A headroom refusal already printed its sentence as the run's last line (error_shown).
             if drive_result.get("error") and not drive_result.get("error_shown"):
                 console.print(f"[bold]Drive sync: {drive_result['error']}[/bold]")
             if drive_result.get("error") or drive_result.get("failed"):
@@ -218,18 +188,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
 
 
 def run_registered(show_panels: bool = True) -> bool:
-    """Run the full cycle for every registered project, in registry order.
-
-    A project that refuses or raises is recorded and the next one runs. The
-    summary prints after the last project, one line each.
-
-    Args:
-        show_panels: False under --quiet.
-
-    Returns:
-        True when every project succeeded. On any failure error() is called,
-        which is what turns the exit code non-zero.
-    """
+    """Run the full cycle for every registered project, in registry order."""
     projects = list_projects()
     if not projects:
         error("No projects registered — nothing for all --registered to back up")
@@ -291,11 +250,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
         return True
@@ -313,8 +269,6 @@ def handle_command(command: str, args: list) -> bool:
     run_all(args[0], show_panels=show_panels)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

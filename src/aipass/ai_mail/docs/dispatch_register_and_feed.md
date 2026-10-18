@@ -8,7 +8,7 @@
 
 ## Notification Feed
 
-Desktop toasts are retired (the owner's ruling, 2026-08-11) — no D-Bus, no
+Desktop toasts are retired — no D-Bus, no
 notify-send, no fallback that still toasts. `notify.py` appends notification
 events to a shared JSONL feed that BAUD's notification bell reads.
 
@@ -65,10 +65,8 @@ id. Two consequences for every reader:
   `/v1/feed` does exactly this — ts-cursor clamped both ends with a gap flag.
 
 Timestamps: every line `notify.py` writes is offset-aware
-(`datetime.now().astimezone().isoformat()`), and all lines in the live feed
-were offset-aware when last measured (2026-08-16). But the contract says only
-ISO8601, which does not require an offset, and hand-seeded lines have been naive
-before — S130 filled this file from two writers with different shapes. Parse
+(`datetime.now().astimezone().isoformat()`). The contract says only ISO8601, which
+does not require an offset, and a hand-seeded line may be naive. Parse
 defensively; comparing a naive `ts` against an aware one raises, and a reader
 that crashes on the cursor comparison stops serving the feed entirely.
 
@@ -78,13 +76,13 @@ appends fake dispatch events to the real feed BAUD renders.
 
 ## Dispatch Register + Completion Reports
 
-The owner's rule 1 (DPLAN-0317): *"the watchdog knows what is outstanding because it
-was TOLD, never because it looked."* Nothing polls. Three files carry it.
+The watchdog knows what is outstanding because it was told, never because it looked.
+Nothing polls. Three files carry it.
 
 ```
 .aipass/dispatch_register.jsonl        # what was promised, append-only
 .aipass/dispatch_reports/<id>.json     # what happened, durable, waits to be read
-.aipass/notifications.jsonl            # the existing feed, now pointing at both
+.aipass/notifications.jsonl            # the feed, pointing at both
 ```
 
 ### Locating them
@@ -115,8 +113,7 @@ reconstruction is exported rather than left for each consumer to re-implement.
 nobody has dispatched from this project yet, which is legitimate and honest. It
 **raises `OSError`** when the register exists and cannot be read.
 
-The distinction is @devpulse's, and it is load-bearing for anything that renders
-health: *"none outstanding"* and *"I cannot tell what is outstanding"* must not
+The distinction is load-bearing for anything that renders health: *"none outstanding"* and *"I cannot tell what is outstanding"* must not
 look the same, and an empty list is how they would. A watchdog that shows all
 clear because it could not open the file is worse than one that shows an error.
 
@@ -130,11 +127,9 @@ misses an event.
 Both paths resolve through `find_repo_root()`, which walks up for
 `AIPASS_REGISTRY.json` and then for `pyproject.toml`. **The second marker is not
 redundant.** The registry is untracked runtime state, so on a fresh checkout — CI,
-a new clone — it exists nowhere, and the walk used to fall through to
-`Path.cwd()`. The register would then be created wherever the process happened to
-be standing, which reports perfect health while covering nothing. `pyproject.toml`
-is tracked and sits only at the repo root, so the right answer was always
-available; it simply was not being asked for.
+a new clone — it exists nowhere; `pyproject.toml` is tracked and sits only at the
+repo root. A register created wherever the process stands would report perfect
+health while covering nothing.
 
 ```
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "sender": "@devpulse", "target": "@ai_mail",
@@ -143,7 +138,7 @@ available; it simply was not being asked for.
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "status": "completed", "report_path": "..."}
 ```
 
-The middle line is the **pid annotation** (FPLAN-0499 phase 2): a second
+The middle line is the **pid annotation**: a second
 `outstanding` record appended once the spawn returns a pid, which `open_dispatch`
 could not know because it deliberately runs *before* the spawn. Same append-only
 discipline as closing — the promise is never rewritten, and the fold takes the
@@ -157,44 +152,34 @@ cannot legitimately overrun: an entry past `expected_by` with no completion reco
 means the monitor **died**. Zero false positives, and nothing runs to discover it —
 the staleness is simply a fact about a file that any reader sees.
 
-Honest cost, named rather than found later: the deleted r3 daemon spotted a stale
-lock in ten minutes. This spots a dead monitor in two hours. That is a deliberate
+The cost: by `expected_by` alone a dead monitor shows in two hours, a deliberate
 trade of detection latency for zero idle cost. `drone @ai_mail dispatch register`
 lists what is open and flags what is overdue.
 
-**The two-hour latency is now the fallback, not the only signal.** Rows carrying a
-`monitor_pid` also expose `monitor_alive` on read — the process is checked in
-`/proc` at the moment someone looks, never stored, because a stored liveness is
+**The two-hour latency is the fallback, not the only signal.** Rows carrying a
+`monitor_pid` also expose `monitor_alive` on read — the process is checked (Linux
+reads `/proc`, Windows `OpenProcess`) at the moment someone looks, never stored, because a stored liveness is
 stale the instant it is written. A dead monitor is therefore visible on the next
 watchdog pass (five minutes) instead of at `expected_by`.
 
 `monitor_alive` is **three-valued and the third value matters**: `True` alive,
-`False` gone, `None` cannot be told. `None` covers every row written before this
-landed and the systemd-scope spawn path, which never learns a pid. Reporting those
-as `False` would have announced a death for the entire historic backlog the moment
-it shipped, so readers must treat `None` as "fall back to `overdue`" — which is
-exactly the behaviour every row had before.
+`False` gone, `None` cannot be told. `None` covers rows with no `monitor_pid` and the
+systemd-scope spawn path, which never learns a pid. Readers treat `None` as "fall
+back to `overdue`"; reading it as `False` would announce a death that nobody saw.
 
 ### A reply closes the row
 
-An agent's own reply is the strongest completion evidence the system has, and
-nothing read it: rows whose agent had already reported by mail sat outstanding,
-went overdue, and were announced as dead monitors for work reported hours earlier.
-A reply now closes its dispatch (`status: "completed (replied)"`, distinct from the
+An agent's own reply is the strongest completion evidence the system has, so a
+reply closes its dispatch (`status: "completed (replied)"`, distinct from the
 monitor's own `completed` so a reader can tell "the agent said so" from "the process
 exited"). Only the row's **target** can close it — a third party replying on the
 thread says nothing about whether the dispatched agent finished.
 
-**Matched by thread, not by the agent's dispatch stamp**, and the incident that
-settled it is worth keeping. On 2026-09-07 at 17:15 the watchdog announced DEAD
-for @api's dispatch `641dddbb` on its two-hour `expected_by` — while @api had
-replied on that thread at 16:45 and its work was landed. Matching on the stamp
-would not have fixed it and would have made it worse: @api's stamped id sat on
-its 15:16 *report-first plan*, sent an hour and a half before the work was done,
-while the real completion carried a different stamp entirely because the agent
-had been resumed under a new dispatch id. The stamp closes too early and still
-misses the completion; the thread is the one link that survives a resume, and a
-report-first plan is not a reply on it.
+**Matched by thread, not by the agent's dispatch stamp.** A resumed agent runs
+under a new dispatch id, so its completion carries a different stamp, and a stamped
+early mail (a report-first plan) is not a completion. The stamp would close too
+early and still miss the completion; the thread is the one link that survives a
+resume, and a report-first plan is not a reply on it.
 
 A dispatch with an **empty subject** — a bare wake — has no thread and can never
 be matched. Its row keeps `expected_by` as its only signal, which is honest
@@ -202,7 +187,7 @@ rather than a gap: there is nothing for the agent to reply *to*.
 
 ### The report is durable; delivery is opportunistic
 
-Written **before the dispatch lock is released** — under r4 the report *is* the
+Written **before the dispatch lock is released** — the report *is* the
 event, so losing it means the dispatch never happened while the released lock says
 it finished cleanly. With the release last, the same crash leaves a held lock:
 visible, and recoverable by the stale-lock path that already exists.
@@ -229,13 +214,12 @@ wrote the mailbox during its run.
 message's `id` in the recipient's `.ai_mail.local/inbox.json`), `recipient` (the
 branch, no @) and `project` (the recipient's project as its registry names it:
 `BAUD_REGISTRY.json` → `baud`, `unknown` when no registry names it). The body
-stays subject plus a 100-char preview; the keys are the way to the whole message
-(DPLAN-0414 C-A). An upsert update writes no line, so it carries none. `wake` lines
-carry none either.
+stays subject plus a 100-char preview; the keys are the way to the whole message.
+An upsert update writes no line, so it carries none. `wake` lines carry none either.
 
 ### Feed records for dispatch completions
 
-`kind: "dispatch"` lines gained three **additive** keys — `dispatch_id`, `sender`,
+`kind: "dispatch"` lines carry three **additive** keys — `dispatch_id`, `sender`,
 `report_path`. The five contract keys are untouched and are written last, so an
 extra can never redefine `ts` or `kind`. Values may be null on an unregistered
 dispatch; treat them as optional. The full report is deliberately **not** inlined:
@@ -243,14 +227,14 @@ it is 1–2 KB and would bloat what @api serves to BAUD, so the line carries a
 pointer instead.
 
 `trigger.fire("dispatch_completed", ...)` also fires, and is **in-process only** —
-@trigger cannot cross process boundaries (DPLAN-0314). **The feed file is what
+@trigger cannot cross process boundaries. **The feed file is what
 carries this event to another process.** Anything expecting the trigger to reach a
 separate watchdog will silently never fire.
 
 Tests re-root the register and the reports directory to `tmp_path` via an autouse
 conftest fixture. `wake_branch` registers before spawning and the wake tests mock
-the spawn, so an unguarded run writes phantom "outstanding" entries into the live
-register — the first time this shipped.
+the spawn, so an unguarded run would write phantom "outstanding" entries into the
+live register.
 
 ## Related
 

@@ -3,7 +3,7 @@
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
 # Version: 1.3.5
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
@@ -44,24 +44,8 @@ if HANDLER_PKG not in sys.modules:
 def _resync_module_attrs() -> Generator[None, None, None]:
     """Keep parent-package attributes honest after sys.modules surgery.
 
-    A test that deletes modules from sys.modules and re-imports them under
-    mocked dependencies (in this suite, only test_module_isolation's test_a,
-    which does it on purpose; test_dead_cwd_imports' _PROBE deletes them too,
-    but in a child interpreter, never in this process) leaves the parent
-    behind. patch.dict restores the sys.modules DICT at exit, but never the
-    parent package's ATTRIBUTE, which keeps pointing at the throwaway twin —
-    one that may lack submodule attributes entirely when they resolved to
-    sys.modules mocks during its import. The next test then resolves two
-    different objects for one dotted name: mock.patch walks the stale attribute
-    (AttributeError: module ...drive has no attribute 'client') while importlib
-    walks sys.modules. Only surfaces when an unlucky xdist worker runs a
-    polluting module before a victim — CI-only red, invisible in serial runs —
-    and only on Python 3.10/3.11: 3.12+ mock.patch resolves its target through
-    sys.modules (pkgutil.resolve_name).
-
-    After every test: point parent attributes back at the sys.modules entry,
-    and drop attributes whose module was evicted from sys.modules entirely so
-    the next import performs a clean load.
+    patch.dict restores the sys.modules DICT but not the parent package ATTRIBUTE, so a
+    re-import under mocks leaves mock.patch (3.10/3.11) walking a stale twin under xdist.
     """
     yield
     snapshot = [(n, m) for n, m in sys.modules.items() if n.startswith("aipass") and m is not None]
@@ -86,40 +70,8 @@ def _resync_module_attrs() -> Generator[None, None, None]:
 def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect this branch's json writes into a temp dir, and silence logging.
 
-    autouse on purpose: under DPLAN-0325 the shim's names write into the real
-    ``backup_json/`` unless the seam is set, so a test that forgets to redirect
-    pollutes the branch. The guard belongs on every test, not on the ones that
-    remember. The env var at the top of this file covers import time; this
-    narrows it to one directory PER TEST.
-
-    Nothing is patched on the shim -- it has no attributes to patch, and that
-    is the point. The service recomputes its directory on every call, so
-    setting the variable here, after import, still takes effect. The sandbox is
-    MEASURED off the shim rather than spelled out, so it cannot drift from what
-    the service actually does. The same seam covers backup's own audit stream
-    (``apps/handlers/audit/trail.py``), which recomputes its path per call too.
-
-    The seam gets its OWN directory rather than tmp_path itself. The service
-    spells the sandbox ``<seam>/<branch>/<branch>_json``, so pointing the seam
-    straight at tmp_path creates ``tmp_path/backup/`` in every single test --
-    and this branch is NAMED backup, so a test building its own ``backup/``
-    directory under tmp_path collided with the fixture rather than with
-    anything it did (test_ignore_pathspec's mirror-cleanup pair, 2026-09-03).
-
-    And that directory sits BESIDE tmp_path, not inside it (2026-09-23). Until
-    now the seam was ``tmp_path/_aipass_json_seam``, so the sandbox the fixture
-    builds -- ``<seam>/backup/backup_json/`` plus the audit stream's
-    ``<seam>/backup/logs/`` -- lived INSIDE the directory tests hand to the
-    product as a project root. Any test that walked, counted or mirrored a bare
-    tmp_path saw files the product never created and the test never wrote, and
-    a count written against that total was measuring the fixture. A fixture
-    that changes the answer to the question under test is a lie in the
-    scaffolding, so the seam moved out: a sibling under the same per-test
-    pytest directory, still unique per test, still swept up with it, but never
-    inside a tree under measurement.
-
-    Returns:
-        The sandbox directory the handler now writes into.
+    The seam sits BESIDE tmp_path, never inside it: the sandbox is spelled <seam>/backup/...,
+    so inside tmp_path it collides with tests that build backup/ and pollutes counted trees.
     """
     seam = tmp_path.parent / f"{tmp_path.name}_aipass_json_seam"
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(seam))
@@ -139,13 +91,7 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Pin the product's consoles to one width for the whole run.
-
-    Rich sizes an unpinned console on every print: 80 columns on POSIX and 79
-    on Windows under pytest's capture, the terminal's width under -s, COLUMNS
-    when it is exported. A line that wraps on one OS and not another turns a
-    substring assertion into a coin toss (DPLAN-0354, test template v1 item 20).
-    """
+    """Pin the product's consoles to one width: an unpinned Rich console wraps differently per OS."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 
@@ -174,32 +120,8 @@ def _no_live_google(*args: object, **kwargs: object) -> NoReturn:
 def sealed_google_edge(monkeypatch: pytest.MonkeyPatch) -> None:
     """Seal both doors to the real account, and the media reader, before EVERY test.
 
-    autouse and suite-wide on purpose. This fixture used to live inside
-    test_drive_pipeline.py, where a file-level autouse reaches exactly one
-    file -- so test_drive_mocked.py, which drives the same four drive_*
-    modules, ran unsealed. ``drive_check``, ``drive_clear`` and ``drive_sync``
-    reach a REAL Google account (drive_check's own 2026-08-13 comment records
-    ``drive_check foo --help`` making a live auth), and in an unsealed file the
-    dial happens BEFORE the assertion that would have failed the test: the
-    account is touched either way, and the red only arrives afterwards.
-
-    Exactly two calls can reach the live account --
-    ``google_client.get_drive_service`` (the OAuth flow) and
-    ``google_client.api_call_with_retry`` (every request) -- and both are bound
-    as module attributes of ``handlers/drive/client.py`` at import time, so one
-    monkeypatch on that one module closes both doors for the whole process.
-    ``googleapiclient.http.MediaFileUpload`` opens the local file for a
-    resumable upload, so it is replaced as well, and ``MEDIA_UPLOAD_AVAILABLE``
-    is set beside it: CI installs no drive extra, so the import guard leaves the
-    flag False and every upload returned failure before reaching the stand-in.
-
-    A call that gets through RAISES rather than dials, so the seal is
-    self-reporting: reaching the edge is a loud RuntimeError, never a quiet
-    network round trip. test_drive_mocked.py pins that refusal directly.
-
-    Both modules are bound at this file's top, which is the same object
-    sys.modules hands the product: patching the attribute here is patching the
-    name the product resolves at call time.
+    Both live calls are module attributes of handlers/drive/client.py, so one patch closes them.
+    MEDIA_UPLOAD_AVAILABLE is forced True: CI installs no drive extra, so uploads would fail early.
     """
     monkeypatch.setattr(drive_client, "get_drive_service", _no_live_google)
     monkeypatch.setattr(drive_client, "api_call_with_retry", _no_live_google)

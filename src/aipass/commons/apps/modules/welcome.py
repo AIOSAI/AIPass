@@ -3,17 +3,10 @@
 # Description: Welcome Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Welcome & Onboarding Orchestration Module
-
-Thin router for the welcome command. Delegates logic
-to handlers/welcome/welcome_ops.py and renders results with Rich.
-
-Handles: welcome command.
-"""
+"""Welcome & Onboarding Orchestration Module"""
 
 from typing import List
 
@@ -44,31 +37,12 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle welcome-related commands.
-
-    Args:
-        command: Command name (welcome)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle welcome-related commands; False if the command is not ours."""
     if command != "welcome":
         return False
 
     return _handle_welcome(args)
-
-
-# =============================================================================
-# DISPLAY HANDLER
-# =============================================================================
 
 
 def _handle_welcome(args: List[str]) -> bool:

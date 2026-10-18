@@ -3,24 +3,13 @@
 # Description: Guard that test/probe fixtures never leak into the live contacts.json
 # Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/paths.py's find_repo_root(), guarding the live contacts.json it locates."""
 
-# @devpulse flagged (2026-08-16, e00936b6) that the live .ai_mail.local/contacts.json
-# carried 6 rows pointing at /tmp paths — 2 from an unisolated pytest run
-# (deliver_email_to_branch() auto-registers every recipient, and CONTACTS_FILE had
-# no conftest redirect the way FEED_PATH does) and 4 older ones from disposable
-# scratchpad sub-agent probes. branch_detection._get_contact_info() then resolved
-# one of those rows as "verified" identity, serving a dead mailbox in place of a
-# real one.
-#
-# Two fixes landed alongside this guard: an autouse conftest fixture that
-# redirects CONTACTS_FILE for every test (tests/conftest.py), and a staleness
-# check in _get_contact_info() that refuses to vouch for a contact whose branch
-# root no longer exists on disk. This test is the live-state tripwire for the
-# first — companion to test_live_mailbox_hygiene.py's inbox guard.
+# Live-state tripwire for tests/conftest.py's autouse CONTACTS_FILE redirect: delivery
+# auto-registers every recipient, and a tmp row would be served as a "verified" identity.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified

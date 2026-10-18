@@ -3,15 +3,10 @@
 # Description: Tests for verify module (plan vectorization check)
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/verify.py."""
-
-# Covers _get_memory_python, _check_plan_subprocess, is_plan_vectorized,
-# handle_command, _discover_handlers.
-#
-# Covers: from aipass.memory.apps.modules.verify import handle_command
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — the check_plan operation itself, in tests/test_chroma_source_match.py
@@ -52,11 +47,6 @@ def _introspected_handlers(capsys):
     return found
 
 
-# ===========================================================================
-# 1. _get_memory_python()
-# ===========================================================================
-
-
 class TestGetMemoryPython:
     """Tests for _get_memory_python() resolution logic."""
 
@@ -70,15 +60,12 @@ class TestGetMemoryPython:
     def test_venv_python_used_when_exists(self, monkeypatch, tmp_path):
         """When the memory .venv python exists, it should be returned."""
 
-        # Remove env override so it doesn't interfere
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
 
-        # Create a fake venv python
         fake_python = tmp_path / ".venv" / "bin" / "python"
         fake_python.parent.mkdir(parents=True)
         fake_python.touch()
 
-        # Patch the module-level constant
         monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", fake_python)
         result = _python_used(monkeypatch)
         assert result == str(fake_python)
@@ -87,7 +74,6 @@ class TestGetMemoryPython:
         """When no env var and no venv, fall back to sys.executable."""
 
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
-        # Point to a path that does not exist
         monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = _python_used(monkeypatch)
         assert result == sys.executable
@@ -96,16 +82,9 @@ class TestGetMemoryPython:
         """An empty AIPASS_MEMORY_PYTHON env var should be treated as unset."""
 
         monkeypatch.setenv("AIPASS_MEMORY_PYTHON", "")
-        # Empty string is falsy, so it should NOT be returned
         monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = _python_used(monkeypatch)
-        # Falls through to venv check (missing) then sys.executable
         assert result == sys.executable
-
-
-# ===========================================================================
-# 2. _check_plan_subprocess()
-# ===========================================================================
 
 
 class TestCheckPlanSubprocess:
@@ -217,11 +196,6 @@ class TestCheckPlanSubprocess:
         assert input_data["plan_label"] == "HPLAN-0042"
 
 
-# ===========================================================================
-# 3. is_plan_vectorized()
-# ===========================================================================
-
-
 class TestIsPlanVectorized:
     """Tests for the public is_plan_vectorized() API."""
 
@@ -245,11 +219,6 @@ class TestIsPlanVectorized:
         result = verify.is_plan_vectorized("FPLAN-0000")
         assert result["success"] is False
         assert result["error"] == "something broke"
-
-
-# ===========================================================================
-# 4. handle_command()
-# ===========================================================================
 
 
 class TestHandleCommand:
@@ -354,20 +323,8 @@ class TestHandleCommand:
         assert called["help"] is True
 
 
-# ===========================================================================
-# 5. _discover_handlers()
-# ===========================================================================
-
-
 def _setup_fake_module_tree(tmp_path):
-    """Build tmp_path/apps/modules/verify.py and apps/handlers/ so that
-    patching verify.__file__ makes _discover_handlers() scan our fake tree.
-
-    _discover_handlers does:
-        Path(__file__).resolve().parent.parent / "handlers"
-    so __file__ must sit at  <root>/apps/modules/verify.py
-    and handlers at          <root>/apps/handlers/
-    """
+    """Build a fake apps/modules/verify.py + apps/handlers/ tree; _discover_handlers reads parent.parent of __file__."""
     modules_dir = tmp_path / "apps" / "modules"
     modules_dir.mkdir(parents=True)
     fake_file = modules_dir / "verify.py"
@@ -404,7 +361,6 @@ class TestDiscoverHandlers:
         assert "chroma_subprocess.py" in result["storage"]
         assert "vector_store.py" in result["storage"]
         assert "query_engine.py" in result["search"]
-        # __init__.py should be excluded
         assert "__init__.py" not in result["storage"]
 
     def test_skips_dunder_directories(self, monkeypatch, tmp_path, capsys):
@@ -430,7 +386,6 @@ class TestDiscoverHandlers:
         """An empty handlers directory returns an empty dict."""
 
         fake_file, _handlers_dir = _setup_fake_module_tree(tmp_path)
-        # handlers_dir exists but is empty (no subdirs)
         monkeypatch.setattr(verify, "__file__", fake_file)
 
         result = _introspected_handlers(capsys)
@@ -481,7 +436,6 @@ class TestDiscoverHandlers:
         result = _introspected_handlers(capsys)
         assert "config" in result
         assert result["config"] == ["config_handler.py"]
-        # Confirm non-py files are absent
         all_files = [f for files in result.values() for f in files]
         assert "settings.json" not in all_files
         assert "README.md" not in all_files
@@ -491,13 +445,11 @@ class TestDiscoverHandlers:
 
         fake_file, handlers_dir = _setup_fake_module_tree(tmp_path)
 
-        # Create dirs in reverse alphabetical order
         for name in ["zebra", "alpha", "middle"]:
             d = handlers_dir / name
             d.mkdir()
             (d / "handler.py").write_text("", encoding="utf-8")
 
-        # Add multiple files to alpha in non-sorted order
         (handlers_dir / "alpha" / "z_module.py").write_text("", encoding="utf-8")
         (handlers_dir / "alpha" / "a_module.py").write_text("", encoding="utf-8")
 

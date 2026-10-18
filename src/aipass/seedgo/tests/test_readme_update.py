@@ -3,7 +3,7 @@
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
 # Version: 2.3.0
 # Created: 2026-09-20
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -35,11 +35,6 @@ _WRITE_BIT_HOLDS = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)
 def _set_writable(path: Path, writable: bool) -> None:
     if sys.platform != "win32":
         os.chmod(path, 0o644 if writable else 0o444)
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -86,11 +81,6 @@ def broken_generator(tmp_path, monkeypatch):
     with pytest.raises(SyntaxError) as reason:
         compile("def (:\n", str(generator), "exec")
     return str(reason.value)
-
-
-# ---------------------------------------------------------------------------
-# handle_command — the routing a user actually types
-# ---------------------------------------------------------------------------
 
 
 class TestHandleCommand:
@@ -143,11 +133,6 @@ class TestHandleCommand:
         readme_update.handle_command("readme", ["check", "@flow"])
 
         assert checked == [["@flow"]] and updated == []
-
-
-# ---------------------------------------------------------------------------
-# readme update / readme check — a whole run, through the command
-# ---------------------------------------------------------------------------
 
 
 class TestUpdateRun:
@@ -235,21 +220,11 @@ class TestUpdateRun:
         assert (registered / "README.md").read_text(encoding="utf-8") == before
 
     def test_check_names_a_generator_that_cannot_load_with_its_reason(self, capsys, registered, broken_generator):
-        """`readme check` carries its own catch, and only a run of check can see it.
-
-        Green on the code from its first run; its proof is the mutant that drops the reason
-        from _handle_check's message in apps/modules/readme_update.py — killed (seedgo, fleet
-        green leg 6).
-        """
+        """`readme check` carries its own catch, and only a run of check can see it."""
         readme_update.handle_command("readme", ["check", "@made_up"])
 
         err = capsys.readouterr().err.splitlines()
         assert [line for line in err if line.endswith(f"Failed to load README generator: {broken_generator}")] != []
-
-
-# ---------------------------------------------------------------------------
-# update_readme_auto_sections — the write itself
-# ---------------------------------------------------------------------------
 
 
 class TestMarkerReplacement:
@@ -285,10 +260,7 @@ class TestMarkerReplacement:
         assert result["updated"] == []
 
     def test_a_section_that_fails_is_named_in_the_errors_not_passed_off_as_empty(self, branch):
-        """A broken passport used to read as "no header": errors stayed empty and the run looked clean.
-
-        Mutant: generate_header_section's old `except (json.JSONDecodeError, OSError): return ""` — killed.
-        """
+        """A broken passport used to read as "no header": errors stayed empty and the run looked clean."""
         (branch / ".trinity").mkdir()
         (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
 
@@ -299,11 +271,7 @@ class TestMarkerReplacement:
         assert result["updated"] == ["tree"]
 
     def test_a_tree_that_cannot_be_listed_and_a_help_that_hangs_are_both_named(self, branch, monkeypatch):
-        """Both used to come back as "" beside an empty errors list, so a failed run read as nothing to do.
-
-        Mutant: generate_tree_section's old `except Exception: return ""` — killed.
-        Mutant: generate_commands_section's old `except subprocess.TimeoutExpired: return ""` — killed.
-        """
+        """Both used to come back as "" beside an empty errors list, so a failed run read as nothing to do."""
         (branch / "apps" / f"{branch.name}.py").write_text("# entry\n", encoding="utf-8")
 
         def unreadable_tree(directory, *args, **kwargs):
@@ -349,11 +317,6 @@ class TestMarkerReplacement:
         assert result["missing_markers"] == []
 
 
-# ---------------------------------------------------------------------------
-# readme_generator — the sections
-# ---------------------------------------------------------------------------
-
-
 class TestTreeSection:
     def test_a_missing_directory_yields_no_section_rather_than_a_broken_fence(self, tmp_path):
         assert readme_generator.generate_tree_section(str(tmp_path / "nonexistent")) == ""
@@ -378,10 +341,7 @@ class TestTreeSection:
         assert "real_file.py" in result
 
     def test_a_file_that_cannot_be_read_is_marked_unreadable_not_left_blank(self, tmp_path, monkeypatch):
-        """An unreadable module used to get the same blank comment as one with no docstring.
-
-        Mutant: _get_file_comment's old `except (OSError, UnicodeDecodeError): ... return ""` — killed.
-        """
+        """An unreadable module used to get the same blank comment as one with no docstring."""
         (tmp_path / "locked.py").write_text('"""Never shown."""\n', encoding="utf-8")
         (tmp_path / "plain.py").write_text("x = 1\n", encoding="utf-8")
 
@@ -445,11 +405,6 @@ class TestModulesSection:
         result = readme_generator.generate_modules_section(str(tmp_path))
 
         assert result == "- **bare**"
-
-
-# ---------------------------------------------------------------------------
-# readme_ops — target resolution
-# ---------------------------------------------------------------------------
 
 
 class TestTargetResolution:

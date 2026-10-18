@@ -3,14 +3,11 @@
 # Description: Handler for registry file operations
 # Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Handler for registry file operations.
-
-Handles loading, parsing, and normalizing *_REGISTRY.json files.
-All file I/O and data transformation for the registry lives here.
 """
 
 import json
@@ -30,17 +27,8 @@ from aipass.drone.apps.handlers.json import json_handler
 from .router_handler import caller_cwd, registries_in
 
 
-# ---------------------------------------------------------------------------
-# Path containment validation
-# ---------------------------------------------------------------------------
-
-
 def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: str) -> bool:
-    """Validate that a resolved branch path is contained within the project root.
-
-    Returns True if the path is safe.  Returns False and logs a warning if
-    the path escapes the project boundary (path-traversal / ghost-branch).
-    """
+    """Validate that a resolved branch path is contained within the project root."""
     try:
         resolved = branch_path.resolve()
         root = project_root.resolve()
@@ -62,24 +50,17 @@ def _validate_branch_path(branch_path: Path, project_root: Path, branch_name: st
     return True
 
 
-# ---------------------------------------------------------------------------
-# Registry path resolution
-# ---------------------------------------------------------------------------
-
 _registry_path: Optional[Path] = None
 
-#: The first passport the credential checks could not read, as the line main()
-#: prints on stderr after routing. None while every passport read was clean.
+#: The first unreadable passport, as the line main() prints on stderr after routing.
 _PASSPORT_FAULT: Optional[str] = None
 
 
 def passport_fault() -> Optional[str]:
     """The line naming a passport the credential checks could not read, or None.
 
-    Both checks accept the registry when the passport cannot be read (fleet
-    green leg 7, drone's option C): refusing would send find_registry() to
-    another project's registry with no word said. The fault is said instead,
-    once, by drone.py main() on stderr after the command has run.
+    Both checks accept the registry when the passport cannot be read: refusing
+    would send find_registry() to another project's registry with no word said.
     """
     return _PASSPORT_FAULT
 
@@ -125,8 +106,7 @@ def _enrolment_file() -> Optional[Path]:
 def _enrolled_homes(enrolment: Path) -> List[tuple]:
     """``(enrolled, path)`` for each enrolled project that holds an AIPASS_REGISTRY.json.
 
-    Raises OSError or ValueError when the file cannot be read as the enrolment
-    record: a fault to name, never "nothing enrolled".
+    Raises OSError or ValueError on an unreadable file: a fault to name, never "nothing enrolled".
     """
     data = json.loads(enrolment.read_text(encoding="utf-8"))
     projects = data.get("projects") if isinstance(data, dict) else None
@@ -144,24 +124,10 @@ def _enrolled_homes(enrolment: Path) -> List[tuple]:
 def resolve_aipass_home() -> AipassHome:
     """The AIPass home: the one answer every AIPASS_HOME reader in drone asks.
 
-    Order, first answer wins (@devpulse's brief, 2026-10-13):
-
-    1. ``AIPASS_HOME`` set — an explicit setting beats a guess, used as given.
-    2. The interpreter's own install: the installed ``drone`` runs on
-       ``<home>/.venv/bin/python3``, so ``Path(sys.prefix).parent`` is the home
-       when it holds an AIPASS_REGISTRY.json. A system Python or a tool venv
-       fails that check and falls through.
-    3. The homes enrolled in ``~/.aipass/trusted_projects.json``: the projects
-       there that hold an AIPASS_REGISTRY.json, the newest ``enrolled`` first.
-       (The prefer-the-interpreter's-parent rule is step 2 already: had that
-       parent held a registry, step 2 would have answered.)
-
-    A terminal opened before setup.sh wrote ``AIPASS_HOME`` into the shell rc
-    still reaches the core branches through 2 or 3.
-
-    Returns:
-        AipassHome. ``path`` is None only when all three failed, and ``tried``
-        then names each, so the tip can say what a person could act on.
+    First answer wins: ``AIPASS_HOME`` as given; the interpreter's ``<home>/.venv``
+    parent when it holds an AIPASS_REGISTRY.json; the newest enrolled home in
+    ``~/.aipass/trusted_projects.json``. ``path`` is None only when all three
+    failed, and ``tried`` then names each for the tip.
     """
     explicit = os.environ.get("AIPASS_HOME")
     if explicit:
@@ -184,11 +150,7 @@ def resolve_aipass_home() -> AipassHome:
 
 
 def _enrolled_or_reason(enrolment: Optional[Path]) -> tuple:
-    """``(homes, "")`` from the enrolment file, or ``([], why there are none)``.
-
-    An unreadable file is a reason to print, never an empty enrolment: the
-    tip names it, so a person can see which file to repair.
-    """
+    """``(homes, "")`` from the enrolment file, or ``([], why there are none)``."""
     if enrolment is None:
         return [], "there is no user home directory holding .aipass/trusted_projects.json"
     if not enrolment.is_file():
@@ -215,12 +177,10 @@ def missing_home_tip() -> str:
     )
 
 
-# The homes whose interpreter choice this process has already logged: once per
-# home, not once per routed command.
+# Homes whose interpreter choice is already logged: once per home, not per command.
 _ANNOUNCED_HOMES: set = set()
 
 
-# Where a venv keeps its python, by platform: (directory, file name).
 VENV_LAYOUTS = {"windows": ("Scripts", "python.exe"), "posix": ("bin", "python")}
 
 
@@ -238,22 +198,10 @@ def _venv_python(home: Path) -> Path:
 def branch_interpreter(branch_path: str | Path) -> str:
     """Which python runs a branch's app: the interpreter of the AIPass home the branch lives in.
 
-    A stranger's machine holds aipass twice: the uv tool venv whose ``drone``
-    comes first on PATH, and the home's own ``.venv`` with the home's code
-    installed editable. A home app run on the tool venv's python imports its
-    handlers from the tool's site-packages, and the handlers fence refuses a
-    caller outside its tree (the owner's sandbox, DPLAN-0408, 2026-10-13).
-
-    * The branch is outside the resolved home (a project's own branch, a
-      declared root), or no home resolved: ``sys.executable``, as always.
-    * The home is ``Path(sys.prefix).parent``, so this drone IS the home's:
-      ``sys.executable``.
-    * Otherwise the home's own venv python when it exists, logged INFO once.
-    * No venv there: ``sys.executable``, with a WARNING naming the home, once.
-      setup.sh makes the venv; a home without one is half-installed.
-
-    The venv path is returned as found, never resolved: a venv's python is a
-    symlink to the base interpreter, and following it would lose the venv.
+    A home app run on the uv tool venv's python imports the tool's handlers,
+    and the handlers fence refuses a caller outside its tree.
+    The venv path is returned unresolved: a venv's python is a symlink to the
+    base interpreter, and following it would lose the venv.
     """
     home = resolve_aipass_home().path
     if home is None:
@@ -286,11 +234,7 @@ def branch_interpreter(branch_path: str | Path) -> str:
 
 
 def _first_registry_in(directory: Path) -> Optional[Path]:
-    """Return the first *_REGISTRY.json in *directory*, or None.
-
-    When multiple matches exist, the alphabetically-first name wins
-    so the result is deterministic across platforms.
-    """
+    """Return the alphabetically-first *_REGISTRY.json in *directory*, or None."""
     matches = registries_in(directory)
     return matches[0] if matches else None
 
@@ -298,42 +242,18 @@ def _first_registry_in(directory: Path) -> Optional[Path]:
 def _registry_matches_credential(registry_path: Path) -> bool:
     """Check whether a candidate registry matches the nearest passport.
 
-    Returns True when the registry is acceptable (IDs match, either side is
-    missing an ID, or the caller has no directory to walk from).  Returns False
-    only when both IDs exist and disagree — the caller should skip this registry
-    and keep walking.
-
-    A registry it cannot read is accepted with a WARNING: load_registry() reads
-    the same file and raises naming it. A passport it cannot read is accepted
-    too, and recorded for passport_fault() so main() says it on stderr.
-
-    DECLARED ROOTS DO NOT COME THROUGH HERE, AND THAT IS DELIBERATE.
-    DECLARATION IS THE CREDENTIAL (@devpulse's ruling, FPLAN-0460 phase 3).
-    This gate asks an INTRA-installation question — "are you a citizen of the
-    registry you are standing in" — and a cross-repo answer is not available to
-    it, because the ids differ BY CONSTRUCTION: AIPASS 7087bb93, VERA-STUDIO
-    8fb38c96, WREN 9d11c395. Routing every external root through this check
-    would refuse all of them, always, for being what they are.
-
-    The authority a walk could never attach is the owner blessing
-    AIPASS_ROOTS.json. That file is the credential, and @memory's reader is the
-    only thing that reads it.
-
-    NOTE FOR WHOEVER FINDS THE UNCHECKED PATH LATER: the AIPASS_HOME fallback in
-    find_registry() has never been credential-checked either, and neither is the
-    external tier below. That is not an oversight to fix. "Fixing" it silently
-    kills every external citizen — the fence test (@wren) simply stops
-    resolving, with no error, because being refused is indistinguishable from
-    never having been declared.
+    False only when both IDs exist and disagree: the caller skips it and keeps walking.
+    Declared roots and the AIPASS_HOME fallback never pass through here, on purpose:
+    registry ids differ across installations by construction, so checking them
+    would silently refuse every external citizen. Declaration is the credential.
     """
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         registry_id = data.get("metadata", {}).get("id") if isinstance(data, dict) else None
     except Exception as exc:
-        # A fault of the REGISTRY is accepted: load_registry() reads the same
-        # file and raises with its name. Skipping would resolve another
-        # registry further up without a word.
+        # Accepted: load_registry() reads the same file and raises with its name;
+        # skipping would resolve another registry further up without a word.
         logger.warning("Credential pre-check could not read registry %s: %s", registry_path, exc)
         return True
     if not registry_id:
@@ -341,11 +261,6 @@ def _registry_matches_credential(registry_path: Path) -> bool:
 
     cwd = caller_cwd()
     if cwd is None:
-        # No location is not a failed check. The walk below infers from
-        # where the caller STANDS, and a process whose directory was
-        # deleted stands nowhere — the same answer as a walk that finds no
-        # passport, reached honestly instead of through an except logging
-        # "pre-check failed" for a check that did not fail.
         logger.info(
             "Credential pre-check for %s has no current directory to walk from — "
             "no passport is reachable, so the registry is accepted",
@@ -366,9 +281,7 @@ def _registry_matches_credential(registry_path: Path) -> bool:
                 return passport_id == registry_id
         return True
     except Exception as exc:
-        # A fault of the PASSPORT is accepted LOUDLY: refusing would send the
-        # walk to another project's registry in silence. passport_fault()
-        # carries it to main(), which says it once on stderr.
+        # Accepted loudly: refusing would send the walk to another project's registry in silence.
         _record_passport_fault(candidate, registry_path, exc)
         return True
 
@@ -376,21 +289,9 @@ def _registry_matches_credential(registry_path: Path) -> bool:
 def find_registry() -> Path:
     """Find a *_REGISTRY.json by walking up from this file's location.
 
-    Search order:
-    1. Explicitly set path via set_registry_path()
-    2. AIPASS_REGISTRY environment variable
-    3. Walk up from cwd (skipping registries that fail credential check)
-    4. The AIPass home (resolve_aipass_home) — for external projects where CWD walk finds nothing
-    5. Walk up from drone package location
-    6. Default: package-relative path
-
-    When a candidate registry's metadata.id conflicts with the nearest
-    passport's registry_id, it is skipped and the walk continues upward.
+    Order: walk up from cwd (skipping credential mismatches), the AIPass home,
+    walk up from this package, then the package's project root.
     """
-    # Walk up from cwd FIRST — this is where the user is working. A caller
-    # whose directory was deleted has no "where", so step 3 is SKIPPED rather
-    # than attempted: the remaining sources (AIPASS_HOME, the package walk)
-    # never depended on a location and still answer.
     cwd = caller_cwd()
     if cwd is not None:
         for parent in [cwd] + list(cwd.parents):
@@ -400,20 +301,16 @@ def find_registry() -> Path:
                     return hit
                 continue
 
-    # The AIPass home — AIPASS_HOME, else the interpreter's install, else an
-    # enrolled home — for external projects where the CWD walk finds nothing
     hit = _get_aipass_home_registry_path()
     if hit is not None:
         return hit
 
-    # Walk up from this file (fallback for pip editable installs)
     current = Path(__file__).resolve().parent
     for parent in [current] + list(current.parents):
         hit = _first_registry_in(parent)
         if hit is not None:
             return hit
 
-    # Fallback — walk up from this file to the project root (marker-based)
     _markers = (".git", "pyproject.toml", "setup.py", "setup.cfg")
     fallback_dir = Path(__file__).resolve().parent
     for parent in [fallback_dir, *fallback_dir.parents]:
@@ -427,13 +324,7 @@ def find_registry() -> Path:
 
 
 def get_registry_path() -> Path:
-    """Get the current registry path.
-
-    Priority:
-    1. Explicitly set path via set_registry_path()
-    2. AIPASS_REGISTRY environment variable
-    3. Walk-up finder from package location
-    """
+    """Get the current registry path: set_registry_path(), else AIPASS_REGISTRY, else find_registry()."""
     global _registry_path
 
     if _registry_path is not None:
@@ -449,19 +340,13 @@ def get_registry_path() -> Path:
 def _verify_registry_credential(registry_path: Path, registry_data: Dict[str, Any]) -> None:
     """Verify that the registry matches the caller's passport credential.
 
-    Compares registry metadata.id against the nearest passport's
-    citizenship.registry_id.  Only raises when BOTH sides have an ID
-    and they don't match — silent pass otherwise.
+    Raises only when BOTH sides have an ID and they differ; silent pass otherwise.
     """
     try:
         registry_id = registry_data.get("metadata", {}).get("id")
         if not registry_id:
             return
 
-        # Walk up from CWD looking for .trinity/passport.json. No location
-        # means no passport to compare against — the same silent pass as a walk
-        # that finds none, said at INFO instead of arriving as a warning about
-        # a verification that never failed.
         cwd = caller_cwd()
         if cwd is None:
             logger.info(
@@ -486,7 +371,6 @@ def _verify_registry_credential(registry_path: Path, registry_data: Dict[str, An
                 passport = json.load(f)
             passport_id = passport.get("citizenship", {}).get("registry_id")
         except Exception as exc:
-            # The same fault the pre-check records; said once, by main().
             _record_passport_fault(passport_path, registry_path, exc)
             return
         if not passport_id:
@@ -516,34 +400,17 @@ def reset_registry_path() -> None:
     _registry_path = None
 
 
-# ---------------------------------------------------------------------------
-# Registry loading and querying
-# ---------------------------------------------------------------------------
-
-
 def _read_registry_json(registry_path: Path) -> Any:
     """Open and parse one registry file; every error is the caller's to name.
 
-    The product has no reason of its own for this name; _load_registry_data
-    could open inline. The reason is the test: a read the OS refuses is
-    supplied here, not by replacing builtins.open for the whole process.
+    A seam for tests: an OS-refused read is patched here, not on builtins.open.
     """
     with open(registry_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
-    """Read, parse, and normalize a registry file.
-
-    Performs file I/O and branch normalization (list → dict).  Does NOT
-    run credential verification or log the operation — callers that need
-    those steps (i.e. load_registry) are responsible.
-
-    Raises:
-        RegistryNotFoundError: If registry file doesn't exist
-        RegistryCorruptError: If registry file is invalid JSON or malformed
-        RegistryPermissionError: If registry file cannot be read
-    """
+    """Read, parse, and normalize a registry file; no credential check, no logging."""
     if not registry_path.exists():
         raise RegistryNotFoundError(
             f"Registry not found at {registry_path}. Create a *_REGISTRY.json file in your project root."
@@ -564,7 +431,6 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
     if "branches" not in data:
         raise RegistryCorruptError("Registry missing 'branches' field")
 
-    # Normalize: AIPASS_REGISTRY uses list format, convert to dict keyed by name
     branches_raw = data["branches"]
     if isinstance(branches_raw, list):
         branches_dict: Dict[str, Any] = {}
@@ -573,7 +439,6 @@ def _load_registry_data(registry_path: Path) -> Dict[str, Any]:
             name = branch.get("name", "").lower()
             if not name:
                 continue
-            # Resolve relative paths against registry location
             raw_path = branch.get("path", "")
             branch_path = Path(raw_path)
             if not branch_path.is_absolute():
@@ -600,16 +465,7 @@ def _get_aipass_home_registry_path() -> Optional[Path]:
 
 
 def load_registry() -> Dict[str, Any]:
-    """Load the branch registry from disk.
-
-    Returns:
-        Registry dictionary with branches (normalized to dict format)
-
-    Raises:
-        RegistryNotFoundError: If registry file doesn't exist
-        RegistryCorruptError: If registry file is invalid JSON
-        RegistryPermissionError: If registry file cannot be read
-    """
+    """Load the branch registry from disk."""
     registry_path = get_registry_path()
     data = _load_registry_data(registry_path)
 
@@ -624,12 +480,8 @@ def load_registry() -> Dict[str, Any]:
 def _fleet_gateway() -> Any:
     """@memory's fleet gateway module, imported at CALL time and never at module level.
 
-    A failure anywhere in @memory's import chain must cost the external tier,
-    not every import of drone (see external_branches, which calls this inside
-    its guard). That call-time import is the product reason; it could sit
-    inline in the guard. Its own name is for the test: a module that will not
-    import is supplied here, not by replacing the interpreter's __import__ for
-    the whole process.
+    A failure in @memory's import chain must cost the external tier, not every
+    import of drone. A seam for tests: patched here, not on __import__.
     """
     from aipass.memory.apps.modules import fleet
 
@@ -639,35 +491,13 @@ def _fleet_gateway() -> Any:
 def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[str, Any]]]:
     """Citizens in declared roots, in DECLARATION ORDER, as registry entries.
 
-    Returns None when the tier is LOST (no project root to scope it, or the
-    gateway raised), and [] when the tier answered and declares nobody. None is
-    never a success answer, so a caller can tell the two apart; the lookups
-    below read it through _external_branches, where a lost tier is no externals.
-
-    Consumes @memory's public gateway and never reads AIPASS_ROOTS.json — the
-    file has exactly one reader and it is theirs. A second reader here would be
-    the two-implementations failure the gateway exists to prevent, and it would
-    drift the first time their schema moved.
-
-    Keyed the way local branches are: the registry's own ``name`` field,
-    lowercased. ``name_from="registry"`` is not a preference — local resolution
-    keys on that field (see _load_registry_data), and giving the external tier a
-    different rule would mean ``@wren`` resolving by one law and ``@memory`` by
-    another.
-
-    Returns None and says so LOUDLY when the gateway fails. An empty declared-roots
-    file is a legal state and silent; another branch's module raising is not.
+    None means the tier is LOST (no project root, or the gateway raised, logged
+    at ERROR); [] means it answered and declares nobody.
+    Never reads AIPASS_ROOTS.json itself: @memory's gateway is its one reader.
+    ``name_from="registry"`` keys externals the way local branches are keyed.
     """
-    # Scoped to the project being resolved AGAINST, not to this checkout.
-    # get_all_branches(registry=X) must read X's declared roots, so an external
-    # project resolves through its own AIPASS_ROOTS.json and a caller that
-    # repoints the registry is not silently answered with ours.
-    #
-    # This is also the isolation seam the other two sources already have: the
-    # AIPASS_HOME source is switched off by unsetting its env var, and without
-    # an equivalent here the real machine's declared roots leaked into every
-    # enumeration test the moment the owner blessed the file. A third source with
-    # no way to scope it is a third source that cannot be tested around.
+    # Scoped to the registry being resolved against, not this checkout; it is
+    # also the seam that keeps the machine's declared roots out of tests.
     if repo_root is None:
         try:
             repo_root = get_registry_path().parent
@@ -675,20 +505,8 @@ def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[st
             logger.warning("External tier: cannot locate a project root to scope declared roots: %s", exc)
             return None
 
-    # Imported HERE, not at module level, and the import sits INSIDE the guard.
-    # A module-level import made every failure in @memory's import chain a
-    # failure to import drone — router, `drone rm`, `drone systems`, all of it —
-    # which is the opposite of the containment this function's docstring
-    # promises. The live instance: registry_scope.py runs
-    # `REPO_ROOT = find_repo_root()` at module level and falls back to
-    # Path.cwd() when the walk up from __file__ finds no AIPASS_REGISTRY.json.
-    # A clean checkout has no registry (gitignored, machine-local), so CI takes
-    # that fallback, and a process whose directory was deleted raises ENOENT
-    # there. Theirs to fix; ours not to die of.
-    #
-    # sys.modules caches the module object, so this stays the SAME object the
-    # suite patches with patch.object(fleet, ...) — a call-time import is not a
-    # fresh one.
+    # The import sits inside the guard: @memory's registry_scope can raise at import
+    # (ENOENT on a deleted cwd), and that must not take down drone.
     try:
         records = _fleet_gateway().external_branches(repo_root, name_from="registry")
     except Exception as exc:
@@ -721,22 +539,13 @@ def external_branches(repo_root: Optional[Path] = None) -> Optional[List[Dict[st
 
 
 def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """The lookups' view of the tier: a lost tier is no externals, never a crash.
-
-    external_branches has already logged the loss at ERROR; local and
-    AIPASS_HOME resolution go on without the declared roots.
-    """
+    """The lookups' view of the tier: a lost tier is no externals, never a crash."""
     tier = external_branches(repo_root)
     return [] if tier is None else tier
 
 
 def _external_registry_path(entry: Dict[str, Any]) -> Optional[Path]:
-    """The sealed registry an external entry was read from.
-
-    Derived by containment, never by walking up: the gateway hands back the
-    branch path and its registry FILENAME, and the declared root is the only
-    ancestor holding that file.
-    """
+    """The sealed registry an external entry was read from: the ancestor holding its registry filename."""
     branch_path = Path(entry["path"])
     for root in [branch_path, *branch_path.parents]:
         candidate = root / entry["registry"]
@@ -757,13 +566,10 @@ def get_all_branches(
 ) -> List[Dict[str, Any]]:
     """Get all branches from the registry, optionally filtered.
 
-    Merges branches from both the primary (local/project) registry and the
-    AIPass home registry (from AIPASS_HOME env var).  Local branches take
-    precedence when names collide.
+    Merges primary, then AIPass home, then declared roots; earlier wins a name collision.
     """
     merged: Dict[str, Any] = {}
 
-    # --- Primary registry ---
     try:
         primary = load_registry()
         for name, branch in primary.get("branches", {}).items():
@@ -771,7 +577,6 @@ def get_all_branches(
     except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
         logger.warning("get_all_branches: primary registry unavailable: %s", exc)
 
-    # --- AIPass home registry (if different from primary) ---
     home_path = _get_aipass_home_registry_path()
     primary_path = get_registry_path()
     if home_path is not None and home_path != primary_path:
@@ -783,12 +588,7 @@ def get_all_branches(
         except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
             logger.warning("get_all_branches: AIPass home registry unavailable: %s", exc)
 
-    # --- Declared roots (external tier) ---
-    # Last on purpose: AIPass local ALWAYS wins, and among externals the
-    # declaration order in roots[] breaks ties. Both are @devpulse's ruling.
-    # This is the one place both sides of a collision are visible at once, so it
-    # is where the collision is named — a shadowed citizen that vanishes without
-    # a line is indistinguishable from one that was never declared.
+    # The one place both sides of a collision are visible, so the shadowing is named here.
     for entry in _external_branches():
         name = entry["name"]
         if name in merged:
@@ -815,15 +615,9 @@ def get_all_branches(
 
 
 def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
-    """Get a single branch by name (case-insensitive).
-
-    Checks the primary (local/project) registry first.  If not found, falls
-    back to the AIPass home registry (AIPASS_HOME env var) when it points to
-    a different location.
-    """
+    """Get a single branch by name (case-insensitive): primary, then AIPass home, then declared roots."""
     lower_name = name.lower()
 
-    # --- Primary registry ---
     try:
         registry = load_registry()
         branch = registry.get("branches", {}).get(lower_name)
@@ -832,7 +626,6 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
     except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
         logger.warning("get_branch_by_name: primary registry unavailable for '%s': %s", name, exc)
 
-    # --- AIPass home registry fallback ---
     home_path = _get_aipass_home_registry_path()
     primary_path = get_registry_path()
     if home_path is not None and home_path != primary_path:
@@ -841,18 +634,10 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
             branch = home_data.get("branches", {}).get(lower_name)
             if branch is not None:
                 return branch
-            # A MISS here is not an answer. This used to return the lookup
-            # itself, so on any machine where AIPass home is not the project
-            # registry, an unknown name ended the search here and the declared
-            # roots below were unreachable. get_branch_with_registry has always
-            # guarded the identical lookup this way.
+            # A miss here is not an answer: returning it would hide the declared roots below.
         except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
             logger.warning("get_branch_by_name: AIPass home registry unavailable for '%s': %s", name, exc)
 
-    # --- Declared roots (external tier) ---
-    # Consulted only after both local sources miss, so a local citizen never
-    # pays a cross-repo read to resolve. First match wins, and the gateway
-    # returns declaration order, so the tiebreak is the file's own ordering.
     for entry in _external_branches():
         if entry["name"] == lower_name:
             logger.info("Resolved '%s' from declared root %s", lower_name, entry["registry"])
@@ -862,12 +647,7 @@ def get_branch_by_name(name: str) -> Optional[Dict[str, Any]]:
 
 
 def get_branch_with_registry(name: str) -> Optional[tuple]:
-    """Get a branch and the registry path it was found in.
-
-    Same two-step lookup as get_branch_by_name (primary then AIPASS_HOME),
-    but returns (branch_dict, registry_path) so callers can determine
-    which project root the branch belongs to.
-    """
+    """Get a branch and the registry path it was found in, in get_branch_by_name's order."""
     lower_name = name.lower()
 
     try:
@@ -890,7 +670,6 @@ def get_branch_with_registry(name: str) -> Optional[tuple]:
         except (RegistryNotFoundError, RegistryCorruptError, RegistryPermissionError) as exc:
             logger.warning("get_branch_with_registry: AIPass home registry unavailable for '%s': %s", name, exc)
 
-    # --- Declared roots (external tier) ---
     for entry in _external_branches():
         if entry["name"] == lower_name:
             external_registry = _external_registry_path(entry)

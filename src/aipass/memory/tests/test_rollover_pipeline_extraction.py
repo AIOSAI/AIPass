@@ -3,25 +3,11 @@
 # Description: Rollover pipeline - the orchestrator's subprocess lanes and chroma path, and extraction
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/rollover/orchestrator.py and extractor.py — subprocess lanes, chroma path, extraction."""
-
-# Split from test_rollover_pipeline.py on 2026-10-08 (oversize_test_file): the
-# subprocess-and-extraction lane, one subject - how the orchestrator hands work
-# to its embedding and vector-store subprocesses, where a branch's local store
-# lives, and how entries are extracted from a memory file.
-#
-# Covers:
-#   from aipass.memory.apps.handlers.rollover.orchestrator import store_vectors_subprocess
-#   from aipass.memory.apps.handlers.rollover.orchestrator import encode_batch_subprocess
-#   from aipass.memory.apps.handlers.rollover.orchestrator import get_branch_local_chroma_path
-#   from aipass.memory.apps.handlers.rollover.orchestrator import extract_text_from_memories
-#   from aipass.memory.apps.handlers.rollover.extractor import extract_with_metadata
-#
-# All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — the real encoder and vector store behind store_vectors_subprocess()
@@ -35,11 +21,6 @@ from aipass.memory.apps.handlers import write_fence
 from aipass.memory.tests.support_rollover_pipeline import _import_extractor
 
 
-# ---------------------------------------------------------------------------
-# Import helpers -- each handler has module-level imports that need mocking
-# ---------------------------------------------------------------------------
-
-
 def _import_orchestrator(monkeypatch):
     """Import orchestrator with mocked infrastructure dependencies."""
     mock_detector = MagicMock()
@@ -51,25 +32,13 @@ def _import_orchestrator(monkeypatch):
 
     monitor_pkg = MagicMock()
 
-    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
-
-    # submodule import under it then dies with "is not a package".
-
     monitor_pkg.detector = mock_detector
 
     rollover_pkg = MagicMock()
 
-    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
-
-    # submodule import under it then dies with "is not a package".
-
     rollover_pkg.extractor = mock_extractor
 
     tracking_pkg = MagicMock()
-
-    # (test_import_isolation.py) — a bare MagicMock has none, and any lazy
-
-    # submodule import under it then dies with "is not a package".
 
     tracking_pkg.line_counter = mock_line_counter
 
@@ -79,8 +48,7 @@ def _import_orchestrator(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking", tracking_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking.line_counter", mock_line_counter)
 
-    # Through monkeypatch, so the copy imported over these mocks leaves with the
-    # test: a bare pop left it in sys.modules for every later file (leg 5).
+    # Through monkeypatch: a bare pop left the mock-built copy cached for later files.
     monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
     if parent is not None:
@@ -95,17 +63,11 @@ def _import_orchestrator(monkeypatch):
     }
 
 
-# ===========================================================================
-# Tests: orchestrator.store_vectors_subprocess
-# ===========================================================================
-
-
 class TestStoreVectorsSubprocess:
     """Test store_vectors_subprocess calls subprocess and returns dict."""
 
     def test_success_returns_parsed_json(self, monkeypatch, tmp_path):
-        # tmp_path, not tempfile.gettempdir(): a local store is a branch write,
-        # and the write fence (2026-09-18) admits only the root it stands on.
+        # tmp_path, not tempfile.gettempdir(): the write fence admits only its own root.
         orch, _ = _import_orchestrator(monkeypatch)
         expected = {"success": True, "collection": "test_col", "total_vectors": 5}
         mock_result = MagicMock()
@@ -127,12 +89,7 @@ class TestStoreVectorsSubprocess:
         mock_run.assert_called_once()
 
     def test_a_local_store_outside_the_aipass_root_never_starts_the_subprocess(self, monkeypatch, tmp_path):
-        """The write that put rolled-over vectors into Vera Studio's `.chroma` dirs.
-
-        Refused in THIS process, before the subprocess starts: the child is the
-        thing that writes, so a refusal it would have to report back is already
-        too late. The global store (db_path None) is memory's own and unfenced.
-        """
+        """A local store outside the root is refused in THIS process, before the writing child starts."""
 
         orch, _ = _import_orchestrator(monkeypatch)
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
@@ -209,7 +166,6 @@ class TestStoreVectorsSubprocess:
         mock_result.returncode = 0
         mock_result.stdout = json.dumps(expected)
 
-        # Simulate a numpy array with tolist method
         mock_embedding = MagicMock()
         mock_embedding.tolist.return_value = [0.1, 0.2, 0.3]
 
@@ -224,15 +180,9 @@ class TestStoreVectorsSubprocess:
 
         assert result["success"] is True
         mock_embedding.tolist.assert_called_once()
-        # Verify the serialized data includes the converted list
         call_kwargs = mock_run.call_args
         input_data = json.loads(call_kwargs.kwargs.get("input", call_kwargs[1].get("input", "")))
         assert input_data["embeddings"] == [[0.1, 0.2, 0.3]]
-
-
-# ===========================================================================
-# Tests: orchestrator.encode_batch_subprocess
-# ===========================================================================
 
 
 class TestEncodeBatchSubprocess:
@@ -292,11 +242,6 @@ class TestEncodeBatchSubprocess:
 
         assert result["success"] is False
         assert "no such file" in result["error"]
-
-
-# ===========================================================================
-# Tests: orchestrator.get_branch_local_chroma_path
-# ===========================================================================
 
 
 class TestGetBranchLocalChromaPath:
@@ -379,11 +324,6 @@ class TestGetBranchLocalChromaPath:
         assert orch.get_branch_local_chroma_path("X") is None
 
 
-# ===========================================================================
-# Tests: orchestrator.extract_text_from_memories
-# ===========================================================================
-
-
 class TestExtractTextFromMemories:
     """Test extract_text_from_memories extracts text from memory items."""
 
@@ -449,11 +389,6 @@ class TestExtractTextFromMemories:
         assert len(texts) == 3
 
 
-# ===========================================================================
-# Tests: extractor.extract_with_metadata
-# ===========================================================================
-
-
 class TestExtractWithMetadata:
     """Test extract_with_metadata enriches extracted items."""
 
@@ -476,10 +411,8 @@ class TestExtractWithMetadata:
         """v2 schema extraction adds _metadata to each extracted entry."""
         ext, mocks = _import_extractor(monkeypatch)
 
-        # Branch name derived from parent of .trinity: tmp_path name (lowercase)
         branch_name = tmp_path.name.lower()
 
-        # Provision limits via config per_branch
         mocks["config_loader"].section.return_value = {
             "defaults": {},
             "per_branch": {
@@ -505,10 +438,7 @@ class TestExtractWithMetadata:
         file_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
         mocks["memory_files"].read_memory_file_data.return_value = data
-        # True, not None: the real writer returns a success boolean, and a
-        # stand-in more generous than the thing it stands in for is how a guard
-        # stops being observable. `None` read as "don't care" only while the
-        # return value was being discarded — which was the defect.
+        # True, not None: the real writer returns a boolean, and a laxer stand-in hides the guard.
         mocks["memory_files"].write_memory_file_simple.return_value = True
 
         result = ext.extract_with_metadata(file_path)
@@ -517,7 +447,6 @@ class TestExtractWithMetadata:
         assert "entries" in result
         assert result["branch"] is not None
         assert result["type"] is not None
-        # Enriched entries should have _metadata
         for entry in result.get("entries", []):
             assert "_metadata" in entry
             assert "branch" in entry["_metadata"]
@@ -562,7 +491,6 @@ class TestExtractWithMetadata:
         """When extract_items returns skipped (under limit), extract_with_metadata passes it."""
         ext, mocks = _import_extractor(monkeypatch)
 
-        # v2 file under limits (no extraction needed)
         data = {
             "document_metadata": {
                 "schema_version": "3.0.0",
@@ -582,12 +510,8 @@ class TestExtractWithMetadata:
         mocks["memory_files"].read_memory_file_data.return_value = data
 
         result = ext.extract_with_metadata(file_path)
-        # _extract_items_v2 returns skipped when under limit; extract_with_metadata
-        # passes the result dict through unchanged when nothing was extracted
         assert result["success"] is True
-        # The passthrough is the WHOLE contract: skipped stays true, nothing was
-        # counted and nothing was extracted. An `or` between those hid the case
-        # where the dict was rebuilt and only one half survived.
+        # All three together: an `or` hid a rebuilt dict where only one half survived.
         assert result["skipped"] is True
         assert result["count"] == 0
         assert result["entries"] == []

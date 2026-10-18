@@ -3,13 +3,11 @@
 # Description: Unit tests for handler-level functions across multiple handler packages
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/ functions: audit/audit_display.py, diagnostics_check.py, readme/readme_ops.py."""
 
-# Handler-level functions across several packages: audit_display, diagnostics,
-# json extras (retired, see section 3-4), readme, hooks_ext.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — audit_display.print_system_summary, in tests/test_coverage_audit.py
@@ -26,22 +24,12 @@ from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_dire
 from aipass.seedgo.apps.handlers.readme import readme_generator, readme_ops
 
 
-# ===========================================================================
-# 1. audit_display -- print_branch_summary
-# ===========================================================================
-# The console is the real one: audit_display prints through aipass.cli's
-# console, which writes to sys.stdout at print time, so capsys reads what the
-# user reads (markup rendered away, width pinned by conftest).
+# The console is the real one: audit_display prints through aipass.cli's console, which
+# writes to sys.stdout at print time, so capsys reads what the user reads.
 
 
 def test_print_branch_summary_basic(capsys: pytest.CaptureFixture[str]) -> None:
-    """print_branch_summary renders the branch line, the score grid and the overall.
-
-    Was a bare call that asserted nothing (no_oracle). The lines below are what
-    the real console prints, read from stdout through capsys (2026-09-27; were
-    the markup strings handed to a mocked console.print, measured 2026-09-07).
-    Mutant: Overall's `{avg:3}%` to `{avg:4}%` in audit_display.py — killed.
-    """
+    """print_branch_summary renders the branch line, the score grid and the overall."""
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
         "scores": {"meta": 100, "naming": 90},
@@ -58,12 +46,7 @@ def test_print_branch_summary_basic(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_print_branch_summary_with_violations(capsys: pytest.CaptureFixture[str]) -> None:
-    """print_branch_summary renders the violation block: count, file, score, issue.
-
-    Was a bare call that asserted nothing (no_oracle) — it could not tell a
-    rendered violation from a silently dropped one.
-    Mutant: `{standard_name.upper()} VIOLATIONS` to `{standard_name} VIOLATIONS` — killed.
-    """
+    """print_branch_summary renders the violation block: count, file, score, issue."""
     audit_result: Dict = {
         "branch": {"name": "testbranch"},
         "scores": {"meta": 60, "naming": 80},
@@ -84,13 +67,7 @@ def test_print_branch_summary_with_violations(capsys: pytest.CaptureFixture[str]
 
 
 def test_print_branch_summary_single_standard_at_full_marks(capsys: pytest.CaptureFixture[str]) -> None:
-    """One standard at 100 renders its row and an Overall of 100.
-
-    It pinned that `system_averages` and `overall_system_avg` were accepted and
-    never rendered; both parameters were dropped (seedgo, fleet green leg 8),
-    and the call now passes the result alone.
-    Mutant: Overall's `{avg:3}%` to `{avg:4}%` in audit_display.py — killed.
-    """
+    """One standard at 100 renders its row and an Overall of 100."""
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
         "scores": {"meta": 100},
@@ -106,11 +83,6 @@ def test_print_branch_summary_single_standard_at_full_marks(capsys: pytest.Captu
     assert not [line for line in lines if "90" in line]
 
 
-# ===========================================================================
-# 2. diagnostics_check -- check_directory
-# ===========================================================================
-
-
 def test_check_directory_missing(tmp_path):
     """check_directory on nonexistent directory returns error."""
     result = check_directory(str(tmp_path / "nonexistent"))
@@ -121,7 +93,6 @@ def test_check_directory_missing(tmp_path):
 
 def test_check_directory_exists(tmp_path):
     """check_directory on existing directory calls pyright."""
-    # Create a Python file
     py_file = tmp_path / "example.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
 
@@ -168,33 +139,6 @@ def test_check_directory_with_errors(tmp_path):
 
     assert result["total_errors"] == 1
     assert result["files_with_errors"] == 1
-
-
-# ===========================================================================
-# 3-4. json_handler -- increment_counter, update_data_metrics: SUBJECT GONE
-# ===========================================================================
-#
-# Both sections were removed with the pair-4 sweep (DPLAN-0325). seedgo's
-# handler is now the fleet's canonical shim, which binds nine names, and
-# neither of these is among them -- the one json service never had them.
-#
-# Deleted rather than re-pointed because there is nothing left to point at,
-# and NOT quietly: a sweep that drops a public entry point should say so.
-# Measured before removing, across every branch: outside the five handlers
-# that still define them (flow, daemon, commons, drone, trigger, all
-# unmigrated), the fleet has no caller of either function. They were handler
-# surface nobody used, so the sweep retired dead code rather than breaking a
-# consumer -- but the same two names will disappear from those five branches
-# when their sweep lands, and each should check its own callers first.
-#
-# The helper these two sections shared, _get_real_json_handler, went with
-# them: it existed to import the real module past this file's mock and then
-# monkeypatch _BRANCH_ROOT / _BRANCH_NAME / JSON_DIR onto it. The shim has
-# none of those three -- the service resolves its directory per call through
-# the AIPASS_TEST_LOG_DIR seam that conftest's mock_infrastructure sets.
-
-# 5. readme_ops -- resolve_branch
-# ===========================================================================
 
 
 def test_resolve_branch_found(tmp_path, monkeypatch):
@@ -252,11 +196,6 @@ def test_resolve_branch_alias(tmp_path, monkeypatch):
     assert result["name"] == "seedgo"
 
 
-# ===========================================================================
-# 6. readme_ops -- get_all_branches
-# ===========================================================================
-
-
 def test_get_all_branches(tmp_path, monkeypatch):
     """get_all_branches returns all branches from registry."""
     registry_data = {
@@ -294,11 +233,6 @@ def test_get_all_branches_no_registry(tmp_path, monkeypatch):
     assert branches == []
 
 
-# ===========================================================================
-# 7. readme_generator -- generate_commands_section
-# ===========================================================================
-
-
 def test_generate_commands_section_no_entry_point(tmp_path):
     """generate_commands_section returns empty when no entry point exists."""
     branch_dir = tmp_path / "mybranch"
@@ -326,11 +260,6 @@ def test_generate_commands_section_with_help(tmp_path):
 
     assert "audit" in result
     assert "report" in result
-
-
-# ===========================================================================
-# 8. readme_generator -- generate_header_section
-# ===========================================================================
 
 
 def test_generate_header_section_with_passport(tmp_path):
@@ -364,11 +293,6 @@ def test_generate_header_section_no_passport(tmp_path):
     assert result == ""
 
 
-# ===========================================================================
-# 9. readme_generator -- update_readme_auto_sections
-# ===========================================================================
-
-
 def test_update_readme_auto_sections_dry_run(tmp_path):
     """update_readme_auto_sections in dry_run mode does not modify the file."""
     branch_dir = tmp_path / "mybranch"
@@ -379,7 +303,6 @@ def test_update_readme_auto_sections_dry_run(tmp_path):
 
     result = readme_generator.update_readme_auto_sections(str(branch_dir), dry_run=True)
     assert result["dry_run"] is True
-    # File should not be modified in dry run
     assert readme.read_text(encoding="utf-8") == original
 
 
@@ -393,14 +316,7 @@ def test_update_readme_auto_sections_no_readme(tmp_path):
 
 
 def test_update_readme_auto_sections_missing_markers(tmp_path):
-    """update_readme_auto_sections reports exactly the two sections it generated.
-
-    Was `assert len(missing_markers) > 0 or len(updated) == 0` — an OR that
-    passes on either half, so it pinned neither. Measured 2026-09-07: for a
-    branch dir holding nothing but a README, only `tree` and `last_updated`
-    generate content; the other three sections are skipped empty BEFORE the
-    marker check, so they are neither updated nor reported missing.
-    """
+    """update_readme_auto_sections reports exactly the two sections it generated."""
     branch_dir = tmp_path / "mybranch"
     branch_dir.mkdir()
     readme = branch_dir / "README.md"

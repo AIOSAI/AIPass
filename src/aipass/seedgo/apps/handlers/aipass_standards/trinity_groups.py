@@ -3,73 +3,15 @@
 # Description: Trinity standard - the eight group checkers and their shared helpers
 # Version: 1.3.0
 # Created: 2026-08-27
-# Modified: 2026-09-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Trinity standard -- the eight group checkers.
 
-Split out of ``trinity_check.py`` on 2026-08-27, when that file crossed the
-1500-line architecture cap.  This is a RELOCATION: no rule, threshold or
-message changed in the move.  ``trinity_check`` keeps the module contract and
-the orchestration; everything that decides whether a specific rule is met
-lives here.
-
-Each ``_group_*`` function takes the context dict built by
-``trinity_check._build_context`` and returns one check dict
-``{"name", "passed", "score", "message"}``.  They are pure: they read the
-context, and never touch the disk themselves.
-
-The one law holds in every group
---------------------------------
-A field the checker cannot measure is a VIOLATION, never a silent pass.  A
-missing, unreadable or invalid file fails every group that depends on it, by
-name; a field of the wrong type is reported with the type actually found and
-is never coerced or ``len()``-ed.  The guard that makes this true is in
-``_records_check``: violation records decide WHETHER a group passes, and the
-entry denominator only decides how bad the score is.  A group holding any
-record can never score 100, even when the denominator is empty.
-
-Contents, in file order: shared type/path/config helpers, message formatting,
-the three check builders, section access, then the eight groups -- file set,
-top-level keys, entry shapes, ordering & numbering, char caps, meta lines &
-_usage, freshness, receipt.
-
-Todos v2 (DPLAN-0345, 2026-09-15): a todo is ``{number, date, task,
-priority?}`` with no ``status``, and the todos tab names the pad size, the
-backlog file and the next number.  Group 8, Todos hygiene, is RETIRED: it
-flagged a todo kept as ``status: done``, and with no ``status`` field that
-trophy can only be spelled as a key outside the closed shape, which Entry
-shapes already flags by name.  Its weight moved with the defect.
-
-The shape is READ, not remembered (FPLAN-0593 Phase 2, 2026-09-15)
-------------------------------------------------------------------
-``_ENTRY_RULES`` used to sit at the top of this file: a hand-kept copy of the
-four entry shapes, correct on the day it was written and one @memory config
-edit away from wrong on any day after.  It is gone.  :func:`entry_shapes`
-derives the required/optional split from
-``entry_limits.entry_types.<type>.fields`` in memory.config.json -- the same
-closed map @memory's ``trinity_push`` derives its own rules from, so the
-checker and the push cannot disagree about what a canonical entry is.
-
-Fail CLOSED, on the Char caps group's contract: the shape is never assumed any
-more than the cap numbers are.  An unreadable config refuses Entry shapes
-whole; a config that publishes no ``fields`` for a section raises an error row
-naming that key, and a group holding any record can never score 100.
-
-The read is by CONFIG KEY, not by import.  memory.config.json is a file this
-checker already reads and already declares in ``external_inputs()``, so the
-shape arrives with no new coupling and nothing new for the audit cache to
-watch.  @memory now publishes ``apps/modules/limits.py`` as the door to the
-same accessors, which is the right reach for a caller that holds no config;
-this module holds the config dict it is auditing, and a live import would
-answer from @memory's own file instead of that dict.
-
-The draft percent made the move too (2026-09-16).  ``_DRAFT_PERCENT = 80`` sat
-here for as long as @memory published the number as a module constant with no
-key to read.  memory.config.json now carries ``entry_limits.draft_percent``,
-so the percent arrives out of the same dict as the caps and the shape, and no
-number in this file is a copy of a number in that one.
+Each ``_group_*`` takes ``trinity_check._build_context``'s dict and returns one
+``{"name", "passed", "score", "message"}``; none touches the disk. A field the
+checker cannot measure is a violation, never a silent pass. Reference: trinity.md
 """
 
 import re
@@ -79,8 +21,6 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
-
-# -- Names on disk -----------------------------------------------------------
 
 _TRINITY_DIR = ".trinity"
 _LOCAL_NAME = "local.json"
@@ -97,20 +37,9 @@ _CANONICAL_FILES = (
 
 _FILE_NAMES = {"local": _LOCAL_NAME, "observations": _OBSERVATIONS_NAME}
 
-# A versioned backup is a LEGAL resident of .trinity/ (the owner's File set ruling):
-# the house convention renames the current file as a version and leaves it in
-# place while the new file is written. The rule is a SHAPE, not a list of the two
-# suffixes minted so far -- the next migration mints its own and must pass without
-# a code change here. Anchored on ``pre`` because that is what the convention
-# means (what the file was BEFORE the migration) and it is what both live
-# generations use; the version token itself is free.
-#
-# Deliberately tight on the token: no dots, so ``local.json.pre_v3_backup.tmp``
-# stays a stray. A rule loose enough to admit ``local.json.tmp`` would make
-# torn-write staging files invisible inside the fleet's own memory directory.
+# A SHAPE, not a list of suffixes, so the next migration's token passes unchanged.
+# No dots in the token: loosening it admits ``local.json.tmp`` torn-write files.
 _VERSION_SUFFIX_RE = re.compile(r"^pre[-_][A-Za-z0-9][A-Za-z0-9_-]*$")
-
-# -- Canonical structure -----------------------------------------------------
 
 _LOCAL_KEY_ORDER = [
     "document_metadata",
@@ -152,73 +81,39 @@ _SECTION_FILE = {
     "observations": "observations",
 }
 
-# Type specs are strings so a violation message can name the expectation in
-# the same words the contract uses -- and the same three words @memory's
-# config spells them with, which is what lets a config `type` be compared
-# against a value here without a translation table in between.
+# Spelled exactly as @memory's config spells a field ``type``, so the two compare directly.
 _TYPE_INT = "int"
 _TYPE_STR = "str"
 _TYPE_STR_LIST = "list[str]"
 
-# Where the closed field shape lives on an entry type definition, spelled as
-# @memory spells it (entry_limits.FIELDS_KEY). The KEY is carried here; the
-# MAP never is -- see entry_shapes().
+# @memory's entry_limits.FIELDS_KEY. The key is carried here; the map never is.
 _FIELDS_KEY = "fields"
 
-# -- Rendering (mirrors memory/apps/handlers/tracking/tab_renderer.py) -------
-
-# Which rollover FILE key and leaf key each section resolves through. The
-# lookup is per file key, exactly as @memory's config_loader._resolve_limits
-# does it: a per_branch entry that carries "local" at all means defaults are
-# never consulted for that file. A deep merge here would compose an expected
-# meta line the renderer would never write.
+# Resolved per file key as @memory's config_loader._resolve_limits does: a per_branch
+# "local" block replaces defaults whole. A deep merge composes a line the renderer never writes.
 _ROLLOVER_KEYS = {
     "sessions": ("local", "sessions"),
     "key_learnings": ("local", "key_learnings"),
     "observations": ("observations", "observations"),
 }
 
-# The renderer's OWN fallbacks, reproduced so expected_meta_line() stays a
-# total function when a section is absent from config. These are never used
-# as caps: the Char caps group refuses to measure without config, and the
-# Meta lines group fails the item loud before it reaches this path.
+# The renderer's own fallbacks, so expected_meta_line() stays total. Never used as caps.
 _RENDERER_FALLBACK_MAX_CHARS = 300
 _RENDERER_FALLBACK_FIELD = "value"
 
-# The draft target every tab carries beside its cap (DPLAN-0342, the user's
-# ruling 2026-09-13): integer percent, floored, derived from the SAME resolved
-# cap (per_branch included) - 300/200/150 -> 240/160/120, 77 -> 61, never
-# rounded.
-#
-# THE MIRROR RETIRED (2026-09-16). It was `_DRAFT_PERCENT = 80` here, guarded
-# by a pin on @memory's live draft_target(), for as long as @memory published
-# the percent as a module constant with no key to read. It publishes
-# entry_limits.draft_percent now, so the number is READ from the config dict
-# this module is handed -- the same dict the caps and the entry shape come
-# out of, from a file external_inputs() already declares.
-#
-# NEVER ASSUMED. A config that publishes no usable percent (absent, not an
-# int, outside 1-100) does not get a guessed one: _draft_percent returns None,
-# the tab renders the marker below rather than a number, and the Meta lines
-# group refuses the whole group loud, naming the key and its owner. @memory's
-# own loader narrows to its regeneration seed instead, which is its call to
-# make about what it writes -- but a checker that quietly agreed with a seed
-# would be scoring files against a number nobody published.
+# Read from the config, never assumed: no usable percent renders the marker and
+# the Meta lines group refuses, rather than scoring against a seed nobody published.
 _DRAFT_PERCENT_KEY = "draft_percent"
 _DRAFT_PERCENT_BOUNDS = (1, 100)
 _UNPUBLISHED_DRAFT = "<entry_limits.draft_percent unpublished>"
 
-# The todos pad tab (DPLAN-0345), mirroring @memory's tab_renderer._todos_tab
-# and todo_roll's BACKUP_DIR / TODO_DIR / BACKLOG_FILE. A caller without branch
-# context renders the honest unknowns, never a guessed directory or number.
+# Mirror @memory's tab_renderer._todos_tab and todo_roll's BACKUP_DIR / TODO_DIR / BACKLOG_FILE.
 _TODO_BACKLOG_PARTS = (".backup", "todo")
 _TODO_BACKLOG_FILE = "backlog.json"
 _UNKNOWN_BRANCH_DIR = "<branch>"
 _UNKNOWN_NEXT = "?"
 
-# How str() writes an int: the only thing a rendered `next #N` can hold besides
-# the unknown. N is derived at RENDER time and adding a todo does not re-render
-# (contract section 3), so the checker reads the slot's shape, never its value.
+# N is derived at render time and adding a todo does not re-render: read the slot's shape, not its value.
 _RENDERED_INT_RE = re.compile(r"0|-?[1-9][0-9]*")
 
 _PLACEHOLDER_RE = re.compile(r"^\{\{[A-Z0-9_]+\}\} (?P<prose>.+)$", re.DOTALL)
@@ -241,11 +136,6 @@ _RECEIPT_STRING_FIELDS = ("stamped", "stamped_by", "config_rendered")
 _MAX_SAMPLE_NUMBERS = 3
 _MAX_MESSAGE_GROUPS = 4
 _EXPECTED_PREVIEW_CHARS = 90
-
-
-# =============================================================================
-# SMALL TYPE HELPERS
-# =============================================================================
 
 
 def _as_dict(value: object) -> dict:
@@ -283,11 +173,6 @@ def _lookup_case_insensitive(mapping: object, key: str) -> object:
         if isinstance(name, str) and name.lower() == wanted:
             return value
     return None
-
-
-# =============================================================================
-# PATHS AND FILE READING
-# =============================================================================
 
 
 def _repo_root() -> Path | None:
@@ -332,18 +217,7 @@ def _prose_from_templates(templates: dict | None) -> dict | None:
 
 
 def _guidelines_from_templates(templates: dict | None) -> dict | None:
-    """The gold observations ``guidelines`` block, or None if unreadable.
-
-    None means REFUSE, never score zero: an unreadable gold source makes the
-    field unmeasurable, and the standard's one law is that an unmeasurable
-    field is refused rather than assumed.
-
-    Args:
-        templates: Loaded gold templates, or None.
-
-    Returns:
-        The template's guidelines dict, or None when it cannot be read.
-    """
+    """The gold observations ``guidelines`` block, or None (refuse, never score zero) if unreadable."""
     if templates is None:
         return None
     block = _as_dict(templates.get("observations")).get("guidelines")
@@ -367,14 +241,9 @@ def _usage_from_templates(templates: dict | None) -> dict | None:
 def _gold_versions_from_templates(templates: dict | None) -> dict | None:
     """Return the gold template_versions values, or None when unreadable.
 
-    GOLD SOURCE, INFERRED -- needs confirming with @memory. The contract's
-    example receipt shows {"local": "3.0.0", "observations": "3.0.0"}: two
-    equal values. In the templates themselves document_metadata.version
-    DIFFERS (LOCAL 2.0.0, OBSERVATIONS 1.0.0) while schema_version is 3.0.0
-    in both, so schema_version is the only field that reproduces the
-    contract's example. This checker therefore compares against
-    schema_version. If @memory rules that the receipt tracks the per-file
-    version instead, change this one function.
+    Inferred, unconfirmed by @memory: schema_version is the only template field
+    that reproduces the contract's example receipt. If the receipt tracks the
+    per-file version instead, change this one function.
     """
     if templates is None:
         return None
@@ -388,22 +257,8 @@ def _gold_versions_from_templates(templates: dict | None) -> dict | None:
     return versions
 
 
-# =============================================================================
-# CONFIG RESOLUTION (caps and keep-counts)
-# =============================================================================
-
-
 def _draft_percent(config: object) -> int | None:
-    """Return the draft percent @memory publishes in *config*, or None when it publishes none usable.
-
-    Args:
-        config: The memory.config.json mapping, as read.
-
-    Returns:
-        The percent as an int when ``entry_limits.draft_percent`` is an int
-        inside :data:`_DRAFT_PERCENT_BOUNDS`; None otherwise, so no caller can
-        receive a number this file invented.
-    """
+    """Return the draft percent @memory publishes in *config*, or None when it publishes none usable."""
     raw = _as_dict(_as_dict(config).get("entry_limits")).get(_DRAFT_PERCENT_KEY)
     low, high = _DRAFT_PERCENT_BOUNDS
     if not _is_int(raw) or not low <= int(raw) <= high:  # pyright: ignore[reportArgumentType]
@@ -441,10 +296,7 @@ def _resolve_rollover_count(config: dict, section: str, branch_name: str) -> int
 def _resolve_todos_count(config: dict, branch_name: str) -> int | None:
     """Resolve the todo pad size the way @memory's config_loader.get_todos_count does, or None.
 
-    Per file key like the other sections, with one exception @memory makes for
-    todos alone: a per_branch ``local`` block that carries no todos count falls
-    back to the default todos count instead of leaving the pad unsized.  A
-    bool, a non-int, zero or a negative number is not a pad size.
+    Todos alone fall back to the default count when a per_branch ``local`` block lacks one.
     """
     rollover = _as_dict(_as_dict(config).get("rollover"))
     defaults_local = _as_dict(_as_dict(rollover.get("defaults")).get("local"))
@@ -481,32 +333,14 @@ def expected_meta_line(
 ) -> str:
     """Compose the ``*_meta`` line the renderer would produce for *section*.
 
-    The result is ``<rendered machine tab> + " " + <template prose>``: the tab
-    carries the live numbers from ``memory.config.json``, the sentence after
-    it carries the section's meaning from the gold template.  Glyphs are
-    byte-identical to @memory's tab_renderer.
-
-    Args:
-        section: One of todos, key_learnings, sessions, observations.
-        branch_name: Branch directory name; per-branch overrides match it
-            case-insensitively.
-        config: The parsed memory.config.json.
-        template_prose: The prose this section's template owns.
-        todo_ctx: ``{"branch_dir", "next_number"}`` for the todos tab, the
-            shape of @memory's ``tab_renderer.todo_context``; None renders
-            ``<branch>`` and ``next #?`` exactly as @memory does without it.
-            Ignored for every other section.
-
-    Returns:
-        The expected meta line as one string.
+    Glyphs are byte-identical to @memory's tab_renderer; ``todo_ctx`` has the shape
+    of its ``tab_renderer.todo_context``.
     """
     limits = _resolve_entry_limits(_as_dict(config), branch_name)
     spec = _as_dict(limits.get(section))
     max_chars = spec.get("max_chars", _RENDERER_FALLBACK_MAX_CHARS)
     field = spec.get("field", _RENDERER_FALLBACK_FIELD)
-    # A non-integer cap is a config error the Char caps group reports; echo it
-    # rather than raise, so this function stays total. An unpublished percent
-    # renders its marker for the same reason: loud in the diff, never a guess.
+    # Echo a bad cap or unpublished percent rather than raise: the groups report them.
     percent = _draft_percent(config)
     if percent is None:
         draft = _UNPUBLISHED_DRAFT
@@ -525,11 +359,6 @@ def expected_meta_line(
             f" · draft to {draft} ⟧"
         )
     return f"{tab} {template_prose}"
-
-
-# =============================================================================
-# ENTRY SHAPE VALIDATION
-# =============================================================================
 
 
 def _required_field_problems(required: dict, entry: dict) -> list[str]:
@@ -555,21 +384,8 @@ def _optional_field_problems(optional: dict, entry: dict) -> list[str]:
 def _rules_from_fields(fields: dict) -> dict | None:
     """Split one closed field map into the required/optional shape this module checks.
 
-    The derivation @memory's ``trinity_push._rules_from_fields`` runs on the
-    same map, reproduced as LOGIC rather than as data: a field is required
-    when the config says so and optional otherwise, and ``type`` is one of the
-    three names both sides already spell identically.
-
-    Args:
-        fields: ``entry_types.<type>.fields`` --
-            ``{name: {"type", "required", ...}}`` as the config publishes it.
-
-    Returns:
-        ``{"required": {name: type}, "optional": {name: type}}``, or None when
-        a field spec is not an object or carries no ``type`` string.  None is
-        the fail-closed answer: a shape that cannot be read is not a shape
-        every entry happens to satisfy, and the caller turns it into an error
-        row naming the key rather than measuring against a remembered rule.
+    Mirrors @memory's ``trinity_push._rules_from_fields`` as logic, not data. None
+    (an unreadable spec) fails closed: the caller turns it into an error row.
     """
     required: dict[str, str] = {}
     optional: dict[str, str] = {}
@@ -587,37 +403,9 @@ def _rules_from_fields(fields: dict) -> dict | None:
 def entry_shapes(config: object, branch_name: str) -> dict:
     """Return the canonical entry shape per section, read from @memory's config.
 
-    THE SHAPE HAS ONE HOME AND IT IS NOT HERE (FPLAN-0593 Phase 2).  This
-    module carried its own literal copy of the four entry shapes until
-    2026-09-15, @memory's ``trinity_push`` carried a second, and the write
-    gate measured against a third.  Three copies of one contract is three
-    chances for a push to prune an entry the gate would have accepted.  Phase
-    1 moved the shape into ``entry_limits.entry_types.<type>.fields`` in
-    memory.config.json; this reads it from there, through the same per_branch
-    resolution the caps already use, so a branch cannot be held to one shape
-    and told another.
-
-    Read from the CONFIG KEY, not through a gateway, and deliberately:
-    @memory publishes ``entry_limits.fields_for()`` from
-    ``apps/handlers/json/entry_limits.py``, and a cross-branch ``handlers``
-    import is a violation of seedgo's own encapsulation standard (it scores
-    every branch, including this one).  ``apps/modules/`` carries no gateway
-    for it -- those modules are CLI command handlers, not an importable
-    surface.  memory.config.json is the file this checker already opens
-    (:func:`trinity_check.load_memory_config`) and already declares in
-    ``external_inputs()``, so reading one more key out of it adds no new
-    coupling and nothing new for the audit cache to watch.
-
-    Args:
-        config: The parsed memory.config.json, or anything unusable.
-        branch_name: Branch directory name; per-branch overrides match it
-            case-insensitively.
-
-    Returns:
-        ``{section: {"required": {...}, "optional": {...}}}`` holding only the
-        sections the config publishes a usable shape for.  A section missing
-        from the result is the fail-closed signal -- the caller raises an
-        error row naming the key, never a pass.
+    Read by config key, not import: importing @memory's entry_limits handler breaks
+    seedgo's own encapsulation standard, and the config is already an external input.
+    A section absent from the result is the fail-closed signal.
     """
     shapes: dict[str, dict] = {}
     for section, spec in _resolve_entry_limits(_as_dict(config), branch_name).items():
@@ -633,22 +421,8 @@ def entry_shapes(config: object, branch_name: str) -> dict:
 def validate_entry_shape(section: str, entry: object, shapes: dict) -> list[str]:
     """Validate one entry against its section's canonical shape.
 
-    Required fields must be present WITH their required types, optional
-    fields must type-check when present, and any other key is a violation
-    named by the key found -- that is how a renamed field (``learning`` for
-    key/value, ``session``/``category``/``type`` for ``tags``) becomes
-    visible instead of silently measuring as nothing.
-
-    Args:
-        section: One of sessions, key_learnings, todos, observations.
-        entry: The candidate entry, of any type.
-        shapes: The map from :func:`entry_shapes` -- @memory's published
-            shape, resolved for this branch.  Required rather than defaulted:
-            a shape this module could supply on its own is the mirror Phase 2
-            exists to delete.
-
-    Returns:
-        A list of human-readable violation strings; empty means clean.
+    Any key outside the shape is named, so a renamed field is visible. ``shapes``
+    has no default: a shape this module supplied itself would be a second copy.
     """
     rules = _as_dict(shapes).get(section)
     if not isinstance(rules, dict):
@@ -665,11 +439,6 @@ def validate_entry_shape(section: str, entry: object, shapes: dict) -> list[str]
         f"unexpected field '{key}' (found {type(entry[key]).__name__})" for key in entry if key not in allowed
     )
     return problems
-
-
-# =============================================================================
-# MESSAGE FORMATTING
-# =============================================================================
 
 
 def _entry_label(entry: object, index: int) -> str:
@@ -720,11 +489,6 @@ def _join_messages(messages: list, failed: int, total: int) -> str:
     return head
 
 
-# =============================================================================
-# CHECK BUILDERS
-# =============================================================================
-
-
 def _score_of(ok: int, total: int) -> int:
     """Proportional subscore that never rounds a failure up to 100."""
     if total <= 0:
@@ -758,12 +522,7 @@ def _items_check(name: str, items: list, clean_message: str) -> dict:
 def _records_check(name: str, ok: int, total: int, records: list, clean_message: str) -> dict:
     """Build a proportional group result from per-entry violation records.
 
-    THE ONE LAW applies to the scoring itself: a group holding any violation
-    record never scores 100, whatever the entry denominator says. A record
-    raised with no measurable entries behind it -- an unreadable section, a
-    config carrying no spec for that section -- divides by a zero denominator,
-    and scoring that clean would be the exact silent pass this standard exists
-    to end. The denominator decides how bad; the records decide whether.
+    Any record caps the score at 99, even over a zero denominator: the records decide whether, the denominator how bad.
     """
     if not records:
         score = _score_of(ok, total)
@@ -774,11 +533,6 @@ def _records_check(name: str, ok: int, total: int, records: list, clean_message:
         "message": _format_records(records),
         "score": min(_score_of(ok, total), 99),
     }
-
-
-# =============================================================================
-# SECTION ACCESS
-# =============================================================================
 
 
 def _section_file(section: str) -> str:
@@ -836,27 +590,8 @@ def _run_probe(section: str, entries: list, problem_of) -> tuple[int, list]:
     return ok, records
 
 
-# =============================================================================
-# GROUP 1 -- FILE SET
-# =============================================================================
-
-
 def is_versioned_backup(name: str) -> bool:
-    """Whether a filename is a legal versioned backup of a canonical file.
-
-    The shape is ``<canonical filename>.pre<sep><token>`` -- for example
-    ``local.json.pre_v3_backup`` or ``observations.json.pre-aipl``. Versioning
-    a non-canonical name does not launder it into a resident.
-
-    Pure name predicate, no I/O: the caller decides what to do about
-    directories, which are never versioned backups whatever they are called.
-
-    Args:
-        name: A bare filename, no path separators.
-
-    Returns:
-        True when the name is a versioned backup of a canonical file.
-    """
+    """Whether a bare filename is ``<canonical filename>.pre<sep><token>``; the caller excludes directories."""
     base, _, suffix = name.rpartition(".")
     return base in _CANONICAL_FILES and bool(_VERSION_SUFFIX_RE.match(suffix))
 
@@ -888,11 +623,6 @@ def _group_file_set(ctx: dict) -> dict:
     items = [(name not in missing, f".trinity/: missing {name}") for name in _CANONICAL_FILES]
     items.extend((False, f".trinity/: stray {name} -- not one of the five canonical files") for name in strays)
     return _items_check("File set", items, f".trinity/ holds exactly the {len(_CANONICAL_FILES)} canonical files")
-
-
-# =============================================================================
-# GROUP 2 -- TOP-LEVEL KEYS
-# =============================================================================
 
 
 def _key_set_item(name: str, data: dict, order: list) -> tuple:
@@ -973,12 +703,7 @@ def _doc_meta_items(ctx: dict, file_key: str, data: dict) -> list:
 
 
 def _extra_meta_fields_item(name: str, meta: dict) -> tuple:
-    """Item: document_metadata carries no field outside the closed set.
-
-    ``status`` is excluded here because it already has its own item, which
-    says WHY it is deleted (health is computed, never stored). Folding it into
-    a generic "unexpected field" line would lose that instruction.
-    """
+    """Item: document_metadata carries no field outside the closed set (``status`` has its own item)."""
     extra = [key for key in meta if key not in _DOC_META_FIELDS and key != "status"]
     if not extra:
         return (True, None)
@@ -1025,11 +750,6 @@ def _group_top_level(ctx: dict) -> dict:
     return _items_check("Top-level keys", items, "Both files carry the canonical top-level keys, in order")
 
 
-# =============================================================================
-# GROUP 3 -- ENTRY SHAPES
-# =============================================================================
-
-
 def _shape_probe(section: str, entries: list, shapes: dict) -> tuple[int, list]:
     """Validate every entry of *section* against the published shape; return (ok_count, records)."""
     label = _section_file(section)
@@ -1049,14 +769,7 @@ def _shape_probe(section: str, entries: list, shapes: dict) -> tuple[int, list]:
 
 
 def _group_entry_shapes(ctx: dict) -> dict:
-    """Group 3: required fields with required types, no extras -- the shape from the config.
-
-    Fails CLOSED, on the Char caps group's contract: the shape is never
-    assumed any more than the cap numbers are.  An unreadable config refuses
-    the whole group; a config that publishes no ``fields`` map for a section
-    raises an error row naming that key, and a group holding any record can
-    never score 100 (see ``_records_check``).
-    """
+    """Group 3: required fields with required types, no extras -- the shape from the config."""
     config = ctx["config"]
     if config is None:
         message = "cannot measure shapes: memory.config.json unreadable -- the entry shape is never assumed"
@@ -1064,11 +777,6 @@ def _group_entry_shapes(ctx: dict) -> dict:
     shapes = entry_shapes(config, ctx["branch"])
     ok, total, records = _entry_scan(ctx, _ALL_SECTIONS, partial(_shape_probe, shapes=shapes))
     return _records_check("Entry shapes", ok, total, records, f"All {total} entries carry the canonical shape")
-
-
-# =============================================================================
-# GROUP 4 -- ORDERING AND NUMBERING
-# =============================================================================
 
 
 def _ordering_problem(entry: object, previous: int | None, seen: set) -> str | None:
@@ -1112,11 +820,6 @@ def _group_ordering(ctx: dict) -> dict:
     return _records_check("Ordering & numbering", ok, total, records, clean)
 
 
-# =============================================================================
-# GROUP 5 -- CHAR CAPS
-# =============================================================================
-
-
 def _cap_problem(entry: object, field: str, max_chars: int) -> str | None:
     """Return why *entry* fails its cap, or None."""
     if not isinstance(entry, dict):
@@ -1151,11 +854,6 @@ def _group_char_caps(ctx: dict) -> dict:
     return _records_check("Char caps", ok, total, records, f"All {total} entries are within their configured caps")
 
 
-# =============================================================================
-# GROUP 6 -- META LINES AND _usage
-# =============================================================================
-
-
 def _preview(text: str) -> str:
     """Shorten a long expected string for a failure message."""
     if len(text) <= _EXPECTED_PREVIEW_CHARS:
@@ -1166,13 +864,7 @@ def _preview(text: str) -> str:
 def _todos_meta_matches(actual: str, ctx: dict) -> bool:
     """True when *actual* is a todos line @memory's renderer can write for this branch.
 
-    A byte-match everywhere but the ``next #N`` slot.  N is derived when the
-    tab is RENDERED, and adding or deleting a todo does not re-render, so a
-    correctly rendered file disagrees with an N recomputed from today's pad
-    until the next render (the shape contract, section 3).  With the branch
-    directory in the tab the slot may hold any rendered int or ``?``; the
-    no-context rendering (``<branch>`` and ``#?``, what spawn birth writes)
-    matches whole.
+    Byte-match everywhere but the ``next #N`` slot, which may hold any rendered int or ``?``.
     """
     branch, config, prose = ctx["branch"], ctx["config"], ctx["prose"]["todos"]
     known = expected_meta_line("todos", branch, config, prose, {"branch_dir": branch, "next_number": None})
@@ -1233,12 +925,7 @@ def _usage_item(ctx: dict, file_key: str) -> tuple:
 
 
 def _guidelines_item(ctx: dict) -> tuple:
-    """Item: observations.json's guidelines block matches the gold template.
-
-    Ruling 3 landed template-verbatim, so the block's CONTENT is scored and
-    not only its presence -- the pre-push fleet carried the right two keys
-    with different text, which presence-only scoring could never see.
-    """
+    """Item: observations.json's guidelines block matches the gold template, content not only presence."""
     name = _OBSERVATIONS_NAME
     fileref = ctx["observations"]
     if fileref["error"] is not None:
@@ -1279,11 +966,6 @@ def _group_meta_lines(ctx: dict) -> dict:
     return _items_check("Meta lines & _usage", items, "All meta lines and _usage strings byte-match the gold source")
 
 
-# =============================================================================
-# GROUP 7 -- FRESHNESS
-# =============================================================================
-
-
 def _parse_date(value: object) -> date | None:
     """Parse the YYYY-MM-DD part of a date or datetime string, or None."""
     if not isinstance(value, str):
@@ -1294,9 +976,6 @@ def _parse_date(value: object) -> date | None:
     try:
         return date.fromisoformat(match.group(0))
     except ValueError:
-        # Right shape, impossible day (2026-13-45). Logged rather than
-        # swallowed: the caller turns None into a loud violation, and the
-        # value that produced it belongs in the record.
         logger.warning("trinity_check: %s has the date shape but is not a real date", value)
         return None
 
@@ -1359,11 +1038,6 @@ def _group_freshness(ctx: dict) -> dict:
     return _items_check("Freshness", items, "last_updated is at least as new as the newest entry in both files")
 
 
-# =============================================================================
-# GROUP 8 -- RECEIPT
-# =============================================================================
-
-
 def _receipt_versions_shape(data: dict) -> tuple:
     """Item: template_versions is a dict of two string versions."""
     versions = data.get("template_versions")
@@ -1412,23 +1086,10 @@ def _group_receipt(ctx: dict) -> dict:
     return _items_check("Receipt", items, f"{_RECEIPT_NAME} is machine-shaped and carries the gold versions")
 
 
-# =============================================================================
-# THE PUBLIC ENTRY POINT
-# =============================================================================
-
-
 def all_groups(ctx: dict) -> list:
     """Run the eight group checkers against one branch context.
 
-    The order is the reporting order the audit renders, and it is fixed here
-    rather than at the call site so the engine cannot silently drop a group by
-    forgetting one in its list -- the failure mode a many-name import invites.
-
-    Args:
-        ctx: The context dict from trinity_check._build_context.
-
-    Returns:
-        Eight check dicts, each ``{"name", "passed", "score", "message"}``.
+    The reporting order is fixed here so no call site can drop a group.
     """
     checks = [
         _group_entry_shapes(ctx),

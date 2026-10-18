@@ -3,14 +3,13 @@
 # Description: Welcome Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Welcome Operations Handler
 
-Implementation logic for the welcome command: scanning for unwelcomed
-branches and creating welcome posts. Returns dicts for module display layer.
+Returns dicts for the module display layer; never prints.
 """
 
 import sqlite3
@@ -27,28 +26,10 @@ from aipass.commons.apps.handlers.welcome.welcome_handler import (
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# WELCOME OPERATIONS
-# =============================================================================
-
-
 def run_welcome(args: List[str]) -> dict:
-    """
-    Scan for unwelcomed branches or welcome a specific branch.
-
-    Usage:
-        commons welcome              - Scan and welcome all new branches
-        commons welcome <branch>     - Manually welcome a specific branch
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Dict with success and welcomed info
-    """
+    """Scan for unwelcomed branches, or welcome the one branch named in args."""
     conn = None
 
-    # Check for --dry-run flag
     dry_run = "--dry-run" in args
     filtered_args = [a for a in args if a != "--dry-run"]
 
@@ -64,7 +45,6 @@ def run_welcome(args: List[str]) -> dict:
             result = _welcome_specific(conn, branch_name)
         else:
             if dry_run:
-                # Show what would happen without creating posts
                 rows = conn.execute("SELECT branch_name FROM agents WHERE branch_name != 'SYSTEM'").fetchall()
                 unwelcomed = [r["branch_name"] for r in rows if not has_been_welcomed(conn, r["branch_name"])]
                 close_db(conn)
@@ -89,15 +69,8 @@ def _welcome_scan(conn) -> dict:
     """
     Scan for unwelcomed branches and create welcome posts.
 
-    Args:
-        conn: Database connection
-
-    Returns:
-        Dict with success, welcomed list and failed list. A scan where any branch failed answers
-        success False with an error naming the failed and the welcomed branches: commons' decision,
-        DPLAN-0354 leg 3 (compass 304: a failure is loud where the caller is). The command then refuses
-        (exit 2) instead of printing a clean "welcomed" list over a branch that was never welcomed;
-        the welcomed list stays in the answer, so the partial work is still reported.
+    Any failed branch makes the answer success False (the command refuses, exit 2), while the
+    welcomed list stays in it so the partial work is still reported.
     """
     failed: List[str] = []
     welcomed = welcome_new_branches(conn, failed)
@@ -123,16 +96,7 @@ def _welcome_scan(conn) -> dict:
 
 
 def _welcome_specific(conn, branch_name: str) -> dict:
-    """
-    Welcome a specific branch by name.
-
-    Args:
-        conn: Database connection
-        branch_name: Branch name to welcome
-
-    Returns:
-        Dict with success and welcome result
-    """
+    """Welcome a specific branch by name."""
     agent = conn.execute("SELECT branch_name FROM agents WHERE LOWER(branch_name) = ?", (branch_name,)).fetchone()
 
     if not agent:

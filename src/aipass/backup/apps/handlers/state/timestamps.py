@@ -3,20 +3,12 @@
 # Description: Per-project last-backup timestamp persistence
 # Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-09-03
+# Modified: 2026-10-17
 # =============================================
 
-"""Timestamp state handler.
+"""Timestamp state handler."""
 
-Persists per-file modification timestamps recorded at the last snapshot so
-``run_snapshot``'s quick-check can tell a changed tree from an unchanged one in
-one comparison, without walking the destination.
-
-This map belongs to the SNAPSHOT strategy alone. ``run_versioned`` never reads
-or writes it: the versioned store keeps the previous copy of every file, so
-``copy_versioned`` compares each source mtime against its own stored copy and
-needs no project-level map at all.
-"""
+# Snapshot lane only: the versioned store compares against its own stored copies and never reads this map.
 
 from ..audit import trail
 from ..json import json_handler
@@ -24,23 +16,12 @@ from ..path import builder
 
 
 def load_timestamps(project_root: str) -> dict:
-    """Load the timestamp map for a project.
-
-    Args:
-        project_root: Absolute path to the project root.
-
-    Returns:
-        Mapping of relative_path to last recorded mtime (float seconds).
-
-    Raises:
-        InvalidDocument: The map exists but cannot be read as a JSON object.
-            Answering an empty map would make every file look changed AND let
-            the next save_timestamps overwrite the unreadable document.
-    """
+    """Load the timestamp map for a project."""
     ts_path = builder.build_timestamps_path(project_root)
     data = json_handler.read_json(ts_path)
     if data is None:
         if ts_path.exists():
+            # An empty map here would let the next save overwrite the unreadable document.
             raise json_handler.InvalidDocument(f"Timestamp map unreadable: {ts_path}")
         data = {}
     if not isinstance(data, dict):
@@ -50,21 +31,8 @@ def load_timestamps(project_root: str) -> dict:
 
 
 def save_timestamps(project_root: str, data: dict) -> None:
-    """Persist the timestamp map for a project.
-
-    Args:
-        project_root: Absolute path to the project root.
-        data: Mapping of relative_path to mtime (float seconds).
-
-    Raises:
-        WriteFailed: The map could not be written. A snapshot run whose
-            timestamps never landed copies everything again next time, so the
-            failure is surfaced rather than counted as a success.
-    """
+    """Persist the timestamp map for a project."""
     ts_path = builder.build_timestamps_path(project_root)
     if not json_handler.write_json(ts_path, data):
         raise json_handler.WriteFailed(f"Timestamp map write failed: {ts_path}")
     trail.log_operation("save_timestamps", {"project_root": project_root, "count": len(data)})
-
-
-# =============================================

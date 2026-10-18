@@ -3,14 +3,10 @@
 # Description: Google Drive upload engine — single + batch with threading
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Google Drive upload engine.
-
-Uploads files to Drive using resumable MediaFileUpload.  Supports single
-file uploads and threaded batch uploads via ThreadPoolExecutor.
-"""
+"""Google Drive upload engine."""
 
 from __future__ import annotations
 
@@ -46,34 +42,17 @@ def upload_single_file(
     note: str = "",
     lane_folder: str = "",
 ) -> bool:
-    """Upload one file with resumable MediaFileUpload.
+    """Upload one file with resumable MediaFileUpload, updating the tracked drive_id when there is one.
 
-    Calculates relative path from backup_root for folder structure in
-    Drive.  Uses tracker for dedup (cached drive_id).  Updates or creates
-    the file accordingly.
-
-    Args:
-        client: Authenticated DriveClient instance.
-        local_file: Absolute path to the file to upload.
-        project_name: Project name for Drive folder hierarchy.
-        backup_root: Root path for computing relative file paths.
-        note: Optional note for logging.
-        lane_folder: Folder under the project folder the file lands in
-            (drive_sync passes the lane, "snapshot"). Tracker keys stay
-            relative to backup_root.
-
-    Returns:
-        True on success, False on failure.
+    lane_folder prefixes the Drive folder only; tracker keys stay relative to backup_root.
     """
     if not local_file.is_file():
         return False
 
-    # Get project folder
     project_folder_id = client.get_or_create_project_folder(project_name)
     if not project_folder_id:
         return False
 
-    # Compute relative path and target folder
     try:
         rel_path = local_file.relative_to(backup_root)
     except ValueError:
@@ -91,7 +70,6 @@ def upload_single_file(
     else:
         target_folder_id = project_folder_id
 
-    # Check tracker for existing drive_id
     try:
         rel_key = str(local_file.relative_to(backup_root))
     except ValueError:
@@ -100,7 +78,6 @@ def upload_single_file(
 
     existing_drive_id = client.file_tracker.get(rel_key, {}).get("drive_id")
 
-    # Detect MIME type
     mime_type, _ = mimetypes.guess_type(str(local_file))
     if mime_type is None:
         mime_type = "application/octet-stream"
@@ -116,14 +93,12 @@ def upload_single_file(
         )
 
         if existing_drive_id:
-            # Update existing file
             request = client.drive_service.files().update(  # type: ignore[union-attr]
                 fileId=existing_drive_id,
                 media_body=media,
                 fields="id",
             )
         else:
-            # Create new file
             file_metadata: dict[str, Any] = {
                 "name": local_file.name,
                 "parents": [target_folder_id],
@@ -187,37 +162,10 @@ def upload_batch(
     project_root: str | None = None,
     on_file: Any = None,
 ) -> dict:
-    """Threaded batch upload using ThreadPoolExecutor.
+    """Threaded batch upload; each thread builds its own Drive service, which is not thread-safe.
 
-    Each thread gets its own Drive service for thread safety.
-
-    Args:
-        client: Authenticated DriveClient instance.
-        files: List of files to upload.
-        project_name: Project name for Drive folder hierarchy.
-        backup_root: Root path for computing relative file paths.
-        tracker: File tracker dict (shared, thread-safe updates).
-        note: Optional note for logging.
-        max_workers: Max concurrent upload threads.
-        batch_save_interval: Save tracker every N uploads.
-        progress_fn: Optional no-argument callback called after each upload.
-        lane_folder: Folder under the project folder every file lands in.
-        project_root: The project whose ``.backup/drive_tracker.json`` the
-            tracker is saved to every ``batch_save_interval`` completed files,
-            so a run that dies part-way leaves what it uploaded tracked. None
-            (the default) saves nothing here; the caller saves at the end.
-        on_file: Optional callback after each finished upload with
-            (store-relative path, bytes uploaded, ok); the running file's writer.
-
-    The stop flag (handlers/state/stop_flag.py) is read as each upload starts
-    and as each one finishes: once it is up, the futures not yet started are
-    cancelled, a worker that picks one up anyway skips it, and the uploads in
-    flight finish and are counted.
-
-    Returns:
-        Dict with success, uploaded, failed counts, bytes_uploaded, and
-        stopped (True when the stop flag cut the batch short; success is then
-        False).
+    project_root set: the tracker is saved every batch_save_interval files, so a dying run keeps what it uploaded.
+    A stop cancels unstarted futures; uploads in flight finish and count; success is then False.
     """
     if not files:
         return {"success": True, "uploaded": 0, "failed": 0}
@@ -233,7 +181,6 @@ def upload_batch(
         """Upload a single file in a worker thread; ``skipped`` when a stop came first."""
         if stop_requested():
             return skipped
-        # Ensure thread has its own service
         if not getattr(client._thread_local, "service", None):
             client._thread_local.service = client._build_thread_service()
         return upload_single_file(
@@ -316,6 +263,3 @@ def upload_batch(
         "bytes_uploaded": bytes_uploaded,
         "stopped": stopped,
     }
-
-
-# =============================================

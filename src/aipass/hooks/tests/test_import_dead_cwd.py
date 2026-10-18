@@ -3,48 +3,13 @@
 # Description: Pins hooks imports against a dead working directory (two worlds)
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
 
-# Every hooks module must import without a readable working directory.
-#
-# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-# routed by @devpulse): ``ntpath.realpath`` calls ``os.getcwd()``
-# UNCONDITIONALLY - not only for relative paths, the way ``posixpath`` does -
-# and ``Path.resolve()`` routes through it. So on Windows every
-# ``Path(__file__).resolve()`` reached at import time is an import-time
-# working-directory dependency: a process whose cwd is gone cannot import the
-# module at all.
-#
-# WHY THIS BRANCH NEEDED TWO WORLDS. @seedgo measured the asymmetry and it is
-# real here: one instrument proves half the defect and looks complete.
-#
-#   World A - ntpath emulation. ``os.path.realpath`` is wrapped to read
-#   ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts an
-#   unguarded ``Path(__file__).resolve()``. It does NOT convict
-#   ``inspect.stack()`` on Linux: there the raise happens inside
-#   ``getabsfile()``, where inspect catches it.
-#
-#   World B - ``os.path.realpath`` denied directly, ``abspath`` left working.
-#   This convicts ``inspect.stack()`` at ``inspect.py:1009``.
-#
-# THE ARMING INGREDIENT FOR WORLD B, measured here rather than assumed:
-# ``inspect.stack()`` only reaches ``os.path.realpath`` for a frame whose
-# filename does not exist on disk. ``getsourcefile()`` returns early for a real
-# file (``os.path.exists``) and returns early for anything already in
-# ``linecache.cache``; only the remaining case falls through to ``getmodule()``,
-# whose module-cache rebuild loop contains the bare
-# ``modulesbyfile[os.path.realpath(f)]`` at line 1009.
-#
-# That is why a first cut of this file reported the world VACUOUS while the very
-# same world killed the import: the probe ran from ``<stdin>``, which the
-# heredoc had put in ``linecache.cache``, so it took the early return. A
-# ``<string>`` frame from ``compile()`` is not cached and does fall through -
-# and so do the ``<frozen importlib._bootstrap>`` frames present on any real
-# import, which is what the live defect actually rides. The probe below uses
-# ``<string>`` deliberately; ``<stdin>`` would silently measure nothing.
+# ntpath.realpath calls os.getcwd() unconditionally, so on Windows an import-time resolve() needs a live cwd.
+# Two worlds, each convicting half: A emulates ntpath (resolve), B denies realpath (inspect.stack()).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every hooks module parses; this file pins only import under a dead cwd
@@ -60,10 +25,7 @@ import pytest
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 GUARD_SOURCE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
-# Other branches' import-time code is held CONSTANT: preloaded in the healthy
-# world, before any denial. Their dead-cwd cure is their own build (fleet
-# rollout in flight, 2026-08-31); this pin measures hooks' sites only. When the
-# fleet is cured these preloads can drop.
+# Other branches' import-time code is preloaded before any denial: this pins hooks' sites only.
 _PRELOAD = """
 from aipass.prax import logger  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
@@ -126,37 +88,14 @@ except FileNotFoundError:
 """
 
 
-# Directories the module walk never enters. dropbox and .archive: the ruling of
-# the owner of the project, 2026-09-27 20:42, in @devpulse's paraphrase - "a
-# dropbox is ignored by all, nothing looks into it and no process runs out of
-# it, it is a sandbox like .archive". __pycache__: hooks' decision (fleet green
-# leg 3) - bytecode caches hold no source module to import. Compared on the
-# parts of the path BELOW the root of the walk, never the whole path, so a root
-# that itself stands inside a directory of one of these names is still walked.
+# Compared on the parts BELOW the walk's root, so a root inside one of these names is still walked.
 _NEVER_WALKED = ("dropbox", ".archive", "__pycache__")
 
 
 def _module_names(root: Path = BRANCH_ROOT / "apps", base: Path = BRANCH_ROOT.parents[1]) -> list[str]:
     """Every importable module under this branch's apps/ tree.
 
-    Discovered, never listed: a hand-written list silently stops covering the
-    handler added after it was written.
-
-    Dot-prefixed directories and ``(disabled)`` names are skipped. ``.archive/``
-    is the fleet's disposal convention (DPLAN-0325 parked the retired json
-    handler there), and its dotted name — ``...json..archive.json_handler`` —
-    is a SyntaxError in the generated child script, which killed the probe
-    before either world could print. Both worlds then failed on the missing
-    arming line rather than on an import, which is the only reason this was
-    visible at all: a discovery sweep that silently stops covering anything is
-    the exact failure this file exists to prevent.
-
-    Args:
-        root: The root of the walk (this branch's apps/ by default).
-        base: The directory the dotted names are made relative to.
-
-    Returns:
-        Dotted module names, sorted.
+    Discovered, never listed. Dotted and ``(disabled)`` names are SyntaxErrors in the child script.
     """
     names = set()
     for path in root.rglob("*.py"):
@@ -166,10 +105,6 @@ def _module_names(root: Path = BRANCH_ROOT / "apps", base: Path = BRANCH_ROOT.pa
         parts = list(relative.parts)
         if any(part.startswith(".") for part in parts):
             continue
-        # A retired module is marked "(disabled)" in place, and the parentheses
-        # are a SyntaxError in the generated child exactly as ``.archive``'s
-        # dotted name was — same silent kill, different spelling. Skipped for
-        # the same reason: a module nobody imports cannot break an import.
         if any("(disabled)" in part for part in parts):
             continue
         if parts[-1] == "__init__":
@@ -181,15 +116,7 @@ def _module_names(root: Path = BRANCH_ROOT / "apps", base: Path = BRANCH_ROOT.pa
 def _run_world(world: str, imports: str) -> subprocess.CompletedProcess:
     """Run a denial world in a child process.
 
-    The injection happens in a child before any aipass import, so no module
-    has cached the real functions.
-
-    Args:
-        world: The denial preamble (world A or world B).
-        imports: The import statements to execute under it.
-
-    Returns:
-        The finished child process.
+    A child, before any aipass import, so no module has cached the real functions.
     """
     script = _PRELOAD + world + imports + '\nprint("IMPORTED")\n'
     return subprocess.run(
@@ -204,14 +131,9 @@ def _run_world(world: str, imports: str) -> subprocess.CompletedProcess:
 
 
 def _assert_world_was_armed(out: str) -> None:
-    """A world that could not fire proves nothing; say so rather than pass.
-
-    Args:
-        out: The child's stdout.
-    """
+    """A world that could not fire proves nothing; say so rather than pass."""
     if "PROBE_VACUOUS" in out:
-        # Allowed only where it is the interpreter's truth (pre-3.11 pathlib
-        # never routes an absolute resolve through os.path.realpath).
+        # Pre-3.11 pathlib never routes an absolute resolve through os.path.realpath.
         assert sys.version_info < (3, 11), (
             "the denial did not fire on an interpreter that routes through "
             "os.path.realpath - the instrument is broken, not the world"
@@ -271,8 +193,7 @@ class TestEveryModuleImportsWithoutACwd:
 
     def test_the_worlds_are_not_the_same_world(self):
         """World B must deny realpath OUTRIGHT; world A must deny getcwd. If a
-        later edit collapsed them into one, the asymmetry this file exists for
-        would be gone and both tests would prove the same half."""
+        later edit merged them, both tests would prove the same half."""
         assert "os.getcwd = _dead_getcwd" in _WORLD_A
         assert "os.getcwd" not in _WORLD_B.replace("os.getcwd = _dead_getcwd", "")
         assert "_denied_realpath" in _WORLD_B
@@ -281,9 +202,7 @@ class TestEveryModuleImportsWithoutACwd:
 class TestTheCureCannotBeSilentlyReverted:
     """``inspect.stack()`` in the guard is the defect, not a style preference.
 
-    ROLLOUT REQUIREMENT from @memory: an import probe cannot reach the
-    caller-is-None branch, so the import tests above can never see a
-    reintroduced ``inspect.stack()`` there. The ban has to be structural.
+    An import probe cannot reach the caller-is-None branch, so the ban is structural.
     """
 
     def test_the_guard_source_is_actually_read(self):
@@ -295,10 +214,7 @@ class TestTheCureCannotBeSilentlyReverted:
     def test_the_fence_lets_kin_through_with_no_cwd(self):
         """The kin seat imports its handlers under world A (the ntpath-shaped denial): ALLOWED.
 
-        Rewritten for fence v2 (DPLAN-0404 leg 12, trigger's 1.4.0 the reference): the probe
-        tests/support_fence.py runs from its kin seat through runpy, so every frame the fence
-        walks is resolved with the cwd denied. Red against a frame walk whose resolve has no
-        OSError arm: the denied cwd kills the import and the probe never answers.
+        Red against a frame walk whose resolve has no OSError arm.
         """
         probe = BRANCH_ROOT / "tests" / "support_fence.py"
         run_kin = f"\nimport runpy\nimport sys\nsys.argv = [{str(probe)!r}, 'pkg']\n"
@@ -310,17 +226,7 @@ class TestTheCureCannotBeSilentlyReverted:
 
     @staticmethod
     def _inspect_stack_calls(source: str) -> list[int]:
-        """Lines calling ``inspect.stack()``, by shape.
-
-        AST, not grep: this guard's docstrings NAME the defect, and a string
-        ban convicts the explanation while acquitting the code.
-
-        Args:
-            source: Python source text.
-
-        Returns:
-            Line numbers of matching calls.
-        """
+        """Lines calling ``inspect.stack()``, by shape."""
         tree = ast.parse(source)
         return [
             node.lineno
@@ -358,8 +264,7 @@ class TestTheCureCannotBeSilentlyReverted:
 
     def test_the_guards_own_resolve_is_guarded(self):
         """The world-A conviction site. An unguarded resolve in this file is
-        reached by every import of hooks' handlers - the engine's and each
-        bridge's - so this one line decides every hook."""
+        reached by every import of hooks' handlers, so it decides every hook."""
         tree = ast.parse(GUARD_SOURCE.read_text(encoding="utf-8"))
         unguarded = [
             node.lineno
@@ -375,12 +280,7 @@ class TestTheCureCannotBeSilentlyReverted:
 def _try_body_nodes(tree: ast.AST) -> set[int]:
     """Identities of every node inside some ``try`` body.
 
-    Args:
-        tree: The parsed module. The caller must keep it alive - these are
-            ``id()`` values, and a collected tree could reuse them.
-
-    Returns:
-        ``id()`` of each node within a ``try`` body.
+    The caller keeps *tree* alive: these are ``id()`` values a collected tree could reuse.
     """
     inside: set[int] = set()
     for node in ast.walk(tree):
@@ -392,15 +292,7 @@ def _try_body_nodes(tree: ast.AST) -> set[int]:
 
 
 def _inside_try(tree: ast.AST, target: ast.AST) -> bool:
-    """Whether a node sits inside the body of a ``try`` statement.
-
-    Args:
-        tree: The parsed module.
-        target: The node to locate.
-
-    Returns:
-        True when the node is within some ``try`` body.
-    """
+    """Whether a node sits inside the body of a ``try`` statement."""
     return id(target) in _try_body_nodes(tree)
 
 

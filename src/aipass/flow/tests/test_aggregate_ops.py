@@ -3,7 +3,7 @@
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
 # Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -24,10 +24,8 @@ import pytest
 import aipass.flow.apps.handlers.plan.aggregate_ops as mod
 
 
-# ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
-# The bus where it lives: aggregate_central_impl imports it inside the function,
-# so a patch on aggregate_ops itself bites nothing and the real event fires.
+# Patched where it lives: aggregate_central_impl imports it inside the function.
 _BUS = "aipass.trigger.apps.modules.core.trigger"
 
 
@@ -35,16 +33,8 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     """A stand-in for aggregate_ops' _create_exclusive seam that answers the
     way Windows does mid-release.
 
-    Windows answers an exclusive create against a lock another writer is still
-    removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured, handed in through the product's
-    own seam so os.open stays whole for every other reader. The first
-    ``denials`` creates of ``lock_path`` are denied (None = never clears);
-    after that the real exclusive create is made on disk.
-
-    Returns:
-        (side_effect, attempts, raised): attempts counts every exclusive create
-        of lock_path; raised holds each PermissionError handed out.
+    Windows denies a create on a delete-pending lock with PermissionError; Linux cannot, so it is manufactured.
+    The first ``denials`` creates are denied (None = never clears); returns (side_effect, attempts, raised).
     """
     attempts: list[int] = []
     raised: list[PermissionError] = []
@@ -61,17 +51,9 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     return fake_create, attempts, raised
 
 
-# ─── Import helpers ──────────────────────────────────────
-
-
 def _import(name: str):
     """Return a function from aggregate_ops for a test to call directly."""
     return getattr(mod, name)
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. find_branch_registry
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFindBranchRegistry:
@@ -119,11 +101,6 @@ class TestFindBranchRegistry:
         assert find_branch_registry(tmp_path, "flow") is None
 
 
-# ═══════════════════════════════════════════════════════════
-# 2. load_branch_registry
-# ═══════════════════════════════════════════════════════════
-
-
 class TestLoadBranchRegistry:
     def test_loads_valid_json(self, tmp_path):
         load_branch_registry = _import("load_branch_registry")
@@ -146,11 +123,6 @@ class TestLoadBranchRegistry:
         assert result == {"plans": {}, "next_number": 1}
 
 
-# ═══════════════════════════════════════════════════════════
-# 3. save_branch_registry
-# ═══════════════════════════════════════════════════════════
-
-
 class TestSaveBranchRegistry:
     def test_saves_valid_json(self, tmp_path):
         save_branch_registry = _import("save_branch_registry")
@@ -169,13 +141,12 @@ class TestSaveBranchRegistry:
         save_branch_registry(reg_file, data)
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
         assert "last_updated" in saved
-        # Should be an ISO format string
         assert "T" in saved["last_updated"]
 
     def test_returns_false_on_write_error(self, tmp_path):
         """save_branch_registry returns False when writing to an impossible path."""
         save_branch_registry = _import("save_branch_registry")
-        # Use a file as parent so mkdir fails on all platforms
+        # A file as parent makes mkdir fail on every platform.
         blocker = tmp_path / "blocker"
         blocker.write_text("I am a file", encoding="utf-8")
         bad_path = blocker / "sub" / "registry.json"
@@ -184,8 +155,7 @@ class TestSaveBranchRegistry:
 
     def test_delete_pending_denial_is_retried_and_write_lands(self, tmp_path):
         """A Windows delete-pending denial on the lock is a held lock: retried on
-        the same budget, and the registry reaches disk. It used to give up on the
-        first denial (PermissionError is an OSError) and lose the auto-close.
+        the same budget, and the registry reaches disk.
         """
         save_branch_registry = _import("save_branch_registry")
         reg_file = tmp_path / "registry.json"
@@ -224,25 +194,17 @@ class TestSaveBranchRegistry:
         denial = next((arg for arg in logged if isinstance(arg, PermissionError)), None)
         assert denial is not None, logged
         assert str(lock) in str(denial)
-        # What each wait was given: positive, doubling, summed into the message.
-        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
-        # `(2**attempt)` growth each redden this.
+        # Mutant: `_sleep(delay)` -> `_sleep(0.0)`, or dropping `(2**attempt)`, reddens this.
         delays = [c.args[0] for c in sleep.call_args_list]
         assert len(delays) == len(attempts)
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in str(denial)
         assert denial.__cause__ is raised[-1]
-        # The budget as the denial reports it; the attempts made must match it.
         reported = re.search(r"still denied after (\d+) attempts", str(denial))
         assert reported, str(denial)
         assert int(reported.group(1)) > 1
         assert len(attempts) == int(reported.group(1))
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. extract_plan_number
-# ═══════════════════════════════════════════════════════════
 
 
 class TestExtractPlanNumber:
@@ -272,11 +234,6 @@ class TestExtractPlanNumber:
         assert extract_plan_number("FPLAN0001") is None
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. auto_close_plan
-# ═══════════════════════════════════════════════════════════
-
-
 class TestAutoClosePlan:
     def _make_registry(self, tmp_path, plans: dict) -> Path:
         reg_file = tmp_path / "registry.json"
@@ -302,9 +259,7 @@ class TestAutoClosePlan:
     def test_a_row_under_the_same_number_that_is_not_this_plan_stays_open(self, tmp_path, row_file):
         """DPLAN-0004's file is missing; the row under "0004" is FPLAN-0004.
 
-        Until leg 6 the heal looked the bare number up and closed that row.
-        Red first on that code; mutants: the startswith guard -> `if False:`,
-        and f"{prefix}-" -> "" (any file passes).
+        Mutant: the startswith guard -> `if False:`, or f"{prefix}-" -> "", reddens this.
         """
         auto_close_plan = _import("auto_close_plan")
         row = {"status": "open", "subject": "Theirs", "file_path": str(tmp_path / row_file) if row_file else ""}
@@ -340,15 +295,9 @@ class TestAutoClosePlan:
         assert result is False
 
 
-# ═══════════════════════════════════════════════════════════
-# 6. validate_and_heal_branch
-# ═══════════════════════════════════════════════════════════
-
-
 class TestValidateAndHealBranch:
     def test_valid_plans_kept(self, tmp_path):
         validate_and_heal_branch = _import("validate_and_heal_branch")
-        # Create an actual plan file on disk
         plan_file = tmp_path / "FPLAN-0001.md"
         plan_file.write_text("plan content", encoding="utf-8")
 
@@ -377,7 +326,6 @@ class TestValidateAndHealBranch:
     def test_missing_plans_healed(self, tmp_path):
         validate_and_heal_branch = _import("validate_and_heal_branch")
 
-        # Set up a registry for auto_close_plan to work with
         reg_dir = tmp_path / "flow_json"
         reg_dir.mkdir()
         reg_file = reg_dir / "test_registry.json"
@@ -424,15 +372,9 @@ class TestValidateAndHealBranch:
             ],
             "recently_closed": [],
         }
-        # No registry file on disk, find_branch_registry returns None
         valid, closed = validate_and_heal_branch("test", branch_data, heal=True)
         assert len(valid) == 0
         assert len(closed) == 0
-
-
-# ═══════════════════════════════════════════════════════════
-# 7. load_central
-# ═══════════════════════════════════════════════════════════
 
 
 class TestLoadCentral:
@@ -467,11 +409,6 @@ class TestLoadCentral:
         assert result["branches"] == {}
 
 
-# ═══════════════════════════════════════════════════════════
-# 8. save_central
-# ═══════════════════════════════════════════════════════════
-
-
 class TestSaveCentral:
     def test_saves_valid_json(self, tmp_path):
         save_central = _import("save_central")
@@ -495,8 +432,6 @@ class TestSaveCentral:
     def test_returns_false_on_error(self, tmp_path):
         """save_central returns False when writing to an impossible path."""
         save_central = _import("save_central")
-        # Use a path that cannot be created on any platform:
-        # a file exists where a directory is needed
         blocker = tmp_path / "blocker"
         blocker.write_text("I am a file", encoding="utf-8")
         bad_dir = blocker / "subdir"
@@ -507,12 +442,7 @@ class TestSaveCentral:
     def test_lock_create_error_is_logged_as_itself(self, tmp_path, mock_logger, platform_create_answer):
         """A lock create that fails with neither contention nor denial is not "after N retries".
 
-        The central file's name fits the filesystem; its .lock sibling is 257
-        bytes, so the exclusive create fails on disk. _acquire_lock used to
-        answer False for it, and save_central logged a retry budget that was
-        never spent. It now propagates to save_central's own error log. Which
-        error a 257-byte name raises is the platform's choice, so the test asks
-        the platform first.
+        The .lock sibling's 257-byte name fails on disk; which error is the platform's choice, so it is asked first.
         Mutant: `lock_path, exc)` + `raise` -> `return False` reddens this.
         """
         save_central = _import("save_central")
@@ -571,26 +501,18 @@ class TestSaveCentral:
 
         assert result is False
         assert json.loads(central_file.read_text(encoding="utf-8")) == before
-        # The logged arguments themselves, never str(call): a call's repr doubles
-        # every backslash, so a Windows path is never a substring of it.
+        # Never str(call): its repr doubles every backslash, hiding a Windows path.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
-        # The budget as the product reports it; the attempts made must match it.
         reported = re.search(r"still denied after (\d+) attempts", logged)
         assert reported, logged
         assert int(reported.group(1)) > 1
         assert len(attempts) == int(reported.group(1))
-        # What each wait was given, as above.
         delays = [c.args[0] for c in sleep.call_args_list]
         assert len(delays) == len(attempts)
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in logged
-
-
-# ═══════════════════════════════════════════════════════════
-# 9. aggregate_central_impl
-# ═══════════════════════════════════════════════════════════
 
 
 class TestAggregateCentralImpl:
@@ -623,7 +545,6 @@ class TestAggregateCentralImpl:
         """
         aggregate_central_impl = _import("aggregate_central_impl")
 
-        # Create plan files on disk so they pass validation
         plan1 = tmp_path / "branch_a" / "FPLAN-0001.md"
         plan1.parent.mkdir(parents=True)
         plan1.write_text("plan a", encoding="utf-8")
@@ -664,7 +585,6 @@ class TestAggregateCentralImpl:
         assert saved["statistics"]["active_count"] == 2
         assert saved["global_statistics"]["total_active"] == 2
         assert saved["global_statistics"]["branches_reporting"] == 2
-        # Sorted newest first by created
         assert saved["active_plans"][0]["plan_id"] == "FPLAN-0002"
 
     def test_recently_closed_limited_to_5(self, tmp_path):
@@ -678,7 +598,6 @@ class TestAggregateCentralImpl:
         central_dir.mkdir()
         central_file = central_dir / "PLANS.central.json"
 
-        # Build 7 closed plans in a single branch
         closed_plans = [
             {"plan_id": f"FPLAN-{i:04d}", "status": "closed", "closed": f"2026-03-{i:02d}"} for i in range(1, 8)
         ]
@@ -776,21 +695,8 @@ class TestAggregateCentralImpl:
         assert "T" in saved["generated_at"]
 
 
-# ═══════════════════════════════════════════════════════════
-# 10. total_closed must not count its own cap
-# ═══════════════════════════════════════════════════════════
-
-
 class TestTotalClosedIsNotTruncated:
-    """Reported by @prax 2026-08-16, reproduced before fixing.
-
-    push_central computes the real closed count per branch, then aggregate
-    read its closed universe back out of the already-capped recently_closed
-    window and republished len(window) as total_closed. Live central at the
-    time: all 44 branches reported total_closed <= 5 (max anywhere exactly 5)
-    while flow's registry held 336 closed plans for devpulse alone, 699 across
-    the tree against a published 126.
-    """
+    """push_central's real closed count must survive; aggregate must not recount the capped window."""
 
     @staticmethod
     def _central(tmp_path, *, real_total, window=5):
@@ -838,7 +744,7 @@ class TestTotalClosedIsNotTruncated:
         assert stats["recently_closed_included"] == 5
 
     def test_total_closed_is_not_merely_the_window_size(self, tmp_path):
-        """The tell @prax named: total_closed == recently_closed_included on every branch.
+        """The tell: total_closed == recently_closed_included on every branch.
 
         Mutant: closed_count=len(recently_closed) -> closed_count=0 reddens this.
         """
@@ -853,7 +759,7 @@ class TestTotalClosedIsNotTruncated:
         assert stats["total_closed"] != stats["recently_closed_included"]
 
     def test_top_level_total_is_not_a_sum_of_caps(self, tmp_path):
-        """Top level summed the per-branch caps — 126 published against 699 real.
+        """The top-level total must not be a sum of the per-branch caps.
 
         Mutant: branches_count=len(branches) -> branches_count=len(branches) + 1 reddens this.
         """

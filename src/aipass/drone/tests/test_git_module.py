@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack and release
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-21
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -1112,7 +1112,9 @@ class TestUntrack:
         assert "a.txt" in _git(untrack_repo, "ls-files").splitlines()
 
     def test_help_names_the_verb_under_owner_and_its_page_renders_the_refusals(self) -> None:
-        owner_part = get_help().split("Owner (devpulse only):\n", 1)[1].split("\n\n", 1)[0]
+        owner_part = (
+            get_help().split("Owner (the repo's registry owner: devpulse in AIPass):\n", 1)[1].split("\n\n", 1)[0]
+        )
         page = get_help("untrack")
 
         assert "  untrack <path ...> " in owner_part

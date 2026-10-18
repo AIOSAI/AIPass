@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
@@ -36,11 +36,7 @@ _PROC = "aipass.flow.apps.handlers.mbank.process"
 
 
 def _move_answer(source: Path, destination: Path) -> OSError | None:
-    """Move ``source`` with the test's own hands and keep what the platform answers.
-
-    Returns:
-        The OSError the move raised, or None when the move succeeded.
-    """
+    """Move ``source`` with the test's own hands and keep what the platform answers."""
     try:
         shutil.move(str(source), str(destination))
     except OSError as exc:
@@ -49,11 +45,7 @@ def _move_answer(source: Path, destination: Path) -> OSError | None:
 
 
 def _mkdir_answer(path: Path) -> OSError | None:
-    """Make ``path`` a directory the way the heal does and keep the platform's answer.
-
-    Returns:
-        The OSError the mkdir raised, or None when the directory was made.
-    """
+    """Make ``path`` a directory the way the heal does and keep the platform's answer."""
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -65,16 +57,7 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     """A stand-in for process's _create_exclusive seam that answers the way
     Windows does mid-release.
 
-    Windows answers an exclusive create against a lock another writer is still
-    removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured, handed in through the product's
-    own seam so os.open stays whole for every other reader. The first
-    ``denials`` creates of ``lock_path`` are denied (None = never clears);
-    after that the real exclusive create is made on disk.
-
-    Returns:
-        (side_effect, attempts, raised): attempts counts every exclusive create
-        of lock_path; raised holds each PermissionError handed out.
+    Linux cannot produce delete-pending PermissionError, so it is manufactured; denials=None never clears.
     """
     attempts: list[int] = []
     raised: list[PermissionError] = []
@@ -89,11 +72,6 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
         return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
     return fake_create, attempts, raised
-
-
-# ===================================================================
-# 1. is_template_content
-# ===================================================================
 
 
 class TestIsTemplateContent:
@@ -246,13 +224,7 @@ class TestIsTemplateContent:
             "[What this phase accomplishes]\n"
             "[Clear description of the idea, feature, improvement, or fix]\n"
         )
-        # Each type has only 1 placeholder, so none reach 3
         assert is_template_content(content) is False
-
-
-# ===================================================================
-# 2. archive_plan
-# ===================================================================
 
 
 class TestArchivePlan:
@@ -284,7 +256,6 @@ class TestArchivePlan:
 
         assert result is True
         assert not plan_file.exists()
-        # Original collision file still present, plus the timestamped one
         md_files = list(processed_dir.glob("FPLAN-0200*.md"))
         assert len(md_files) == 2
 
@@ -304,9 +275,6 @@ class TestArchivePlan:
     def test_archive_returns_false_on_move_failure(self, tmp_path, mock_logger):
         """Return False when the move itself raises.
 
-        The failure is a real one on disk: the plan file was never written, so
-        the move has no source. The test makes the same move on a missing twin
-        first and asserts only that the platform refused it.
         Mutant: the except's `return False` -> `return True` reddens this.
         """
         plan_file = tmp_path / "FPLAN-0400.md"
@@ -322,12 +290,7 @@ class TestArchivePlan:
         assert mock_logger.error.call_args.args[1] == plan_file
 
     def test_archive_returns_false_when_dest_not_verified(self, tmp_path):
-        """Return False when destination file does not exist after move.
-
-        The real shutil moves the file on disk; the product's own constant is
-        the seam, a processed dir whose every child answers "not there", so
-        the verification is the only thing between the move and a True (leg 10).
-        """
+        """Return False when destination file does not exist after move."""
         plan_file = tmp_path / "FPLAN-0500.md"
         plan_file.write_text("content", encoding="utf-8")
         processed_dir = tmp_path / "processed"
@@ -352,14 +315,8 @@ class TestArchivePlan:
             result = archive_plan(plan_file)
 
         assert result is False
-        # The move did happen on disk; only the verification refused to call it done.
         assert (processed_dir / "FPLAN-0500.md").read_text(encoding="utf-8") == "content"
         assert not plan_file.exists()
-
-
-# ===================================================================
-# 3. load_flow_registry (additional coverage)
-# ===================================================================
 
 
 class TestLoadFlowRegistryAdditional:
@@ -374,11 +331,6 @@ class TestLoadFlowRegistryAdditional:
             result = load_flow_registry(registry_file="custom_reg.json")
 
         assert result["next_number"] == 2
-
-
-# ===================================================================
-# 4. save_flow_registry (additional coverage)
-# ===================================================================
 
 
 class TestSaveFlowRegistryAdditional:
@@ -402,9 +354,6 @@ class TestSaveFlowRegistryAdditional:
     def test_delete_pending_denial_is_retried_and_processed_flag_lands(self, tmp_path):
         """A Windows delete-pending denial on the registry lock is a held lock:
         retried on the same budget, and the "processed" update reaches disk.
-
-        It used to give up on the first denial, so the plan was archived but
-        the registry never learned it was processed.
         """
 
         reg_file = tmp_path / "fplan_registry.json"
@@ -417,9 +366,6 @@ class TestSaveFlowRegistryAdditional:
             patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
             patch(f"{_PROC}._sleep") as sleep,
         ):
-            # A save that refuses is the failure this test is about, so it is
-            # said as one: a lock that gave up on the denial fails here by
-            # name, not by its own error escaping the test.
             try:
                 save_flow_registry(data, registry_file=reg_file.name)
             except Exception as exc:  # save_flow_registry raises bare Exception
@@ -452,25 +398,18 @@ class TestSaveFlowRegistryAdditional:
         ):
             proc.save_flow_registry({"next_number": 2, "plans": {}}, registry_file=reg_file.name)
 
-        # The count the message states is the count of creates made, read off
-        # the attempts rather than the private budget constant.
         budget = len(attempts)
         assert budget > 1
         assert str(lock) in str(excinfo.value)
         assert f"{budget} attempts" in str(excinfo.value)
         assert json.loads(reg_file.read_text(encoding="utf-8")) == before
-        # What each wait was given: positive, doubling, summed into the message.
-        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
-        # `(2**attempt)` growth each redden this.
+        # Waits are positive, doubling, and summed into the message.
         delays = [c.args[0] for c in sleep.call_args_list]
         assert len(delays) == len(attempts)
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
-        # The helper's own raise rides out of save_flow_registry as the context
-        # of its wrapper, chained to the last denial (reached through the
-        # public saver since leg 10, not by calling the lock helper).
         helper_exc = excinfo.value.__context__
         assert isinstance(helper_exc, PermissionError)
         assert helper_exc.__cause__ is raised[-1]
@@ -478,12 +417,7 @@ class TestSaveFlowRegistryAdditional:
     def test_lock_create_error_is_reported_as_itself(self, tmp_path, mock_logger, platform_create_answer):
         """A lock create that fails with neither contention nor denial names its own cause.
 
-        The registry name fits the filesystem; its .lock sibling is 257 bytes, so
-        the exclusive create fails on disk. _acquire_lock used to answer False,
-        and save_flow_registry reported "Could not acquire lock" - the contention
-        message - for it. It now propagates. Which error a 257-byte name raises
-        is the platform's choice, so the test asks the platform first.
-        Mutant: `lock_path, exc)` + `raise` -> `return False` reddens this.
+        The 257-byte .lock name fails on disk; which OSError is the platform's choice, so it is asked first.
         """
         name = "a" * 252 + ".js"
         answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
@@ -507,11 +441,6 @@ class TestSaveFlowRegistryAdditional:
         assert excinfo.value.__context__ is logged[0]
 
 
-# ===================================================================
-# 5. get_closed_plans (additional coverage)
-# ===================================================================
-
-
 class TestGetClosedPlansAdditional:
     """Additional edge cases for get_closed_plans."""
 
@@ -533,7 +462,6 @@ class TestGetClosedPlansAdditional:
         ):
             result = get_closed_plans()
 
-        # Should not raise, returns empty because the good registry has no closed plans
         assert result == []
 
     def test_includes_registry_file_in_result(self, tmp_path):
@@ -570,18 +498,11 @@ class TestGetClosedPlansAdditional:
         assert result[0]["registry_file"] == "special_registry.json"
 
 
-# ===================================================================
-# 6. cleanup_temp_files (additional coverage)
-# ===================================================================
-
-
 class TestCleanupTempFilesAdditional:
     """Additional edge cases for cleanup_temp_files."""
 
     def test_scan_error_returns_error_key(self, tmp_path):
         """When scanning the directory raises, return scan_error key."""
-        # The product's own constant is the seam: a memory dir that exists but
-        # cannot be listed. pathlib itself stays whole (leg 10).
         unlistable = MagicMock(spec=Path)
         unlistable.exists.return_value = True
         unlistable.glob.side_effect = PermissionError("no access")
@@ -592,22 +513,13 @@ class TestCleanupTempFilesAdditional:
         assert result["files_found"] == 0
 
 
-# ===================================================================
-# 7. verify_and_heal_orphaned_plans (additional coverage)
-# ===================================================================
-
-
 class TestVerifyAndHealOrphanedPlansAdditional:
     """Additional edge cases for verify_and_heal_orphaned_plans."""
 
     def test_handles_rename_exception(self, tmp_path):
         """When the heal's move raises, report failed_to_heal.
 
-        The failure is a real one on disk: the processed path is a file, so
-        the directory the heal makes before its rename cannot be made. The test
-        asks the platform the same question on a twin first.
-        Mutants: the except's `failed_to_heal += 1` -> `+= 0`, and its
-        `"status": "heal_failed"` -> `"healed"`, each redden this.
+        A file stands where the processed directory goes, so the heal's mkdir fails on disk.
         """
         plan_file = tmp_path / "FPLAN-0030.md"
         plan_file.write_text("orphan", encoding="utf-8")
@@ -695,11 +607,6 @@ class TestVerifyAndHealOrphanedPlansAdditional:
         assert not plan_b.exists()
 
 
-# ===================================================================
-# 8. process_closed_plans (additional coverage)
-# ===================================================================
-
-
 class TestProcessClosedPlansAdditional:
     """Additional edge cases for process_closed_plans."""
 
@@ -777,10 +684,8 @@ class TestProcessClosedPlansAdditional:
         ):
             process_closed_plans()
 
-        # Registry save was called with cleanup_completed=False
         mock_save.assert_called_once()
         assert registry["plans"]["70"]["cleanup_completed"] is False
-        # processed should NOT be set when archive fails
         assert "processed" not in registry["plans"]["70"]
 
     def test_logs_json_operation_after_processing(self, tmp_path, mock_json_handler):
@@ -820,7 +725,6 @@ class TestProcessClosedPlansAdditional:
         ):
             process_closed_plans()
 
-        # The processed flag is written back to the plan's OWN registry, once.
         mock_save.assert_called_once_with(registry, registry_file="fplan_registry.json")
         assert registry["plans"]["80"]["processed"] is True
         mock_json_handler.assert_called_once_with(

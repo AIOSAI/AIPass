@@ -3,16 +3,10 @@
 # Description: Logging System Lifecycle Handler
 # Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-09-24
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Logging Lifecycle Handler
-
-Implementation logic for initializing, shutting down, and running
-continuous logging. Extracted from modules/logger.py to follow
-the 3-tier architecture (modules = orchestration, handlers = implementation).
-"""
+"""PRAX Logging Lifecycle Handler"""
 
 from typing import Dict, Any
 
@@ -41,47 +35,22 @@ from aipass.prax.apps.handlers.config.load import (
 
 
 def run_initialize(module_name: str) -> Dict[str, Any]:
-    """Execute the logging system initialization sequence.
-
-    Steps:
-    1. Create config file if missing
-    2. Discover all Python modules
-    3. Save module registry
-    4. Setup system logger
-    5. Install logger override
-    6. Start file watcher
-
-    Args:
-        module_name: Name of the calling module — recorded on the operation
-
-    Returns:
-        Dict with initialization results:
-        - modules_count: Number of discovered modules
-        - system_logs_dir: Path to system logs
-        - module_logs_dir: Path to module logs
-    """
-    # Create config file if missing
+    """Execute the logging system initialization sequence; returns modules_count and the two log dirs."""
     create_config_file()
 
-    # Discover all modules
     modules = discover_python_modules()
 
-    # Save registry
     save_module_registry(modules)
 
-    # Setup prax_logger's own logging
     system_logger_instance = setup_system_logger()
 
-    # Log system startup
     system_logger_instance.info("Prax logging system initialized")
     system_logger_instance.info(f"System logs: {get_system_logs_dir()}, Module logs: {get_module_logs_dir('prax')}")
     system_logger_instance.info(f"Found {len(modules)} modules for logging setup")
 
-    # Install logger override
     install_logger_override()
     system_logger_instance.info("Logger override system installed")
 
-    # Start file watcher
     start_file_watcher()
 
     log_operation(
@@ -99,20 +68,9 @@ def run_initialize(module_name: str) -> Dict[str, Any]:
 
 
 def run_shutdown(module_name: str) -> None:
-    """Execute the logging system shutdown sequence.
-
-    Steps:
-    1. Stop file watcher
-    2. Restore original logger
-    3. Log shutdown operation
-
-    Args:
-        module_name: Name of the calling module — recorded on the operation
-    """
-    # Stop file watcher
+    """Execute the logging system shutdown sequence."""
     stop_file_watcher()
 
-    # Restore original logger
     restore_original_logger()
 
     log_operation("Logging system shutdown", {"initiated_by": module_name})

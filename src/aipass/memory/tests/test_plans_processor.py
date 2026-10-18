@@ -3,14 +3,10 @@
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
-
-# Tests for plans_processor handler -- line coverage for all functions.
-#
-# Covers: from aipass.memory.apps.handlers.intake.plans_processor import process_plans
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — the embed_subprocess.py child _embed_texts() spawns; sealed at subprocess
@@ -25,19 +21,9 @@ from unittest.mock import MagicMock, patch
 from aipass.memory.apps.handlers.intake import plans_processor
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _sha(path):
     """The content hash the manifest records — spelled here so fixtures cannot drift from it."""
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
-
-
-# ===========================================================================
-# Tests: _chunk_plan_text
-# ===========================================================================
 
 
 class TestChunkPlanText:
@@ -70,7 +56,6 @@ class TestChunkPlanText:
         result = mod._chunk_plan_text(text, "plan.md")
 
         assert len(result) == 1
-        # The last section should be flushed since there is only one header
         assert result[0]["section"] == "Header One"
         assert "Trailing content" in result[0]["text"]
 
@@ -85,24 +70,18 @@ class TestChunkPlanText:
 
         result = mod._chunk_plan_text(text, "plan.md")
 
-        # The "Short" section has text "## Short\nTiny." stripped -> "## Short\nTiny."
-        # which is short, so it should be skipped
         assert len(result) == 1
         assert result[0]["section"] == "Long Section"
 
     def test_fallback_to_size_chunking(self, monkeypatch):
         mod = plans_processor
-        # Headers present but every section body is tiny (< 30 chars), so the
-        # header-based pass produces zero chunks and the size-based fallback
-        # triggers on the full text which exceeds MAX_CHUNK_CHARS.
-        # Each pair "## Hxxx\nx\n" is ~12 chars; need > 1500 total.
+        # Every section is under 30 chars, so the header pass yields nothing and the size fallback runs.
         num_sections = (mod.MAX_CHUNK_CHARS // 8) + 50
         header_lines = []
         for i in range(num_sections):
             header_lines.append(f"## H{i:04d}")
             header_lines.append("x")
         text = "\n".join(header_lines)
-        # Confirm text is actually long enough for the size-based fallback
         assert len(text) > mod.MAX_CHUNK_CHARS
 
         result = mod._chunk_plan_text(text, "plan.md")
@@ -130,14 +109,11 @@ class TestChunkPlanText:
 
     def test_splits_oversized_chunks(self, monkeypatch):
         mod = plans_processor
-        # Create a markdown section that is > MAX_CHUNK_CHARS * 2
         big_body = "X" * (mod.MAX_CHUNK_CHARS * 3)
         text = f"## Big Section\n{big_body}\n"
 
         result = mod._chunk_plan_text(text, "plan.md")
 
-        # The single chunk was > MAX_CHUNK_CHARS * 2, so it gets split into
-        # exactly one part per MAX_CHUNK_CHARS, each part numbered from zero.
         assert [chunk["section"] for chunk in result] == [
             "Big Section_part0",
             "Big Section_part1",
@@ -152,31 +128,10 @@ class TestChunkPlanText:
         assert result == []
 
 
-# ===========================================================================
-# Tests: _load_manifest / _save_manifest
-# ===========================================================================
-
-
 class TestUnfilledPlaceholderSectionsAreNotVectorized:
-    """@flow's proposal, 2026-08-30, built as proposed and measured before shipping.
+    """A section whose every content line is a bracketed template prompt is not vectorized.
 
-    A plan template ships sections the author is meant to fill in. Unfilled, the
-    body is nothing but the bracketed prompt — `[What do you want to achieve?]`
-    — and vectorizing it stores a question the template asked, attributed to a
-    plan that never answered it.
-
-    NARROW ON PURPOSE. @flow's own plan-level heuristic (`is_template_content`)
-    was retired after it false-positived on real-but-minimal FPLANs and destroyed
-    the file, the registry row and the archive together. This is chunk-level, so
-    the worst case is a dropped empty section rather than a lost plan — and the
-    rule only fires when EVERY content line of the body is bracketed. One line of
-    real prose anywhere and the chunk is kept.
-
-    Measured against the live collection before building: 452 of 8,433 vectors
-    (5.4%) match, and ZERO of them contain unbracketed prose. Not the ~27% @flow
-    estimated — most of that redundancy is identical FILLED template prose
-    ('## Agent Preparation', '## Notepad', '## Listen'), which is real content
-    and stays.
+    Chunk-level and narrow on purpose: one line of real prose keeps the chunk.
     """
 
     def test_an_unfilled_section_is_dropped(self, monkeypatch):
@@ -208,12 +163,7 @@ class TestUnfilledPlaceholderSectionsAreNotVectorized:
         assert len(chunks) == 1
 
     def test_a_section_that_is_only_a_rule_or_blank_is_not_called_a_placeholder(self, monkeypatch):
-        """Absence of content is not the same as an unfilled prompt.
-
-        A body with no content lines at all is already dropped by the length
-        gate. Routing it through the placeholder rule instead would make the
-        rule's own log and meaning wrong about why it went.
-        """
+        """Absence of content is not an unfilled prompt; the length gate, not the placeholder rule, drops it."""
         mod = plans_processor
         assert mod._is_placeholder_only("## Notes\n\n---\n") is False
         assert mod._is_placeholder_only("## Notes\n\n") is False
@@ -261,11 +211,6 @@ class TestManifest:
         assert loaded == data
 
 
-# ===========================================================================
-# Tests: _embed_texts
-# ===========================================================================
-
-
 class TestEmbedTexts:
     """Test _embed_texts subprocess wrapper."""
 
@@ -296,10 +241,7 @@ class TestEmbedTexts:
         assert "model not found" in result["error"]
 
     def test_an_embedder_refusal_names_its_cause(self, monkeypatch, tmp_path):
-        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty (leg 9).
-
-        Asked through process_plans, with the plans directory and the manifest under tmp_path.
-        """
+        """The embedder's real refusal: exit 1, its reason as JSON on stdout, stderr empty."""
         plans = tmp_path / "plans"
         plans.mkdir()
         (plans / "FPLAN-0001_probe_2026-10-03.md").write_text(
@@ -335,11 +277,6 @@ class TestEmbedTexts:
 
         assert result["success"] is False
         assert "no such binary" in result["error"]
-
-
-# ===========================================================================
-# Tests: _store_vectors
-# ===========================================================================
 
 
 class TestStoreVectors:
@@ -393,24 +330,8 @@ class TestStoreVectors:
         assert "timed out" in result["error"]
 
 
-# ===========================================================================
-# Tests: _find_repo_root / _get_memory_python (module-level)
-# ===========================================================================
-
-
 class TestFindRepoRoot:
-    """This lane no longer walks — it delegates to ``handlers/repo_root.py``.
-
-    THE TEST THAT USED TO LIVE HERE ASSERTED THE DEFECT. ``test_find_repo_root_
-    falls_back_to_cwd`` pinned ``result == Path.cwd()``, so the exact construct
-    that took CI down twice on 2026-08-31 had a green test standing guard over
-    it. Both are rewritten rather than deleted: what a suite used to guarantee
-    is worth more in the record than a clean diff, and a reversed pin says out
-    loud that the contract changed on purpose.
-
-    The walk itself is pinned once, in ``test_repo_root.py``. Pinning it again
-    per lane would recreate the ten-copies problem in the tests.
-    """
+    """This lane no longer walks — it delegates to ``handlers/repo_root.py`` (the walk is pinned there)."""
 
     def test_it_delegates_instead_of_walking_itself(self, monkeypatch, tmp_path):
         """A private walk here is how the first cure missed nine other files."""
@@ -462,7 +383,6 @@ class TestGetMemoryPython:
     def test_falls_back_to_sys_executable(self, monkeypatch, tmp_path):
         mod = plans_processor
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
-        # Point to a non-existent venv
         monkeypatch.setattr(mod, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / "python")
 
         result = mod._get_memory_python()
@@ -470,30 +390,8 @@ class TestGetMemoryPython:
         assert result == sys.executable
 
 
-# ===========================================================================
-# Tests: process_plans
-# ===========================================================================
-
-
 class TestTheManifestKeysOnContentNotOnlyOnAName:
-    """@flow's finding, 2026-08-30: a restored plan is never re-vectorized.
-
-    `process_plans` skipped any file whose NAME appeared in the manifest. Restore
-    puts the plan file back but nothing removes its manifest row, so when that
-    plan is genuinely closed later its FINAL content is silently never stored and
-    the collection keeps only its pre-restore text. Three live cases, all APLANs
-    @devpulse restored after a mistaken close.
-
-    @flow offered two seams: an entry point they call on restore, or keying the
-    manifest on content. Content keying wins because it needs nothing from them
-    and it is self-healing — it also covers a plan edited after close, which the
-    callback seam would still miss.
-
-    Measured before choosing the migration: 491 manifest rows, 488 files present,
-    and ZERO present files modified after they were processed. So backfilling a
-    hash for a legacy row cannot skip a change that already happened, and the
-    mtime guard below covers one arriving later.
-    """
+    """A restored plan is re-vectorized: the manifest keys on content, not only on the name."""
 
     def _mock_config(self, monkeypatch, mod, plans_dir):
         mock_cl = MagicMock()
@@ -536,7 +434,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert mod.process_plans()["files_processed"] == 0
         assert seen == []
 
-        # Restored with different content, same name — this is the defect.
+        # Restored with different content, same name.
         plan.write_text("## Summary\n\nthe FINAL text, written after the restore\n", encoding="utf-8")
         seen.clear()
         again = mod.process_plans()
@@ -545,12 +443,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert seen == [plan.name]
 
     def test_an_unreadable_manifest_refuses_the_run_and_keeps_its_bytes(self, monkeypatch, tmp_path):
-        """No plan is embedded and the manifest is not overwritten.
-
-        Until leg 4 of DPLAN-0354 an unreadable manifest loaded as {}, the
-        manifest of a store that never processed anything, so every plan was
-        embedded again and the broken file was written over.
-        """
+        """An unreadable manifest refuses the run: no plan is embedded and the manifest is not overwritten."""
         mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
@@ -572,13 +465,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert manifest_path.read_bytes() == before
 
     def test_a_manifest_whose_root_is_a_list_refuses_the_run_and_keeps_its_bytes(self, monkeypatch, tmp_path):
-        """Valid JSON with a list at the root is refused, not read as a manifest.
-
-        Green on the tree from its first run; its proof is the mutant of leg 5
-        of DPLAN-0354 that takes the isinstance guard out of _load_manifest.
-        The store records and refuses, so a run past a missing guard returns
-        to the assert instead of failing on its first write into the list.
-        """
+        """Valid JSON with a list at the root is refused, not read as a manifest."""
         mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
@@ -609,15 +496,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert manifest_path.read_bytes() == before
 
     def test_a_newly_processed_plan_records_its_content_not_just_a_time(self, monkeypatch, tmp_path):
-        """The write side, pinned separately from the read side.
-
-        A mutant reverting `_manifest_entry` to a bare timestamp survived every
-        other test here: the legacy read path is tolerant enough that the next
-        run still answered "not stale" via mtime. So the row would quietly go
-        back to naming a time instead of a content, and the restore defect would
-        return for every plan processed from then on — invisibly, because
-        nothing asserted what the row actually said.
-        """
+        """A new row records the content hash; the tolerant legacy read path would hide a bare timestamp."""
         mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
@@ -637,11 +516,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert entry["processed_at"]
 
     def test_a_legacy_row_is_backfilled_not_re_embedded(self, monkeypatch, tmp_path):
-        """491 rows carry a bare timestamp. Re-embedding them all would be a storm.
-
-        The migration records what the row was always missing — the hash — and
-        does not pay for embeddings it has no reason to believe are stale.
-        """
+        """A legacy bare-timestamp row is backfilled with its hash, not re-embedded."""
         mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
@@ -664,12 +539,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert isinstance(entry, dict) and entry.get("content_sha256"), entry
 
     def test_a_legacy_row_whose_file_is_newer_than_its_row_reprocesses(self, monkeypatch, tmp_path):
-        """The safety net for the case the one-time measurement cannot cover.
-
-        A legacy row carries no hash, so 'unchanged' is a belief, not a fact. If
-        the file was written AFTER the row was recorded, that belief is wrong —
-        which is exactly what a restore does to a plan.
-        """
+        """A legacy row older than its file reprocesses: that is what a restore looks like."""
         mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
@@ -687,12 +557,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         assert seen == [plan.name]
 
     def test_a_manifest_row_whose_file_is_gone_is_left_alone(self, monkeypatch, tmp_path):
-        """The three live cases are rows for files that LEFT processed_plans.
-
-        Pruning them would re-vectorize the whole plan from scratch the moment it
-        came back, discarding nothing but paying for everything. The row is not
-        the problem; trusting the row's NAME was. Left in place on purpose.
-        """
+        """A row whose file is gone is kept: pruning it would re-vectorize the plan in full on its return."""
         mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
@@ -779,11 +644,7 @@ class TestProcessPlans:
         )
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
         manifest_path = tmp_path / ".plans_processed.json"
-        # The row must POSTDATE the file. Written as 2026-01-01 against a file
-        # created moments ago, this fixture was the restore shape by accident —
-        # a plan whose content is newer than the row claiming to have processed
-        # it — and it only read as "already processed" while the check ignored
-        # everything but the name.
+        # The row carries the content hash: a dated-only row older than the file is the restore shape.
         manifest_path.write_text(
             json.dumps({"done.md": {"processed_at": "2026-01-01T00:00:00", "content_sha256": _sha(plan_file)}}),
             encoding="utf-8",

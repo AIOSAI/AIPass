@@ -3,7 +3,7 @@
 # Description: Tests for lock_ops handler — atomic lock file management
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""
@@ -20,16 +20,11 @@ import pytest
 
 from aipass.flow.apps.handlers.runner import lock_ops
 
-# ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.runner.lock_ops"
 
 
 def _unlink_answer(path: Path) -> OSError | None:
-    """Unlink ``path`` with the test's own hands and keep what the platform answers.
-
-    Returns:
-        The OSError the unlink raised, or None when the platform refused nothing.
-    """
+    """Unlink ``path`` with the test's own hands and keep what the platform answers."""
     try:
         path.unlink()
     except OSError as exc:
@@ -41,17 +36,8 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0
     """A stand-in for lock_ops' _create_exclusive seam that answers the way
     Windows does mid-release.
 
-    On Windows an exclusive create against a lock file another writer is still
-    removing (delete-pending) raises PermissionError, not FileExistsError. Linux
-    unlinks the name at once and can never show that, so it is manufactured
-    and handed in through the product's own seam, so os.open stays whole for
-    every other reader: creates of ``lock_path`` reach the real exclusive
-    create for the first ``after`` calls, are then denied ``denials`` times
-    (None = never clears), then reach the real create again.
-
-    Returns:
-        (side_effect, attempts, raised): attempts counts every exclusive create
-        of lock_path; raised holds each PermissionError handed out.
+    Windows delete-pending raises PermissionError, which Linux can never show. Creates of
+    ``lock_path`` pass for ``after`` calls, are denied ``denials`` times (None = forever), then pass.
     """
     attempts: list[int] = []
     raised: list[PermissionError] = []
@@ -73,11 +59,6 @@ def _age(lock: Path) -> None:
     """Set the lock's mtime an hour back, well past any unreadable-lock grace."""
     old = time.time() - 3600
     os.utime(lock, (old, old))
-
-
-# ═══════════════════════════════════════════════════════════
-# 1. try_create_lock
-# ═══════════════════════════════════════════════════════════
 
 
 class TestTryCreateLock:
@@ -109,18 +90,12 @@ class TestTryCreateLock:
         assert lock.read_text(encoding="utf-8") == "99999"
 
     def test_delete_pending_denial_is_retried_and_lock_lands(self, tmp_path):
-        """A Windows delete-pending PermissionError is a held lock: wait, retry, win.
-
-        It used to escape try_create_lock on the first denial and crash the
-        detached post-close runner, leaving the just-closed plan unprocessed.
-        """
+        """A Windows delete-pending PermissionError is a held lock: wait, retry, win."""
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
 
         with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            # A create that gave up on the denial is the failure this test is
-            # about, so it is said by name rather than escaping the test.
             try:
                 result = mod.try_create_lock(lock)
             except PermissionError as exc:
@@ -134,9 +109,7 @@ class TestTryCreateLock:
     def test_denial_that_never_clears_raises_at_the_budget(self, tmp_path):
         """A denial past the budget is a real permissions problem: raise it, chained.
 
-        Not False: acquire_lock's callers read False as "another instance is
-        already running", which would be a lie. Not forever: exactly the
-        budget of attempts, then the last denial surfaces as the cause.
+        Not False: callers read False as "another instance is already running".
         """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
@@ -156,28 +129,19 @@ class TestTryCreateLock:
         assert mod._CREATE_RETRIES > 1
         assert f"{mod._CREATE_RETRIES} attempts" in str(excinfo.value)
         assert not lock.exists()
-        # What each wait was given, not only how many: a positive first delay,
-        # doubling after every denial, and the sum is the waited figure reported.
-        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
-        # `(2**attempt)` growth each redden this.
+        # Positive first delay, doubling per denial, sum reported as the wait.
         delays = [c.args[0] for c in sleep.call_args_list]
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
     def test_file_exists_still_returns_false_at_once(self, tmp_path):
-        """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next.
-
-        The held lock is a real file, so the FileExistsError is the platform's
-        own, with no stand-in (leg 11). No wait means no second attempt.
-        """
+        """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next."""
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("12345", encoding="utf-8")
 
         with patch(f"{_MOD}._sleep") as sleep:
-            # A retried FileExistsError spends the budget and then raises; that
-            # is the failure this test is about, so it is said by name.
             try:
                 result = mod.try_create_lock(lock)
             except PermissionError as exc:
@@ -186,11 +150,6 @@ class TestTryCreateLock:
         assert result is False
         sleep.assert_not_called()
         assert lock.read_text(encoding="utf-8") == "12345"
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. is_lock_stale
-# ═══════════════════════════════════════════════════════════
 
 
 class TestIsLockStale:
@@ -234,8 +193,6 @@ class TestIsLockStale:
     def test_fresh_empty_lock_is_held(self, tmp_path):
         """The empty-lock race: a holder has done O_EXCL but not yet written its pid.
 
-        A reader in that gap used to see "" -> ValueError -> stale, and acquire_lock
-        then unlinked the live holder's lock. A fresh empty lock is held.
         Mutant: `if age < _UNREADABLE_LOCK_GRACE:` -> `if False:` reddens this.
         """
         mod = lock_ops
@@ -255,13 +212,7 @@ class TestIsLockStale:
         assert mod.is_lock_stale(lock) is False
 
     def test_vanished_lock_is_stale(self, tmp_path):
-        """A lock gone before it could be read was released: the caller may take over.
-
-        A guard: the product before leg 3 answered True here too (its read caught
-        every OSError as stale), so this does not tell old from new; its proof
-        is its mutant. Mutant: the `return True` after "Lock released before it
-        could be read" -> `return False` reddens this.
-        """
+        """A lock gone before it could be read was released: the caller may take over."""
         mod = lock_ops
         lock = tmp_path / ".gone.lock"
         assert mod.is_lock_stale(lock) is True
@@ -269,12 +220,7 @@ class TestIsLockStale:
     def test_unreadable_lock_raises_instead_of_reading_stale(self, tmp_path):
         """A lock that exists but cannot be read is not proof its holder is dead.
 
-        A directory at the lock path raises a real OSError on read; it used to be
-        swallowed as 'stale'. It now surfaces to the caller. Which OSError is the
-        platform's choice (IsADirectoryError on Linux and macOS, PermissionError
-        on Windows); the one answer that must not come is FileNotFoundError, the
-        answer that means stale.
-        Mutant: `except FileNotFoundError:` -> `except OSError:` reddens this.
+        Which OSError is the platform's choice; only FileNotFoundError (meaning stale) must not come.
         """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
@@ -292,11 +238,6 @@ class TestIsLockStale:
         with patch(f"{_MOD}._pid_alive", return_value=True):
             result = mod.is_lock_stale(lock)
         assert result is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. acquire_lock
-# ═══════════════════════════════════════════════════════════
 
 
 class TestAcquireLock:
@@ -331,15 +272,8 @@ class TestAcquireLock:
     def test_raises_when_stale_lock_unlink_fails(self, tmp_path):
         """A stale lock that cannot be removed raises; it is not reported as held.
 
-        False means "another live process holds the lock" to every caller; a
-        dead holder's lock in a directory we cannot write is not that. The lock
-        (dead pid) sits in a directory set read-only. Whether that refuses an
-        unlink is the platform's choice (Linux and macOS as a user: refused;
-        Windows, or root: not), so the test first unlinks a probe of its own in
-        that directory and asserts the product's answer for what it saw: the
-        same error, lock untouched; or, where nothing is refused, a normal
-        takeover.
-        Mutant: `lock_file.unlink(missing_ok=True)` -> `pass` reddens this.
+        Whether a read-only dir refuses an unlink is the platform's choice (not for Windows or root),
+        so a probe unlink decides which answer the product owes.
         """
         mod = lock_ops
         home = tmp_path / "ro"
@@ -366,9 +300,6 @@ class TestAcquireLock:
     def test_lock_released_between_the_read_and_the_unlink_is_taken(self, tmp_path):
         """The holder lets go after the stale check read its lock and before the unlink.
 
-        A stand-in for the stale check removes the file as it answers "stale",
-        so the unlink meets nothing. That is a released lock, not an error: it
-        is taken, with no error.
         Mutant: `lock_file.unlink(missing_ok=True)` -> `lock_file.unlink()` reddens this.
         """
         mod = lock_ops
@@ -390,10 +321,7 @@ class TestAcquireLock:
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
 
     def test_fresh_empty_lock_is_not_unlinked(self, tmp_path):
-        """A holder between O_EXCL and its pid write keeps its lock: acquire says held.
-
-        Mutant: `if age < _UNREADABLE_LOCK_GRACE:` -> `if False:` reddens this.
-        """
+        """A holder between O_EXCL and its pid write keeps its lock: acquire says held."""
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("", encoding="utf-8")
@@ -424,13 +352,12 @@ class TestAcquireLock:
 
     def test_delete_pending_after_stale_unlink_still_acquires(self, tmp_path):
         """The re-create right after unlinking a stale lock is where Windows says
-        delete-pending. It used to escape acquire_lock raw; now it waits and wins.
+        delete-pending; it must wait and win.
         """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("999999999", encoding="utf-8")
-        # First create meets the stale file (real FileExistsError); the second,
-        # just after the unlink, is denied once as Windows would.
+        # First create meets the stale file; the second, after the unlink, is denied once.
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1, after=1)
 
         with (
@@ -450,8 +377,7 @@ class TestAcquireLock:
 
     def test_denial_that_never_clears_raises_instead_of_returning_false(self, tmp_path):
         """False means "another instance is running" to every caller. A lock that
-        can never be created is not that, so acquire_lock lets the chained
-        PermissionError through after the budget.
+        can never be created raises the chained PermissionError instead.
         """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
@@ -470,11 +396,6 @@ class TestAcquireLock:
         assert sleep.call_count == mod._CREATE_RETRIES
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. release_lock
-# ═══════════════════════════════════════════════════════════
-
-
 class TestReleaseLock:
     """Tests for release_lock — lock file cleanup."""
 
@@ -487,13 +408,7 @@ class TestReleaseLock:
         assert not lock.exists()
 
     def test_no_error_when_lock_missing(self, tmp_path):
-        """Should handle missing lock file gracefully (missing_ok=True).
-
-        The graceful part is now READ: release_lock returns None and the file
-        is still absent afterwards. A bare call asserted nothing - a
-        release_lock that created the file, or returned an error object, passed
-        this test unchanged.
-        """
+        """Should handle missing lock file gracefully (missing_ok=True)."""
         mod = lock_ops
         lock = tmp_path / ".nonexistent.lock"
         assert not lock.exists()
@@ -502,22 +417,15 @@ class TestReleaseLock:
         assert not lock.exists()
 
     def test_logs_warning_on_os_error(self, tmp_path, mock_logger):
-        """Should log warning when lock removal fails.
-
-        Mutant: except OSError as exc: logger.warning(...release...) -> except OSError: pass reddens this.
-        """
+        """Should log warning when lock removal fails."""
         mod = lock_ops
-        # A directory at the lock path: unlink raises a real OSError on disk.
+        # A directory at the lock path makes unlink raise a real OSError.
         lock = tmp_path / ".test.lock"
         lock.mkdir()
         assert mod.release_lock(lock) is None
         assert lock.is_dir()
 
-        # THE WARNING IS THE SUBJECT, and it was never read. This unit takes
-        # mock_logger, states "should log warning" in its docstring and then
-        # checked neither - a release_lock that swallowed the OSError silently
-        # passed it. The message is asserted through the real formatting the
-        # handler uses: lazy %s args, not an f-string.
+        # The handler logs with lazy %s args, not an f-string.
         mock_logger.warning.assert_called_once()
         args = mock_logger.warning.call_args.args
         assert "Failed to release lock file" in args[0]

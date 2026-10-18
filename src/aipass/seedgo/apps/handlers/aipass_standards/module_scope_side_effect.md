@@ -51,6 +51,24 @@ file's own imports: `from os import environ` and `from pathlib import Path as P`
 
 Anything else — constants, `pytestmark`, fixture definitions, imports, typing — is not judged.
 
+## The ninth shape, judged everywhere
+
+| shape | what |
+|---|---|
+| `signal_disposition` | `signal.signal(...)`, `signal.alarm(...)`, `signal.setitimer(...)` |
+
+A test file's module scope is not the only one that runs at collection: every module a test
+imports runs its own inside the same pytest worker. Python ignores SIGPIPE so that a write to a
+dead pipe raises `BrokenPipeError`; a module that resets SIGPIPE to `SIG_DFL` at import leaves
+the worker at the default, where the kernel ends the process instead (status 141), with no
+traceback and nothing for faulthandler to print. Replacing SIGTERM or SIGINT at import changes
+the worker the same way. So this one shape is judged in **every** file the checker is handed —
+production modules and `conftest.py` too — while the other eight stay test-file-only.
+
+A test file means one in a tests tree (`applicability.is_test_path`), not a test-shaped name
+anywhere: a product module named `test_token.py` is judged for `signal_disposition` alone.
+Reading a disposition (`signal.getsignal`) changes nothing and is not judged.
+
 ## What is not judged
 
 `conftest.py` is exempt. Its module scope is the declared, once-per-session harness: test

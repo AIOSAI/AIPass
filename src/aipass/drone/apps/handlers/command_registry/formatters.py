@@ -3,14 +3,10 @@
 # Description: Rich output formatting for custom command registry
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-10-17
 # =============================================
 
-"""Rich output formatting for custom command registry operations.
-
-Renders command lists, activation results, and removal confirmations
-using Rich tables and styled console output.
-"""
+"""Rich output formatting for custom command registry operations."""
 
 from __future__ import annotations
 
@@ -30,12 +26,7 @@ from aipass.drone.apps.handlers.json import json_handler
 
 
 def format_command_list(commands: list[dict]) -> None:
-    """Display registered custom commands as a Rich table.
-
-    Args:
-        commands: List of command dicts with ``name``, ``target``,
-                  ``command``, ``args``, ``description`` keys.
-    """
+    """Display registered custom commands as a Rich table."""
     json_handler.log_operation(
         "format_command_list",
         {"command_count": len(commands)},
@@ -77,13 +68,7 @@ def format_activation_results(
     added: list[str],
     skipped: list[str],
 ) -> None:
-    """Display what was registered during activation.
-
-    Args:
-        branch: Branch name (with or without ``@`` prefix).
-        added: List of command names that were successfully registered.
-        skipped: List of command names that were skipped (already exist).
-    """
+    """Display what was registered during activation; *branch* may carry its ``@`` or not."""
     display_name = branch if branch.startswith("@") else f"@{branch}"
 
     console.print()
@@ -107,12 +92,7 @@ def format_activation_results(
 
 
 def format_removal(name: str, success: bool) -> None:
-    """Display the result of removing a custom command.
-
-    Args:
-        name: The command name that was targeted for removal.
-        success: Whether the removal succeeded.
-    """
+    """Display the result of removing a custom command."""
     console.print()
     if success:
         console.print(f"Removed custom command '{name}'.")

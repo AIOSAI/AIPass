@@ -3,36 +3,13 @@
 # Description: sections.flow has two writers — both must build the same shape
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dashboard/refresh.py."""
 
-# Contract cover for the 2026-08-16 sections.flow handoff (@devpulse dispatch).
-#
-# ``sections.flow`` is written by TWO services: @flow's ``push_flow_to_branch_dashboard``
-# and prax's dashboard refresh. Both assign the section wholesale, so last writer
-# wins. @flow's module went to 2.0.0 with a five-key contract
-# (``managed_by``/``active_plans``/``open_recent``/``recently_closed``/``total_plans``);
-# prax's refresh still built the old three-key block, so every refresh silently
-# deleted ``open_recent`` and ``total_plans`` until flow's next push.
-#
-# The invariant, same species as the quick_status one in test_dashboard_merge.py:
-# **no writer deletes a key it did not write** — applied here at section level.
-#
-# Two things this file pins that the dispatch did not ask for, both found while
-# building it:
-#
-# 1. The old ``_extract_flow_section`` read the central's TOP-LEVEL ``recently_closed``,
-#    which is the newest 5 closed plans FLEET-WIDE. Every branch's dashboard was
-#    published other branches' closed plans. The per-branch block was there the
-#    whole time at ``branches.<name>``.
-# 2. ``total_plans`` is NOT derivable from PLANS.central.json. The only per-branch
-#    closed number there (``branches.<name>.statistics.total_closed``) is capped at
-#    5 by construction, so prax preserves flow's value rather than inventing one.
-#
-# The handlers are bound at the top by import statement. The reload this file
-# used to do was for conftest's sys.modules stubs, which are gone (prax, leg 14).
+# sections.flow has two writers (@flow's push and prax's refresh), each assigning it
+# wholesale, so last writer wins: no writer may delete a key it did not write.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
@@ -63,10 +40,7 @@ def _refresh_world(monkeypatch, tmp_path) -> None:
 
 
 def _flow_section(centrals: dict, branch_name: str, existing: "dict | None" = None) -> dict:
-    """sections.flow as the public door writes it: refresh_single_dashboard on a
-    fresh branch dir under tmp_path, the centrals handed in, flow's prior section
-    on disk when ``existing`` is given (prax, leg 14: the tests used to call the
-    private _extract_flow_section; every one now goes through the refresh)."""
+    """sections.flow as refresh_single_dashboard writes it for a fresh branch under tmp_path."""
     _WORLD["calls"] += 1
     branch = _WORLD["tmp_path"] / f"refresh_{_WORLD['calls']}" / branch_name.lower()
     branch.mkdir(parents=True)
@@ -80,10 +54,8 @@ def _flow_section(centrals: dict, branch_name: str, existing: "dict | None" = No
     return json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))["sections"]["flow"]
 
 
-# @flow's published contract, pinned in their
-# tests/test_push_branch_dashboard.py::test_full_section_key_set_is_exactly_the_contract.
-# ``last_updated`` is not in flow's builder — write_section stamps it — but prax's
-# refresh writes the file directly, so it stamps its own.
+# @flow's contract, pinned in their test_push_branch_dashboard.py; last_updated is
+# outside it because prax's refresh writes the file directly and stamps its own.
 FLOW_CONTRACT_KEYS = {"managed_by", "active_plans", "open_recent", "recently_closed", "total_plans"}
 
 
@@ -146,16 +118,11 @@ def _centrals(branch: str = "prax", active=None, closed=None, extra_branches=Non
     }
 
 
-# ═══════════════════════════════════════════════════════════
-# 1. The five-key contract
-# ═══════════════════════════════════════════════════════════
-
-
 class TestFiveKeyContract:
     """prax's refresh must build the same key set @flow's push builds."""
 
     def test_section_carries_every_contract_key(self):
-        """RED before this round: open_recent and total_plans were absent."""
+        """open_recent and total_plans must be present alongside the older keys."""
         section = _flow_section(_centrals(active=[_plan("FPLAN-0001", "prax", "2026-08-10")]), "PRAX")
 
         assert FLOW_CONTRACT_KEYS <= set(section), f"missing: {FLOW_CONTRACT_KEYS - set(section)}"
@@ -178,11 +145,6 @@ class TestFiveKeyContract:
         assert section["active_plans"] == 0
         assert section["open_recent"] == []
         assert section["recently_closed"] == []
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. active_plans — the int count
-# ═══════════════════════════════════════════════════════════
 
 
 class TestActivePlansCount:
@@ -209,11 +171,6 @@ class TestActivePlansCount:
         section = _flow_section(centrals, "PRAX")
 
         assert section["active_plans"] == 1
-
-
-# ═══════════════════════════════════════════════════════════
-# 3. open_recent — the bounded window
-# ═══════════════════════════════════════════════════════════
 
 
 class TestOpenRecent:
@@ -261,7 +218,7 @@ class TestOpenRecent:
         assert section["open_recent"][-1]["created"] == ""
 
     def test_no_unbounded_list_ships_anywhere_in_the_section(self):
-        """The owner's ruling, applied to prax's writer too."""
+        """No list in the section exceeds five rows, on prax's writer too."""
         centrals = _centrals(active=[_plan(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}") for i in range(1, 23)])
         section = _flow_section(centrals, "PRAX")
 
@@ -270,12 +227,7 @@ class TestOpenRecent:
 
 
 class TestSubjectCap:
-    """A plan subject is a glance, not an essay (DPLAN-0347, thread 16).
-
-    Five rows of a 430-char subject is 2 KB of every greeting on every branch,
-    forever. The count cap alone never bounded the section: the subjects are the
-    section. Truncate, never refuse — refusing drops the plan from the glance.
-    """
+    """A plan subject is a glance: truncate to the cap, never refuse (that drops the plan)."""
 
     def test_an_essay_subject_is_cut_to_the_cap_in_open_recent(self):
         essay = "FPLAN-0593 " + "startup floor fleet-wide " * 20
@@ -312,16 +264,11 @@ class TestSubjectCap:
         assert operations.SUBJECT_CAP == 120
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. recently_closed — the misattribution bug
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRecentlyClosed:
-    """The bug found while building: every branch published the fleet's closures."""
+    """Each branch publishes only its own closures, never the fleet's."""
 
     def test_only_this_branchs_closures_are_published(self):
-        """RED before this round: the fleet-wide top-level list went to everyone."""
+        """The fleet-wide top-level list must not reach every branch."""
         centrals = _centrals(
             closed=[_closed("FPLAN-0378", "prax", subject="Mine")],
             extra_branches={
@@ -353,11 +300,7 @@ class TestRecentlyClosed:
 
 
 class TestClosedWindow:
-    """The age window @flow's push applies — prax applied none, so cards flickered.
-
-    Live on 2026-08-16: @api's card carried 2 closed rows after a flow push and 5
-    after a prax refresh, the oldest from May, with no plan closing in between.
-    """
+    """The age window @flow's push applies; without it cards flicker between writers."""
 
     def test_plans_closed_before_the_window_are_dropped(self):
         centrals = _centrals(
@@ -398,16 +341,11 @@ class TestClosedWindow:
         assert [e["id"] for e in section["recently_closed"]] == ["FPLAN-0001"]
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. total_plans — the key prax cannot source
-# ═══════════════════════════════════════════════════════════
-
-
 class TestTotalPlansPreserved:
     """prax cannot compute total_plans, so it carries flow's value instead."""
 
     def test_flows_value_survives_a_prax_refresh(self):
-        """THE clobber this round exists to close."""
+        """A prax refresh must not clobber flow's total_plans."""
         section = _flow_section(_centrals(), "PRAX", existing={"total_plans": 30})
 
         assert section["total_plans"] == 30
@@ -417,13 +355,7 @@ class TestTotalPlansPreserved:
         assert _flow_section(_centrals(), "PRAX")["total_plans"] == 0
 
     def test_truncated_central_statistic_is_never_used_as_the_total(self):
-        """branches.<name>.statistics.total_closed is capped at 5 by construction.
-
-        Measured 2026-08-16: all 44 branches reported total_closed <= 5 — @flow's
-        aggregate feeds the already-capped recently_closed list back in as the
-        closed universe. A branch with 104 closed plans reports 5. Deriving
-        total_plans from it would publish a knowingly wrong number.
-        """
+        """branches.<name>.statistics.total_closed is capped at 5 by construction."""
         centrals = _centrals(
             active=[_plan("FPLAN-0001", "prax", "2026-08-10")],
             closed=[_closed(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}T10:00:00+00:00") for i in range(1, 6)],

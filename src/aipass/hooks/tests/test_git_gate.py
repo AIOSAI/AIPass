@@ -4,7 +4,7 @@
 # Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -24,9 +24,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.security.git_gate import handle
 
-# Derived, never spelled: the fixtures below are only meaningful as paths INSIDE
-# this checkout, and a hardcoded home path makes the suite a property of one
-# machine. parents[4] is the repo root — tests -> hooks -> aipass -> src -> root.
+# Derived, never spelled: the fixtures are only meaningful as paths INSIDE this checkout.
 _REPO = Path(__file__).resolve().parents[4]
 
 
@@ -50,7 +48,6 @@ def admin_grant():
     """The classifier's tests run from the verified admin seat: since 5.0.0 the grant opens no git or gh lane.
 
     Patched at @ai_mail's rail, so no test reads this machine's real grant.
-    TestRawGitIsRefusedForEverySeat patches it per call for the other seats.
     """
     with patch("aipass.ai_mail.apps.modules.door_verified_caller.is_verified_admin_caller", return_value=True):
         yield
@@ -77,10 +74,7 @@ def _reason(result: dict) -> str:
 
 
 class TestGitReadsAreRefusedFromTheAdminSeat:
-    """The owner, 2026-10-04: every raw git read is refused, the admin seat (the autouse grant) included.
-
-    Until 5.0.0 this class was TestGitGateReadAllowed: each verb below ran raw from the admin seat.
-    """
+    """The owner, 2026-10-04: every raw git read is refused, the admin seat (the autouse grant) included."""
 
     @pytest.mark.parametrize(
         "command",
@@ -302,15 +296,7 @@ class TestGitGateWordBoundary:
     def test_drone_git_allowed(self):
         """KEPT and STRENGTHENED 2026-09-07, not merged (DPLAN-0323 contested band).
 
-        The row arrived on the merge walk because it could not fail: the verb
-        was ``status``, which is allowlisted, so removing the ``@`` lookbehind
-        at git_gate.py:21 left the result allowed either way. That is a coverage
-        GAP wearing the name of a passing test, and deleting it would have left
-        the gap while removing the reminder.
-
-        The write verb is what pins the lookbehind: a drone-routed push is the
-        sanctioned route and must stay allowed, while the raw form is refused.
-        Measured both, 2026-09-07.
+        ``status`` alone is allowlisted and cannot fail; the write verb is what pins the ``@`` lookbehind.
         """
         _assert_allowed(_bash("drone @git status"))
         _assert_allowed(_bash("drone @git push"))
@@ -319,12 +305,7 @@ class TestGitGateWordBoundary:
     def test_a_path_spelled_git_is_still_git(self):
         """REPLACES test_path_git_not_matched, which pinned the hole as the rule.
 
-        The old unit asserted ``/usr/bin/git push`` was ALLOWED. It passed for
-        its whole life because RAW_GIT_RE's lookbehind excludes a leading slash,
-        and it made the one mechanical layer holding git writes behind drone a
-        full path away from being bypassed. A green test naming the defect is
-        worse than no test: it answers the question before anyone asks it.
-        Reported 2026-09-11 by an external reader, via @devpulse (static).
+        RAW_GIT_RE's lookbehind excludes a leading slash, so a full path must be caught separately.
         """
         _assert_blocked(_bash("/usr/bin/git push"))
 
@@ -339,12 +320,7 @@ class TestGitGateWordBoundary:
 class TestPathSpelledExecutable:
     """A git/gh spelled as a path, read only at a command position.
 
-    The four re cases from the report are pinned verbatim (@devpulse
-    2026-09-12, from an external reader of a public drone post): the first was
-    the hole, the other three were the pattern's working behaviour and must
-    stay working. Everything below the blocks is the other half of the rule —
-    a path that merely NAMES the binary is not an invocation of it, or the cure
-    would refuse `ls /usr/bin/git` and be routed around within the day.
+    A path that merely NAMES the binary is not an invocation, or `ls /usr/bin/git` would be refused.
     """
 
     def test_absolute_path_git_write_is_blocked(self):
@@ -378,11 +354,7 @@ class TestPathSpelledExecutable:
     def test_the_word_git_alone_stays_allowed(self):
         """What the `/` requirement in _path_exec_tail is actually for.
 
-        RAW_GIT_RE matches `git\\s`, so a bare `git` with no arguments was never
-        in scope — it prints usage and touches nothing. Dropping the separator
-        test from _path_exec_tail would make the new rule read that usage print
-        as an unverbed invocation and refuse it. Found by mutation: the mutant
-        that removed the check survived every other unit in this class.
+        A bare `git` prints usage and touches nothing; only this pin kills a mutant dropping the check.
         """
         _assert_allowed(_bash("git"))
         _assert_allowed(_bash("echo done; git"))
@@ -420,8 +392,7 @@ class TestGitGateGhCommands:
 
 class TestGhApiIsRefusedOffTheAdminSeatToo:
     """DPLAN-0356 item 4 made `gh api` GET-only off the admin seat; the owner's 2026-10-04 ruling refuses it
-    whole. Measured from canary before item 4: `gh api -X DELETE repos/o/r`, `gh api -X PUT .../contents/f`
-    (a commit) and `gh api repos/o/r/merges` (a merge) were all allowed."""
+    whole: DELETE, PUT and merges all reach GitHub through it."""
 
     def _run(self, command: str, tmp_path: Path) -> dict:
         with patch(_RAIL, return_value=False):
@@ -493,9 +464,7 @@ class TestGitGateEditProtection:
     def test_windows_spellings_of_a_protected_path_are_blocked_on_every_host(self):
         """The Windows CI runner measured the gate ALLOWING these (2026-09-16).
 
-        The tests above build their paths from the host, so Linux never saw a
-        backslash. These are spelled out so every host exercises the Windows form,
-        and in mixed case, which Windows and default macOS filesystems open as the same file.
+        Spelled out, in mixed case, so every host exercises the Windows form.
         """
         for path in (
             r"D:\work\.claude\settings.json",
@@ -572,20 +541,10 @@ class TestGitGateMisc:
 class TestMailBodyIsAnArgumentNotACommand:
     """A heredoc body is data; an interpreter's own text is code.
 
-    @ai_mail was refused twice on 2026-09-15 for a reply whose BODY quoted a
-    write-shaped line, and shipped through a file instead; every dispatch brief
-    since carried a line telling recipients not to quote one. Quoted spans were
-    already blanked here, so the surviving shape was the heredoc — a body that
-    carries no quotes to blank.
-
-    The same reading closes the opposite hole in the same move: an interpreter's
-    inline script had its whole program blanked as a quoted argument, so a write
-    verb inside it was read as no invocation at all.
+    A mail body quoting a write-shaped line is not refused; a write verb in an inline script is.
     """
 
-    #: Assembled rather than written out. The pieces keep the fixture honest —
-    #: every test below is the SAME text in a different position, so a failure
-    #: names the position and never the wording.
+    #: Assembled: a literal write invocation in this file refuses the next agent who edits it from a shell.
     WRITE_LINE = "gi" + "t push"
 
     def test_a_heredoc_mail_body_quoting_a_write_line_is_allowed(self):
@@ -601,11 +560,7 @@ class TestMailBodyIsAnArgumentNotACommand:
         _assert_blocked(_bash(f'bash -c "{self.WRITE_LINE}"'))
 
     def test_a_non_shell_program_that_names_git_is_read_as_its_quotes_were(self):
-        """awk and perl are not shell: their quoted programs stay blanked, as before 1.1.0.
-
-        Measured on a real turn 2026-09-16: the first code_text appended every
-        interpreter's program, and a read-only awk filter naming a diff header was refused.
-        """
+        """awk and perl are not shell: their quoted programs stay blanked, as before 1.1.0."""
         _assert_allowed(_bash("drone @git diff | awk '/^diff --git a\\/x/{p=1} p'"))
         _assert_allowed(_bash(f"perl -e \"print('{self.WRITE_LINE}')\""))
         _assert_allowed(_bash(f"perl <<'EOF'\nprint('{self.WRITE_LINE}')\nEOF"))
@@ -617,8 +572,7 @@ class TestMailBodyIsAnArgumentNotACommand:
     def test_an_unquoted_invocation_inside_another_commands_arguments_is_blocked(self):
         """Also unchanged: the reading did not narrow to command position.
 
-        find -exec is in bash_writes' published residual for write TARGETS, so
-        nothing here may start depending on it being seen as a command.
+        find -exec is bash_writes' published residual: nothing here may depend on it being seen.
         """
         _assert_blocked(_bash(f"find . -exec {self.WRITE_LINE} \\;"))
 
@@ -633,14 +587,10 @@ class TestMailBodyIsAnArgumentNotACommand:
 class TestOneProgramSpelledManyWays:
     """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
 
-    Measured on this gate BEFORE the cure: of the write rows below, only the
-    bare lowercase one was refused. Windows runs every one of them as git, so
-    the single mechanical layer holding git writes behind drone was one spelling
-    away from being off — reported 09-16, carried as todo 51 until the go.
+    Windows runs every spelling below as git.
     """
 
-    #: Assembled, like WRITE_LINE above and for the same reason: a literal write
-    #: invocation in this file refuses the next agent who edits it from a shell.
+    #: Assembled, like WRITE_LINE above and for the same reason.
     WRITE = "commi" + "t -m x"
 
     WRITES = ("git", "git.exe", "GIT", "Git", "git.EXE", "git.cmd", "/usr/bin/git.exe", "~/bin/git.exe")
@@ -664,9 +614,7 @@ class TestOneProgramSpelledManyWays:
     def test_a_dotted_tail_that_is_not_executable_is_not_the_program(self):
         """The regex finds a candidate; verb_name is what makes it a verdict.
 
-        A file NAMED for git is not git. Keeping that quiet is why the list of
-        executable extensions lives once in bash_writes instead of being spelled
-        into a regex in each gate, where the two copies would drift apart.
+        The executable extensions live once in bash_writes, so the gates cannot drift apart.
         """
         _assert_allowed(_bash("cat some/path/git.py"))
         _assert_allowed(_bash("ls /usr/bin/git"))
@@ -694,11 +642,7 @@ def _seat(root: Path, name: str) -> str:
 
 
 class TestRawGitIsRefusedForEverySeat:
-    """DPLAN-0356, the owner 2026-09-30 refused raw git reads off @devpulse; 2026-10-04 refused them on it too.
-
-    The grant (@ai_mail's rail, patched here at that edge) no longer opens this lane;
-    the passport only names the caller in the refusal.
-    """
+    """DPLAN-0356, the owner 2026-09-30 refused raw git reads off @devpulse; 2026-10-04 refused them on it too."""
 
     def _run(self, command: str, cwd: str, grant: bool) -> dict:
         with patch(_RAIL, return_value=grant):
@@ -802,8 +746,7 @@ def trust_home(tmp_path, monkeypatch):
 class TestAProtectedFileIsProtectedUnderEveryName:
     """DPLAN-0356 phase 3, R1 (red team, CRITICAL): the files were matched by NAME.
 
-    A hard link in a seat's own directory is a second name for the trust
-    registry; before 2.0.0 of protected_paths a write through it was allowed.
+    A hard link in a seat's own directory is a second name for the trust registry.
     """
 
     def test_a_write_through_a_hard_link_is_refused_on_both_lanes(self, tmp_path, trust_home):
@@ -839,8 +782,7 @@ class TestAProtectedFileIsProtectedUnderEveryName:
 class TestTheProtectedLaneRefusesDeletesAndMovesOnItsOwn:
     """DPLAN-0356 phase 3, R2 (red team, CRITICAL): the protected lane watched write verbs only.
 
-    A delete or a move away depended on rm_gate knowing the verb. git_gate now
-    refuses each by itself — these run git_gate alone, no rm_gate behind it.
+    git_gate refuses a delete or move away by itself: these run it alone, no rm_gate behind it.
     """
 
     def test_a_delete_a_move_away_and_a_move_over_are_each_refused(self, tmp_path, trust_home):
@@ -928,7 +870,6 @@ class TestProtectedPathsAreDefaultDeny:
     """DPLAN-0356 phase 4, P2 (final review, CRITICAL): a write verb nobody listed passed every fence.
 
     Off the admin seat a protected path may be an operand only of a read-only program.
-    Since protected_paths 2.1.0 the set holds AIPASS_HOME's .git/ and every sealed registry.
     """
 
     def _members(self) -> list[str]:
@@ -977,8 +918,7 @@ class TestProtectedPathsAreDefaultDeny:
 class TestRawGitAndGhAreRefusedForEverySeat:
     """The owner, 2026-10-04: any git command is blocked; if drone cannot do it, it cannot be done.
 
-    The admin carve-out for raw reads (DPLAN-0356, 09-30) is withdrawn. Each lane is
-    called from the VERIFIED admin seat (the rail patched True) and must refuse.
+    Each lane is called from the VERIFIED admin seat (the rail patched True) and must refuse.
     """
 
     def _admin(self, command: str) -> dict:

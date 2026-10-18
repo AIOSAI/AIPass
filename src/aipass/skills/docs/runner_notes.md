@@ -15,8 +15,8 @@ instructions for the agent to follow. Extra arguments are parsed as `key=value`
 pairs, and a bare word becomes a positional `arg0`, `arg1` and so on.
 
 `run <name> --help` is not an action. It prints the skill's own `SKILL.md`,
-because handlers that fall through to a default reading used to answer requests
-for help by complaining that a skill named `--help` does not exist.
+so a handler that falls through to a default reading never sees `--help` as
+an argument.
 
 ## Running a Skill
 
@@ -50,7 +50,7 @@ Not every caller comes through this door. A function published for in-process
 import — `machine_vitals()` in the system_status skill, the notifier in the
 telegram skill — is called directly and never meets the gate, so each one asks
 the switch itself. A door that forgets to ask keeps working after the skill is
-switched off, which is exactly what happened to the telegram notifier: see
+switched off; the telegram notifier's own check is described in
 [telegram.md](telegram.md).
 
 ---

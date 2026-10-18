@@ -3,48 +3,14 @@
 # Description: Windows compat - exclusive creates that lose the delete-pending race (advisory arm)
 # Version: 1.0.0
 # Created: 2026-09-17
-# Modified: 2026-09-17
+# Modified: 2026-10-17
 # =============================================
 
 """
 Windows compat -- an exclusive create that treats "exists" as normal and
 PermissionError as nothing.
 
-The incident (CI 35192484222, Windows): api's token store lock took
-``os.open(path, O_CREAT | O_EXCL)`` in a retry loop that caught
-``FileExistsError`` only.  On Windows a create against a lock file another
-thread is mid-removing (delete pending) answers ``PermissionError`` (errno
-13), not ``FileExistsError``.  The exception left the loop, the thread died,
-and the revoke never ran.  POSIX unlinks the name at once, so Linux and macOS
-can never see it -- no suite run there can catch it either.
-
-Two arms, both read from the try that owns the ``FileExistsError`` handler:
-
-* ESCAPE -- no handler on that try (or on any try around it in the same
-  function) takes a PermissionError: it leaves the function raw where
-  "exists" would have returned or retried.
-* GIVES UP -- the try sits in a loop, ``FileExistsError`` retries, and the
-  handler that takes PermissionError (``except OSError``) unconditionally
-  returns, raises or breaks: a transient state becomes a failed acquire.
-
-Deliberately NOT flagged, each measured against the fleet on 2026-09-17:
-
-* A single-shot create whose ``except OSError`` fails the same way "exists"
-  does (ai_mail wake/daemon locks, memory intake, aipass install): Windows
-  gets the outcome POSIX gets, with a different log line.
-* A fresh name per attempt -- the path is a Name assigned inside the retry
-  loop (prax json_service's pid+counter temp file).  Nothing deletes a name
-  nobody has used yet.
-* A create inside a ``sys.platform`` / ``os.name`` guard.
-
-Known misses, named rather than hidden: flags held in a variable
-(``os.open(p, flags)``), a create reached through a wrapper function, and a
-PermissionError caught by a try OUTSIDE the retry loop (gives up, unflagged).
-A single-shot create of a data file nothing ever deletes, with a
-``FileExistsError``-only handler, IS flagged and is a false positive -- none
-exists in the fleet today; a bypass rule is the answer when one appears.
-
-Pure: takes a parsed tree, never touches the disk.
+Reference: windows_compat.md (exclusive creates that lose the delete-pending race).
 """
 
 import ast
@@ -202,15 +168,7 @@ def _judge(call: ast.Call, ancestry: list[tuple[ast.AST, str]]) -> str | None:
 
 
 def find_exclusive_create_races(tree: ast.Module, platform_guarded: set[int]) -> list[tuple[int, str]]:
-    """Exclusive creates that lose the Windows delete-pending race.
-
-    Args:
-        tree: Parsed module.
-        platform_guarded: Line numbers inside sys.platform / os.name guards.
-
-    Returns:
-        (line, description) per offending create, in source order.
-    """
+    """Exclusive creates that lose the Windows delete-pending race."""
     found: list[tuple[int, str]] = []
     for node, ancestry in _walk(tree, []):
         if not isinstance(node, ast.Call) or not is_exclusive_create(node) or node.lineno in platform_guarded:

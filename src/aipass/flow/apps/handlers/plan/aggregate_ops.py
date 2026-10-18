@@ -3,17 +3,11 @@
 # Description: Central Plans Aggregation Implementation Handler
 # Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """
 Central Plans Aggregation Operations Handler
-
-Implements aggregation and self-healing logic for PLANS.central.json.
-Validates file existence, rebuilds active_plans, and auto-closes missing plans.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
 """
 
 import json
@@ -25,12 +19,7 @@ from typing import Dict, Any, List, Tuple, Optional
 
 from aipass.prax import logger
 
-# logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
-
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "aggregate_central"
 
@@ -41,8 +30,7 @@ _LOCK_BACKOFF_BASE = 0.05
 def _sleep(seconds: float) -> None:
     """time.sleep(seconds), the lock backoff's wait.
 
-    The reason is the tests alone: they patch this name so the backoff neither
-    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    Exists so tests can patch the backoff without replacing time.sleep process-wide.
     """
     time.sleep(seconds)
 
@@ -50,12 +38,7 @@ def _sleep(seconds: float) -> None:
 def _create_exclusive(lock_path: Path) -> int:
     """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
 
-    It stands alone because this create is where platforms answer differently:
-    Windows answers a lock another writer is still removing (delete pending)
-    with PermissionError, which a retry wins, and Linux cannot produce that.
-    The tests (test_aggregate_ops, the branch-registry and central denial
-    tests) hand the denial in through this name rather than replacing os.open
-    for the whole process (flow's decision, leg 11).
+    A seam for tests to inject Windows' delete-pending PermissionError, which Linux cannot produce.
     """
     return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
@@ -63,16 +46,8 @@ def _create_exclusive(lock_path: Path) -> int:
 def _acquire_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
 
-    A Windows delete-pending PermissionError (another writer mid-release) is
-    a held lock: it is retried on the same budget as FileExistsError.
-
-    Returns:
-        True once acquired; False only when the budget runs out on contention.
-
-    Raises:
-        PermissionError: The budget ran out and the last attempt was denied.
-            Chained from that denial, so a real permissions problem surfaces.
-        OSError: The create failed with any other OSError, raised at once.
+    False only when the budget runs out on contention. Raises PermissionError when the
+    last attempt was denied, and any other OSError at once.
     """
     denial: PermissionError | None = None
     waited = 0.0
@@ -91,8 +66,7 @@ def _acquire_lock(lock_path: Path) -> bool:
                 "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
             )
         except OSError as exc:
-            # Neither contention nor denial: False would read as a spent retry
-            # budget, so it propagates to the caller (flow's decision, leg 3).
+            # False would read as a spent retry budget, so it propagates.
             logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
             raise
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
@@ -113,40 +87,19 @@ def _release_lock(lock_path: Path) -> None:
         logger.warning("[%s] Could not release lock %s: %s", MODULE_NAME, lock_path, exc)
 
 
-# =============================================
-# HELPER FUNCTIONS
-# =============================================
-
-
 def find_branch_registry(branch_path: Path, branch_name: str) -> Optional[Path]:
-    """Find the registry file for a branch
-
-    Args:
-        branch_path: Path to the branch directory
-        branch_name: Name of the branch
-
-    Returns:
-        Path to registry file if found, None otherwise
-
-    Checks common patterns:
-    - {branch_path}/flow_json/{branch}_registry.json
-    - {branch_path}/{branch}_json/{branch}_registry.json
-    - {branch_path}/registry.json
-    """
+    """Find the registry file for a branch"""
     if not branch_path.exists():
         return None
 
-    # Pattern 1: flow_json/{branch}_registry.json
     candidate = branch_path / "flow_json" / f"{branch_name}_registry.json"
     if candidate.exists():
         return candidate
 
-    # Pattern 2: branch_json/branch_registry.json
     candidate = branch_path / f"{branch_name}_json" / f"{branch_name}_registry.json"
     if candidate.exists():
         return candidate
 
-    # Pattern 3: registry.json
     candidate = branch_path / "registry.json"
     if candidate.exists():
         return candidate
@@ -155,14 +108,7 @@ def find_branch_registry(branch_path: Path, branch_name: str) -> Optional[Path]:
 
 
 def load_branch_registry(registry_path: Path) -> Dict[str, Any]:
-    """Load a branch registry file
-
-    Args:
-        registry_path: Path to the registry file
-
-    Returns:
-        Registry dict or empty structure on error
-    """
+    """Load a branch registry file"""
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -172,15 +118,7 @@ def load_branch_registry(registry_path: Path) -> Dict[str, Any]:
 
 
 def save_branch_registry(registry_path: Path, registry: Dict[str, Any]) -> bool:
-    """Save a branch registry file
-
-    Args:
-        registry_path: Path to the registry file
-        registry: Registry data to save
-
-    Returns:
-        True on success, False on failure
-    """
+    """Save a branch registry file"""
     lock_path = registry_path.with_suffix(".lock")
     try:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,52 +153,29 @@ def save_branch_registry(registry_path: Path, registry: Dict[str, Any]) -> bool:
 
 
 def extract_plan_number(plan_id: str) -> Optional[str]:
-    """Extract plan number from plan_id (e.g., 'FPLAN-0148' -> '0148', 'DPLAN-0004' -> '0004')
-
-    Args:
-        plan_id: Plan ID string with any prefix (e.g., 'FPLAN-0148', 'DPLAN-0004')
-
-    Returns:
-        Plan number string or None if invalid format
-    """
+    """Extract plan number from plan_id (e.g., 'FPLAN-0148' -> '0148', 'DPLAN-0004' -> '0004')"""
     if not plan_id or "-" not in plan_id:
         return None
     return plan_id.split("-", 1)[1]
 
 
 def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool:
-    """Auto-close a plan in its branch registry
-
-    Args:
-        registry_path: Path to the branch registry
-        plan_id: Plan ID (e.g., 'PLAN0148')
-        branch_name: Name of the branch for logging
-
-    Returns:
-        True if plan was closed, False otherwise (including a row under the
-        same number whose file names another prefix, or no file at all)
-    """
+    """Auto-close a plan in its branch registry"""
     plan_num = extract_plan_number(plan_id)
     if not plan_num:
         logger.warning(f"[{MODULE_NAME}] Invalid plan_id format: {plan_id}")
         return False
 
-    # Load registry
     registry = load_branch_registry(registry_path)
     plans = registry.get("plans", {})
 
-    # Check if plan exists in registry
     if plan_num not in plans:
         logger.warning(f"[{MODULE_NAME}] {plan_id} not found in registry {registry_path}")
         return False
 
     plan_info = plans[plan_num]
 
-    # A bare number is not an identity: every type numbers from 0001, so the
-    # row under "0004" may be FPLAN-0004 while the missing file was
-    # DPLAN-0004. Close only a row whose own file names the same prefix; a row
-    # that names none cannot be told apart and is left open (flow's decision,
-    # leg 6 of fleet green).
+    # Every plan type numbers from 0001: close only a row whose file names the same prefix.
     prefix = plan_id.split("-", 1)[0]
     row_file = Path(str(plan_info.get("file_path") or "")).name
     if not row_file.startswith(f"{prefix}-"):
@@ -274,17 +189,14 @@ def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool
         )
         return False
 
-    # Skip if already closed
     if plan_info.get("status") == "closed":
         logger.info(f"[{MODULE_NAME}] {plan_id} already closed in {branch_name}")
         return False
 
-    # Close the plan
     plan_info["status"] = "closed"
     plan_info["closed"] = datetime.now(timezone.utc).isoformat()
     plan_info["closed_reason"] = "auto_closed_missing_file"
 
-    # Save registry
     if save_branch_registry(registry_path, registry):
         logger.info(f"[{MODULE_NAME}] SUCCESS: Auto-closed {plan_id} in {branch_name} - file not found")
         return True
@@ -296,16 +208,7 @@ def auto_close_plan(registry_path: Path, plan_id: str, branch_name: str) -> bool
 def validate_and_heal_branch(
     branch_name: str, branch_data: Dict[str, Any], heal: bool = True
 ) -> Tuple[List[Dict], List[Dict]]:
-    """Validate plans in a branch and heal missing files
-
-    Args:
-        branch_name: Name of the branch
-        branch_data: Branch data from PLANS.central.json
-        heal: If True, auto-close plans with missing files
-
-    Returns:
-        Tuple of (valid_active_plans, all_closed_plans)
-    """
+    """Validate plans in a branch and heal missing files"""
     branch_path = Path(branch_data.get("branch_path", ""))
     active_plans = branch_data.get("active_plans", [])
     recently_closed = branch_data.get("recently_closed", [])
@@ -313,12 +216,10 @@ def validate_and_heal_branch(
     valid_active = []
     healed_plans = []
 
-    # Find branch registry for healing
     registry_path = None
     if heal and branch_path.exists():
         registry_path = find_branch_registry(branch_path, branch_name)
 
-    # Validate active plans
     for plan in active_plans:
         file_path = Path(plan.get("file_path", ""))
         plan_id = plan.get("plan_id", plan.get("plan", ""))
@@ -328,10 +229,8 @@ def validate_and_heal_branch(
         else:
             logger.info(f"[{MODULE_NAME}] Missing file for {plan_id} in {branch_name}: {file_path}")
 
-            # Attempt to heal
             if heal and registry_path:
                 if auto_close_plan(registry_path, plan_id, branch_name):
-                    # Add to healed plans for recently_closed
                     healed_plan = plan.copy()
                     healed_plan["status"] = "closed"
                     healed_plan["closed"] = datetime.now(timezone.utc).isoformat()
@@ -341,7 +240,6 @@ def validate_and_heal_branch(
                 if heal:
                     logger.warning(f"[{MODULE_NAME}] Cannot heal {plan_id} - registry not found for {branch_name}")
 
-    # Combine recently_closed with healed plans
     all_closed = recently_closed + healed_plans
 
     return valid_active, all_closed
@@ -350,23 +248,8 @@ def validate_and_heal_branch(
 def _resolve_total_closed(branch_name: str, *, upstream_total: Any, healed_count: int, window_size: int) -> int:
     """Resolve how many plans a branch has really closed.
 
-    Aggregation only ever sees the `recently_closed` WINDOW — five rows, capped
-    upstream. Counting that window was how `total_closed` came to report 5 for a
-    branch with 336 closed plans: the statistic measured its own cap, which is
-    why it equalled `recently_closed_included` on all 44 branches (@prax,
-    2026-08-16). The real count is measured by push_central from the full
-    registry, so we carry that number forward and only add what we healed —
-    healed plans move active -> closed during this run, so upstream has not
-    counted them yet.
-
-    Args:
-        branch_name: Branch being aggregated, for the warning
-        upstream_total: `statistics.total_closed` as push_central left it
-        healed_count: Plans auto-closed during this run
-        window_size: Size of the closed window, used only as a floor
-
-    Returns:
-        The real closed count, or the window size as an explicit floor
+    Aggregation sees only the capped recently_closed window, so the real count is push_central's
+    upstream total plus this run's heals; without it, the window size is returned as a floor.
     """
     if isinstance(upstream_total, bool) or not isinstance(upstream_total, int):
         logger.warning(
@@ -381,14 +264,7 @@ def _resolve_total_closed(branch_name: str, *, upstream_total: Any, healed_count
 
 
 def load_central(central_file: Path) -> Dict[str, Any]:
-    """Load PLANS.central.json
-
-    Args:
-        central_file: Path to the central file
-
-    Returns:
-        Central data or empty structure if file doesn't exist
-    """
+    """Load PLANS.central.json"""
     empty_structure = {
         "generated_at": "",
         "active_plans": [],
@@ -410,16 +286,7 @@ def load_central(central_file: Path) -> Dict[str, Any]:
 
 
 def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, Any]) -> bool:
-    """Save PLANS.central.json
-
-    Args:
-        central_file: Path to the central file
-        central_dir: Path to the .ai_central/ directory
-        central_data: Central data to save
-
-    Returns:
-        True on success, False on failure
-    """
+    """Save PLANS.central.json"""
     lock_path = central_file.with_suffix(".lock")
     try:
         central_dir.mkdir(parents=True, exist_ok=True)
@@ -447,39 +314,13 @@ def save_central(central_file: Path, central_dir: Path, central_data: Dict[str, 
         return False
 
 
-# =============================================
-# MAIN AGGREGATION IMPLEMENTATION
-# =============================================
-
-
 def aggregate_central_impl(
     heal: bool = True, central_file: Path | None = None, central_dir: Path | None = None
 ) -> bool:
-    """Aggregate and validate central plans
-
-    Algorithm:
-    1. Load PLANS.central.json
-    2. For each branch in branches.*:
-       - Validate all active_plans have files on disk
-       - If heal=True and file missing: auto-close in branch registry
-       - Collect valid active plans and all closed plans
-    3. Rebuild top-level active_plans (sorted by created, newest first)
-    4. Rebuild top-level recently_closed (last 5, sorted by closed, newest first)
-    5. Update statistics
-    6. Save PLANS.central.json
-
-    Args:
-        heal: If True, auto-close plans with missing files in their registries
-        central_file: Path to PLANS.central.json
-        central_dir: Path to .ai_central directory
-
-    Returns:
-        True on success, False on failure
-    """
+    """Aggregate and validate central plans"""
     try:
         logger.info(f"[{MODULE_NAME}] Starting central aggregation")
 
-        # Apply defaults when caller passes None
         if central_file is None or central_dir is None:
             logger.error(f"[{MODULE_NAME}] central_file and central_dir are required")
             return False
@@ -487,7 +328,6 @@ def aggregate_central_impl(
         assert central_file is not None  # narrowing for type checker
         assert central_dir is not None
 
-        # Load central file
         central_data = load_central(central_file)
         branches = central_data.get("branches", {})
 
@@ -495,28 +335,21 @@ def aggregate_central_impl(
             logger.info(f"[{MODULE_NAME}] No branches found in PLANS.central.json")
             return True
 
-        # Track all active and closed plans across branches
         all_active = []
         all_closed = []
 
-        # Process each branch
         total_closed_all_branches = 0
         for branch_name, branch_data in branches.items():
             logger.info(f"[{MODULE_NAME}] Processing branch: {branch_name}")
 
-            # The closed universe we can see is only the recently_closed WINDOW.
-            # Read the real count before validate_and_heal_branch, while the
-            # upstream statistic push_central measured is still on the branch.
+            # Read before validate_and_heal_branch, while push_central's statistic is still here.
             window_before = len(branch_data.get("recently_closed", []))
             upstream_total = branch_data.get("statistics", {}).get("total_closed")
 
-            # Validate and heal
             valid_active, closed_plans = validate_and_heal_branch(branch_name, branch_data, heal)
 
-            # Update branch-level active_plans with validated list
             branch_data["active_plans"] = valid_active
 
-            # Update branch-level recently_closed (sorted, newest first)
             branch_recently_closed = sorted(closed_plans, key=lambda x: x.get("closed", ""), reverse=True)[:5]
             branch_data["recently_closed"] = branch_recently_closed
 
@@ -528,14 +361,12 @@ def aggregate_central_impl(
             )
             total_closed_all_branches += branch_total_closed
 
-            # Update branch-level statistics to match validated arrays
             branch_data["statistics"] = {
                 "active_count": len(valid_active),
                 "total_closed": branch_total_closed,
                 "recently_closed_included": len(branch_recently_closed),
             }
 
-            # Add branch name to each plan for identification
             for plan in valid_active:
                 if "branch" not in plan:
                     plan["branch"] = branch_name
@@ -546,27 +377,21 @@ def aggregate_central_impl(
                     plan["branch"] = branch_name
                 all_closed.append(plan)
 
-        # Sort active by created date (newest first)
         all_active.sort(key=lambda x: x.get("created", ""), reverse=True)
 
-        # Sort closed by closed date (newest first) and limit to last 5
         all_closed.sort(key=lambda x: x.get("closed", ""), reverse=True)
         recently_closed = all_closed[:5]
 
-        # Update top-level arrays
         central_data["active_plans"] = all_active
         central_data["recently_closed"] = recently_closed
 
-        # Update top-level statistics. total_closed sums the resolved per-branch
-        # totals — len(all_closed) would sum the per-branch WINDOWS instead, which
-        # is how the tree-wide figure came to read 126 against a real 699.
+        # Not len(all_closed): that sums the per-branch windows, not the totals.
         central_data["statistics"] = {
             "active_count": len(all_active),
             "total_closed": total_closed_all_branches,
             "recently_closed_included": len(recently_closed),
         }
 
-        # Update global_statistics (aggregated from all branches)
         central_data["global_statistics"] = {
             "total_active": len(all_active),
             "total_closed": total_closed_all_branches,
@@ -575,10 +400,8 @@ def aggregate_central_impl(
             ),
         }
 
-        # Update generated_at timestamp
         central_data["generated_at"] = datetime.now(timezone.utc).isoformat()
 
-        # Save central file
         if save_central(central_file, central_dir, central_data):
             logger.info(
                 "[%s] SUCCESS: Aggregation complete: %d active, %d recently closed",
@@ -587,7 +410,6 @@ def aggregate_central_impl(
                 len(recently_closed),
             )
 
-            # Fire trigger event
             try:
                 from aipass.trigger.apps.modules.core import trigger
 

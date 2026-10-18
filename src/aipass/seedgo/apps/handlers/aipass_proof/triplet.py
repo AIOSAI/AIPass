@@ -3,19 +3,10 @@
 # Description: Verify standard triplet completeness (check + content + md)
 # Version: 1.0.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-17
 # =============================================
 
-"""Triplet Proof -- Verify every standard has all 3 files: *_check.py, *_content.py, *.md
-
-Interface:
-    scan(pack_dir: Path) -> dict
-    Returns: {"passed": bool, "total": int, "complete": list, "check_only": list,
-              "missing_check": list, "other_incomplete": list, "orphaned": list,
-              "issues": list, "summary": str}
-
-Reference: tools/triplet_scanner.py (original prototype)
-"""
+"""Triplet Proof -- Verify every standard has all 3 files: *_check.py, *_content.py, *.md"""
 
 from __future__ import annotations
 
@@ -25,7 +16,6 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 
-# Directories to skip entirely
 _SKIP_DIRS = SOURCE_SKIP_DIRS
 
 
@@ -41,13 +31,6 @@ def scan(pack_dir: Path) -> dict:
 
     Every standard should have three files: {name}_check.py, {name}_content.py, {name}.md.
     Files that don't fit any triplet pattern are flagged as orphaned.
-
-    Args:
-        pack_dir: Path to the standards pack directory (e.g. handlers/aipass_standards/).
-
-    Returns:
-        Dict with keys: passed, total, complete, check_only, missing_check,
-        other_incomplete, orphaned, issues, summary.
     """
     logger.info(f"[triplet] Scanning {pack_dir}")
 
@@ -83,7 +66,6 @@ def scan(pack_dir: Path) -> dict:
         else:
             orphaned_files.append(name)
 
-    # Union of all discovered standard names
     all_names = sorted(checks | contents | docs)
 
     complete: list[str] = []
@@ -130,7 +112,6 @@ def scan(pack_dir: Path) -> dict:
 
     passed = len(issues) == 0 and len(orphaned_files) == 0
 
-    # Build human-readable summary
     parts = [f"{len(complete)} complete"]
     if check_only:
         parts.append(f"{len(check_only)} check-only")

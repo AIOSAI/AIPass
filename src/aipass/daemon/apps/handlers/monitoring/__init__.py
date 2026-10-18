@@ -13,12 +13,7 @@
 #   - Part of Branch Activity Monitoring System
 # =============================================
 
-"""
-Monitoring handlers for daemon branch.
-
-Provides activity collection and memory health checking
-for the Branch Activity Monitoring System (FPLAN-0266).
-"""
+"""Monitoring handlers for daemon branch."""
 
 from aipass.daemon.apps.handlers.monitoring.activity_collector import (
     load_branch_registry,
@@ -40,17 +35,14 @@ from aipass.daemon.apps.handlers.monitoring.red_flag_detector import (
 )
 
 __all__ = [
-    # activity_collector
     "load_branch_registry",
     "get_branch_paths",
     "scan_branch_activity",
     "get_all_branch_activity",
-    # memory_health
     "check_memory_files_exist",
     "validate_memory_structure",
     "check_freshness",
     "get_memory_health_status",
-    # red_flag_detector
     "get_branch_status",
     "get_red_flag_summary",
 ]

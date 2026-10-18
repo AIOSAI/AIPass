@@ -4,16 +4,13 @@
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
 
-# Replays the DPLAN-0276 incident: PreCompact can fire several times back-to-back
-# with no intervening UserPromptSubmit, so cadence's normal turn-0 grounding path
-# never runs. This PostToolUse backstop must inject grounding content directly via
-# additionalContext the next time any tool runs, exactly once per compact, and
-# stay silent otherwise.
+# PreCompact can fire several times with no UserPromptSubmit between, so cadence's turn-0 path never
+# runs: the PostToolUse backstop must ground via additionalContext exactly once per compact.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/lifecycle/post_compact_regrounding.py parses and imports
@@ -65,9 +62,7 @@ class TestPostCompactRegrounding:
     def test_silent_when_pending_but_all_content_empty(self, tmp_path, monkeypatch):
         """Silent only where nothing was promised: an unstamped, non-branch directory.
 
-        The chdir is the contract, not scaffolding. From inside a stamped tree the
-        same four empties are a degraded regroup and ship a banner — the twin
-        below pins that side (DPLAN-0347, hooks row 1).
+        The chdir is the contract: inside a stamped tree the same empties ship a degraded banner.
         """
 
         monkeypatch.chdir(tmp_path)
@@ -248,10 +243,8 @@ class TestPostCompactRegrounding:
 
     def test_the_shipped_distance_covers_the_measured_double_ground_not_the_long_stretches(self):
         """Calibrated on the 09-16 injection ledgers: the backstop's last part sat 126,258
-        transcript bytes before the 09:30 fire-all, and 308,557 and 587,488 bytes of
-        autonomous work before the other two post-compact prompts. DEFAULTS is what
-        ships: cadence_config.json is gitignored, an operator's override (the
-        long-stretch case above proves the file is read)."""
+        transcript bytes before a fire-all; long autonomous stretches ran 308,557 and more.
+        DEFAULTS is what ships: cadence_config.json is gitignored."""
 
         assert 126_258 <= cadence.DEFAULTS["regroup_fresh_bytes"] < 308_557
 
@@ -349,12 +342,7 @@ class TestActiveStartupInstruction:
     def test_step_two_is_honest_outside_the_fleet(self, tmp_path):
         """Measured by @verify from an external project (via @devpulse 2026-09-11).
 
-        The refresh answers "Branch VERIFY not found in registry" there — the
-        project carries its own registry — and the DASHBOARD.local.json the step
-        points at was four months stale and read new_mail 0 while the inbox held
-        three. Step 2 is kept rather than skipped (prax owns the resolver half),
-        but it now names the failure and aims the agent at last_updated, because
-        a stale dashboard reported as current is worse than no dashboard.
+        A stale dashboard reported as current is worse than none: step 2 names the failure and points at last_updated.
         """
         context = self._ground(tmp_path)
         assert "not in the registry" in context
@@ -384,16 +372,7 @@ class TestActiveStartupInstruction:
         assert result["stdout"] == ""
 
 
-# =============================================================================
-# release_notice — DPLAN-0335 leg 2
-#
-# These pin apps/modules/release_notice.py and its two doors. They live in this
-# file because the post-compact regroup is one of those two doors and the
-# test-write gate refuses new test files by policy (DPLAN-0323); a dedicated
-# tests/test_release_notice.py is the right long-term home and is proposed to
-# @devpulse in the dispatch reply.
-# =============================================================================
-
+# release_notice and its two doors live here: the post-compact regroup is one of them.
 _RN = "aipass.hooks.apps.modules.release_notice"
 
 MANAGER_PASSPORT = '{"identity": {"citizen_class": "manager"}}'
@@ -405,10 +384,7 @@ def _make_project(
 ):
     """Build a project tree and return the branch cwd the hook would run in.
 
-    root/
-      PROJ_REGISTRY.json              <- the project marker every fence uses
-      .aipass/scaffold_manifest.json  <- only when *stamped* is given
-      src/branch/.trinity/passport.json
+    PROJ_REGISTRY.json is the project marker every fence uses.
     """
     root.mkdir(parents=True, exist_ok=True)
     (root / "PROJ_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -552,9 +528,7 @@ class TestReleaseNoticeModule:
 def _speaks(tmp_path, stamped: str, installed: str) -> bool:
     """Whether the notice speaks for a scaffold stamped `stamped` under `installed`.
 
-    The parse and the comparison are read through build_notice (fleet green
-    leg 8), not _version_tuple / _is_behind by name: a parsed stamp speaks only
-    when it is behind, an unparseable one always counts as behind.
+    A parsed stamp speaks only when it is behind; an unparseable one always counts as behind.
     """
     root = tmp_path / f"proj-{stamped or 'empty'}-{installed or 'empty'}"
     return _notice(_make_project(root, stamped=stamped), installed=installed) != ""
@@ -662,15 +636,8 @@ class TestReleaseNoticeCompactDoor:
         spy.assert_not_called()
 
 
-# =============================================================================
-# Issue #752 — one fire must stay under Claude Code's hook display limit
-#
-# Claude Code 2.1.267 persists a hook additionalContext longer than 10,000
-# UTF-16 units to a file and shows the agent a 2,000-char preview. The backstop
-# used to send ~21,500 in one fire. These pin the budgeted, ordered, multi-part
-# re-ground against sections at the sizes measured on 2026-09-10 (the largest
-# of each across the hooks, devpulse, memory, vera and baud seats).
-# =============================================================================
+# One fire must stay under Claude Code's 10,000-unit hook display limit; TODAYS_SIZES are the
+# largest section sizes measured across seats.
 
 _PCR = "aipass.hooks.handlers.lifecycle.post_compact_regrounding"
 _GC = "aipass.hooks.apps.modules.grounding_content"
@@ -691,8 +658,7 @@ def _section(tag, size):
 def _units(text: str) -> int:
     """Length the way Claude Code measures it: UTF-16 code units, not code points.
 
-    The test's own measure (fleet green leg 8), not the handler's _cc_len: the
-    budget pins hold the handler to Claude Code's count, so they count it here.
+    The test's own count, not the handler's _cc_len, so the pins hold the handler to Claude Code's.
     """
     return len(text.encode("utf-16-le")) // 2
 
@@ -795,8 +761,7 @@ class TestRegroupBudget752:
         for line in _section("BRANCH", 25_000).split("\n"):
             assert stream.count(line) == 1
 
-    # The two below go through handle() with the branch section verbatim (fleet
-    # green leg 8), not _pack by name.
+    # The two below go through handle() with the branch section verbatim, not _pack by name.
 
     def test_a_single_line_longer_than_a_part_is_cut_not_dropped(self, tmp_path):
         """The line is lowercase letters only; every other run of them in a fire

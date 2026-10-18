@@ -3,15 +3,11 @@
 # Description: Atomic lock management for git PR workflow
 # Version: 1.1.4
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Atomic lock management for git PR workflow.
-
-Provides acquire/release/check/force-unlock operations using an atomic
-lockfile (.git_pr.lock) at the repository root. Uses os.open with
-O_CREAT | O_EXCL | O_WRONLY for race-free lock acquisition.
 """
 
 from __future__ import annotations
@@ -30,9 +26,7 @@ from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
 _LOCK_FILENAME = ".git_pr.lock"
 _STALE_THRESHOLD_SECONDS = 600
 
-# What marks a project root when no registry file exists to mark it — the same
-# set find_registry() falls back to, because a second opinion on "where is the
-# root" is how two answers to one question start disagreeing.
+# Must match find_registry()'s fallback set, or the two disagree on the root.
 _PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
 
 
@@ -68,11 +62,7 @@ def _pid_alive(pid: int) -> bool:
     """Return True if the process is alive. Platform-guarded: Windows uses
     OpenProcess (os.kill on win32 calls TerminateProcess — kills the target).
 
-    A check that fails raises: the Windows check used to answer True
-    ("assuming alive") and any other OSError False ("assuming dead"), so a
-    holder nobody could check read as active or as orphaned, answers a real
-    check gives. The caller reports it as unchecked. Permission denied is an
-    answer, not a failure: the process exists, it belongs to someone else.
+    A check that fails raises (the caller reports "unchecked"); permission denied means alive.
     """
     if sys.platform == "win32":
         return _pid_alive_windows(pid)
@@ -90,19 +80,9 @@ def _pid_alive(pid: int) -> bool:
 def find_repo_root() -> Path:
     """Walk up from CWD looking for a *_REGISTRY.json, fallback to git rev-parse.
 
-    Any ``*_REGISTRY.json`` marks a project root, not just AIPass's own —
-    external projects name theirs after themselves (VERA-STUDIO_REGISTRY.json),
-    and hardcoding the AIPass name sent them down the toplevel-query fallback
-    while registry resolution found the real root, so the two could disagree.
-
-    NO-CWD PATH. This returns ``Path``, not ``Optional[Path]``, so unlike its
-    siblings in this sweep it cannot answer "unknown" — callers build a lock
-    path out of it. Both location-derived sources lose their starting point at
-    once (the walk has nowhere to start, and the toplevel query would be handed
-    the same dead directory), so the answer falls to the two sources that never
-    needed a location: AIPASS_HOME, then the walk up from this file. That is
-    ``find_registry``'s existing precedence, reused rather than re-invented —
-    two orders for one question is how the answers start disagreeing.
+    Any ``*_REGISTRY.json`` marks a root: external projects name theirs after themselves.
+    With no CWD it never answers "unknown" (callers build a lock path from it): it
+    uses find_registry's order, AIPASS_HOME then the walk up from this file.
     """
     cwd = caller_cwd()
     current = cwd
@@ -121,16 +101,12 @@ def find_repo_root() -> Path:
         for parent in here.parents:
             if registries_in(parent):
                 return parent
-        # Last resort, and the world CI actually runs in: a clean checkout has
-        # no registry anywhere (it is gitignored and machine-local). Marker-based,
-        # the same markers find_registry falls back to. Never the deleted
-        # directory, which is the one place a lock could not be written.
+        # CI's case: a clean checkout has no registry (gitignored). Never the deleted cwd.
         for parent in here.parents:
             if any((parent / marker).exists() for marker in _PROJECT_MARKERS):
                 return parent
         return here.parent
 
-    # Fallback: git rev-parse --show-toplevel
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -149,11 +125,8 @@ def find_repo_root() -> Path:
 def _create_exclusive(path: str) -> int:
     """Create the lock file exclusively and return its open fd.
 
-    O_CREAT | O_EXCL is the whole atomicity of the PR lock: of two acquirers,
-    the OS lets exactly one create the file. It stands alone because this one
-    create is where platforms answer differently - Windows answers a lock that
-    another process is mid-removing (delete pending) with PermissionError, not
-    FileExistsError - and acquire_lock's answer to each is what every PR relies on.
+    O_CREAT | O_EXCL is the whole atomicity of the PR lock. Windows answers a lock
+    mid-removal with PermissionError, not FileExistsError.
     """
     return os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
 
@@ -161,14 +134,7 @@ def _create_exclusive(path: str) -> int:
 def acquire_lock(branch_name: str) -> dict:
     """Acquire an atomic lock for git PR workflow.
 
-    Uses os.open with O_CREAT | O_EXCL | O_WRONLY for race-free creation.
     Never waits: a held lock answers blocked at once, naming the holder.
-
-    Args:
-        branch_name: The branch acquiring the lock (e.g. "@api").
-
-    Returns:
-        Dict with success (bool) and message (str).
     """
     repo_root = find_repo_root()
     lock_path = repo_root / _LOCK_FILENAME
@@ -192,7 +158,6 @@ def acquire_lock(branch_name: str) -> dict:
         return {"success": True, "message": f"Lock acquired by {branch_name}"}
 
     except FileExistsError:
-        # Lock already held
         holder_info = _read_lock_file(lock_path)
         holder = holder_info.get("branch", "unknown") if holder_info else "unknown"
         msg = f"Lock blocked: already held by {holder}"
@@ -200,12 +165,8 @@ def acquire_lock(branch_name: str) -> dict:
         return {"success": False, "message": msg}
 
     except PermissionError as exc:
-        # Windows answers an exclusive create against a lock another process is
-        # mid-removing (delete pending) with ACCESS DENIED, not FILE EXISTS. It
-        # used to escape here, out of the door every PR crosses. This door never
-        # waits, so it answers blocked: the holder if the file still reads, else
-        # the denial named - a root that is truly unwritable answers this way
-        # forever, and must not pass for a lock that is merely busy.
+        # Windows delete-pending: answer blocked, naming the holder or the denial, so a
+        # truly unwritable root does not pass for a merely busy lock.
         holder_info = _read_lock_file(lock_path)
         if holder_info:
             msg = f"Lock blocked: already held by {holder_info.get('branch', 'unknown')}"
@@ -219,14 +180,7 @@ def acquire_lock(branch_name: str) -> dict:
 
 
 def release_lock(force: bool = False) -> dict:
-    """Release the lock file.
-
-    Args:
-        force: If True, remove regardless of PID match.
-
-    Returns:
-        Dict with success (bool) and message (str).
-    """
+    """Release the lock file; *force* removes it regardless of PID match."""
     repo_root = find_repo_root()
     lock_path = repo_root / _LOCK_FILENAME
 
@@ -257,11 +211,7 @@ def release_lock(force: bool = False) -> dict:
 def check_lock_status() -> dict:
     """Check the current lock status, including stale and orphan detection.
 
-    Returns:
-        Dict with locked, branch, started, pid, stale, orphaned,
-        age_seconds, and message. A held lock also carries pid_checked:
-        False when the holder's liveness could not be checked, and its
-        status in the message is then "unchecked", never active or orphaned.
+    A held lock carries pid_checked: False means status "unchecked", never active or orphaned.
     """
     repo_root = find_repo_root()
     lock_path = repo_root / _LOCK_FILENAME
@@ -295,7 +245,6 @@ def check_lock_status() -> dict:
     started = lock_data.get("started", "")
     pid = lock_data.get("pid", 0)
 
-    # Calculate age
     age_seconds = 0.0
     stale = False
     if started:
@@ -306,7 +255,6 @@ def check_lock_status() -> dict:
         except (ValueError, TypeError) as exc:
             logger.warning("check_lock_status: could not parse lock start time '%s': %s", started, exc)
 
-    # Check if PID is still alive (orphan detection)
     orphaned = False
     pid_checked = True
     try:
@@ -344,11 +292,7 @@ def check_lock_status() -> dict:
 
 
 def force_unlock() -> dict:
-    """Force remove lock file regardless of holder.
-
-    Returns:
-        Dict with success (bool) and message (str).
-    """
+    """Force remove lock file regardless of holder."""
     json_handler.log_operation("force_unlock", {})
     return release_lock(force=True)
 

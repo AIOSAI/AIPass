@@ -3,74 +3,13 @@
 # Description: Windows compat - a path asserted against the repr of a mock call (advisory arm, tests)
 # Version: 1.2.0
 # Created: 2026-09-18
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 r"""
 Windows compat -- a path asserted against the repr of a mock call.
 
-The incident (CI 35416653326, Windows): three of flow's lock tests built
-``" ".join(str(c) for c in mock_logger.error.call_args_list)`` and asserted
-``str(lock) in logged``.  ``str(call(...))`` is the mock call's repr, and repr
-escapes a backslash, so the Windows path ``C:\Users\...`` is spelled
-``C:\\Users\\...`` in that text and the substring check fails.  A POSIX path
-has no backslash for repr to escape -- the text is a fixed point there -- so no
-Linux or macOS run can go red on it.
-
-A second mechanism, same shape (CI 38843541023, Windows, 2026-10-15): api's
-``test_host_lifetime`` asserted ``str(home) in str(log.info.call_args_list[0])``
-where the product logged ``home`` as a Path ARGUMENT.  repr of a Path is
-``WindowsPath('C:/Users/.../home')`` -- forward slashes -- while ``str(home)``
-is ``C:\Users\...\home``, so the substring is never there.  On POSIX the
-``PosixPath(...)`` repr and ``str()`` spell the path alike.  Two ways to the same red: a str
-argument has its backslashes doubled by repr, a Path argument is re-rendered
-with forward slashes.  The cure for both is to compare the argument itself --
-``log.info.call_args_list[0].args[1] == home`` for a Path argument, the
-message text in ``args[0]`` for a string -- never the call's repr.
-
-The shape, read per function with a small name-flow pass:
-
-* REPR TEXT -- ``str()``, ``repr()`` or an f-string of a mock call record:
-  ``m.call_args``, ``m.call_args_list``, ``m.mock_calls``, an element of one
-  (a loop or comprehension variable), or its ``.args`` / ``.kwargs`` / ``[0]``
-  containers.  A str of a tuple is a repr of its members too.  Joins, slices,
-  case changes and names bound to any of these carry it.
-* PATH TEXT -- ``str()`` / ``os.fspath()`` / an f-string of a path object: the
-  ``tmp_path`` / ``tmpdir`` fixture, ``Path(...)``, ``tempfile`` and
-  ``os.path`` results, and anything built from those with ``/``,
-  ``.with_suffix()``, ``.parent`` and the other path-returning members.
-* The sink -- ``in`` / ``not in`` / ``==`` / ``!=`` with PATH TEXT on one side
-  and REPR TEXT on the other, or ``.count/.find/.index/.startswith/.endswith``
-  of REPR TEXT given PATH TEXT.  ``in`` goes red on Windows; ``not in`` passes
-  there without checking anything.
-
-Deliberately NOT flagged:
-
-* A real message string or argument: ``c.args[0]``, ``m.call_args[0][0]``,
-  ``c.kwargs["msg"]``, ``c.args[1] == path`` -- one level inside the args
-  container, the value itself.  That is the cure.
-* A path side that repr cannot change: ``.name`` / ``.stem`` / ``.suffix``,
-  ``.as_posix()`` / ``.as_uri()``, ``Path("one_part")``.
-* A path side the test already escaped: ``repr(str(p))``, ``str(p).replace(...)``,
-  or a repr text passed through ``.replace(...)``.
-* A test inside a ``sys.platform`` / ``os.name`` guard or skipif.
-
-Helpers: a function or method defined in the same module is read by what it
-returns (CI 35426157867 -- memory's ``home, foreign = self._fenced_world(tmp_path,
-...)``).  A tuple return binds element by element; a helper whose returns
-disagree in kind (a path on one branch, a word on another) is read as opaque.
-
-Known misses, named rather than hidden: a path the test reaches only through a
-fixture (a parameter with an ordinary name, ``def test_x(self, branch):``,
-whether the fixture lives in the module or a conftest), an attribute
-(``self.lock``), a helper from another module, or a helper whose path arrives
-through a parameter not named ``tmp_path`` / ``tmpdir`` -- the flow pass reads
-names bound in the function, the two tmp fixtures and same-module helper
-returns, nothing else.  A ``%``-format or ``.format()`` of a path is read as
-opaque.  ``lock.as_posix() in logged`` is not flagged although it fails on
-Windows too when the product logged ``str(lock)``: which spelling the product
-used is not in the test.
-
+Reference: windows_compat.md, "Advisory — a path asserted against the repr of a mock call".
 Pure: takes a parsed tree, never touches the disk.
 """
 
@@ -447,15 +386,7 @@ def platform_skipped(decorators: list[ast.expr]) -> bool:
 
 
 def find_mock_repr_paths(tree: ast.Module, platform_guarded: set[int]) -> list[tuple[int, str]]:
-    """Paths asserted against the repr text of a mock call.
-
-    Args:
-        tree: Parsed module.
-        platform_guarded: Line numbers inside sys.platform / os.name guards.
-
-    Returns:
-        (line, description) per offending comparison, in source order.
-    """
+    """Paths asserted against the repr text of a mock call."""
     found: dict[int, str] = {}
     for func, env, skipped in _functions(tree, helper_table(tree), False):
         if skipped:

@@ -3,7 +3,7 @@
 # Description: Tests for update command and error message formatting
 # Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/update.py, the actions refusal and branch-health's bare summary."""
@@ -33,11 +33,6 @@ def _mock_log_operations():
         patch.object(_activity_mod.json_handler, "log_operation", return_value=True),
     ):
         yield
-
-
-# ============================================================================
-# Update command tests
-# ============================================================================
 
 
 class TestUpdateCommand:
@@ -93,9 +88,7 @@ class TestUpdateCommand:
     def test_no_escalation_warning_when_nothing_to_escalate(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A clean digest must not emit a stderr warning.
 
-        The section header was warned unconditionally, so every quiet run printed
-        'ESCALATIONS NEEDED' to stderr and 'None - all clear' to stdout. Anything
-        capturing stderr (cron, logs) read that as a standing alarm.
+        Anything capturing stderr (cron, logs) reads 'ESCALATIONS NEEDED' there as a standing alarm.
         """
         with (
             patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
@@ -119,24 +112,14 @@ class TestUpdateCommand:
         assert "ESCALATIONS NEEDED" in captured.err, "a real escalation must warn on stderr"
 
 
-# ============================================================================
-# Error cascade tests — single error message, no double-error
-# ============================================================================
-
-
 ROUTER = "aipass.daemon.apps.daemon"
 
 
 class TestErrorCascade:
     """A handled-but-refused command must not cascade to another module.
 
-    THE CONTRACT IS UNCHANGED; THE SHAPE OF THE ANSWER MOVED (FPLAN-0492 wave
-    2b). These used to assert `is True` — "actions handled it, router, stop
-    looking". `actions` is a retired verb, so every one of these subcommands is
-    an unknown argument, and the owner's standing ruling says an unknown argument
-    exits non-zero naming the token. SystemExit(1) stops the cascade harder than
-    a True ever did: nothing after it runs at all. What would still be a defect
-    is falling THROUGH to another module, and that is what each of these pins.
+    `actions` is a retired verb, so each subcommand is an unknown argument and exits non-zero naming the token.
+    Falling THROUGH to another module is the defect each of these pins.
     """
 
     @pytest.mark.parametrize(
@@ -152,9 +135,7 @@ class TestErrorCascade:
     def test_actions_refuses_every_retired_subcommand(self, args) -> None:
         """Called DIRECTLY, a verb raises; the router turns that into exit 1.
 
-        The split is the layering: the module decides the argument is unknown,
-        apps/daemon.py renders and exits. Pinning the raise here and the exit in
-        test_route_command_* keeps both halves honest.
+        The module decides the argument is unknown; apps/daemon.py renders and exits.
         """
         with pytest.raises(UnknownArgument) as exc:
             _actions_mod.handle_command("actions", args)
@@ -172,21 +153,12 @@ class TestErrorCascade:
     def test_route_command_does_not_fall_through_on_a_refusal(self) -> None:
         """The router must not try the next module after a verb refuses.
 
-        route_command catches Exception broadly and moves on to the next module.
-        UnknownArgument is caught BEFORE that, or the refusal would be logged as
-        a module error and the loop would carry on — turning "actions: unknown
-        argument 'x'" into "unknown command: actions", which names the wrong
-        thing and exits through a different path entirely.
+        UnknownArgument is caught BEFORE route_command's broad except, or the refusal reads "unknown command".
         """
         modules = _daemon_mod.get_modules()
         with pytest.raises(SystemExit) as exc:
             _daemon_mod.route_command("actions", ["nonexistent_xyz"], modules)
         assert exc.value.code == 1
-
-
-# ============================================================================
-# Branch-health no-args fallback tests
-# ============================================================================
 
 
 class TestBranchHealthFallback:

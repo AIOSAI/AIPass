@@ -3,26 +3,16 @@
 # Description: Error reporting handler for registry and source fix email
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Error Reporting Handler
-
-Contains the core logic for reporting errors to the registry and
-dispatching error_detected events. Also handles source fix email
-pipeline for suppressed errors.
-
-Purpose:
-    Implementation logic for error reporting, separated from CLI/display
-    layer to satisfy thin-module standard.
 """
 
 from typing import Optional
 
 from aipass.prax import logger
-
-# logger imported from aipass.prax
 
 from aipass.trigger.apps.handlers.error_registry import (
     report as _registry_report,
@@ -32,23 +22,11 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 def send_source_fix_email(entry: dict) -> Optional[bool]:
     """Send recommendation email to source branch about fixing log level.
-
-    When an error is suppressed, the source branch gets notified that
-    their log level may be wrong. This closes the loop:
-    error -> investigate -> suppress -> fix source -> error stops
-
-    Args:
-        entry: Error registry entry dict
-
-    Returns:
-        True if the email was sent. False if there was nothing to send: the
-        entry names no branch (empty or 'unknown' component). None if the
-        send failed — ai_mail could not be imported, refused delivery, or
-        raised — so the caller can say the mail was lost rather than skipped.
+    True sent; False nothing to send (no branch); None the send failed, so the mail is lost, not skipped.
     """
     try:
         from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.info("[ERRORS] Could not import deliver_email_to_branch - ai_mail not available")
         return None
@@ -118,24 +96,7 @@ def report_error(
     error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium", fire_event: bool = True
 ) -> dict:
     """Report an error to the registry and optionally fire error_detected event.
-
-    Public API for cross-branch push reporting. Drone and other branches
-    call this instead of importing from handlers directly.
-
-    Pipeline: report() -> registry stores -> fire event -> handler checks
-    circuit breaker + rate limiting -> dispatch email if allowed.
-
-    Args:
-        error_type: Error class name (e.g., 'ImportError', 'TimeoutError')
-        message: Original error message text
-        component: Branch that generated the error (e.g., 'FLOW', 'API')
-        log_path: Path to source log file (optional)
-        severity: Error severity - low, medium, high, critical (default: medium)
-        fire_event: Whether to fire error_detected event (default: True).
-            Set False for silent registration without dispatch.
-
-    Returns:
-        Dict with error entry data + 'is_new' bool + 'dispatched' bool.
+    Public API for cross-branch push reporting; other branches call this, not handlers.
     """
     result = _registry_report(
         error_type=error_type,
@@ -146,8 +107,7 @@ def report_error(
     )
     result["dispatched"] = False
 
-    # Fire event on every call — let the error_detected handler decide
-    # when to dispatch via circuit breaker, backoff, and rate limiting.
+    # Fire on every call; the error_detected handler owns breaker, backoff and rate limits.
     error_count = result.get("count", 1)
     if not fire_event:
         return result

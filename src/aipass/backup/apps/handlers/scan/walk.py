@@ -3,14 +3,10 @@
 # Description: Project tree walker yielding file paths
 # Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
-"""Project tree walker.
-
-Recursively enumerates files beneath a project root and yields
-(absolute_path, relative_path) tuples for downstream filtering and copying.
-"""
+"""Project tree walker."""
 
 import os
 from collections.abc import Iterator
@@ -19,15 +15,7 @@ from ..audit import trail
 
 
 def walk_project(root: str) -> Iterator[tuple[str, str]]:
-    """Walk the project tree rooted at ``root``.
-
-    Args:
-        root: Absolute path to the project root directory.
-
-    Yields:
-        Tuples of (absolute_path, relative_path) for every file beneath root.
-        Skips symlinks.
-    """
+    """Walk the project tree rooted at ``root``."""
     trail.log_operation("walk_project", {"root": root})
     root_path = os.path.realpath(root)
 
@@ -44,6 +32,3 @@ def walk_project(root: str) -> Iterator[tuple[str, str]]:
                 continue
             rel_path = os.path.relpath(abs_path, root_path)
             yield abs_path, rel_path
-
-
-# =============================================

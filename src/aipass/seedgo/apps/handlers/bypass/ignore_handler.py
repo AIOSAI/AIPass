@@ -3,24 +3,10 @@
 # Description: Ignore Pattern Configuration Handler
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Ignore Pattern Configuration Handler
-
-Provides ignore patterns for audit file filtering, template baseline checking,
-and deprecated pattern tracking. Pure configuration with helper functions.
-
-Also provides the .seedgoignore engine — a gitignore-style dotfile droppable
-into any directory (per-directory scope, same nesting semantics as .gitignore)
-plus a global default so agents' tools/ dirs are ignored fleet-wide with zero
-per-branch setup. See DEFAULT_IGNORE_PATTERNS / is_seedgo_ignored().
-"""
-
-# =============================================
-# IMPORTS
-# =============================================
+"""Ignore Pattern Configuration Handler"""
 
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -30,12 +16,7 @@ import pathspec
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# =============================================
-# TEMPLATE IGNORE PATTERNS
-# =============================================
-
-# Template files that exist in spawn template but aren't required in branches
-# Used by architecture_check.py when checking template baseline
+# Spawn-template files a branch need not carry (architecture_check's baseline).
 TEMPLATE_IGNORE_PATTERNS = [
     ".gitkeep",  # Git placeholder files - not actual requirements
     "notepad.md",  # Optional scratch file
@@ -43,20 +24,8 @@ TEMPLATE_IGNORE_PATTERNS = [
     "test_scaffold.py",  # Scaffold example — branches have their own tests
 ]
 
-# =============================================
-# AUDIT IGNORE PATTERNS
-# =============================================
-
-# What the audit removes from a branch's corpus, as gitignore-style patterns
-# matched against the BRANCH-RELATIVE path (a leading "/" anchors to the branch
-# root; a bare "name/" matches that directory anywhere). Until 2026-09-25 these
-# were substrings of the whole lowercased path, and "/integrations/" and
-# "/artifacts/" silently removed 5 tracked source files (1,399 lines) in api and
-# commons (survey row #14, owner "Ok go."). Every entry carries its reason;
+# Gitignore-style, matched against the BRANCH-RELATIVE path ("/" anchors to the branch root);
 # ignored_tracked_source() convicts any entry that removes a file git tracks.
-# Dropped that day: ".temp" and ".old" (the corpus is *.py, so they could only
-# ever hit a mid-name dot in real source) and "/test/" (tests live in tests/,
-# which joined the corpus 2026-09-21; a test/ directory under apps/ is product).
 AUDIT_IGNORE_RULES: Tuple[Tuple[str, str], ...] = (
     ("__pycache__/", "bytecode caches: never source"),
     (".archive/", "retired copies, same as applicability.RETIRED_DIRS"),
@@ -68,47 +37,18 @@ AUDIT_IGNORE_RULES: Tuple[Tuple[str, str], ...] = (
 )
 AUDIT_IGNORE_PATTERNS = [pattern for pattern, _reason in AUDIT_IGNORE_RULES]
 
-# =============================================
-# DEPRECATED PATTERNS
-# =============================================
-
-# Patterns that have been removed from the system
-# Used by standards_verify.py to detect leftover usage
-# Note: --full was reinstated by DPLAN-0275 (force a full re-scan, bypassing
-# the incremental audit cache) — no longer deprecated.
+# standards_verify.py flags leftover usage; --full is live (forces a full re-scan), not deprecated.
 DEPRECATED_PATTERNS = {"--verbose": "removed from audit (v0.4.0)"}
-
-# =============================================
-# HELPER FUNCTIONS
-# =============================================
 
 
 def get_template_ignore_patterns() -> List[str]:
-    """Return list of template files to skip in architecture baseline check
-
-    Returns:
-        Copy of template ignore patterns list
-
-    Example:
-        patterns = get_template_ignore_patterns()
-        if template_name in patterns:
-            # Skip this template file
-    """
+    """Return list of template files to skip in architecture baseline check"""
     json_handler.log_operation("config_accessed", {"config": "template_ignore_patterns"})
     return TEMPLATE_IGNORE_PATTERNS.copy()
 
 
 def get_audit_ignore_patterns() -> List[str]:
-    """Return list of patterns for files/directories to skip during audit
-
-    Returns:
-        Copy of audit ignore patterns list
-
-    Example:
-        patterns = get_audit_ignore_patterns()
-        if any(pattern in file_path for pattern in patterns):
-            # Skip this file
-    """
+    """Return list of patterns for files/directories to skip during audit"""
     json_handler.log_operation("config_accessed", {"config": "audit_ignore_patterns"})
     return AUDIT_IGNORE_PATTERNS.copy()
 
@@ -136,11 +76,7 @@ def _gitignore_spec(gitignore: Path) -> pathspec.GitIgnoreSpec:
 def gitignored(file_path: Path, repo_root: Path) -> bool:
     """Whether the repository's .gitignore files ignore file_path, read without git.
 
-    Every .gitignore from the repository root down to the file's directory is
-    consulted in order and the deepest one that has an opinion wins, the way git
-    layers them. Negations (``!path``) are honoured, so commons' re-included
-    ``apps/handlers/artifacts/*.py`` reads as tracked. No subprocess: agents have
-    no git.
+    The deepest .gitignore with an opinion wins and negations are honoured; no subprocess, agents have no git.
     """
     target = file_path.resolve()
     root = repo_root.resolve()
@@ -160,8 +96,7 @@ def gitignored(file_path: Path, repo_root: Path) -> bool:
 def ignored_tracked_source(branch_path: Path, ignored_rel_paths: List[str]) -> List[str]:
     """The files the audit ignore list removed that git does NOT ignore: tracked source dropped by a pattern.
 
-    Outside a git repository nothing is tracked, so the answer is every
-    removed file unverified -- returned as is, never as an acquittal.
+    Outside a git repository every removed file is returned unverified, never acquitted.
     """
     repo_root = find_repo_root(branch_path)
     if repo_root is None:
@@ -170,33 +105,15 @@ def ignored_tracked_source(branch_path: Path, ignored_rel_paths: List[str]) -> L
 
 
 def get_deprecated_patterns() -> dict:
-    """Return dict of deprecated patterns and their removal reasons
-
-    Returns:
-        Copy of deprecated patterns dict
-
-    Example:
-        patterns = get_deprecated_patterns()
-        for pattern, reason in patterns.items():
-            # Check if pattern exists in codebase
-    """
+    """Return dict of deprecated patterns and their removal reasons"""
     json_handler.log_operation("config_accessed", {"config": "deprecated_patterns"})
     return DEPRECATED_PATTERNS.copy()
 
 
-# =============================================
-# SEEDGO_IGNORE — gitignore-style, per-directory
-# =============================================
-
-# Dotfile name — droppable into any directory in a branch, gitignore-style
-# patterns (via pathspec), scoped to that directory's subtree exactly like a
-# real .gitignore.
+# Scoped to its own directory's subtree, exactly like a real .gitignore.
 IGNORE_FILENAME = ".seedgoignore"
 
-# Global default — applied to every branch with zero per-branch setup.
-# Agents' tools/ dirs are deliberate throwaway prototyping space (quick
-# scripts for fast answers) — not standards-compliant by design, and that's
-# fine and wanted (the owner ruling).
+# Applied to every branch: agents' tools/ dirs are throwaway prototyping space, not held to standards.
 DEFAULT_IGNORE_PATTERNS: List[str] = [
     "tools/",
 ]
@@ -208,19 +125,7 @@ def _iter_seedgo_ignore_files(branch_root: Path) -> List[Path]:
 
 
 def load_ignore_entries(branch_root: Path) -> List[Tuple[str, "pathspec.PathSpec"]]:
-    """Build the ordered (scope, PathSpec) list for a branch.
-
-    scope "" is the global default and applies branch-wide. Each discovered
-    .seedgoignore file adds a scope equal to its own directory (relative to
-    branch_root) — its patterns are relative to that directory and only
-    match within its subtree, same nesting semantics as a real .gitignore.
-
-    Args:
-        branch_root: Absolute path to the branch root.
-
-    Returns:
-        Ordered list of (scope, PathSpec) pairs, global default first.
-    """
+    """Build the ordered (scope, PathSpec) list for a branch, global default (scope "") first."""
     root = Path(branch_root).resolve()
     entries: List[Tuple[str, "pathspec.PathSpec"]] = [
         ("", pathspec.PathSpec.from_lines("gitignore", DEFAULT_IGNORE_PATTERNS))
@@ -244,16 +149,7 @@ def load_ignore_entries(branch_root: Path) -> List[Tuple[str, "pathspec.PathSpec
 def is_seedgo_ignored(
     file_path: str, branch_root: Path, entries: Optional[List[Tuple[str, "pathspec.PathSpec"]]] = None
 ) -> bool:
-    """Check whether file_path is ignored via .seedgoignore or the global default.
-
-    Args:
-        file_path: Absolute path to the candidate file.
-        branch_root: Absolute path to the branch root.
-        entries: Pre-loaded result of load_ignore_entries(); loaded fresh if omitted.
-
-    Returns:
-        True when scans/audits/checklists/checker-style enforcement should skip this path.
-    """
+    """Check whether file_path is ignored via .seedgoignore or the global default."""
     root = Path(branch_root).resolve()
     try:
         rel = Path(file_path).resolve().relative_to(root).as_posix()
@@ -271,10 +167,3 @@ def is_seedgo_ignored(
         if spec.match_file(sub_rel):
             return True
     return False
-
-
-# =============================================
-# MODULE INITIALIZATION
-# =============================================
-
-# No initialization needed - pure configuration

@@ -3,141 +3,12 @@
 # Description: v5 - a test that evicts a cached module and does not put it back
 # Version: 1.1.0
 # Created: 2026-09-15
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Does this test leave the import cache the way it found it?
 
-    def _import_rollover(monkeypatch):
-        mocks = _prepare_rollover_mocks(monkeypatch)       # the cli is a MagicMock now
-        sys.modules.pop("aipass.memory.apps.modules.rollover", None)
-        delattr(parent, "rollover")
-        from aipass.memory.apps.modules import rollover    # re-executed against the mock
-        return rollover, mocks
-
-Teardown put the cli back. Nothing put the MODULE back. The re-import minted a
-rollover bound to a mock `error()`, and it stayed cached in `sys.modules` and on
-its parent package after the test that made it had finished. The next in-process
-`memory.main()` on the same xdist worker found that module, routed
-`rollover <bogus>` through the mock error, and exited 0 where the contract says 2.
-Which worker inherited it was loadscope's ordering, so CI on PR #769 went red on
-some platforms and Pythons and not others: a flicker, and the flicker was a leak.
-
-THE SAME RULING AS `host_state`, ONE LAYER IN. Touching the real thing is allowed;
-leaving it changed is the defect. A test may evict a module to force a fresh
-import - that is often the only way to execute import-time code under a mock. It
-may not walk away leaving the cache holding a different object from the one it
-found. This rule is about the restore, never about the eviction.
-
-WHY A RULE AND NOT A `host_state` SPECIES. `host_state` judges test units and
-fixtures. The incident's site was neither: it was a module-level HELPER that
-units call, and that is where this shape lives across the fleet (prax keeps
-dozens of bare pops inside `_fresh_import()`-style helpers). Teaching host_state
-to read helpers would change what every one of its six species reads, and its
-denominator with it. A separate rule reads every function and scores against
-every function, and host_state stays exactly what it was measured to be.
-
-WHAT IS READ: every function defined in a test file - test functions, fixtures,
-and module-level, class-level or nested helpers - each one on its own scope. No
-call is followed and no other file is opened, so the site is judged by what is
-written in the function that evicts.
-
-WHAT COUNTS AS AN EVICTION:
-
-  - `sys.modules.pop(K, ...)` and `del sys.modules[K]`.
-  - `delattr(M, "attr")` where M is PROVABLY a module: a name bound in the same
-    function from `importlib.import_module(...)`, `__import__(...)`,
-    `sys.modules[...]` or `sys.modules.get(...)`, a name bound by an `import`
-    statement at module level or in the function, or one of those expressions
-    written in place. The `.get` spelling is here because it is how memory's
-    half-cured helpers bind the parent package: they moved the `sys.modules`
-    half onto monkeypatch and kept a bare `delattr(parent, ...)` on a `parent`
-    read with `.get`, which is the other half of the same leak.
-
-  `monkeypatch.delitem(sys.modules, ...)` and `monkeypatch.delattr(...)` are
-  never evictions here. They are the cure.
-
-THE THIRD SPECIES, PARENT_ATTRIBUTE_REBIND (1.1.0, PR #774). memory's
-test_trinity_standard evicted every `handlers.json*` key with
-`monkeypatch.delitem` and re-imported `handlers.json.memory_files`. The fresh
-import set the NEW json package as the attribute of the surviving
-`aipass.memory.apps.handlers`; teardown restored sys.modules only. On 3.10/3.11
-a dotted `mock.patch` walks package attributes (`mock._importer`), on 3.12+ it
-reads sys.modules, so later string patches landed on the new module while the
-product read the old one: two rows on 3.10/3.11 only. Read: every cache
-removal in the function (`del`, `.pop`, and `<mp>.delitem(sys.modules, K)`)
-whose key resolves to literal names or to a literal `startswith` prefix over
-`sys.modules`, then every later fresh import with a literal name. The first
-evicted package on the imported path whose own parent survived is the rebound
-attribute. Acquitted by a monkeypatch `setattr`/`delattr` of that leaf name
-before the import (the cure on disk), a `setattr`/`M.leaf =` after it or in a
-`finally`, a fixture teardown, or the import sitting inside `pytest.raises`
-(a failed import binds nothing). Every cache restore - monkeypatch,
-`patch.dict`, a `finally`, an autouse record - leaves the attribute changed,
-so none of them acquits this species. `importlib.reload` keeps the module
-object and is not read.
-
-WHAT ACQUITS A SITE:
-
-  - MONKEYPATCH RECORDED IT FIRST. `setitem`/`delitem` on `sys.modules` with the
-    same key expression, or `setattr`/`delattr` with the same object and
-    attribute, earlier in the same function. Recorded first, pytest puts back
-    whatever stood there - the real module, or nothing. Recorded AFTER the
-    eviction, it records the eviction and restores that, which is no restore.
-  - `patch.dict(sys.modules ...)` as a `with` around the eviction, or as a
-    decorator on the function. It snapshots the whole dict and restores it on
-    exit. It acquits `sys.modules` evictions only: it never touches a package
-    attribute, so a `delattr` inside it is still read.
-  - AN EXPLICIT RESTORE after the eviction, or in any `finally` of the same
-    function: `sys.modules[K] = ...` or `sys.modules.update(...)` for the cache,
-    `setattr(M, "attr", ...)` or `M.attr = ...` for the attribute. A re-import
-    is NOT a restore - `importlib.import_module(K)` after the eviction is the
-    pollution, not the cure.
-  - A FIXTURE WITH ANY STATEMENT AFTER ITS LAST YIELD. The teardown is where a
-    fixture puts things back, and it runs for a failing test too. That is
-    `host_state`'s convention, adopted after demanding a try/finally convicted
-    thirty correct fixtures.
-  - AN AUTOUSE FIXTURE IN THE SAME FILE RECORDED THE KEY. `setitem`/`delitem` on
-    `sys.modules` inside an `autouse=True` fixture runs around every test in the
-    file, so the key it records is put back after each of them, whatever a
-    helper did to it in between. Both sides have to resolve to the same literal
-    name - a string, a module-level string constant, or a `for` over a literal
-    collection written in place or held in a module-level constant - one hop,
-    same file. Cache evictions only: the fixture never recorded
-    a package attribute. ADDED BECAUSE THE FLEET RUN DEMANDED IT: memory's
-    test_symbolic_extras records five symbolic modules in `_mock_handler_deps`
-    and pops the same five bare in five `_import_*` helpers, and a runtime probe
-    found every one of those module objects unchanged after teardown.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM, all of it in the direction of FEWER
-flags:
-
-  - it does not follow calls. A restore performed by a helper the function calls,
-    a fixture it requests, or a conftest two directories up is invisible - and so
-    is an eviction performed by one. `conftest.py` is not a test file and is not
-    read at all, so an autouse conftest fixture that records the same key - the
-    one measured false positive left, prax's `modules.logger` - is invisible.
-  - an autouse record whose key is assembled at runtime resolves to nothing, and
-    nothing acquits nothing.
-  - `delattr` on a name that is not provably a module is not read. A
-    `from x import y` name may be a function; so may a parameter.
-  - a name bound to a module AND rebound to anything else in the same function
-    is not provably a module, and is not read.
-  - code in a string is not code. A harness script handed to a child interpreter
-    evicts modules in a process that dies with it, and is never read.
-  - statements at module level, outside any function, are not read.
-  - `sys.modules.clear()`, `popitem()`, `del M.attr` and a manually started
-    `patch.dict(...).start()` are not read as evictions or restores.
-  - `sys.modules.update(...)` acquits every cache eviction in its function
-    without comparing keys. Generous on purpose.
-  - A flagged site may be harmless - a module with no state, re-imported to an
-    identical copy. The identity still changed. It nominates. A human decides.
-
-STDLIB ONLY - `ast`, `dataclasses`, `pathlib`, `typing`, and the pack's own corpus
-reader, like the rest of the pack. `_is_fixture` is a second copy of the reader in
-`host_state_check` and `fresh_clone_check`: no rule in this pack imports another,
-so a rule lifts out alone, and the copy is on the record rather than hidden.
-"""
+Reference: module_eviction.md"""
 
 import ast
 from dataclasses import dataclass, field
@@ -146,57 +17,38 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
 
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "module_eviction"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
+#: Tried in order; a project matching none of them gets a whole-tree walk.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: The import cache, by its dotted spelling.
 SYS_MODULES: str = "sys.modules"
 
-#: The two species. A cache entry and a package attribute are two homes of one
-#: module, and a finding says which one was left changed.
+#: A cache entry and a package attribute are two homes of one module; a finding says which.
 SPECIES_CACHE: str = "SYS_MODULES_EVICTION"
 SPECIES_ATTRIBUTE: str = "PACKAGE_ATTRIBUTE_EVICTION"
-#: The third: a fresh import after a cache eviction sets the new module on the
-#: surviving parent package, which a cache-only restore never puts back.
+#: A re-import sets the new module on the surviving parent, which a cache-only restore never undoes.
 SPECIES_REBIND: str = "PARENT_ATTRIBUTE_REBIND"
 
-#: Calls whose result can only be a module (or None), so a name bound from one
-#: is provably a module.
+#: Their result can only be a module (or None), so a name bound from one is provably a module.
 MODULE_BINDERS: frozenset = frozenset({"importlib.import_module", "__import__", "sys.modules.get"})
 
-#: The monkeypatch methods that record a dict key or an attribute before they
-#: change it. Read on any receiver: `monkeypatch`, `mp` and `self.monkeypatch`
-#: are the same MonkeyPatch.
+#: Read on any receiver: `monkeypatch`, `mp` and `self.monkeypatch` are the same MonkeyPatch.
 RECORDING_ITEM_METHODS: frozenset = frozenset({"setitem", "delitem"})
 RECORDING_ATTR_METHODS: frozenset = frozenset({"setattr", "delattr"})
 
-#: `patch.dict`, and the qualified spellings that end in it.
 PATCH_DICT: str = "patch.dict"
 
-#: Scopes read on their own. A nested def is a function of its own, and a
-#: lambda's body may never run, so neither is read as part of its parent.
+#: A nested def is its own subject and a lambda's body may never run, so neither is read with its parent.
 SEPARATE_SCOPES: tuple = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
-#: The longest target spelling a finding quotes before it truncates.
 MAX_TARGET_TEXT: int = 60
 
-#: How many flagged functions to name in the result. The full list lives in the
-#: report artifact; a check message printing hundreds of lines is unreadable.
+#: The full list lives in the report artifact.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# DATA
-# =============================================================================
 
 
 @dataclass
@@ -218,28 +70,16 @@ class Eviction:
 class FileFacts:
     """What one test file declares at module level, read once per file."""
 
-    #: Names a top-level `import` binds - modules, file-wide.
     imports: Set[str] = field(default_factory=set)
-    #: Module-level names bound to a string literal.
     strings: Dict[str, str] = field(default_factory=dict)
-    #: Module-level names bound to a literal list, tuple or set of strings.
     collections: Dict[str, List[str]] = field(default_factory=dict)
-    #: Literal sys.modules keys an autouse fixture in this file records.
     autouse_keys: Set[str] = field(default_factory=set)
-
-
-# =============================================================================
-# READING A FUNCTION'S OWN SCOPE
-# =============================================================================
 
 
 def functions_in(tree: ast.Module) -> List[Tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]]:
     """Every def in a parsed file with its `::`-joined qualified name, nested ones too.
 
-    Classes contribute their name to the path and are not subjects themselves.
-    A def inside an `if`, `try` or `with` is still a def, so every statement
-    child is walked, not only bodies of classes and functions.
-    """
+    A def inside an `if`, `try` or `with` is still a def, so every statement child is walked."""
     found: List[Tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]] = []
     stack: List[Tuple[ast.AST, Tuple[str, ...]]] = [(node, ()) for node in reversed(tree.body)]
     while stack:
@@ -257,11 +97,7 @@ def functions_in(tree: ast.Module) -> List[Tuple[str, Union[ast.FunctionDef, ast
 def own_nodes(function: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> List[ast.AST]:
     """Every node in a function's own body, nested defs, classes and lambdas excluded.
 
-    ONE SCOPE, ONE OWNER. `ast.walk` over the function would hand a nested
-    helper's eviction to its parent as well, reporting one site twice and
-    letting the parent's restore acquit the child's eviction. Decorators are
-    not the body either; the one decorator this rule reads is read by name.
-    """
+    ONE SCOPE, ONE OWNER: walking nested defs would report a site twice and let a parent's restore acquit a child."""
     found: List[ast.AST] = []
     stack: List[ast.AST] = [s for s in reversed(function.body) if not isinstance(s, SEPARATE_SCOPES)]
     while stack:
@@ -284,19 +120,10 @@ def _text(node: ast.AST) -> str:
     return spelled if len(spelled) <= MAX_TARGET_TEXT else spelled[: MAX_TARGET_TEXT - 3] + "..."
 
 
-# =============================================================================
-# WHAT IS PROVABLY A MODULE
-# =============================================================================
-
-
 def is_module_expression(node: Optional[ast.AST]) -> bool:
     """True for an expression whose value can only be a module (or None).
 
-    `importlib.import_module(...)`, `__import__(...)`, `sys.modules.get(...)`
-    and `sys.modules[...]`. Anything else - a `from x import y` name, a
-    parameter, an attribute of something - may be a function, and `delattr` on
-    a function is not an eviction.
-    """
+    A `from x import y` name, a parameter or an attribute may be a function, and `delattr` on one is no eviction."""
     if isinstance(node, ast.Call):
         return corpus.dotted_name(node.func) in MODULE_BINDERS
     if isinstance(node, ast.Subscript):
@@ -328,12 +155,8 @@ def provable_modules(
 ) -> Set[str]:
     """Names in this function that can only hold a module.
 
-    A name is proven by an `import`, or by an assignment from a module
-    expression. It is DISPROVEN by any other binding in the same function - a
-    parameter, a `for` target, a second assignment from something else - because
-    the reader cannot tell which binding is live at the `delattr`, and the
-    doubt goes to the no-flag side.
-    """
+    Proven by an `import` or an assignment from a module expression; DISPROVEN by any other binding in
+    the function, because which binding is live at the `delattr` is unknowable and doubt goes to no-flag."""
     proving_targets: Set[int] = set()
     proven = _import_names(nodes)
     for node in nodes:
@@ -347,11 +170,6 @@ def provable_modules(
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and id(node) not in proving_targets:
             disproven.add(node.id)
     return (module_imports | proven) - disproven
-
-
-# =============================================================================
-# EVICTIONS
-# =============================================================================
 
 
 def evictions_in(nodes: List[ast.AST], modules: Set[str]) -> List[Eviction]:
@@ -387,18 +205,10 @@ def _is_module(node: ast.expr, modules: Set[str]) -> bool:
     return is_module_expression(node)
 
 
-# =============================================================================
-# ACQUITTALS
-# =============================================================================
-
-
 def _recorded_first(eviction: Eviction, nodes: List[ast.AST]) -> bool:
     """True when monkeypatch recorded the same target before the eviction ran.
 
-    EARLIER, NOT MERELY PRESENT. monkeypatch restores the value it saw when it
-    was called. Called before the eviction, that is the real module; called
-    after it, that is the eviction, and teardown faithfully restores the hole.
-    """
+    EARLIER, NOT MERELY PRESENT: recorded after the eviction, teardown faithfully restores the hole."""
     for node in nodes:
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) or len(node.args) < 2:
             continue
@@ -429,8 +239,7 @@ def _is_patch_dict_of_sys_modules(node: ast.AST) -> bool:
 def _patch_dict_guarded(function: Union[ast.FunctionDef, ast.AsyncFunctionDef], nodes: List[ast.AST]) -> Set[int]:
     """Ids of every node a `patch.dict(sys.modules)` will put back on exit.
 
-    A decorator guards the whole function; a `with` guards its own body.
-    """
+    A decorator guards the whole function; a `with` guards its own body."""
     if any(_is_patch_dict_of_sys_modules(decorator) for decorator in function.decorator_list):
         return {id(node) for node in nodes}
     guarded: Set[int] = set()
@@ -478,10 +287,7 @@ def _restores_attribute(node: ast.AST, eviction: Eviction) -> bool:
 def _restored_explicitly(eviction: Eviction, nodes: List[ast.AST], finally_ids: Set[int]) -> bool:
     """True when the same scope puts the evicted target back, after it or in a finally.
 
-    A RE-IMPORT IS NOT A RESTORE. `importlib.import_module(K)` after the
-    eviction mints a new module object and caches THAT - which is the pollution
-    this rule exists to find, so it acquits nothing.
-    """
+    A RE-IMPORT IS NOT A RESTORE: it mints and caches a new module, which is the pollution itself."""
     restores = _restores_cache if eviction.species == SPECIES_CACHE else _restores_attribute
     for node in nodes:
         if getattr(node, "lineno", -1) <= eviction.line and id(node) not in finally_ids:
@@ -492,7 +298,9 @@ def _restored_explicitly(eviction: Eviction, nodes: List[ast.AST], finally_ids: 
 
 
 def _is_fixture(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
-    """True when a function carries a pytest fixture decorator."""
+    """True when a function carries a pytest fixture decorator.
+
+    A copy of the reader in host_state_check and fresh_clone_check: no rule imports another, so each lifts out alone."""
     for decorator in node.decorator_list:
         target = decorator.func if isinstance(decorator, ast.Call) else decorator
         if corpus.dotted_name(target).rsplit(".", 1)[-1] == "fixture":
@@ -503,10 +311,7 @@ def _is_fixture(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
 def teardown_after_yield(function: Union[ast.FunctionDef, ast.AsyncFunctionDef], nodes: List[ast.AST]) -> bool:
     """True when a fixture runs any statement after handing its value over.
 
-    ANY STATEMENT, NOT A TRY/FINALLY. pytest runs a yield fixture's teardown when
-    the test fails as well as when it passes; demanding a `finally` convicted
-    thirty correct fixtures on host_state's first fleet run.
-    """
+    ANY STATEMENT, NOT A TRY/FINALLY: pytest runs a yield fixture's teardown for a failing test too."""
     if not _is_fixture(function):
         return False
     yields = [getattr(n, "lineno", -1) for n in nodes if isinstance(n, (ast.Yield, ast.YieldFrom))]
@@ -514,11 +319,6 @@ def teardown_after_yield(function: Union[ast.FunctionDef, ast.AsyncFunctionDef],
         return False
     last_yield = max(yields)
     return any(isinstance(n, ast.stmt) and n.lineno > last_yield for n in nodes)
-
-
-# =============================================================================
-# WHAT THE FILE RECORDS AROUND EVERY TEST - AUTOUSE FIXTURES
-# =============================================================================
 
 
 def _literal_strings(node: ast.AST) -> List[str]:
@@ -548,10 +348,7 @@ def _module_constants(tree: ast.Module) -> Tuple[Dict[str, str], Dict[str, List[
 def key_strings(key: ast.expr, nodes: List[ast.AST], facts: FileFacts) -> Set[str]:
     """The literal module names a key expression stands for, one hop, or an empty set.
 
-    A string literal is itself. A name is a module-level string constant, or the
-    target of a `for` in the same scope over a literal collection - written in
-    place or held in a module-level constant. Anything else resolves to nothing.
-    """
+    A string is itself; a name is a module-level string constant or a same-scope `for` target over a literal collection."""
     if isinstance(key, ast.Constant) and isinstance(key.value, str):
         return {key.value}
     if not isinstance(key, ast.Name):
@@ -603,22 +400,9 @@ def file_facts(tree: ast.Module) -> FileFacts:
 def _recorded_by_autouse(eviction: Eviction, nodes: List[ast.AST], facts: FileFacts) -> bool:
     """True when every name a cache eviction's key stands for is recorded by a same-file autouse fixture.
 
-    An autouse fixture runs around every test in its file, so its monkeypatch
-    record is restored after each of them, whatever a helper did to that key in
-    between. A key that resolves to nothing acquits nothing.
-    """
+    An autouse record is restored after every test in its file; a key that resolves to nothing acquits nothing."""
     names = key_strings(eviction.target, nodes, facts)
     return bool(names) and names <= facts.autouse_keys
-
-
-# =============================================================================
-# ANALYSIS
-# =============================================================================
-
-
-# =============================================================================
-# THE THIRD SPECIES - A RE-IMPORT REBINDS THE PARENT'S ATTRIBUTE
-# =============================================================================
 
 
 def _string_value(node: Optional[ast.AST], facts: FileFacts) -> str:
@@ -661,10 +445,7 @@ def _startswith_prefixes(test: ast.AST, variable: str, facts: FileFacts) -> Set[
 def key_prefixes(key: ast.expr, nodes: List[ast.AST], facts: FileFacts) -> Set[str]:
     """The prefixes a loop key over `sys.modules` was filtered by, or an empty set.
 
-    Two spellings, both one hop: `for k in [n for n in sys.modules if
-    n.startswith(P)]` (memory's specimen), and `for k in list(sys.modules):`
-    with an `if k.startswith(P):` in the loop body.
-    """
+    `for k in [n for n in sys.modules if n.startswith(P)]`, or `for k in list(sys.modules):` with an `if k.startswith(P):`."""
     if not isinstance(key, ast.Name):
         return set()
     prefixes: Set[str] = set()
@@ -715,10 +496,7 @@ class CacheClear:
 def cache_clears_in(nodes: List[ast.AST], facts: FileFacts) -> List[CacheClear]:
     """Every `sys.modules` key removal in one scope whose key resolves to literal names or prefixes.
 
-    `monkeypatch.delitem(sys.modules, K)` counts here, unlike in the first
-    species: it restores the cache entry and nothing else, and the attribute a
-    re-import rebinds on the parent package is the part it never saw.
-    """
+    `monkeypatch.delitem` counts here: it restores the cache entry, never the parent attribute a re-import rebinds."""
     found: List[CacheClear] = []
     for node in nodes:
         if not isinstance(node, (ast.Delete, ast.Call)):
@@ -753,11 +531,7 @@ def _is_sys_modules(node: ast.AST) -> bool:
 def _imported_names(node: ast.AST, facts: FileFacts) -> List[str]:
     """The dotted module names a statement or call imports fresh, when literal; else [].
 
-    `importlib.import_module(N)` / `import_module(N)` / `__import__(N)` with a
-    literal or module-constant N, `import a.b.c`, and `from a.b import c`
-    (which may import `a.b.c`). `importlib.reload` is not here: it re-executes
-    the same module object in place, and the parent's attribute keeps it.
-    """
+    `importlib.reload` is not here: it re-executes the same object in place, and the parent attribute keeps it."""
     if isinstance(node, ast.Call) and node.args:
         if corpus.dotted_name(node.func) in ("importlib.import_module", "import_module", "__import__"):
             value = _string_value(node.args[0], facts)
@@ -773,10 +547,7 @@ def _imported_names(node: ast.AST, facts: FileFacts) -> List[str]:
 def _rebound_parent(dotted: str, clears: List[CacheClear]) -> Optional[Tuple[str, str, CacheClear]]:
     """The (parent, leaf, clear) a fresh import of `dotted` rebinds, or None.
 
-    The import re-executes every evicted package on its path; the first one
-    whose own parent survived is set as an attribute on that surviving parent.
-    A top-level name has no parent package and rebinds nothing.
-    """
+    The first evicted package on the path whose own parent survived is set on that parent; a top-level name rebinds nothing."""
     parts = dotted.split(".")
     for depth in range(1, len(parts) + 1):
         candidate = ".".join(parts[:depth])
@@ -815,11 +586,7 @@ def _attribute_restored(leaf: str, after: int, nodes: List[ast.AST], finally_ids
 def _inside_pytest_raises(nodes: List[ast.AST]) -> Set[int]:
     """Ids of every node inside a `with pytest.raises(...)` body.
 
-    An import the test expects to raise binds nothing: the parent attribute is
-    set only after the child module finished executing. Measured on the fleet:
-    spawn's `test_the_denier_actually_denies` evicts `aipass.memory*` and
-    re-imports it under a meta-path denier inside `pytest.raises`.
-    """
+    An import expected to raise binds nothing: the parent attribute is set only after the child finishes executing."""
     inside: Set[int] = set()
     for node in nodes:
         if not isinstance(node, (ast.With, ast.AsyncWith)):
@@ -837,14 +604,8 @@ def rebinds_in(
 ) -> List[Eviction]:
     """Every fresh import after a cache eviction that rebinds a parent attribute nothing pinned.
 
-    EXACT OR SILENT. Both the evicted key and the imported name must resolve to
-    literal names (or a literal `startswith` prefix over `sys.modules`) in this
-    function or as module-level constants, and the import must sit after the
-    eviction. Acquitted by a monkeypatch `setattr`/`delattr` of an attribute of
-    that leaf name made BEFORE the eviction, an explicit `setattr`/assignment of
-    it after the import or in a `finally`, or a fixture teardown after its yield.
-    `patch.dict(sys.modules)` acquits nothing here: it restores the dict only.
-    """
+    EXACT OR SILENT: key and imported name must resolve to literals, and the import must follow the eviction.
+    `patch.dict(sys.modules)` acquits nothing here: it restores the dict only."""
     known = facts or FileFacts()
     nodes = own_nodes(function)
     clears = cache_clears_in(nodes, known)
@@ -905,10 +666,7 @@ def unrestored_in(
 ) -> List[Eviction]:
     """Every eviction in one function that nothing in it, or in its file's autouse fixtures, undoes.
 
-    `facts` defaults to none deliberately: a function handed over without its
-    file has no module-level import and no autouse fixture to lean on, which is
-    the pre-acquittal reading rather than a silently generous one.
-    """
+    `facts` defaults to none: a function handed over without its file gets the strict reading, never a generous one."""
     known = facts or FileFacts()
     nodes = own_nodes(function)
     candidates = evictions_in(nodes, provable_modules(function, nodes, known.imports))
@@ -932,20 +690,14 @@ def unrestored_in(
 def function_count(scanned: corpus.Corpus) -> int:
     """How many functions the rule reads. The denominator.
 
-    EVERY SUBJECT THE RULE JUDGES IS IN IT. Rows come from helpers as well as
-    units, so scoring them against units alone would let one file of helpers
-    drive a project below zero.
-    """
+    Rows come from helpers too, so scoring against units alone could drive a project below zero."""
     return sum(len(functions_in(parsed.tree)) for parsed in scanned.files)
 
 
 def find_unrestored(scanned: corpus.Corpus) -> List[Dict]:
     """One row per function that leaves an evicted module unrestored.
 
-    ONE ROW PER FUNCTION, EVERY LINE NAMED. A helper that pops five modules is
-    one function a reader has to go and fix, not five; the row's detail lists
-    each line so nothing is hidden by the dedupe.
-    """
+    ONE ROW PER FUNCTION, EVERY LINE NAMED in its detail, so the dedupe hides nothing."""
     rows: List[Dict] = []
     for parsed in scanned.files:
         facts = file_facts(parsed.tree)
@@ -991,34 +743,16 @@ def _rebound_detail(rebound: List[Eviction]) -> str:
     )
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its tests put evicted modules back.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to be
-            excused from. Wiring a bypass before the standard can fail would be
-            granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory, violations. A project with no tests reports not_applicable
-        rather than a number, because zero tests measured is not zero quality
-        found.
-    """
+    ``bypass_rules`` is accepted for the scoring-API contract and not read: shadow mode gates nothing.
+    No tests reports not_applicable: zero tests measured is not zero quality found."""
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. A project whose only test file has a syntax error must never report
-    # what a project with no tests at all reports.
+    # Built before the empty path: a broken only-test-file must never read as no tests.
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(

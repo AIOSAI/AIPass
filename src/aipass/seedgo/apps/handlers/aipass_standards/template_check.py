@@ -3,23 +3,13 @@
 # Description: Template/Boilerplate Detection Checker Handler
 # Version: 1.0.0
 # Created: 2026-07-01
-# Modified: 2026-07-01
+# Modified: 2026-10-17
 # =============================================
 
 """
 Template/Boilerplate Detection Checker Handler
 
-Detects files still left in un-configured template form and flags them
-as advisory warnings. Never blocks the audit — surfaces loudly so
-branches know they have unconfigured stub files.
-
-Checks:
-1. .aipass/aipass_local_prompt.md for template markers
-2. README.md for template markers
-3. .trinity/passport.json for template markers (the only spawn-templated artifact)
-
-AUDIT_SCOPE: branch_level — runs once per branch via check_branch().
-ADVISORY: always passes so it never blocks commits or audits.
+Reference: template.md
 """
 
 import re
@@ -114,15 +104,7 @@ def _check_file(file_path: Path, bypass_rules: list | None) -> Dict:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check branch for un-configured template/boilerplate files.
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/cli)
-        bypass_rules: Standard bypass rules from .seedgo/bypass.json
-
-    Returns:
-        dict with passed=True (advisory), checks list, score, standard, advisory flag
-    """
+    """Check branch for un-configured template/boilerplate files."""
     bp = Path(branch_path)
 
     if is_bypassed(branch_path, "template", bypass_rules=bypass_rules):

@@ -3,70 +3,12 @@
 # Description: v5 - entry points production declares that no test ever names
 # Version: 1.0.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-10-17
 # =============================================
 
 """Has the suite ever said this verb out loud?
 
-PORTED FROM THE TAXONOMY NOMINATOR of the same name onto the v5 scoring API.
-Every other check in this pack reads a test and asks what it proves. This one
-reads PRODUCTION first, enumerates the entry points it DECLARES - CLI verbs in a
-`COMMANDS`-style tuple, HTTP routes on a decorator - and diffs them against every
-string literal in the test corpus. A declared entry point no test mentions
-anywhere is an entry point nothing covers, however green the line-coverage number
-over the handler behind it.
-
-IN WAVE 1 THIS FOUND SIX UNEXERCISED HTTP ROUTES over a 97-percent-covered
-handler lane, and it was the only security-consequential finding in the sweep.
-The cost estimate recorded by the branch that proposed it was ten lines of code.
-
-THE COMPARISON IS AN EXACT LITERAL MATCH, AND THAT CUTS BOTH WAYS. A verb is
-"mentioned" when the WHOLE string literal equals it, anywhere in the test corpus:
-an argument, a parametrize entry, a fixture table, a module-level list. It is the
-weakest test of coverage that still means something - a verb passed to a function
-that immediately discards it acquits, and the execution tier is where "mentioned"
-becomes "exercised".
-
-It is NOT a substring search, and the nominator this was ported from described it
-loosely enough to suggest otherwise. The words "purge-all" inside a prose
-docstring or a comment do not acquit `purge-all`, because a substring search over
-raw text is precisely the v4 defect this pack exists to delete: it is what let a
-file of pattern strings with no code score 94 percent, and it would let any
-branch clear this rule by writing its verbs into a comment. So the rule
-over-CONVICTS where the mention is only prose, rather than over-acquitting where
-the mention is only a substring. Wrong in the direction that produces a finding a
-human can dismiss in ten seconds, never in the direction that produces a green
-number nobody earned.
-
-THE DENOMINATOR IS ENTRY POINTS, NOT TEST UNITS, AND THAT IS A DELIBERATE BREAK
-FROM ITS SIBLINGS. Every other check in this pack scores flagged units over total
-units. This rule's finding is an ABSENCE - there is no unit at fault, so scoring
-it over units would produce 100 on every project forever, a number that cannot
-move and therefore says nothing. What is measured is the share of DECLARED entry
-points the suite names. A project that declares none reports not_applicable for
-the same reason a project with no tests does: nothing measured is not nothing
-found.
-
-WHAT THIS FILE CANNOT SEE, STATED RATHER THAN IMPLIED. A verb assembled at
-runtime (`f"{prefix}-install"`, a dict built in a loop, a plugin registry filled
-by an entry-point group) is invisible to a static reader and is never counted, so
-it is never flagged - the bias runs toward FEWER findings. A route reached only
-through a mounted sub-app is a known false positive. And because this rule reads
-production, a production file that will not parse declares nothing it can read;
-that is why `production_limits()` is published beside the score on every return
-path. A hole and an unread file look identical from outside, and the difference
-is the entire honesty of the claim "no test mentions it".
-
-ONE ARM CAME ACROSS DEAD AND IS NOT HERE. The nominator guarded `_from_assignment`
-with `if node.value is None: return {}` for the `COMMANDS: tuple` annotation
-shape. It never decided anything - `_constant_strings(None)` fails its isinstance
-and returns `[]`, so the result is `{}` either way - and deleting it left every
-behavioural pin green. It is gone rather than carried forward and pinned, so
-nobody later "fixes" a real bug by editing a branch that never fires. The
-behaviour it appeared to protect is pinned instead, at `_constant_strings`.
-
-STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, and the
-pack's own corpus reader. That constraint is the reason the pack exists.
+Reference: entry_point_diff.md
 """
 
 import ast
@@ -75,52 +17,28 @@ from typing import Dict, List, Optional, Sequence, Set, Union
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "entry_point_diff"
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: Module-level tuple/list names that declare a module's CLI verbs. Kept short
-#: and conventional: a name this list does not know declares nothing this rule
-#: can read, which costs a missed finding and never a false one.
+#: An unknown name costs a missed finding, never a false one.
 COMMAND_CONSTANTS: frozenset = frozenset({"COMMANDS", "HANDLED_COMMANDS", "VERBS", "SUBCOMMANDS"})
 
-#: Decorator names that declare an HTTP route. The route string is argument 0,
-#: which is the spelling flask, fastapi, starlette and aiohttp all share.
+#: Route string is argument 0: the spelling flask, fastapi, starlette and aiohttp share.
 ROUTE_DECORATORS: frozenset = frozenset({"route", "get", "post", "put", "patch", "delete", "websocket"})
 
-#: Verbs too short for a literal match to mean anything. A two-character verb
-#: appears inside unrelated strings often enough that "mentioned" stops being
-#: evidence, so short verbs are not measured rather than measured badly.
+#: Shorter verbs match unrelated strings too often for "mentioned" to be evidence.
 MINIMUM_VERB_LENGTH: int = 3
 
-#: How many flagged entry points to name in the result. The full list lives in
-#: the report artifact; a check message that prints hundreds of lines is
-#: unreadable.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# READING WHAT PRODUCTION DECLARES
-# =============================================================================
 
 
 def _constant_strings(node: Optional[ast.AST]) -> List[str]:
     """Every string element of a tuple/list/set literal.
 
-    A non-literal value - `COMMANDS = load_commands()` - yields nothing, and
-    that is the runtime-assembly blind spot named in the module docstring
-    rather than a case worth guessing at. `None` is accepted for the same
-    reason: an annotation with no value (`COMMANDS: tuple`) declares a shape
-    and no verbs, and it falls out of the isinstance rather than needing a
-    guard of its own at the call site.
+    `None` (bare `COMMANDS: tuple`) falls out of the isinstance; callers need no guard.
     """
     if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
         return []
@@ -131,11 +49,7 @@ def _constant_strings(node: Optional[ast.AST]) -> List[str]:
 def _declaring_constant(targets: Sequence[ast.expr]) -> str:
     """The COMMANDS-style name among an assignment's targets, or "".
 
-    THE MATCHING NAME, NOT THE FIRST NAME. The nominator this was ported from
-    reported `names[0]`, so `CLI = COMMANDS = ("run",)` told a reader the verb
-    was "declared in CLI" - a name that is not in COMMAND_CONSTANTS and is not
-    why the verb was found. A reader who goes looking for the reason and finds
-    a name the rule never matched on stops trusting the row.
+    The matching name, not targets[0]: `CLI = COMMANDS = (...)` reports COMMANDS.
     """
     for target in targets:
         if isinstance(target, ast.Name) and target.id in COMMAND_CONSTANTS:
@@ -150,15 +64,7 @@ def _from_assignment(node: Union[ast.Assign, ast.AnnAssign], relpath: str) -> Di
     if not constant:
         return {}
 
-    # AN ANNOTATION WITHOUT A VALUE - `COMMANDS: tuple` - IS A DECLARATION OF
-    # SHAPE, NOT OF VERBS, AND IT NEEDS NO GUARD HERE. The nominator this was
-    # ported from carried `if node.value is None: return {}` at this line, and
-    # it never once decided anything: `_constant_strings(None)` fails its
-    # isinstance and returns [], so the dict comprehension is empty either way.
-    # Deleting it left every behavioural pin green, which is the definition of
-    # code that is not running the show. It is gone rather than pinned, so
-    # nobody later "fixes" a real bug by editing a branch that never fires -
-    # the same call corpus.py made on its dead With/AsyncWith arm.
+    # No `node.value is None` guard: `_constant_strings(None)` already returns [].
     return {
         verb: {"file": relpath, "line": node.lineno, "how": f"declared in {constant}"}
         for verb in _constant_strings(node.value)
@@ -185,13 +91,7 @@ def _from_route_decorators(node: Union[ast.FunctionDef, ast.AsyncFunctionDef], r
 
 
 def _declared_in(tree: ast.Module, relpath: str) -> Dict[str, Dict]:
-    """Entry point -> declaring site, for one production module.
-
-    `ast.walk` rather than a scan of `tree.body`, so a verb tuple defined
-    inside a class body or a factory function is still read. That is generous
-    in the direction of finding MORE declarations, which is the direction that
-    produces findings rather than hiding them.
-    """
+    """Entry point -> declaring site, for one production module."""
     declared: Dict[str, Dict] = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -204,10 +104,7 @@ def _declared_in(tree: ast.Module, relpath: str) -> Dict[str, Dict]:
 def declared_entry_points(scanned: corpus.Corpus) -> Dict[str, Dict]:
     """Every entry point production declares, across the whole target.
 
-    ONE ROW PER ENTRY POINT, FIRST DECLARATION WINS. A verb re-exported from
-    two modules is one thing a test can name, not two, so it must not be able
-    to cost a project twice. Files are read in sorted order so the site a
-    reader is sent to does not depend on filesystem walk order.
+    First declaration wins, so a re-exported verb cannot cost a project twice.
     """
     declared: Dict[str, Dict] = {}
     for relpath in sorted(scanned.production_trees):
@@ -225,21 +122,10 @@ def measurable_entry_points(scanned: corpus.Corpus) -> Dict[str, Dict]:
     }
 
 
-# =============================================================================
-# READING WHAT THE TESTS SAY
-# =============================================================================
-
-
 def mentioned_strings(scanned: corpus.Corpus) -> Set[str]:
     """Every string literal appearing anywhere in the test corpus.
 
-    Whole-file, not per-unit: a verb named in a module-level parametrize table
-    or a shared fixture is named by the suite, and attributing the mention to a
-    single unit would manufacture findings out of file layout.
-
-    The set holds WHOLE literals. Membership downstream is therefore exact, not
-    a substring test - see the module docstring for why that direction is the
-    only safe one.
+    Whole literals: membership downstream is exact, never a substring test.
     """
     mentioned: Set[str] = set()
     for parsed in scanned.files:
@@ -248,13 +134,7 @@ def mentioned_strings(scanned: corpus.Corpus) -> Set[str]:
 
 
 def find_unnamed_entry_points(scanned: corpus.Corpus) -> List[Dict]:
-    """Every declared entry point the test corpus never names.
-
-    The public entry point for this rule - the report lane and the tests both
-    ask the question here rather than re-deriving it. Rows are attributed to
-    the DECLARING site, because the defect is an absence and there is no test
-    to point at; the reader still needs somewhere to go.
-    """
+    """Every declared entry point the test corpus never names, at its declaring site."""
     mentioned = mentioned_strings(scanned)
     rows: List[Dict] = []
     for entry_point, site in sorted(measurable_entry_points(scanned).items()):
@@ -278,38 +158,16 @@ def find_unnamed_entry_points(scanned: corpus.Corpus) -> List[Dict]:
     return rows
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its tests name the entry points it declares.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory. A project with no tests, or with no declared entry point,
-        reports not_applicable rather than a number, because zero measured is
-        not zero found.
+    bypass_rules is accepted for the scoring-API contract and unread: advisory gates nothing.
     """
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS, with_production=True)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. An earlier version of the reference check returned "no test files
-    # found" before this ran, so a project whose ONLY test file had a syntax
-    # error reported exactly what a project with no tests at all reports. A
-    # broken file must never read as an absent one - that is the whole contract
-    # `unparseable` exists to keep, and it was defeated on the one path where
-    # nothing else could catch it. The ordering here is the fix, inherited.
+    # Built before the empty-path returns: an unparseable file must never read as an absent one.
     unreadable: List[Dict] = _limit_checks(scanned)
 
     if total == 0:
@@ -386,13 +244,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
 def _limit_checks(scanned: corpus.Corpus) -> List[Dict]:
     """The lines saying what could NOT be read, test side and production side.
 
-    THE PRODUCTION LINE IS THE MOST IMPORTANT LINE THIS CHECK EMITS. The claim
-    it makes is "production declares X and no test names it", and that claim is
-    only honest beside a count of the production files it could not read. An
-    unreadable file declares nothing, so every entry point inside it is a
-    finding that never happens - the bias runs toward CLEAN, which is the
-    direction nobody goes looking. Publishing it beside the score is what stops
-    a hole and an unread file from looking identical from outside.
+    Published on every return path: an unread production file hides its findings.
     """
     checks: List[Dict] = []
 

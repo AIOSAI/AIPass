@@ -3,15 +3,12 @@
 # Description: Which checkers judge a file in the per-file checklist, and how a failure reads
 # Version: 1.1.0
 # Created: 2026-10-03
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Which checkers judge a file in the per-file checklist, and how a failure reads.
 
-Moved out of apps/modules/checklist.py when it passed the 600-line cap (seedgo
-fleet green leg 15). The checklist binds each function under its old private
-name, so ``checklist._format_failure`` and the rest still answer from there.
-Returns values, NEVER prints: the printing stays in the module.
+checklist.py binds each function under its old private name; returns values, never prints.
 """
 
 from pathlib import Path
@@ -31,12 +28,7 @@ def is_entry_point(file_path: str) -> bool:
 
 
 def reads_text_file(checker, file_path: str) -> bool:
-    """Whether a ``TEXT_FILES = True`` checker judges this non-.py file.
-
-    The checker says which kinds it reads through its own ``is_text_target``;
-    a TEXT_FILES checker that exports none reads nothing beyond ``.py``, so a
-    missing hook can only narrow the lane, never widen it.
-    """
+    """Whether a ``TEXT_FILES = True`` checker judges this non-.py file; no ``is_text_target`` means no."""
     # Literally True: a stand-in object whose every attribute is truthy declares nothing.
     if getattr(checker, "TEXT_FILES", False) is not True:
         return False
@@ -47,38 +39,22 @@ def reads_text_file(checker, file_path: str) -> bool:
 def is_applicable(checker, file_path: str) -> bool:
     """Determine if a checker applies to the given file.
 
-    First gate is APPLIES_TO — whether the standard is meaningful for this
-    KIND of file (production / tests / everywhere), shared with the audit lane
-    via applicability.py so the two can never disagree about scope again.
-    Structural standards used to fail on nearly every test file in the fleet
-    here while the audit lane never even looked at tests/; that gap is what
-    branches were absorbing with bypass rules.
-
-    Then AUDIT_SCOPE — where a result is reported:
-      - "entry_point" (default) -> only apps/{name}.py files
-      - "all_files"             -> any .py file; a non-.py text file only for a
-                                   ``TEXT_FILES = True`` checker (:func:`reads_text_file`)
-      - "branch_level"          -> normally skipped, but eligible if checker
-                                   also implements check_module() for per-file use
+    APPLIES_TO goes through applicability.py so this lane and the audit lane agree on scope.
     """
     if not applicability.applies_to_file(checker, file_path):
         return False
 
     scope = getattr(checker, "AUDIT_SCOPE", "entry_point")
 
-    # Branch-level checkers skip per-file runs UNLESS they also implement
-    # check_module() for targeted single-file validation (e.g., ruff_check)
     if scope == "branch_level":
         return hasattr(checker, "check_module") and file_path.endswith(".py")
 
-    # Only check_module() capable checkers
     if not hasattr(checker, "check_module"):
         return False
 
     if scope == "all_files":
         return file_path.endswith(".py") or reads_text_file(checker, file_path)
 
-    # Default: entry_point scope
     return is_entry_point(file_path)
 
 
@@ -90,10 +66,8 @@ def format_failure(result: Dict) -> str:
     if not failed:
         return "Failed (no details)"
 
-    # Use first failure's message, trimmed
     msg = failed[0].get("message", "Unknown issue")
 
-    # If multiple failures, indicate count
     if len(failed) > 1:
         msg = f"{msg} (+{len(failed) - 1} more)"
 
@@ -101,12 +75,7 @@ def format_failure(result: Dict) -> str:
 
 
 def is_skip_or_error(results: List[Dict]) -> bool:
-    """Whether the checklist declined the file (skip/error) or judged nothing.
-
-    A skipped file (throwaway, retired, prototype, ignored, not Python) was
-    judged by nothing, so naming the few rows it was not judged by would
-    mislead in the other direction.
-    """
+    """Whether the checklist declined the file (skip/error) or judged nothing."""
     if not results:
         return True
     return any(r.get("standard") in ("(skip)", "(error)") for r in results)

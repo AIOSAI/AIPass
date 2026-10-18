@@ -3,51 +3,31 @@
 # Description: README Auto-Update Module
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 README Auto-Update Module
 
-On-demand updating of auto-generated README sections for any AIPass branch.
-Uses readme_generator handler to produce content for sections marked with
-<!-- AUTO:SECTION --> comment markers in README.md files.
-
-Run: seedgo readme update @branch
+Fills README.md sections marked <!-- AUTO:SECTION --> from the readme_generator handler.
 """
 
 import sys
 from pathlib import Path
 from typing import List
 
-# =============================================================================
-# INFRASTRUCTURE SETUP
-# =============================================================================
-
-# IMPORTS
-# =============================================================================
-
-# Prax logger (system-wide, always first)
 from aipass.prax import logger
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error as display_error, warning
 
-# Handler (implementation) — readme operations
 from aipass.seedgo.apps.handlers.readme.readme_ops import (
     load_generator,
     resolve_targets,
     SECTION_NAMES,
 )
-
-
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -80,13 +60,6 @@ def print_introspection() -> None:
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'readme' command.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if handled, False if not this module's command
     """
     if command not in ("readme", "readme_update"):
         return False
@@ -99,7 +72,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         print_help()
         return True
 
-    # Subcommands: update, check
     subcommand = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
@@ -120,11 +92,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
 
     return True
-
-
-# =============================================================================
-# SUBCOMMAND ORCHESTRATION
-# =============================================================================
 
 
 def _handle_update(args: List[str]) -> None:
@@ -223,11 +190,6 @@ def _handle_check(args: List[str]) -> None:
             logger.error(f"README check failed for {branch_name}: {e}")
 
 
-# =============================================================================
-# DISPLAY HELPERS
-# =============================================================================
-
-
 def _print_target_error(err_code: str) -> None:
     """Display target resolution errors"""
     if err_code == "no_args":
@@ -293,16 +255,12 @@ if __name__ == "__main__":
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Confirm Prax logger connection
     logger.info("Prax logger connected to readme_update")
 
-    # Log standalone execution
     json_handler.log_operation("readme_update_run", {"command": "standalone", "args": sys.argv[1:]})
 
-    # Run command
     handle_command("readme", sys.argv[1:])

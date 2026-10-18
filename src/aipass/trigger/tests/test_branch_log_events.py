@@ -3,7 +3,7 @@
 # Description: Unit tests for branch_log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
@@ -17,38 +17,26 @@ from unittest.mock import MagicMock, call, patch
 from aipass.cli.apps.modules import display
 from aipass.trigger.apps.modules import branch_log_events
 
-# The mocks the autouse fixture set on the real module, read by the helpers below.
 _MOCKS: dict = {}
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch, tmp_path):
     """Patch every name branch_log_events reaches outside with, on the real module.
 
-    The logger is patched because start()'s failure path logs at ERROR, and a
-    real prax ERROR line is what the live watcher escalates. trigger is patched
-    so no test hands the live bus to a watcher; the watcher functions are
-    patched so no test starts a real filesystem observer.
+    The logger too: a real prax ERROR line from start()'s failure path is what the live watcher escalates.
     """
     mod = branch_log_events
     monkeypatch.setattr(mod, "logger", MagicMock())
 
-    # -- trigger json handler -----------------------------------------------
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(mod, "json_handler", mock_json_handler)
 
-    # -- trigger core (trigger object with .fire method) --------------------
     mock_trigger = MagicMock()
     mock_trigger.fire = MagicMock()
     monkeypatch.setattr(mod, "trigger", mock_trigger)
 
-    # -- log_watcher handler ------------------------------------------------
     mock_log_watcher = MagicMock()
     mock_log_watcher.set_event_callback = MagicMock()
     mock_log_watcher.start_branch_log_watcher = MagicMock(return_value=MagicMock())
@@ -73,8 +61,6 @@ def _mock_infrastructure(monkeypatch, tmp_path):
         monkeypatch.setattr(mod, name, getattr(mock_log_watcher, name))
     monkeypatch.setattr(mod, "AIPASS_PKG_ROOT", tmp_path)
 
-    # The CLI console and rich are real: output is read with capsys, and a
-    # refusal through error() is read from cli's own failure flag.
     _MOCKS.clear()
     _MOCKS.update(watcher=mock_log_watcher, json_handler=mock_json_handler, trigger=mock_trigger)
 
@@ -97,11 +83,6 @@ def _get_json_handler():
 def _get_core_trigger():
     """Return the mocked trigger object."""
     return _MOCKS["trigger"]
-
-
-# ---------------------------------------------------------------------------
-# Tests -- start()
-# ---------------------------------------------------------------------------
 
 
 def test_start_success_returns_true():
@@ -129,22 +110,12 @@ def test_start_failure_returns_false():
     assert result is False
 
 
-# ---------------------------------------------------------------------------
-# Tests -- stop()
-# ---------------------------------------------------------------------------
-
-
 def test_stop_calls_stop_branch_log_watcher():
     """stop() calls stop_branch_log_watcher."""
     mod = _import_module()
     mod.stop()
     watcher = _get_log_watcher()
     assert watcher.stop_branch_log_watcher.call_args_list == [call()]
-
-
-# ---------------------------------------------------------------------------
-# Tests -- status()
-# ---------------------------------------------------------------------------
 
 
 def test_status_returns_dict_from_handler():
@@ -158,22 +129,12 @@ def test_status_returns_dict_from_handler():
     assert result["aipass_root"] == "/fake/path"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- reset_hashes()
-# ---------------------------------------------------------------------------
-
-
 def test_reset_hashes_calls_clear_seen_hashes():
     """reset_hashes() calls clear_seen_hashes."""
     mod = _import_module()
     mod.reset_hashes()
     watcher = _get_log_watcher()
     assert watcher.clear_seen_hashes.call_args_list == [call()]
-
-
-# ---------------------------------------------------------------------------
-# Tests -- handle_command routing
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_start_success():
@@ -186,10 +147,7 @@ def test_handle_command_start_success():
 
 
 def test_handle_command_start_failure_prints_error(capsys):
-    """A watcher that fails to start is reported through error(), which fails the command.
-
-    Mutant run: the failure sent through warning() instead of error() reddens this.
-    """
+    """A watcher that fails to start is reported through error(), which fails the command."""
     mod = _import_module()
     watcher = _get_log_watcher()
     watcher.start_branch_log_watcher.return_value = None
@@ -242,11 +200,6 @@ def test_handle_command_unknown_returns_false():
     assert result is False
 
 
-# ---------------------------------------------------------------------------
-# Tests -- handle_command module-name routing
-# ---------------------------------------------------------------------------
-
-
 def test_handle_command_module_name_routes_to_subcommand():
     """handle_command('branch_log_events', ['start']) recurses to start."""
     mod = _import_module()
@@ -292,11 +245,6 @@ def test_handle_command_module_name_help_word():
     mock_help.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- handle_command help flags on direct subcommands
-# ---------------------------------------------------------------------------
-
-
 def test_handle_command_subcommand_help_flag():
     """handle_command('start', ['--help']) shows help instead of starting."""
     mod = _import_module()
@@ -335,11 +283,6 @@ def test_handle_command_direct_help_word():
     mock_help.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- print_introspection output
-# ---------------------------------------------------------------------------
-
-
 def test_print_introspection_outputs_module_name(capsys):
     """print_introspection prints module name and handler info."""
     mod = _import_module()
@@ -348,11 +291,6 @@ def test_print_introspection_outputs_module_name(capsys):
     assert "branch_log_events Module" in output
     assert "Connected Handlers:" in output
     assert "log_watcher.py" in output
-
-
-# ---------------------------------------------------------------------------
-# Tests -- print_help output
-# ---------------------------------------------------------------------------
 
 
 def test_print_help_outputs_commands(capsys):
@@ -364,11 +302,6 @@ def test_print_help_outputs_commands(capsys):
     assert "stop" in output
     assert "status" in output
     assert "reset" in output
-
-
-# ---------------------------------------------------------------------------
-# Tests -- handle_command status output content
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_status_prints_all_fields(capsys):
@@ -383,17 +316,10 @@ def test_handle_command_status_prints_all_fields(capsys):
     assert "AIPASS root:" in output
 
 
-# ---------------------------------------------------------------------------
-# help_flag_safety canary — a help flag ANYWHERE explains, never executes
-# ---------------------------------------------------------------------------
-
-
 def test_help_flag_past_position_zero_does_not_run_the_verb(monkeypatch):
     """A flag one position later must not let the subcommand run.
 
-    Probed with the read-only `status` verb deliberately: if the gate is
-    missing, the canary reads state instead of starting or resetting a
-    watcher. status() is mocked, so the assertion is that it is never reached.
+    Probed with read-only `status` so a missing gate reads state instead of starting a watcher.
     """
     mod = _import_module()
 

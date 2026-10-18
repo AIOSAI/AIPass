@@ -1,6 +1,6 @@
 # Windows Compatibility
-**Status:** Draft v1
-**Date:** 2026-05-10
+**Status:** Draft v1.1
+**Date:** 2026-10-16
 
 ---
 
@@ -150,6 +150,22 @@ seat too (flow reproduced CI 35416653326 that way, 2026-09-18; its suite is
 backslash is a character, not a separator, so `as_posix()` still equals
 `str()` — nor drive letters, nor any state class. Run it as a cheap extra lane,
 not as a replacement for the static read.
+
+### Path length: the tmp prefix is the host's, not the test's
+Not checked; advisory text. On macOS CI a `tmp_path` starts about 125 characters
+deep (`/private/var/folders/<2>/<30>/T/pytest-of-runner/pytest-0/popen-gwN/<test>0/`,
+the test name cut at 30), about 150 once a test adds its project directory; Linux's
+`/tmp/pytest-of-runner/...` is about 50 shorter. A test whose fixture name plus the
+product's store layout nears a length guard the product names (Windows' 260
+`MAX_PATH`) goes red on macOS only, and green on every Linux seat. macOS run
+38999228656: backup's `test_prune.py` wrote a 64-character name that the versioned
+store nests under a hashed folder, about 280 characters on macOS against about 230
+on Linux, so the 260 guard skipped it and four prune tests counted one stored path
+fewer. Keep fixture names short, or spell the length math in an assertion
+(`assert len(str(longest)) < 260, longest`) so the next long prefix reds the test,
+not CI. No checker reads this: the prefix is a property of the CI host, and the
+guard and its limit live in the product, so a static "longest fixture path against
+a product constant" would be a guess.
 
 ### Advisory — exclusive creates that lose the delete-pending race
 Not scored. Reported on the audit's info channel (`check_branch_info`) as

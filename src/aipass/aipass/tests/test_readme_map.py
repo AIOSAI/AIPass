@@ -3,7 +3,7 @@
 # Description: Tests for readme_map handler
 # Version: 1.3.2
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/readme_map.py and the handlers it drives."""
@@ -44,11 +44,6 @@ def _root_at(monkeypatch: pytest.MonkeyPatch, root: Path | None) -> None:
     monkeypatch.setattr(rm, "_README_MAP", None)
 
 
-# =============================================================================
-# TestDetectAipassRoot — reached through list_branches()
-# =============================================================================
-
-
 class TestDetectAipassRoot:
     """Root detection, seen through the public lookup that runs it."""
 
@@ -71,10 +66,7 @@ class TestDetectAipassRoot:
         _root_at(monkeypatch, None)
 
         readme = get_readme_path("aipass")
-        # The exact value depends on the environment; what it must NAME does
-        # not. Value pin added 2026-09-08 (v5 assertion_shape): isinstance
-        # alone was equally true of Path.cwd(), which is exactly the wrong
-        # answer this walk exists to avoid.
+        # Pin what the root names, not its type: Path.cwd() is a Path too, and the wrong answer.
         assert readme is not None
         root = readme.parents[3]
         assert (root / "src" / "aipass").is_dir(), f"{root} does not hold src/aipass/"
@@ -88,17 +80,11 @@ class TestDetectAipassRoot:
         assert (root / "src" / "aipass").is_dir(), f"{root} does not hold src/aipass/"
 
 
-# =============================================================================
-# TestBuildReadmeMap — reached through list_branches() / get_readme_path()
-# =============================================================================
-
-
 class TestBuildReadmeMap:
     """The branch → README map, seen through the public lookups."""
 
     def test_returns_dict(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Maps branch names to Paths."""
-        # Create fake src/aipass structure with one branch README
         src_aipass = tmp_path / "src" / "aipass"
         drone_dir = src_aipass / "drone"
         drone_dir.mkdir(parents=True)
@@ -111,16 +97,10 @@ class TestBuildReadmeMap:
     def test_skips_missing_readmes(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Branches without README.md are excluded."""
         src_aipass = tmp_path / "src" / "aipass"
-        # Create directory but no README
         (src_aipass / "drone").mkdir(parents=True)
         _root_at(monkeypatch, tmp_path)
 
         assert "drone" not in list_branches()
-
-
-# =============================================================================
-# TestGetReadmePath
-# =============================================================================
 
 
 class TestGetReadmePath:
@@ -146,11 +126,6 @@ class TestGetReadmePath:
         assert get_readme_path("nonexistent_branch") is None
 
 
-# =============================================================================
-# TestListBranches
-# =============================================================================
-
-
 class TestListBranches:
     """Tests for list_branches()."""
 
@@ -173,11 +148,6 @@ class TestListBranches:
         _root_at(monkeypatch, tmp_path)
 
         assert list_branches() == []
-
-
-# =============================================================================
-# TestLiveDiscovery
-# =============================================================================
 
 
 class TestLiveDiscovery:
@@ -207,11 +177,6 @@ class TestLiveDiscovery:
         branches = list_branches()
         assert "drone" in branches
         assert "hooks" in branches  # was missing from the old hardcoded roster
-
-
-# =============================================================================
-# TestReadReadmeAt — path-based live read
-# =============================================================================
 
 
 class TestReadReadmeAt:

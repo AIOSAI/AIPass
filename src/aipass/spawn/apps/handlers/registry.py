@@ -3,36 +3,13 @@
 # Description: *_REGISTRY.json discovery and CRUD operations
 # Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
 
-Identity model (DPLAN-0239, settled 2026-07-11):
-
-  registry.metadata.id
-      PROJECT credential — authoritative, minted once at ``aipass init``.
-      Passport ``citizenship.registry_id`` conforms to it (drone enforces
-      the pair at routing time). Spawn never mints this; bootstrap.py does.
-
-  branch-entry registry_id
-      PER-CITIZEN UUID — set-once, minted by ``add_to_registry`` at entry
-      creation. Uniquely identifies the citizen *within* the project.
-      NOT the project credential; NOT copied from the passport.
-
-  owner (entry field, ``True`` / absent)
-      Sealed authority flag. First agent = project owner.  Seated via
-      ``ensure_project_has_owner`` at creation time. ``citizen_class ==
-      'manager'`` is a cosmetic preference for the seating heuristic,
-      never the gate — the entry ``owner: true`` IS the gate.
-
-  admin (entry field, ``True`` / absent) — DPLAN-0288
-      One seat only: devpulse. Written by ``ensure_admin`` (the sanctioned
-      path, exposed as ``drone @spawn grant-admin``) during the owner's
-      ceremony. This flag on its own GRANTS NOTHING — it is leg 5 of a
-      five-leg contract (verified caller, cert path, cert content, HMAC
-      signature, this flag); the lane stays dark unless all five pass.
-"""
+metadata.id is the project credential; an entry's registry_id is a per-citizen UUID. Never conflate them.
+Entry flags owner and admin are the sealed authority; a passport never is."""
 
 import uuid
 from datetime import datetime
@@ -51,30 +28,15 @@ except ImportError:
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
 
-# The one seat that may ever carry the registry admin flag (DPLAN-0288).
-# A constant, never a caller-chosen parameter — see ensure_admin().
+# The one seat that may ever carry the registry admin flag: a constant, never a parameter.
 ADMIN_BRANCH = "devpulse"
 
 
 def is_protected(branch_name, branch_dir=None, registry_path=None):
     """Check if a branch is protected from deletion and pollution cleanup.
 
-    Protection layers (any one is sufficient):
-      1. Hardcoded floor — spawn, devpulse, drone.
-      2. Registry owner flag — entry has ``owner: true``.
-      3. Active passport — ``.trinity/passport.json`` with
-         ``citizenship.registered == True``.
-
-    Args:
-        branch_name: Branch name to check (case-insensitive).
-        branch_dir: Path to the branch directory (for passport check).
-            Auto-resolved from registry when omitted.
-        registry_path: Path to ``*_REGISTRY.json``.
-            Auto-discovered via ``find_registry()`` when omitted.
-
-    Returns:
-        Tuple of (protected: bool, reason: str).
-    """
+    Any one layer protects: the hardcoded floor, the registry owner flag, or a registered passport.
+    Returns (protected, reason)."""
     name_lower = branch_name.lower()
 
     if name_lower in _PROTECTED_FLOOR:
@@ -83,11 +45,7 @@ def is_protected(branch_name, branch_dir=None, registry_path=None):
     try:
         rp = Path(registry_path) if registry_path else find_registry()
         if rp is None:
-            # No registry anywhere above us. The hardcoded floor above has
-            # already had its say, so the honest answer is "this layer cannot
-            # protect it" — not a crash. AttributeError would escape the except
-            # below (OSError/ValueError/KeyError only) and turn "no registry
-            # here" into a traceback inside a SAFETY check.
+            # Answer, never raise: AttributeError on None would escape the except below inside a safety check.
             logger.info("[is_protected] No registry found — registry layer cannot answer for %s", branch_name)
             return False, "no registry found — not protected by the registry layer"
         reg_data = load_registry(rp)
@@ -115,15 +73,7 @@ def is_protected(branch_name, branch_dir=None, registry_path=None):
 
 
 def branches_as_list(branches):
-    """Normalize branches to a list regardless of storage format.
-
-    The registry may store branches as:
-    - A list of dicts (legacy format)
-    - A dict keyed by name (dict format from setup.sh)
-
-    Returns:
-        list of branch entry dicts
-    """
+    """Normalize branches to a list regardless of storage format (list, or dict keyed by name)."""
     if isinstance(branches, dict):
         return list(branches.values())
     if isinstance(branches, list):
@@ -134,31 +84,15 @@ def branches_as_list(branches):
 def find_registry(start_path=None):
     """Find *_REGISTRY.json — walks up from start_path only.
 
-    Does NOT pass package_root — prevents silent registration in
-    AIPass's own registry when creating agents in external projects.
-
-    Args:
-        start_path: Directory to start searching from.
-
-    Returns:
-        Path to *_REGISTRY.json.
-    """
+    No package_root fallback: it would silently register external agents in AIPass's own registry.
+    Returns None when no registry is found."""
     from aipass.aipass.shared.registry_discovery import find_registry as _common_find
 
     return _common_find(start_path=start_path)
 
 
 def _default_registry_schema(credential=""):
-    """Return an empty registry document.
-
-    Args:
-        credential: The project's ``metadata.id``. Empty string omits the key
-            entirely — see load_registry for why that is not the same as
-            minting a fresh one.
-
-    Returns:
-        Dict with metadata and an empty branches list.
-    """
+    """Return an empty registry document; an empty credential omits metadata.id, it never mints one."""
     metadata = {
         "version": "1.0.0",
         "last_updated": datetime.now().strftime("%Y-%m-%d"),
@@ -170,39 +104,12 @@ def _default_registry_schema(credential=""):
 
 
 def load_registry(registry_path):
-    """
-    Load registry from JSON file. Returns an empty schema if missing — never a
-    minted identity.
+    """Load registry from JSON file; an empty schema with no metadata.id when missing or unreadable.
 
-    LOADING IS A READ. This function used to mint a fresh ``metadata.id`` for a
-    file that did not exist, on the reasoning that a missing registry IS a new
-    project. That reasoning was right about the defect and wrong about the
-    place. The shared resolver ``registry_discovery.find_registry`` returns
-    ``Path.cwd() / AIPASS_REGISTRY.json`` when nothing exists — a PATH for an
-    ABSENCE — so ``save_registry(p, load_registry(p))`` wrote a registry
-    carrying a brand-new project credential into whatever directory the caller
-    happened to be standing in (@memory, measured 2026-08-31). Nobody composed
-    it that way, but a load that invents a trust-anchor identity for a file that
-    is not there is a mint, and minting is a decision, not a fallback.
-
-    The decision now lives in ``resolve_project_credential``, which the two real
-    create sites call by name. The asymmetry the credential tests pin survives
-    intact, one layer over: absent means mint (when a creator asks for it),
-    unreadable never does — a file that exists but cannot be parsed is a project
-    whose credential we failed to read, and inventing a replacement would
-    re-credential a live project and orphan every passport carrying the real id.
-
-    Args:
-        registry_path: Path to AIPASS_REGISTRY.json
-
-    Returns:
-        Dict with metadata and branches list. No ``metadata.id`` unless the file
-        itself carried one.
-    """
+    Loading is a read: it never mints a credential. Minting is resolve_project_credential's decision;
+    inventing one for an unreadable file would re-credential a live project and orphan its passports."""
     registry_path = Path(registry_path)
     if not registry_path.exists():
-        # Said out loud. A silent empty document is exactly how the mint stayed
-        # invisible for as long as it did.
         logger.info(
             "[registry] %s does not exist — returning an empty document with NO credential. "
             "A project credential is minted only by resolve_project_credential(), never by a load.",
@@ -225,23 +132,8 @@ def load_registry(registry_path):
 def registry_is_writable_document(registry_path) -> bool:
     """Is this registry safe to run a read-modify-write cycle against?
 
-    ``load_registry`` answers a MISSING file and an UNREADABLE one the same way
-    — an empty document — because a reader has nothing better to say. A WRITER
-    does: appending one branch to that empty document and saving it replaces a
-    live project's whole ``branches`` list, and its ``metadata`` (credential
-    included) with a default. Measured 2026-09-07 on a temp project: a registry
-    holding 3 branches, corrupted mid-file, came back from ``add_to_registry``
-    holding 1 and no ``metadata.id``.
-
-    Missing is not unreadable. A missing registry is a project being created
-    (the create lane's own case, and it stays allowed); an unreadable one is a
-    project whose file we failed to parse, and every branch in it is still real.
-
-    Returns:
-        True when the file does not exist (nothing to lose) or parses into a
-        registry-shaped dict. False when it exists but cannot be read or is not
-        a JSON object — the caller must refuse to write.
-    """
+    True when missing (nothing to lose) or a JSON object; False when it exists but is unreadable.
+    load_registry answers both with an empty document, and writing that wipes every live branch."""
     registry_path = Path(registry_path)
     if not registry_path.exists():
         return True
@@ -253,32 +145,8 @@ def registry_is_writable_document(registry_path) -> bool:
 def resolve_project_credential(registry_path) -> str:
     """Return the project credential to stamp on a citizen being created here.
 
-    This is the explicit mint — the counterpart to ``load_registry`` no longer
-    doing it. Only a caller that KNOWS it is creating a citizen should call it,
-    because for a registry that does not exist yet the honest answer is "this is
-    a new project, here is its identity", and that sentence is only true when
-    somebody is actually founding one.
-
-    Three cases, and the middle one is the whole point of the split:
-
-      * registry ABSENT     -> mint a fresh UUID. Without it the project's first
-        citizen falls back to whatever registry discovery finds next, which is
-        AIPass's own id: a brand-new agent displaying a number from a project it
-        was never part of.
-      * registry PRESENT     -> hand back its own ``metadata.id``, untouched.
-        The project's lock is never re-issued.
-      * registry UNREADABLE  -> return "". Not absent, so not a new project;
-        inventing one here would orphan every passport already carrying the real
-        id.
-
-    Mints a value; writes nothing. Creating the file is the create step's job.
-
-    Args:
-        registry_path: Path to the project's ``*_REGISTRY.json``.
-
-    Returns:
-        The credential string, or "" when it cannot be established.
-    """
+    The explicit mint; call only when creating a citizen. Absent registry mints a fresh UUID,
+    present returns its metadata.id untouched, unreadable returns "" (never re-credential). Writes nothing."""
     registry_path = Path(registry_path)
     if not registry_path.exists():
         return str(uuid.uuid4())
@@ -287,16 +155,7 @@ def resolve_project_credential(registry_path) -> str:
 
 
 def save_registry(registry_path, data):
-    """
-    Save registry to JSON file. Auto-updates timestamp and sorts branches.
-
-    Args:
-        registry_path: Path to AIPASS_REGISTRY.json
-        data: Registry dict to save
-
-    Returns:
-        True on success, False on error
-    """
+    """Save registry to JSON file. Auto-updates timestamp and sorts branches."""
     registry_path = Path(registry_path)
     data["metadata"]["last_updated"] = datetime.now().strftime("%Y-%m-%d")
 
@@ -312,14 +171,7 @@ def save_registry(registry_path, data):
 
 
 def get_next_citizen_number(registry_path):
-    """Get next citizen number from registry (count of existing branches + 1).
-
-    Args:
-        registry_path: Path to AIPASS_REGISTRY.json
-
-    Returns:
-        int: Next citizen number
-    """
+    """Get next citizen number from registry (count of existing branches + 1)."""
     data = load_registry(registry_path)
     branches = data.get("branches", [])
     return len(branches_as_list(branches)) + 1
@@ -341,37 +193,9 @@ def _validate_path_containment(branch_path, registry_path):
 def add_to_registry(registry_path, branch_name, branch_path, profile, email, purpose="", citizen_id="", credential=""):
     """Add a new branch entry to the registry.
 
-    Mints a fresh per-citizen UUID for the entry's ``registry_id`` (the citizen
-    UID) unless the caller supplies one.  This is NOT the project credential —
-    that lives in ``metadata.id`` and is copied into passports separately.
-
-    ``citizen_id`` exists so a caller that has ALREADY stamped the id into the
-    citizen's passport can hand the same value here: the passport's
-    ``citizenship.citizen_id`` and this entry's ``registry_id`` are two copies
-    of one fact, and minting twice would silently produce two different ids for
-    the same citizen.  Callers with no passport to match (adoption) omit it.
-
-    Uses file locking around the entire read-modify-write cycle to prevent
-    corruption from concurrent spawns. Skips locking on Windows.
-
-    Args:
-        registry_path: Path to AIPASS_REGISTRY.json
-        branch_name: Uppercase branch name (e.g. "MY_AGENT")
-        branch_path: Absolute path to branch directory
-        profile: Profile string (e.g. "AIPass Workshop")
-        email: Branch email (e.g. "@my_agent")
-        purpose: Optional purpose description
-        citizen_id: Optional pre-minted per-citizen UUID. Empty string mints a
-            fresh one, which is the correct behaviour when no passport carries
-            the id yet.
-        credential: Optional project credential (``metadata.id``) to write when
-            the registry does not carry one yet. Supplied by a caller that has
-            ALREADY stamped it into a passport, so the file and the passport
-            agree. NEVER overwrites an id the registry already has.
-
-    Returns:
-        True if added, False if already exists or error
-    """
+    citizen_id: pass the id already in the passport; minting twice gives one citizen two ids.
+    credential: written only into a registry being created here, never over an existing metadata.id.
+    Returns True if added, False if already present or on error. Locked with fcntl on POSIX only."""
     registry_path = Path(registry_path)
 
     if not _validate_path_containment(branch_path, registry_path):
@@ -388,17 +212,10 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
     try:
-        # Whether the FILE existed decides who owns the credential, not whether
-        # the loaded dict has an id: load_registry mints one for a missing file,
-        # so a freshly minted id would otherwise look "already set" and shadow
-        # the caller's — leaving the passport claiming one credential and the
-        # registry carrying another. Two mints, one project, no agreement.
+        # Whether the file existed, not whether the dict has an id, decides who owns the credential.
         registry_existed = registry_path.exists()
 
-        # A registry that exists but cannot be parsed is not an empty registry.
-        # Refusing here is the whole guard: past this line the branch list is
-        # rebuilt from what load_registry returned, and for an unreadable file
-        # that is nothing at all.
+        # Past this line the branch list is rebuilt from load_registry, which is empty for an unreadable file.
         if not registry_is_writable_document(registry_path):
             logger.error(
                 "[registry] %s exists but could not be read as a registry document — refusing to add %s. "
@@ -410,9 +227,6 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
 
         registry = load_registry(registry_path)
 
-        # A registry the caller is creating adopts the caller's credential (the
-        # one already stamped into the passport). An EXISTING registry's id is
-        # the project's lock and is never touched here.
         if credential and not registry_existed:
             registry.setdefault("metadata", {})["id"] = credential
 
@@ -458,22 +272,7 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
 def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool | None:
     """Update passport.json registry_id if it doesn't match the current registry.
 
-    Call when adopting an existing agent or during sync-registry --fix to repair
-    registry_id mismatches caused by registry recreation.
-
-    Args:
-        branch_dir: Path to the branch directory (containing .trinity/passport.json)
-        registry_path: Path to the project registry (*_REGISTRY.json)
-
-    Returns:
-        True if the passport was updated. False if there was nothing to change:
-        no passport, no registry, a registry without an id, or ids already
-        equal. None if the fix FAILED: the registry or the passport could not
-        be read, or the passport could not be written. None is an answer the
-        success path never gives, so a caller can tell a failure from "already
-        correct" (spawn's decision, DPLAN-0354 leg 5); sync_registry names it
-        under ids_failed, adoption leaves it in this log.
-    """
+    True if updated, False if nothing to change, None if a read or write failed (never a success value)."""
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
         return False
@@ -498,7 +297,7 @@ def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool | No
             raise ValueError(f"passport at {passport_path} could not be read")
         old_id = passport.get("citizenship", {}).get("registry_id", "")
         if old_id == current_id:
-            return False  # Already correct, no update needed
+            return False
 
         passport.setdefault("citizenship", {})["registry_id"] = current_id
         if not json_handler.write_json(passport_path, passport):
@@ -518,24 +317,8 @@ def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool | No
 def pick_owner_branch(branches, project_root):
     """Select which branch entry should be the owner (no writes).
 
-    Canonical heuristic (first match wins):
-      1. citizen_class == "manager" (cosmetic preference, not the gate)
-      2. First agent by ``created`` date (ultimate fallback)
-
-    The passport ``citizenship.owner`` step that used to sit between these two
-    is GONE: R8 (DPLAN-0319) dropped that field from the 2.0 schema, because a
-    passport is self-declared and ownership is not. The registry ENTRY's
-    ``owner: true`` flag — a different field, written by
-    ``ensure_project_has_owner`` — remains the sealed authority. Step 1 still
-    reads the passport, but only for the cosmetic class preference.
-
-    Args:
-        branches: List of branch entry dicts.
-        project_root: Path to the project root (registry parent dir).
-
-    Returns:
-        The chosen branch entry dict, or None if branches is empty.
-    """
+    A manager-class passport wins (cosmetic preference, not the gate), else the earliest created.
+    Returns None when branches is empty."""
     if not branches:
         return None
 
@@ -553,11 +336,7 @@ def pick_owner_branch(branches, project_root):
 
 
 def ensure_project_has_owner(registry_path):
-    """Ensure exactly one branch entry in the registry has owner:true.
-
-    Uses ``pick_owner_branch`` for the canonical seating heuristic.
-    Writes to the REGISTRY ENTRY (sealed authority), not the passport.
-    """
+    """Ensure exactly one branch entry in the registry has owner:true (the entry, never the passport)."""
     registry_path = Path(registry_path)
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))
@@ -581,28 +360,8 @@ def ensure_project_has_owner(registry_path):
 def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
     """Set ``admin: true`` on the devpulse entry of the root registry.
 
-    The sanctioned write path for the owner's admin ceremony (DPLAN-0288),
-    mirroring ``ensure_project_has_owner``: authority is written to the
-    REGISTRY ENTRY, never to a passport a branch can edit on itself.
-
-    HARD FENCE: ``branch_name`` exists so the refusal is testable, not so
-    callers can choose a seat. Anything other than ``ADMIN_BRANCH`` is
-    refused by name — this helper can never grant admin to anyone else.
-
-    The flag alone grants NOTHING: the admin dispatch lane verifies five
-    legs (verified caller, cert path, cert content, signature, this flag).
-
-    Args:
-        registry_path: Path to the root ``AIPASS_REGISTRY.json``.
-            Auto-discovered via ``find_registry()`` when omitted.
-        branch_name: Must be devpulse (case-insensitive). Anything else refuses.
-
-    Returns:
-        Tuple of (status, reason) where status is one of:
-            "granted"  — flag newly written
-            "already"  — flag was already true, nothing written
-            "refused"  — nothing written, reason names why
-    """
+    branch_name exists so the refusal is testable; anything but ADMIN_BRANCH is refused by name.
+    Returns (status, reason), status one of "granted", "already", "refused" (nothing written)."""
     requested = (branch_name or "").strip().lower()
     if requested != ADMIN_BRANCH:
         reason = (
@@ -644,12 +403,7 @@ def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
 def backfill_owner_and_registry_id(registry_path):
     """Backfill owner and per-citizen registry_id into branch entries.
 
-    Mints a fresh UUID for any entry that is missing ``registry_id`` or
-    holds a stale project-id duplicate (same value as another entry).
-    Already-unique UUIDs are never touched.
-
-    Also seats owner via ``ensure_project_has_owner`` if missing.
-    """
+    Re-mints a missing or duplicated registry_id; an already-unique UUID is never touched."""
     registry_path = Path(registry_path)
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))
@@ -679,15 +433,9 @@ def backfill_owner_and_registry_id(registry_path):
 
 
 def get_owner(start_path=None):
-    """Return the branch entry dict whose owner==true, or None.
-
-    Walks up from start_path (default CWD) to find *_REGISTRY.json.
-    """
+    """Return the branch entry dict whose owner==true, or None."""
     registry_path = find_registry(start_path=start_path)
     if registry_path is None or not registry_path.exists():
-        # find_registry answers absence with None now (@aipass, 2026-08-31).
-        # No registry and an unwritten registry are the same answer here: nobody
-        # owns a project that does not exist.
         return None
     reg_data = load_registry(registry_path)
     for branch in branches_as_list(reg_data.get("branches", [])):
@@ -697,10 +445,7 @@ def get_owner(start_path=None):
 
 
 def is_owner(email, start_path=None):
-    """True iff email matches the owner entry's email.
-
-    Normalizes email — tolerates with/without leading '@'.
-    """
+    """True iff email matches the owner entry's email, with or without a leading '@'."""
     if not email:
         return False
     normalized = (email if email.startswith("@") else f"@{email}").lower()

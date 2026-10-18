@@ -3,7 +3,7 @@
 # Description: trinity_check rollover tabs: meta composing, todos pad, draft percent (split from test_trinity_check.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -29,12 +29,8 @@ from aipass.seedgo.tests.support_trinity_check import (
 
 pytestmark = pytest.mark.usefixtures("_mock_infrastructure")
 
-# @memory's renderer is resolved and imported at module scope, BEFORE the
-# autouse infrastructure mock swaps aipass.prax in sys.modules -- it reaches
-# into the real prax package at import time and cannot load through a
-# MagicMock. Presence is decided by looking for the file rather than by
-# catching an ImportError, so a genuine breakage in that module is never
-# swallowed as "unavailable".
+# @memory's renderer is imported at module scope, before the autouse mock swaps aipass.prax, and found by file
+# rather than by catching ImportError, so a real breakage there is never swallowed as "unavailable".
 _RENDERER_RELATIVE = ("src", "aipass", "memory", "apps", "modules", "door_tab_renderer.py")
 _compose_meta = None
 _COMPOSE_META_IMPORT_ERROR = "@memory door_tab_renderer.py is not on disk"
@@ -49,31 +45,8 @@ for _parent in Path(__file__).resolve().parents:
 _NO_COUNT_TAB = "⟦ rollover ON → no entry limit configured · summary ≤300 chars · draft to 240 ⟧"
 
 
-# ===========================================================================
-# F. Meta composition -- the two implementations must never drift apart
-# ===========================================================================
-
-
 def _both_composers(checker):
-    """The two inputs the cross-implementation guard needs, or a red naming what is gone.
-
-    THESE THREE ARMS USED TO SKIP (SELF-SKIP, cured 2026-09-07). Measured over
-    the whole class before the change: 28 of 28 parametrisations ran and none
-    skipped, so no arm protected anything. What they COULD do is silently retire
-    the guard - the one thing standing between @memory's composer and this
-    checker drifting apart - the moment a file moved. A guard that cannot run is
-    a guard that is not there, and the fleet would have learned that from a
-    green suite.
-
-    Args:
-        checker: The trinity checker under test.
-
-    Returns:
-        `(compose_meta, config, prose)`, all three non-None. The composer is
-        handed back rather than read from module scope at the call site, so the
-        caller gets a callable a type checker can see is not None - which is the
-        same fact the assertion below establishes, stated once.
-    """
+    """The two inputs the cross-implementation guard needs, or a red naming what is gone."""
     compose = _compose_meta
     assert compose is not None, (
         f"@memory's tab_renderer is the OTHER side of this guard and it is unreachable "
@@ -247,12 +220,7 @@ class TestMetaComposition:
     @pytest.mark.parametrize("branch_name", ["memory", "MEMORY", "Memory", "seedgo"])
     @pytest.mark.parametrize("section", ["todos", "key_learnings", "sessions", "observations"])
     def test_expected_meta_line_is_byte_identical_to_the_renderer(self, checker, branch_name, section):
-        """The cross-implementation guard: two composers, one string.
-
-        @memory's tab_renderer.compose_meta writes these lines; this checker
-        decides whether what it finds is right. If the two ever disagree the
-        fleet fails a group forever with nobody able to fix it.
-        """
+        """The cross-implementation guard: two composers, one string."""
         compose, config, prose = _both_composers(checker)
 
         mine = checker.expected_meta_line(section, branch_name, config, prose[section])
@@ -323,14 +291,7 @@ class TestMetaComposition:
 
 
 class TestTheTodosTabIsReadByShape:
-    """DPLAN-0345: the todos tab's ``next #N`` is derived when the tab is RENDERED.
-
-    Adding or deleting a todo does not re-render, so a correctly rendered file
-    disagrees with an N recomputed from today's pad until the next render
-    (@memory's shape contract, section 3). The Meta lines group reads that one
-    slot by shape -- a rendered int, or ``?`` -- and byte-matches everything
-    else, including the branch directory in the backlog path.
-    """
+    """DPLAN-0345: the todos tab's ``next #N`` is derived when the tab is RENDERED."""
 
     _PAD_HEAD = "⟦ pad of 10 · oldest roll to .backup/todo/testbranch/backlog.json · task ≤150 chars · draft to 120"
 
@@ -398,24 +359,8 @@ class TestTheTodosTabIsReadByShape:
         _assert_failed(check, "todos_meta does not byte-match")
 
 
-# ===========================================================================
-# THE DRAFT PERCENT IS READ FROM THE CONFIG, NEVER CARRIED HERE
-# ===========================================================================
-
-
 class TestTheDraftPercentIsRead:
-    """``_DRAFT_PERCENT = 80`` lived in trinity_groups for as long as @memory
-    published the number as a module constant with no key to read. It publishes
-    ``entry_limits.draft_percent`` as of 2026-09-16, so the last mirrored number
-    retired with the shape mirror before it.
-
-    Two claims, both behavioural, because CPython interns small ints and an
-    identity check could never tell a read from a copy: move the number in the
-    config and the tab moves with it; publish nothing usable and the tab carries
-    a marker while the group refuses LOUD, naming the key and its owner. A
-    checker that quietly agreed with @memory's regeneration seed would be
-    scoring files against a number nobody published.
-    """
+    """The draft percent is read from entry_limits.draft_percent in the config; with nothing usable published the group refuses loud."""
 
     @pytest.mark.parametrize(("percent", "draft"), [(80, 240), (50, 150), (100, 300), (1, 3), (33, 99)])
     def test_the_tab_moves_when_the_published_percent_moves(self, trinity, percent, draft):

@@ -1,18 +1,14 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-30
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Passport-based authorization for git operations.
 
-Identifies the calling branch by walking up from CWD to locate
-``.trinity/passport.json``. Read-only commands need only a valid passport.
-Write commands are authorized per-repo against that project's own registry:
-manager class, matching tenancy, owner flag, and a passport presented from the
-registry-recorded home. See ``_owner_tier_refusal`` for the full rule.
+Reference: docs/git_access.md
 """
 
 from __future__ import annotations
@@ -79,10 +75,8 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
     },
 }
 
-# The gh passthroughs split by subcommand (DPLAN-0356 leg 3, the owner's ruling of
-# 2026-09-30: only the admin writes, harmless reads stay fleet-wide). A read asks
-# the gate for the command itself (global tier); every write asks for
-# "<command>-write" (owner tier). A subcommand in neither list is refused.
+# A read asks the gate for the command (global tier), a write for "<command>-write"
+# (owner tier); a subcommand in neither list is refused.
 GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "issue": {
         "read": ("list", "view", "status"),
@@ -122,58 +116,38 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     return None
 
 
-# Owner-tier is earned, not listed (DPLAN-0281, the owner's ruling). A caller holds it
-# iff ALL of these hold — devpulse-in-AIPass qualifies through the general rule,
-# with no special case, and any project's manager qualifies in their own repo:
-#   1. passport citizen_class == manager
-#   2. tenancy: passport citizenship.registry_id == registry metadata.id  (F59 4.1)
-#   3. the registry for THAT repo lists the caller with owner: true
-#   4. path-binding: the passport lives at/under the registry-recorded path (F59 4.2a)
-#
-# Check 4 is the one that closes T-A: a rogue sub-agent can forge a passport naming
-# any branch and copy the registry id off local disk, but it cannot place that
-# passport inside the real manager's directory without defeating the pre-edit hook
-# layer and OS permissions first.
+# Owner-tier: manager class, matching tenancy, owner: true, and a passport under the
+# registry-recorded path, which a copied registry id alone cannot forge.
 _MANAGER_CLASS = "manager"
 
-# Rollback is one env var (F59 6.1). 'warn' logs the refusal and allows, for
-# migration triage; anything else enforces. Deliberately not a config file —
-# a rollback that needs an edit is not a rollback.
+# 'warn' logs authority refusals and allows; an env var because a rollback that needs an edit is not one.
 _AUTH_MODE_ENV = "AIPASS_GIT_AUTH_MODE"
 
-# Owner-tier verbs that encode AIPass's OWN dev→PR→main flow: they assume a `dev`
-# branch, our PR conventions, or pyproject versioning. Against an arbitrary project
-# repo they would half-run and leave a mess, so they refuse honestly until
-# translated. `commit` and `sync` translated in DPLAN-0281 P2; `tag` in DPLAN-0290
-# item 1 — an external seat tags its own HEAD, so it is no longer on this list.
-_AIPASS_FLOW_VERBS = frozenset({"dev-pr", "pr", "close-pr", "merge", "smart-sync", "fix", "delete-branch"})
+# These encode AIPass's own flow and would half-run in another project's repo.
+_AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch"})
 
-# Verbs that DO work from an external seat, named in the refusal so a manager who
-# hits one of the above learns what they can use instead of guessing.
-_TRANSLATED_VERBS = "'commit', 'sync' and 'tag'"
-
-# Owner-tier refuses for two reasons that are NOT interchangeable, and conflating
-# them cost us both a false page and a real hole:
-#   authority  — the caller is not, or cannot be shown to be, this repo's owner.
-#                Fault-shaped, so it logs ERROR, and warn-mode DOES lift it —
-#                rolling back the authority migration is exactly that switch's job.
-#   capability — the caller IS the proven owner; the verb simply is not translated
-#                for this repo yet (_AIPASS_FLOW_VERBS). Not a fault, so it logs
-#                WARNING for the same reason _resolve_caller does, and warn-mode
-#                must NOT lift it: this refusal predates that migration and exists
-#                to stop a half-run in someone else's repo, which no rollback wants.
+# authority: not shown to be the owner, ERROR, warn-mode lifts it.
+# capability: proven owner, untranslated verb, WARNING, warn-mode must NOT lift it.
 _AUTHORITY = "authority"
 _CAPABILITY = "capability"
 
 
-# Real git verbs drone deliberately does not expose — staging and remote work are
-# folded into higher-level commands. Without a pointer the refusal is a dead end.
+# Without a pointer the refusal of a real git verb is a dead end.
 _REROUTED_VERBS: dict[str, str] = {
     "add": "Staging is part of commit — use 'commit --all' or 'commit \"<msg>\" <files>'.",
     "push": "Use 'dev-pr' to push dev and open a PR. An external repo: 'push --repo <path>' (admin seat only).",
     "pull": "Use 'sync'.",
     "fetch": "Fetching is part of 'sync'. An external repo: 'fetch --repo <path>' (admin seat only).",
 }
+
+
+def external_owner_verbs() -> list[str]:
+    """The owner-tier verbs a project's manager may run in its own repo, in tier order, gh writes as '<cmd> <write>'."""
+    return [
+        verb.replace("-write", " <write>")
+        for verb in GIT_ACCESS_TIERS["owner"]["commands"]
+        if verb not in _AIPASS_FLOW_VERBS
+    ]
 
 
 def _rerouted_hint(command: str) -> str:
@@ -185,10 +159,7 @@ def _rerouted_hint(command: str) -> str:
 class Caller(NamedTuple):
     """An identified caller: who they claim to be, and where they said it from.
 
-    ``home`` is load-bearing — it is the directory the passport was found in, and
-    owner-tier binds authority to that location (F59 4.2a). A name alone is
-    self-reported and forgeable; a name plus a location the attacker cannot
-    occupy is not.
+    ``home`` is where the passport was found; owner-tier binds authority to it.
     """
 
     name: str
@@ -197,12 +168,7 @@ class Caller(NamedTuple):
 
 
 class Refusal(NamedTuple):
-    """Why owner-tier was refused, and which species of refusal it is.
-
-    ``kind`` is load-bearing, not decoration: it selects the log severity and
-    decides whether the warn-mode rollback may lift the refusal. See _AUTHORITY
-    and _CAPABILITY above.
-    """
+    """Why owner-tier was refused, and which species of refusal it is."""
 
     reason: str
     kind: str
@@ -211,15 +177,7 @@ class Refusal(NamedTuple):
 def _resolve_caller() -> Caller:
     """Walk up from CWD to find passport.json and return the caller's identity.
 
-    Raises PermissionError if no readable, named passport is found.
-
-    THE ONE SITE IN THIS SWEEP THAT FAILS CLOSED. Everywhere else "no current
-    directory" is the absence of a convenience and the answer is None. Here it
-    decides whether a caller may write to the repository, and an authority the
-    gate cannot establish is an authority the caller does not have — the same
-    answer it already gives when the walk finds no passport. What changed is
-    that it now arrives as a stated refusal instead of an ENOENT traceback out
-    of the middle of a credential check.
+    Raises PermissionError if no readable, named passport is found, or there is no cwd (fails closed).
     """
     cwd = caller_cwd()
     if cwd is None:
@@ -256,11 +214,7 @@ def _resolve_caller() -> Caller:
             break
         current = parent
 
-    # WARNING, not ERROR: the gate failing closed on a non-branch CWD is designed
-    # behaviour, not a fault. Logged loud enough to diagnose, quiet enough not to
-    # page anyone (@trigger log-fix 906263c8ff2e). The caller's cwd is the one
-    # fact that identifies WHO tripped the gate; trigger's normalizer collapses
-    # it to <path>, so repeat signatures stay unified across callers.
+    # WARNING: failing closed on a non-branch cwd is designed behaviour, not a fault.
     msg = f"No .trinity/passport.json found in directory hierarchy (caller cwd: {cwd}) — cannot verify caller"
     logger.warning(msg)
     raise PermissionError(msg)
@@ -281,12 +235,7 @@ def _citizen_class(passport: dict) -> str:
 def _registry_entry(registry_data: dict, name: str) -> dict | None:
     """Find a branch's entry in a registry, case-insensitively.
 
-    Registries differ on casing — AIPass records 'devpulse', Vera-Studio 'VERA' —
-    and ``_load_registry_data`` lowercases the keys only for the LIST shape it
-    normalizes. A registry authored as a dict is passed through untouched, keys
-    and all, so a plain lowercase lookup would miss 'VERA' and read as "not
-    listed" — a denial that has nothing to do with authority. Both shapes are
-    matched case-insensitively (F59 4.1: wrap the shared loader, don't change it).
+    The loader lowercases keys only for the list shape; a dict registry keeps 'VERA' as written.
     """
     branches = registry_data.get("branches", {})
     key = name.lower()
@@ -304,12 +253,7 @@ def _registry_entry(registry_data: dict, name: str) -> dict | None:
 def _resolve_location(path: Path) -> Path:
     """Resolve a path the owner gate binds authority to: the registry's directory or a recorded home.
 
-    Product reason: the gate's one door to ``Path.resolve``, so both anchors of
-    path-binding resolve the same way and every failure is caught at the gate.
-    Test reason, said plainly: a resolve failure cannot be built in tmp_path on
-    every host (a symlink loop raises RuntimeError on 3.12, nothing on 3.13, and
-    symlinks are not portable), so tests replace this name rather than pathlib's
-    process-wide ``Path.resolve``.
+    Tests patch this name: a resolve failure cannot be built portably in tmp_path.
     """
     return path.resolve()
 
@@ -317,15 +261,8 @@ def _resolve_location(path: Path) -> Path:
 def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     """Resolve a registry entry's recorded path, or None when it records none.
 
-    Registries record these relative ('src/aipass/devpulse'), and
-    ``_load_registry_data`` resolves them to absolute — but only for the LIST
-    shape it normalizes. A dict-authored registry arrives with its paths exactly
-    as written, so resolve here too rather than trusting the loader to have done
-    it: an unresolved relative path would resolve against CWD and bind authority
-    to wherever the caller happened to be standing.
-
-    Raises OSError when a recorded path is present but cannot be resolved, so
-    that failure is never reported as an entry that records no path.
+    Resolved against repo_root: a dict registry keeps relative paths, which would bind to CWD.
+    Raises OSError when a present path cannot be resolved, never None ("records no path").
     """
     raw = entry.get("path")
     if not raw:
@@ -336,15 +273,10 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     try:
         return _resolve_location(recorded)
     except OSError as exc:
-        # Raised, not None: None reads downstream as "records no path", which would
-        # send someone hunting a registry entry that is in fact present and fine.
         logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
         raise
     except RuntimeError as exc:
-        # Python 3.12 answers a symlink loop in a non-strict resolve with
-        # RuntimeError, not OSError. Raised as OSError so the owner gate's refusal
-        # catches it: a failure is a refusal, never a traceback out of the gate.
-        # Named by its own type: RecursionError is a RuntimeError too, and not a loop.
+        # Python 3.12 raises RuntimeError for a symlink loop; re-raised as OSError so the gate refuses.
         logger.warning("Registry path %s could not be resolved: %s: %s", recorded, type(exc).__name__, exc)
         raise OSError(f"{type(exc).__name__}: {exc}") from exc
 
@@ -352,13 +284,7 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
 def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
     """Return why owner-tier is refused for this caller, or None if authorized.
 
-    Every branch names the check that refused, so a passport/registry drift is
-    diagnosable from a single log line instead of a bisect. Fails CLOSED: any
-    check that cannot be completed is a refusal, never a silent pass.
-
-    Each refusal also carries its species (_AUTHORITY vs _CAPABILITY), because
-    the caller has to know whether it is looking at a fault or at an untranslated
-    verb — they differ in severity and in whether warn-mode may lift them.
+    Fails CLOSED: a check that cannot complete is a refusal naming that check.
     """
     citizen_class = _citizen_class(caller.passport)
     if citizen_class != _MANAGER_CLASS:
@@ -374,10 +300,7 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
         registry_path = get_registry_path()
         registry_data = load_registry()
     except RegistryMismatchError as exc:
-        # The shared loader runs its own credential check and raises before
-        # returning, so it lands here rather than at the tenancy check below.
-        # Same verdict, named the same way — a refusal must not depend on which
-        # layer happened to notice first.
+        # The loader's own credential check; same verdict as the tenancy check below.
         logger.warning("owner-tier refused for '%s': registry credential mismatch: %s", caller.name, exc)
         return Refusal(
             f"caller '{caller.name}' does not hold citizenship in this project's registry ({exc})", _AUTHORITY
@@ -413,13 +336,10 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
     if entry.get("owner") is not True:
         return Refusal(f"caller '{caller.name}' is listed in {registry_path.name} without owner: true", _AUTHORITY)
 
-    # The registry file's own directory is the repo root by construction, which
-    # keeps path-binding anchored to the SAME registry the checks above used.
+    # Anchors path-binding to the SAME registry the checks above used.
     try:
         repo_root = _resolve_location(registry_path.parent)
     except (OSError, RuntimeError) as exc:
-        # Fails CLOSED as a named refusal: before, this resolve sat outside any try,
-        # and a loop or an unreadable parent left the gate as a traceback.
         logger.warning(
             "Registry directory %s could not be resolved: %s: %s", registry_path.parent, type(exc).__name__, exc
         )
@@ -450,12 +370,11 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
             _AUTHORITY,
         )
 
-    # Reached only once all four authority checks have PASSED, so the caller is a
-    # proven owner and this is purely a missing translation — hence _CAPABILITY.
+    # Must stay after the authority checks: only a proven owner gets _CAPABILITY.
     if registry_path.name != AIPASS_REGISTRY_NAME and command in _AIPASS_FLOW_VERBS:
         return Refusal(
-            f"'{command}' encodes AIPass's own dev→PR→main flow and is not translated for "
-            f"external repos yet — {_TRANSLATED_VERBS} work here today (DPLAN-0281 P2, DPLAN-0290)",
+            f"'{command}' encodes AIPass's own flow and is not translated for external repos yet — "
+            f"these work here: {', '.join(external_owner_verbs())}",
             _CAPABILITY,
         )
 
@@ -465,18 +384,7 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
 def verify_git_access(command: str) -> str:
     """Check if the calling branch is authorized for this git command.
 
-    Uses GIT_ACCESS_TIERS to determine access level. Global-tier commands are
-    available to all branches. Owner-tier is earned per-repo: the caller must be
-    a manager, of THIS project, listed as its owner, presenting a passport from
-    its registry-recorded home (DPLAN-0281). No branch is hardcoded — devpulse
-    holds git in AIPass through the same rule that gives any project's manager
-    git in theirs.
-
-    Returns:
-        The caller's branch name if authorized.
-
-    Raises:
-        PermissionError: If the caller is not authorized for this command.
+    Returns the caller's branch name; raises PermissionError when refused. No branch is hardcoded.
     """
     global_cmds = GIT_ACCESS_TIERS["global"]["commands"]
     owner_tier = GIT_ACCESS_TIERS["owner"]
@@ -494,12 +402,7 @@ def verify_git_access(command: str) -> str:
         refusal = _owner_tier_refusal(command, caller_info)
         warn_only = os.environ.get(_AUTH_MODE_ENV, "").strip().lower() == "warn"
         if refusal and refusal.kind == _CAPABILITY:
-            # A proven owner meeting an untranslated verb. Not a fault, so it warns
-            # rather than pages — and warn_only is deliberately not consulted: the
-            # authority rollback has no business re-arming a half-run in someone
-            # else's repo. Says "cannot run", not "not authorized", because this
-            # caller IS authorized and sending them to audit their passport would
-            # be a false trail.
+            # warn_only is not consulted here; "cannot run", since this caller IS authorized.
             msg = f"Branch '{caller_info.name}' cannot run '{command}' in this repo: {refusal.reason}."
             logger.warning(msg)
             raise PermissionError(msg)
@@ -508,8 +411,6 @@ def verify_git_access(command: str) -> str:
             logger.error(msg)
             raise PermissionError(msg)
         if refusal:
-            # Rollback mode: record exactly what enforcement WOULD have refused,
-            # so the blast radius is read off the logs rather than guessed at.
             logger.warning(
                 "git auth warn-mode: '%s' for '%s' would be denied under enforcement: %s",
                 command,

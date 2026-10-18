@@ -3,39 +3,15 @@
 # Description: Birth-certificate admin grant — keygen, mint (sign), verify (FPLAN-0401)
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 Birth-certificate admin grant for devpulse (DPLAN-0288 / FPLAN-0401).
 
-The owner's ruling: devpulse — and only devpulse — holds an admin privilege
-that lets it dispatch ANY agent, manager-class citizens included. The grant
-rides on devpulse's EXISTING birth certificate (``artifacts/
-birth_certificate.json``, SYSTEM-minted at spawn, in spawn's
-``_NEVER_UPDATE_FILES``, untracked by git): the owner's ceremony adds a
-``privileges`` block and an HMAC-SHA256 ``signature`` computed with a key
-that lives OUTSIDE every repo (``~/.aipass/admin_grant.key``).
-
-THE CONTRACT (single source of truth: FPLAN-0401) — verify has 5 legs, ALL
-must pass, every refusal is named, missing key = lane dark:
-
-  1. caller   — verified caller IS devpulse (env rail only, never CLI flags)
-  2. cert     — read from the REGISTRY entry's path, never caller-supplied
-  3. content  — owner/type/privileges.admin all correct
-  4. signature— HMAC-SHA256 over the canonical cert-minus-signature payload
-  5. registry — devpulse entry carries ``admin: true``
-
-This module is the CEREMONY TOOLING and the reference implementation of the
-contract. It does not run the ceremony — the owner does, via
-``drone @devpulse admin_grant``. @ai_mail mirrors the same contract for the
-dispatch lane (their code, their tests).
-
-Security note (honest threat model): every agent on this machine shares one
-OS user, so a determined process could read the key. The signature's job is
-tamper-EVIDENCE and accident-proofing — editing a JSON field can happen by
-drift; forging an HMAC cannot happen by accident and is loud in any
-transcript. Never log or print key material.
+The contract lives in FPLAN-0401 and @ai_mail mirrors it for the dispatch lane: change both sides together.
+The key is outside every repo but readable by the shared OS user: the HMAC is tamper evidence, not secrecy.
+Never log or print key material.
 """
 
 import hmac
@@ -51,7 +27,6 @@ from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.module_root import module_file
 
-# Branch root: .../src/aipass/devpulse (this file sits at apps/handlers/owner/)
 _BRANCH_ROOT = module_file(__file__).parents[3]
 
 DEFAULT_KEY_PATH = Path.home() / ".aipass" / "admin_grant.key"
@@ -61,27 +36,14 @@ ADMIN_HOLDER = "devpulse"  # constant by design — the grant is not parameteriz
 SIGNATURE_ALGO = "hmac-sha256"
 
 
-# =============================================================================
-# CANONICAL PAYLOAD + KEY HANDLING
-# =============================================================================
-
-
 def canonical_payload(cert: dict) -> bytes:
-    """Canonical signing payload: full cert WITHOUT ``signature``, sorted keys.
-
-    Per THE CONTRACT: json.dumps(sort_keys=True, separators=(",", ":"),
-    ensure_ascii=True), utf-8 encoded. Deterministic across writers.
-    """
+    """Canonical signing payload: full cert WITHOUT ``signature``; the contract's exact dumps, so writers agree."""
     unsigned = {k: v for k, v in cert.items() if k != "signature"}
     return json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
 
 def _read_key(key_path: Path) -> bytes | None:
-    """Read key bytes (64 hex chars -> 32 bytes). None if missing/invalid.
-
-    Invalid content is treated as missing (lane dark) but logged — a corrupt
-    key file must fail closed, never sign or verify anything.
-    """
+    """Read key bytes (64 hex chars -> 32 bytes). None if missing/invalid: a corrupt key fails closed."""
     if not key_path.exists():
         return None
     try:
@@ -96,17 +58,8 @@ def compute_signature(cert: dict, key: bytes) -> str:
     return hmac.new(key, canonical_payload(cert), hashlib.sha256).hexdigest()
 
 
-# =============================================================================
-# CEREMONY OPERATIONS (keygen / mint)
-# =============================================================================
-
-
 def generate_key(key_path: Path = DEFAULT_KEY_PATH, force: bool = False) -> tuple[bool, str]:
-    """Create the signing key (64 hex chars, 0600). Refuses to overwrite.
-
-    Returns:
-        (ok, message) — message never contains key material.
-    """
+    """Create the signing key (64 hex chars, 0600). Refuses to overwrite; the message never holds key material."""
     if key_path.exists() and not force:
         return False, f"key already exists at {key_path} — refusing to overwrite (use force)"
 
@@ -123,12 +76,7 @@ def mint_grant(
     key_path: Path = DEFAULT_KEY_PATH,
     granted_by: str = "owner",
 ) -> tuple[bool, str]:
-    """Add the admin privilege block to the birth certificate and sign it.
-
-    Idempotent: re-minting re-signs with a fresh ``granted`` date. The cert
-    must already exist (SYSTEM-minted at spawn) and belong to devpulse —
-    this tool never creates certificates and never signs anyone else's.
-    """
+    """Add the admin privilege block to devpulse's existing birth certificate and sign it; never creates one."""
     key = _read_key(key_path)
     if key is None:
         return False, f"no signing key at {key_path} — run keygen first"
@@ -161,19 +109,8 @@ def mint_grant(
     return True, f"admin grant minted + signed on {cert_path}"
 
 
-# =============================================================================
-# VERIFICATION — the 5-leg contract check
-# =============================================================================
-
-
 def _resolve_verified_caller() -> str:
-    """Resolve the caller from the env rail ONLY (drone router sets these).
-
-    Returns the normalized branch name, or "" when unverifiable. Bare process
-    cwd is deliberately NOT consulted — an unverified caller never satisfies
-    the admin check (fail closed). Passport ``branch_info.branch_name`` wins
-    over the directory name when readable.
-    """
+    """Resolve the caller from the env rail ONLY, or "": the process cwd is never consulted (fail closed)."""
     branch = os.environ.get("AIPASS_CALLER_BRANCH", "")
     if branch:
         return branch.lstrip("@").lower()
@@ -209,19 +146,12 @@ def verify_admin_grant(
     key_path: Path = DEFAULT_KEY_PATH,
     registry_path: Path | None = None,
 ) -> tuple[bool, str]:
-    """Full 5-leg verification per THE CONTRACT. Reference implementation.
-
-    Returns:
-        (ok, reason) — reason names the failed leg, or "admin grant verified"
-        on success. Every failure path is a named refusal; nothing passes by
-        default.
-    """
-    # Leg 1 — caller identity (env rail only)
+    """Full 5-leg verification per THE CONTRACT: (ok, reason naming the failed leg); nothing passes by default."""
     caller = _resolve_verified_caller()
     if caller != ADMIN_HOLDER:
         return False, f"leg1 caller: verified caller is {caller or 'unverifiable'!r}, not {ADMIN_HOLDER}"
 
-    # Leg 5's registry doubles as leg 2's path source — load it first.
+    # The cert path comes from the registry entry, never from the caller.
     registry_file = registry_path or _find_registry(_BRANCH_ROOT)
     if registry_file is None or not registry_file.exists():
         return False, "leg2 cert-path: AIPASS_REGISTRY.json not found"
@@ -245,7 +175,6 @@ def verify_admin_grant(
     if not cert_path.exists():
         return False, f"leg2 cert-path: no birth certificate at registry-recorded home {entry_path}"
 
-    # Leg 3 — cert content
     try:
         cert = json.loads(cert_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -256,7 +185,6 @@ def verify_admin_grant(
     if cert.get("privileges", {}).get("admin") is not True:
         return False, "leg3 content: certificate carries no admin privilege"
 
-    # Leg 4 — signature
     key = _read_key(key_path)
     if key is None:
         return False, f"leg4 signature: no signing key at {key_path} — lane dark until ceremony"
@@ -266,7 +194,6 @@ def verify_admin_grant(
     if not hmac.compare_digest(signature["value"], compute_signature(cert, key)):
         return False, "leg4 signature: signature mismatch — certificate tampered or foreign key"
 
-    # Leg 5 — registry roster flag
     if entry.get("admin") is not True:
         return False, f"leg5 registry: {ADMIN_HOLDER} entry lacks admin flag (ceremony incomplete)"
 

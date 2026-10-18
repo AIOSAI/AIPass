@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog schedule handler + router integration
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
@@ -24,14 +24,8 @@ from aipass.devpulse.apps.handlers.watchdog import schedule as schedule_handler
 from aipass.devpulse.apps.modules import watchdog as wd_mod
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# parse_schedule — wall-clock
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 @pytest.fixture
 def fixed_now():
-    # 2026-04-14 10:00:00 — any 02:00 target is "past", any 14:30 is "future".
     return datetime(2026, 4, 14, 10, 0, 0)
 
 
@@ -51,7 +45,6 @@ def test_parse_schedule_with_seconds(fixed_now):
 
 
 def test_parse_schedule_midnight_rolls_tomorrow(fixed_now):
-    # 00:00 is strictly before 10:00 today -> tomorrow.
     target = schedule_handler.parse_schedule("00:00", now=fixed_now)
     assert target == datetime(2026, 4, 15, 0, 0, 0)
 
@@ -62,15 +55,9 @@ def test_parse_schedule_end_of_day_same_day(fixed_now):
 
 
 def test_parse_schedule_equal_to_now_rolls_tomorrow(fixed_now):
-    # Target equal to now is "past" by policy — rolls forward so a caller
-    # who says "wake at 10:00" at 10:00 sharp gets tomorrow, not "now".
+    # Equal to now is "past" by policy: "wake at 10:00" said at 10:00 sharp means tomorrow.
     target = schedule_handler.parse_schedule("10:00", now=fixed_now)
     assert target == datetime(2026, 4, 15, 10, 0, 0)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# parse_schedule — relative
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -86,11 +73,6 @@ def test_parse_schedule_equal_to_now_rolls_tomorrow(fixed_now):
 def test_parse_schedule_relative(fixed_now, text, delta_seconds):
     target = schedule_handler.parse_schedule(text, now=fixed_now)
     assert target == fixed_now + timedelta(seconds=delta_seconds)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# parse_schedule — invalid
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -115,11 +97,6 @@ def test_parse_schedule_invalid(text):
 def test_parse_schedule_none_raises():
     with pytest.raises(ValueError):
         schedule_handler.parse_schedule(None)  # type: ignore[arg-type]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# format_wait
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_format_wait_hours_and_minutes():
@@ -149,11 +126,6 @@ def test_format_wait_overdue():
 def test_format_wait_zero():
     now = datetime(2026, 4, 14, 10, 0, 0)
     assert schedule_handler.format_wait(now, now) == "in 0s"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# wake_at — injected clock
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 class _FakeClock:
@@ -205,11 +177,6 @@ def test_wake_at_real_short_relative():
     assert result["command"] is None
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# wake_at — command execution
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_wake_at_runs_echo_command():
     start = datetime(2026, 4, 14, 10, 0, 0)
     clock = _FakeClock(start, step_seconds=5.0)
@@ -241,26 +208,16 @@ def test_wake_at_nonexistent_command():
         now_fn=clock,
     )
 
-    # shell=True routes through /bin/sh which reports 127 for not-found.
     assert result["command_exit_code"] != 0
     assert result["command"] == "this-command-does-not-exist-xyz-123"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Chunked sleep
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_wake_at_sleeps_in_chunks(monkeypatch):
-    """Long waits sleep in chunks of at most 5.0s, never once; mutant chunk 5.5 reddens it.
+    """Long waits sleep in chunks of at most 5.0s, never once.
 
-    Only schedule's own ``time`` name is swapped (a namespace carrying the fake
-    sleep): patching time.sleep itself is process-wide and raced the prax
-    logger's daemon threads.
+    Only schedule's own ``time`` is swapped: time.sleep itself is process-wide.
     """
     start = datetime(2026, 4, 14, 10, 0, 0)
-    # Real-time clock — no advancement per call — so wake_at relies on sleep.
-    # We fake sleep to advance our synthetic clock instead.
     state = {"now": start}
 
     def fake_clock():
@@ -273,17 +230,11 @@ def test_wake_at_sleeps_in_chunks(monkeypatch):
     monkeypatch.setattr(schedule_handler, "time", SimpleNamespace(sleep=sleep_mock))
     schedule_handler.wake_at("+30s", now_fn=fake_clock)
 
-    # Each chunk is capped at 5.0 seconds, so 30s -> >= 6 calls.
     max_chunk = 5.0
     assert sleep_mock.call_count >= 6
     for call in sleep_mock.call_args_list:
         (value,) = call.args
         assert value <= max_chunk + 0.0001
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Router integration
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture

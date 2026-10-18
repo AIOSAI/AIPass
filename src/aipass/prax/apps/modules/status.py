@@ -3,14 +3,10 @@
 # Description: PRAX Status Command
 # Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Status Module
-
-Implements the 'status' command using handle_command interface.
-"""
+"""PRAX Status Module"""
 
 import os
 import sys
@@ -46,17 +42,8 @@ def print_help():
 def _format_last_scan(last_scan: dict | None) -> str:
     """One line describing the last discovery scan.
 
-    There used to be a `File Watcher: Active/Inactive` line here. It reported
-    `is_file_watcher_active()`, which answers for the CALLING process — and the
-    status command never started a watcher, so it read "Inactive" on every run
-    while discovery was perfectly healthy. A field that is always wrong is worse
-    than no field. Since DPLAN-0339 step 4 discovery is a scheduled scan, so the
-    honest facts are when it last ran and what it changed.
-
-    None is load_last_scan's answer for a registry it could not read, said as
-    such: printed as "never" it sent the operator to scan a registry that had
-    been scanned (prax, leg 7).
-    """
+    No watcher line: is_file_watcher_active() answers for the calling process, never this one.
+    None (unreadable registry) must not print as "never"."""
     if last_scan is None:
         return "unreadable — the registry could not be read; see the prax log"
     if not last_scan:
@@ -69,23 +56,11 @@ def _format_last_scan(last_scan: dict | None) -> str:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle status command
-
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command was handled
-    """
+    """Handle status command"""
     if command != "status":
         return False
 
-    # --- sub-command routing ------------------------------------------------
-    # A dashed help flag ANYWHERE wins — `status sync -h` asks about sync, and
-    # answering it by running the sync is the wrong reply. It also has to beat
-    # the unknown-argument refusal below: a question is never a bad argument.
+    # A help flag anywhere wins: before the sync verb and before the unknown-argument refusal.
     if wants_help(args):
         print_help()
         return True
@@ -94,13 +69,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         json_handler.log_operation("status_checked", {"subcommand": "sync"})
         return _handle_sync()
 
-    # An unknown sub-argument was the quietest swallow of them all: `status
-    # bogus` printed the normal status block with no complaint and exited 0,
-    # so a typo'd subcommand was indistinguishable from the real thing.
+    # Refuse, never swallow: a typo'd subcommand must not print the normal block and exit 0.
     if args:
         refuse("status", args[0], "drone @prax status --help")
 
-    # --- default: show PRAX system status (bare 'status') ---
     json_handler.log_operation("status_checked", {"subcommand": "show"})
     status = get_system_status()
 
@@ -139,8 +111,7 @@ def _handle_sync() -> bool:
     synced = result["branches_synced"]
     missing = result["branches_missing"]
 
-    # The scan is real; the write is not. Saying "written" over a file that is
-    # deliberately absent is the shape of report this branch refuses to print.
+    # The scan is real, the write is not: never report "written".
     warning(
         f"Nothing written — {len(synced)} branches scanned",
         details=result.get("reason", ""),
@@ -171,7 +142,6 @@ def print_introspection():
 
 
 if __name__ == "__main__":
-    # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_help()
         sys.exit(0)

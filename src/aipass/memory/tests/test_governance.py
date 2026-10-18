@@ -3,7 +3,7 @@
 # Description: Surfacing governance module — state API, rejection paths, command exit seam
 # Version: 1.0.2
 # Created: 2026-07-16
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/governance.py (pure state-in/state-out API)."""
@@ -26,11 +26,6 @@ from aipass.memory.apps.modules.governance import (
 )
 
 
-# =============================================================================
-# new_state
-# =============================================================================
-
-
 class TestNewState:
     def test_returns_zeroed_state(self):
         state = new_state()
@@ -44,11 +39,6 @@ class TestNewState:
         s2 = new_state()
         s1["surfaced_ids"].append("x")
         assert s2["surfaced_ids"] == []
-
-
-# =============================================================================
-# should_surface — rejection paths
-# =============================================================================
 
 
 class TestShouldSurfaceRejections:
@@ -104,11 +94,6 @@ class TestShouldSurfaceRejections:
         assert ok is False
         assert "already" in reason.lower()
         assert st is ready_state
-
-
-# =============================================================================
-# should_surface — happy path
-# =============================================================================
 
 
 class TestShouldSurfaceHappy:
@@ -175,11 +160,6 @@ class TestShouldSurfaceHappy:
         assert ok is True
 
 
-# =============================================================================
-# The record switch — a caller that wants the verdict alone writes no log line
-# =============================================================================
-
-
 class TestTheRecordSwitchKeepsTheSurfaceOffTheLog:
     def test_a_surface_with_record_off_writes_no_log_line(self, monkeypatch):
         written = []
@@ -196,11 +176,6 @@ class TestTheRecordSwitchKeepsTheSurfaceOffTheLog:
         ok, _, _ = should_surface("compass-8", 0.9, state, current_time=10.0)
         assert ok is True
         assert [entry[0] for entry in written] == ["governance_surface"]
-
-
-# =============================================================================
-# State isolation — two independent states do not bleed
-# =============================================================================
 
 
 class TestStateIsolation:
@@ -235,11 +210,6 @@ class TestStateIsolation:
         assert state["surfaced_ids"] == ["a", "b"]
 
 
-# =============================================================================
-# record_message
-# =============================================================================
-
-
 class TestRecordMessage:
     def test_increments_counter(self):
         state = new_state()
@@ -265,11 +235,6 @@ class TestRecordMessage:
         assert updated["surfaced_ids"] == ["x"]
 
 
-# =============================================================================
-# Config merging
-# =============================================================================
-
-
 class TestConfigMerging:
     def test_none_config_uses_defaults(self):
         state = new_state()
@@ -291,18 +256,8 @@ class TestConfigMerging:
         assert DEFAULT_CONFIG["cooldown_seconds"] == 300
 
 
-# ===========================================================================
-# The exit seam — a refusal that exits 0 is half a refusal
-# ===========================================================================
-
-
 class TestTheUnknownSubcommandRefusalReachesTheExitCode:
-    """The fleet refusal sweep, 2026-09-07: `governance <bogus>` exited 0.
-
-    Printed through `warning()`, which marks nothing, so the entry point's
-    `resolve_exit(True)` read a clean command and returned 0 — a caller asking
-    whether the verb existed was told yes. Same sentence, through `error()`.
-    """
+    """`governance <bogus>` must exit 2: a refusal through `warning()` marks nothing and exits 0."""
 
     def test_an_unknown_subcommand_exits_two(self, capsys):
         reset_command_state()

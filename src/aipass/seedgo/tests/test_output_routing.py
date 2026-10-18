@@ -3,7 +3,7 @@
 # Description: Unit tests for output_routing_check
 # Version: 1.1.0
 # Created: 2026-07-09
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/output_routing_check.py."""
@@ -20,20 +20,12 @@ from aipass.seedgo.apps.handlers.aipass_standards import output_routing_check
 from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _pin_bypass_log(monkeypatch):
     """Point is_bypassed's json_handler at a mock for every test here.
 
-    The bypass tests call the real is_bypassed, which appends to the
-    repo-tracked seedgo_json/utils_log.json via the json_handler global in
-    its OWN module -- xdist workers racing on that shared file corrupt it
-    (JSONDecodeError: Extra data). sys.modules patching never reaches a
-    function's globals, so the pin must land on the utils module object.
+    The real one appends to the tracked utils_log.json, which xdist workers corrupt; sys.modules
+    patching never reaches a function's globals, so the pin lands on the utils module object.
     """
     mock_handler = MagicMock()
     mock_handler.log_operation = MagicMock(return_value=True)
@@ -49,11 +41,6 @@ def _check_line(tmp_path, code: str) -> dict:
 
 _ONE_HIT = "1 raw status output(s) on lines 1"
 _CLEAN = "All user-facing status output uses @cli helpers"
-
-
-# ===========================================================================
-# 1. Status-print detection, one line at a time, through check_module
-# ===========================================================================
 
 
 class TestIsStatusConsolePrint:
@@ -151,11 +138,6 @@ class TestIsStatusConsolePrint:
         assert result["checks"][0]["message"] == _CLEAN
 
 
-# ===========================================================================
-# 2. File scanning — docstrings, comments, line numbers, through check_module
-# ===========================================================================
-
-
 class TestScanFile:
     """What the _scan_file pass over a file hands check_module."""
 
@@ -221,11 +203,6 @@ class TestScanFile:
         assert result["passed"] is False
         assert result["checks"][0]["name"] == "File readable"
         assert result["checks"][0]["message"].startswith("Error reading file: cannot read:")
-
-
-# ===========================================================================
-# 3. check_module — full checker
-# ===========================================================================
 
 
 class TestCheckModule:
@@ -303,11 +280,6 @@ class TestCheckModule:
         f.write_text("".join(lines), encoding="utf-8")
         result = output_routing_check.check_module(str(f))
         assert "and 3 more" in result["checks"][0]["message"]
-
-
-# ===========================================================================
-# 4. False-positive avoidance
-# ===========================================================================
 
 
 class TestFalsePositiveAvoidance:

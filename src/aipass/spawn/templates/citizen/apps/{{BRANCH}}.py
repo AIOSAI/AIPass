@@ -8,13 +8,6 @@
 
 """
 {{BRANCHNAME}} Branch - Main Orchestrator
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Routes commands to discovered modules automatically
-- No manual imports or routing needed
-
-Entry point contains no business logic - modules implement functionality.
 """
 
 import importlib
@@ -27,9 +20,7 @@ from typing import Any, List, Tuple
 # so a later setdefault would name the wrong branch in every log line.
 os.environ.setdefault("AIPASS_BRANCH_NAME", "{{BRANCH}}")
 
-# Rich markup below is non-ASCII (bullets, em dashes). On Windows the console
-# defaults to cp1252, which raises UnicodeEncodeError mid-render - help output
-# dies partway through instead of printing. Force UTF-8 before any console use.
+# Rich markup below is non-ASCII; a cp1252 Windows console raises UnicodeEncodeError mid-render.
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
     for _stream in (sys.stdout, sys.stderr):
@@ -42,26 +33,12 @@ from aipass.prax import logger
 
 __version__ = "1.0.0"
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
 def discover_modules() -> List[Any]:
-    """Auto-discover modules in modules/ directory.
-
-    Every module is imported by its package path only. The local-layout
-    fallback (apps.modules.<stem>) was removed in canary's fleet green leg 1
-    and ported to this template in spawn's leg 10: this file imports aipass.*
-    above, so the package is always importable, and a module that failed under
-    its package name failed again under the local one and was logged by the
-    wrong name.
-
-    Returns:
-        List of imported modules exposing handle_command().
-    """
+    """Auto-discover modules in modules/ directory, imported by package path only."""
     modules: List[Any] = []
 
     if not MODULES_DIR.exists():
@@ -84,22 +61,12 @@ def discover_modules() -> List[Any]:
 
 
 def _module_summary(module: Any) -> Tuple[str, str]:
-    """Return the short name and one-line description of a discovered module.
-
-    Args:
-        module: An imported module object.
-
-    Returns:
-        Tuple of (name, first docstring line or a placeholder).
-    """
+    """Return the short name and one-line description of a discovered module."""
     name = module.__name__.split(".")[-1]
     doc = (module.__doc__ or "").strip()
     return name, doc.split("\n")[0] if doc else "No description"
 
 
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
 
 
 def print_introspection() -> None:
@@ -161,22 +128,10 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
 
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """Route command to appropriate module.
-
-    Args:
-        command: Command name.
-        args: Remaining arguments for the module.
-        modules: Discovered modules to try in order.
-
-    Returns:
-        True if a module handled the command, False otherwise.
-    """
+    """Route command to appropriate module; True if a module handled it."""
     for module in modules:
         try:
             if module.handle_command(command, args):
@@ -187,15 +142,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 def _print_subcommand_help(command: str, modules: List[Any]) -> bool:
-    """Show a subcommand's own help without executing it.
-
-    Args:
-        command: The subcommand the caller asked about.
-        modules: Discovered modules to try in order.
-
-    Returns:
-        True if a module rendered its help, False if the command is unknown.
-    """
+    """Show a subcommand's own help without executing it; False if the command is unknown."""
     if route_command(command, ["--help"], modules):
         return True
 
@@ -203,17 +150,10 @@ def _print_subcommand_help(command: str, modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
 
 
 def main() -> int:
-    """Main entry point - routes commands or shows help.
-
-    Returns:
-        0 on success, 1 on an unknown command.
-    """
+    """Main entry point - routes commands or shows help; 0 on success, 1 on an unknown command."""
     args = sys.argv[1:]
 
     if not args:
@@ -233,9 +173,7 @@ def main() -> int:
 
     modules = discover_modules()
 
-    # Subcommand help must never execute the command. Checked BEFORE routing,
-    # on `remaining` rather than the raw argv, so `{{BRANCH}} <cmd> --help`
-    # shows that subcommand's help instead of running it.
+    # Checked before routing: subcommand help must never execute the command.
     if remaining and remaining[0] in ("--help", "-h"):
         return 0 if _print_subcommand_help(command, modules) else 1
 

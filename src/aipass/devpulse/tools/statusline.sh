@@ -2,7 +2,6 @@
 # AIPass statusline — pretty, context-aware
 input=$(cat)
 
-# Extract fields
 dir=$(echo "$input" | jq -r '.workspace.current_dir // ""')
 model=$(echo "$input" | jq -r '.model.display_name // "?"')
 ctx=$(echo "$input" | jq -r '.context_window.remaining_percentage // empty')
@@ -11,7 +10,6 @@ lines_add=$(echo "$input" | jq -r '.cost.total_lines_added // 0')
 lines_rm=$(echo "$input" | jq -r '.cost.total_lines_removed // 0')
 session=$(echo "$input" | jq -r '.session_name // empty')
 
-# Colors
 RST='\033[0m'
 DIM='\033[2m'
 BOLD='\033[1m'
@@ -22,9 +20,8 @@ CYAN='\033[36m'
 MAGENTA='\033[35m'
 WHITE='\033[97m'
 
-# Branch identity — a citizen is wherever a passport is, not a path shape.
-# Walk up from cwd looking for .trinity/passport.json (covers src/aipass/*
-# AND projects/* citizens); path patterns only as fallback for non-citizens.
+# A citizen is wherever a passport is (src/aipass/* and projects/*), not a path shape;
+# path patterns are only the fallback for non-citizens.
 branch=""
 probe="$dir"
 while [ -n "$probe" ] && [ "$probe" != "/" ] && [ "$probe" != "$HOME" ]; do
@@ -46,7 +43,6 @@ if [ -z "$branch" ]; then
     fi
 fi
 
-# Context color — green > 50%, yellow 20-50%, red < 20%
 ctx_color="$GREEN"
 if [ -n "$ctx" ]; then
     if [ "$ctx" -lt 20 ] 2>/dev/null; then
@@ -56,7 +52,6 @@ if [ -n "$ctx" ]; then
     fi
 fi
 
-# Build context bar (10 chars wide)
 bar=""
 if [ -n "$ctx" ]; then
     used=$((100 - ctx))
@@ -68,16 +63,12 @@ if [ -n "$ctx" ]; then
     bar+="]${RST}"
 fi
 
-# Shorten model name
 short_model=$(echo "$model" | sed 's/Claude //')
 
-# Git branch
 git_branch=$(git -C "$dir" branch --show-current 2>/dev/null)
 
-# Build output
 out=""
 
-# Branch or directory
 if [ -n "$branch" ]; then
     out+="${CYAN}@${branch}${RST}"
 else
@@ -85,38 +76,16 @@ else
     out+="${DIM}${short_dir}${RST}"
 fi
 
-# Git branch
 if [ -n "$git_branch" ]; then
     out+=" ${DIM}(${RST}${YELLOW}${git_branch}${RST}${DIM})${RST}"
 fi
 
-# Watchdog status — the truth, not a hope (DPLAN-0317 r4; was DPLAN-0308 r2).
-# FIRST segment after the branch, deliberately: narrow terminals (the phone
-# face) truncate the tail of this line, and the watchdog word is the one
-# The owner must never lose.
-#
-# r4 DELETED THE DETECTION DAEMON. This block had to change in the same breath
-# or it would have painted red forever against a perfectly healthy watchdog:
-# WD_HB used to be touched only by the daemon, so "no daemon" would have been
-# permanently true. The WIRE owns the heartbeat now (touches it every ~5s;
-# stale >15s means the wire process itself is stuck), and a live wire IS the
-# whole of the coverage — there is no second process to be up.
-#
-# Green watchdog:in ONLY when BOTH hold:
-#   1. a live wire is registered for THIS session (registry pid alive + session match)
-#   2. that wire is actually ticking (heartbeat fresher than 15s)
-# A wire that looks armed and is not ticking is red — that corpse is the failure
-# this line exists to expose.
-#
-# Since Claude Code 2.1.271 the wire is the one-shot `baseline --once` under
-# background Bash (wrapper "background"); the Monitor tool lost `persistent` and
-# kills every watch at 30 minutes (DPLAN-0348). Both wrappers paint green. The
-# continuous wire refuses background Bash before it registers, so a registered
-# "background" wire is always a one-shot.
-#
-# NO wire is the designed resting state now — nothing out, nothing armed — so it
-# paints dim `idle`, not red. Red on every quiet hour trains the eye to skip red.
-# What this line cannot see: work that is out with no wire armed reads `idle` too.
+# Watchdog sits first after the branch: narrow terminals truncate the tail of this line.
+# The wire owns the heartbeat (touched every ~5s; stale past 15s means the wire is stuck).
+# Green only when a live wire is registered for THIS session AND the heartbeat is fresh;
+# armed but not ticking is red. Both wrappers count: "monitor" and the one-shot "background".
+# No wire is the resting state: dim idle, not red, or red stops being read.
+# Blind spot: work that is out with no wire armed also reads idle.
 WD_HB="/tmp/aipass-watchdog-active"
 WD_REG="$HOME/Projects/AIPass/src/aipass/devpulse/.watchdog/watchdog_active.json"
 wd_session=$(echo "$input" | jq -r '.session_id // empty')
@@ -140,8 +109,7 @@ fi
 if [ "$wd_wire" = 1 ] && [ "$wd_beat" = 1 ]; then
     out+=" ${DIM}│${RST} ${GREEN}watchdog:in${RST}"
 elif [ "$wd_wire" = 1 ]; then
-    # Registered, pid alive, not ticking. The most dangerous corpse: it looks
-    # signed-in everywhere else.
+    # Registered and alive but not ticking: looks signed-in everywhere else.
     out+=" ${DIM}│${RST} ${RED}watchdog:HUNG${RST}"
 elif [ "$wd_beat" = 1 ]; then
     # Another session is signed in — sign in here to take over.
@@ -150,39 +118,31 @@ else
     out+=" ${DIM}│${RST} ${DIM}watchdog:idle${RST}"
 fi
 
-# Separator
 out+=" ${DIM}│${RST} "
 
-# Model
 out+="${MAGENTA}${short_model}${RST}"
 
-# Separator
 out+=" ${DIM}│${RST} "
 
-# Context
 if [ -n "$ctx" ]; then
     out+="${ctx_color}${ctx}%${RST} ${bar}"
 else
     out+="${DIM}...${RST}"
 fi
 
-# Cost (if any)
 if [ -n "$cost" ] && [ "$cost" != "0" ]; then
     cost_fmt=$(printf "%.2f" "$cost" 2>/dev/null || echo "$cost")
     out+=" ${DIM}│${RST} ${DIM}\$${cost_fmt}${RST}"
 fi
 
-# Lines changed
 if [ "$lines_add" -gt 0 ] 2>/dev/null || [ "$lines_rm" -gt 0 ] 2>/dev/null; then
     out+=" ${DIM}│${RST} ${GREEN}+${lines_add}${RST}${DIM}/${RST}${RED}-${lines_rm}${RST}"
 fi
 
-# Session name if set
 if [ -n "$session" ]; then
     out=" ${DIM}[${RST}${WHITE}${session}${RST}${DIM}]${RST} ${out}"
 fi
 
-# Hook activity — show last hook if fired within 3 seconds
 HOOK_FILE="/tmp/aipass-hook-last"
 if [ -f "$HOOK_FILE" ]; then
     hook_data=$(cat "$HOOK_FILE" 2>/dev/null)

@@ -3,16 +3,12 @@
 # Description: Unit tests for the dashboard display and command handlers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the display and command handlers of apps/modules/dashboard.py."""
 
-# Split out of test_operations.py (2026-10-08), whole classes: print_status,
-# print_template, print_introspection, print_help, handle_command,
-# _handle_refresh, _caller_dir and main. The dashboard module is bound once at
-# the top; the conftest fixture _dashboard_quiet doubles its logger and json
-# service before every test (prax, leg 12).
+# conftest's _dashboard_quiet doubles the dashboard module's logger and json service per test.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations_refresh.py
@@ -25,11 +21,6 @@ from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.prax.tests.support_test_operations import _load_dashboard_module, _Screen
 
 pytestmark = pytest.mark.usefixtures("_dashboard_quiet")
-
-
-# =============================================
-# print_status (dashboard.py)
-# =============================================
 
 
 class TestPrintStatus:
@@ -77,11 +68,6 @@ class TestPrintStatus:
         assert self._screen.read().printed == []
 
 
-# =============================================
-# print_template (dashboard.py)
-# =============================================
-
-
 class TestPrintTemplate:
     """Tests for print_template -- CLI template display."""
 
@@ -101,11 +87,6 @@ class TestPrintTemplate:
         assert "Dashboard Template Structure" in screen.printed
         block = screen.out.split("=" * 50 + "\n", 1)[1]
         assert json.loads(block) == mod.DASHBOARD_TEMPLATE
-
-
-# =============================================
-# print_introspection (dashboard.py)
-# =============================================
 
 
 class TestDashboardPrintIntrospection:
@@ -128,11 +109,6 @@ class TestDashboardPrintIntrospection:
             assert any(section in line for line in printed), f"section {section} not listed"
 
 
-# =============================================
-# print_help (dashboard.py)
-# =============================================
-
-
 class TestDashboardPrintHelp:
     """Tests for print_help -- CLI help output."""
 
@@ -151,11 +127,6 @@ class TestDashboardPrintHelp:
         assert len(printed) > 5
         for command in ("status", "template", "refresh", "push-template", "diff-template", "template-status"):
             assert any(line.strip().startswith(command) for line in printed), f"{command} not documented"
-
-
-# =============================================
-# handle_command (dashboard.py)
-# =============================================
 
 
 class TestDashboardHandleCommand:
@@ -257,11 +228,7 @@ class TestDashboardHandleCommand:
             mock_ts.assert_called_once()
 
     def test_unknown_subcommand_shows_help(self):
-        """Unknown subcommand is refused by name instead of printing help and exiting 0.
-
-        `drone @prax dashboard refrsh` silently did nothing and reported success
-        (@devpulse's fleet CLI sweep, 2026-09-07).
-        """
+        """Unknown subcommand is refused by name instead of printing help and exiting 0."""
         mod = _load_dashboard_module()
 
         with pytest.raises(UnknownArgument) as refusal:
@@ -269,11 +236,6 @@ class TestDashboardHandleCommand:
 
         assert refusal.value.verb == "dashboard"
         assert refusal.value.token == "bogus"
-
-
-# =============================================
-# _handle_refresh (dashboard.py)
-# =============================================
 
 
 class TestHandleRefresh:
@@ -397,11 +359,8 @@ class TestHandleRefresh:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        # _handle_refresh walks UP from cwd looking for a DASHBOARD.local.json
-        # or .aipass marker. Without one directly in tmp_path, the walk keeps
-        # going past the sandbox and can match an ancestor the test never
-        # built (a home directory's own .aipass, say) — planting the marker
-        # here is what makes tmp_path itself the first, and only, match.
+        # _handle_refresh walks UP from cwd for a marker; planting one here stops the walk
+        # at tmp_path instead of an ancestor's .aipass the test never built.
         (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
         # The caller's directory outranks the process cwd; under drone it is set.
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
@@ -439,12 +398,7 @@ class TestHandleRefresh:
         self._screen.assert_one_error("Failed: no dashboard")
 
     def test_bare_refresh_refreshes_the_callers_branch_not_prax(self, tmp_path, monkeypatch):
-        """drone runs prax with cwd at prax, so the caller's branch comes from AIPASS_CALLER_CWD.
-
-        Measured 2026-09-11: a bare `drone @prax dashboard refresh` from
-        src/aipass/flow refreshed PRAX. Here the process cwd is a prax that has
-        its own dashboard, exactly as under drone.
-        """
+        """drone runs prax with cwd at prax, so the caller's branch comes from AIPASS_CALLER_CWD."""
         from unittest.mock import patch as _patch
 
         mod = _load_dashboard_module()
@@ -504,7 +458,7 @@ class TestCallerDir:
             seen.append(caller)
             return tmp_path / "flow"
 
-        # Through the command (prax, leg 6): the caller directory is what refresh hands the resolver.
+        # The caller directory is what refresh hands the resolver.
         monkeypatch.setattr(mod, "resolve_branch_path", _record)
         monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: {"status": "success", "branch": "FLOW"})
 
@@ -512,11 +466,6 @@ class TestCallerDir:
             mod.handle_command("dashboard", ["refresh", "@flow"])
 
         assert seen == [tmp_path]
-
-
-# =============================================
-# main (dashboard.py)
-# =============================================
 
 
 class TestDashboardMain:

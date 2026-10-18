@@ -3,24 +3,13 @@
 # Description: Canary tests that literal [placeholders] survive Rich rendering
 # Version: 1.1.0
 # Created: 2026-08-10
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
 
-# Rendered-output canaries for square-bracket placeholders.
-#
-# Rich treats ``[word]`` as a style tag, so an UNESCAPED literal placeholder is
-# consumed silently: ``drone @prax monitor run [branches]`` renders as
-# ``drone @prax monitor run`` with no error and no visible gap. Every test here
-# renders through the product's own Rich console, read back with capsys, and
-# asserts the bracketed text is still in the output — a mocked console records
-# the call but never renders, so it cannot catch this class.
-#
-# Covers:
-# - monitor.print_help() — the ``[branches]`` argument placeholder
-# - prax.print_help() — the ``[options]`` usage placeholder
-# - log_health._display_rates() — the ``[branch]`` attribution tag on every row
+# Rich swallows an unescaped ``[word]`` as a style tag, silently. These render through
+# the product's real console: a mocked console records the call but never renders.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — prax.py's main() on each flag, covered by tests/test_help_flag_safety.py
@@ -50,11 +39,6 @@ def render(capsys):
     return _render
 
 
-# ---------------------------------------------------------------------------
-# Help-surface placeholders
-# ---------------------------------------------------------------------------
-
-
 class TestHelpPlaceholders:
     """Placeholders in --help output must reach the terminal."""
 
@@ -73,7 +57,7 @@ class TestHelpPlaceholders:
         assert "[options]" in output
 
     def test_monitor_help_documents_commons_feed(self):
-        """Commons feed mode is discoverable from --help (devpulse 62dcd0cc)."""
+        """Commons feed mode is discoverable from --help."""
         output = self._render(monitor, lambda m: m.print_help())
         assert "monitor run commons" in output
 
@@ -83,11 +67,6 @@ class TestHelpPlaceholders:
         for line in output.splitlines():
             if line.strip().startswith("filter"):
                 pytest.fail(f"help advertises an unhandled Mission Control command: {line.strip()}")
-
-
-# ---------------------------------------------------------------------------
-# Scoped banner
-# ---------------------------------------------------------------------------
 
 
 class TestScopedBannerRenders:
@@ -110,11 +89,6 @@ class TestScopedBannerRenders:
 
     def test_unscoped_banner_unchanged(self):
         assert "all branches, all levels, no filters" in self._banner([])
-
-
-# ---------------------------------------------------------------------------
-# log-health branch attribution
-# ---------------------------------------------------------------------------
 
 
 class TestLogHealthBranchTag:
@@ -166,13 +140,7 @@ class TestLogHealthBranchTag:
 
 
 class TestHelpCoversEveryCommand:
-    """Top-level --help must name every command the router can actually reach.
-
-    log-health shipped, worked, and was absent from --help entirely: the only
-    way to discover it was to already know it existed. A help surface that
-    omits a working command is the same defect as one that advertises a dead
-    flag, pointed the other way.
-    """
+    """Top-level --help must name every command the router can actually reach."""
 
     @pytest.fixture(autouse=True)
     def _keep_render(self, render):

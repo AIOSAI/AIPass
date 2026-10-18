@@ -3,7 +3,7 @@
 # Description: Unit tests for skills runner
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # Category: skills/tests
 # =============================================
 
@@ -24,18 +24,13 @@ from aipass.skills.apps.modules.runner import handle_command, run_skill
 
 class TestRunSkillHandler:
     def test_the_run_command_prints_the_disk_report_to_stdout(self, capsys):
-        # Mutant killed 2026-09-27: handle_command's console.print loop removed.
+        # Pins handle_command's console.print loop.
         assert handle_command("run", ["system_status", "disk"]) is True
         out, err = capsys.readouterr()
         assert "  Disk Usage (/)" in out
         assert err == ""
 
-    # No platform guards below this line. Until 2026-09-12 these four carried
-    # skipif(win32) because the skill read /proc; the guard named Windows and
-    # the host that actually went red every run was macOS, which the predicate
-    # never mentioned (FPLAN-0554, runs 34704362515 / 34707099650). The skill
-    # asks psutil now, which answers on every host this project supports, so a
-    # skip here would hide a portable path rather than protect one.
+    # No platform guards below: the skill asks psutil, which answers on every supported host.
 
     def test_run_system_status_memory(self):
         result = run_skill("system_status", action="memory")
@@ -96,7 +91,6 @@ class TestRunSkillReturnContract:
         assert "success" in result
         assert "output" in result
         assert "error" in result
-        # Verify values are correct, not just keys
         assert result["success"] is True
         assert "Disk Usage" in result["output"]
         assert result["error"] is None
@@ -106,7 +100,6 @@ class TestRunSkillReturnContract:
         assert isinstance(result["success"], bool)
         assert isinstance(result["output"], str)
         assert result["error"] is None
-        # Content assertions — not just types
         assert result["success"] is True
         assert len(result["output"]) > 0
         assert "Disk Usage" in result["output"]
@@ -116,38 +109,18 @@ class TestRunSkillReturnContract:
         assert isinstance(result["success"], bool)
         assert isinstance(result["output"], str)
         assert isinstance(result["error"], str)
-        # Content assertions — not just types
         assert result["success"] is False
         assert "not found" in result["error"].lower()
         assert result["output"] == ""
 
 
-# ---------------------------------------------------------------------------
-# The macOS half, manufactured on this Linux box
-#
-# There is no Mac here, so the host that went red is built rather than waited
-# for (FPLAN-0554, runs 34704362515 / 34707099650). The world has three parts
-# and all three are load-bearing:
-#
-#   the handler's platform is darwin - the host names itself honestly, through
-#                                     the handler's _host_platform seam
-#   every /proc read is refused     - what makes the world discriminating; the
-#                                     pre-cure handler read /proc itself and
-#                                     goes red under exactly this fixture
-#   psutil is a stand-in            - not a shortcut around the denial. psutil's
-#                                     Linux backend reads /proc through plain
-#                                     open(), so leaving the real one in place
-#                                     would have manufactured a failure no Mac
-#                                     can have: there psutil answers from the
-#                                     kernel, not from procfs.
-# ---------------------------------------------------------------------------
-
+# A macOS host built on Linux: platform darwin, every /proc read refused, psutil a stand-in
+# (real psutil on Linux reads /proc, a failure no Mac can have).
 PROC_ROOT = "/proc"
 PROC_MEMINFO = "/proc/meminfo"
 GIB = 1024**3
 
-# macOS: no buffers, no cached. Linux has both. The handler prints them where
-# the platform has them, so both shapes are held here.
+# macOS has no buffers/cached, Linux has both; the handler prints them only where present.
 _VirtualDarwin = namedtuple("svmem", ["total", "available", "percent", "used", "free", "active", "inactive", "wired"])
 _VirtualLinux = namedtuple(
     "svmem",
@@ -157,12 +130,7 @@ _Swap = namedtuple("sswap", ["total", "used", "free", "percent", "sin", "sout"])
 
 
 class _PsutilStandIn:
-    """A psutil stand-in that answers from its own numbers, never from the host.
-
-    That is the whole point: 8 GB of memory and three processes are values this
-    machine does not have, so an assertion on them can only pass if the handler
-    asked psutil.
-    """
+    """A psutil stand-in with numbers this host lacks, so an assertion passes only if the handler asked it."""
 
     def __init__(self, virtual, swap, pids, boot_time):
         self._virtual = virtual
@@ -223,8 +191,7 @@ def darwin_host(monkeypatch, status_handler, audit_guard):
     """A host with no /proc, with psutil answering the way it does on a Mac."""
 
     def _deny_proc(event, args):
-        # "open" covers builtins.open, io.open, os.open and pathlib; the two
-        # directory reads are their own events. Every route, no name replaced.
+        # "open" covers every file route; the two directory reads are their own events.
         if event not in ("open", "os.listdir", "os.scandir") or not isinstance(args[0], (str, os.PathLike)):
             return
         text = os.fspath(args[0])
@@ -326,12 +293,7 @@ class TestSystemStatusOffLinux:
 
 
 class TestSummaryIsHonestAboutAFailedSection:
-    """Row B: a partial report is not a good answer.
-
-    The old `_summary` returned success=True with the failures in an Errors
-    trailer, so a caller that checks `success` read a disk line as a system
-    report.
-    """
+    """A partial report is not a good answer: a caller checking `success` must see the failure."""
 
     def test_a_failed_section_makes_the_summary_fail(self, monkeypatch, status_handler):
         broken = _PsutilWithBrokenMemory(None, _darwin_swap(), [1, 2], time.time() - 90061)

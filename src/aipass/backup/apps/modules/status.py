@@ -3,16 +3,13 @@
 # Description: Status module — show backup status for a project, as a page or one JSON object
 # Version: 1.3.0
 # Created: 2026-04-23
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Status Module — display backup info and recent history for a project.
 
-``status <root> --json [--sizes]`` answers the backup door's contract
-(src/aipass/devpulse/docs.local/backup_door_contract.md, "@backup: status
---json"): one JSON object on stdout and nothing else there. Its ``running``
-list (DPLAN-0412, "running") is read from the project's running files; a stale
-one is dropped and removed by the read. The page form names the running lanes too.
+``status <root> --json`` answers the backup door's contract (devpulse's backup_door_contract.md):
+one JSON object on stdout and nothing else there.
 """
 
 import json
@@ -47,9 +44,7 @@ from aipass.backup.apps.handlers.state.progress import read_running
 MODULE_NAME = "status"
 PRIMARY_COMMAND = "status"
 
-#: The lanes the contract reports, in its order. Each one's last run is read
-#: from the project's changelog by its ``mode``; drive_sync writes its entry
-#: after a run whose uploads all succeeded.
+#: The lanes the contract reports, in its order; each one's last run is its changelog ``mode``.
 LANES = ("snapshot", "versioned", "drive_sync")
 FLAGS = ("--json", "--sizes")
 
@@ -100,17 +95,8 @@ def _last_runs(changelog: list[dict]) -> dict:
 def build_status(project_root: str, sizes: bool = False) -> dict:
     """Build the contract's status object for one project root.
 
-    Args:
-        project_root: Absolute path to an existing project directory.
-        sizes: Walk both stores and add the ``store`` key.
-
-    Returns:
-        The status object, keys in the contract's order.
-
-    Raises:
-        InvalidDocument: The config, changelog or Drive tracker is unreadable.
-            (A running file that cannot be read is stale, never an error.)
-        OSError: A store directory could not be listed while measuring sizes.
+    Raises InvalidDocument (config, changelog or tracker unreadable; a bad running file is
+    stale, never an error) or OSError (a store directory unlistable while measuring sizes).
     """
     config = load_project_config(project_root)
     changelog = load_changelog(project_root)
@@ -171,11 +157,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
@@ -228,8 +211,6 @@ def handle_command(command: str, args: list) -> bool:
     logger.info(f"[backup] Status shown for {project_root}")
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

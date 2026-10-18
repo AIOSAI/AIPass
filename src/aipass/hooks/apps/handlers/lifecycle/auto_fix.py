@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -23,11 +23,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 SKIP_EXTENSIONS = {".md", ".txt", ".log", ".csv", ".html"}
 
-# Untracked working ground: where agents are meant to try things. The lane's rows are the
-# shipped tree's; on a probe they read as an order to dress it with a META block and a layer,
-# and a recorded type error would fence the seat's next edit (devpulse 320d5948, three
-# sightings on two seats). Matched on whole directory names. Not "every git-ignored path":
-# .trinity/ is ignored, and its JSON is exactly what the corruption check guards.
+# Untracked working ground where agents try things: the tree's rows would fence a probe. Whole dir names only.
+# Not "every git-ignored path": .trinity/ is ignored, and its JSON is exactly what the corruption check guards.
 SCRATCH_DIRS = {"docs.local", "dropbox", ".backup", ".archive"}
 _HARNESS_ROOT = re.compile(r"claude(-\d+)?")
 
@@ -35,9 +32,7 @@ _HARNESS_ROOT = re.compile(r"claude(-\d+)?")
 def _scratch_ground(file_path: str) -> str | None:
     """The scratch ground *file_path* lies in, None when it is the tree's.
 
-    The harness scratchpad is a ``scratchpad`` directory below a ``claude-<uid>`` one
-    (<temp>/claude-<uid>/<project>/<session>/scratchpad/); a ``scratchpad`` without that
-    root is a tree directory like any other.
+    The harness scratchpad counts only below a ``claude-<uid>`` root; a bare ``scratchpad`` is a tree directory.
     """
     dirs = [part for part in file_path.replace("\\", "/").split("/") if part][:-1]
     for part in dirs:
@@ -58,15 +53,7 @@ PYTHON_PATTERNS = {
         "message": "Return None for error states, not error_msg string",
     },
     "open_no_encoding": {
-        # Word-boundary matched: a bare substring test reads the `open(` inside
-        # `subprocess.Popen(` as an open() call. @drone reported it firing on
-        # every edit to a file that has a Popen and no open() at all — six
-        # times across six unrelated edits, with no fix available on their side
-        # (Popen takes no encoding in byte mode) and an advisory that says "do
-        # not skip or defer". A check that cries wolf on correct code gets
-        # ignored on the day it is right.
-        # \b before `open` also excludes fdopen/popen/reopen, while `.` is a
-        # non-word char so io.open( and os.open( still match.
+        # Word-boundary matched: a bare substring reads `subprocess.Popen(` as open(; `io.open(` still matches.
         "pattern": "open(",
         "word_boundary": True,
         "requires_missing": "encoding=",
@@ -188,10 +175,7 @@ def _run_python_checks(file_path: str) -> list[str]:
 
 
 def _no_answer(unanswered: list[str] | None, check: str, why: str) -> None:
-    """A check that did not judge the file answers None, and says why (devpulse's decision B, leg 4).
-
-    The caller logs the arm; this records the check and the why for the advisory line.
-    """
+    """A check that did not judge the file answers None, and says why (devpulse's decision B, leg 4)."""
     if unanswered is not None:
         unanswered.append(f"{check} ({why})")
 
@@ -199,9 +183,7 @@ def _no_answer(unanswered: list[str] | None, check: str, why: str) -> None:
 def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = None) -> list[dict] | None:
     """ruff's errors in *file_path*, [] when it judged the file clean.
 
-    None when ruff did not judge the file: a provider hook file it skips by design, a
-    return code that is no answer, an empty or unparseable answer, a timeout, any other
-    failure. The why is appended to *unanswered*.
+    None when ruff did not judge the file (skipped, no answer, timeout); the why goes to *unanswered*.
     """
     if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return _no_answer(unanswered, "ruff", "skipped: a provider hook file")
@@ -241,9 +223,7 @@ def _run_ruff_lint_structured(file_path: str, unanswered: list[str] | None = Non
 def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> list[dict] | None:
     """pyright's errors in *file_path*, [] when it judged the file clean.
 
-    None when pyright did not judge the file: a provider hook file it skips by design,
-    an unparseable answer, pyright not installed, a timeout, any other failure. The why
-    is appended to *unanswered*.
+    None when pyright did not judge the file (skipped, not installed, timeout); the why goes to *unanswered*.
     """
     if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return _no_answer(unanswered, "pyright", "skipped: a provider hook file")
@@ -253,7 +233,7 @@ def _run_pyright_check(file_path: str, unanswered: list[str] | None = None) -> l
             capture_output=True,
             text=True,
             timeout=15,
-            # The file's project root, not the session cwd a scratch module can shadow (memory leg 9).
+            # The file's project root, not the session cwd a scratch module can shadow.
             cwd=importlib.import_module("aipass.hooks.apps.modules.diagnostics_state").pyright_cwd(file_path),
         )
         try:
@@ -286,9 +266,7 @@ _CHECKLIST_MARKER_FALLBACK = "[FAIL]"
 def _load_checklist_module():
     """Import @seedgo's checklist module, where the finding marker is published.
 
-    A seam: the tests are the reason it exists. They replace this function by name
-    in place of patching importlib.import_module, which replaces it process-wide.
-    It changes no verdict. The decision is hooks', leg 4.
+    A seam: tests replace it by name instead of patching importlib.import_module process-wide.
     """
     return importlib.import_module("aipass.seedgo.apps.modules.checklist")
 
@@ -296,18 +274,7 @@ def _load_checklist_module():
 def _checklist_marker() -> str:
     """The token @seedgo's checklist prints on a finding — read, never restated.
 
-    This consumer grepped for a cross for months after checklist stopped
-    printing one. @seedgo changed the marker to plain ASCII for a good reason
-    (@spawn scripted against the cross, got zero hits across all 18 files of a
-    branch, and nearly deleted 41 bypass rules on that "proof") and the reader
-    was not moved with it. The failure was silent by construction: an empty list
-    reads exactly like a clean file, so the gate reported compliance while
-    catching nothing.
-
-    Reading the constant off the owner's module is the fix for the SPECIES, not
-    just this instance — the next marker change cannot silently disagree with
-    this file. When seedgo is not importable at all, fall back and SAY SO: a
-    quiet fallback is how the first one lasted.
+    A restated marker once went stale silently: an empty list reads like a clean file. So the fallback is loud.
     """
     try:
         checklist = _load_checklist_module()
@@ -331,10 +298,7 @@ def _checklist_marker() -> str:
 def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
     """Pull findings out of checklist output, rejoining Rich's wrapped lines.
 
-    The output is laid out for a human at a fixed console width, so a long
-    detail continues on the next line WITHOUT the marker. Reading one line per
-    finding truncated the detail mid-sentence — the standard's name survived and
-    the reason for the finding did not.
+    Laid out for a fixed console width, a long detail continues on the next line without the marker.
     """
     findings: list[str] = []
     current: str | None = None
@@ -371,13 +335,7 @@ def _run_seedgo_checklist(file_path: str) -> list[str]:
             timeout=15,
             cwd=aipass_home,
         )
-        # The exit code carries nothing: checklist never calls sys.exit on a
-        # standards failure, so it returns 0 with eight findings on stdout
-        # (measured 2026-08-30). Discarding output on a non-zero code would
-        # therefore throw away the ONLY signal there is the moment seedgo ever
-        # does start exiting non-zero — the same drift that produced the marker
-        # bug, pre-armed. Parse the text either way; report a non-zero code
-        # rather than act on it.
+        # checklist exits 0 even with findings: parse stdout whatever the code, and only log a non-zero one.
         if result.returncode != 0:
             logger.info(
                 "[HOOKS] auto_fix: seedgo checklist exited %d for %s (parsing stdout anyway)",
@@ -395,9 +353,7 @@ def _run_seedgo_checklist(file_path: str) -> list[str]:
 def _record_diagnostics(seat: str, file_path: str, answers: list[list[dict] | None]) -> None:
     """Record what the structured checks found, in this seat's own entry alone.
 
-    Errors found are written. The entry is removed only when every check judged the file
-    and found nothing: a check that gave no answer (None) never clears an open error
-    (devpulse's decision B, leg 4). The state's one definition is diagnostics_state's.
+    A check that gave no answer (None) never clears an open error; only all-judged-clean removes the entry.
     """
     ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
     found = [error for answer in answers if answer for error in answer]
@@ -458,10 +414,7 @@ def _units(text: str) -> int:
 def _fit(error_text: str, frame: str, file_path: str) -> str:
     """*error_text* cut so the whole context fits the line past which the model sees only a preview.
 
-    Fleet green leg 5: every one of the 268 captured_ledger_store warnings since
-    09-27 was this hook's context over that line (long SEEDGO rows), so the
-    agent told to fix the errors was shown the start of the list. The cut keeps
-    the frame (count, file, instruction) whole and names where the rest is.
+    Past that line the model sees only a preview, so the frame (count, file, instruction) stays whole.
     """
     limit = importlib.import_module("aipass.hooks.apps.handlers.config.output_merge").CONTEXT_LIMIT
     if _units(frame) + _units(error_text) <= limit:
@@ -475,14 +428,7 @@ def _fit(error_text: str, frame: str, file_path: str) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """Run diagnostics on edited files and surface errors.
-
-    Args:
-        hook_data: Parsed hook event dict from engine.
-
-    Returns:
-        Result dict with stdout (JSON additionalContext or empty) and exit_code.
-    """
+    """Run diagnostics on edited files and surface errors."""
     try:
         tool_name = hook_data.get("tool_name", "")
         if tool_name not in EDIT_TOOLS:
@@ -520,7 +466,7 @@ def handle(hook_data: dict) -> dict:
 
             ruff_lint_errors = _run_ruff_lint_structured(file_path, unanswered)
             ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-            # A template's or a placeholder line's errors are not the tree's (spawn 94b406f9): never recorded.
+            # A template's or a placeholder line's errors are not the tree's: never recorded.
             tree = [ds.of_the_tree(file_path, ruff_lint_errors, 1), ds.of_the_tree(file_path, type_errors, 0)]
             _record_diagnostics(ds.seat_key(hook_data), file_path, tree)
 

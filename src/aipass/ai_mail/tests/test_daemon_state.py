@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch daemon's config, state file and kill switch
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- the safety config, the daemon state file and the kill switch."""
@@ -27,11 +27,7 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import JsonUnreadable
 pytestmark = pytest.mark.usefixtures("daemon_json_silenced", "daemon_paths_in_tmp")
 
 
-# ---- _read_json tests ----------------------------------------
-
-
-# Read and written through the daemon state file's public load and save, not
-# called directly (ai_mail, leg 14).
+# _read_json is reached through the daemon state file's public load and save, not called directly.
 
 
 def _state_read_from(monkeypatch, state_file):
@@ -69,7 +65,7 @@ def test_read_json_missing_file(tmp_path, monkeypatch):
 
 
 def test_read_json_invalid_json(tmp_path, monkeypatch):
-    """Corrupt JSON raises JsonUnreadable, distinct from a missing file (ai_mail, leg 13)."""
+    """Corrupt JSON raises JsonUnreadable, distinct from a missing file."""
     target = tmp_path / "bad.json"
     target.write_text("{not valid json!!!", encoding="utf-8")
 
@@ -78,15 +74,12 @@ def test_read_json_invalid_json(tmp_path, monkeypatch):
 
 
 def test_read_json_empty_file(tmp_path, monkeypatch):
-    """An empty file is unreadable too, not absent (ai_mail, leg 13)."""
+    """An empty file is unreadable too, not absent."""
     target = tmp_path / "empty.json"
     target.write_text("", encoding="utf-8")
 
     with pytest.raises(JsonUnreadable):
         _state_read_from(monkeypatch, target)
-
-
-# ---- _write_json tests ----------------------------------------
 
 
 def test_write_json_creates_file(tmp_path, monkeypatch):
@@ -120,9 +113,6 @@ def test_write_json_unicode(tmp_path, monkeypatch):
     assert written["message"] == "Hello from branch \u2014 done"
 
 
-# ---- load_config tests ----------------------------------------
-
-
 def test_load_config_no_file():
     """Missing config file returns all defaults."""
     result = load_config()
@@ -151,7 +141,6 @@ def test_load_config_partial_file(tmp_path):
 
     assert result["poll_interval_seconds"] == 60
     assert result["max_depth"] == 5
-    # Defaults filled in
     assert result["max_turns_per_wake"] == 100
     assert result["max_dispatches_per_branch_per_day"] == 10
     assert result["autonomous_branches"] == []
@@ -187,7 +176,7 @@ def test_load_config_full_file(tmp_path):
 
 
 def test_load_config_corrupt_json_refuses(tmp_path):
-    """A corrupt safety config raises, never the defaults (ai_mail, leg 13).
+    """A corrupt safety config raises, never the defaults.
 
     The defaults are the less safe side: autonomous_branches [] means every
     branch is autonomous, and the kill switch path is the default one.
@@ -200,14 +189,11 @@ def test_load_config_corrupt_json_refuses(tmp_path):
 
 
 def test_load_daemon_state_corrupt_refuses(tmp_path):
-    """A corrupt state file raises: an empty state would reset today's dispatch counts (ai_mail, leg 13)."""
+    """A corrupt state file raises: an empty state would reset today's dispatch counts."""
     (tmp_path / "daemon_state.json").write_text("{{broken", encoding="utf-8")
 
     with pytest.raises(JsonUnreadable):
         load_daemon_state()
-
-
-# ---- load_daemon_state tests -----------------------------------
 
 
 def test_load_daemon_state_no_file():
@@ -251,11 +237,7 @@ def test_load_daemon_state_new_day_resets_counts(tmp_path):
 
     assert result["daily_counts"] == {}
     assert result["date"] == str(date.today())
-    # session_cycles should NOT be reset
     assert result["session_cycles"] == {"some_branch": 4}
-
-
-# ---- save_daemon_state tests -----------------------------------
 
 
 def test_save_daemon_state_writes_file(tmp_path):
@@ -270,12 +252,8 @@ def test_save_daemon_state_writes_file(tmp_path):
     assert written["daily_counts"] == {"@flow": 2}
     assert written["date"] == str(date.today())
     assert "last_updated" in written
-    # Verify last_updated is a valid timestamp
     parsed = datetime.strptime(written["last_updated"], "%Y-%m-%d %H:%M:%S")
     assert (datetime.now() - parsed).total_seconds() < 5
-
-
-# ---- is_kill_switch_active tests -------------------------------
 
 
 def test_kill_switch_active_when_file_exists(tmp_path):
@@ -298,12 +276,7 @@ def test_kill_switch_inactive_when_no_file(tmp_path):
 def test_kill_switch_uses_default_path_when_key_missing(tmp_path, monkeypatch):
     """With no kill_switch_path key it consults <repo root>/.aipass/autonomous_pause.
 
-    The assertion here was ``isinstance(result, bool)`` — true of every possible
-    implementation, including one that ignored the default path entirely and
-    returned False forever. It was also a fact about the AUTHOR'S MACHINE: the
-    real repo root was consulted, so the answer depended on whether a pause file
-    happened to exist. The default is aimed at tmp_path now, which makes both
-    answers observable and the result the same on any machine.
+    _REPO_ROOT is aimed at tmp_path so both answers are observable and the result is machine-independent.
     """
     monkeypatch.setattr(daemon_mod, "_REPO_ROOT", tmp_path)
     default_path = tmp_path / ".aipass" / "autonomous_pause"

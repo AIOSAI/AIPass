@@ -4,8 +4,8 @@
 
 **Branch** drone · **Code** `apps/plugins/devpulse_ops/auth.py`, `apps/modules/git_module.py`
 
-Drone is the only git interface in AIPass: raw `git` and `gh` writes are blocked by a hook, and
-every verb arrives here. Which verbs exist is `drone @git --help`; who may run them is this page.
+Drone is the only git interface in AIPass: raw `git` and `gh` are blocked by a hook, reads
+included, and every verb arrives here. Which verbs exist is `drone @git --help`; who may run them is this page.
 
 ---
 
@@ -16,8 +16,8 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 
 | Tier | Who | What it covers |
 |------|-----|----------------|
-| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, remote, lock, branches, tag listing, and the `gh` verbs |
-| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, the PR verbs, branch deletion, sync, merge, unlock, tag, fix |
+| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, and the `gh` reads |
+| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, and the `gh` writes |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:
 `citizen_class: manager`, registry tenancy, an entry carrying `owner: true`, and path-binding of
@@ -25,16 +25,15 @@ the passport to the recorded home. There is no caller allowlist anywhere in the 
 
 **A command in neither tier is unreachable, not merely ungated.** `verify_git_access()` refuses
 anything it cannot find in a tier as `Unknown git command`, so registering a verb and wiring it to
-a handler does not make it callable. `prune-temp` shipped that way and no caller could reach it
-(found in the APLAN-0003 audit, tier ruled by @devpulse).
-`test_every_registered_command_holds_a_tier` now asserts the rule rather than the instance.
+a handler does not make it callable. `test_every_registered_command_holds_a_tier` asserts that
+every registered verb holds a tier.
 
 ---
 
 ## Two refusal species — authority vs capability
 
-Owner tier refuses for two reasons that are not interchangeable, and conflating them cost a false
-page *and* a real hole (commit `2b7e6bcc`).
+Owner tier refuses for two reasons that are not interchangeable: conflating them gives a false page
+*and* a real hole.
 
 | | **Authority** | **Capability** |
 |---|---|---|
@@ -45,16 +44,26 @@ page *and* a real hole (commit `2b7e6bcc`).
 | `AIPASS_GIT_AUTH_MODE=warn` | **lifts it** — rolling back the authority migration is exactly that switch's job | **does not lift it**, and cannot: the capability branch raises before `warn_only` is ever read |
 
 Why the wording differs: a proven owner sent to audit their passport is a false trail — they never
-had an authority problem. Why the rollback is scoped: one flag tested against every refusal species
-also lifted this wall, and `pr` ran to completion inside an external repo. A rollback named for one
-migration has no business re-arming a half-run of our merge flow in someone else's repository.
+had an authority problem. Why the rollback is scoped: a flag that lifted every refusal species would
+let `pr` run to completion inside an external repo. A rollback named for one migration has no
+business re-arming a half-run of our merge flow in someone else's repository.
 
-**Which verbs refuse outside AIPass:** `dev-pr`, `pr`, `close-pr`, `merge`, `smart-sync`, `fix`,
-`delete-branch` — they assume a `dev` branch, our PR conventions, or `pyproject` versioning, so
-against an arbitrary repo they would half-run and leave a mess. `commit` and `sync` were translated
-in DPLAN-0281 P2, `tag` in DPLAN-0290 item 1; the refusal names those three so a manager who hits
-the wall learns what they *can* use. For an external repo, the door is `--repo` — see
+**Which verbs refuse outside AIPass:** `pr`, `close-pr`, `smart-sync`, `fix`, `delete-branch` —
+they assume our PR conventions, our lock or our events, so against an arbitrary repo they would
+half-run and leave a mess. Every other owner verb runs for the project's manager from its own seat;
+`auth.external_owner_verbs()` is the list, and both the refusal and `drone @git --help` print it.
+The admin seat's door into an external repo is `--repo` — see
 [external_repo_door.md](external_repo_door.md).
+
+**`dev-pr` and `merge` in an external repo** run the same dev → main model, aimed at the repo's own
+GitHub slug from its origin URL (`external_pr_handler.py`). `dev-pr` refuses before any push unless
+HEAD is `dev`, no tracked file is modified, and dev holds commits `origin/main` does not (it fetches
+main first); then it pushes dev and opens the PR with `gh pr create -R OWNER/NAME`. `merge` keeps the
+joint-decision gate, merges with `gh pr merge -R OWNER/NAME --merge` (deleting the head branch only
+when it is known and not `dev` or `main`), then checks out `dev` and fast-forwards it to `origin/dev`.
+A local step that fails after GitHub merged exits 1 and still names the merge. No PR lock, no sync
+with AIPass, and no `pr_merged` event: that event syncs AIPass's own status page. Pinned in
+`tests/test_git_module_merge.py` against a real repo and a bare origin, gh stubbed.
 
 **WARNING is not silence.** @trigger's `watch_branch_log_warnings` feeds branch-log WARNINGs into
 the escalation digest — ten occurrences of one signature in sixty minutes mails @devpulse. A
@@ -87,12 +96,12 @@ administration, not routing logic.
 
 | Plugin | Verb | Purpose |
 |--------|------|---------|
-| `merge_plugin` | `merge` | Straight-merge a PR and sync local main |
+| `merge_plugin` | `merge` | Straight-merge a PR and sync local main; an external repo takes `external_pr_handler` |
 | `sync_plugin` | `smart-sync` | Fetch, detect divergence, rebase |
 | `fix_plugin` | `fix` | Repair a stuck rebase or a detached HEAD |
 
-`auth.py` is the gate they share. A second plugin directory, `hook_sounds/`, is disabled in place —
-it moved to the hooks branch and its files carry a `.disabled` suffix.
+`auth.py` is the gate they share. A second plugin directory, `hook_sounds/`, is disabled in place:
+its files carry a `.disabled` suffix, and hook sounds live in the hooks branch.
 
 ---
 

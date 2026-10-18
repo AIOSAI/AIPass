@@ -3,36 +3,19 @@
 # Description: the records every stage of a gutting campaign exchanges
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The record shapes a gutting campaign hands from one stage to the next.
+"""The record shapes a gutting campaign hands from one stage to the next.
 
-WHY THIS IS ITS OWN MODULE. ``gutting.py`` crossed the branch's 1500-line
-architecture cap, so the probe was split along the lines its own section
-banners already drew. These dataclasses are the BOTTOM of that split: they own
-the campaign's vocabulary - a discovered function, how to invoke the target's
-suite, one run's raw output, the baseline verdict, one mutant's test selection,
-the coverage map and the finished campaign - and they depend on nothing else in
-the pack. ``mutation_runner``, ``mutation_selection`` and ``gutting`` all
-import from here and nothing here imports back, which is what keeps the split
-acyclic.
-
-The contracts travel with the shapes and are unchanged by the move: a baseline
-that is not green is a REFUSAL rather than a zero, a ``Selection`` of None, of
-``()`` and of a populated tuple are three different claims, and a
-``MutantResult`` never exists without the ``kill_cause`` field contract 1
-requires. The relocation changed no rule and no number.
+The bottom of the gutting split: depends on nothing else in the pack, so it stays acyclic.
 """
 
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, FrozenSet, List, Optional, Tuple
 
-#: SELECTION MODES. `full_suite` is the default and is the behaviour every
-#: number published before this release describes; `coverage_context` is the
-#: opt-in reduction and is never chosen implicitly.
+#: `coverage_context` is an opt-in reduction, never chosen implicitly.
 SELECTION_FULL_SUITE = "full_suite"
 SELECTION_COVERAGE = "coverage_context"
 SELECTION_MODES: tuple = (SELECTION_FULL_SUITE, SELECTION_COVERAGE)
@@ -41,18 +24,11 @@ DEFAULT_MUTANT_TIMEOUT_SECONDS = 300
 DEFAULT_BUDGET_SECONDS = 1800
 
 
-# =============================================================================
-# SHAPES
-# =============================================================================
-
-
 @dataclass(frozen=True)
 class FunctionSite:
     """One `def` or `async def` in the target's production source.
 
-    `skip_reason` is None for a site that will be probed and a recorded reason
-    for one that will not. A site is never dropped from the list; declining to
-    mutate it is part of the measurement.
+    A site is never dropped: declining to mutate it carries a `skip_reason`.
     """
 
     relpath: str
@@ -66,11 +42,7 @@ class FunctionSite:
     skip_reason: Optional[str] = None
 
     def to_document(self) -> dict:
-        """The site as a plain record.
-
-        Returns:
-            A JSON-safe dict naming the function and where it lives.
-        """
+        """The site as a plain record."""
         return {
             "relpath": self.relpath,
             "qualname": self.qualname,
@@ -84,12 +56,7 @@ class FunctionSite:
 
 @dataclass(frozen=True)
 class SuiteTarget:
-    """How to run the target copy's suite, entirely as supplied by the caller.
-
-    This module builds NO environment and imports NO target code. The isolated
-    env is the caller's job (`envcopy` does it for this pack); everything here
-    is a subprocess invocation over values handed in.
-    """
+    """How to run the target copy's suite, entirely as supplied by the caller."""
 
     python: Path
     cwd: Path
@@ -114,10 +81,7 @@ class SuiteRun:
 class BaselineResult:
     """The unmutated suite, and whether it can support a verdict at all.
 
-    A target whose baseline is not green CANNOT BE MEASURED by this probe: a
-    mutant is killed when the suite goes red, so a suite that is already red
-    kills every mutant for free and survivorship means nothing. That state
-    returns `refusal_reason` and never a number - it is a refusal, not a zero.
+    A red baseline returns `refusal_reason` and never a number.
     """
 
     green: bool
@@ -131,11 +95,7 @@ class BaselineResult:
     refusal_reason: Optional[str] = None
 
     def to_document(self) -> dict:
-        """The baseline as a plain record.
-
-        Returns:
-            A JSON-safe dict, including the refusal reason when there is one.
-        """
+        """The baseline as a plain record."""
         return {
             "green": self.green,
             "passed": self.passed,
@@ -153,11 +113,8 @@ class BaselineResult:
 class Selection:
     """Which tests one mutant runs, and on what grounds.
 
-    `nodeids` is None for "the whole suite", an EMPTY tuple for "nothing can
-    kill this, do not start pytest at all", and a populated tuple for a reduced
-    run. The three are deliberately distinct: a green whole-suite run and a
-    green nine-test run are different claims, and a zero-test survivor is not a
-    claim about the suite's oracles at all.
+    `nodeids` None is the whole suite, `()` is "do not start pytest", a tuple is a reduced run:
+    three different claims.
     """
 
     basis: str
@@ -178,9 +135,7 @@ class Selection:
 class CoverageMap:
     """Which tests execute each function's body, measured in the baseline pass.
 
-    A map that could not be built carries `refusal_reason` and no numbers. The
-    campaign publishes that refusal; it never falls back to the full suite
-    while continuing to call the run a coverage-selected campaign.
+    A map that could not be built carries `refusal_reason` and no numbers.
     """
 
     by_function: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
@@ -210,13 +165,7 @@ class CoverageMap:
 class MutantResult:
     """One gutted function, and what the suite did about it.
 
-    `kill_cause` is present on EVERY record, killed or not, because contract 1
-    forbids a mutant record without it. For a survivor or an unrun mutant it is
-    None, which is a statement that no kill happened - not a missing field.
-
-    `selection` is present for the same reason one level up: a verdict read off
-    a reduced test set is a different claim from a verdict read off the whole
-    suite, so every record says which it is and how many tests stood behind it.
+    `kill_cause` is on every record (contract 1); None means no kill happened, not a missing field.
     """
 
     site: FunctionSite
@@ -233,12 +182,7 @@ class MutantResult:
     def to_document(self) -> dict:
         """The mutant as a plain record.
 
-        Returns:
-            A JSON-safe dict carrying the kill_cause split required by
-            contract 1, the raw exception class behind it, and the test
-            selection this verdict was read from. `selected_tests` is None when
-            the whole suite ran - `selection_basis` says which whole-suite case
-            that was.
+        `selected_tests` is None when the whole suite ran; `selection_basis` says which case.
         """
         return {
             "relpath": self.site.relpath,

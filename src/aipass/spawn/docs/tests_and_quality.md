@@ -23,8 +23,7 @@ written.
 
 A test count claimed in prose is a number with no owner. The AST count seedgo measures and a
 `grep` for `def test_` disagree by a handful, because grep counts lines inside docstrings and
-comments — which is how this branch's own README once carried two different totals in two
-sections. One number, one method, produced live.
+comments. One number, one method, produced live.
 
 ---
 
@@ -91,4 +90,4 @@ furniture.
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17

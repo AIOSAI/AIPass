@@ -5,51 +5,17 @@
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-09-16
+# Modified: 2026-10-17
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
 
-Cadence's reset_counter() (called from PreCompact) only takes effect on the
-NEXT UserPromptSubmit — but that event does not fire during long autonomous
-tool-call loops, only PostToolUse does. PreCompact/PostCompact stdout is never
-shown to Claude (debug log only), so neither can inject grounding directly.
-PostToolUse's hookSpecificOutput.additionalContext IS shown to Claude, and
-fires on every tool call — this consumes the same post-compact signal there
-instead of waiting for a UserPromptSubmit that may not come for a long time.
-
-ONE FIRE MUST STAY UNDER THE DISPLAY LIMIT (issue #752). Until 2026-09-10 this
-joined branch + identity + kernel + navmap into one additionalContext of about
-21,500 chars. Claude Code persists any hook additionalContext longer than
-10,000 chars to a file and shows the agent a 2,000-char preview, so the agent
-got the header and a sliver of the kernel, and the branch prompt never landed.
-The limit was measured, not assumed, two ways on 2026-09-10:
-
- - read from the installed binary (Claude Code 2.1.267): the hook-output
-   persister ``Fme(e, n, r, {threshold: o = sgr})`` returns the text untouched
-   when ``e.length <= o``, with ``sgr = 1e4``; additionalContext is passed
-   with the default threshold, and the preview constant is ``EBe = 2000``.
-   ``e.length`` is a JS string length, i.e. UTF-16 code units, which is the
-   unit REGROUP_FIRE_BUDGET is counted in.
- - corroborated from 1,609 hook attachments across every transcript on this
-   machine (2.1.207 to 2.1.267): the largest PostToolUse additionalContext
-   shown inline was 2,424 chars and the smallest persisted one 12,148; the
-   smallest persisted hook stdout was 10,221, while navmap's ~7,900 lands
-   inline every cadence fire.
-
-So the re-ground is packed into parts, each at most REGROUP_FIRE_BUDGET, and
-handed out one part per PostToolUse in priority order — branch prompt (with
-the manager release notice at its head), identity, kernel, navmap — so that
-if anything is ever lost it is the least important tail. The parts ride the
-cadence regroup token: the first fire consumes it and queues the rest, a real
-UserPromptSubmit cancels what is left (the cadence turn-0 path then delivers
-every loader as its own injection), and a new compaction starts over.
-
-The handoff runs both ways since DPLAN-0348. The last part stamps completion,
-and the next prompt's turn-0 fire-all stands down for the four grounding
-loaders while that prompt is still near it in the transcript. A harness
-task-notification is not a real UserPromptSubmit: it neither cancels the queue
-nor spends turn 0.
+Long tool loops send no UserPromptSubmit and PreCompact/PostCompact stdout never reaches Claude;
+PostToolUse additionalContext does, so the post-compact signal is consumed here. Claude Code
+persists hook additionalContext over 10,000 UTF-16 units (``sgr = 1e4`` in its hook-output
+persister) and shows a 2,000-char preview, so the re-ground ships in parts of at most
+REGROUP_FIRE_BUDGET, one per PostToolUse, most important first. A real prompt cancels what is
+left; the last part stamps completion so the next turn-0 fire-all stands down.
 """
 
 import importlib
@@ -57,10 +23,7 @@ import json
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-#: Claude Code 2.1.267 persists hook additionalContext above 10,000 UTF-16
-#: units and shows a 2,000-char preview (see the module docstring for how that
-#: was measured). 9,000 leaves 10% margin for a future lower limit and is the
-#: hard ceiling for every fire this handler emits, headers and markers included.
+#: 10% under Claude Code's 10,000-unit limit; the hard ceiling for every fire, headers and markers included.
 REGROUP_FIRE_BUDGET = 9000
 
 _SILENT = {"stdout": "", "exit_code": 0}
@@ -98,18 +61,8 @@ def _next_header(index: int, total: int) -> str:
 def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
     """Every non-empty grounding section, in the order the agent must not lose them.
 
-    Branch first: it carries the seat's own rules (sign-in, memory discipline,
-    caps) and is the one section no other injection repeats mid-turn. The
-    manager release notice (DPLAN-0335 leg 2) opens the branch section rather
-    than trailing the payload, so it lands in part 1 on every seat. It is built
-    only once there is grounding to carry it — the two reads it costs are not
-    spent on a regroup that has nothing to say.
-
-    A section that was EXPECTED here and did not load is named, not swallowed
-    (DPLAN-0347, hooks row 1): the banner rides at the head of part 1 and the
-    same lines go to the log at WARNING. A regroup that loses everything still
-    ships the banner rather than going silent — a post-compact session with no
-    grounding at all is the one that most needs to be told so.
+    Branch first, with the release notice at its head so it lands in part 1. A section that failed
+    to load is named in a banner ahead of part 1, never swallowed; a total loss still ships it.
     """
     grounding_content = importlib.import_module("aipass.hooks.apps.modules.grounding_content")
     sections, failures = grounding_content.grounding_report(hook_data)
@@ -135,18 +88,13 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
         else:
             sections.insert(0, ("notice", notice))
     if banner:
-        # Ahead of everything, including the notice: it changes how the rest of
-        # the re-ground must be read, so it cannot be the part that gets cut.
+        # Ahead of the notice: it changes how the rest must be read, so it cannot be the part cut.
         sections.insert(0, ("degraded", banner))
     return sections
 
 
 def _split_to_fit(text: str, room: int) -> tuple[str, str]:
-    """Longest whole-line prefix of *text* within *room* units, and the rest.
-
-    Falls back to a hard character cut only when not even one line fits, so a
-    section is split between lines wherever a line boundary exists.
-    """
+    """Longest whole-line prefix of *text* within *room* units, and the rest."""
     lines = text.split("\n")
     taken = 0
     size = 0
@@ -194,12 +142,8 @@ def _pack(
 ) -> list[tuple[str, str]]:
     """Pack *sections* into parts of at most *budget* units: order kept, nothing dropped.
 
-    Returns (text, labels) per part. A section that fits the current part joins
-    it; one that does not, but would fit a fresh part, starts one, so sections
-    stay whole wherever they can; one larger than a whole part is split between
-    lines and carried into the next. Headers name the part count, and the
-    count's own header line can shift the packing, so it re-packs until the
-    count it prints is the count it produced.
+    Headers name the part count, and that header can shift the packing, so it re-packs until
+    the count it prints is the count it produced.
     """
     total = 1
     fires = _pack_once(sections, instruction, budget, total)
@@ -270,9 +214,7 @@ def handle(hook_data: dict) -> dict:
         context, labels = fires[index - 1]
         cadence.log_regroup_fire(labels, index, len(fires), context, REGROUP_FIRE_BUDGET, hook_data)
         if index == len(fires) and sections[0][0] != "degraded":
-            # The whole grounding is out, so the next prompt's turn-0 fire-all
-            # need not send it again (DPLAN-0348). A degraded re-ground did not
-            # ground the seat, and a partial one never reaches this line.
+            # A degraded re-ground did not ground the seat, so only a whole one stands in for turn 0.
             cadence.stamp_regroup_complete(hook_data)
         result = {
             "hookSpecificOutput": {

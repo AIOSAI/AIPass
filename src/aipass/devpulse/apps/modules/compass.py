@@ -3,33 +3,11 @@
 # Description: Compass Module — drone command for devpulse's rated decision store
 # Version: 1.0.2
 # Created: 2026-06-16
-# Modified: 2026-09-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Compass Module — command routing for devpulse's rated decision store.
-
-Compass is the truth-store of decisions: short, *rated* choices
-(``good | bad | impressive | interesting``) that devpulse consults at a fork.
-The rating IS the signal — repeat the good, avoid the bad. See DPLAN-0212.
-
-This module is the thin command layer (FPLAN P2). It parses args, calls the
-``compass`` storage handler (FPLAN P1), and renders results to the console.
-No business logic lives here — that's the handler's job.
-
-Subcommands:
-  add "context" "decision" --rating R [--note ..] [--tags a,b] [--source ..] [--supersedes N]
-  query "question" [--rating R] [--limit N] [--include-archived]
-  stats
-  rate <id> <rating>
-  archive <id>
-  note <id> "text"
-  review
-
-Every subcommand accepts ``--db PATH`` (passed through as ``db_path=``) for
-testing and power use; omitted, it uses the real store.
-
-Auto-discovered by devpulse.py via the handle_command() convention.
 """
 
 from typing import List, Optional
@@ -40,18 +18,13 @@ from aipass.devpulse.apps.handlers import compass
 from aipass.devpulse.apps.handlers.compass import mark_surfaced, recall_decisions
 from aipass.devpulse.apps.handlers.json import json_handler
 
-# Public cross-branch recall API (DPLAN-0246 Track 2). Other branches import
-# at the modules/ boundary ONLY (seedgo boardroom ruling):
-#   from aipass.devpulse.apps.modules.compass import recall_decisions, mark_surfaced
-# recall_decisions(prompt_text, limit) -> scored candidates, side-effect-free;
-# mark_surfaced(ids) counts only what the caller actually injected.
+# The cross-branch recall API: other branches import these two from here, never from the handler.
 __all__ = ["handle_command", "mark_surfaced", "recall_decisions"]
 
 console = err_console
 
 _VALID_SUBCOMMANDS = ("add", "query", "stats", "rate", "archive", "note", "review")
 
-# Console colour per rating — the rating is the signal, so make it pop.
 _RATING_STYLE = {
     "good": "bold green",
     "bad": "bold red",
@@ -133,26 +106,12 @@ def print_introspection() -> None:
 
 
 def _wants_help(args: List[str]) -> bool:
-    """Help flag anywhere in args = explain, never execute (DPLAN-0291 rule E).
-
-    Bare word 'help' counts only at position 0 — later positions may be free text
-    (a compass note can legitimately contain the word).
-    """
+    """Help flag anywhere in args = explain, never execute; bare 'help' only first, since a note may contain it."""
     return bool(args) and (args[0] in ("--help", "-h", "help") or any(a in ("--help", "-h") for a in args))
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Route compass subcommands to the storage handler.
-
-    Auto-discovered by devpulse.py module loader.
-
-    Args:
-        command: The primary command string.
-        args: Additional arguments after the command.
-
-    Returns:
-        True if the command was handled, False otherwise.
-    """
+    """Route compass subcommands to the storage handler."""
     if command != "compass":
         return False
 
@@ -192,18 +151,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     return True
 
 
-# =============================================================================
-# ARG PARSING HELPERS
-# =============================================================================
-
-
 def _extract_flag(args: List[str], flag: str) -> tuple[List[str], Optional[str]]:
-    """Pull a single ``--flag VALUE`` pair out of args.
-
-    Returns the remaining args (flag + value removed) and the value (or None
-    if the flag was absent). Raises ValueError if the flag is given without a
-    following value — errors must fail loud, never silent.
-    """
+    """Pull a single ``--flag VALUE`` pair out of args; a flag with no value raises ValueError."""
     value: Optional[str] = None
     remaining: List[str] = []
     i = 0
@@ -225,12 +174,7 @@ def _extract_db_path(args: List[str]) -> tuple[List[str], Optional[str]]:
 
 
 def _extract_bool_flag(args: List[str], flag: str) -> tuple[List[str], bool]:
-    """Pull a valueless boolean ``--flag`` out of args.
-
-    Returns the remaining args (every occurrence of the flag removed) and True
-    if the flag was present, else False. Unlike ``_extract_flag`` this consumes
-    no following value.
-    """
+    """Pull a valueless boolean ``--flag`` out of args."""
     if flag in args:
         return [a for a in args if a != flag], True
     return args, False
@@ -240,11 +184,6 @@ def _rating_tag(rating: str) -> str:
     """Render a coloured ``[RATING]`` tag for query/review output."""
     style = _RATING_STYLE.get(rating, "bold white")
     return f"[{style}]\\[{(rating or '?').upper()}][/{style}]"
-
-
-# =============================================================================
-# SUBCOMMAND HANDLERS
-# =============================================================================
 
 
 def _handle_add(sub_args: List[str]) -> bool:
@@ -282,9 +221,6 @@ def _handle_add(sub_args: List[str]) -> bool:
             error(f"--supersedes must be an integer, got {supersedes_raw!r}")
             return True
 
-    # Write-time conflict check — a NON-BLOCKING advisory (DPLAN-0246). Skipped
-    # when the writer already chose to supersede, and never allowed to block or
-    # crash the add. Only shown when NOT already superseding.
     if supersedes is None:
         try:
             conflicts = compass.find_conflicts(context, decision, db_path=db_path)
@@ -392,8 +328,7 @@ def _render_query_results(query_text: str, rating: Optional[str], results: List[
             console.print(f"    [cyan]note:[/cyan]     {r['note']}")
         if r.get("tags"):
             console.print(f"    [cyan]tags:[/cyan]     {r['tags']}")
-        # Supersession pointers — an archived hit must never masquerade as
-        # current truth, so flag its status + who replaced it (DPLAN-0246).
+        # An archived hit must never masquerade as current truth.
         if r.get("status") == "archived":
             superseded_by = r.get("superseded_by")
             if superseded_by:
@@ -463,10 +398,7 @@ def _handle_rate(sub_args: List[str]) -> bool:
     if changed:
         console.print(f"[green]Re-rated[/green] [bold]#{decision_id}[/bold] -> {_rating_tag(rating)}")
     else:
-        # error, not warning: warning() skips mark_command_failed(), so
-        # "nothing changed" exited 0 and `compass rate <id> good && <next>` ran
-        # the next step as if it had. Same defect @canary found in the owner
-        # gates on 2026-08-22, in a verb nobody was looking at.
+        # error, not warning: warning() skips mark_command_failed(), so a chained next step would run.
         error(
             f"No decision with id {decision_id} — nothing changed.",
             suggestion="Run 'compass list' to see the ids that exist.",
@@ -500,10 +432,7 @@ def _handle_archive(sub_args: List[str]) -> bool:
             f"[green]Archived[/green] [bold]#{decision_id}[/bold] [dim](kept as avoid-list, not deleted)[/dim]"
         )
     else:
-        # error, not warning: warning() skips mark_command_failed(), so
-        # "nothing changed" exited 0 and `compass rate <id> good && <next>` ran
-        # the next step as if it had. Same defect @canary found in the owner
-        # gates on 2026-08-22, in a verb nobody was looking at.
+        # error, not warning: warning() skips mark_command_failed(), so a chained next step would run.
         error(
             f"No decision with id {decision_id} — nothing changed.",
             suggestion="Run 'compass list' to see the ids that exist.",
@@ -512,11 +441,7 @@ def _handle_archive(sub_args: List[str]) -> bool:
 
 
 def _handle_note(sub_args: List[str]) -> bool:
-    """Dispatch ``compass note <id> "text"`` — set a decision's note.
-
-    Follows the subcommand-help convention: ``compass note --help`` prints the
-    per-subcommand help block; malformed input shows the Usage line.
-    """
+    """Dispatch ``compass note <id> "text"`` — set a decision's note."""
     try:
         rest, db_path = _extract_db_path(sub_args)
     except ValueError as exc:
@@ -545,10 +470,7 @@ def _handle_note(sub_args: List[str]) -> bool:
         console.print(f"[green]Note set[/green] on [bold]#{decision_id}[/bold]")
         console.print(f"  [cyan]note:[/cyan] {note_text}")
     else:
-        # error, not warning: warning() skips mark_command_failed(), so
-        # "nothing changed" exited 0 and `compass rate <id> good && <next>` ran
-        # the next step as if it had. Same defect @canary found in the owner
-        # gates on 2026-08-22, in a verb nobody was looking at.
+        # error, not warning: warning() skips mark_command_failed(), so a chained next step would run.
         error(
             f"No decision with id {decision_id} — nothing changed.",
             suggestion="Run 'compass list' to see the ids that exist.",

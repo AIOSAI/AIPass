@@ -5,26 +5,15 @@
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-05-18
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """
 Claude Code bridge.
 
-Thin entry point called from the provider settings hook entries:
-  claude.py EventType          — dispatch ALL enabled hooks for that event
-  claude.py EventType:hook_name — dispatch ONLY that one hook (separate output)
-
-Since 2.0.0 (DPLAN-0356):
-  - The hook code is the PROMOTED copy (mount.py, `drone @hooks promote`), never
-    the tree being edited. This script runs from the source tree, so it holds
-    nothing but argv, stdin, the mount and one call: engine.run_event owns the
-    rest and changes only through promote.
-  - Failure mode: a PreToolUse call whose hook code cannot load or raises is
-    REFUSED (block JSON, exit 2): Claude Code runs the tool on any other exit, so
-    a bridge that dies quietly is every gate off. Every other event exits 0 with
-    the reason on stderr: an injector that cannot load costs its text, never the
-    prompt.
+Runs the promoted copy (`drone @hooks promote`), never the tree being edited.
+A PreToolUse that cannot load or raises is refused (exit 2): Claude Code runs the
+tool on any other exit. Every other event exits 0 with the reason on stderr.
 """
 
 import importlib.util

@@ -3,18 +3,11 @@
 # Description: Branch log events module for log watcher public API
 # Version: 1.1.0
 # Created: 2026-02-02
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Log Events Module - Public API for branch log watching
-
-Provides start/stop/status commands for the branch log watcher.
-Watches src/aipass/*/logs/*.log for ERROR entries.
-Fires error_detected events handled by AI_Mail's error_handler.
-
-Commands: start, stop, status
-Architecture: Module orchestrates handlers
 """
 
 import os
@@ -46,7 +39,7 @@ def print_introspection():
     """Display module introspection info."""
     try:
         from aipass.cli.apps.modules.display import console
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.info("CLI console not available, using rich fallback")
         from rich.console import Console
@@ -71,21 +64,11 @@ def print_introspection():
 
 
 def start() -> bool:
-    """
-    Start the branch log watcher.
-
-    Watches src/aipass/*/logs/*.log for ERROR entries.
-    Fires error_detected events to registered handlers.
-
-    Returns:
-        True if started successfully, False otherwise
-    """
+    """Start the branch log watcher."""
     logger.info("[TRIGGER] Starting branch log watcher")
 
-    # Set the event callback to trigger.fire
     set_event_callback(trigger.fire)
 
-    # Start the watcher
     observer = start_branch_log_watcher()
     if observer:
         logger.info(f"[TRIGGER] Branch log watcher started, monitoring: {AIPASS_PKG_ROOT}/*/logs/*.log")
@@ -95,30 +78,19 @@ def start() -> bool:
 
 
 def stop() -> None:
-    """
-    Stop the branch log watcher.
-    """
+    """Stop the branch log watcher."""
     logger.info("[TRIGGER] Stopping branch log watcher")
     stop_branch_log_watcher()
     logger.info("[TRIGGER] Branch log watcher stopped")
 
 
 def status() -> dict:
-    """
-    Get branch log watcher status.
-
-    Returns:
-        Dict with status info from handler
-    """
+    """Get branch log watcher status."""
     return get_watcher_status()
 
 
 def reset_hashes() -> None:
-    """
-    Clear the error deduplication hash set.
-
-    Useful after extended runtime or for testing.
-    """
+    """Clear the error deduplication hash set."""
     clear_seen_hashes()
     logger.info("[TRIGGER] Branch log watcher hash set cleared")
 
@@ -157,21 +129,11 @@ def print_help() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """
-    Handle branch_log_events commands - orchestrate handler calls.
-
-    Args:
-        command: Module name or subcommand (branch_log_events, start, stop, status, reset)
-        args: Additional arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle branch_log_events commands - orchestrate handler calls."""
     from aipass.cli.apps.modules import console, success, error
 
     from aipass.trigger.apps.handlers.cli.help_flags import wants_help
 
-    # Handle module-name routing (drone @trigger branch_log_events <subcmd>)
     if command == "branch_log_events":
         if not args:
             print_introspection()
@@ -183,12 +145,10 @@ def handle_command(command: str, args: list) -> bool:
         remaining = args[1:]
         return handle_command(subcommand, remaining)
 
-    # Help gate — catch --help passed as direct command
     if command in ["--help", "-h", "help"]:
         print_help()
         return True
 
-    # Handle direct subcommands
     if command not in ["start", "stop", "status", "reset"]:
         return False
 

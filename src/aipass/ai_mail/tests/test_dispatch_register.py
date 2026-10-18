@@ -3,18 +3,12 @@
 # Description: Tests for the dispatch register append-only log
 # Version: 1.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
 
-# FPLAN-0452 P0.
-#
-# The register's whole value is that crash detection costs nothing: an entry past
-# its expected_by with no completion record is a FACT ABOUT A FILE, visible to
-# anyone who looks, with no process running to discover it. These tests pin the
-# properties that fact depends on — append-only, never production, honest about
-# what it cannot parse.
+# An entry past expected_by with no completion is a fact about a file; these pin append-only and honest parsing.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
@@ -52,12 +46,7 @@ def _only_open_row(repo_root):
 
 
 def _a_pid_that_is_gone():
-    """A pid that certainly does not exist: spawn a process and reap it.
-
-    Not a large made-up number — pids wrap, and a test that assumes 999999 is
-    free is a test that fails on a busy box for a reason nobody will believe.
-    Waiting on a real child guarantees the pid is dead when we look.
-    """
+    """A pid that certainly does not exist: spawn a process and reap it (pids wrap, so no made-up number)."""
     proc = subprocess.Popen([sys.executable, "-c", ""])
     proc.wait()
     return proc.pid
@@ -83,9 +72,7 @@ class TestWrittenBeforeAnythingSpawns:
     def test_expected_by_comes_from_the_caller_not_a_number_invented_here(self, repo):
         """The spec forbids an invented timeout — expected_seconds is the contract.
 
-        This is what makes "past expected_by" mean the monitor DIED rather than
-        "the agent is taking a while": the caller passes dispatch_monitor's own
-        HARD_TIMEOUT, which a live monitor can never legitimately overrun.
+        The caller passes HARD_TIMEOUT, so "past expected_by" means the monitor died.
         """
         import json
 
@@ -104,9 +91,7 @@ class TestWrittenBeforeAnythingSpawns:
 
 
 class TestADeclinedWakeBackIsOnTheRow:
-    """wake_branch(wake_back=False) — @daemon's scheduled nudges — says so on the
-    row, and ONLY then: an absent key means the default, so every default row
-    stays byte-identical to the rows written before the option existed."""
+    """wake_branch(wake_back=False) says so on the row, and ONLY then: absent key means default."""
 
     def test_a_declined_wake_back_is_recorded_and_survives_the_pid_annotation(self, repo):
         dispatch_id = register.open_dispatch("@daemon", "@api", "", 7200, repo_root=repo, wake_back=False)
@@ -165,14 +150,9 @@ class TestAppendOnly:
 
 
 class TestTheMonitorPidMakesADeathVisibleEarly:
-    """FPLAN-0499 phase 2. Without a pid on the row a dead monitor is invisible
-    until ``expected_by`` — HARD_TIMEOUT, two hours. With one, a reader sees the
-    process is gone on the next watchdog pass, five minutes.
+    """Without a pid on the row a dead monitor is invisible until ``expected_by``; with one, next watchdog pass.
 
-    The tri-state is the load-bearing part. "No pid recorded" is every row
-    written before this landed, plus the systemd-scope spawn path which never
-    learns a pid; reporting those as dead would have announced a death for the
-    whole backlog the moment it shipped.
+    Tri-state: "no pid recorded" (old rows, systemd-scope spawns) is unknown, never dead.
     """
 
     def test_a_row_whose_pid_is_gone_reports_monitor_alive_false(self, repo):
@@ -197,11 +177,7 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         assert _only_open_row(repo)["monitor_alive"] is True
 
     def test_a_row_with_no_pid_is_unknown_not_dead(self, repo):
-        """The distinction the whole tri-state exists for.
-
-        Every row written before this feature has no pid. If absence read as
-        False, shipping it would have announced a death for each one.
-        """
+        """The distinction the whole tri-state exists for: absence of a pid is not death."""
         register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
 
         row = _only_open_row(repo)
@@ -235,12 +211,7 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         assert after["expected_by"] == before["expected_by"], "the deadline must not move"
 
     def test_an_already_closed_dispatch_is_not_resurrected_by_a_late_pid(self, repo):
-        """A late annotation must not reopen finished work.
-
-        The monitor writes its completion and exits; an annotation arriving
-        after that would otherwise append a fresh `outstanding` record and the
-        dispatch would read as open forever.
-        """
+        """A late annotation must not reopen finished work (it would read as open forever)."""
         dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
         assert dispatch_id
         register.close_dispatch(dispatch_id, "completed", repo_root=repo)
@@ -266,16 +237,8 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
     def test_monitor_alive_cannot_be_told_for_a_non_pid(self, bad):
         assert register.monitor_alive(bad) is None
 
-    # ── The Windows leg, runnable on every platform through a fake kernel32.
-    # The Windows matrix on 6d764980 went red on the two liveness pins above:
-    # the first cut answered None on win32, so a watchdog there could never
-    # see a dead monitor. These pin the mapping of the Win32 answers onto the
-    # tri-state without needing the platform.
-
-    # The Win32 codes are written as Win32 documents them (STILL_ACTIVE 259,
-    # ERROR_INVALID_PARAMETER 87, ERROR_ACCESS_DENIED 5,
-    # PROCESS_QUERY_LIMITED_INFORMATION 0x1000), not read back from the module:
-    # an echo of the product's own constant cannot catch a wrong one (ai_mail, leg 9).
+    # Win32 codes as documented (STILL_ACTIVE 259, ERROR_INVALID_PARAMETER 87, ERROR_ACCESS_DENIED 5,
+    # PROCESS_QUERY_LIMITED_INFORMATION 0x1000), not read from the module: an echo cannot catch a wrong one.
     @pytest.mark.parametrize(
         ("handle", "exit_code", "last_error", "expected"),
         [
@@ -297,7 +260,6 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
             out.contents.value = exit_code
             return 1
 
-        # Attributes named as Win32 names them — the probe calls them by these names.
         fake_kernel32 = SimpleNamespace(
             OpenProcess=lambda access, inherit, pid: opened_with.append((access, inherit, pid)) or handle,
             GetExitCodeProcess=_exit_code_into,
@@ -305,7 +267,6 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
         )
         monkeypatch.setattr(register, "_kernel32", lambda: fake_kernel32)
         monkeypatch.setattr(register, "_last_win32_error", lambda: last_error)
-        # Through monitor_alive, which routes win32 to the Windows leg (ai_mail, leg 14).
         monkeypatch.setattr(sys, "platform", "win32")
         monkeypatch.setattr(register.os, "kill", lambda *a: pytest.fail("os.kill must never be reached on win32"))
 
@@ -323,18 +284,10 @@ class TestTheMonitorPidMakesADeathVisibleEarly:
 
 
 class TestAReplyClosesTheRow:
-    """FPLAN-0499 phase 2, and the incident that shaped it.
+    """A reply on the dispatch thread is completion evidence and closes the row.
 
-    At 17:15 on 2026-09-07 the watchdog announced DEAD for @api's dispatch
-    641dddbb because the row hit its two-hour expected_by — while @api had
-    replied on that thread at 16:45 and its work was landed. The reply was the
-    completion evidence and nothing read it.
-
-    MATCHING IS BY THREAD, NOT BY THE AGENT'S DISPATCH STAMP. The same incident
-    is why: @api's stamped id sat on its 15:16 report-first PLAN, sent before
-    the work was done, while the real completion at 16:45 carried a different
-    stamp because the agent had been resumed under a new dispatch id. The stamp
-    would have closed the row early and still missed the completion.
+    Matching is by thread, not dispatch stamp: a resumed agent carries a new stamp,
+    and a report-first plan can carry the old one before the work is done.
     """
 
     def test_a_reply_on_the_thread_closes_the_dispatch(self, repo):
@@ -347,9 +300,7 @@ class TestAReplyClosesTheRow:
         assert register.outstanding(repo_root=repo) == []
 
     def test_the_close_names_the_reply_as_the_reason(self, repo):
-        """ "The agent said it was done" and "the monitor saw it exit" are
-        different facts, and a reader that cannot tell them apart cannot spot a
-        dispatch that reported but never terminated."""
+        """ "The agent said it was done" and "the monitor saw it exit" are different facts."""
         register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
 
         register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
@@ -357,12 +308,7 @@ class TestAReplyClosesTheRow:
         assert json.loads(_lines(repo)[-1])["status"] == register.STATUS_REPLIED
 
     def test_a_report_first_plan_does_not_close_the_row(self, repo):
-        """THE REGRESSION THIS RULE EXISTS TO AVOID.
-
-        @api's plan mail was a fresh subject, not a reply on the brief's thread.
-        Closing on it would stop the watchdog watching a dispatch whose work has
-        not started — which is worse than the false DEAD it replaces.
-        """
+        """THE REGRESSION THIS RULE EXISTS TO AVOID: a fresh-subject plan mail is not a completion."""
         register.open_dispatch("@devpulse", "@api", "Your brief - ONE ROOM step 1", 7200, repo_root=repo)
 
         closed = register.close_on_reply(
@@ -373,11 +319,7 @@ class TestAReplyClosesTheRow:
         assert len(register.outstanding(repo_root=repo)) == 1, "a plan is not a completion"
 
     def test_a_resumed_agent_still_closes_its_original_row(self, repo):
-        """The live case: the completion carried a DIFFERENT dispatch stamp.
-
-        The thread is the only link that survives a resume, which is exactly why
-        the stamp cannot be the matcher.
-        """
+        """The live case: the completion carried a DIFFERENT dispatch stamp; the thread survives a resume."""
         original = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
         assert original
 
@@ -395,10 +337,7 @@ class TestAReplyClosesTheRow:
     def test_a_register_that_cannot_be_read_raises_rather_than_matching_nothing(self, repo, monkeypatch):
         """None means "this reply answers no open row"; an unreadable register is not that.
 
-        Before leg 11 the read failure answered None too. Its one caller,
-        reply's _close_dispatch_row_on_reply, swallows and logs every raise after
-        the reply is delivered, so the raise reaches a log line, never the reply.
-        Its proof is the mutant that answers None again (ai_mail, leg 11).
+        The caller (_close_dispatch_row_on_reply) logs the raise after delivery, so it never blocks the reply.
         """
 
         def _unreadable(**kwargs):
@@ -509,11 +448,7 @@ class TestNeverProduction:
         assert register.register_file(repo_root=repo) == repo / ".aipass" / register.REGISTER_FILENAME
 
     def test_re_rooting_never_returns_the_live_register(self, repo):
-        """The defect feed.py was fixed for: a test writing production state.
-
-        A caller who explicitly passed a root and silently got the real file
-        would poison the live register from inside a test run.
-        """
+        """The defect feed.py was fixed for: a test writing production state."""
         live = register.register_file()
 
         assert register.register_file(repo_root=repo) != live
@@ -521,15 +456,7 @@ class TestNeverProduction:
     def test_re_rooting_works_with_no_registry_marker_anywhere(self, monkeypatch, tmp_path):
         """A FRESH CHECKOUT has no marker — the registry is untracked runtime state.
 
-        This test replaces one that asserted a RuntimeError here, and that
-        assertion was pinning the bug rather than the behaviour. The old code
-        re-DERIVED the root by walking for a marker file after find_repo_root()
-        had already returned one; with no marker on disk the walk found nothing
-        and raised for every caller passing repo_root — 26 of @devpulse's tests
-        and the CI job on PR 739 (reported by them, 2026-08-23).
-
-        The root is now carried, not hunted, so there is no second answer to
-        disagree with the first.
+        The root is carried, not re-hunted for a marker, so a given repo_root never raises.
         """
         orphan = tmp_path / "no-marker-above-here"
         orphan.mkdir()
@@ -564,9 +491,7 @@ class TestNeverProduction:
 class TestThePublicSeam:
     """AIPASS_DISPATCH_REGISTER re-points the default register, read at every call.
 
-    A consumer's tests (devpulse's hermetic_mail_doors) transplanted the register
-    by patching this module's private find_repo_root; the fence refuses that
-    reach. The variable is the public seam in its place (DPLAN-0404 leg 15).
+    Consumers (devpulse's hermetic_mail_doors) use it instead of patching the private find_repo_root.
     """
 
     def test_the_variable_names_the_register_every_rootless_caller_reads(self, monkeypatch, tmp_path):
@@ -624,23 +549,13 @@ class TestReadingIsForgiving:
 class TestEmptyAndUnreadableAreNotTheSameAnswer:
     """@devpulse's pin: "none outstanding" and "I cannot tell" must not render alike.
 
-    They wrote it against the old re-root raise, which was the WRONG trigger —
-    it fired on every fresh checkout, where nothing is actually wrong. Removing
-    it was correct and their own later dispatch asked for it. The distinction
-    they were protecting is not, and this is where it actually belongs: a
-    register that EXISTS and cannot be READ.
+    The missing-register half is TestReadingIsForgiving.test_no_register_yet_is_an_empty_state_not_a_failure.
     """
-
-    # The missing-register half of this pair is
-    # TestReadingIsForgiving.test_no_register_yet_is_an_empty_state_not_a_failure.
 
     def test_an_unreadable_register_raises_instead_of_reporting_all_clear(self, repo):
         """A register that exists but cannot be read must never answer "[]".
 
-        Staged as a DIRECTORY at the register's path: it exists, so the
-        defined-empty-state check passes, and opening it is an OSError. That is
-        the same shape as a permission failure or a bad mount, without a test
-        that behaves differently under root.
+        Staged as a DIRECTORY (not chmod) so the OSError holds under root too.
         """
         path = repo / ".aipass" / register.REGISTER_FILENAME
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -661,13 +576,7 @@ class TestTheSuiteCannotTouchProduction:
     """The conftest guard, pinned — it was added after the suite wrote 31 phantoms."""
 
     def test_the_register_under_test_is_never_the_live_one(self):
-        """wake_branch registers before it spawns, and the wake tests mock the spawn.
-
-        The first run of this suite therefore wrote 31 "outstanding" entries into
-        the real register, every one of which would have read as OVERDUE two hours
-        later — phantom crashes in the one file whose job is to make real crashes
-        visible. Third of its kind after FEED_PATH and CONTACTS_FILE.
-        """
+        """wake_branch registers before it spawns, and the wake tests mock the spawn: phantom OVERDUE rows."""
         live = Path(__file__).resolve().parents[4] / ".aipass" / register.REGISTER_FILENAME
 
         assert live.name == register.REGISTER_FILENAME, "anchor check: the live path must be real"

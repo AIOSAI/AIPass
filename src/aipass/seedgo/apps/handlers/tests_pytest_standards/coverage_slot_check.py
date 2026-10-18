@@ -3,33 +3,12 @@
 # Description: nominator - the confession grep (COVERAGE-SLOT)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 6 — the test that says out loud why it exists.
+"""TAXONOMY rule 6 — the test that says out loud why it exists.
 
-COVERAGE-SLOT is the only species in the catalog whose detector is a phrase
-match, and it is the most precise rule in the set for exactly that reason:
-*every hit is a confession*. A test whose docstring says it exists "to satisfy
-the checker" or "for coverage" is telling you what it is. Nobody writes that
-sentence about a test they believe in.
-
-TAXONOMY's own note: the same grep would have caught them the day they were
-written.
-
-THE FALSE POSITIVE IS REAL AND IT IS NAMED. A docstring that merely MENTIONS
-coverage while asserting real behaviour is not a confession, and the naive
-grep — the one that matches the bare word "coverage" anywhere — flags this
-branch's own test suite dozens of times over, because seedgo is a tool whose
-subject matter is checkers and standards. So the phrases here are the
-*purposive* ones: the ones that state the test's REASON, not its topic. That
-narrowing is why this file greps phrases rather than words, and it is the same
-correction this campaign has already had to make twice for token matching.
-
-The scan is over DOCSTRINGS, COMMENTS and CLASS NAMES, not over arbitrary
-string literals. A test whose data happens to contain "for coverage" is not
-confessing anything.
+Reference: coverage_slot.md
 """
 
 import ast
@@ -85,9 +64,7 @@ _COMPILED = tuple((re.compile(pattern, re.IGNORECASE), reason) for pattern, reas
 def _comments_for(parsed: corpus.TestFile) -> dict:
     """Line number -> comment text, for every `#` comment in the file.
 
-    Read from the raw source because comments are not in the AST at all. A
-    string is only treated as a comment when the `#` starts the line's own
-    content, so a URL fragment inside a literal is not mistaken for one.
+    Raw source, since comments are not in the AST; `#` must start the line's content.
     """
     comments = {}
     for index, line in enumerate(parsed.source.splitlines(), start=1):
@@ -129,9 +106,7 @@ def nominate(scanned: corpus.Corpus) -> List[dict]:
 def _nominate_unit(unit: corpus.TestUnit, comments: dict) -> dict:
     """One nomination for a unit, or an empty dict when it confesses nothing.
 
-    A unit is nominated ONCE however many phrases it matches. Three
-    confessions in one docstring is one confessing test, and counting it three
-    times would inflate the group's own number.
+    Nominated once however many phrases match, so the group's number is not inflated.
     """
     reason = _confession_in(unit.docstring)
     if reason:

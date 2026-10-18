@@ -3,25 +3,15 @@
 # Description: Point @api's host server at the installed phone face, and read back where it points
 # Version: 1.0.0
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Point @api's host server at the installed bundle (FPLAN-0587 row 2) and the
 installed baud-cli (FPLAN-0589 row 3, ``set_baud_bin``).
 
-@api owns the face_dir setting and its validation (row 1): ``set_face_dir(path)``
-refuses a relative path, a missing directory, or one without phone.html, at write
-time. This file calls it in-process and never writes api's config file itself.
-
-The module layer imports @api's host config and hands it in as ``host_config``
-(None when @api is not importable here), so the one cross-branch edge lives in
-modules/baud.py and this handler stays inside its branch. When @api does not
-publish the function on this install, the result says so and names the CLI door
-(``drone @api host-api set-config --face-dir <dir>``).
-
-A server already running resolved its face root at start, so every successful
-point is followed by the restart line.
+@api owns the validation; this calls it in-process and never writes api's config file.
+``host_config`` comes from modules/baud.py, the one cross-branch edge (None: no @api here).
 """
 
 from __future__ import annotations
@@ -50,13 +40,7 @@ class PointResult:
 def point_api_at(dest: Path, host_config: Any) -> PointResult:
     """Ask @api to serve the phone face from `dest`.
 
-    Args:
-        dest: An absolute directory holding phone.html.
-        host_config: @api's host config module, or None when it is not importable.
-
-    Returns:
-        ok=True with the directory @api stored, or ok=False with the refusal
-        and the manual command.
+    A running server resolved its face root at start: success needs RESTART_HINT.
     """
     set_face_dir = getattr(host_config, "set_face_dir", None)
     if set_face_dir is None:
@@ -78,17 +62,7 @@ def point_api_at(dest: Path, host_config: Any) -> PointResult:
 def point_api_at_binary(path: Path, host_config: Any) -> PointResult:
     """Ask @api to exec the fleet lanes' baud binary from `path` (FPLAN-0589).
 
-    @api's ``set_baud_bin`` validates the path (absolute, exists, regular file,
-    executable) before it stores anything, and a running server picks it up on its
-    next request: no restart line.
-
-    Args:
-        path: The installed baud-cli.
-        host_config: @api's host config module, or None when it is not importable.
-
-    Returns:
-        ok=True with the path @api stored, or ok=False with the refusal and the manual command.
-    """
+    A running server picks it up on its next request: no restart line."""
     set_baud_bin = getattr(host_config, "set_baud_bin", None)
     if set_baud_bin is None:
         logger.warning("[baud] @api set_baud_bin unavailable (host config: %s)", type(host_config).__name__)

@@ -3,7 +3,7 @@
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
 # Version: 1.2.0
 # Created: 2026-09-19
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/top.py and the leaderboard reader it drives."""
@@ -21,20 +21,9 @@ from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.leaderboard import reader
 from aipass.cli.apps.modules import display
 
-# Driven through the entry point's main() with real module discovery, so the
-# exit codes asserted here are the ones drone hands back to a caller.
-#
-# The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing
-# to stdout. A partial ranking printed beside a refusal would be read as an
-# answer by whatever consumes the output, so "it exited non-zero" alone is not
-# the contract. Every argument refusal is run twice, plain and --json, because
-# the JSON form is the one a caller parses without looking.
-#
-# The tie-break has its own control. Sorting by count alone would leave
-# dictionary insertion order deciding equal counts - stable within one run, and
-# therefore a result that passes a single-run assertion while being a property
-# of how the file happened to be written. The tie tests write the same rows in
-# two different orders and demand the same output.
+# Driven through main() with real discovery, so these exit codes are the ones drone returns.
+# A refusal exits 2 AND writes nothing to stdout, plain and --json: a caller reads stdout as the ranking.
+# Tie tests write the same rows in several orders: insertion order must never decide an equal count.
 
 
 def _run(monkeypatch, argv):
@@ -44,12 +33,8 @@ def _run(monkeypatch, argv):
 
 
 def _narrow_error_console(monkeypatch):
-    """Wrap stderr at 40 columns for one test, so a refusal's phrase breaks across lines.
-
-    The conftest pins 200; a refusal naming a long tmp path still wrapped inside
-    its phrase there (macOS CI, PR #774, 2026-10-10). At 40 the break lands in
-    every phrase on every platform, so an oracle that reads across it is measured.
-    """
+    """Wrap stderr at 40 columns for one test, so a refusal's phrase breaks across lines."""
+    # At the conftest's 200 a long tmp path can still wrap mid-phrase; at 40 every platform does.
     monkeypatch.setattr(display.err_console, "width", 40)
 
 
@@ -58,11 +43,6 @@ def _board(tmp_path, text, name="scores.txt"):
     path = tmp_path / name
     path.write_text(text, encoding="utf-8")
     return str(path)
-
-
-# =============================================================================
-# WHAT IT RANKS
-# =============================================================================
 
 
 def test_the_highest_counts_print_one_per_line(monkeypatch, capsys, tmp_path):
@@ -167,11 +147,6 @@ def test_n_may_be_written_with_leading_zeros(monkeypatch, capsys, tmp_path):
     assert len(capsys.readouterr().out.splitlines()) == 3
 
 
-# =============================================================================
-# THE JSON FORM
-# =============================================================================
-
-
 @pytest.mark.parametrize(
     "argv_builder",
     [
@@ -207,10 +182,6 @@ def test_a_non_ascii_name_survives_the_json_form(monkeypatch, capsys, tmp_path):
     assert json.loads(capsys.readouterr().out) == [{"name": "zoë", "count": 4}]
 
 
-# =============================================================================
-# THE CONTRACT: A REFUSAL EXITS 2 AND WRITES NOTHING TO STDOUT
-# =============================================================================
-
 BAD_ARGUMENTS = {
     "n_but_no_file": (["3"], "no FILE given"),
     "zero": (["0", "BOARD"], "N must be a positive integer"),
@@ -239,11 +210,8 @@ def test_bad_arguments_are_refused_with_an_empty_stdout(monkeypatch, capsys, tmp
 
 
 def test_the_json_flag_alone_is_refused_rather_than_answered(monkeypatch, capsys):
-    """Bare 'top' is a question and exits 0; 'top --json' asked for output and has no N.
-
-    The flag is what separates them. An empty array here would be a caller's
-    answer to a question it never finished asking.
-    """
+    """Bare 'top' is a question and exits 0; 'top --json' asked for output and has no N."""
+    # An empty array here would answer a question the caller never finished asking.
     assert _run(monkeypatch, ["top", "--json"]) == 2
 
     captured = capsys.readouterr()
@@ -346,11 +314,6 @@ def test_n_is_refused_before_the_file_is_opened(monkeypatch, capsys, tmp_path):
     assert "file not found" not in captured.err
 
 
-# =============================================================================
-# USAGE AND HELP NEVER RANK
-# =============================================================================
-
-
 def test_bare_top_prints_the_usage_and_exits_zero(monkeypatch, capsys):
     """No arguments at all is a question, not a refusal."""
     assert _run(monkeypatch, ["top"]) == 0
@@ -373,12 +336,8 @@ def test_bare_top_prints_the_usage_and_exits_zero(monkeypatch, capsys):
     ids=["help_flag", "short_flag", "help_word", "flag_before_args", "flag_after_args"],
 )
 def test_help_anywhere_explains_and_ranks_nothing(monkeypatch, capsys, tmp_path, argv_builder):
-    """Help prints the page, exits 0, and never reads the file.
-
-    A ranking is a line of a name and a bare count, so that is what must be
-    absent: the help page quotes 'alice 12' inside an example line, and a
-    substring check would pass for the wrong reason.
-    """
+    """Help prints the page, exits 0, and never reads the file."""
+    # Whole lines, not substrings: the help page quotes 'alice 12' inside an example line.
     board = _board(tmp_path, "alice 12\nbob 30\n")
 
     assert _run(monkeypatch, argv_builder(board)) == 0
@@ -387,11 +346,6 @@ def test_help_anywhere_explains_and_ranks_nothing(monkeypatch, capsys, tmp_path,
     assert "Usage:" in captured.out
     assert not any(line.strip() in ("alice 12", "bob 30") for line in captured.out.splitlines())
     assert captured.err == ""
-
-
-# =============================================================================
-# THE READER ITSELF
-# =============================================================================
 
 
 def test_read_totals_sums_and_rank_orders(tmp_path):

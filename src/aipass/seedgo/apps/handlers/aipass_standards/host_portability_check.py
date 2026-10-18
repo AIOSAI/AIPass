@@ -3,123 +3,12 @@
 # Description: Host Portability Standards Checker Handler
 # Version: 1.3.0
 # Created: 2026-09-12
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Host Portability Standards Checker Handler.
 
-WHERE IT CAME FROM. A macOS CI leg went red with 32 failures and every branch
-that carried one read 100 on the seedgo audit. ``windows_compat`` was not the
-hole: it asks "does this run on Windows", and the two species that broke macOS
-are both perfectly good Windows code. They are LINUX assumptions, not POSIX
-ones, and nothing in the pack had a name for them.
-
-    ARM A  reading /proc as a filesystem. Linux has it, macOS does not,
-           Windows does not. ``Path("/proc/meminfo").read_text()`` raises
-           FileNotFoundError on a Mac.
-    ARM B  shelling out to a binary that is not on every host. ``tmux`` and
-           ``systemctl`` are the fleet's two: a missing binary raises
-           FileNotFoundError out of exec, so ``check=False`` does NOT help.
-
-BOTH ARMS SCORE. They were measured over 1,671 files across all 18 branches
-before this file was written, and each arm was narrowed until its acquittal
-rate stopped teaching a reader to ignore it.
-
-ARM A IS RESTRICTED TO A FILESYSTEM ARGUMENT, and that restriction is the rule.
-49 `/proc` literals exist fleet-wide; only some of them touch a disk. The three
-shapes the argument rule throws out are the ones that would have made the rule
-a nuisance:
-
-    {"/proc/42/status": str(status_file)}      a MOCK TABLE key (ai_mail
-                                               test_wake.py:337,348) — a dict
-                                               key opens nothing.
-    reason="/proc is Linux-only"               the PROSE of the skipif that
-                                               already handles it (prax
-                                               test_instance_lock.py:172,
-                                               devpulse test_watchdog_wire.py:738).
-    ["bwrap", "--proc", "/proc", "true"]       an argv element, not a path the
-                                               caller opens (aipass
-                                               sandbox_checker.py:71).
-
-A docstring cannot reach this rule at all: a docstring's parent node is an
-``ast.Expr``, and an ``ast.Expr`` is never a call argument, so the argument
-restriction excludes it by construction rather than by a separate test.
-
-ARM A'S CALLER GUARD IS WHY THE ONE REAL BUG IS LEGIBLE. drone's
-``path_resolver.py`` reads ``/proc/self/fd`` twice, 34 lines apart. Line 101 is
-inside ``_resolve_via_openat2``, whose only call site sits under
-``if _openat2_available():`` — and that predicate returns
-``sys.platform == "linux" and ...``. Line 135 is inside ``_resolve_via_walk``,
-which is the NON-Linux fallback: it is reached precisely when the platform is
-not Linux, and it then reads a Linux-only filesystem. Without the one-hop
-caller check the rule convicts both and the real bug is one row of noise among
-twenty-two. With it, the rule convicts one line fleet-wide in production, and
-that line is a genuine defect.
-
-ARM B IS A CURATED LIST, NOT A HEURISTIC. 374 subprocess sites were read: 190
-spell argv[0] dynamically and the invisible spelling is usually the CORRECT
-one — hooks ``sound.py`` picks the macOS player on darwin and the ALSA one
-otherwise inside a platform ``if``, then runs the variable. A rule that
-guessed at dynamic argv[0] would convict the cure. (Those two command names
-are not spelled out here: windows_compat scores a bare occurrence of the ALSA
-one in ANY string, docstrings included, and a rule's prose is not a reason to
-take a point off its own branch.) The 12 portable names actually used
-here (git, bash, sh, drone, python3, sleep, gh, ps, lsof, pgrep, npm, ruff)
-carry 134 sites and zero known bugs, so they are allowlisted by omission: only
-the ten names below are read at all.
-
-ARM C READS THE GATE, NOT THE HOST CALL (FPLAN-0554 round three). Eight
-macOS reds in a row were TESTS whose own skip named the wrong host:
-``skipif(sys.platform == "win32", reason="/proc is Linux-only")`` on prax
-``test_current_boot_id_reads_proc_on_linux``, and the same predicate on four
-skills ``test_runner`` units whose reason said "reads Linux /proc/meminfo".
-None of them spelled /proc in a filesystem call - the product did - so arms A
-and B could never see them. The predicate named ONE host that lacks the
-recipe; macOS lacks it too and ran the unit. Arm C convicts a platform skip
-that names only Windows on a unit that DECLARES a Linux recipe, by its name
-(``_on_linux``) or its reason ("Linux-only", or Linux beside /proc, /sys or
-systemd). It acquits a unit that manufactures its own lane (patches the
-platform or the filesystem primitive). Two wider shapes were measured and
-rejected: a Linux-named unit with no gate at all (5 fleet hits, 5 false - a
-pure function handed the string "linux"), and any /proc word in a reason
-(devpulse's wire gate names /proc beside lsof, and macOS HAS the lsof lane).
-
-The same rule now binds arm A: a skip acquits a /proc read only when its
-predicate names the host that HAS the recipe (``!= "linux"``, ``"darwin"``,
-a /proc probe, ``shutil.which``). ``os.name == "nt"`` names Windows and no
-longer launders a read macOS will fail.
-
-ARM D IS THE HOST'S PYTHON, not its OS (PR #774). A class whose base is
-``Path`` or ``PurePath`` itself raises AttributeError ``_flavour`` on 3.10 and
-3.11 and runs on every 3.12 seat, so the leg that wrote it never saw it: backup
-``_ResolveDeniedPath`` and trigger ``_RefusingPath``. A concrete flavour
-(``PureWindowsPath``, memory's) or a body that sets ``_flavour`` is acquitted.
-It lives here and not in a new standard because CI's hosts differ by Python as
-well as by OS, and a new standard would move EXPECTED_STANDARDS mid-train.
-
-ARM E IS A SYMLINKED PREFIX (PR #774, hooks 60d2af72). macOS hands out /var and
-/private/var for one directory; ``Path.home()``, ``Path.cwd()``, ``os.getcwd()``
-and ``tempfile`` keep the spelling they were given, ``.resolve()`` does not. hooks'
-``locate_config()`` compared ``aipass_home()`` (through ``_absolute()``, a
-resolve) with walk bounds from ``_search_bounds()`` (``Path.cwd(), Path.home()``)
-and read the install as a foreign project. The arm is FILE-LOCAL: inside one
-function, an ``==`` / ``!=`` / ``in x.parents`` / ``relative_to`` /
-``is_relative_to`` / ``startswith`` whose one side passed through ``.resolve()``
-or ``os.path.realpath`` and whose other side is one of those host spellings -
-directly, through a name assigned in the same function (last assignment wins),
-through ``/``, ``.parent``, ``str()``, ``Path()``, or through a same-file
-module-level function every known return of which carries one spelling (followed
-to a fixed point, so the loader's helper of a helper is seen). A path from a
-parameter or another module carries no spelling and is never judged: that is the
-call graph this arm does not have. Measured 2026-10-10 over 2,084 files: 4 rows,
-all hooks, all the specimen's walk with ``home = Path.home()`` as the stop.
-
-Interface: AUDIT_SCOPE = "branch_level", entry point ``check_branch``.
-The corpus is ``apps/``, ``tests/`` AND ``lib/`` — a test that reads /proc is
-exactly what turned the macOS leg red, the per-file audit lane never enters
-``tests/``, and skills keeps all seven built-in skills in ``lib/``, where
-``system_status/handler.py`` read /proc on every macOS run while this standard
-read 100.
+Reference: host_portability.md
 """
 
 import ast
@@ -156,18 +45,12 @@ _SYS_ROOT = "/" + "sys/"
 #: Directories this checker never walks, plus the two trees that are not source.
 _SKIP_DIRS = SOURCE_SKIP_DIRS
 
-#: The roots a branch's own code lives in. `tests/` is here on purpose: every
-#: macOS failure this standard exists to prevent was a test. `lib/` is where
-#: skills keeps its seven built-in skills; lib/system_status/handler.py read
-#: /proc on every macOS run and this standard read 100 because it never looked
-#: (FPLAN-0554 round three). Widened HERE only: the per-file audit corpus stays
-#: apps/, because moving every standard onto skills' tier-2 layout at once
-#: needs the SKILL.md architecture exemption designed first.
+#: The roots a branch's own code lives in: every macOS failure this standard exists to prevent was a test,
+#: and skills keeps its built-in skills in lib/. Widened HERE only; the per-file audit corpus stays apps/.
 _CORPUS_ROOTS = ("apps", "tests", "lib")
 
-#: Calls that hand a string to the filesystem. A `/proc` literal ANYWHERE else
-#: - a dict key, an argv element, a skipif reason - opens nothing and is not
-#: this rule's business.
+#: Calls that hand a string to the filesystem. A `/proc` literal anywhere else (a dict key, an argv element,
+#: a skipif reason) opens nothing.
 _FS_CONSTRUCTORS = frozenset({"open", "Path", "PosixPath", "PurePath"})
 _FS_METHODS = frozenset(
     {
@@ -268,17 +151,11 @@ _SPELLING_FIX = (
 )
 
 
-# =============================================
-# PLATFORM READING (extends windows_compat's helpers)
-# =============================================
-
-
 def _reads_platform(node: ast.expr) -> bool:
     """True when the expression consults the host platform.
 
-    ``_references_platform`` (windows_compat_check) knows ``sys.platform`` and
-    ``os.name``; this adds the ``platform`` module, which the standard's own
-    definition names and which no existing checker reads.
+    ``_references_platform`` (windows_compat_check) knows ``sys.platform`` and ``os.name``; this adds the
+    ``platform`` module.
     """
     if _references_platform(node):
         return True
@@ -329,10 +206,8 @@ def _platform_branch_lines(tree: ast.Module, predicates: frozenset) -> Set[int]:
 def _platform_true_operands(tree: ast.Module, predicates: frozenset) -> Set[int]:
     """``id()`` of every node in the ``X`` of an inline ``X if <platform test> else Y``.
 
-    Nodes, not lines (seedgo, fleet green leg 16): both operands usually share
-    one line, and ``Y`` runs where the platform is not the one tested, so it
-    stays judged. A module-level constant has no function for
-    :func:`_function_tests_platform` to read, so this is its only acquittal.
+    Nodes, not lines: both operands usually share one line, and ``Y`` runs where the platform is not the one
+    tested, so it stays judged. A module-level constant has no function to read, so this is its only acquittal.
     """
     ids: Set[int] = set()
     for node in ast.walk(tree):
@@ -344,10 +219,8 @@ def _platform_true_operands(tree: ast.Module, predicates: frozenset) -> Set[int]
 def _function_tests_platform(func: ast.AST) -> bool:
     """True when anything in this function branches on the platform.
 
-    Deliberately whole-function rather than lines-before: the fleet's guarded
-    reads are written both ways (``if sys.platform != "linux": return None``
-    above the read, ``if not path.exists(): return 0`` below it) and a
-    before-only rule convicts half of a single idiom.
+    Whole-function, not lines-before: guarded reads are written both ways (a platform return above the read,
+    an exists() return below it), and a before-only rule convicts half of one idiom.
     """
     for node in ast.walk(func):
         test = getattr(node, "test", None)
@@ -355,11 +228,6 @@ def _function_tests_platform(func: ast.AST) -> bool:
             if _reads_platform(test):
                 return True
     return False
-
-
-# =============================================
-# EXCEPTION AND EXISTENCE GUARDS
-# =============================================
 
 
 def _handler_catches(handler: ast.ExceptHandler, wanted: frozenset) -> bool:
@@ -391,8 +259,7 @@ def _fs_except_lines(tree: ast.Module) -> Set[int]:
 def _expects_missing(context: ast.expr) -> bool:
     """``pytest.raises(X)`` where X is a missing-file error: the test passes on every host.
 
-    A /proc read or a missing binary inside it raises that error where the host
-    lacks them, which is what the test claims (seedgo, fleet green leg 10).
+    A /proc read or missing binary inside it raises where the host lacks them, which is what the test claims.
     """
     if not (isinstance(context, ast.Call) and _tail_name(context.func) == RAISES and context.args):
         return False
@@ -421,10 +288,6 @@ def _has_existence_exit(func: ast.AST) -> bool:
                     return True
     return False
 
-
-# =============================================
-# SKIP MARKS, INCLUDING MODULE-LEVEL ALIASES
-# =============================================
 
 #: Hosts whose name in a skipif predicate means "the host that HAS the recipe".
 _RECIPE_HOSTS = frozenset({"linux", "darwin"})
@@ -460,9 +323,7 @@ def _mark_kind(mark: ast.expr) -> str:
 def _module_skip_marks(tree: ast.Module) -> Tuple[Dict[str, ast.expr], List[ast.expr]]:
     """Module-level names bound to a skip mark, and the module's own ``pytestmark``.
 
-    ``_posix_only = pytest.mark.skipif(os.name == "nt", reason=...)`` then
-    ``@_posix_only`` is how 17+ guards fleet-wide are spelled, and a reader
-    that only understands the inline form cannot judge any of them.
+    ``_posix_only = pytest.mark.skipif(...)`` then ``@_posix_only`` is how many fleet guards are spelled.
     """
     aliases: Dict[str, ast.expr] = {}
     module_marks: List[ast.expr] = []
@@ -491,10 +352,8 @@ def _skip_marks(decorators: Iterable[ast.expr], aliases: Dict[str, ast.expr]) ->
 def _names_recipe_host(predicate: ast.expr) -> bool:
     """True when a skipif predicate names the host that HAS the recipe, or probes the recipe.
 
-    ``sys.platform != "linux"``, ``not Path("/proc").exists()`` and
-    ``shutil.which("tmux") is None`` all do. ``sys.platform == "win32"`` does
-    not: it names one host that lacks the recipe, and macOS - which lacks it
-    too - runs the unit.
+    ``sys.platform == "win32"`` does not: it names one host that lacks the recipe, and macOS, which lacks it
+    too, runs the unit.
     """
     for child in ast.walk(predicate):
         if isinstance(child, ast.Constant) and isinstance(child.value, str):
@@ -555,11 +414,6 @@ def _manufactures_its_lane(unit: ast.AST) -> bool:
     return False
 
 
-# =============================================
-# ONE-HOP CALLER GUARD
-# =============================================
-
-
 def _caller_guarded_functions(tree: ast.Module, platform_lines: Set[int]) -> frozenset:
     """Functions whose EVERY call site in this module sits under a platform test.
 
@@ -572,11 +426,6 @@ def _caller_guarded_functions(tree: ast.Module, platform_lines: Set[int]) -> fro
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             call_lines.setdefault(node.func.id, []).append(node.lineno)
     return frozenset(name for name, lines in call_lines.items() if lines and all(ln in platform_lines for ln in lines))
-
-
-# =============================================
-# ARM A - /proc AS A FILESYSTEM ARGUMENT
-# =============================================
 
 
 def _proc_literal(node: ast.expr) -> str:
@@ -610,11 +459,8 @@ def _unwrap_path(node: ast.expr) -> ast.expr:
 def _proc_bindings(tree: ast.Module) -> Tuple[Dict[str, str], Set[int]]:
     """Names bound ONLY to /proc literals, and the ids of those bound value nodes.
 
-    skills lib/system_status/handler.py spelled all three of its reads this
-    way - ``meminfo_path = "/proc/meminfo"`` then ``open(meminfo_path)`` - and
-    a reader that took only a literal argument never nominated one. A name
-    bound to anything else anywhere in the file is dropped: which value
-    reaches the call is then a question one pass cannot answer.
+    A name bound only to a /proc literal (``meminfo_path = "/proc/meminfo"`` then ``open(meminfo_path)``)
+    is read; a name bound to anything else anywhere in the file is dropped.
     """
     texts: Dict[str, str] = {}
     values: Dict[str, List[int]] = {}
@@ -644,12 +490,8 @@ def _fs_operands(node: ast.Call) -> List[ast.expr]:
 def _proc_nominations(tree: ast.Module, guarded: Set[int]) -> List[Tuple[int, str]]:
     """Every ``/proc`` literal that reaches a filesystem call, directly or through a name.
 
-    A ``Path(...)`` bound to a name is judged where the name is USED, not where
-    it is built, because building a Path touches nothing: telegram
-    base_bot.py:2721 builds ``Path(f"/proc/{pid}/fd")`` outside its try and
-    lists it inside ``except OSError``, and the constructor line was a false row.
-    A call whose ``id()`` is in ``guarded`` (:func:`_platform_true_operands`) is
-    not nominated.
+    A ``Path(...)`` bound to a name is judged where the name is USED, not where it is built: building a
+    Path touches nothing. A call whose ``id()`` is in ``guarded`` (:func:`_platform_true_operands`) is not nominated.
     """
     bound, bound_values = _proc_bindings(tree)
     found: List[Tuple[int, str]] = []
@@ -692,11 +534,6 @@ def _proc_violations(tree: ast.Module, skipped: Set[int], predicates: frozenset)
     return violations
 
 
-# =============================================
-# ARM B - ASSUMED NON-PORTABLE BINARY
-# =============================================
-
-
 def _subprocess_aliases(tree: ast.Module) -> frozenset:
     """Names this module calls the subprocess module by."""
     names: Set[str] = {"subprocess"}
@@ -711,9 +548,7 @@ def _subprocess_aliases(tree: ast.Module) -> frozenset:
 def _runner_argv0(node: ast.Call, aliases: frozenset) -> str:
     """The bare literal argv[0] of a subprocess runner call, or "".
 
-    A Name, a starred element or an f-string argv[0] returns "" on purpose:
-    190 of 374 fleet sites spell it dynamically and that spelling is usually
-    the cure, not the disease.
+    A Name, a starred element or an f-string argv[0] returns "" on purpose: a dynamic spelling is usually the cure.
     """
     func = node.func
     if not isinstance(func, ast.Attribute) or func.attr not in _SUBPROCESS_RUNNERS:
@@ -790,10 +625,6 @@ def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tu
         )
     return violations, acquitted
 
-
-# =============================================
-# ARM C - A SKIP THAT NAMES THE WRONG HOST (tests lane)
-# =============================================
 
 #: A unit NAMED for Linux. The other half (non_linux, off_linux, not_linux) is
 #: the portable case and is excluded by name.
@@ -877,11 +708,6 @@ def _gate_violations(
     return violations
 
 
-# =============================================
-# ARM D - A DIRECT pathlib.Path SUBCLASS (the host's Python)
-# =============================================
-
-
 def _flavourless_subclasses(tree: ast.Module) -> List[Tuple[int, str]]:
     """Classes whose base is ``Path`` or ``PurePath`` itself and carry no ``_flavour``."""
     violations: List[Tuple[int, str]] = []
@@ -893,11 +719,6 @@ def _flavourless_subclasses(tree: ast.Module) -> List[Tuple[int, str]]:
         if bases and not carried:
             violations.append((node.lineno, f"class {node.name}({min(bases)}) - {_FLAVOUR_FIX}"))
     return violations
-
-
-# =============================================
-# ARM E - A RESOLVED PATH COMPARED WITH ONE TAKEN AS GIVEN (file-local)
-# =============================================
 
 
 def _dotted(node: ast.expr) -> str:
@@ -1071,11 +892,6 @@ def _mixed_spelling_comparisons(tree: ast.Module) -> List[Tuple[int, str]]:
     return violations
 
 
-# =============================================
-# CORPUS
-# =============================================
-
-
 def _corpus_files(branch_root: Path, ignore_entries: list) -> List[Path]:
     """Every auditable .py file under apps/, tests/ and lib/."""
     files: List[Path] = []
@@ -1106,9 +922,7 @@ def _relative(path: Path, branch_root: Path) -> str:
 def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
     """Every arm (A to E) over one file. Returns (violations, acquitted binary sites).
 
-    A file that cannot be read or parsed reports NOTHING rather than a
-    violation: this standard is about what the code does, and an unparseable
-    file is ruff's business, not portability's.
+    A file that cannot be read or parsed reports NOTHING: an unparseable file is ruff's business.
     """
     path = Path(file_path)
     try:
@@ -1134,11 +948,6 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
     return violations, acquitted
 
 
-# =============================================
-# BRANCH-LEVEL CHECK (audit pipeline entry)
-# =============================================
-
-
 def _result(score: int, checks: List[Dict], branch_path: str) -> Dict:
     """The pack's result shape, logged once."""
     json_handler.log_operation(
@@ -1159,20 +968,7 @@ def _violation_items(rows: Iterable[Tuple[str, int, str]]) -> List[Dict]:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for host assumptions: Linux-only OS calls and a 3.12-only Path subclass.
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/seedgo)
-        bypass_rules: Optional list of bypass rules to skip certain violations
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': 'HOST_PORTABILITY'
-        }
-    """
+    """Check a branch for host assumptions: Linux-only OS calls and a 3.12-only Path subclass."""
     branch_root = Path(branch_path)
 
     if is_bypassed(branch_path, _BYPASS_KEY, bypass_rules=bypass_rules):

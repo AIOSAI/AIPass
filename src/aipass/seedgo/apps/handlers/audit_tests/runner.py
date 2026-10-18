@@ -3,7 +3,7 @@
 # Description: audit-tests orchestration - the nine-step pipeline
 # Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -19,15 +19,7 @@ The pipeline. Nine steps, and step 7 is the one everything else serves.
     8  nominate              static species; suspects, never verdicts (Law M1)
     9  assemble -> validate -> write -> render
 
-STEP 7 IS BEFORE STEP 8 DELIBERATELY. A run that cannot prove its own gate can
-fire publishes NOTHING — not "the static groups only". A partial publication
-from an unproven harness is exactly the confidently-wrong-number shape the
-whole lane refuses.
-
-WHAT A REFUSAL STILL DOES: publishes a complete artifact with every group
-`not_applicable` and a reason. An empty file, or no file, is indistinguishable
-from a run that never happened, and the entire point of the refusal vocabulary
-is that those two are different things.
+A refusal still publishes a complete artifact, every group `not_applicable` with a reason.
 """
 
 import tempfile
@@ -43,17 +35,13 @@ from aipass.seedgo.apps.handlers.audit_tests import adapters, artifact, laws, re
 from aipass.seedgo.apps.handlers.audit_tests import cache, m10, selfcheck
 from aipass.seedgo.apps.handlers.json import json_handler
 
-#: Default wall-clock budget for one target's suite (Law T-BUDGET).
 DEFAULT_BUDGET_SECONDS = 900
 
-#: Prefix for the scratch env, so a stray directory is identifiable at a glance.
 SCRATCH_PREFIX = "audit_tests_"
 
-#: The M10 note of a run asked not to prove it - a skip, never a failure to fingerprint.
 SKIPPED_NOTE = "skipped: this run was asked not to prove M10 (no_m10_proof), so nothing was fingerprinted"
 
-#: The cache lane is not built. S5 requires the artifact to say what it cannot
-#: see rather than leave a reader to assume a check ran and passed.
+#: S5: the artifact says what it cannot see rather than imply a check ran.
 NO_CACHE_BLOCK = {
     "served_from_cache": False,
     "stamp": "",
@@ -73,12 +61,7 @@ class RunResult:
 
     @property
     def refused(self) -> bool:
-        """True when this run declined to publish a measurement.
-
-        Read from the exit-code vocabulary rather than from the document, so
-        one definition of "refused" governs the summary line, the fleet code
-        and the artifact together.
-        """
+        """True when this run declined to publish a measurement (read from the exit code, the one definition)."""
         return refusal.is_refusal(self.code)
 
     def summary_line(self) -> str:
@@ -97,17 +80,8 @@ class RunResult:
         return f"{self.target.name}: hygiene {score} ({count} violation(s)) -> {self.path}"
 
 
-# =============================================================================
-# TARGET RESOLUTION
-# =============================================================================
-
-
 def branch_paths() -> Dict[str, Path]:
-    """Registered branch name -> path.
-
-    `target.resolve()` takes this as an argument rather than importing the
-    registry itself, which is what keeps it testable without one.
-    """
+    """Registered branch name -> path."""
     return {entry["name"]: Path(entry["path"]) for entry in discover_branches()}
 
 
@@ -129,11 +103,6 @@ def resolve_targets(argument: str) -> List[target_module.Target]:
     return [target_module.resolve(argument, paths)]
 
 
-# =============================================================================
-# THE REFUSAL PATH
-# =============================================================================
-
-
 def refuse(
     target: target_module.Target,
     refused: refusal.Refusal,
@@ -145,9 +114,7 @@ def refuse(
 ) -> RunResult:
     """Publish a complete refused artifact and return its result.
 
-    Publication is attempted, not assumed. If the refused artifact is itself
-    unlawful the LawViolation propagates rather than being swallowed — an
-    enforcer that quietly writes an unlawful document has stopped being one.
+    An unlawful refused artifact propagates its LawViolation, never swallowed.
     """
     previous = artifact.load_previous(target)
     document = artifact.refused_artifact(
@@ -170,18 +137,8 @@ def refuse(
     return RunResult(target, document, path, refused.code)
 
 
-# =============================================================================
-# ONE TARGET
-# =============================================================================
-
-
 def run_target(target: target_module.Target, options: Optional[dict] = None) -> RunResult:
-    """Run the full pipeline for one target. Never raises past its own edge.
-
-    Every failure mode inside becomes a REFUSAL with a law and a reason, which
-    is the difference between a lane that reports it could not measure and a
-    lane that looks like it measured nothing.
-    """
+    """Run the full pipeline for one target. Never raises past its own edge; failures become refusals."""
     options = dict(options or {})
     budget = int(options.get("budget_seconds") or DEFAULT_BUDGET_SECONDS)
 
@@ -233,16 +190,8 @@ def _measure(
 ) -> RunResult:
     """Steps 4-9 for a target an adapter has claimed.
 
-    The real tree is FINGERPRINTED before and after. Law M10 is the lane's
-    central promise, and a promise this instrument merely asserted would be the
-    same species it exists to catch: a claim nothing could ever falsify. So it
-    is measured, on every run, and the result is published whether it is good
-    news or not.
-
-    THE CARRIER WINDOW OPENS FIRST, before the before-fingerprint, so that
-    every write THIS process makes into the real tree during the comparison
-    window is on record. Otherwise the audit's own logger appears in its own
-    diff as an unexplained change.
+    The carrier window opens before the before-fingerprint, or the audit's own
+    logger shows in its own M10 diff as an unexplained change.
     """
     started = datetime.now(timezone.utc)
     clock = time.monotonic()
@@ -271,8 +220,7 @@ def _measure(
                 m10_proof=_m10_proof(target, before, options, run),
             )
     except Exception as exc:
-        # A crash mid-measurement is a refusal, never a zero. The lane knows
-        # nothing about this target's hygiene and says exactly that.
+        # A crash mid-measurement is a refusal, never a zero.
         logger.error(f"[AUDIT-TESTS] measurement of {target.name} failed: {type(exc).__name__}: {exc}")
         return refuse(
             target,
@@ -286,9 +234,7 @@ def _measure(
             group_list=group_list,
         )
     finally:
-        # The window closes on every path out, including the crash one. A
-        # recorder left open would keep attributing the next target's writes
-        # to this run's roots.
+        # Closed on every path out, or the next target's writes are attributed to this run.
         m10.stop_carrier_recording()
         if spec is not None:
             adapter.teardown(spec)
@@ -310,10 +256,7 @@ def _publish(
     """Steps 7-9: canary or refuse, then assemble, validate, write."""
     gate = dict(run.get("gate") or {})
 
-    # STEP 7, and it is before step 8 deliberately. A run that cannot prove its
-    # own gate can fire publishes NOTHING - not "the static groups only". A
-    # partial publication from an unproven harness is the confidently-wrong
-    # -number shape the whole lane exists to refuse.
+    # Step 7 before step 8: an unproven gate publishes NOTHING, not "the static groups only".
     if not gate.get("proven"):
         return refuse(
             target,
@@ -375,12 +318,8 @@ def _pack_dir(adapter) -> Optional[Path]:
 def _retirements(adapter, ecosystem: str) -> List[dict]:
     """The adapter's recorded group retirements, namespaced and validated.
 
-    Law S3 lets a group vanish ONLY by a ruling, and the ruling is published
-    in the artifact rather than left in a commit message. An entry with no
-    ruling text is dropped here rather than passed on, so that S3's own
-    validator refuses the artifact instead of accepting a retirement nobody
-    signed - the check that catches an adapter retiring a group by writing an
-    empty string.
+    An entry with no ruling is dropped so S3's validator refuses the artifact
+    rather than accept a retirement nobody signed.
     """
     entries: List[dict] = []
 
@@ -398,12 +337,7 @@ def _retirements(adapter, ecosystem: str) -> List[dict]:
 def _unproven_refusal(gate: dict, run: dict, elapsed: float) -> refusal.Refusal:
     """The refusal for a gate that was never proven able to fire.
 
-    THE PRE-BUILT BUILDERS ARE USED ONLY WHERE THEIR WORDING IS TRUE. A budget
-    expiry gets the T-BUDGET refusal and a missed canary gets the canary one;
-    everything else carries the measurement's OWN reason. Reaching for the
-    canary builder on every unproven run would restate a specific cause the
-    run never established — the same invented-diagnosis defect the gate log's
-    reason branch already had to be corrected for.
+    Pre-built builders only where their wording is true; otherwise the measurement's own reason.
     """
     if run.get("timed_out"):
         return refusal.refusal_for_budget(elapsed, int(run.get("budget_seconds", DEFAULT_BUDGET_SECONDS)), "hygiene")
@@ -411,14 +345,8 @@ def _unproven_refusal(gate: dict, run: dict, elapsed: float) -> refusal.Refusal:
     canary = gate.get("canary") or {}
     detail = [f"canary: {canary}", f"stdout tail: {str(run.get('stdout_tail', ''))[-400:]}"]
 
-    # The hook check comes FIRST and the ordering is the point. With the gate
-    # switched off the canary is still WRITTEN and still not caught, so
-    # `attempted and not caught` is true — and reaching for the canary refusal
-    # there reports a blind gate when the measured fact is that no gate was
-    # installed. `refusal_for_canary` says so in its own words ("the gate was
-    # installed but did not fire"), which is exactly why it may not be used
-    # here. Caught by running canary point C, after an audit cleanup put these
-    # two branches in the wrong order.
+    # hook_installed first: with no gate the canary is still written and uncaught, and
+    # refusal_for_canary's wording ("installed but did not fire") would then be false.
     if gate.get("hook_installed") and canary.get("attempted") and not canary.get("caught"):
         return refusal.refusal_for_canary(detail)
 
@@ -432,8 +360,7 @@ def _unproven_refusal(gate: dict, run: dict, elapsed: float) -> refusal.Refusal:
 def _fingerprint_target(target: target_module.Target) -> Optional[Dict[str, tuple]]:
     """The real tree's fingerprint before anything runs, or None if it could not be taken.
 
-    None means a failure and only that: a run asked not to prove M10 never calls
-    this, so _m10_proof cannot read a skip as a failure (seedgo fleet green leg 14).
+    None means failure only: a no_m10_proof run never calls this, so a skip is never read as one.
     """
     try:
         return m10.snapshot_tree(target.path)
@@ -445,10 +372,7 @@ def _fingerprint_target(target: target_module.Target) -> Optional[Dict[str, tupl
 def _probe_live_writers(target: target_module.Target, options: dict) -> None:
     """Record which of the target's own paths move with no suite running.
 
-    Two back-to-back snapshots, taken before the copy exists. Whatever changes
-    between them belongs to something that is not this run - a live citizen's
-    daemon, server or logger - and the M10 proof subtracts that set so its
-    headline names writes nothing else was seen making.
+    Two back-to-back snapshots before the copy exists; the M10 proof subtracts what moved.
     """
     if options.get("no_m10_proof"):
         return
@@ -457,19 +381,10 @@ def _probe_live_writers(target: target_module.Target, options: dict) -> None:
     try:
         options["live_writers"] = m10.live_writers(target.path)
         options["live_writers_probed"] = True
-        # PUBLISHED, not just measured. A bare `probed: true` reads as "probed
-        # ADEQUATELY", and this window is milliseconds against a run of tens of
-        # seconds - so a service writing once a minute is missed and its paths
-        # surface as unattributed. @trigger hit exactly that (a systemd user
-        # unit, six files) and only found it by identifying the paths by hand.
-        # The reader cannot make the comparison unless BOTH numbers are here.
+        # Published: the window is milliseconds against a long run, so a rare writer surfaces as unattributed.
         options["live_writer_probe_seconds"] = round(time.perf_counter() - started, 4)
     except OSError as exc:
-        # Recorded, never assumed empty: an unmeasured live-writer set makes
-        # every concurrent write read as an M10 violation, which is the safe
-        # direction but must not look like a clean probe. The window stays
-        # None rather than becoming the elapsed-until-failure, which would
-        # read as a window that measured something.
+        # Recorded, never assumed empty; the window stays None so it never reads as a measurement.
         logger.warning(f"[AUDIT-TESTS] live-writer probe of {target.path} failed: {exc}")
         options["live_writers_probed"] = False
 
@@ -482,17 +397,8 @@ def _m10_proof(
 ) -> dict:
     """Whether the real tree survived the run untouched, measured both ends.
 
-    A `not_probed` result is published in full rather than omitted. A missing
-    proof block and a passing one must never look the same, which is the whole
-    argument of Law S1 applied to the lane's own harness.
-
-    THE VERDICT IS JUDGED OVER NON-CARRIER PATHS. The audit's own machinery
-    writes into a live branch while it measures it, and the diff is partitioned
-    on PROVENANCE - what this process was recorded writing - never on what a
-    path looks like. `diff_snapshots` is asked NOT to record here because the
-    partition records instead: the alarm belongs to the changes nothing can
-    account for, and an ERROR that fires on the audit's own logs teaches
-    everyone to ignore Law M10.
+    The diff is partitioned on PROVENANCE (what this process was recorded writing), never
+    on path shape; `diff_snapshots` does not record because the partition does.
     """
     if options.get("no_m10_proof"):
         return _m10_not_probed(SKIPPED_NOTE)
@@ -502,9 +408,6 @@ def _m10_proof(
     try:
         after = m10.snapshot_tree(target.path)
     except OSError as exc:
-        # Never swallowed: without the second fingerprint the M10 claim cannot
-        # be made at all, and a proof that quietly stopped running is worse
-        # than one that never existed.
         logger.warning(f"[AUDIT-TESTS] after-fingerprint of {target.path} failed, M10 unproven: {exc}")
         return _m10_not_probed(f"the after-fingerprint could not be taken: {exc}")
 
@@ -517,12 +420,7 @@ def _m10_proof(
     changed = _changed(diff)
     concurrent = _changed(options.get("live_writers") or {})
 
-    # THE SUITE WROTE IT, in this instrument's own words. The strongest of the
-    # three signals: the hygiene gate watches the suite in-process and names
-    # every path it opens for writing, so a real-tree path in that record was
-    # written BY the measurement. This is the finding check 12 exists for, and
-    # it is read from the FULL diff: a path the carrier also wrote is never
-    # subtracted out of this list, because the suite's record convicts.
+    # Read from the FULL diff: a path the carrier also wrote stays, because the suite's own record convicts.
     by_the_suite = sorted(_changed(partition["diff_before_carrier_subtraction"]) & recorded)
 
     return {
@@ -561,11 +459,7 @@ def _changed(diff: dict) -> set:
 def _paths_the_gate_recorded(run: Optional[dict]) -> set:
     """Every path the hygiene gate saw the suite write.
 
-    The gate is per-interpreter, so this record is complete only to the extent
-    `gate_coverage` says it is - child processes and file-backed sqlite3
-    handles write where it cannot follow, and both are counted there. That is
-    why a path's ABSENCE from this set proves nothing on its own, and why the
-    M10 verdict treats "absent" as undetermined rather than as innocent.
+    Per-interpreter only (see `gate_coverage`), so absence from this set proves nothing.
     """
     if not run:
         return set()
@@ -575,10 +469,7 @@ def _paths_the_gate_recorded(run: Optional[dict]) -> set:
 def _m10_not_probed(reason: str) -> dict:
     """The M10 block for a run that could not prove anything.
 
-    The carrier block is built by the same partition the measured path uses,
-    on an empty diff, so an unprobed proof and a probed one cannot drift into
-    two different shapes - the second reader of this document would have no way
-    to tell a missing field from a subtraction nobody published.
+    Built by the same partition on an empty diff, so probed and unprobed blocks keep one shape.
     """
     empty = m10.carrier_partition({})
     return {
@@ -601,11 +492,7 @@ def _m10_not_probed(reason: str) -> dict:
 
 
 def _compose_groups(group_list: List[str], ecosystem: str, hygiene: dict, nominations: dict) -> Dict[str, dict]:
-    """Every published group, in `group_list` order. Law S4 is order-sensitive.
-
-    A spine group no adapter implements stays in the list and reports
-    `not_applicable` with a reason. It never disappears and it is never 0.
-    """
+    """Every published group, in `group_list` order. Law S4 is order-sensitive."""
     groups: Dict[str, dict] = {}
 
     for name in group_list:
@@ -622,12 +509,7 @@ def _compose_groups(group_list: List[str], ecosystem: str, hygiene: dict, nomina
 
 
 def _unclaimed_group(name: str, ecosystem: str) -> dict:
-    """A declared adapter group the adapter returned nothing for.
-
-    Law S1 again: the group stays, states it did not run, and says who was
-    supposed to fill it. A group that vanished because an adapter forgot it is
-    exactly what S3 exists to catch.
-    """
+    """A declared adapter group the adapter returned nothing for."""
     return {
         "tier": "static",
         "kind": "nominate_only",
@@ -648,14 +530,7 @@ def _hygiene_group(
 ) -> dict:
     """The scored group, built from a proven gate's normalized measurement.
 
-    THE SCORE IS A GATE, NOT AN OPINION (design section 4.5): 100 or 0, never a
-    percentage. "Your suite forged 31 log entries instead of 79" is not a
-    better suite, it is the same defect at a different volume — and a partial
-    credit would let a branch improve its number without fixing anything.
-
-    Only reached when the gate is proven. An unproven gate never gets here,
-    which is what keeps "no violations seen" and "nothing was watching" from
-    ever producing the same document.
+    100 or 0, never a percentage: partial credit would let a branch improve its number without fixing anything.
     """
     violations = list(gate.get("violations") or [])
     document = dict(gate)
@@ -681,17 +556,10 @@ def _hygiene_group(
     return document
 
 
-# =============================================================================
-# THE FLEET FORM
-# =============================================================================
-
-
 def run(argument: str, options: Optional[dict] = None) -> Tuple[List[RunResult], int]:
     """Run every target the argument names. Returns `(results, worst_code)`.
 
-    The fleet code is the WORST per-target code and a per-target summary line
-    is available for every target regardless, so the single number is never
-    the only signal a caller has.
+    The fleet code is the WORST per-target code.
     """
     results: List[RunResult] = []
 
@@ -699,8 +567,6 @@ def run(argument: str, options: Optional[dict] = None) -> Tuple[List[RunResult],
         try:
             results.append(run_target(target, options))
         except laws.LawViolation as exc:
-            # The lane refused to publish its own artifact. Loud, and never
-            # converted into a score.
             logger.error(f"[AUDIT-TESTS] artifact for {target.name} was unlawful and not written: {exc}")
             results.append(RunResult(target, {"status": "refused"}, None, refusal.EXIT_UNPROVEN))
 

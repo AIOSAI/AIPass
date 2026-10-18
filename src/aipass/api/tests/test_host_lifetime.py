@@ -3,27 +3,13 @@
 # Description: Tests for a serve that outlives the shell that started it
 # Version: 1.1.1
 # Created: 2026-08-20
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
 
-# Tests for the Host API Lifetime Lane
-#
-# A `host-api serve` routed through drone is a child of drone's exec timeout.
-# @baud read the tailnet server's pane on 2026-08-19 and found fourteen cycles of
-# "timed out after 43200s" followed by "restarting in 2s" — and the churn cost
-# more than the downtime, because uvicorn's access log goes to stdout, stdout was
-# that pane, and a day of history scrolled out of a bounded scrollback. By evening
-# nobody could answer which bundle a phone had pulled.
-#
-# The two halves are one defect: a server with nowhere to write has no history,
-# and a server held open by a caller cannot outlive that caller's patience.
-#
-# WHAT THESE TESTS GUARD MOST CAREFULLY is the pair of promises that make
-# detaching safe rather than merely convenient — the bind is validated BEFORE
-# anything is spawned, and the log is APPENDED to rather than truncated. Both are
-# one keyword in the implementation and both fail silently if that keyword goes.
+# Two promises, each one keyword in the code and silent if it goes: the bind is
+# validated BEFORE anything spawns, and the log is APPENDED, never truncated.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that lifetime.py parses and imports
@@ -55,17 +41,10 @@ def runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """
     A throwaway runtime directory, so no test touches the real logs/.
 
-    THE SUPERVISOR IS ANSWERED "no" BY DEFAULT, added 2026-08-27 with the
-    autostart lane. running() now asks systemd before it reads the record file,
-    so without this every test in this file would shell out to the real
-    systemctl and — on a host where the unit IS installed and running — would
-    get a live pid back and fail for a reason that has nothing to do with it.
-    A test whose result depends on whether the machine it runs on happens to be
-    serving is not a test.
-    """
+    The supervisor answers "no": running() asks systemd first, and a host with the
+    unit live would otherwise hand every test a real pid."""
     monkeypatch.setattr(host_lifetime, "_runtime_dir", lambda: tmp_path)
-    # The home is this checkout, so the server is this process's copy, whatever
-    # home the machine running the suite has enrolled (DPLAN-0408).
+    # This checkout, whatever home the machine running the suite has enrolled.
     monkeypatch.setenv("AIPASS_HOME", str(THIS_CHECKOUT))
     monkeypatch.setattr(host_lifetime, "json_handler", MagicMock())
     monkeypatch.setattr(host_lifetime, "logger", MagicMock())
@@ -102,12 +81,7 @@ class TestTheBindIsCheckedBeforeAnythingIsSpawned:
     """
     D1 holds across the detach seam, and this is where it would quietly stop.
 
-    A refused address must never reach a listener. Validating inside the
-    detached child would technically satisfy that — the child would refuse and
-    die — but the operator who typed the command would see a success, and the
-    refusal would be a line in a log file they have no reason to open. A
-    refusal nobody reads is not a refusal.
-    """
+    Validating inside the child would leave the refusal in a log nobody opens."""
 
     def test_a_refused_bind_spawns_nothing(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The load-bearing one: no process, not even a short-lived one."""
@@ -145,21 +119,13 @@ class TestTheChildIsGenuinelyDetached:
     """
     The mechanism, asked of the call rather than assumed from the docstring.
 
-    Without a new session the child stays in the process group drone is timing,
-    which is the entire bug — the server would still die at twelve hours and
-    these tests would still pass on every other assertion.
+    Without a new session the child stays in the process group drone is timing.
     """
 
     def test_the_child_gets_its_own_session(self, runtime: Path, bind_ok: None) -> None:
         """One keyword, and the whole fix is it — SPELLED PER PLATFORM.
 
-        start_new_session is POSIX-only. Popen accepts it on Windows and
-        silently does nothing, which is the worst failure this flag could have:
-        `--detach` would report success and the server would still die with
-        whatever timed out its parent. seedgo's Windows check caught that, not
-        a test — so this asserts the spelling that is actually load-bearing
-        HERE rather than the one that happens to be in the source.
-        """
+        start_new_session is POSIX-only; Windows accepts it and silently does nothing."""
         with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
             host_lifetime.serve_detached()
 
@@ -176,12 +142,7 @@ class TestTheChildIsGenuinelyDetached:
             assert "creationflags" not in handed
 
     def test_the_detach_keywords_are_never_empty(self, runtime: Path, bind_ok: None) -> None:
-        """Vacuity floor for the branch above.
-
-        A _detach_kwargs() that returned {} would make the platform assertions
-        the only thing standing between this and a server that is not detached
-        at all — and on the untested platform, nothing would stand there.
-        """
+        """Vacuity floor for the branch above."""
         with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
             host_lifetime.serve_detached()
 
@@ -204,11 +165,7 @@ class TestTheChildIsGenuinelyDetached:
         assert popen.call_args.kwargs["stderr"] is subprocess.STDOUT
 
     def test_the_command_carries_the_resolved_bind_not_the_defaults(self, runtime: Path, bind_ok: None) -> None:
-        """The child must serve what the parent validated, not re-decide it.
-
-        If the child re-read the config it could bind something the gate never
-        saw — the same class of hole as validating inside the child.
-        """
+        """The child must serve what the parent validated, not re-decide it."""
         with patch.object(subprocess, "Popen", return_value=_spawned()) as popen:
             host_lifetime.serve_detached(host="127.0.0.1", port=9001)
 
@@ -220,14 +177,7 @@ class TestTheChildIsGenuinelyDetached:
 
 
 class TestTheLogSurvivesARestart:
-    """
-    The half that actually cost @baud an answer.
-
-    Fourteen restarts destroyed a day of access history because the only copy
-    lived in a pane's scrollback. Giving the server a file fixes that ONLY if
-    the file is appended to — a truncating open would reproduce the same loss
-    with extra steps, and would look completely fine in every other test here.
-    """
+    """The half that actually cost @baud an answer."""
 
     def test_earlier_output_is_not_truncated_by_a_new_server(self, runtime: Path, bind_ok: None) -> None:
         """The pin that would catch "w" replacing "a"."""
@@ -285,11 +235,7 @@ class TestFindingTheRunningServer:
         """
         This process is alive by construction, which makes it a safe stand-in.
 
-        Also the vacuity floor of TestADeadChildIsDead: an _alive that always
-        said False would pass both zombie tests, and fails here. Its own test,
-        _alive(os.getpid()) by name, was retired as this one's duplicate once
-        those tests asked through running() (api, fleet green leg 9).
-        """
+        Also the vacuity floor of TestADeadChildIsDead's zombie tests."""
         host_lifetime.record_path().write_text(
             json.dumps({"pid": os.getpid(), "host": "127.0.0.1", "port": 8790}), encoding="utf-8"
         )
@@ -301,15 +247,7 @@ class TestFindingTheRunningServer:
 
     @pytest.mark.parametrize("unreadable", ["{ not json", "[]"])
     def test_an_unreadable_record_is_unknown_not_no_server(self, runtime: Path, unreadable: str) -> None:
-        """
-        Half a JSON file, or JSON that is not a record, says NOTHING about the server.
-
-        running() used to answer None here, the same answer as no record at all,
-        so `status` said no server was running about a pid nobody had read.
-        It raises now and status renders the third answer, unknown, with the
-        reason (api, fleet green leg 9). Its proof is the mutant that puts the
-        old return None back.
-        """
+        """Half a JSON file, or JSON that is not a record, says NOTHING about the server."""
         host_lifetime.record_path().write_text(unreadable, encoding="utf-8")
 
         with pytest.raises(host_lifetime.LifetimeError) as refusal:
@@ -325,11 +263,7 @@ class TestFindingTheRunningServer:
         """
         The defect the old None hid (api, fleet green leg 9).
 
-        stop() reads None as a stale record and unlinks the file, so a server
-        whose record was half-written lost the one file that names its pid and
-        kept running where `stop` could no longer find it. A record nobody can
-        read is not a record anybody may clear.
-        """
+        A record nobody can read is not a record anybody may clear."""
         host_lifetime.record_path().write_text("{ not json", encoding="utf-8")
 
         with pytest.raises(host_lifetime.LifetimeError):
@@ -354,23 +288,7 @@ class TestADeadChildIsDead:
     """
     The defect the first LIVE start/stop found, on 2026-08-19.
 
-    Every test above mocks os.kill, so every one of them was green while stop()
-    was broken. A real detached server shut down cleanly — its log says
-    "Finished server process" — and stop() waited the full ten seconds and then
-    reported that the server would not go.
-
-    The reason is that a process which has exited but has not been REAPED still
-    holds a pid entry, so os.kill(pid, 0) answers yes to a corpse. It only
-    bites when the caller is the server's own parent, which is why no mocked
-    test could see it and why a real one had to.
-
-    This uses a real process for exactly that reason. It is the only test here
-    that could have caught it.
-
-    Asked through running(), the public question _alive answers for status and
-    stop, with a record naming the child (api, fleet green leg 9). The vacuity
-    floor, a live pid read as running, is test_a_live_record_is_returned's.
-    """
+    os.kill(pid, 0) answers yes to an unreaped child; only a real process shows it."""
 
     def test_a_reaped_child_is_not_reported_alive(self, runtime: Path) -> None:
         """The pin. Without the reap in _alive, this hangs on a zombie forever."""
@@ -378,20 +296,13 @@ class TestADeadChildIsDead:
         child.wait()
         host_lifetime.record_path().write_text(json.dumps({"pid": child.pid}), encoding="utf-8")
 
-        # Deliberately NOT calling child.poll() again — Popen.wait() has already
-        # reaped it, so this is the easy half and only proves the floor.
         assert host_lifetime.running() is None
 
     def test_an_unreaped_child_is_not_reported_alive_either(self, runtime: Path) -> None:
-        """The real case: nobody has waited on it, so the zombie is still there.
-
-        This is the exact situation stop() is in when it runs in the process
-        that spawned the server.
-        """
+        """The real case: nobody has waited on it, so the zombie is still there."""
         child = subprocess.Popen([sys.executable, "-c", "pass"])
 
-        # Wait for it to exit WITHOUT reaping it, the way a caller polling
-        # _alive would. os.waitid with WNOWAIT leaves the zombie in place.
+        # WNOWAIT waits for the exit and leaves the zombie in place.
         os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
         host_lifetime.record_path().write_text(json.dumps({"pid": child.pid}), encoding="utf-8")
 
@@ -417,11 +328,7 @@ class TestStopping:
         assert not host_lifetime.record_path().exists()
 
     def test_the_server_is_asked_to_exit_not_killed(self, runtime: Path) -> None:
-        """SIGTERM, so uvicorn gets to finish its shutdown.
-
-        SIGKILL would cut that short, and this handler does not get to decide
-        that a server taking its time is a server that has hung.
-        """
+        """SIGTERM, so uvicorn gets to finish its shutdown."""
         alive = [True]
         host_lifetime.record_path().write_text(json.dumps({"pid": 4242}), encoding="utf-8")
 
@@ -447,11 +354,7 @@ class TestStopping:
         runtime: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Never silently escalated, and never silently given up on.
-
-        Time is driven rather than slept — a real ten-second wait in a suite is
-        not a test, it is a delay.
-        """
+        """Never silently escalated, and never silently given up on."""
         monkeypatch.setattr(host_lifetime, "STOP_POLL_SECONDS", 0.0)
         host_lifetime.record_path().write_text(json.dumps({"pid": 4242}), encoding="utf-8")
 
@@ -476,12 +379,7 @@ if __name__ == "__main__":
 class TestStatusTellsTheTruthAboutAServerItDidNotStart:
     """
     Requirement four of the autostart ruling, and the reason it is a
-    requirement: a unit-managed server writes no record file, so the lane that
-    only ever read that file called a perfectly healthy server absent.
-
-    This is the failure mode that costs an operator an hour at 3am — the command
-    you run to find out whether it is up, telling you the opposite of the truth.
-    """
+    requirement: a unit-managed server writes no record file, so a record-only lane calls it absent."""
 
     def test_a_supervised_server_is_reported_running(self, runtime: Path, supervised: int) -> None:
         record = host_lifetime.running()
@@ -496,9 +394,7 @@ class TestStatusTellsTheTruthAboutAServerItDidNotStart:
     ) -> None:
         """
         A reboot leaves a record naming a pid that is gone, and the unit then
-        starts the real server. Reading the file first would answer with the
-        dead pid while a healthy server listened on the same port.
-        """
+        starts the real server; reading the file first answers with the dead pid."""
         host_lifetime.record_path().write_text(
             json.dumps({"pid": 999, "host": "127.0.0.1", "port": 1}), encoding="utf-8"
         )
@@ -534,12 +430,7 @@ class TestStatusTellsTheTruthAboutAServerItDidNotStart:
 class TestStoppingASupervisedServerIsNotATrap:
     """
     Requirement five. Signalling a supervised pid directly leaves the restart
-    policy free to start it again — the command prints success and the server is
-    back before the operator finishes reading it.
-
-    A stop that undoes itself is worse than a stop that refuses, because the
-    operator walks away.
-    """
+    policy free to start it again."""
 
     def test_the_supervisor_is_asked_and_the_pid_is_never_signalled(
         self, runtime: Path, supervised: int, monkeypatch: pytest.MonkeyPatch
@@ -574,10 +465,7 @@ class TestStoppingASupervisedServerIsNotATrap:
     ) -> None:
         """
         The supervisor ACCEPTING a stop and the process being gone are two
-        facts. This branch has already been caught once believing the first
-        implies the second — os.kill(pid, 0) answering yes to an unreaped
-        corpse, found by running the thing for real rather than by a mock.
-        """
+        facts."""
         monkeypatch.setattr(host_autostart, "stop_unit", accepted := MagicMock(return_value=True))
         monkeypatch.setattr(host_autostart, "STOP_TIMEOUT_SECONDS", 0.0)
 
@@ -607,10 +495,7 @@ class TestStoppingASupervisedServerIsNotATrap:
 class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
     """
     D1 reaches the unit too, and this is the one place it matters most: a unit
-    is a spawn that repeats at every boot with nobody watching. An address
-    refused at the CLI and then baked into one is D1 holding everywhere except
-    forever.
-    """
+    is a spawn that repeats at every boot with nobody watching."""
 
     def test_a_refused_bind_writes_nothing(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(host_config, "load_config", lambda: {"host": "0.0.0.0", "port": 8787})
@@ -646,8 +531,7 @@ class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
 class TestTheServerRunsOnItsHomesInterpreter:
     """
     DPLAN-0408: `aipass install` runs these doors in the uv tool venv, which has no
-    fastapi; the server it spelled as itself died on start. It is the home's server.
-    """
+    fastapi; the server it spelled as itself died on start. It is the home's server."""
 
     @pytest.fixture(params=[("linux", "bin", "python"), ("win32", "Scripts", "python.exe")])
     def other_home(self, request: Any, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
@@ -715,8 +599,7 @@ class TestTheServerRunsOnItsHomesInterpreter:
 
         operations.log_operation.assert_called_once_with("host_api_serve_detached", record)
         assert record["log"] == str(home_logs / host_lifetime.LOG_NAME)
-        # The home rides as a Path argument; compare it as one. Its repr renders
-        # forward slashes on Windows, so a str(home) substring check fails there.
+        # Compare as a Path: a str(home) substring check fails on Windows.
         assert log.info.call_args_list[0].args[1] == home
         assert {host_lifetime.record_path().parent, host_lifetime.log_path().parent} == {home_logs}
         assert host_lifetime.unit_path().parent == home_logs
@@ -738,10 +621,7 @@ class TestTwoServersAreNeverStartedByAccident:
     ) -> None:
         """
         And the refusal NAMES the supervisor, because the two cases need
-        different commands from the operator: a supervised server signalled by
-        hand comes straight back, so "already running" alone sends them to the
-        wrong one.
-        """
+        different commands from the operator."""
         with pytest.raises(host_lifetime.LifetimeError, match="supervisor"):
             host_lifetime.serve_detached()
 
@@ -750,11 +630,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
     """
     The 2026-08-27 ruling, at the three places that act on it.
 
-    A probe that failed on a machine that HAS systemd leaves the question
-    unanswered. Flattening that to None would be the original defect one layer
-    down: the tailnet unit writes no record file, so every caller would take the
-    record path and conclude that nothing is running.
-    """
+    None would send every caller down the record path, which a unit never writes."""
 
     def test_running_refuses_rather_than_reporting_no_server(
         self, runtime: Path, monkeypatch: pytest.MonkeyPatch
@@ -772,9 +648,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
     ) -> None:
         """
         The trap this closes: a record left over from before the unit was
-        installed is still on disk. Swallowing the refusal would report THAT
-        pid — a hand-started server that has not existed since this morning.
-        """
+        installed is still on disk."""
         host_lifetime.record_path().write_text(
             json.dumps({"pid": 177102, "host": "10.0.0.1", "port": 8787}), encoding="utf-8"
         )
@@ -792,8 +666,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
     ) -> None:
         """
         A second listener started blind is how one port gets two servers and a
-        log that cannot say which of them wrote a line.
-        """
+        log that cannot say which of them wrote a line."""
 
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")
@@ -809,8 +682,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
     def test_no_signal_is_sent_into_the_dark(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         If a unit IS holding the server, a bare SIGTERM is a stop its restart
-        policy may undo — so an unanswered probe must refuse, not guess.
-        """
+        policy may undo — so an unanswered probe must refuse, not guess."""
 
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")
@@ -828,9 +700,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
     ) -> None:
         """
         The ruling's other half, at the caller: zero is not a refusal, so a
-        machine with no systemd still finds a hand-started server exactly as it
-        did before any of this existed.
-        """
+        machine with no systemd still finds a hand-started server."""
         host_lifetime.record_path().write_text(
             json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}), encoding="utf-8"
         )
@@ -847,9 +717,7 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
 class TestTheStatusLaneGetsAThirdAnswer:
     """
     running() raises when the supervisor cannot be asked, which is right for
-    stop and serve — both must refuse rather than act blind. Status is the one
-    caller whose whole job is to report a state, and "I cannot tell" IS a state.
-    """
+    stop and serve, which must refuse rather than act blind; for status "I cannot tell" IS a state."""
 
     def test_an_unreachable_supervisor_is_unknown_not_none(
         self, runtime: Path, monkeypatch: pytest.MonkeyPatch
@@ -868,8 +736,7 @@ class TestTheStatusLaneGetsAThirdAnswer:
     def test_unknown_is_not_the_same_as_nothing_running(self, runtime: Path) -> None:
         """
         The distinction the whole fix rests on. Both print differently and one
-        of them is a lie when the unit is live.
-        """
+        of them is a lie when the unit is live."""
         assert host_lifetime.server_state()["state"] == "none"
 
     def test_a_live_server_still_reports_running(self, runtime: Path, supervised: int) -> None:
@@ -883,8 +750,7 @@ class TestTheInstallReportNamesAConflictItCanSee:
     """
     A hand-started server holding the port turns `enable --now` into a unit that
     cannot bind, burns its retry window and lands in `failed` — which reads as
-    "autostart is broken" rather than as the real cause.
-    """
+    "autostart is broken" rather than as the real cause."""
 
     def test_a_detached_server_on_the_port_is_reported(
         self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
@@ -893,8 +759,6 @@ class TestTheInstallReportNamesAConflictItCanSee:
         monkeypatch.setattr(host_autostart, "is_supported", supported)
         monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
         monkeypatch.setattr(host_lifetime, "_alive", lambda pid: pid == 4242)
-        # linger_enabled runs for real; only loginctl itself is answered, by a
-        # recording stub that refuses every other command.
         monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.setattr(host_autostart.shutil, "which", lambda name: f"/bin/{name}" if name == "loginctl" else None)
         asked: list = []
@@ -921,8 +785,7 @@ class TestTheInstallReportNamesAConflictItCanSee:
     ) -> None:
         """
         Reinstalling over a unit that is already running is normal — the
-        supervisor restarts it. Only a HAND-started server is in the way.
-        """
+        supervisor restarts it. Only a HAND-started server is in the way."""
         supported = MagicMock(return_value=True)
         monkeypatch.setattr(host_autostart, "is_supported", supported)
         monkeypatch.setattr(host_autostart, "linger_enabled", MagicMock(return_value=True))
@@ -936,11 +799,7 @@ class TestTheInstallReportNamesAConflictItCanSee:
     def test_an_unreachable_supervisor_never_retracts_a_written_unit(
         self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """
-        The conflict check is a courtesy and runs AFTER the write. Letting it
-        raise would hand the operator a rendered unit plus an error saying it
-        did not happen.
-        """
+        """The conflict check is a courtesy and runs AFTER the write."""
         supported = MagicMock(return_value=True)
         monkeypatch.setattr(host_autostart, "is_supported", supported)
         monkeypatch.setattr(host_autostart, "linger_enabled", MagicMock(return_value=True))

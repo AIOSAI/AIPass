@@ -3,7 +3,7 @@
 # Description: Restore module — version discovery and file restoration
 # Version: 1.0.0
 # Created: 2026-06-12
-# Modified: 2026-09-23
+# Modified: 2026-10-17
 # =============================================
 
 """Restore Module — list versions and restore files from versioned store."""
@@ -53,16 +53,13 @@ def _find_file_folder(project_root: str, filename: str) -> Path | None:
     if not store.exists():
         return None
 
-    # Ask the builder where this name WOULD be written instead of re-deriving
-    # the layout here. A name over 50 characters is stored in a folder called
-    # name[:30]_md5[:8], so globbing the full name never matched it and the
-    # file could be backed up but never restored.
+    # The builder owns the layout: a name over 50 chars is stored as name[:30]_md5[:8],
+    # so globbing the full name misses it.
     direct = build_versioned_file_path(project_root, filename)
     if direct.is_file():
         return direct.parent
 
-    # Bare basename of a nested file: the folder name the builder picks is the
-    # same wherever the parent sits, so search for THAT, not the raw argument.
+    # Bare basename of a nested file: the builder's folder name is the same at any depth.
     name = Path(filename).name
     folder_name = build_versioned_file_path(project_root, name).parent.name
     for candidate in store.rglob(folder_name):
@@ -73,15 +70,7 @@ def _find_file_folder(project_root: str, filename: str) -> Path | None:
 
 
 def run_list_versions(project_root: str, filename: str) -> bool:
-    """List all versions of a file in the versioned store.
-
-    Args:
-        project_root: Project root path.
-        filename: Name of the file to look up.
-
-    Returns:
-        True if versions were found and listed.
-    """
+    """List all versions of a file in the versioned store."""
     file_folder = _find_file_folder(project_root, filename)
     if not file_folder:
         error(f"No versioned file found for: {filename}")
@@ -89,24 +78,15 @@ def run_list_versions(project_root: str, filename: str) -> bool:
 
     versions = list_versions(file_folder)
     if not versions:
-        # Same channel as the lookup failure above, for the same reason: this
-        # is a listing that did not happen. On console.print it landed on
-        # stdout beside the "Versions of X:" heading it is denying, and left
-        # the process unmarked, so `restore <p> list <f>` exited 0 having
-        # listed nothing. The guard above does NOT cover this case -- it fires
-        # when the file is absent, and here the file is present but the store
-        # holds no version the handler can read (a pruned hashed folder whose
-        # current version is no longer the only non-baseline file in it).
+        # error(), not console.print: the file exists but no readable version does,
+        # and the listing that did not happen must exit nonzero.
         error(f"No versions found for: {filename}")
         return False
 
     console.print(f"[bold]Versions of {filename}:[/bold]")
     for v in versions:
         marker = "*" if v["type"] == "current" else " "
-        # markup=False on THIS line only: the row is pure data (type label,
-        # timestamp, stored filename) and carries no tags of its own, so the
-        # parser has nothing to do but eat "[diff]" as an unknown style. The
-        # heading above is a separate print and keeps its [bold] intact.
+        # markup=False: the row is pure data, and rich would eat "[diff]" as an unknown style.
         console.print(f"  {marker} [{v['type']}] {v['timestamp']}  {v['path'].name}", markup=False)
 
     trail.log_operation(
@@ -117,16 +97,7 @@ def run_list_versions(project_root: str, filename: str) -> bool:
 
 
 def run_restore_file(project_root: str, filename: str, output_path: str) -> bool:
-    """Restore the current version of a file to an output path.
-
-    Args:
-        project_root: Project root path.
-        filename: Name of the file to restore.
-        output_path: Where to write the restored file.
-
-    Returns:
-        True if restore succeeded.
-    """
+    """Restore the current version of a file to an output path."""
     file_folder = _find_file_folder(project_root, filename)
     if not file_folder:
         error(f"No versioned file found for: {filename}")
@@ -156,23 +127,14 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are filenames.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
 
-    # A malformed invocation is not a help request. Answering it with the
-    # help page told the user nothing about what was wrong AND reported
-    # success, so a script could not tell `restore <project> list` (no file
-    # named) from `restore --help`. The command IS ours, so the answer is
-    # True: error() has marked the process failed and resolve_exit turns
-    # that into exit 2. Returning False here made the router append
-    # "Unknown command: restore", a false line, and exit 1 (devpulse ruling,
-    # 2026-09-22, matching drive_check's refusal).
+    # A malformed call is an error, not help: error() marks the process failed (exit 2),
+    # and True keeps the router from adding a false "Unknown command: restore".
     if len(args) < 3:
         error(
             "restore needs a project, a verb and a filename",
@@ -191,15 +153,6 @@ def handle_command(command: str, args: list) -> bool:
         run_restore_file(project_root, args[2], args[3])
         return True
 
-    # The 2026-09-22 refusal only reached `list` with no filename; everything
-    # else still fell through to print_help() and returned a success nobody
-    # could question. `restore <p> file <f>` with no output path and a
-    # mistyped verb both got the usage page on STDOUT and exit 0, so a script
-    # could not tell a restore that ran from one that never started. Same
-    # shape as the cure above and as drive_check's refusal: error() names what
-    # was wrong on stderr and marks the process failed, True keeps the command
-    # ours so resolve_exit reports 2 instead of the router adding a false
-    # "Unknown command: restore" on top of a true line.
     if subcommand == "file":
         error(
             "restore file needs an output path",
@@ -213,8 +166,6 @@ def handle_command(command: str, args: list) -> bool:
     )
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

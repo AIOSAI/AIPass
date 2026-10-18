@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.4.0
 # Created: 2026-04-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
@@ -37,11 +37,6 @@ from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 def store_path(tmp_path):
     """Fresh, isolated registry file per test — never touches real .trinity/."""
     return tmp_path / "watchdog_active.json"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# register / deregister
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_register_creates_entry_and_returns_handle(store_path):
@@ -99,10 +94,8 @@ def test_deregister_removes_entry(store_path):
 
 
 def test_deregister_nonexistent_returns_false(store_path):
-    # Empty store
     assert watch_registry.deregister("ghost-abcdef", storage_path=store_path) is False
 
-    # Non-empty store, wrong handle
     watch_registry.register("timer", {"duration": "1s"}, storage_path=store_path)
     assert watch_registry.deregister("ghost-abcdef", storage_path=store_path) is False
 
@@ -114,11 +107,6 @@ def test_deregister_only_removes_target(store_path):
     watch_registry.deregister(h1, storage_path=store_path)
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     assert [w["handle"] for w in raw["watches"]] == [h2]
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# list_active
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_list_active_empty(store_path):
@@ -140,7 +128,6 @@ def test_list_active_prunes_stale_by_default(store_path):
     watch_registry.register("timer", {}, storage_path=store_path)
     watch_registry.register("schedule", {}, storage_path=store_path)
 
-    # Force every pid to look dead.
     with patch.object(watch_registry, "is_pid_alive", return_value=False):
         active = watch_registry.list_active(storage_path=store_path, prune_stale=True)
 
@@ -166,7 +153,6 @@ def test_list_active_selective_prune(store_path):
     h_alive = watch_registry.register("agent", {"label": "alive"}, storage_path=store_path)
     h_dead = watch_registry.register("agent", {"label": "dead"}, storage_path=store_path)
 
-    # Patch the dead entry's pid on disk to something definitely unused.
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     for watch in raw["watches"]:
         if watch["handle"] == h_dead:
@@ -179,41 +165,23 @@ def test_list_active_selective_prune(store_path):
     assert h_dead not in surviving_handles
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# is_pid_alive
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_is_pid_alive_current_process():
     assert watch_registry.is_pid_alive(os.getpid()) is True
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.kill sig-0)")
 def test_is_pid_alive_impossible_pid():
-    # 999999 is well above typical kernel.pid_max default — unlikely to exist.
     assert watch_registry.is_pid_alive(999999) is False
 
 
 def test_is_pid_alive_rejects_invalid_input():
     assert watch_registry.is_pid_alive(-1) is False
     assert watch_registry.is_pid_alive(0) is False
-    # Non-int input can't be used by os.kill — handled defensively.
     assert watch_registry.is_pid_alive("1234") is False  # type: ignore[arg-type]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Zombies off Linux — FPLAN-0554, from macOS CI run 34682737363
-#
-# os.kill(pid, 0) SUCCEEDS for a zombie: the process has exited but has not been
-# reaped, so its pid still resolves. The zombie check used to be gated on
-# `sys.platform == "linux"`, which meant that off Linux a killed process read
-# ALIVE — kill_watch answered killed=False "still alive after 2.0s" for a pid it
-# had just SIGTERMed, and list_active(prune_stale=True) kept a dead watch listed.
-#
-# These run on THIS Linux box by pretending to be darwin: sys.platform is
-# monkeypatched and subprocess.run answers in the shape real `ps -o state=`
-# prints (a state code, optionally with BSD modifier flags appended).
-# ─────────────────────────────────────────────────────────────────────────────
+# os.kill(pid, 0) SUCCEEDS for a zombie, so off Linux only ps can say a pid is a corpse.
+# These pretend darwin here, with subprocess.run answering in real `ps -o state=` shape.
 
 
 def _fake_ps(stdout: str, argv_seen: list | None = None):
@@ -254,9 +222,7 @@ def test_is_zombie_off_linux_is_false_when_ps_cannot_run(monkeypatch, pretend_pl
 
 
 def test_a_zombie_is_not_alive_off_linux(monkeypatch, pretend_platform):
-    """Row 3 in one assertion. This pid genuinely answers os.kill(pid, 0) — the
-    ps state is the ONLY thing that can say it is a corpse, and before FPLAN-0554
-    nothing asked it off Linux."""
+    """This pid answers os.kill(pid, 0); the ps state is the ONLY thing that can say it is a corpse."""
     pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
 
@@ -272,13 +238,7 @@ def test_a_live_pid_off_linux_is_still_alive(monkeypatch, pretend_platform):
 
 
 def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_platform):
-    """What the bug cost operationally: a dead watch stayed listed forever.
-
-    Runs on every host since registry 1.1.1: this goes through list_active and
-    so through _FileLock, whose door is now the fcntl binding, not the platform
-    name this test pretends. The Windows skip it used to carry was the symptom
-    of the same import that reddened two watch_agent rows on the Windows runner.
-    """
+    """A zombie watch must not stay listed forever; runs on every host, as the lock reads fcntl, not the platform."""
     watch_registry.register("agent", {"label": "reaped"}, storage_path=store_path)
     pretend_platform(watch_registry, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_ps("Z+\n"))
@@ -287,11 +247,7 @@ def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_pla
 
 
 def test_the_lock_is_a_no_op_where_fcntl_is_absent(store_path, monkeypatch, pretend_platform):
-    """Windows has no fcntl. The lock reads that fact from the module binding, not
-    from sys.platform, so a pretended darwin on a host without fcntl neither
-    imports it nor creates the lock file (CI red on PR #774, run 38068553235:
-    test_watchdog_agent's two off-Linux rows died in this door on the Windows
-    runner with ModuleNotFoundError: No module named 'fcntl')."""
+    """The lock reads the fcntl binding, not sys.platform: pretended darwin without fcntl neither imports nor locks."""
     monkeypatch.setattr(watch_registry, "fcntl", None)
     pretend_platform(watch_registry, "darwin")
 
@@ -300,11 +256,6 @@ def test_the_lock_is_a_no_op_where_fcntl_is_absent(store_path, monkeypatch, pret
     assert handle.startswith("agent-")
     assert store_path.exists()
     assert not store_path.with_suffix(store_path.suffix + ".lock").exists()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# kill_watch / kill_all
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_kill_watch_handle_not_found(store_path):
@@ -321,7 +272,6 @@ def test_kill_watch_handle_not_found(store_path):
 def test_kill_watch_already_dead_pid(store_path):
     """Handle for a dead pid should still be deregistered cleanly."""
     handle = watch_registry.register("timer", {}, storage_path=store_path)
-    # Point the entry at a dead pid without touching the current pid of this test.
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     raw["watches"][0]["pid"] = 999999
     store_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
@@ -330,7 +280,6 @@ def test_kill_watch_already_dead_pid(store_path):
     assert result["killed"] is True
     assert result["was_alive"] is False
 
-    # Deregistered
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     assert raw["watches"] == []
 
@@ -339,8 +288,6 @@ def test_kill_watch_happy_path(store_path):
     """Spawn a sleep subprocess, register it, kill via registry — verify dead."""
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
-        # Manually install an entry pointing at the subprocess pid so kill_watch
-        # targets it instead of this test's own pid.
         handle = watch_registry.register("timer", {"duration": "30s"}, storage_path=store_path)
         raw = json.loads(store_path.read_text(encoding="utf-8"))
         for watch in raw["watches"]:
@@ -353,8 +300,6 @@ def test_kill_watch_happy_path(store_path):
         assert result["was_alive"] is True
         assert result["killed"] is True
 
-        # Subprocess should have exited (wait briefly in case SIGTERM is still
-        # in flight on a slow CI box).
         proc.wait(timeout=5)
         assert proc.returncode is not None
     finally:
@@ -365,11 +310,7 @@ def test_kill_watch_happy_path(store_path):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only signal semantics (SIG_IGN)")
 def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
-    """A pid that ignores SIGTERM must come back killed=False, not a KILLED lie.
-
-    The handle is still deregistered (the caller reclaims it; the runaway pid
-    is theirs to deal with) — but the result must say the process survived.
-    """
+    """A pid that ignores SIGTERM must come back killed=False, not a KILLED lie; the handle is still freed."""
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -395,10 +336,8 @@ def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
         assert result["killed"] is False
         assert "still alive" in result["reason"]
 
-        # Deregistered regardless — the handle is reclaimable.
         raw = json.loads(store_path.read_text(encoding="utf-8"))
         assert raw["watches"] == []
-        # And the process really did survive the SIGTERM.
         assert proc.poll() is None
     finally:
         proc.kill()
@@ -409,7 +348,6 @@ def test_kill_watch_reports_failure_when_pid_survives_sigterm(store_path):
 def test_kill_all_multiple_watches(store_path):
     h1 = watch_registry.register("timer", {}, storage_path=store_path)
     h2 = watch_registry.register("schedule", {}, storage_path=store_path)
-    # Point both at dead pids so kill_all completes fast and doesn't touch real processes.
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     for watch in raw["watches"]:
         watch["pid"] = 999999
@@ -428,11 +366,6 @@ def test_kill_all_empty(store_path):
     assert watch_registry.kill_all(storage_path=store_path) == []
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Atomic write + concurrency sanity
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_atomic_write_leaves_no_tmp(store_path):
     watch_registry.register("timer", {}, storage_path=store_path)
     tmp_sibling = store_path.with_suffix(store_path.suffix + ".tmp")
@@ -445,7 +378,6 @@ def test_sequential_register_deregister_preserves_entries(store_path):
     raw = json.loads(store_path.read_text(encoding="utf-8"))
     assert len(raw["watches"]) == 10
 
-    # Remove every other one.
     for handle in handles[::2]:
         assert watch_registry.deregister(handle, storage_path=store_path) is True
 
@@ -468,24 +400,14 @@ def test_full_cycle_integration(store_path):
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Handler integration — each handler registers at start, deregisters on exit
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def test_agent_handler_registers_and_deregisters(store_path, monkeypatch):
     """watch_agent registers on entry and deregisters in finally (even on early return)."""
-    # Force the handler's default storage path to our tmp file so register
-    # lands in the right place.
     monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
-    # @__definitely_not_a_branch__ hits the early "not found" return —
-    # exercises the deregister-in-finally path with minimal work.
     result = agent_handler.watch_agent("@__definitely_not_a_branch__", timeout_seconds=1)
     assert "handle" in result
     assert result["handle"].startswith("agent-")
 
-    # Registry should be empty after the call.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
 
 
@@ -493,7 +415,6 @@ def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
     """wake_in with a short duration registers then deregisters; mutant 'register skipped' reddens it."""
     monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
-    # Poll the store on disk from here while the timer waits in its own thread.
     outcome: dict = {}
     waker = threading.Thread(target=lambda: outcome.update(result=watch_timer.wake_in("1s")))
     snapshots: list[list] = []
@@ -508,12 +429,10 @@ def test_timer_wake_in_registers_and_deregisters(store_path, monkeypatch):
     assert result["state"] == "woke"
     assert "handle" in result
 
-    # Mid-flight snapshot must have seen the entry.
     assert any(any(w["handle"].startswith("timer-") for w in snap) for snap in snapshots), (
         "timer handler never registered mid-wait"
     )
 
-    # After wake_in returns, the registry must be empty.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
 
 
@@ -521,7 +440,6 @@ def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
     """wake_at with a tiny relative delay registers then deregisters."""
     monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
-    # Fast-forward clock so wake_at returns immediately without real waiting.
     start = datetime(2026, 4, 14, 12, 0, 0)
     calls = {"n": 0}
 
@@ -537,7 +455,6 @@ def test_schedule_wake_at_registers_and_deregisters(store_path, monkeypatch):
     assert result["state"] == "woke"
     assert "handle" in result
 
-    # Registry cleaned up.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
 
 
@@ -545,7 +462,6 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
     """If a handler raises mid-wait, the finally block must still deregister."""
     monkeypatch.setattr(watch_registry, "default_storage_path", lambda: store_path)
 
-    # Make time.sleep raise after the register call.
     def exploding_sleep(duration):
         """Simulate a KeyboardInterrupt / cancellation mid-sleep."""
         raise RuntimeError("boom")
@@ -557,12 +473,7 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         watch_timer.wake_in("5s")
 
-    # Even though wake_in raised, the finally block must have deregistered.
     assert watch_registry.list_active(storage_path=store_path, prune_stale=False) == []
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# default storage path — where the store lands when nobody passes one
 
 
 def test_a_call_that_names_no_store_writes_the_sealed_tmp_store(tmp_path):
@@ -580,23 +491,10 @@ def test_a_call_that_names_no_store_writes_the_sealed_tmp_store(tmp_path):
 
 @pytest.mark.live_default_store
 class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
-    """The 2026-08-31 CI red: on a fresh checkout (no AIPASS_REGISTRY.json
-    anywhere — the marker is machine-local runtime state, exactly like the
-    hermetic_mail_doors story one fixture up) the old walk found nothing and
-    fell back to Path.cwd(). The composed runner hands every child cwd = repo
-    root, so an unrelated test exercising agent.watch planted .watchdog/ in
-    the tree — convicted by seedgo's left-nothing-behind fixture on its first
-    live catch. The store is package state: it belongs where the package
-    lives, derived from __file__, the same answer on a dev machine, a fresh
-    checkout, and a dead cwd.
-    """
+    """The store is package state, derived from __file__: a cwd answer plants .watchdog/ in the tree."""
 
     def test_the_default_path_ignores_cwd_entirely(self, tmp_path, monkeypatch):
-        """From a marker-less cwd the default must NOT be under that cwd.
-
-        Red against the old code: the walk fails (no marker above tmp_path,
-        no parent named devpulse) and the fallback answers tmp_path/.watchdog.
-        """
+        """From a marker-less cwd the default must NOT be under that cwd."""
         monkeypatch.chdir(tmp_path)
         for mod in (reg, tmr):
             default = mod.default_storage_path()

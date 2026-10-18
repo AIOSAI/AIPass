@@ -3,20 +3,10 @@
 # Description: Module scanning for command discovery
 # Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
-"""Core scanning logic for discovering available commands in a branch.
-
-Combines two discovery strategies:
-1. Run the branch entry point with ``--help`` and parse the output.
-2. Scan ``apps/modules/*.py`` for files containing ``handle_command()``.
-
-Results are merged and deduplicated, then returned as a flat list of dicts
-suitable for display or downstream activation.
-
-Reuses existing discovery-handler functions where possible.
-"""
+"""Core scanning logic for discovering available commands in a branch."""
 
 from __future__ import annotations
 
@@ -32,25 +22,10 @@ from aipass.drone.apps.handlers.discovery_handler import (
 from aipass.drone.apps.handlers.registry_handler import branch_interpreter
 
 
-# ---------------------------------------------------------------------------
-# Help-output scanning
-# ---------------------------------------------------------------------------
-
-
 def scan_help_output(branch_path: str, branch_name: str) -> list[dict]:
     """Run the branch entry point with ``--help`` and parse discovered commands.
 
-    Args:
-        branch_path: Absolute path to the branch directory.
-        branch_name: Branch name (without ``@`` prefix).
-
-    Returns:
-        List of command dicts ``{"name": ..., "description": ..., "source": "help"}``.
-
-    Raises:
-        subprocess.TimeoutExpired, OSError: the entry point could not be run. An empty
-            list here would read as "a branch with no commands"; ``scan_branch`` catches
-            these and names the failure.
+    Raises TimeoutExpired/OSError rather than return [], which would read as "no commands".
     """
     entry_point = get_entry_point(branch_path, branch_name)
     if entry_point is None:
@@ -69,7 +44,6 @@ def scan_help_output(branch_path: str, branch_name: str) -> list[dict]:
 
     command_names = parse_help_for_commands(help_text)
 
-    # Build richer dicts by re-scanning the help text for descriptions
     description_map = _extract_descriptions(help_text, command_names)
 
     return [
@@ -83,11 +57,7 @@ def scan_help_output(branch_path: str, branch_name: str) -> list[dict]:
 
 
 def _extract_descriptions(help_text: str, command_names: list[str]) -> dict[str, str]:
-    """Best-effort extraction of one-line descriptions from help text.
-
-    Looks for lines like ``  command_name   Description text`` and pairs
-    the first token with the rest of the line.
-    """
+    """Best-effort extraction of one-line descriptions from help text."""
     descriptions: dict[str, str] = {}
     name_set = set(command_names)
 
@@ -102,20 +72,8 @@ def _extract_descriptions(help_text: str, command_names: list[str]) -> dict[str,
     return descriptions
 
 
-# ---------------------------------------------------------------------------
-# Module-file scanning
-# ---------------------------------------------------------------------------
-
-
 def scan_module_files(branch_path: str) -> list[dict]:
-    """Scan ``apps/modules/*.py`` for files that define ``handle_command()``.
-
-    Args:
-        branch_path: Absolute path to the branch directory.
-
-    Returns:
-        List of command dicts ``{"name": ..., "description": ..., "source": "module"}``.
-    """
+    """Scan ``apps/modules/*.py`` for files that define ``handle_command()``."""
     modules_dir = Path(branch_path) / "apps" / "modules"
     if not modules_dir.is_dir():
         return []
@@ -136,7 +94,6 @@ def scan_module_files(branch_path: str) -> list[dict]:
         if "def handle_command" not in source:
             continue
 
-        # Extract a description from the module docstring (first line).
         description = _extract_module_description(source)
 
         results.append(
@@ -167,27 +124,11 @@ def _extract_module_description(source: str) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Full branch scan (merge + deduplicate)
-# ---------------------------------------------------------------------------
-
-
 def scan_branch(branch_path: str, branch_name: str, help_errors: list[str] | None = None) -> list[dict]:
     """Perform a full scan of a branch to discover available commands.
 
-    Combines both ``--help`` parsing and ``apps/modules/*.py`` file scanning,
-    deduplicates by command name (``--help`` wins on conflict), and returns
-    the merged result.
-
-    Args:
-        branch_path: Absolute path to the branch directory.
-        branch_name: Branch name (without ``@`` prefix).
-        help_errors: When a list is given, a failed ``--help`` scan appends its
-            error text here, so the caller can say it on screen; the result is
-            then module files only. None (the default) collects nothing.
-
-    Returns:
-        List of command dicts with keys ``name``, ``description``, ``source``.
+    ``--help`` wins on a name conflict. A failed ``--help`` scan appends its error to
+    ``help_errors`` when given, and the result is then module files only.
     """
     help_error = ""
     try:
@@ -200,7 +141,6 @@ def scan_branch(branch_path: str, branch_name: str, help_errors: list[str] | Non
             help_errors.append(help_error)
     module_commands = scan_module_files(branch_path)
 
-    # Merge: help results take priority for duplicates.
     seen: dict[str, dict] = {}
     for cmd in help_commands:
         seen[cmd["name"]] = cmd

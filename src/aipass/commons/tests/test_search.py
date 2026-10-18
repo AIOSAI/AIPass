@@ -3,7 +3,7 @@
 # Description: Unit tests for search handler, search queries, and log export
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/search/search_ops.py, search_queries.py, and log_export.py."""
@@ -16,28 +16,20 @@ import sqlite3
 from unittest.mock import patch, MagicMock
 
 
-# Coverage imports -- handler layer (search_ops)
 from aipass.commons.apps.handlers.search.search_ops import run_search
 
-# Coverage imports -- search_queries (covers the module for seedgo)
 from aipass.commons.apps.handlers.search.search_queries import (
     search_posts,
     sync_post_to_fts,
 )
 
-# Coverage imports -- log_export
 from aipass.commons.apps.handlers.search.log_export import export_room_log
 
 _OPS = "aipass.commons.apps.handlers.search.search_ops"
 
 
 def _run_parsed(args: list) -> dict:
-    """Run run_search with every query function recorded; return the result and the recorders.
-
-    The argument parsing is reached the way a user reaches it: through
-    run_search, whose parsed room/author/type decide which query runs and
-    with what filters. No database is opened.
-    """
+    """Run run_search with every query function recorded; return the result and the recorders."""
     with (
         patch(f"{_OPS}.json_handler", autospec=True),
         patch(f"{_OPS}.get_db") as mock_get_db,
@@ -57,17 +49,8 @@ def _run_parsed(args: list) -> dict:
     }
 
 
-# =============================================================================
-# argument parsing, through run_search
-# =============================================================================
-
-
 def test_run_search_refuses_an_empty_query():
-    """
-    An empty query is refused before any database round-trip.
-
-    Mutant killed: `if not query:` -> `if False:` in run_search (search_all runs on "").
-    """
+    """An empty query is refused before any database round-trip."""
     seen = _run_parsed([""])
     assert seen["result"] == {"success": False, "error": "Search query cannot be empty"}
     seen["get_db"].assert_not_called()
@@ -77,44 +60,26 @@ def test_run_search_refuses_an_empty_query():
 
 
 def test_parse_search_args_query_only():
-    """
-    First positional arg is the search query; no filters, all types searched.
-
-    Mutant killed: `result["query"] = args[0]` -> `result["query"] = args[-1]`
-    in _parse_search_args (the query becomes the last argument).
-    """
+    """First positional arg (not the last) is the search query; no filters, all types searched."""
     seen = _run_parsed(["hello world", "--type"])
     seen["all"].assert_called_once_with(seen["conn"], "hello world", room=None, author=None)
     assert seen["result"]["query"] == "hello world"
 
 
 def test_parse_search_args_room_flag():
-    """
-    The --room flag should set the room filter and lowercase it.
-
-    Mutant killed: `result["room"] = remaining[i + 1].lower()` -> `result["room"] = remaining[i + 1]`.
-    """
+    """The --room flag should set the room filter and lowercase it."""
     seen = _run_parsed(["test", "--room", "General"])
     seen["all"].assert_called_once_with(seen["conn"], "test", room="general", author=None)
 
 
 def test_parse_search_args_author_flag():
-    """
-    The --author flag should set the author filter and lowercase it.
-
-    Mutant killed: `result["author"] = remaining[i + 1].lower()` -> `result["author"] = remaining[i + 1]`.
-    """
+    """The --author flag should set the author filter and lowercase it."""
     seen = _run_parsed(["test", "--author", "DRONE"])
     seen["all"].assert_called_once_with(seen["conn"], "test", room=None, author="drone")
 
 
 def test_parse_search_args_type_flag_valid():
-    """
-    The --type flag accepts 'posts' and 'comments', and each runs only its own query.
-
-    Mutant killed: `if search_type in ("posts", "comments"):` -> `if search_type in ("posts",):`
-    (--type comments falls back to searching everything).
-    """
+    """The --type flag accepts 'posts' and 'comments', and each runs only its own query."""
     seen = _run_parsed(["test", "--type", "posts"])
     seen["posts"].assert_called_once_with(seen["conn"], "test", room=None, author=None)
     seen["all"].assert_not_called()
@@ -127,17 +92,7 @@ def test_parse_search_args_type_flag_valid():
 
 
 def test_parse_search_args_type_flag_invalid():
-    """
-    Invalid --type values should keep the default 'all'.
-
-    No single-line mutant of the type whitelist reddens this through
-    run_search: run_search's own else-branch searches everything for any type
-    that is not posts or comments, so the whitelist is equivalent at the
-    public route. What is pinned is what the user sees: a bogus type still
-    searches posts and comments, and never one of them alone.
-    Mutant killed: `if parsed["search_type"] == "posts":` -> `if parsed["search_type"] != "comments":`
-    in run_search (a bogus type searches posts only).
-    """
+    """A bogus --type searches posts and comments together, never one of them alone."""
     seen = _run_parsed(["test", "--type", "bogus"])
     seen["all"].assert_called_once_with(seen["conn"], "test", room=None, author=None)
     seen["posts"].assert_not_called()
@@ -145,31 +100,16 @@ def test_parse_search_args_type_flag_invalid():
 
 
 def test_parse_search_args_all_flags():
-    """
-    All flags combined should be parsed correctly.
-
-    Mutant killed: `result["search_type"] = search_type` -> `pass` in _parse_search_args
-    (--type posts is dropped after --room and --author, and everything is searched).
-    """
+    """All flags combined should be parsed; --type survives after --room and --author."""
     seen = _run_parsed(["registry", "--room", "Dev", "--author", "flow", "--type", "posts"])
     seen["posts"].assert_called_once_with(seen["conn"], "registry", room="dev", author="flow")
     assert seen["result"]["success"] is True
 
 
 def test_parse_search_args_flag_without_value():
-    """
-    A flag at the end without a value should be skipped gracefully.
-
-    Mutant killed: `if flag == "--room" and i + 1 < len(remaining):` -> `if flag == "--room":`
-    (IndexError out of run_search).
-    """
+    """A flag at the end without a value should be skipped, not raise IndexError."""
     seen = _run_parsed(["test", "--room"])
     seen["all"].assert_called_once_with(seen["conn"], "test", room=None, author=None)
-
-
-# =============================================================================
-# run_search tests
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.search.search_ops.json_handler", autospec=True)
@@ -186,7 +126,6 @@ def test_run_search_no_args(
     result = run_search([])
     assert result["success"] is False
     assert result["error"].startswith("Usage")
-    # No query means no DB round-trip at all
     mock_get_db.assert_not_called()
     mock_search_all.assert_not_called()
     mock_close_db.assert_not_called()
@@ -220,17 +159,10 @@ def test_run_search_returns_results(
     mock_close_db.assert_called_once_with(mock_conn)
 
 
-# =============================================================================
-# _format_comment_tree tests
-# =============================================================================
-
-
 def _log_comment_lines(conn: sqlite3.Connection, comments: list) -> list:
     """Seed one post in r/general with the given comments; return the exported log's comment lines.
 
-    Each comment is (key, parent_key, author, content, vote_score); parent_key
-    names an earlier comment's key or None. The comment tree is reached the way
-    a user reaches it: through export_room_log.
+    Each comment is (key, parent_key, author, content, vote_score); parent_key names an earlier key or None.
     """
     for agent in {c[2] for c in comments} | {"LOG_AUTHOR"}:
         conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)", (agent, agent))
@@ -249,12 +181,7 @@ def _log_comment_lines(conn: sqlite3.Connection, comments: list) -> list:
 
 
 def test_format_comment_tree_flat(initialized_db: sqlite3.Connection):
-    """
-    Top-level comments (no parent) should render without indentation.
-
-    Mutant killed: `if comment["vote_score"] >= 0` -> `if comment["vote_score"] > 0`
-    in _format_comment_tree's _render (a zero score loses its plus sign).
-    """
+    """Top-level comments render without indentation, and a zero score keeps its plus sign."""
     lines = _log_comment_lines(
         initialized_db,
         [("c1", None, "DRONE", "First", 3), ("c2", None, "FLOW", "Second", 0)],
@@ -263,92 +190,49 @@ def test_format_comment_tree_flat(initialized_db: sqlite3.Connection):
 
 
 def test_format_comment_tree_nested(initialized_db: sqlite3.Connection):
-    """
-    Child comments should be indented deeper than their parent.
-
-    Mutant killed: `_render(child, depth + 1)` -> `_render(child, depth)` in _format_comment_tree.
-    """
+    """Child comments should be indented deeper than their parent."""
     lines = _log_comment_lines(
         initialized_db,
         [("c1", None, "A", "Root", 1), ("c2", "c1", "B", "Reply", -1)],
     )
     assert len(lines) == 2
-    # The reply should have more leading whitespace than the root
     root_indent = len(lines[0]) - len(lines[0].lstrip())
     reply_indent = len(lines[1]) - len(lines[1].lstrip())
     assert reply_indent > root_indent
 
 
 def test_format_comment_tree_empty(initialized_db: sqlite3.Connection):
-    """
-    A post with no comments should produce no comment lines, and no comment block.
-
-    Through export_room_log the tree is never handed an empty list (the
-    export only builds it when the post has comments), so what is pinned is
-    the log a commentless post exports: its body, then nothing.
-    Mutant killed: `if comment_rows:` -> `if True:` in export_room_log (an empty
-    comment block's blank line lands after the body).
-    """
+    """A post with no comments should produce no comment lines, and no comment block."""
     lines = _log_comment_lines(initialized_db, [])
     assert lines == []
     assert export_room_log(initialized_db, "general").endswith("\nbody\n")
 
 
 def test_format_comment_tree_negative_score(initialized_db: sqlite3.Connection):
-    """
-    Negative vote scores should show the minus sign, not a plus.
-
-    Mutant killed: `if comment["vote_score"] >= 0` -> `if True` in _format_comment_tree's _render.
-    """
+    """Negative vote scores should show the minus sign, not a plus."""
     lines = _log_comment_lines(initialized_db, [("c1", None, "X", "Bad take", -5)])
     assert lines == ["  > X: Bad take [-5]"]
 
 
-# =============================================================================
-# _quote_fts5_query tests
-#
-# search_posts()/search_comments() feed the raw user query straight into
-# `WHERE ... MATCH ?`. FTS5 treats that string as its own query language, so
-# "FPLAN-0593" gets parsed as a bare "-0593" NOT-clause and raises
-# "fts5: syntax error near '-'"/"no such column: 0593" instead of matching
-# the literal text. _quote_fts5_query() wraps every whitespace-separated
-# token in a double-quoted FTS5 phrase (doubling any embedded quote, per the
-# FTS5 escaping rule) so the query is always read as literal text.
-# =============================================================================
+# FTS5 reads MATCH input as its own query language: unquoted, "FPLAN-0593" is a NOT-clause and raises.
 
 
 def test_quote_fts5_query_hyphenated_term(initialized_db: sqlite3.Connection):
-    """
-    A hyphenated identifier must not be parsed as an FTS5 NOT operator.
-
-    Through search_posts, on the title this time (the end-to-end test below
-    searches the content).
-    Mutant killed: _quote_fts5_query's `return " ".join(...)` -> `return query` (fts5 syntax error).
-    """
+    """A hyphenated identifier in a title must not be parsed as an FTS5 NOT operator."""
     post_id = _seed_agent_and_post(initialized_db, "FPLAN-0593 kickoff", "notes")
 
     assert [r["id"] for r in search_posts(initialized_db, "FPLAN-0593")] == [post_id]
 
 
 def test_quote_fts5_query_plain_single_word(initialized_db: sqlite3.Connection):
-    """
-    A single ordinary word is simply wrapped as one literal phrase token.
-
-    Mutant killed: `'"' + token.replace('"', '""') + '"'` -> `'"' + token.replace('"', '""')`
-    in _quote_fts5_query (an unterminated phrase: fts5 syntax error).
-    """
+    """A single ordinary word is wrapped as one terminated literal phrase token."""
     post_id = _seed_agent_and_post(initialized_db, "Greeting", "hello from the commons")
 
     assert [r["id"] for r in search_posts(initialized_db, "hello")] == [post_id]
 
 
 def test_quote_fts5_query_multi_word(initialized_db: sqlite3.Connection):
-    """
-    Each word becomes its own quoted phrase, joined back with spaces (implicit AND).
-
-    Both words must appear, in any order and not adjacent; one alone is not a match.
-    Mutant killed: `" ".join(` -> `" OR ".join(` in _quote_fts5_query (the one-word post matches).
-    """
+    """Each word becomes its own quoted phrase joined by implicit AND: one word alone is not a match."""
     both = _seed_agent_and_post(initialized_db, "Both", "world news, then hello again")
     _seed_agent_and_post(initialized_db, "One", "hello only")
 
@@ -356,21 +240,10 @@ def test_quote_fts5_query_multi_word(initialized_db: sqlite3.Connection):
 
 
 def test_quote_fts5_query_embedded_double_quote(initialized_db: sqlite3.Connection):
-    """
-    An embedded double-quote must be doubled per the FTS5 escaping rule, not left bare.
-
-    Mutant killed: `token.replace('"', '""')` -> `token` in _quote_fts5_query (fts5 syntax error).
-    """
+    """An embedded double-quote must be doubled per the FTS5 escaping rule, not left bare."""
     post_id = _seed_agent_and_post(initialized_db, "Quoted", 'she wrote a"b in the log')
 
     assert [r["id"] for r in search_posts(initialized_db, 'a"b')] == [post_id]
-
-
-# =============================================================================
-# search_posts end-to-end -- reproduces DPLAN defect: hyphenated queries
-# (e.g. plan IDs like "FPLAN-0593") must be found, not raise an FTS5 syntax
-# error.
-# =============================================================================
 
 
 def _seed_agent_and_post(conn: sqlite3.Connection, title: str, content: str) -> int:

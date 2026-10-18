@@ -3,7 +3,7 @@
 # Description: Batch 3 tests for 8 seedgo checker handlers
 # Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
@@ -32,11 +32,6 @@ from aipass.seedgo.apps.handlers.aipass_standards import shebang_check
 from aipass.seedgo.apps.handlers.aipass_standards import silent_catch_check
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _pin_bypass_log(monkeypatch):
     """Point is_bypassed's json_handler at a mock for every test here.
@@ -51,10 +46,6 @@ def _pin_bypass_log(monkeypatch):
     mock_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 META_HEADER = textwrap.dedent("""\
     # =================== AIPass ====================
@@ -78,11 +69,6 @@ def _write_temp_py_with_meta(tmp_path: Path, name: str, body: str) -> str:
     """Write a .py file with a valid META header prepended."""
     full = META_HEADER.format(filename=name) + body
     return _write_temp_py(tmp_path, name, full)
-
-
-# ===========================================================================
-# 1. log_structure_check
-# ===========================================================================
 
 
 class TestLogStructureCheck:
@@ -144,11 +130,6 @@ class TestLogStructureCheck:
         assert result["passed"] is True
 
 
-# ===========================================================================
-# 2. log_visibility_check
-# ===========================================================================
-
-
 class TestLogVisibilityCheck:
     """Tests for log_visibility_check.check_module."""
 
@@ -202,11 +183,6 @@ class TestLogVisibilityCheck:
         assert result["passed"] is True
 
 
-# ===========================================================================
-# 3. meta_check
-# ===========================================================================
-
-
 class TestMetaCheck:
     """Tests for meta_check.check_module."""
 
@@ -253,11 +229,6 @@ class TestMetaCheck:
 
         assert result["score"] == 100
         assert result["passed"] is True
-
-
-# ===========================================================================
-# 4. modules_check
-# ===========================================================================
 
 
 class TestModulesCheck:
@@ -325,11 +296,6 @@ class TestModulesCheck:
         assert result["passed"] is True
 
 
-# ===========================================================================
-# 5. permission_flags_check
-# ===========================================================================
-
-
 class TestPermissionFlagsCheck:
     """Tests for permission_flags_check.check_module."""
 
@@ -380,11 +346,6 @@ class TestPermissionFlagsCheck:
 
         assert result["score"] == 100
         assert result["passed"] is True
-
-
-# ===========================================================================
-# 6. readme_check
-# ===========================================================================
 
 
 class TestReadmeCheck:
@@ -465,11 +426,6 @@ class TestReadmeCheck:
         assert result["passed"] is True
 
 
-# ===========================================================================
-# 7. shebang_check
-# ===========================================================================
-
-
 class TestShebangCheck:
     """Tests for shebang_check.check_module."""
 
@@ -516,11 +472,6 @@ class TestShebangCheck:
 
         assert result["score"] == 100
         assert result["passed"] is True
-
-
-# ===========================================================================
-# 8. silent_catch_check
-# ===========================================================================
 
 
 class TestSilentCatchCheck:

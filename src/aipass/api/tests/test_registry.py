@@ -3,7 +3,7 @@
 # Description: Tests for registry driver auto-discovery
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/registry.py, driver auto-discovery for integrations."""
@@ -97,14 +97,7 @@ class TestImportDriver:
     """Single driver import and registration, reached through load_drivers()."""
 
     def test_import_valid_driver(self, tmp_path):
-        """
-        A driver with register() is loaded AND its hook is called.
-
-        The call stood alone before 2026-09-07 — no assertion at all, so an
-        _import_driver that silently skipped the register() hook passed. The
-        hook is the entire point of a driver: without it the module is loaded
-        and registers nothing, which looks identical from the outside.
-        """
+        """A driver with register() is loaded AND its hook is called."""
         project = tmp_path / "integrations" / "proj"
         project.mkdir(parents=True)
         driver = project / "driver.py"
@@ -115,20 +108,14 @@ class TestImportDriver:
 
         assert load_drivers(tmp_path / "integrations") == 1
 
-        # The namespaced key is the contract: two projects named driver.py
-        # must not overwrite each other in sys.modules.
+        # The namespaced key is the contract: two projects' driver.py must not collide in sys.modules.
         loaded = sys.modules["_aipass_integration_proj"]
         assert loaded.LOADED is True, "the driver module was never executed"
         assert loaded.REGISTERED is True, "the driver was loaded but its register() hook never ran"
 
     def test_driver_without_register_hook(self, tmp_path):
-        """
-        No register() is not an error — the module still loads.
-
-        Also a bare call. What is worth pinning is that the absence of the
-        hook does not abort the import partway: a driver may register at
-        module level instead, so its top-level code has to have run.
-        """
+        """No register() is not an error — the module still loads."""
+        # A driver may register at module level instead, so its top-level code has to have run.
         project = tmp_path / "integrations" / "proj2"
         project.mkdir(parents=True)
         driver = project / "driver.py"
@@ -143,8 +130,7 @@ class TestImportDriver:
     def test_unloadable_driver_is_skipped_not_counted(self, tmp_path, monkeypatch):
         """A driver.py that cannot be loaded (here a directory) is skipped and not counted."""
         (tmp_path / "integrations" / "fake" / "driver.py").mkdir(parents=True)
-        # The failed load leaves its half-built module in sys.modules; the name is
-        # entered through monkeypatch so teardown removes it (api, fleet green leg 3).
+        # The failed load leaves its half-built module in sys.modules; monkeypatch makes teardown remove it.
         monkeypatch.setitem(sys.modules, "_aipass_integration_fake", None)
 
         assert load_drivers(tmp_path / "integrations") == 0
@@ -164,11 +150,8 @@ class TestRegistryHandleCommand:
         assert capsys.readouterr().out == ""
 
     def test_no_args_stays_silent(self, capsys):
-        """Registry owns no commands — it must not prepend its banner to theirs.
-
-        Registry is discovered before google_client, so anything printed here
-        leaks into the output of the commands that module owns.
-        """
+        """Registry owns no commands — it must not prepend its banner to theirs."""
+        # Registry is discovered before google_client, so anything printed here leaks into its output.
         assert handle_command("validate", []) is False
         assert capsys.readouterr().out == ""
 
@@ -177,14 +160,7 @@ class TestPrintIntrospection:
     """Tests for print_introspection() — registry status display."""
 
     def test_introspection_reports_where_it_looks_for_drivers(self, capsys):
-        """
-        The self-map names the directory it scans and whether it has loaded.
-
-        A bare call with no assertion until 2026-09-07. This module's whole
-        job is auto-discovery, so the two facts an operator opens the self-map
-        for are WHERE it looks and WHETHER it has run — an introspection that
-        stopped printing either still "rendered without raising".
-        """
+        """The self-map names the directory it scans and whether it has loaded."""
         print_introspection()
 
         printed = capsys.readouterr().out

@@ -3,12 +3,10 @@
 # Description: Tests for the contacts address book handler
 # Version: 1.0.3
 # Created: 2026-04-11
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/contacts.py."""
-
-# DPLAN-0121 Phase 5.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
@@ -26,9 +24,6 @@ from aipass.ai_mail.apps.handlers.email.contacts import (
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 
-# ---- Fixtures ------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _silence_json_handler():
     """Prevent log_operation from writing real JSON files during tests."""
@@ -43,9 +38,6 @@ def isolated_contacts(tmp_path, monkeypatch):
     contacts_file = tmp_path / ".ai_mail.local" / "contacts.json"
     monkeypatch.setattr(contacts_mod, "CONTACTS_FILE", contacts_file)
     return contacts_file
-
-
-# ---- loading contacts.json, read through all_contacts() -----
 
 
 def test_load_contacts_missing_file(isolated_contacts):
@@ -75,9 +67,6 @@ def test_load_contacts_missing_key(isolated_contacts):
     isolated_contacts.parent.mkdir(parents=True, exist_ok=True)
     isolated_contacts.write_text(json.dumps({"other": {}}), encoding="utf-8")
     assert all_contacts() == {}
-
-
-# ---- get_contact() tests -----------------------------------
 
 
 def test_get_contact_empty(isolated_contacts):
@@ -110,9 +99,6 @@ def test_get_contact_not_found(isolated_contacts, tmp_path):
     assert result is None
 
 
-# ---- register_contact() tests ------------------------------
-
-
 def test_register_contact_creates_entry(isolated_contacts, tmp_path):
     """register_contact writes a new entry with correct fields."""
     inbox = str(tmp_path / "path" / "to" / "inbox.json")
@@ -133,13 +119,11 @@ def test_register_contact_updates_existing(isolated_contacts, tmp_path):
     assert first is not None
     assert "last_seen" in first
 
-    # Re-register with new path
     new_inbox = str(tmp_path / "new" / "path" / "inbox.json")
     register_contact("devpulse", "AIPass", new_inbox)
     updated = get_contact("devpulse")
     assert updated is not None
     assert updated["inbox"] == new_inbox
-    # last_seen should be present (may or may not change within same second)
     assert "last_seen" in updated
 
 
@@ -164,9 +148,6 @@ def test_register_contact_persists_to_disk(isolated_contacts, tmp_path):
     assert data["contacts"]["testbranch"]["project"] == "TestProject"
 
 
-# ---- all_contacts() tests ----------------------------------
-
-
 def test_all_contacts_empty(isolated_contacts):
     """all_contacts returns empty dict when no contacts registered."""
     result = all_contacts()
@@ -184,18 +165,10 @@ def test_all_contacts_returns_all(isolated_contacts, tmp_path):
     assert len(result) == 2
 
 
-# ---- conftest isolation guard --------------------------------
-
-
 def test_conftest_isolates_contacts_file_by_default():
     """The autouse fixture in conftest.py must redirect CONTACTS_FILE.
 
-    Without it, every test exercising delivery's auto-register side effect
-    (test_deliver_auto_provisions_inbox, test_empty_upsert_key_is_treated_as_no_key,
-    etc.) upserts real rows into the live .ai_mail.local/contacts.json — 6 rows
-    leaked this way and were then trusted as "verified" identity (found live,
-    2026-08-16, @devpulse). This does not need `isolated_contacts`: the
-    autouse fixture must already apply here, same as in any other test.
+    Without it, delivery's auto-register upserts test rows into the live contacts.json.
     """
     live_path = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.json"
 

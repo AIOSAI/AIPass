@@ -3,58 +3,12 @@
 # Description: nominator - a hand-kept module list that claims to be complete and is not (DRIFTED-INVENTORY)
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-A hand-maintained list that CLAIMS to enumerate a tree, and no longer does.
+"""A hand-maintained list that CLAIMS to enumerate a tree, and no longer does.
 
-    # Every importable module in canary's tree.
-    CANARY_MODULES = [...]
-
-    @pytest.mark.parametrize("module", CANARY_MODULES)
-    def test_module_imports_with_no_readable_cwd(module, world):
-        ...
-
-THE DEFECT, AND WHY IT IS QUIET. The list is both the input and the oracle.
-Every module it forgets is a module the probe never runs, and nothing goes
-red - the suite reports the same green it reported when the list was whole,
-with a smaller number of cases nobody counts. A new module lands, the list
-stays as it was, and the coverage claim in the comment above it quietly stops
-being true. Measured on the calibration fixture: the list names eight modules,
-the tree holds eleven, and the three it forgot are never import-probed.
-
-THE COMPLETENESS CLAIM IS WHAT MAKES IT A DEFECT. An ordinary list of module
-names promises nothing; a list under "Every importable module in canary's
-tree" promises everything, and only a promise can be broken. So this rule
-requires the claim in writing - in a comment directly above the list, in the
-module docstring, or in the docstring of the test that parametrizes over it -
-before it will say a word. No claim, no nomination, however short the list is.
-
-Comments are read from the FILE'S SOURCE by line number, because the parser
-throws them away. That is the only place the claim usually lives.
-
-DRIFT RUNS BOTH WAYS. A name the tree has and the list lacks is an untested
-module. A name the list has and the tree lacks is a probe pointed at nothing -
-it either errors loudly or, worse, was renamed and the list now pins the old
-spelling. Both are reported, separately, in the same row.
-
-WHAT IT DELIBERATELY DOES NOT FLAG:
-
-  - a list with no completeness claim attached to it. Most module lists are
-    deliberate subsets and saying so is the author's business, not this rule's.
-  - a list nothing parametrizes over. If it is not the oracle, its drift costs
-    no coverage.
-  - a list that matches the tree exactly, in both directions.
-  - a list whose entries mostly do NOT exist in the tree. That is evidence the
-    walk root was inferred WRONG, not that the list is stale, and the rule
-    says so in the log rather than publishing a row it cannot stand behind.
-
-NOMINATION, NEVER CONVICTION (Law M1). A module can be legitimately excluded -
-an optional extra, a platform-specific shim, a module the probe cannot run on
-this box - and the list's author may have meant every word of it. The static
-tier names the gap and lists the exact missing modules so the author can
-answer in one line; the execution tier convicts.
+Reference: drifted_inventory.md
 """
 
 import ast
@@ -65,7 +19,6 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
 
-#: The adapter group this nominator fills. Namespaced by the core.
 GROUP = "static_drifted_inventory"
 
 #: Words that turn a list into a promise. Matched as whole words against a
@@ -74,34 +27,23 @@ COMPLETENESS_WORDS: frozenset = frozenset(
     {"every", "all", "each", "complete", "completely", "exhaustive", "exhaustively", "entire", "entirely"}
 )
 
-#: How a word is cut out of a comment or docstring for that match.
 WORD_PATTERN = re.compile(r"[a-z]+")
 
-#: What a string constant must look like before it is read as a module path.
 #: At least one dot: a bare identifier is a word, not an import target.
 DOTTED_MODULE_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
 
 #: Below this, a literal is a pair of examples rather than an inventory.
 MIN_INVENTORY_ENTRIES = 2
 
-#: The decorator that turns a list into the suite's oracle.
 PARAMETRIZE = "parametrize"
 
-#: What makes a directory an importable package, and what a module file is.
 PACKAGE_MARKER = "__init__.py"
 MODULE_SUFFIX = ".py"
 
-#: Never walked when enumerating a tree's importable modules. `.archive` holds
-#: verbatim disposal copies that must never be read as live modules, and the
-#: test directories are not what a production inventory claims to cover. Any
-#: dot-directory is skipped on top of this list.
+#: Never walked; any dot-directory (e.g. `.archive` disposal copies) is skipped on top.
 WALK_SKIP_DIRS: frozenset = frozenset({"__pycache__", "tests", "test", "docs", "node_modules", "site-packages"})
 
-#: The share of a literal's entries that must EXIST in the walked tree before
-#: the walk is accepted as the tree the literal is talking about. The walk root
-#: is inferred from the literal's own common prefix, and an inferred root that
-#: explains less than half the list has not earned the right to call the rest
-#: drift - it is far likelier that the root is wrong.
+#: An inferred root explaining less than this share of the list is likelier wrong than the list stale.
 MAPPING_PROOF_SHARE = 0.5
 
 SPECIFICATION = {
@@ -143,11 +85,6 @@ SPECIFICATION = {
 }
 
 
-# =============================================================================
-# THE LITERAL - a list of dotted module names, written by hand
-# =============================================================================
-
-
 def _string_entries(value: ast.expr) -> List[str]:
     """The string constants of a list/tuple/set literal, or [] for anything else."""
     if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
@@ -170,16 +107,7 @@ def _looks_like_an_inventory(entries: Sequence[str]) -> bool:
 def _common_prefix(entries: Sequence[str]) -> str:
     """The longest dotted prefix every entry shares, or "" when there is none.
 
-    `aipass.canary` for a list whose entries all begin with it. This is what
-    names the subtree the literal claims to enumerate, and it is derived from
-    the literal rather than configured, so a list about some other package
-    measures against that package.
-
-    Args:
-        entries: The literal's string entries.
-
-    Returns:
-        The shared dotted prefix.
+    Derived from the literal, not configured, so a list about another package measures that package.
     """
     split = [entry.split(".") for entry in entries]
     shared: List[str] = []
@@ -192,14 +120,7 @@ def _common_prefix(entries: Sequence[str]) -> str:
 
 
 def _inventory_literals(parsed: corpus.TestFile) -> List[Tuple[str, List[str], int]]:
-    """Every module-level literal that reads as an inventory of module paths.
-
-    Args:
-        parsed: The test module.
-
-    Returns:
-        `(name, entries, lineno)` per candidate literal.
-    """
+    """Every module-level literal that reads as an inventory of module paths."""
     found: List[Tuple[str, List[str], int]] = []
 
     for statement in parsed.tree.body:
@@ -224,25 +145,10 @@ def _assignment_parts(statement: ast.stmt) -> Tuple[Optional[str], Optional[ast.
     return None, None
 
 
-# =============================================================================
-# THE CLAIM - what turns the list into a promise
-# =============================================================================
-
-
 def _comment_block_above(source: str, lineno: int) -> str:
     """The unbroken run of `#` comment lines directly above a source line.
 
-    The AST throws comments away, so the claim that makes this rule apply is
-    invisible to every other reader in this pack. It is read here from the
-    file's own text, by line number, and it stops at the first line that is
-    not a comment - a comment three blank lines up is about something else.
-
-    Args:
-        source: The file's text.
-        lineno: The 1-based line the literal starts on.
-
-    Returns:
-        The comment text above it, joined by spaces, without the markers.
+    Read from the file's text, since the AST drops comments; stops at the first non-comment line.
     """
     lines = source.splitlines()
     collected: List[str] = []
@@ -263,16 +169,7 @@ def _completeness_claim(
     lineno: int,
     consumers: Sequence[corpus.TestUnit],
 ) -> Tuple[str, str]:
-    """The written promise attached to a literal, and where it was found.
-
-    Args:
-        parsed: The test module.
-        lineno: The line the literal starts on.
-        consumers: Units that parametrize over it.
-
-    Returns:
-        `(claim text, where it was found)`, or `("", "")` when there is none.
-    """
+    """The written promise attached to a literal, and where it was found."""
     comment = _comment_block_above(parsed.source, lineno)
     if _claims_completeness(comment):
         return comment, "the comment above the list"
@@ -286,11 +183,6 @@ def _completeness_claim(
             return unit.docstring.strip().splitlines()[0], f"the docstring of {unit.name}"
 
     return "", ""
-
-
-# =============================================================================
-# THE ORACLE - the parametrize decorator that consumes the literal
-# =============================================================================
 
 
 def _parametrize_consumers(parsed: corpus.TestFile, name: str) -> List[corpus.TestUnit]:
@@ -313,11 +205,6 @@ def _decorator_reads(decorator: ast.expr, name: str) -> bool:
     return any(isinstance(node, ast.Name) and node.id == name for node in ast.walk(decorator))
 
 
-# =============================================================================
-# THE TREE - what is actually importable under the claimed prefix
-# =============================================================================
-
-
 def _is_walkable(name: str) -> bool:
     """True for a directory an importable inventory could legitimately claim."""
     return not name.startswith(".") and name not in WALK_SKIP_DIRS
@@ -326,17 +213,7 @@ def _is_walkable(name: str) -> bool:
 def _package_contents(directory: Path, dotted: str) -> Set[str]:
     """Dotted names for one package's own modules and subpackages, recursively.
 
-    A directory counts as a package only when it holds an `__init__.py`, and a
-    file counts as a module the same way - because that is the rule the import
-    system itself applies, and an inventory of "importable modules" is a claim
-    about what the import system can reach.
-
-    Args:
-        directory: The package directory.
-        dotted: The dotted name of that package.
-
-    Returns:
-        Every dotted name under it.
+    `__init__.py` decides, because that is the rule the import system applies.
     """
     found: Set[str] = set()
 
@@ -365,26 +242,8 @@ def _is_inside(candidate: Path, root: Path) -> bool:
 def _inventory_root(parsed: corpus.TestFile, corpus_root: Path) -> Path:
     """The package tree a file's inventory is talking about.
 
-    THE CORPUS ROOT IS THE ANSWER IN THE ORDINARY CASE and this function
-    returns it unchanged there. It exists for the case that is not ordinary,
-    and the case was MEASURED rather than imagined: run against a branch that
-    keeps a frozen copy of ANOTHER branch inside itself - which is exactly what
-    a fixture directory is - mapping the literal's prefix onto the corpus root
-    measured canary's eight-entry list against seedgo's 250-module tree and
-    called 242 of them missing. That row was a mapping failure wearing a
-    coverage failure's clothes.
-
-    So the tree is anchored where the test file itself lives: the OUTERMOST
-    package that still contains the file, climbing no higher than the corpus
-    root. A branch laid out normally gives back the corpus root on the first
-    comparison; a nested copy gives back the copy.
-
-    Args:
-        parsed: The test module holding the inventory.
-        corpus_root: The corpus root, which is also the ceiling.
-
-    Returns:
-        The directory the literal's common prefix names.
+    The outermost package still holding the test file, never above the corpus root: a
+    fixture holding a frozen copy of another branch must measure against the copy.
     """
     root = corpus_root.resolve()
     start = parsed.path.resolve().parent
@@ -400,15 +259,7 @@ def _inventory_root(parsed: corpus.TestFile, corpus_root: Path) -> Path:
 
 
 def _tree_modules(root: Path, prefix: str) -> Set[str]:
-    """Every importable dotted name under `root`, named from `prefix`.
-
-    Args:
-        root: The directory the prefix stands for.
-        prefix: The dotted name that root stands for.
-
-    Returns:
-        Dotted module names, including `prefix` itself when root is a package.
-    """
+    """Every importable dotted name under `root`, named from `prefix`."""
     if not root.is_dir():
         logger.warning(f"[AUDIT-TESTS] drifted_inventory cannot walk {root}, so it cleared no inventory there")
         return set()
@@ -422,11 +273,7 @@ def _tree_modules(root: Path, prefix: str) -> Set[str]:
 def _mapping_holds(declared: Sequence[str], found: Set[str], name: str, prefix: str) -> bool:
     """True when the walk explains enough of the literal to be believed.
 
-    A literal whose entries mostly do NOT exist under the walked root is
-    evidence that the root is wrong, not that the list is stale, and a rule
-    that published in that state would report a mapping failure as a coverage
-    failure. The refusal is LOGGED rather than taken quietly, because a rule
-    that could not run must never read the same as a rule that found nothing.
+    A refusal is logged: a rule that could not run must never read like one that found nothing.
     """
     present = len(set(declared) & found)
     if present > len(declared) * MAPPING_PROOF_SHARE:
@@ -437,11 +284,6 @@ def _mapping_holds(declared: Sequence[str], found: Set[str], name: str, prefix: 
         f"inventory was NOT cleared - it was skipped"
     )
     return False
-
-
-# =============================================================================
-# THE NOMINATION
-# =============================================================================
 
 
 def _drift_row(
@@ -509,14 +351,7 @@ def _nominate_literal(
 
 
 def nominate(scanned: corpus.Corpus) -> List[dict]:
-    """Every hand-kept inventory whose completeness claim has stopped being true.
-
-    Args:
-        scanned: The parsed corpus.
-
-    Returns:
-        Nomination rows, one per drifted literal.
-    """
+    """Every hand-kept inventory whose completeness claim has stopped being true."""
     rows: List[dict] = []
 
     for parsed in scanned.files:

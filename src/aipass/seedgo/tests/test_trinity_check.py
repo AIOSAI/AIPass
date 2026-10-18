@@ -3,27 +3,12 @@
 # Description: Unit tests for trinity_check - trinity memory file standards checker
 # Version: 1.6.0
 # Created: 2026-08-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
 
-# Tests for trinity_check -- the trinity memory file standards checker.
-#
-# The contract under test is devpulse ``dropbox/trinity_pattern.md``. The drift
-# classes exercised by the regression suite are devpulse
-# ``dropbox/trinity_audit/MASTER_LIST.md`` D1-D16, each named in its own test so
-# a future blindness fails BY NAME rather than as an anonymous score drop.
-#
-# THE ONE LAW, and the reason this standard exists at all: a field the checker
-# cannot measure is a VIOLATION, never a silent pass. The old gate measured an
-# unparseable shape as zero chars and passed it fleet-wide for months.
-# ``TestTheOneLaw`` exists so that cannot come back.
-#
-# Fixtures are synthetic: config and gold templates are pinned onto the module so
-# a config edit on @memory's branch can never turn these tests red. The single
-# exception is the fleet acceptance bar in ``TestFleetAcceptanceBar``, which is
-# deliberately coupled to live branch state -- see its docstring.
+# Fixtures are synthetic (config and gold templates pinned onto the module), except TestFleetAcceptanceBar, coupled to live state.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json.loads() of a well-formed trinity file; only the malformed ones are the subject
@@ -87,11 +72,7 @@ _CANONICAL_OBSERVATION_BRANCHES = frozenset(
 
 
 def _shapes(trinity, config=None, branch: str = _BRANCH) -> dict:
-    """The entry shape the checker derives from a config -- the fixture's by default.
-
-    Nothing in this file spells a shape out. The tests move the CONFIG and
-    watch the shape follow it, which is the whole of FPLAN-0593 Phase 2.
-    """
+    """The entry shape the checker derives from a config -- the fixture's by default."""
     return trinity.entry_shapes(_CONFIG if config is None else config, branch)
 
 
@@ -109,19 +90,11 @@ def _fleet_dir() -> Path | None:
     return None if root is None else root / "src" / "aipass"
 
 
-# ===========================================================================
-# A. THE ONE LAW -- fail loud, never silent-pass
-# ===========================================================================
-
-
 class TestTheOneLaw:
     """Nothing unmeasurable may ever produce a passing group."""
 
     def test_missing_trinity_dir_fails_every_group(self, trinity, tmp_path):
-        # The registry marks this a LIVE installation. Without it the tree is
-        # indistinguishable from a fresh clone, where an absent .trinity is an
-        # environment fact rather than a violation -- see
-        # TestACleanCheckoutIsNotAViolatingFleet.
+        # The registry marks a live installation; without it an absent .trinity is a fresh-clone fact, not a violation.
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
         branch = tmp_path / "nobody"
         branch.mkdir()
@@ -333,28 +306,8 @@ class TestTheOneLaw:
         assert any("number must be int" in problem for problem in problems)
 
 
-# ===========================================================================
-# CI. A clean checkout is an environment fact, not 18 simultaneous violations
-# ===========================================================================
-
-
 class TestACleanCheckoutIsNotAViolatingFleet:
-    """CI ran seedgo-audit on a GitHub runner and every one of the 18 branches
-    came back trinity 0 / FAILED. Nothing was wrong with the fleet: .trinity/
-    and AIPASS_REGISTRY.json are BOTH gitignored by design -- memories never
-    ship -- so a fresh clone has no memory files at all and the checker refused
-    every group, which branch_audit turned into a score of 0.
-
-    THE ONE LAW says unmeasurable is REFUSED, never zeroed, and a whole SPECIES
-    missing on a tree that also has no registry is an environment fact. So the
-    standard reports itself not-applicable for the run and is left out of the
-    gating average entirely -- not scored 0 (a lie about the branch) and not
-    scored 100 (a lie about the measurement).
-
-    The discrimination is deliberately conservative: BOTH signals must be
-    absent. A live installation missing .trinity on one branch still has the
-    registry, so that stays exactly the violation it always was.
-    """
+    """A fresh clone (no .trinity and no registry, both gitignored) is reported not-applicable, never scored 0 or 100."""
 
     @staticmethod
     def _ci_tree(root: Path, name: str = _BRANCH) -> Path:
@@ -381,9 +334,7 @@ class TestACleanCheckoutIsNotAViolatingFleet:
         assert any("checkout" in line.lower() for line in lines)
 
     def test_a_live_installation_missing_trinity_is_still_a_violation(self, trinity, tmp_path):
-        """The whole point of the discrimination -- a registry means a real
-        install, so an absent .trinity there is a real finding.
-        """
+        """A registry means a real install, so an absent .trinity there is a real finding."""
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
         result = trinity.check_branch(str(self._ci_tree(tmp_path)))
 
@@ -406,10 +357,7 @@ class TestACleanCheckoutIsNotAViolatingFleet:
         assert result["score"] == 100
 
     def test_the_spawn_template_trinity_does_not_look_like_a_citizen(self, trinity, tmp_path):
-        """The ONE .trinity that DOES ship: spawn/templates/*/.trinity is
-        un-ignored in .gitignore. It sits two levels down, not at
-        <fleet>/<branch>/.trinity, so it must not make a clone look live.
-        """
+        """spawn/templates/*/.trinity ships but sits two levels down, so it must not make a clone look live."""
         template = tmp_path / "spawn" / "templates" / "citizen" / ".trinity"
         template.mkdir(parents=True)
         (template / "local.json").write_text("{}\n", encoding="utf-8")
@@ -424,29 +372,8 @@ class TestACleanCheckoutIsNotAViolatingFleet:
         assert isinstance(result.get("checks"), list)
 
 
-# ===========================================================================
-# Marker 7. The gate, pinned so it cannot be downgraded by accident
-# ===========================================================================
-
-
 class TestTrinityIsAGateNotAReport:
-    """Marker 7 asked for a REPORT -> GATE flip. Measured first: trinity was
-    already a gate and has been since it shipped. In this standards family a
-    gate is expressed by three things together, and trinity has all three --
-    so there was nothing to flip, and these tests exist so it stays that way.
-
-    The family's own vocabulary:
-      * ``ADVISORY = True`` marks a standard that never gates (template). ruff
-        gated from 2026-09-25 (owner 00:33), once CI ruff was green fleet-wide.
-        trinity does not set it, so it counts in the gating average.
-      * ``passed`` is the block signal. trinity requires a PERFECT 100, which
-        is stricter than every other branch_level standard -- json_handler,
-        the precedent named in the brief, passes at 75.
-      * failing groups surface in ``checks[]``, which the audit lifts into
-        ``failed_checks``.
-
-    Each is pinned separately because each could be lost on its own.
-    """
+    """trinity is a gate: no ADVISORY flag, a perfect 100 to pass, failing groups lifted into ``checks[]``; each pinned alone."""
 
     def test_trinity_is_not_advisory(self, checker):
         """ADVISORY = True would silently drop trinity out of the average."""
@@ -490,30 +417,12 @@ class TestTrinityIsAGateNotAReport:
         assert [c for c in result["checks"] if not c["passed"]]
 
 
-# ===========================================================================
-# D. The fleet acceptance bar -- the red-first proof, as a test
-# ===========================================================================
-
-
 class TestFleetAcceptanceBar:
-    """The build brief's blindness guard, read off the LIVE fleet.
-
-    INTENTIONALLY COUPLED TO LIVE STATE. Exactly 6 of the 18 citizens are
-    fully canonical on OBSERVATIONS entry shape today; if more than six come
-    back clean the checker has gone blind somewhere, and if fewer do a branch
-    regressed. When a branch is migrated this expectation is UPDATED to the new
-    clean set -- never deleted and never loosened, because the day it stops
-    being an exact equality is the day it stops proving anything.
-    """
+    """The build brief's blindness guard, read off the LIVE fleet."""
 
     @staticmethod
     def _observation_problems(trinity, path: Path) -> list[str]:
-        """Every entry-shape violation in one live observations.json.
-
-        Reading goes through the checker's own reader, which reports a bad
-        file rather than raising -- so an unparseable branch counts as
-        drifted instead of blowing up the guard.
-        """
+        """Every entry-shape violation in one live observations.json."""
         result = trinity._read_json_file(path)
         if result["error"] is not None:
             return [f"{path.name}: {result['error']}"]
@@ -566,11 +475,6 @@ class TestFleetAcceptanceBar:
 
         blind = [name for name, problems in drifted.items() if not problems]
         assert blind == [], f"the checker went blind on {blind}"
-
-
-# ===========================================================================
-# E. Scoring mechanics
-# ===========================================================================
 
 
 class TestScoringMechanics:
@@ -627,9 +531,7 @@ class TestScoringMechanics:
 
         result = trinity.check_branch(str(branch))
 
-        # Floor, measured: eight groups are always reported, even for a branch
-        # whose local.json will not parse. Without it an empty checks list would
-        # walk this row green having read no key at all.
+        # Floor: eight groups are always reported, even on an unparseable local.json, so an empty checks list cannot walk green.
         assert len(result["checks"]) == 8
         for check in result["checks"]:
             assert set(check) == {"name", "passed", "message", "score"}
@@ -687,10 +589,8 @@ class TestScoringMechanics:
 
         result = trinity.check_branch(str(branch))
 
-        # The failing groups are selected first and counted, because the guard
-        # this replaces asserted nothing at all if every group happened to pass.
-        # Measured on this fixture: 6 of the 8 groups fail on an unparseable
-        # local.json; File set and Receipt are the two that survive it.
+        # Failing groups are selected and counted first, so the guard is not vacuous when every group passes:
+        # 6 of the 8 fail on an unparseable local.json; File set and Receipt survive it.
         failing = [check for check in result["checks"] if not check["passed"]]
         assert len(failing) == 6, f"expected 6 failing groups, got {[c['name'] for c in failing]}"
         for check in failing:
@@ -698,12 +598,7 @@ class TestScoringMechanics:
 
 
 class TestTheCacheWatchesMemorysFiles:
-    """external_inputs() names what the incremental audit cache must watch outside the branch.
-
-    2026-09-15: a memory.config.json or template edit left cached Trinity rows
-    scored from before it. The paths come from the same helpers the loaders
-    read, so the cache and the checker cannot name different files.
-    """
+    """external_inputs() names what the incremental audit cache must watch outside the branch."""
 
     @staticmethod
     def _memory(tmp_path, *templates: str) -> Path:
@@ -752,17 +647,8 @@ class TestTheCacheWatchesMemorysFiles:
         assert names == ["LOCAL.template.json", "OBSERVATIONS.template.json", "memory.config.json"]
 
 
-# ===========================================================================
-# G. Bypass is deliberately absent
-# ===========================================================================
-
-
 class TestBypassIsDeliberatelyAbsent:
-    """The contract: "None for shape rules, by design."
-
-    A bypassable memory standard recreates the drift it exists to end. These
-    tests pin the design decision so nobody "fixes" it into existence later.
-    """
+    """Bypass is None for shape rules, by design: a bypassable memory standard recreates the drift it exists to end."""
 
     _RULES = [
         {"file": ".trinity/local.json", "standard": "trinity", "reason": "would suppress the standard"},
@@ -813,23 +699,8 @@ class TestBypassIsDeliberatelyAbsent:
         assert "trinity contract" in trinity.check_branch.__doc__.lower()
 
 
-# ===========================================================================
-# H. The silent-pass hole this checker was almost born with -- regression guard
-# ===========================================================================
-
-
 class TestKnownSilentPassHole:
-    """The checker's own violation of THE ONE LAW, found by test and closed.
-
-    Shipped state of _records_check dropped its violation records whenever the
-    entry denominator came out clean, and _cap_probe's config-has-no-spec
-    record contributes nothing to that denominator when the container is empty.
-    Char caps answered 'All 0 entries are within their configured caps',
-    passed=True, score=100 -- a silent pass of something the checker had just
-    said it could not measure, inside the standard written to end exactly that.
-    Fixed in _records_check: records decide whether, the denominator only
-    decides how bad. This test is the guard, not a bug report.
-    """
+    """The checker's own violation of THE ONE LAW, found by test and closed."""
 
     def test_char_caps_must_not_pass_when_the_config_has_no_spec(self, trinity, tmp_path, monkeypatch):
         specless = copy.deepcopy(_CONFIG)
@@ -850,27 +721,8 @@ class TestKnownSilentPassHole:
         assert check["score"] < 100
 
 
-# ===========================================================================
-# A RELATIVE BRANCH PATH NAMES THE SAME BRANCH AN ABSOLUTE ONE DOES
-# ===========================================================================
-
-
 class TestARelativeBranchPathStillNamesTheBranch:
-    """Found while verifying my own memories after a write: running the checker
-    on "." reported score 93 with 'document_name seedgo.LOCAL does not name
-    branch ' and 'managed_by seedgo != branch directory name ' -- note the
-    empty branch in both messages. The same tree on an absolute path scored
-    100.
-
-    Cause: _build_context took branch_path.name verbatim, and Path(".").name
-    is the empty string. Every relative invocation -- a caller standing in the
-    branch, a test helper, anything shelling out with cwd -- silently measured
-    Top-level keys against a branch called "". The failure is worse than a
-    crash because it looks like real drift and names files that are correct.
-
-    Fix: resolve the path before deriving the name. These tests pin that a
-    relative and an absolute path answer identically.
-    """
+    """A relative branch path names the same branch an absolute one does: the path is resolved before the name is read."""
 
     def test_a_relative_path_scores_the_same_as_an_absolute_one(self, trinity, tmp_path, monkeypatch):
         branch = _write_branch(tmp_path)
@@ -893,12 +745,7 @@ class TestARelativeBranchPathStillNamesTheBranch:
         assert top["passed"] is True
 
     def test_a_trailing_dot_segment_resolves_to_the_branch(self, trinity, tmp_path):
-        """Green before the fix as well as after, and kept deliberately: it
-        pins WHY the bug was only ever a bare "." -- pathlib drops interior and
-        trailing "." segments when it parses, so "<branch>/." already carried
-        the name. Without this the reader would reasonably assume every dotted
-        form was broken.
-        """
+        """A trailing "." segment already resolves to the branch: pathlib drops it, so only a bare "." was ever broken."""
         branch = _write_branch(tmp_path)
 
         result = trinity.check_branch(f"{branch}/.")
@@ -906,20 +753,8 @@ class TestARelativeBranchPathStillNamesTheBranch:
         assert result["score"] == 100
 
 
-# ===========================================================================
-# THE SPLIT: trinity_groups holds the nine, trinity_check holds the engine
-# ===========================================================================
-
-
 class TestTheGroupSplitKeepsEveryGroup:
-    """trinity_check.py crossed the 1500-line architecture cap during the
-    marker-7 work, so the group checkers moved to trinity_groups.py on
-    2026-08-27. A relocation, not a redesign -- but the one regression a split
-    invites is a group quietly going missing, and a missing group does not
-    fail loudly: the weighted mean simply divides by less and the branch scores
-    HIGHER. That is the exact shape of a silent pass this standard exists to
-    end, so it gets pinned rather than assumed.
-    """
+    """Every group survives the split into trinity_groups: a missing group divides by less and scores the branch higher."""
 
     def test_all_groups_returns_every_weighted_group_in_reporting_order(self, trinity, tmp_path):
         branch = _write_branch(tmp_path)
@@ -947,9 +782,7 @@ class TestTheGroupSplitKeepsEveryGroup:
         assert [c["name"] for c in result["checks"]] == list(trinity.GROUP_WEIGHTS)
 
     def test_the_engine_does_not_reach_past_the_public_entry_point(self, trinity):
-        """The nine used to be imported by name into the engine, which is how a
-        forgotten group becomes possible. Pin that the engine holds one handle.
-        """
+        """The engine holds one handle on the groups, never the nine by name, so a group cannot be forgotten."""
         source = Path(trinity.__file__).read_text(encoding="utf-8")
 
         assert "all_groups(ctx)" in source

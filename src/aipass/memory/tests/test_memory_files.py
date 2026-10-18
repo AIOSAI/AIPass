@@ -3,21 +3,12 @@
 # Description: Tests for memory_files.py, the memory file safe I/O handler
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/memory_files.py."""
 
-# ---------------------------------------------------------------------------
-# update_metadata — REMOVED 2026-08-25
-# ---------------------------------------------------------------------------
-# Its eight tests went with it. The function's only job was writing
-# `document_metadata.status.<field>`, and the owner's ruling deleted the status
-# block from the trinity standard: health is computed by the checker at run
-# time, never stored. Its one production caller (line_counter.update_line_count)
-# stamped a health date through it; nothing else in the fleet imported it.
-# Keeping a generic writer for a block the standard forbids would leave the
-# next agent a sanctioned-looking way to recreate the drift.
+# update_metadata is gone on purpose: the trinity standard forbids a stored status block.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — read_memory_file() and write_memory_file(), tests/test_changed_entries.py

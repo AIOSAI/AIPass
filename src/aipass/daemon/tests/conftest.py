@@ -4,7 +4,7 @@
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
 # Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -19,7 +19,10 @@
 #
 # @Meta header not seedgo standards
 
-"""Shared pytest fixtures for daemon tests"""
+"""Shared pytest fixtures for daemon tests
+
+Reference: docs/testing.md
+"""
 
 import json
 import logging
@@ -27,8 +30,7 @@ import os
 import sys
 import tempfile
 
-# Redirect prax logs to temp directory during tests
-# Must be set before any prax imports to catch logger initialization
+# Must be set before any prax import, which reads it at logger initialization.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -48,53 +50,18 @@ from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, disc
 
 logger = logging.getLogger(__name__)
 
-# The two units the scheduler runs on. Named here because both the seal and the
-# host-state snapshot need them and a second spelling is a second thing to drift.
 _TIMER_UNITS = ("daemon-tick.service", "daemon-tick.timer")
 _LIVE_UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
-# Never discover out of .archive/: it holds verbatim disposal copies of the
-# suites the one json service subsumed, and rglobbing into a dot-directory
-# generates the dotted module name ...json..archive.json_handler, a SyntaxError
-# that kills the file that walked there (DPLAN-0325, hooks' finding).
+# .archive/ holds disposal copies; collecting them yields a dotted module name that is a SyntaxError.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
 
 
-# =============================================================================
-# HOST STATE — the suite may not move the live scheduler timer
-# =============================================================================
-#
-# THE OWNER'S RULING (2026-09-08), his words: "tests can't disable processes, they
-# should restore to exact same state before the test. The test is fine and good
-# that it can enter something."
-#
-# WHAT HAPPENED. tests/test_cli_routing.py runs the REAL router over every verb
-# in GATED_VERBS, and two of those verbs are install-timer and uninstall-timer.
-# With the argument gate in place the refusal comes first and the verb never
-# runs. Without it — a red-first run, or any mutation run that disables the gate
-# — _install() and _uninstall() executed for real against the user's systemd.
-# The journal recorded seven Started/Stopped pairs across four such runs on
-# 2026-09-07, ending on a Stop at 11:46:40. Nothing ticked for twenty-three
-# hours: @vera/release-watch and @daemon/inbox-sweep both missed their windows,
-# and no MISSED line could even be written, because writing one needs a tick.
-#
-# WHY THE SEAL IS SESSION-WIDE AND NOT ON THOSE TWO ROWS. Scoping the guard to
-# the rows that bit would leave the hole open for the next verb added to
-# GATED_VERBS, and whoever adds it has no reason to know this file exists. The
-# defect is not "two rows reach systemd", it is "a test can reach systemd at
-# all". Same argument TestInstall._no_real_home already makes about ~/.aipass:
-# a seam a test can forget to use is not a fix.
+# Seals are autouse on the seam, never on the test that bit: the next test has no reason to know.
 
 
 def _systemctl(*args: str) -> tuple:
-    """Ask systemd --user something. Returns (ok, stdout) — never raises.
-
-    Returns ok=False where systemd is not reachable at all (no systemctl on
-    PATH, no user bus, a timeout), which is the honest answer on the Windows
-    job and in a container. A snapshot built from an unreachable host is marked
-    unavailable rather than being recorded as "absent", because those two are
-    very different facts and only one of them is worth restoring.
-    """
+    """Ask systemd --user something. Returns (ok, stdout); ok=False is unreachable, not absent."""
     try:
         result = subprocess.run(
             ["systemctl", "--user", *args], capture_output=True, text=True, encoding="utf-8", timeout=15
@@ -106,10 +73,7 @@ def _systemctl(*args: str) -> tuple:
 
 
 def _host_timer_snapshot() -> dict:
-    """Record the live daemon-tick timer state: files, enabled, active.
-
-    Read-only. This is the state the suite is required to give back.
-    """
+    """Record the live daemon-tick timer state: files, enabled, active. Read-only."""
     reachable, enabled = _systemctl("is-enabled", "daemon-tick.timer")
     if not reachable:
         return {"available": False}
@@ -126,25 +90,8 @@ def _host_timer_snapshot() -> dict:
 def _seal_timer_host_state(tmp_path, request):
     """Make live systemd unreachable from every test in this suite.
 
-    Autouse and unconditional. The three seams are the whole surface by which
-    timer_install can change host state:
-
-      _run_systemctl  every stop/disable/enable/start/daemon-reload
-      _UNIT_DIR       where unit files are copied to and unlinked from
-      _STATE_DIR      the ~/.aipass mkdir
-
-    Patched at the MODULE, so _install() and _uninstall() — which look these up
-    as globals at call time — get the stand-ins even when they are invoked
-    through the real router with the gate absent.
-
-    A test that asks for `systemctl_on_path` (test_timer_install.py) keeps the
-    real wrapper, and the seal moves the other door instead: PATH becomes an
-    empty directory, so the only systemctl the wrapper can find is the stub
-    that fixture lays. The live host's systemctl is unreachable either way.
-
-    The stand-in returns True, so an unpatched caller sees a successful install
-    rather than a confusing failure — the point is that nothing happened, not
-    that something failed.
+    Patched at the module, so the real router reaches the stand-ins even with the gate absent.
+    `systemctl_on_path` keeps the real wrapper and empties PATH instead, leaving only its stub.
     """
     if "systemctl_on_path" in request.fixturenames:
         no_systemctl = tmp_path / "_sealed_empty_path"
@@ -166,27 +113,7 @@ def _seal_timer_host_state(tmp_path, request):
 
 @pytest.fixture(autouse=True)
 def _seal_runstate_file(tmp_path):
-    """Keep the suite out of the LIVE scheduler runstate.
-
-    daemon_json/daemon_runstate.json is not scratch: it holds the fleet's real
-    last_run / next_run / seeded slots. @seedgo's weekly slot was hand-seeded
-    there over two sessions, and @vera's and @daemon's rows are how the
-    scheduler knows what already fired.
-
-    MEASURED, 2026-09-08, and this is a defect I introduced earlier in this same
-    session. DPLAN-0332 made run_tick() stamp last_tick in a finally so a gap
-    can be detected — which means EVERY non-dry tick now saves, including one in
-    a test that patched load_runstate but not save_runstate
-    (test_scheduler_bot.py, the notify-not-called case). One suite run replaced
-    three real fleet rows with the fixture row @commons/test. Snapshot before,
-    diff after: CHANGED. Restored by hand from the snapshot.
-
-    The narrow fix would be to patch save_runstate in that one test. This is the
-    wide one, for the same reason the timer seal above is session-wide: the
-    defect is not "one test forgot", it is "a test can reach the live scheduler
-    state at all", and the next person to call run_tick() in a test inherits the
-    hole with no way to know.
-    """
+    """Keep the suite out of the LIVE scheduler runstate: every non-dry run_tick() saves."""
     with patch.object(runstate_mod, "RUNSTATE_FILE", tmp_path / "_sealed_runstate.json"):
         yield
 
@@ -209,46 +136,21 @@ WAKE_PROMPT_FILE = "last_wake_prompt.txt"
 def _seal_branch_wake_prompt(tmp_path):
     """Keep the suite out of every OTHER citizen's .daemon/ directory.
 
-    MEASURED 2026-09-08 20:45:18, found by @devpulse: Vera-Studio's live
-    .daemon/last_wake_prompt.txt held exactly the 16 bytes 'tend your branch' —
-    test_run_blocked_contract.py's _job() default prompt. The path is
-    _fire_job -> recovery.record_wake_prompt -> _branch_daemon_dir, which
-    resolves @vera through discovery.active_citizens() to the REAL Vera-Studio
-    tree, and writes. The FakeStatus seam stops the wake reaching a live tmux;
-    nothing stopped the transcript reaching a live branch.
-
-    SEALED SESSION-WIDE ON THE SEAM, not on the row that bit. The blast radius
-    is every fixture owner that happens to be a real citizen — @commons, @backup,
-    @vera, @devpulse, @daemon, @seedgo, @baud, @flow and @api all appear in this
-    suite — so scoping the guard to one test module would leave it open for the
-    tenth. That is learning 130, paid for on the timer in FPLAN-0524.
-
-    Returns a tmp directory rather than None so a test can still assert the
-    branch-side write HAPPENED; only its destination changes.
+    Fixture owners are real citizens, so _branch_daemon_dir resolves to live trees.
+    Yields a tmp dir, not None, so a test can still assert the branch-side write happened.
     """
     sealed = tmp_path / "_sealed_branch_daemon"
     with patch.object(recovery_mod, "_branch_daemon_dir", return_value=sealed):
         yield sealed
 
 
-# Stands in for drone in every test: exits 1 naming the seal, so a test that
-# forgot its own fake sees a FAILED fire rather than a live command or a live mail.
+# Exits 1 naming the seal, so a test that forgot its own fake sees a FAILED fire.
 SEALED_LAUNCHER = (sys.executable, "-c", "import sys; sys.exit('sealed: a test reached the real drone launcher')")
 
 
 @pytest.fixture(autouse=True)
 def _seal_command_launcher():
-    """No test may run the real drone through a command job (DPLAN-0338).
-
-    ``command_job.LAUNCHER`` replaces the job's own ``drone`` token AND prefixes
-    the notify mail's ``drone @ai_mail email`` call, so this one seam covers every
-    subprocess the command lane can start: a real scheduled command against the
-    real tree, and a real mail into a real citizen's inbox. Session-wide on the
-    seam for the reason the three seals above are (learning 130): the next test
-    to fire a command job has no reason to know this file exists.
-
-    Tests that need a behaviour patch LAUNCHER over this with their own fake.
-    """
+    """No test may run the real drone through a command job; LAUNCHER also prefixes notify mail."""
     with patch.object(command_job_mod, "LAUNCHER", SEALED_LAUNCHER):
         yield SEALED_LAUNCHER
 
@@ -274,21 +176,9 @@ def _live_wake_prompts() -> dict:
 
 @pytest.fixture(scope="session", autouse=True)
 def _branch_wake_prompt_sentinel():
-    """Fail the session that rewrote a live citizen's wake transcript.
+    """Fail the session that rewrote a live citizen's wake transcript. Never restores.
 
-    The seal above closes the known route; this is the backstop for the one
-    nobody has thought of. Read-only and non-restoring — the damage is reported,
-    not quietly papered over.
-
-    IT TELLS A TEST FROM A REAL FIRE, and it can, precisely. The live scheduler
-    runs while the suite runs (~2 min timer, ~30 s suite), and a real fire during
-    that window legitimately rewrites a branch's transcript — @vera's did at
-    07:45:19 today. But record_wake_prompt always writes BOTH destinations with
-    the SAME text, and the suite's daemon_json copy is sealed to tmp by
-    _seal_runstate_file. So: branch file changed AND daemon_json now matches it
-    means a real tick out of a separate process; branch file changed and
-    daemon_json does not means this suite wrote it. That discriminator is why
-    this sentinel can be strict without crying wolf (learning 135).
+    A real mid-suite fire writes the same text to daemon_json too; a change that does not match is the suite.
     """
     before = _live_wake_prompts()
     yield
@@ -315,24 +205,9 @@ def _branch_wake_prompt_sentinel():
 
 @pytest.fixture(scope="session", autouse=True)
 def _runstate_sentinel():
-    """Fail the session that put fixture rows into the live scheduler runstate.
+    """Fail the session that put fixture rows into the live scheduler runstate. Never restores.
 
-    Same argument as _host_state_sentinel: the seal stops the known route, this
-    catches the one nobody has thought of. Read-only and non-restoring, so the
-    damage is reported rather than quietly papered over.
-
-    IT COMPARES KEYS, NOT BYTES, and that is not a weakening — it is the only
-    check that can be trusted here. THE LIVE SCHEDULER RUNS WHILE THE SUITE RUNS:
-    the systemd timer fires every ~2 minutes, the suite takes ~30 seconds, and a
-    real tick landing mid-session legitimately moves ``last_tick`` and rewrites
-    ``last_status``/``last_blocked_at`` on real rows. Two byte-comparing versions
-    of this fixture failed healthy runs on 2026-09-08 before that was measured,
-    and a sentinel that cries wolf teaches people to ignore it.
-
-    What it still catches is exactly the damage that happened: on 2026-09-08 one
-    suite run replaced @seedgo/shadow-cycle-weekly, @daemon/inbox-sweep and
-    @vera/release-watch with the fixture row @commons/test. A live tick never
-    invents a key discovery does not publish, and never drops one it does.
+    Compares keys, not bytes: the live timer ticks mid-suite and rewrites real rows' values.
     """
     live = runstate_mod.RUNSTATE_FILE
     before = _live_job_keys(live)
@@ -345,7 +220,7 @@ def _runstate_sentinel():
         real = {runstate_mod.job_key(j["owner"], j["id"]) for j in discover_jobs()}
     except OSError as e:
         logger.warning("cannot ask the fleet for its jobs, holding the pre-suite roster: %s", e)
-        real = before  # cannot ask the fleet; hold the pre-suite roster as truth
+        real = before
 
     invented = after - before - real
     assert not invented, (
@@ -370,17 +245,7 @@ def _runstate_sentinel():
 def _host_state_sentinel():
     """Fail the session that moved the live timer, naming what moved.
 
-    The seal above prevents the known route. This one is the backstop for the
-    route nobody has thought of yet — a test that shells out to
-    `drone @daemon uninstall-timer`, a helper that calls systemctl directly, a
-    future module with its own copy of the install logic. On 2026-09-07 the
-    suite took the scheduler down and reported 594 passed; after this it cannot
-    do both.
-
-    Read-only and non-restoring on purpose. A sentinel that quietly put the
-    timer back would hide the very defect it exists to report, and the session
-    is over by the time it speaks — the honest move is to say loudly what
-    changed and let a human decide.
+    Never restores: putting the timer back quietly would hide the defect it reports.
     """
     before = _host_timer_snapshot()
     yield
@@ -400,11 +265,7 @@ def _host_state_sentinel():
 def pinned_console_width() -> None:
     """Pin the product's consoles to one width for the whole run.
 
-    Every daemon module prints through aipass.cli.apps.modules' console (and
-    error() through err_console). Rich sizes an unpinned console on every print:
-    80 columns on POSIX and 79 on Windows under pytest's capture, the terminal's
-    width under -s, COLUMNS when exported. A line that wraps on one OS and not
-    another turns a substring assertion into a coin toss (test template v1 item 20).
+    Unpinned, Rich wraps at 80 on POSIX and 79 on Windows, so substring asserts differ by OS.
     """
     for product_console in (console, err_console):
         product_console.width = 200
@@ -419,22 +280,7 @@ def clean_command_state() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
-    """Redirect daemon's json writes into a temp dir.
-
-    autouse on purpose: since DPLAN-0325 the handler is a shim over the one
-    prax service, and the service resolves its directory from
-    AIPASS_TEST_LOG_DIR on EVERY call. Unset, the nine names write into the
-    real daemon_json/, so a test that forgets to redirect pollutes the branch.
-    The guard belongs on every test, not on the ones that remember.
-
-    Own subdirectory on purpose: the service spells the sandbox
-    <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    tmp_path/daemon/ in every test and collide with a test that builds a
-    directory of its own branch's name.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
+    """Redirect daemon's json writes into a temp subdir, not tmp_path itself (tmp_path/daemon/ collides)."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)

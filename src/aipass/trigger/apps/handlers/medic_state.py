@@ -3,35 +3,14 @@
 # Description: Medic state persistence and status collection handler
 # Version: 1.3.0
 # Created: 2026-02-12
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Medic State Handler - Persistence and status for Medic toggle
 
-Reads/writes medic_enabled flag and the mute lists in medic_state.json.
-Collects status data from suppression logs and rate limit logs.
-
-State lives in trigger_json/medic_state.json. It used to live in
-trigger_json/trigger_config.json, which is a name json_handler's trio
-machinery owns for module "trigger": any trio call under that caller name
-validates the file against a config template, finds this hand-written shape
-invalid, and overwrites it with a blank one — taking every live mute and the
-persisted breaker state with it. Nothing routed there yet; the file moved
-before something did. read_config() migrates on first read.
-
-Two independent mute classes share the same entry format and TTL machinery:
-    muted_branches         - CONTENT mutes. Silence error_detected dispatch for
-                             a branch doing known-noisy work.
-    volume_muted_branches  - VOLUME mutes. Silence runaway_log_detected alerts.
-
-They are deliberately separate: a content mute says "expect error lines from
-me right now", which says nothing about log volume. Gating volume alerts on a
-content mute inverted their purpose — during build windows (when agents mute
-themselves) runaway alerts were exactly the ones being dropped.
-
-Architecture:
-    Module (medic.py) orchestrates, this handler manages state.
+Never store state in trigger_config.json: json_handler's trio owns that name and blanks this shape.
+Content mutes (error dispatch) and volume mutes (runaway alerts) stay separate; one never gates the other.
 """
 
 import json
@@ -63,21 +42,13 @@ _DURATION_RE = re.compile(r"^(\d+)(h|d)$")
 DEFAULT_MUTE_SECONDS = 86400  # 24 hours
 DEFAULT_OFF_SECONDS = 86400  # 24 hours
 
-# Two independent mute classes — see module docstring.
 MUTE_KEY_CONTENT = "muted_branches"  # content-based error noise (medic)
 MUTE_KEY_VOLUME = "volume_muted_branches"  # volume-based runaway alerts
 MUTE_KEYS = (MUTE_KEY_CONTENT, MUTE_KEY_VOLUME)
 
 
 def parse_duration(duration_str: str) -> Optional[float]:
-    """Parse a duration string like '24h', '48h', '7d' into seconds.
-
-    Args:
-        duration_str: Duration with unit suffix (h=hours, d=days)
-
-    Returns:
-        Seconds as float, or None if unparseable
-    """
+    """Parse a duration string like '24h', '48h', '7d' into seconds."""
     m = _DURATION_RE.match(duration_str.strip())
     if not m:
         return None
@@ -114,16 +85,7 @@ def read_config() -> dict:
     """
     Read medic_state.json, migrating off the legacy path on first read.
 
-    Returns:
-        Parsed config dict, or empty dict when the file does not exist yet
-
-    Raises:
-        OSError, ValueError: the file exists but cannot be read or parsed.
-            Returning {} here once let write_config persist a blank over every
-            mute and the circuit-breaker state (the json_handler loss on
-            Windows CI, 32167459635). A write cycle now aborts instead, the
-            dispatch gate in escalation.py logs and carries on, and the CLI
-            entry point reports the error.
+    Raises on an unreadable file: returning {} would let write_config blank every mute and the breaker state.
     """
     migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
     if not MEDIC_STATE_FILE.exists():
@@ -136,15 +98,7 @@ def read_config() -> dict:
 
 
 def write_config(data: dict) -> bool:
-    """
-    Write medic_state.json. Cleans expired mute entries before writing.
-
-    Args:
-        data: Config dict to persist
-
-    Returns:
-        True on success, False on failure
-    """
+    """Write medic_state.json. Cleans expired mute entries before writing."""
     try:
         _clean_expired_mutes(data)
         atomic_write_json(MEDIC_STATE_FILE, data)
@@ -155,15 +109,7 @@ def write_config(data: dict) -> bool:
 
 
 def is_enabled() -> bool:
-    """
-    Check if Medic is currently enabled.
-
-    If disabled with a TTL (medic_disabled_until), treats an expired
-    TTL as enabled — evaluate on read, no timers.
-
-    Returns:
-        True if medic_enabled is True or its TTL has expired
-    """
+    """Check if Medic is currently enabled; an expired medic_disabled_until counts as enabled."""
     data = read_config()
     config = data.get("config", {})
     enabled = bool(config.get("medic_enabled", True))
@@ -176,29 +122,13 @@ def is_enabled() -> bool:
 
 
 def get_disabled_until() -> Optional[str]:
-    """Get the medic_disabled_until timestamp if set.
-
-    Returns:
-        ISO timestamp string, or None if not set or permanent off
-    """
+    """Get the medic_disabled_until timestamp if set."""
     data = read_config()
     return data.get("config", {}).get("medic_disabled_until")
 
 
 def set_enabled(enabled: bool, duration_seconds: Optional[float] = None) -> bool:
-    """
-    Set medic_enabled flag in config.
-
-    When disabling with a duration, stores medic_disabled_until so the
-    off state auto-expires. When enabling, clears any stored expiry.
-
-    Args:
-        enabled: True to enable, False to disable
-        duration_seconds: TTL in seconds for disable (None = permanent)
-
-    Returns:
-        True on success
-    """
+    """Set medic_enabled flag in config."""
     with json_file_lock(MEDIC_STATE_FILE):
         data = read_config()
         if "config" not in data:
@@ -218,15 +148,7 @@ def set_enabled(enabled: bool, duration_seconds: Optional[float] = None) -> bool
 
 
 def _normalize_branch_name(name: str) -> str:
-    """
-    Normalize a branch name - strip @, extract from path if needed.
-
-    Args:
-        name: Raw branch name (could be path, @-prefixed, etc.)
-
-    Returns:
-        Lowercase branch name (e.g., 'speakeasy')
-    """
+    """Normalize a branch name - strip @, extract from path if needed."""
     cleaned = name.lstrip("@")
     if "/" in cleaned:
         cleaned = Path(cleaned).name
@@ -234,15 +156,7 @@ def _normalize_branch_name(name: str) -> str:
 
 
 def _get_muted_detail_for(key: str) -> List[Dict[str, Any]]:
-    """
-    Get active mute entries for one mute class, with expiry info.
-
-    Args:
-        key: Config key — MUTE_KEY_CONTENT or MUTE_KEY_VOLUME
-
-    Returns:
-        List of dicts with 'name' and 'expires_at' (None = permanent)
-    """
+    """Get active mute entries for one mute class, with expiry info."""
     data = read_config()
     raw = data.get("config", {}).get(key, [])
     now = datetime.now()
@@ -263,49 +177,22 @@ def _get_muted_detail_for(key: str) -> List[Dict[str, Any]]:
 
 
 def get_muted_branches() -> List[str]:
-    """
-    Get list of currently active CONTENT-muted branch names.
-
-    Evaluates TTL expiry on read — expired mutes are filtered out.
-
-    Returns:
-        List of muted branch names (lowercase, e.g., ['speakeasy', 'api'])
-    """
+    """Get list of currently active CONTENT-muted branch names."""
     return [m["name"] for m in _get_muted_detail_for(MUTE_KEY_CONTENT)]
 
 
 def get_muted_branches_detail() -> List[Dict[str, Any]]:
-    """
-    Get CONTENT-muted branches with expiry info for status display.
-
-    Returns active mutes only (expired ones filtered out).
-
-    Returns:
-        List of dicts with 'name' and 'expires_at' (None = permanent)
-    """
+    """Get CONTENT-muted branches with expiry info for status display."""
     return _get_muted_detail_for(MUTE_KEY_CONTENT)
 
 
 def get_volume_muted_branches() -> List[str]:
-    """
-    Get list of currently active VOLUME-muted branch names.
-
-    Volume mutes gate runaway_log_detected alerts only — they are independent
-    of the content mutes used by the medic error pipeline.
-
-    Returns:
-        List of volume-muted branch names (lowercase)
-    """
+    """Get list of currently active VOLUME-muted branch names."""
     return [m["name"] for m in _get_muted_detail_for(MUTE_KEY_VOLUME)]
 
 
 def get_volume_muted_branches_detail() -> List[Dict[str, Any]]:
-    """
-    Get VOLUME-muted branches with expiry info for status display.
-
-    Returns:
-        List of dicts with 'name' and 'expires_at' (None = permanent)
-    """
+    """Get VOLUME-muted branches with expiry info for status display."""
     return _get_muted_detail_for(MUTE_KEY_VOLUME)
 
 
@@ -319,17 +206,7 @@ def _mute_entry_name(entry) -> str:
 
 
 def _mute_branch_in(key: str, branch_name: str, duration_seconds: Optional[float] = None) -> bool:
-    """
-    Add a branch to one mute class with optional TTL.
-
-    Args:
-        key: Config key — MUTE_KEY_CONTENT or MUTE_KEY_VOLUME
-        branch_name: Branch name (with or without @)
-        duration_seconds: TTL in seconds (None = permanent/forever)
-
-    Returns:
-        True on success
-    """
+    """Add a branch to one mute class with optional TTL."""
     clean = _normalize_branch_name(branch_name)
     with json_file_lock(MEDIC_STATE_FILE):
         data = read_config()
@@ -348,16 +225,7 @@ def _mute_branch_in(key: str, branch_name: str, duration_seconds: Optional[float
 
 
 def _unmute_branch_in(key: str, branch_name: str) -> bool:
-    """
-    Remove a branch from one mute class.
-
-    Args:
-        key: Config key — MUTE_KEY_CONTENT or MUTE_KEY_VOLUME
-        branch_name: Branch name (with or without @)
-
-    Returns:
-        True on success
-    """
+    """Remove a branch from one mute class."""
     clean = _normalize_branch_name(branch_name)
     with json_file_lock(MEDIC_STATE_FILE):
         data = read_config()
@@ -370,33 +238,12 @@ def _unmute_branch_in(key: str, branch_name: str) -> bool:
 
 
 def mute_branch(branch_name: str, duration_seconds: Optional[float] = None) -> bool:
-    """
-    Add a branch to the CONTENT muted list with optional TTL.
-
-    Muted branches will have errors detected but NOT dispatched. Does NOT
-    gate runaway (volume) alerts — use mute_branch_volume for those.
-    Persists in medic_state.json.
-
-    Args:
-        branch_name: Branch name (with or without @)
-        duration_seconds: TTL in seconds (None = permanent/forever)
-
-    Returns:
-        True on success
-    """
+    """Add a branch to the CONTENT muted list with optional TTL."""
     return _mute_branch_in(MUTE_KEY_CONTENT, branch_name, duration_seconds)
 
 
 def unmute_branch(branch_name: str) -> bool:
-    """
-    Remove a branch from the CONTENT muted list.
-
-    Args:
-        branch_name: Branch name (with or without @)
-
-    Returns:
-        True on success
-    """
+    """Remove a branch from the CONTENT muted list."""
     return _unmute_branch_in(MUTE_KEY_CONTENT, branch_name)
 
 
@@ -404,40 +251,18 @@ def mute_branch_volume(branch_name: str, duration_seconds: Optional[float] = Non
     """
     Add a branch to the VOLUME muted list with optional TTL.
 
-    Volume mutes silence runaway_log_detected alerts for a branch that is
-    knowingly producing heavy log output. CRITICAL-severity runaways still
-    bypass this mute — see runaway_handler.
-
-    Args:
-        branch_name: Branch name (with or without @)
-        duration_seconds: TTL in seconds (None = permanent/forever)
-
-    Returns:
-        True on success
+    CRITICAL-severity runaways still bypass this mute (runaway_handler).
     """
     return _mute_branch_in(MUTE_KEY_VOLUME, branch_name, duration_seconds)
 
 
 def unmute_branch_volume(branch_name: str) -> bool:
-    """
-    Remove a branch from the VOLUME muted list.
-
-    Args:
-        branch_name: Branch name (with or without @)
-
-    Returns:
-        True on success
-    """
+    """Remove a branch from the VOLUME muted list."""
     return _unmute_branch_in(MUTE_KEY_VOLUME, branch_name)
 
 
 def get_suppression_stats() -> Dict[str, Any]:
-    """
-    Get suppression log statistics.
-
-    Returns:
-        Dict with suppressed_count and last_suppressed timestamp
-    """
+    """Get suppression log statistics."""
     suppressed_count = 0
     last_suppressed = "never"
     try:
@@ -458,12 +283,7 @@ def get_suppression_stats() -> Dict[str, Any]:
 
 
 def get_rate_limit_stats() -> Dict[str, Any]:
-    """
-    Get rate limit log statistics.
-
-    Returns:
-        Dict with rate_limited_count and last_rate_limited timestamp
-    """
+    """Get rate limit log statistics."""
     dispatch_count = 0
     last_dispatch = "never"
     try:

@@ -3,16 +3,10 @@
 # Description: Skill template management
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
-"""Skill scaffolding templates: resolve a tier, copy it, fill placeholders.
-
-Backs ``drone @skills create``. Three tiers ship - markdown_only,
-with_handler, full - and each is a real directory under ``templates/``
-copied wholesale, then rewritten in place so the new skill carries its own
-name. Refuses an unknown tier rather than guessing one.
-"""
+"""Skill scaffolding templates: resolve a tier, copy it, fill placeholders."""
 
 import shutil
 from pathlib import Path
@@ -22,21 +16,13 @@ from aipass.skills.apps.handlers.json import json_handler
 from aipass.skills.apps.handlers.module_paths import module_file
 
 
-# Template directory lives at src/aipass/skills/templates/
 TEMPLATES_DIR = module_file(__file__).parent.parent.parent / "templates"
 
 VALID_TYPES = ("markdown_only", "with_handler", "full")
 
 
 def get_template(template_type):
-    """Get the path to a template directory.
-
-    Args:
-        template_type: One of "markdown_only", "with_handler", "full".
-
-    Returns:
-        dict: {"success": bool, "path": Path|None, "error": str|None}
-    """
+    """Get the path to a template directory."""
     if template_type not in VALID_TYPES:
         return {
             "success": False,
@@ -56,12 +42,7 @@ def get_template(template_type):
 
 
 def _replace_placeholder_in_file(file_path, skill_name):
-    """Replace {{SKILL_NAME}} placeholder in a single file.
-
-    Args:
-        file_path: Path to the file to process.
-        skill_name: Name to substitute for the placeholder.
-    """
+    """Replace {{SKILL_NAME}} placeholder in a single file."""
     try:
         content = file_path.read_text(encoding="utf-8")
         if "{{SKILL_NAME}}" in content:
@@ -72,16 +53,7 @@ def _replace_placeholder_in_file(file_path, skill_name):
 
 
 def copy_template(template_path, target_path, skill_name):
-    """Copy a template directory to a target location, replacing placeholders.
-
-    Args:
-        template_path: Path to the source template directory.
-        target_path: Path to the destination directory for the new skill.
-        skill_name: Name to replace {{SKILL_NAME}} with in all files.
-
-    Returns:
-        dict: {"success": bool, "created_files": list[str], "error": str|None}
-    """
+    """Copy a template directory to a target location, replacing placeholders."""
     target = Path(target_path)
 
     if target.exists():
@@ -92,12 +64,9 @@ def copy_template(template_path, target_path, skill_name):
         }
 
     try:
-        # Copy the entire template tree, excluding __pycache__
         shutil.copytree(str(template_path), str(target), ignore=shutil.ignore_patterns("__pycache__"))
 
-        # Replace placeholders in all files. Names are spelled with forward
-        # slashes and sorted below, so every host answers the same list in the
-        # same order: str() would spell apps\handlers on Windows.
+        # Posix-spelled and sorted so every host answers the same list: str() spells apps\handlers on Windows.
         created_files = []
         for file_path in target.rglob("*"):
             if not file_path.is_file():
@@ -122,7 +91,6 @@ def copy_template(template_path, target_path, skill_name):
 
     except Exception as e:
         logger.error(f"Template copy failed: {e}")
-        # Clean up on failure
         if target.exists():
             shutil.rmtree(str(target))
         return {

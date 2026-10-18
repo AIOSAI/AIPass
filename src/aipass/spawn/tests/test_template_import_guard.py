@@ -3,7 +3,7 @@
 # Description: What the newborn's handler guard must survive on its very first import
 # Version: 1.1.1
 # Created: 2026-08-30
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -40,37 +40,9 @@ from aipass.spawn.tests.support_template_import_guard import (
     _simulation_unavailable,
 )
 
-# Every citizen is born carrying `apps/handlers/__init__.py` from the template,
-# and that file runs `_guard_branch_access()` at import time — so a defect in it
-# is not a defect in one branch, it is a defect in every branch the factory has
-# ever shipped and every one it will ship.
-#
-# MEASURED 2026-08-30 (@drone's dead-cwd pin, reported by @devpulse): the guard
-# resolved frame filenames BEFORE skipping pseudo-files like `<string>`, and
-# `Path(...).resolve()` on a relative or pseudo filename calls `os.getcwd()`. Any
-# process whose working directory had been deleted therefore died with
-# FileNotFoundError while importing ANY branch. All 18 live copies were fixed in
-# 32db831c; these pins guard the TEMPLATE, so the next spawned branch is born
-# with the guarded form instead of re-inheriting the defect.
-#
-# The tests render the template into a throwaway package and import it in a
-# subprocess, because that is the only way to exercise a file whose whole
-# behaviour happens at import time. The defect pins reproduce it in two worlds —
-# an injected cwd failure that runs on every OS, and a genuinely deleted directory
-# that runs wherever the OS allows the recipe — and the fence pins exist so the
-# fix cannot be mistaken for a weakened guard: it must still refuse an outside
-# caller and still admit an inside one.
-#
-# ON THE CPYTHON LINE NUMBERS IN THIS FILE (@skills' round-9 correction): every
-# `pathlib.py:NNN` and `ntpath.py:NNN` below is a DATED COURTESY to the reader,
-# not the claim. They were read on 3.12.3 here, and on the 3.10/3.11/3.13 sources
-# fetched for the round that needed them, and they move between patch releases —
-# @skills and I cited two different numbers for one getcwd read within a day. What
-# is falsifiable, and what every comment states in words beside the number, is the
-# MECHANISM and the ORDERING: which call happens above which check, and what is
-# captured when. A pin whose reasoning rests on a line number fails open on the
-# next bugfix release, silently, which is the line-scoped-waiver species one
-# context over.
+# The guard runs at import in every newborn, so it is rendered and imported in a subprocess.
+# It must survive an unreadable cwd (resolving a pseudo filename calls os.getcwd) and still
+# refuse an outside caller. CPython line numbers below are courtesies; the mechanism is the claim.
 
 
 TEMPLATE_CLASSES = sorted(get_available_classes())
@@ -88,10 +60,7 @@ def _render(source: str) -> str:
 
 
 def _plant_newborn(root: Path, class_name: str) -> Path:
-    """Write the rendered guard at the path a real newborn would carry it.
-
-    Returns the directory to put on sys.path.
-    """
+    """Write the rendered guard at the path a real newborn would carry it; returns the sys.path root."""
     package = root / "aipass" / "newborn" / "apps" / "handlers"
     package.mkdir(parents=True)
 
@@ -105,9 +74,7 @@ def _plant_newborn(root: Path, class_name: str) -> Path:
     return root
 
 
-# The import a stranger makes, by a variable so its line never spells the handlers:
-# the verdict is the fence's frame walk, not its line rule. Prints the refusal's
-# caller line, OTHER for a different ImportError, or ALLOWED.
+# Named by a variable so the verdict is the fence's frame walk, not its line rule.
 _FOREIGN_PROBE = """
     import importlib
 
@@ -125,9 +92,7 @@ _FOREIGN_PROBE = """
 def _run_seat(seat: Path, root: Path, body: str, cwd: Path) -> subprocess.CompletedProcess:
     """Write `body` as a file at `seat`, with the planted tree first on sys.path, and run it.
 
-    A real file, not `-c`: the fence judges a caller by its file's path, so the
-    seat is what makes the caller foreign, kin or unknown.
-    """
+    A real file, not `-c`: the fence judges a caller by its file's path."""
     seat.parent.mkdir(parents=True, exist_ok=True)
     head = f"import sys\n\nsys.path.insert(0, {str(root)!r})\n\n"
     seat.write_text(head + textwrap.dedent(body).strip() + "\n", encoding="utf-8")
@@ -140,37 +105,9 @@ def _run_seat(seat: Path, root: Path, body: str, cwd: Path) -> subprocess.Comple
     )
 
 
-# =============================================================================
-# The two worlds, and why both exist
-# =============================================================================
-
-# The condition these pins reproduce is "the cwd read RAISES", not "a directory
-# was deleted" — deletion is one way to arrive there, and on Windows it is not
-# an available one: Windows locks a process's current directory, so the recipe
-# dies at rmdir with WinError 32 before the test reaches its claim (round-2
-# Windows gate, relayed by @devpulse 2026-08-31).
-#
-# MY PICK, stated so it can be quoted: BOTH, scoped by what each can honestly
-# measure — @memory's injection as the portable pin that runs on every OS, and
-# @drone's real-world recipe kept and skipped on win32, because Windows makes
-# the RECIPE unavailable, not the STATE (a disconnected share or an ejected
-# volume hands a live Windows process a dead cwd).
-#
-# @devpulse asked whether mine are the quiet species — a relative path resolving
-# to the WRONG place rather than crashing — because the injection would then
-# need to fake a different world. I MEASURED IT RATHER THAN ANSWERING: I rebuilt
-# the pre-32db831c form (resolve first, skip second) and ran it with a live cwd
-# from outside the newborn tree. Both forms imported cleanly. The old form
-# still skipped `<string>` — it just paid for the resolve first — so the ONLY
-# behavioural difference between defective and fixed is whether that resolve
-# raises. There is no quiet species here, and that is precisely what licenses
-# the injection: it reproduces the whole of the discriminator, not part of it.
-#
-# The injection carries a POSITIVE CONTROL for the same reason @memory's own
-# skip-reads-green mutant taught the fleet: a faked world that fails to fake
-# anything makes every pin pass. The child proves the call site is broken before
-# it imports, and a test whose world did not take SKIPS with that reason instead
-# of reporting a green it did not earn.
+# The condition is "the cwd read RAISES": an injected world runs on every OS, a deleted
+# directory wherever the OS allows it. The injection carries a positive control, so a world
+# that did not take SKIPS instead of reading green.
 
 WINDOWS_RECIPE_SKIP = (
     "Windows locks a process's current working directory, so this recipe dies at "
@@ -206,20 +143,8 @@ _DELETE_CWD = (
 )
 
 PORTABLE_WORLDS = {
-    # Denying os.getcwd is @memory's construction. On POSIX it reaches
-    # Path.resolve(); on Windows it reaches ntpath.realpath, which calls
-    # os.getcwd() unconditionally on its first lines, before it even checks
-    # whether the path is absolute.
     "getcwd-denied": _INJECT_DEAD_CWD,
-    # Denying os.path.realpath is the call the Windows CI traceback actually
-    # died in: inspect.stack() -> getsourcefile() -> getmodule() -> an
-    # UNPROTECTED os.path.realpath(f). ADDED 2026-08-31 after the Windows gate
-    # found a defect one line ABOVE the code the first fix guarded. On POSIX the
-    # os.getcwd denial can never reach that call site — posixpath.abspath raises
-    # first, inside getabsfile(), where inspect catches it
-    # (`except (TypeError, FileNotFoundError): return None`) — which is exactly
-    # why this was invisible on Linux for as long as it existed. Denying the
-    # call the defect makes is the honest way to run CI's world from here.
+    # Windows CI died in inspect's unprotected os.path.realpath; a getcwd denial never reaches it on POSIX.
     "realpath-denied": _DENY_REALPATH,
 }
 
@@ -244,9 +169,7 @@ def _in_dead_cwd(root: Path, world: str, tail: str, cwd: Path):
     )
 
 
-# Same probe, relative input. @skills' round-7 finding, answered by measurement
-# rather than by agreement: cwd and resolve ride DIFFERENT captured attributes
-# on <=3.10, so arming one says nothing about the other.
+# Relative input: on <=3.10 cwd and resolve ride different captured attributes.
 _PATHLIB_ROUTE_PROBE_RELATIVE = """
     from pathlib import Path as _RoutePath
 
@@ -258,20 +181,8 @@ _PATHLIB_ROUTE_PROBE_RELATIVE = """
         print("PATHLIB_INERT")
 """
 
-# Windows' contribution to the posix-absolute row, reduced to the one property
-# that decides it: the concrete class spells the path back in ITS dialect, so a
-# posix-absolute literal reaches posixpath.realpath as a relative path.
-#
-# MEASURED THE HARD WAY, and the reason this patches a dunder instead of
-# introducing a class: a stand-in built as `class X(pathlib.Path)` and installed
-# as `pathlib.Path = X` is DOWNGRADED BY THE INTERPRETER. Path.__new__
-# (3.12 pathlib.py:1166) asks `if cls is Path` — and `Path` there is a GLOBAL
-# LOOKUP in the pathlib module, which the installation just rebound to X. So
-# `cls is Path` is true for X, __new__ returns a plain PosixPath, __init__ never
-# runs because the result is not an instance of X, and the first str() dies in
-# _load_parts with no _raw_paths. The round-9 species one level further down:
-# replacing a module attribute changes what the interpreter's OWN identity test
-# means. Pinned below so it cannot come back as a tidier-looking rewrite.
+# Patches a dunder, never `pathlib.Path = X(Path)`: Path.__new__'s `cls is Path` global lookup
+# would then downgrade X to a plain PosixPath. Pinned below against a tidier rewrite.
 _A_CONCRETE_CLASS_THAT_SPELLS_ANOTHER_DIALECT = """
     import pathlib
 
@@ -284,9 +195,7 @@ _A_CONCRETE_CLASS_THAT_SPELLS_ANOTHER_DIALECT = """
     print("DIALECT_INSTALLED")
 """
 
-# route -> {absolute probe verdict, relative probe verdict} under a getcwd
-# denial. EVERY row is measured through an explicit platform emulation, on
-# whatever host runs the file.
+# Every row runs through an explicit platform emulation, whatever the host.
 _GETCWD_TABLE = {
     ("posix", "absolute"): "PATHLIB_INERT",
     ("posix", "relative"): "PATHLIB_ARMED",
@@ -298,29 +207,8 @@ _GETCWD_TABLE = {
 class TestTheGetcwdRouteNeedsNoAccessorPatch:
     """@skills' round-7 return finding, answered by measurement.
 
-    Their words: cwd and resolve ride DIFFERENT captured attributes on <=3.10
-    (Path.cwd() is `cls(cls._accessor.getcwd())` there — confirmed, 3.10
-    pathlib.py:993, and 3.11 :907 already reads os.getcwd directly), so an
-    emulation that exercises one call leaves the other patch dark.
-
-    What I measured in my own tree rather than agreeing: the getcwd-denied
-    world needs no accessor patch AT ALL for the route this file cares about,
-    because Path.resolve reaches os.getcwd from INSIDE realpath, which looks the
-    name up on the `os` module at CALL time on every interpreter. Nothing
-    captures it. What the world genuinely cannot reach on <=3.10 is Path.cwd(),
-    and the template guard never calls it — a limit, stated rather than left to
-    be discovered.
-
-    AND THE ROW @memory'S LITMUS CAUGHT BEFORE CI DID: run the probe under the
-    OPPOSITE platform's emulation and require the verdict not to move. It
-    moved. The absolute-path row is a POSIXPATH fact; on nt, realpath reads the
-    cwd before it looks at the path at all, so the same denial arms there.
-
-    ROUND 8 finished the same thought in the other direction: the posix rows
-    were running BARE, so on an nt host they measured nt under a posix label.
-    Both rows go through an explicit emulation now — emulate both platforms or
-    neither, which is the rule that produced this class in the first place.
-    """
+    realpath looks up os.getcwd at call time, so no accessor patch is needed; Path.cwd() on <=3.10
+    stays unreachable, and the guard never calls it. Emulate both platforms or neither."""
 
     @staticmethod
     def _emulation_or_skip(route: str) -> str:
@@ -410,16 +298,7 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
     def test_a_posix_route_with_a_foreign_dialect_class_is_the_windows_red(self):
         """CI's windows red, reproduced from Linux — and the reason for the gate.
 
-        Same posix emulation, same denial, same probe literal. The only change
-        is a concrete class that spells the path back in another dialect, which
-        is precisely what Windows contributes to this row and the one thing the
-        emulation never replaced. INERT becomes ARMED, and the row's expectation
-        was a posix fact all along.
-
-        Kept as a test rather than a comment because it is also the negative
-        control for the skip above: if the gate ever lets an nt host run this
-        row again, this is the verdict it will get.
-        """
+        Only a foreign-dialect concrete class differs from the posix row; INERT becomes ARMED."""
         emulation = self._emulation_or_skip("posix")
 
         result = _run(
@@ -450,18 +329,7 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
     def test_a_stand_in_that_subclasses_the_class_it_replaces_is_downgraded(self):
         """Why the dialect stand-in patches a dunder instead of adding a class.
 
-        The obvious way to make Path spell paths differently is to subclass it
-        and install the subclass. On 3.12 that quietly does not work: Path.__new__
-        asks `if cls is Path`, `Path` is a global lookup in pathlib, and the
-        installation just rebound it — so the check matches the subclass, __new__
-        returns a plain PosixPath, and __init__ never runs on it. What comes back
-        is a half-built object of the WRONG class that dies on first str().
-
-        Reported as measured rather than asserted as universal: a version where
-        the identity check is gone would keep the subclass, and that is a legal
-        answer here. What must never happen is the third state — a subclass that
-        survives as a half-built object nobody notices.
-        """
+        Kept or downgraded are both legal; a half-built surviving subclass never is."""
         result = _run(
             _child_script(
                 _BUILD_PROBE_PATH,
@@ -499,11 +367,7 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
     def test_no_row_of_the_table_runs_bare(self):
         """@memory's rule, pinned where it can rot: emulate BOTH or neither.
 
-        Round 8's windows red was a posix row with no prelude — which reads as
-        "posix" only while the host is posix. This host cannot tell a bare row
-        from an emulated one behaviourally (they are the same here), so the
-        claim is pinned on the table itself, which is where the mistake was.
-        """
+        A bare row is indistinguishable on its own host, so the table itself is pinned."""
         for route, (prelude, _requires) in _PLATFORM_EMULATIONS.items():
             assert prelude.strip(), (
                 f"the {route!r} row installs nothing, so it measures whatever "
@@ -517,13 +381,7 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
     def test_an_emulation_stacked_on_its_own_platform_is_one_layer(self, route):
         """@seedgo's round-8 find, relayed by @devpulse, checked here.
 
-        They stacked an nt emulation on an nt-shaped world and recursed to the
-        stack limit: host == emulated is one layer, and an emulation whose
-        replacement calls the name it replaced eats itself. On the Windows
-        runner my nt emulation IS applied to a host where ntpath is already
-        os.path, so that is not a hypothetical for this file — it is just
-        invisible from Linux unless the emulation is applied twice.
-        """
+        On Windows the nt emulation lands on a host already nt; applying it twice shows that from Linux."""
         emulation = self._emulation_or_skip(route)
         result = _run(
             _child_script(
@@ -547,12 +405,7 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
 
     @pytest.mark.parametrize("route", sorted(_PLATFORM_EMULATIONS))
     def test_each_platform_emulation_is_inert_without_the_denial(self, route):
-        """And the same for the platform stand-ins themselves.
-
-        An emulation that raises on its own would make every row above
-        vacuously ARMED — @canary's round-4 species, applied to a platform
-        instead of a world.
-        """
+        """And the same for the platform stand-ins themselves (else every row is vacuously ARMED)."""
         result = _run(
             _child_script(
                 self._emulation_or_skip(route),
@@ -570,20 +423,12 @@ class TestTheGetcwdRouteNeedsNoAccessorPatch:
         )
 
 
-# =============================================================================
-# The defect itself — portable form (runs on every OS)
-# =============================================================================
-
-
 @pytest.mark.parametrize("world", sorted(PORTABLE_WORLDS))
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
 def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, world, tmp_path):
     """Import the newborn's handlers where reading the cwd raises.
 
-    `-c` gives the top frame the pseudo-filename `<string>`, and the defective
-    guard resolved it before skipping it — so the import died on a call the
-    fixed guard never makes. MEASURED red against the pre-fix form on Linux.
-    """
+    `-c` makes the top frame `<string>`; resolving it before skipping it is the defect."""
     root = _plant_newborn(tmp_path / "tree", class_name)
     (tmp_path / "stand_here").mkdir()
 
@@ -608,12 +453,7 @@ def test_newborn_import_survives_a_cwd_that_cannot_be_read(class_name, world, tm
 def test_a_cwd_inside_the_newborn_buys_a_foreign_seat_nothing(class_name, tmp_path):
     """A pseudo filename is never resolved, pinned through the import a stranger makes.
 
-    Replaces the ordering pin that called the old guard's private _find_real_caller
-    (spawn's template leg, DPLAN-0404). Under v2.1 the frozen bootstrap's
-    '<frozen importlib._bootstrap>' frames are transport; resolved against a cwd
-    inside the newborn they would read as kin, and a foreign line that does not
-    spell the handlers would be let through (measured 2026-10-08, devpulse's flip).
-    """
+    Resolved against a cwd inside the newborn, frozen-bootstrap frames would read as kin."""
     root = _plant_newborn(tmp_path / "tree", class_name)
 
     result = _run_seat(
@@ -627,20 +467,10 @@ def test_a_cwd_inside_the_newborn_buys_a_foreign_seat_nothing(class_name, tmp_pa
     assert result.stdout.strip() == "Caller branch: foreign"
 
 
-# =============================================================================
-# The defect itself — real-world form (POSIX only, by ruling)
-# =============================================================================
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason=WINDOWS_RECIPE_SKIP)
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
 def test_newborn_import_survives_a_deleted_working_directory(class_name, tmp_path):
-    """The same claim against a genuinely deleted cwd — no faking at all.
-
-    This is the pin the injection stands in for. Keeping it means the stand-in
-    is never the only evidence on the platforms where the real world is
-    reachable.
-    """
+    """The same claim against a genuinely deleted cwd — no faking at all."""
     root = _plant_newborn(tmp_path / "tree", class_name)
     (tmp_path / "stand_here").mkdir()
 
@@ -664,12 +494,7 @@ def test_newborn_import_survives_a_deleted_working_directory(class_name, tmp_pat
 class TestBothConstructionsAgree:
     """@memory's licensing condition, made a test rather than a promise.
 
-    The injection is a legitimate stand-in only for as long as it produces the
-    IDENTICAL answer from the IDENTICAL call site as the real deleted-directory
-    world. Both run on POSIX, so that is checkable here every time the suite
-    runs — and the day it stops being true, this goes red instead of the
-    stand-in quietly drifting away from the world it claims to model.
-    """
+    The injection is a valid stand-in only while it answers the call site as the deleted world does."""
 
     CALL_SITE = """
         from pathlib import Path
@@ -696,13 +521,7 @@ class TestBothConstructionsAgree:
         )
 
     def test_the_control_probe_can_report_a_world_that_did_not_take(self):
-        """The control's own negative control — it must be able to say NO.
-
-        A control that always reports CONTROL_LIVE is worse than no control: it
-        turns every portable pin into a vacuous green on exactly the platform
-        where the injection may not reach the call site. Run the probe with no
-        world applied at all; a healthy cwd must make it say so.
-        """
+        """The control's own negative control — it must be able to say NO."""
         result = _run(_NO_WORLD_AT_ALL, cwd=Path(__file__).parent)
 
         assert result.returncode == 0, result.stderr
@@ -712,11 +531,7 @@ class TestBothConstructionsAgree:
         )
 
     def test_the_windows_skip_states_the_ruling_not_just_the_symptom(self):
-        """The skip reason is the evidence a future reader gets — pin it.
-
-        Readable from Linux, so both answers are observable without a Windows
-        box: what is pinned is what the skipped tests SAY, not that they ran.
-        """
+        """The skip reason is the evidence a future reader gets — pin it."""
         marks = [
             m
             for m in getattr(test_newborn_import_survives_a_deleted_working_directory, "pytestmark")
@@ -728,11 +543,6 @@ class TestBothConstructionsAgree:
         assert "WinError 32" in reason
         assert "RECIPE" in reason and "STATE" in reason, "the skip must say WHY Windows is excused, not just that it is"
         assert marks[0].args[0] is (sys.platform == "win32")
-
-
-# =============================================================================
-# The fence the fix must not have weakened
-# =============================================================================
 
 
 @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
@@ -761,10 +571,7 @@ def test_newborn_refuses_a_foreign_branch_and_names_it(class_name, tmp_path):
 def test_the_newborns_modules_door_is_open_to_a_foreign_branch(class_name, tmp_path):
     """A foreign seat imports a newborn module that imports the handlers on its behalf.
 
-    Kin asked, so the fence lets it through: that is the door every other branch
-    is told to use. The door file is planted here (the scaffold ships none) and
-    names the handlers on its own kin line, which the fence never reads.
-    """
+    Kin asked, so the fence lets it through. The scaffold ships no door file, so one is planted."""
     root = _plant_newborn(tmp_path / "tree", class_name)
     modules = root / "aipass" / "newborn" / "apps" / "modules"
     modules.mkdir()
@@ -821,17 +628,8 @@ def test_newborn_admits_its_own_code(class_name, tmp_path):
     assert result.stdout.strip() == "ADMITTED"
 
 
-# =============================================================================
-# The wider species: import-time resolve() anywhere in the template
-# =============================================================================
-
-
 def _unguarded_module_level_resolves(source: str) -> list:
-    """Line numbers of resolve() calls that run at import and are not guarded.
-
-    Module level only, and outside any try — see the class docstring for why
-    function-level resolves are deliberately not flagged.
-    """
+    """Line numbers of resolve() calls that run at import and are not guarded (module level, outside any try)."""
     tree = ast.parse(source)
 
     guarded = {
@@ -842,16 +640,8 @@ def _unguarded_module_level_resolves(source: str) -> list:
         if hasattr(node, "lineno")
     }
 
-    # Walk what RUNS at import, which is not the same as what is WRITTEN at
-    # module level — @memory's correction, 2026-08-31, after the last crash
-    # standing in their tree was a resolve() in a find_repo_root DEFAULT
-    # ARGUMENT: written inside a def, evaluated at import anyway. So a
-    # function's body is pruned (that resolve is a deliberate raise, see the
-    # class docstring) but its defaults and decorators are NOT.
-    #
-    # STATED LIMIT: a module-level call into a locally defined function also
-    # runs at import and is not followed here. That needs a call graph, and
-    # naming the gap beats a pin that reads like it covers more than it does.
+    # Walk what RUNS at import: function bodies are pruned, defaults and decorators are not.
+    # Limit: a module-level call into a local function is not followed (needs a call graph).
     found = []
     pending: list[ast.AST] = list(tree.body)
     while pending:
@@ -878,45 +668,14 @@ def _unguarded_module_level_resolves(source: str) -> list:
 class TestImportTimeRootDerivationSurvivesADeadCwd:
     """A newborn must not inherit a cwd read that runs at import.
 
-    @memory raised this as the wider species after the guard fix (2026-08-31)
-    and left the template ruling to me: `Path(__file__).resolve()` is a cwd read
-    on Windows anywhere it appears, because ntpath.realpath computes os.getcwd()
-    unconditionally rather than only for relative paths.
-
-    MY RULING, and the sweep that backs it: severity splits on WHEN it runs.
-
-    * At MODULE level it is unrecoverable and it spreads — nearly every module
-      in a newborn imports json_handler, so one dead-cwd process loses the whole
-      branch with a traceback from inside the stdlib. These are guarded, falling
-      back to the unresolved absolute path (`__file__` has been absolute since
-      3.9, so only symlink normalisation is lost, and only in the world where
-      the alternative is a dead import).
-    * Inside a FUNCTION it stays exactly as written. It fails where a caller can
-      see it, and a root that is wrong-but-plausible is worse than a raise —
-      "fail to errors, never fall back silently" is the branch's own rule. The
-      pin below is scoped to module level for that reason, not by oversight.
-
-    The template's json_handler used to carry the derivation itself, and a test
-    here ran that exact text in a realpath-denied subprocess. Since DPLAN-0325
-    the derivation belongs to prax's json service (`for_module` -> `parents[3]`,
-    no resolve()) and prax pins it in its own suite; the template's shim only
-    hands it `__file__`. That test is in tests/.archive/. What stays is the
-    species sweep below, which is the stronger claim anyway: it reads EVERY
-    module in the template, so a newborn cannot re-inherit the idiom at any site.
-    """
+    At module level a resolve() is guarded (ntpath.realpath reads the cwd even for absolute paths);
+    inside a function it stays and raises, because a wrong-but-plausible root is worse."""
 
     def test_no_unguarded_module_level_resolve_anywhere_in_the_template(self):
-        """The species, not the site — so a newborn cannot re-inherit the idiom.
-
-        Scoped to module level: a resolve() inside a function is a deliberate
-        raise, and flagging it here would push future authors toward silently
-        wrong roots.
-        """
+        """The species, not the site — so a newborn cannot re-inherit the idiom."""
         offenders = []
         for path in _swept_py_files(get_template_dir("specialist")):
-            # Render first: the template carries {{BRANCH}} placeholders that
-            # are not valid Python. Skipping unparseable files instead would
-            # exempt exactly the files most likely to carry the idiom.
+            # Render first: skipping unparseable placeholder files would exempt the likeliest offenders.
             offenders += [
                 f"{path.name}:{line}"
                 for line in _unguarded_module_level_resolves(_render(path.read_text(encoding="utf-8")))
@@ -965,35 +724,14 @@ class TestImportTimeRootDerivationSurvivesADeadCwd:
         ],
     )
     def test_the_detector_can_tell_the_three_cases_apart(self, label, source, expected):
-        """The detector's own control — it must be able to say yes AND no.
-
-        A structural pin that quietly stopped detecting would go green forever
-        and read as coverage. Same lesson as the control probe above: a check
-        that can only produce one answer has not been tested, it was assumed.
-        """
+        """The detector's own control — it must be able to say yes AND no."""
         assert _unguarded_module_level_resolves(source) == expected, label
-
-
-# =============================================================================
-# Optional peer imports must survive a peer that is BROKEN, not just absent
-# =============================================================================
 
 
 class TestOptionalPeerImportsAreWideEnough:
     """A peer branch being broken is allowed; dying of it is not.
 
-    Raised by @prax 2026-08-31 from their own watcher: they declared the
-    @trigger import optional and caught only ImportError, while trigger's
-    handler guard raises FileNotFoundError. An optional dependency's fallback
-    has to be at least as wide as the failures its import can produce — and a
-    peer's handlers package does real filesystem work at import time, so a dead
-    or unreadable cwd surfaces as OSError, not ImportError.
-
-    The width is deliberately OSError and not Exception: a peer that is
-    unavailable or broken at the filesystem level is weather, but a peer with a
-    genuine programming error should still take spawn down loudly rather than
-    be swallowed into an empty dict.
-    """
+    A peer's import can raise OSError, so the fallback catches it; not Exception, so a real bug stays loud."""
 
     @staticmethod
     def _deny(module_prefix, exc):
@@ -1024,11 +762,7 @@ class TestOptionalPeerImportsAreWideEnough:
         ids=["dead-cwd", "unreadable", "absent"],
     )
     def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch, tmp_path):
-        """Through the public mint (fleet green leg 7: this pin used to call core._load_meta_tabs).
-
-        The fallback is an empty tab set, so the newborn's todos_meta line is the
-        template's own line, its {{TODOS_META}} left for @memory to render later.
-        """
+        """Through the public mint; the empty-tab fallback leaves the template's todos_meta line as is."""
         denier = self._deny("aipass.memory", exc)
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
@@ -1066,31 +800,10 @@ class TestOptionalPeerImportsAreWideEnough:
         assert not (tmp_path / "newbie").exists(), "the lookup runs before the copy: nothing is minted"
 
 
-# =============================================================================
-# The deleted stack walk, pinned structurally
-# =============================================================================
-
-
 def _inspect_stack_calls(source: str) -> list:
-    """Line numbers of every ``inspect.stack()`` CALL in ``source``.
+    """Line numbers of every ``inspect.stack()`` CALL in ``source``, under any of its three spellings.
 
-    An AST matcher, never a string search. The guard's own docstring names
-    ``inspect.stack()`` while explaining the defect, so a spelling ban would
-    convict the explanation and force the cure to be undocumented — the pin
-    would be arguing against its own comment.
-
-    Handles the three ways the call can be spelled, because a ban that only
-    knows one is an invitation to the other two:
-
-    * ``inspect.stack()`` — attribute on the module name
-    * ``import inspect as i`` then ``i.stack()`` — module bound to an alias
-    * ``from inspect import stack`` then ``stack()`` — the function bound direct
-
-    Deliberately NOT convicted: ``inspect.currentframe()`` (that is
-    ``sys._getframe`` under another name and touches no filesystem), any
-    ``.stack`` attribute on something that is not the inspect module, and a bare
-    reference that is never called.
-    """
+    AST, never a string search: the guard's docstring names ``inspect.stack()`` to explain the cure."""
     tree = ast.parse(source)
 
     imports = [node for node in ast.walk(tree) if isinstance(node, ast.Import)]
@@ -1116,15 +829,7 @@ def _inspect_stack_calls(source: str) -> list:
     return sorted(found)
 
 
-# What the .py sweeps never enter, read relative to the swept root. The rule is
-# the owner of the project's, 09-27 20:42, in paraphrase: a dropbox is ignored
-# by all, nothing looks into it and no process runs out of it, a sandbox like
-# .archive. The template's own dropbox and .archive are not such places: they
-# are shipped content copied into every newborn, so the sweep of
-# templates/citizen skips __pycache__ alone. apps/ holds real archives (retired
-# .py under apps/modules/.archive and apps/handlers/.archive), so its sweep
-# skips .archive and dropbox too. The real template archive, templates/.archive,
-# lies outside both roots (spawn's decision, DPLAN-0354 leg 4).
+# The template's dropbox and .archive are shipped content, so swept; apps/ holds real archives.
 _SWEEP_SKIP_DIRS = frozenset({"__pycache__"})
 _APPS_SKIP_DIRS = frozenset({"__pycache__", ".archive", "dropbox"})
 
@@ -1134,32 +839,20 @@ def _swept_py_files(root: Path, skip: frozenset[str] = _SWEEP_SKIP_DIRS) -> list
     return [path for path in sorted(root.rglob("*.py")) if not skip.intersection(path.relative_to(root).parts)]
 
 
-# Every .py under these roots, each with the directories its sweep skips.
 _BANNED_ROOTS = (
     (Path(__file__).resolve().parents[1] / "apps", _APPS_SKIP_DIRS),
     (get_template_dir("specialist"), _SWEEP_SKIP_DIRS),
 )
 
 
-# Measured 2026-08-31: 48 files across apps/ and templates/citizen/. The floor
-# exists so a walk that silently stops finding files cannot read as "clean" —
-# a blinded sweep and a cured tree produce the same empty list otherwise.
+# A floor, so a blinded walk cannot read as a clean tree.
 _MIN_FILES_SWEPT = 40
 
 
 class TestTheStackWalkCannotComeBack:
     """The deleted second walk has no behavioural instrument — so pin the source.
 
-    MEASURED FLEET-WIDE and relayed by @devpulse 2026-08-31: the
-    ``caller_file is None`` branch in ``_guard_branch_access`` is unreachable
-    from any import-shaped test, because ``apps/__init__.py`` always supplies a
-    real-file frame. Nine branches reproduced it identically — restoring the
-    walk leaves the whole suite green. This branch is the copy every newborn
-    inherits, so an unpinned regression here would ship.
-
-    A structural pin is the honest instrument for a defect whose only symptom
-    is a call that must not exist.
-    """
+    Its branch is unreachable from any import-shaped test: restoring the walk leaves the suite green."""
 
     def test_the_guard_has_no_stack_walk(self):
         source = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
@@ -1171,15 +864,7 @@ class TestTheStackWalkCannotComeBack:
         )
 
     def test_no_stack_walk_anywhere_in_apps_or_the_template(self):
-        """Tree-wide, because zero legitimate callers remain — CHECKED, not assumed.
-
-        @devpulse's warning was earned elsewhere: @commons applied this ban
-        without looking first and found a LIVE stack walk the dispatch had not
-        named. So this was measured before widening — spawn's json_handler is a
-        pure shim with no local walk (over aipass.aipass.shared when this was
-        written, over prax's json service since DPLAN-0325), and the
-        implementation behind it is itself already on sys._getframe(2).
-        """
+        """Tree-wide, because zero legitimate callers remain — CHECKED, not assumed."""
         offenders = []
         swept = 0
 
@@ -1200,10 +885,7 @@ class TestTheStackWalkCannotComeBack:
     def test_the_sweep_watches_the_template_dropbox_and_archive(self, tmp_path):
         """The template's dropbox and .archive are shipped content, swept; __pycache__ is not.
 
-        The root stands inside a directory named dropbox, so a skip read on the
-        whole path would hide everything. Ran red while _SWEEP_SKIP_DIRS named
-        dropbox and .archive: neither template file was swept.
-        """
+        The root sits under a dropbox, so a skip read on the whole path would hide everything."""
         root = tmp_path / "dropbox" / "citizen"
         for relative in ("kept.py", "dropbox/shipped.py", ".archive/shipped.py", "__pycache__/stale.py"):
             (root / relative).parent.mkdir(parents=True, exist_ok=True)
@@ -1233,15 +915,7 @@ class TestTheStackMatcherIsTheRealOne:
     def test_prose_that_names_the_walk_is_not_a_violation(self):
         """The cure explains itself by naming the defect — that must stay legal.
 
-        Puts the old guard's own sentence in a stub's docstring, rather than
-        asserting the whole live file is clean. The first version read the live
-        guard's prose, and the mutant run exposed it: restoring the walk made
-        this "control" red too, which means it was a second copy of the ban
-        wearing a control's name. Since the v2 fence (DPLAN-0404) spawn's live
-        guard no longer mentions inspect.stack() at all, so the sentence lives
-        here. A control has to fail for the reason it exists — here, only if
-        prose starts convicting.
-        """
+        A stub, not the live guard: reading the live file would make this a second copy of the ban."""
         prose = "Replaces the inspect.stack() walk of the first guard (2026-04-25)."
 
         assert _inspect_stack_calls(f'def stub():\n    """{prose}"""\n') == []
@@ -1267,23 +941,8 @@ class TestTheStackMatcherIsTheRealOne:
 class TestNewbornsAreBornPinned:
     """The template ships the AST pin, and it works in the position it lands in.
 
-    TEMPLATE OWNER'S DECISION, stated rather than left implicit: YES, the pin
-    ships in ``templates/citizen/tests/test_scaffold.py``. A newborn inherits
-    the cured guard, but without a pin a future author regrows the walk and
-    every suite stays green — which is exactly the fleet-wide condition
-    @devpulse measured in nine branches. test_scaffold.py is the right home
-    because it is self-contained: the pin needs no conftest, so it survives a branch replacing the template
-    scaffolding with its own suite.
-
-    STATED LIMIT: ``spawn update`` never overwrites .py files, so this reaches
-    FUTURE citizens only. The 18 existing branches need their own owners to add
-    it — which is what @devpulse's relay is doing. Shipping it here is not a
-    claim that the fleet is covered.
-
-    These tests render the template into a throwaway newborn and run its own
-    scaffold pin against it, green AND red, because a shipped test nobody has
-    executed in its landing position is a guess.
-    """
+    It ships in the self-contained test_scaffold.py (no conftest). Limit: ``spawn update`` never
+    overwrites .py, so only future citizens get it. Run green AND red in its landing position."""
 
     @staticmethod
     def _mint(root: Path, guard_source: str) -> Path:

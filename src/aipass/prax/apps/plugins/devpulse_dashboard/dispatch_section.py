@@ -3,14 +3,10 @@
 # Description: Dispatch status section builder for devpulse dashboard
 # Version: 1.0.0
 # Created: 2026-05-16
-# Modified: 2026-05-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Dispatch section builder for devpulse dashboard plugin.
-
-Scans all 12 AIPass branches for .dispatch.lock files to show
-which agents are currently active. Writes to dashboard via write_section().
-"""
+"""Dispatch section builder for devpulse dashboard plugin."""
 
 import json
 from pathlib import Path
@@ -54,16 +50,7 @@ def _read_lock(lock_path: Path) -> Dict:
 
 
 def build_dispatch_section(branch_path: Path) -> bool:
-    """Build dispatch section data and write to dashboard.
-
-    Scans all 13 branches for active dispatch locks.
-
-    Args:
-        branch_path: Path to devpulse branch root.
-
-    Returns:
-        True if write_section succeeded, False otherwise.
-    """
+    """Build dispatch section data and write to dashboard."""
     aipass_src = _get_aipass_src(branch_path)
 
     agents_active: List[str] = []

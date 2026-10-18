@@ -3,7 +3,7 @@
 # Description: Integration tests for citizen class system
 # Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -41,20 +41,7 @@ from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create
 
-# Context kept from the file's original docstring:
-#
-# Integration tests for the citizen class template system.
-# Tests class registry, class-aware create, class-aware update, and backward compatibility.
-
-# =============================================================================
-# CLASS REGISTRY TESTS
-# =============================================================================
-
-
-# The two live classes, and the one template directory they both mint from
-# (DPLAN-0319 R3/R4). Spelled out literally rather than read from the registry:
-# a test that asks the code under test what it should contain cannot catch the
-# roster changing.
+# Spelled out literally: asking the code under test for its roster cannot catch the roster changing.
 LIVE_CLASSES = ["manager", "specialist"]
 RETIRED_CLASSES = {"aipass_framework": "specialist", "builder": "specialist", "project_agent": "manager"}
 TEMPLATE_DIR_NAME = "citizen"
@@ -91,13 +78,7 @@ class TestClassRegistry:
         assert get_default_class() == "specialist"
 
     def test_get_template_dir_is_the_one_citizen_dir(self):
-        """CONTRACT CHANGED (R3): the template dir is named for what it is, not a class.
-
-        This used to pin ``get_template_dir("aipass_framework").name ==
-        "aipass_framework"``. A class-named template dir became wrong by
-        construction the moment two classes shared one template, so both classes
-        now resolve the SAME directory and its name is neutral.
-        """
+        """CONTRACT CHANGED (R3): the template dir is named for what it is, not a class."""
         paths = {cls: get_template_dir(cls) for cls in LIVE_CLASSES}
         assert {p.name for p in paths.values()} == {TEMPLATE_DIR_NAME}
         assert len(set(paths.values())) == 1, f"classes forked the template again: {paths}"
@@ -118,9 +99,7 @@ class TestClassRegistry:
     def test_get_template_dir_refuses_retired_names_loudly(self, retired, replacement):
         """A retired name is REFUSED by name, never silently mapped to its replacement.
 
-        A silent map would let a caller that still types the old name keep working
-        while the passport spawn writes says something else — the exact drift this
-        rework exists to end.
+        A silent map would let the passport spawn writes disagree with the name the caller typed.
         """
         with pytest.raises(ValueError) as exc:
             get_template_dir(retired)
@@ -131,15 +110,9 @@ class TestClassRegistry:
         assert "retired" in message.lower()
 
     def test_manager_is_now_template_selectable(self):
-        """CONTRACT INVERTED (R4): 'manager' used to be identity-only.
-
-        It had no template of its own, so ``validate_class("manager")`` was False
-        and the CLI could not accept it. It is a first-class registered class now.
-        """
+        """CONTRACT INVERTED (R4): 'manager' used to be identity-only."""
         assert validate_class("manager") is True
         assert "manager" in CITIZEN_CLASSES
-        # The identity set used to be a strict SUPERSET of the template set; the
-        # superset collapsed to equality when manager got a template.
         assert set(IDENTITY_CITIZEN_CLASSES) == set(CITIZEN_CLASSES) == set(LIVE_CLASSES)
 
     @pytest.mark.parametrize("citizen_class", LIVE_CLASSES)
@@ -150,11 +123,7 @@ class TestClassRegistry:
     def test_resolve_template_class_ignores_free_text_role(self):
         """CONTRACT REMOVED (R3): the ``role == "project_agent"`` tiebreaker died.
 
-        It existed to pick between two template shapes for a manager. There is one
-        shape left, so reading a passport's free-text role to choose one would be
-        inventing a distinction — and "project_agent" is a retired word besides.
-        The class alone decides, whatever the role says.
-        """
+        One template shape is left, so the class alone decides, whatever the role says."""
         assert resolve_template_class({"citizen_class": "manager", "role": "project_agent"}) == "manager"
         assert resolve_template_class({"citizen_class": "manager", "role": "orchestration_hub"}) == "manager"
         assert resolve_template_class({"citizen_class": "manager"}) == "manager"
@@ -186,12 +155,7 @@ class TestClassRegistry:
 class TestMintTimeClass:
     """R3: the class is DERIVED at mint from the citizen number, not typed.
 
-    A project's first citizen manages it; everyone after is a specialist. The
-    signal (``get_next_citizen_number``) already existed at mint time, so routing
-    it into class selection removes one thing a caller can get wrong. An explicit
-    caller-supplied class still wins — that is the seam @aipass's ``new_project``
-    sits on while its own fix lands.
-    """
+    A project's first citizen manages it; everyone after is a specialist. An explicit class still wins."""
 
     @staticmethod
     def _fresh_registry(tmp_path):
@@ -241,11 +205,7 @@ class TestMintTimeClass:
     def test_cli_create_without_a_class_lets_the_mint_decide(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """REGRESSION (found by this deliverable, fixed in apps/spawn.py).
 
-        ``handle_create`` seeded ``citizen_class = get_default_class()`` when the
-        caller typed no class, and an explicit class always wins — so the CLI, the
-        primary entry point, handed spawn_agent an explicit "specialist" every
-        time and the mint-time decision could never fire. A fresh project's first
-        citizen was born a specialist with no manager anywhere in it.
+        handle_create must not seed a default class, or the explicit-wins rule stops the mint deciding.
         """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         assert handle_create([str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
@@ -302,11 +262,6 @@ class TestCustomConfigReadmeGuide:
         assert "TESTBRANCH" in rendered
 
 
-# =============================================================================
-# CLASS-AWARE CREATE TESTS
-# =============================================================================
-
-
 class TestClassAwareCreate:
     """Tests for class-aware agent creation."""
 
@@ -352,9 +307,7 @@ class TestClassAwareCreate:
     def test_create_refuses_a_retired_class_and_builds_nothing(self, tmp_path, retired):
         """The Python API door: refused by name, before any filesystem work.
 
-        @aipass's new_project still passes citizen_class="project_agent" today —
-        a loud refusal is the correct answer until its parallel fix lands, not a
-        quiet substitution that would write a passport disagreeing with the call.
+        A loud refusal, not a quiet substitution that writes a passport disagreeing with the call.
         """
         target = tmp_path / f"legacy_{retired}"
         result = spawn_agent(str(target), citizen_class=retired)
@@ -364,18 +317,8 @@ class TestClassAwareCreate:
         assert not target.exists()
 
 
-# =============================================================================
-# CLASS-AWARE UPDATE TESTS
-# =============================================================================
-
-
 class TestClassAwareUpdate:
-    """Tests for class-aware update behavior.
-
-    The class a passport claims is read through the public update_branch on a
-    one-branch project under tmp_path, its registry handed in by registry_path
-    (fleet green leg 7: the tests used to call the private _read_citizen_class).
-    """
+    """Tests for class-aware update behavior, read through the public update_branch."""
 
     @staticmethod
     def _project(tmp_path, passport=None, text=None):
@@ -395,9 +338,7 @@ class TestClassAwareUpdate:
     def _update(registry):
         """The public update; answers the classes it asked a template for, and its result.
 
-        The recorder hands back a template dir that does not exist, so the update
-        returns at "Template directory not found", before any walk or write.
-        """
+        The recorder's template dir does not exist, so update returns before any walk or write."""
         asked = []
 
         def template_for(citizen_class):
@@ -452,13 +393,7 @@ class TestClassAwareUpdate:
 
     @pytest.mark.parametrize("role", ["orchestration_hub", "project_agent", ""])
     def test_read_citizen_class_never_reads_the_role(self, tmp_path, role):
-        """CONTRACT REMOVED (R3): a manager's free-text role used to pick the template.
-
-        ``role == "project_agent"`` resolved the project_agent template and any
-        other role resolved aipass_framework. Both targets are gone and there is
-        one template shape, so the role is not consulted at all — a manager is a
-        manager whatever it wrote in its own role field.
-        """
+        """CONTRACT REMOVED (R3): a manager's free-text role used to pick the template."""
         registry = self._project(tmp_path, {"identity": {"citizen_class": "manager", "role": role}})
 
         asked, _ = self._update(registry)
@@ -474,7 +409,6 @@ class TestClassAwareUpdate:
         """update specialist --all should parse correctly and call update_all with class filter."""
         from unittest.mock import patch
 
-        # Mock update_all to isolate from real branch state
         mock_results = [
             {
                 "branch": "test",
@@ -493,11 +427,6 @@ class TestClassAwareUpdate:
 
         assert result == 0
         mock_ua.assert_called_once_with(dry_run=True, trace=False, citizen_class="specialist")
-
-
-# =============================================================================
-# TEMPLATE STRUCTURE TESTS
-# =============================================================================
 
 
 class TestTemplateStructure:
@@ -521,11 +450,7 @@ class TestTemplateStructure:
     def test_template_passport_traits_is_an_empty_list_not_a_placeholder(self):
         """CONTRACT INVERTED (R7): identity.traits used to be the string "{{TRAITS}}".
 
-        The 2.0 field set makes traits/what_i_do/what_i_dont_do LISTS, and the
-        {{TRAITS}} placeholder is gone from the engine entirely. ``--traits`` is
-        written post-render by core.py instead (see TestAgentScaffoldContent) —
-        without that write the flag would be accepted and silently dropped.
-        """
+        ``--traits`` is written post-render by core.py; without that write the flag is silently dropped."""
         passport = json.loads((self._template() / ".trinity" / "passport.json").read_text(encoding="utf-8"))
 
         assert passport["identity"]["traits"] == []
@@ -563,9 +488,7 @@ class TestTemplateStructure:
     def test_template_carries_no_class_specific_prose(self):
         """One template, two classes: it may not hardcode either class's language.
 
-        The retired project_agent template's README and local prompt hardcoded
-        "manager" prose. Shipping that from the shared template would tell every
-        specialist it manages the project.
+        Manager prose shipped from the shared template would tell every specialist it manages the project.
         """
         tpl = self._template()
         offenders = []
@@ -575,11 +498,6 @@ class TestTemplateStructure:
                 if word in text:
                     offenders.append(f"{rel}: {word}")
         assert offenders == [], f"retired class names still in template prose: {offenders}"
-
-
-# =============================================================================
-# AGENT SCAFFOLD CONTENT TESTS
-# =============================================================================
 
 
 class TestAgentScaffoldContent:
@@ -614,12 +532,7 @@ class TestAgentScaffoldContent:
         assert passport["identity"]["role"] == "Data Analyst"
 
     def test_created_agent_passport_has_traits_as_a_list(self, tmp_path):
-        """CONTRACT CHANGED (R7): traits lands as a LIST, not the string it was.
-
-        The template no longer renders {{TRAITS}}, so core.py writes the caller's
-        value into identity.traits AFTER the render. A bare string becomes a
-        one-element list rather than being stored as a string in a list field.
-        """
+        """CONTRACT CHANGED (R7): traits lands as a LIST; a bare string becomes a one-element list."""
         target = tmp_path / "traits_test"
         spawn_agent(str(target), role="Analyst", traits="curious, terse", purpose="Reports")
 
@@ -652,11 +565,6 @@ class TestAgentScaffoldContent:
         assert passport["branch_info"]["email"] == "@email_test"
 
 
-# =============================================================================
-# MULTI-AGENT COEXISTENCE TESTS
-# =============================================================================
-
-
 class TestMultiAgentCoexistence:
     """Tests verifying multiple agents can coexist in the same registry."""
 
@@ -685,9 +593,7 @@ class TestMultiAgentCoexistence:
         for name in ["alpha", "beta", "gamma"]:
             spawn_agent(str(tmp_path / name), registry_path=str(reg), purpose=f"{name} purpose")
 
-        # branch_name renders LOWERCASE in schema 2.0 (R1 casing), and the class
-        # is derived from the citizen number (R3) rather than being one value for
-        # everybody — alpha is the project's first citizen, so alpha manages it.
+        # alpha is the project's first citizen, so alpha manages it.
         expected_class = {"alpha": "manager", "beta": "specialist", "gamma": "specialist"}
         for name in ["alpha", "beta", "gamma"]:
             passport = json.loads((tmp_path / name / ".trinity" / "passport.json").read_text(encoding="utf-8"))
@@ -704,15 +610,7 @@ def _fresh_registry(tmp_path):
 class TestPassportOwnerFieldIsGone:
     """CONTRACT DELETED (R8): citizenship.owner is not written at birth any more.
 
-    This class used to pin ``passport["citizenship"]["owner"] is True`` for the
-    first citizen and ``False`` for everyone after. The field is out of the 2.0
-    schema entirely: a passport is SELF-DECLARED and ownership is not, so a copy
-    of the answer sitting in the file the citizen itself can edit was a second,
-    weaker source of truth for a fact the sealed registry already holds.
-
-    The rewrite keeps the same coverage on the other side of the seam — the
-    registry ENTRY's ``owner: true`` flag, which is a DIFFERENT field and stays.
-    """
+    A passport is self-declared and ownership is not; the registry entry's ``owner`` flag holds it."""
 
     def test_newborn_passport_has_no_owner_field(self, tmp_path):
         reg = _fresh_registry(tmp_path)
@@ -747,11 +645,7 @@ class TestPassportOwnerFieldIsGone:
 class TestRetroactiveOwner:
     """Tests for retroactive owner assignment on legacy projects.
 
-    ``pick_owner_branch`` lost its middle step with R8 — it used to read the
-    passport's ``citizenship.owner`` between "prefer a manager" and "oldest by
-    created date". Both surviving steps are pinned here, plus the deleted one
-    staying deleted.
-    """
+    Steps: prefer a manager, then oldest by created date; the passport's own owner flag is never read."""
 
     def test_retroactive_owner_prefers_the_manager(self, tmp_path):
         """Step 1: alpha is the project's first citizen, so alpha is its manager."""
@@ -759,7 +653,7 @@ class TestRetroactiveOwner:
         spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))
         spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))
 
-        # Strip owner from the registry entries to simulate legacy state (no sealed owner)
+        # Legacy state: no sealed owner.
         reg_data = json.loads(reg.read_text(encoding="utf-8"))
         for b in reg_data["branches"]:
             b.pop("owner", None)
@@ -773,12 +667,7 @@ class TestRetroactiveOwner:
         assert entries["ZETA"].get("owner") is not True
 
     def test_a_passport_can_no_longer_declare_itself_owner(self, tmp_path):
-        """The DELETED step, pinned as deleted.
-
-        beta plants ``citizenship.owner: true`` on itself and is NOT the manager.
-        Under the old step 2 that flag won. It must not win now — otherwise any
-        citizen could seat itself by editing its own file.
-        """
+        """The DELETED step, pinned as deleted: no citizen seats itself by editing its own file."""
         reg = _fresh_registry(tmp_path)
         spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))  # citizen #1 -> manager
         spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))  # citizen #2 -> specialist
@@ -845,28 +734,11 @@ class TestRetroactiveOwner:
         assert entries["AGENT_Y"].get("owner") is not True
 
 
-# =============================================================================
-# BIRTH CERTIFICATE SCHEMA TESTS
-# =============================================================================
-
-
 class TestBirthCertificateSchema:
     """Every mint must be born on the current cert schema.
 
-    The fleet's birth certificates carry ``metadata.template`` — the AIPass
-    profile the citizen was registered under. They used to carry
-    ``metadata.citizen_class`` instead, holding the value ``builder``, a class
-    that was retired when the fleet migrated builder -> aipass_framework (see
-    the legacy path in ``sync_registry_ops``). The two keys are different
-    concepts, not a rename: the passport is the authoritative home for
-    citizen_class, and a birth record repeating a retired class value preserves
-    stale data forever.
-
-    ``artifacts/birth_certificate.json`` is on the never-update list, so a
-    template that mints the old shape cannot be corrected later by an update —
-    every citizen born from it carries the old schema for life. That makes this
-    a template-level canary rather than a data check.
-    """
+    The cert is never-update, so a template minting the old shape (``metadata.citizen_class``)
+    marks every citizen for life; ``metadata.template`` holds the profile instead."""
 
     @pytest.mark.parametrize("class_name", LIVE_CLASSES)
     def test_mint_carries_metadata_template(self, tmp_path, class_name):

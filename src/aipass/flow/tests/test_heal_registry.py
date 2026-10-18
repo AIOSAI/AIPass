@@ -3,7 +3,7 @@
 # Description: Tests for heal_registry doctrine self-heal handler
 # Version: 1.0.0
 # Created: 2026-07-29
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry/heal_registry.py."""
@@ -18,9 +18,6 @@ from unittest.mock import patch
 import pytest
 
 from aipass.flow.apps.handlers.registry import heal_registry as mod
-
-
-# ─── Fake registry store (mimics load/save round-tripping to disk) ───
 
 
 class FakeRegistryStore:
@@ -105,11 +102,6 @@ def _is_orphan_through_heal(root, location, seats):
     return bool(actions or quarantined)
 
 
-# ═══════════════════════════════════════════════════════════
-# 1. _build_plan_file_index
-# ═══════════════════════════════════════════════════════════
-
-
 class TestBuildPlanFileIndex:
     """Tests for the (prefix, number) filesystem index."""
 
@@ -146,18 +138,8 @@ class TestBuildPlanFileIndex:
         assert _heal(tmp_path / "nope", FakeRegistryStore(), {"f": {"prefix": "FPLAN"}}) == []
 
 
-# ═══════════════════════════════════════════════════════════
-# 2. Case 2 — unregistered file
-# ═══════════════════════════════════════════════════════════
-
-
 class TestNotAPlanRows:
-    """Case 6 (leg 9): an open row whose present file is not a plan is closed, registry only.
-
-    Live: FPLAN 0564 to 0583 named reports the scan had renamed before leg 7.
-    Red first on the heal of leg 8. Mutants leg9 N1 (sweep not called), N2 (None
-    closed too), N3 (reason changed), N4 (closed row not saved) redden tests here.
-    """
+    """Case 6 (leg 9): an open row whose present file is not a plan is closed, registry only."""
 
     REPORT = "FPLAN-0508 rows seedgo\n"
 
@@ -244,10 +226,7 @@ class TestUnregisteredFile:
     def test_a_report_named_like_a_plan_is_not_registered(self, tmp_path, quiet_cross_prefix):
         """Leg 7: hooks' DPLAN-0356_ph2_report.md in docs.local was registered as a plan.
 
-        The world of 2026-10-04 02:31:06: the scan had renamed the report to
-        DPLAN-0358.md, no row held 0358, and heal registered it as DPLAN-0358.
-        A file named like a plan with a free number must not be registered.
-        Mutant: the index's is_plan_file gate off reddens this (leg7 H1b).
+        Mutant: the index's is_plan_file gate off reddens this.
         """
         plan = _make_plan_file(tmp_path / "devpulse", "DPLAN-0356_fleet_green_2026-10-01.md")
         report = tmp_path / "hooks" / "docs.local" / "DPLAN-0358.md"
@@ -291,17 +270,10 @@ class TestUnregisteredFile:
         assert store.saves == []
 
 
-# ═══════════════════════════════════════════════════════════
-# 3. Case 1 — number collision
-# ═══════════════════════════════════════════════════════════
-
-
 class TestNumberCollision:
     """Ghost row + different real file on the same prefix+number.
 
-    Reached through the public heal (leg 10). Its missing-file sweep runs
-    first and closes an OPEN row whose file is gone, so the collision code
-    only ever meets such a row closed: the worlds here hold it closed.
+    The missing-file sweep runs first and closes an open ghost, so these worlds hold it closed.
     """
 
     def test_bumps_new_file_and_preserves_original_row(self, tmp_path, quiet_cross_prefix):
@@ -334,9 +306,7 @@ class TestNumberCollision:
     def test_the_bump_never_lands_on_a_held_row(self, tmp_path, quiet_cross_prefix):
         """next_number 356 beside a row at 0356: the bump takes 0357 and 0356 survives (leg 7).
 
-        Moved here from test_close_ops in leg 10: a collision reaches the
-        self-heal only through the heal. Mutant: the bump read from
-        next_number alone reddens this (leg7 C2, L1b).
+        Mutant: the bump read from next_number alone reddens this.
         """
         real_file = _make_plan_file(tmp_path, "FPLAN-0011_real_plan_2026-07-01.md")
         held = {"status": "closed", "subject": "held", "file_path": str(tmp_path / "gone" / "FPLAN-0356_h.md")}
@@ -433,7 +403,7 @@ class TestNumberCollision:
     def test_second_scan_of_same_collision_heals_nothing(self, tmp_path, quiet_cross_prefix):
         """Idempotency: the squatter keeps its OLD number in its filename forever, so a
         second scan must not mint a second fresh row for the file it already resolved
-        on the first pass (the exact non-idempotency bug @devpulse caught live)."""
+        on the first pass."""
         real_file = _make_plan_file(tmp_path, "DPLAN-0165_compass_wiring_2026-05-04.md")
         store = FakeRegistryStore(
             {
@@ -472,11 +442,6 @@ class TestNumberCollision:
         assert real_file.exists()
         assert actions == []
         assert store.saves == []
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. Case 4 — missing-file orphan
-# ═══════════════════════════════════════════════════════════
 
 
 class TestMissingFileOrphan:
@@ -563,11 +528,6 @@ class TestMissingFileOrphan:
         assert store.saves == []
 
 
-# ═══════════════════════════════════════════════════════════
-# 5. Case 3 — wrong-prefix rows
-# ═══════════════════════════════════════════════════════════
-
-
 TYPES = {
     "flow_plans": {"prefix": "FPLAN"},
     "team_dev_plans": {"prefix": "TDPLAN"},
@@ -577,9 +537,7 @@ TYPES = {
 class TestWrongPrefixRows:
     """Rows sitting in the wrong type registry get removed or re-homed.
 
-    Reached through the public heal (leg 10). The sweep reads no status, and
-    the missing-file sweep that runs first would close an OPEN row whose file
-    is gone, so rows naming an absent file are held closed here.
+    The missing-file sweep runs first and closes open ghosts, so rows naming an absent file are held closed.
     """
 
     def test_ghost_duplicate_row_is_removed(self, tmp_path, quiet_cross_prefix):
@@ -700,11 +658,6 @@ class TestWrongPrefixRows:
 
         assert actions == []
         assert store.saves == []
-
-
-# ═══════════════════════════════════════════════════════════
-# 6. heal_registry_doctrine_impl — orchestrator
-# ═══════════════════════════════════════════════════════════
 
 
 class TestHealRegistryDoctrineImpl:
@@ -877,11 +830,6 @@ class TestHealRegistryDoctrineImpl:
         assert result["healed_count"] == 0
 
 
-# ═══════════════════════════════════════════════════════════
-# 7. Files are never mutated
-# ═══════════════════════════════════════════════════════════
-
-
 class RefusingStore(FakeRegistryStore):
     """A store whose every save fails the way save_registry does: False, nothing written."""
 
@@ -894,8 +842,7 @@ class RefusingStore(FakeRegistryStore):
 class TestAHealItCouldNotSaveReportsNothing:
     """Leg 10: save_registry answers False and never raises.
 
-    Every heal save ignored that False, so heal reported rows it never wrote.
-    Each save now raises, and the doctrine logs it as that sweep's failure.
+    A heal whose save answered False must report that sweep as failed, not the rows as healed.
     """
 
     @staticmethod
@@ -1018,11 +965,6 @@ class TestNeverTouchesPlanFiles:
             assert path.read_text(encoding="utf-8") == content
 
 
-# ═══════════════════════════════════════════════════════════
-# Case 5 — orphan location (ghost paths + root/seat misfiles)
-# ═══════════════════════════════════════════════════════════
-
-
 def _seat(root: Path, rel: str) -> Path:
     """Create a live citizen seat — a directory carrying a passport."""
     seat = root / rel
@@ -1034,13 +976,8 @@ def _seat(root: Path, rel: str) -> Path:
 class TestHealOrphanLocations:
     """Ruling of 2026-08-16 (the owner, via @devpulse).
 
-    Stale paths are expected debris — we test and move things constantly — so
-    the answer is a healer that fixes the class, never a hand-edit of JSON.
-    A record whose location is not a live citizen seat is an orphan: it either
-    does not exist at all (ghost path from an old move) or it exists without a
-    passport (a project root holding records that belong to the seat beneath
-    it). Attribution is on evidence only; anything else is quarantined for a
-    human, never guessed and never dropped.
+    A location that is gone or holds no passport is an orphan: attributed on evidence only,
+    otherwise quarantined for a human, never guessed and never dropped.
     """
 
     def test_ghost_path_heals_to_the_live_seat(self, tmp_path):
@@ -1245,11 +1182,7 @@ class TestDoctrineSurfacesQuarantine:
 class TestOrphanDetectionIsNotOverBroad:
     """Guard against burying the refusal lane in false positives.
 
-    A first dry run flagged 76 rows because the detector treated 'not a seat'
-    as 'orphan'. 28 of those were plans filed at the repo root and several more
-    were filed inside a citizen's own subdirectories — all normal filings. A
-    quarantine list that cries wolf 30 times is a list nobody reads, so
-    detection is two precise signals instead.
+    'Not a seat' is not 'orphan': repo-root and in-citizen subdirectory filings are normal.
     """
 
     def test_repo_root_holding_many_seats_is_a_container_not_a_misfile(self, tmp_path):
@@ -1309,9 +1242,7 @@ class TestOrphanDetectionIsNotOverBroad:
 class TestFindQuarantinedLocations:
     """The read-only half of the attribution rule, used by `status`.
 
-    It shares _attribute_orphan with the healer but must never write. That
-    "never" is the whole reason the function exists separately, so it is
-    asserted here rather than assumed from the docstring.
+    It shares _attribute_orphan with the healer but must never write.
     """
 
     def test_a_row_with_no_location_is_quarantined_by_that_reason(self, tmp_path):

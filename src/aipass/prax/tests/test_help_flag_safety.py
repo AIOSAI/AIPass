@@ -3,26 +3,13 @@
 # Description: A help probe must never execute the thing it asks about
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/log_audit.py, log_health.py, monitor.py and apps/handlers/cli/help_flags.py."""
 
-# Regression cover for help_flag_safety (@seedgo 2026-08-13, DPLAN-0291 rule E).
-#
-# Every prax module gated help at ``args[0]`` only, so a flag anywhere later on
-# the line was discarded and the subcommand ran instead. The standalone
-# ``__main__`` paths screened ``--help`` but not ``-h``, and ``-h`` survives a
-# ``--``-prefix filter because it carries a single dash. Two of the three had
-# teeth:
-#
-#     log_audit.py enforce -h   -> truncated every oversized log
-#     monitor.py   run -h       -> started a live Mission Control
-#
-# The rule these pin: a dashed flag counts ANYWHERE, a bare ``help`` counts only
-# at position 0 (branch names, log filenames and grep patterns are free text).
-#
-# Modules are bound once at the top and never reloaded (prax, leg 12).
+# The rule these pin: a dashed flag (-h included) counts ANYWHERE, a bare ``help``
+# only at position 0 (branch names, log filenames and grep patterns are free text).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — log_audit.py's enforce and sweep, covered by tests/test_log_audit.py
@@ -43,9 +30,7 @@ from aipass.prax.apps.modules import log_audit, log_health, monitor
 
 @pytest.fixture
 def prax_entry_point(monkeypatch):
-    """prax.py imported once at the top and never reloaded, its logger doubled.
-    Its error() is the real one, so a refusal is read off stderr with capsys
-    (prax, leg 11)."""
+    """prax.py with its logger doubled; error() stays real, so refusals are read off stderr."""
     monkeypatch.setattr(prax_entry, "logger", MagicMock())
     return prax_entry
 
@@ -58,8 +43,6 @@ PRAX_PATH = "aipass.prax.apps.prax"
 WATCHDOG_PATH = "aipass.prax.apps.handlers.logging.log_watchdog"
 RATE_TRACKER_PATH = "aipass.prax.apps.handlers.monitoring.rate_tracker"
 
-# Every module these tests touch, imported once at the top and never reloaded
-# (prax, leg 12: the per-test pop and reload left sys.modules changed).
 _BOUND = {
     LOG_AUDIT_PATH: log_audit,
     LOG_HEALTH_PATH: log_health,
@@ -84,8 +67,7 @@ def _load(module_path: str):
     return _BOUND[module_path]
 
 
-# The tail positions a flag can hide in, per module. Each pairs the command
-# name with args whose FIRST token is a real, destructive subcommand.
+# Each case's FIRST arg is a real, destructive subcommand; the flag hides behind it.
 DESTRUCTIVE_CASES = [
     ("log-audit", LOG_AUDIT_PATH, ["enforce", "--help"]),
     ("log-audit", LOG_AUDIT_PATH, ["enforce", "-h"]),
@@ -98,10 +80,8 @@ DESTRUCTIVE_CASES = [
 ]
 
 
-# Every entry point that DOES something, per module. A red run of this file
-# must not truncate a log or start a monitor to prove the gate is missing —
-# the first draft did exactly that and hung the suite on a live Mission
-# Control, which is the defect writing its own bug report.
+# Every doing entry point, stubbed so a red run cannot truncate a log or start a
+# live monitor (that hangs the suite).
 EXECUTION_TARGETS = {
     LOG_AUDIT_PATH: [
         (None, "_run_enforce"),
@@ -167,16 +147,7 @@ class TestHelpNeverExecutes:
 
 
 class TestUnknownArgumentIsRefused:
-    """The owner's standing ruling: an unknown token FAILS — named, on stderr, non-zero.
-
-    @devpulse's 2026-09-07 fleet CLI sweep found prax swallowing two of them.
-    `drone @prax --definitely-not-a-flag` printed the self-map and exited 0,
-    output byte-identical to a clean no-args run, because argparse's
-    parse_known_args hands an unrecognised flag back instead of erroring.
-    `log-audit not_a_real_subarg_xyz` printed the right refusal and still
-    exited 0 — the same failure wearing a friendlier face, and the one a
-    caller's `&&` reads as success.
-    """
+    """An unknown token FAILS: named, on stderr, non-zero (parse_known_args would swallow it)."""
 
     def test_an_unknown_top_level_flag_never_reaches_the_self_map(self, prax_entry_point, capsys):
         """The refusal comes first: no self-map, no help, exit 1, token named."""
@@ -225,12 +196,7 @@ class TestUnknownArgumentIsRefused:
         assert refusal.value.token == "not_a_real_subarg_xyz"
 
     def test_the_router_turns_a_refused_sub_argument_into_exit_one(self, prax_entry_point, capsys):
-        """End to end: exit 1, and the caller is told WHICH token was refused.
-
-        route_command's blanket `except Exception` would also produce exit 1,
-        but it renders "Handler failed: ..." — a refusal reported as a crash.
-        The named re-raise is what keeps the token in the message.
-        """
+        """End to end: exit 1 naming the token, not route_command's "Handler failed" crash path."""
         mod = prax_entry_point
 
         with patch("sys.argv", ["prax", "log-audit", "not_a_real_subarg_xyz"]):
@@ -277,12 +243,7 @@ class TestACrashedHandlerIsNotAnUnknownCommand:
 
 
 class TestOwnershipStillComesFirst:
-    """The gate sits AFTER the ownership check.
-
-    prax.py tries each module in turn. A help scan at the top of the function
-    would make whichever module is tried first answer every `--help`, so
-    `drone @prax monitor --help` could be served by log_audit.
-    """
+    """The gate sits AFTER the ownership check, or the first module tried answers every --help."""
 
     @pytest.mark.parametrize(
         "module_path,foreign", [(LOG_AUDIT_PATH, "monitor"), (MONITOR_PATH, "log-audit"), (LOG_HEALTH_PATH, "monitor")]

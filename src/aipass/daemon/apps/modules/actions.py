@@ -3,16 +3,12 @@
 # Description: Action Registry CLI Module (RETIRED)
 # Version: 2.0.0
 # Created: 2026-03-02
-# Modified: 2026-06-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 RETIRED — the numbered action registry CLI.
-
-Superseded by the decentralized .daemon/schedule.json model (DPLAN-0204).
-Author jobs directly in a branch's .daemon/schedule.json file.
-See: drone @daemon run --help (full schema + schedule types)
-"""
+Author jobs in a branch's .daemon/schedule.json; see drone @daemon run --help."""
 
 from typing import List
 

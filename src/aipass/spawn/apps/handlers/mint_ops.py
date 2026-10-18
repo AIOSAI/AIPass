@@ -3,17 +3,10 @@
 # Description: The mint of a new citizen from the template, step by step
 # Version: 1.1.1
 # Created: 2026-09-28
-# Modified: 2026-10-14
+# Modified: 2026-10-17
 # =============================================
 
-"""The mint body: a validated target becomes a registered citizen.
-
-spawn_at decides the lane (refusals, adopt, birth from seed) and hands a fresh
-target to mint_citizen. Both moved out of apps/modules/core.py whole, step order
-unchanged (spawn's decisions, DPLAN-0354 legs 4 and 9); core keeps the routing
-and the meta-tab importer and hands it in, so @memory's optional import stays
-where it was.
-"""
+"""The mint body: a validated target becomes a registered citizen."""
 
 import uuid
 from collections.abc import Callable
@@ -65,44 +58,9 @@ def spawn_at(
 ) -> dict:
     """Decide the lane for a target and run it: refuse, adopt, birth from seed, or mint.
 
-    Moved whole from spawn_agent in apps/modules/core.py (spawn's decision,
-    DPLAN-0354 leg 9); core keeps the routing and hands in its meta-tab importer.
-
-    Args:
-        target_path: Where to create the agent (must not exist)
-        load_meta_tabs: Answers @memory's meta-tab values, handed to mint_citizen
-        role: Agent's role description
-        traits: Agent's personality traits. A bare string becomes a one-element
-            list; a list/tuple is stored as given. identity.traits is a LIST in
-            the 2.0 schema (DPLAN-0319 R7).
-        purpose: Agent's purpose (brief description)
-        profile: AIPass profile override (default: auto-detect)
-        template_dir: Custom template directory (default: the citizen template)
-        registry_path: Path to AIPASS_REGISTRY.json (default: auto-discover)
-        citizen_class: Explicit citizen class ("manager" or "specialist").
-            Default None means DECIDE AT MINT from the citizen number — the
-            project's first citizen is its manager, everyone after is a
-            specialist (DPLAN-0319 R3). An explicit value still wins; a retired
-            name ("aipass_framework", "project_agent", "builder") is refused by
-            name, never quietly translated.
-
-    Returns:
-        Dict with creation results:
-            - success: bool
-            - branch_name: str (uppercase)
-            - path: str
-            - files_copied: int
-            - registry_updated: bool
-            - validation_issues: list
-            - error: str (only if success=False)
-    """
-    # Forbidden and RETIRED values refuse before any filesystem work — "admin" is
-    # a devpulse-only registry privilege, never a class and never a template
-    # directory (DPLAN-0288); "aipass_framework"/"project_agent"/"builder" are
-    # renamed classes that spawn refuses to translate silently (DPLAN-0319 R4).
-    # Both doors are checked, including the API — @aipass's new_project still
-    # passes citizen_class="project_agent" today, and a loud refusal is the
-    # correct answer until its parallel fix lands.
+    citizen_class None means decide at mint from the citizen number; retired names are refused.
+    traits: a bare string becomes a one-element list (identity.traits is a list)."""
+    # Forbidden and retired values refuse before any filesystem work, through every door.
     for candidate in (citizen_class, Path(template_dir).name if template_dir else ""):
         refusal = refuse_retired_or_forbidden(candidate)
         if refusal:
@@ -113,11 +71,9 @@ def spawn_at(
     if template_dir:
         template = Path(template_dir)
     else:
-        # Both classes share one template dir, so this lookup is class-independent
-        # — the real class decision happens at mint, once citizen_number is known.
+        # Class-independent lookup; the real class is decided at mint, once citizen_number is known.
         template = get_template_dir(citizen_class or get_default_class())
 
-    # Guard: block creating agent inside another agent's directory
     for parent in target.parents:
         if (parent / ".trinity" / "passport.json").is_file():
             return error_result(
@@ -127,23 +83,12 @@ def spawn_at(
         if parent == parent.parent:
             break
 
-    # Validate
     if target.exists():
-        # If target has a passport, adopt it (register without re-creating)
         passport_path = target / ".trinity" / "passport.json"
         if passport_path.exists():
             return adopt_existing(target, purpose, profile, registry_path)
 
-        # A directory with no live passport but WITH a tracked seed is the
-        # fresh-clone shape (TDPLAN-0017): the branch's code came down with the
-        # repo, its passport did not — .trinity/ is gitignored. That citizen is
-        # not "already existing", it is waiting to be born, and its identity is
-        # sitting right there in .aipass/passport.seed.json.
-        #
-        # This is also the ONLY door a seed can ever be found at. A seed lives
-        # inside the branch directory it describes, so a mint into a target that
-        # does not exist yet has no seed to prefer — the template path below is
-        # correct there by construction, not by omission.
+        # A fresh clone carries the seed but not the gitignored .trinity/; the only door a seed is found at.
         seed_file = find_seed(target)
         if seed_file:
             return birth_from_seed(target, seed_file, purpose, profile, registry_path)
@@ -166,11 +111,7 @@ def spawn_at(
 
 
 def _find_project_registry(target: Path) -> Path:
-    """Walk up from target to find a project root, return its registry path.
-
-    Used when the default find_registry returned a registry outside the
-    target's project (e.g. AIPass's own registry for an external target).
-    """
+    """Walk up from target to find a project root, return its registry path."""
     for parent in [target.parent] + list(target.parent.parents):
         if any((parent / m).exists() for m in _PROJECT_MARKERS):
             return parent / "AIPASS_REGISTRY.json"
@@ -190,35 +131,15 @@ def mint_citizen(
     registry_path=None,
     citizen_class=None,
 ) -> dict:
-    """Mint a citizen at a target that does not exist yet, from template.
-
-    Args:
-        target: Resolved path of the new branch (must not exist)
-        template: The template directory to copy
-        load_meta_tabs: Answers @memory's meta-tab values for the newborn's
-            folder name; called at the same step as before the move, after the
-            registry is resolved
-        role, traits, purpose, profile, registry_path, citizen_class: as
-            spawn_agent in apps/modules/core.py documents them
-
-    Returns:
-        The result dict spawn_agent returns (success, branch_name, path,
-        files_copied, registry_updated, validation_issues, ...), or the
-        error dict of error_result when the mint is refused.
-    """
-    # Extract names
+    """Mint a citizen at a target that does not exist yet, from template."""
     folder_name = get_branch_name(target)
     branch_upper = normalize_branch_name(folder_name, "upper")
     branch_lower = normalize_branch_name(folder_name, "lower")
     detected_profile = profile or detect_profile(target)
 
-    # Determine registry — per-project, never borrow another project's
+    # Per-project registry: never borrow another project's.
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
     if reg_path is None:
-        # No registry above the target. That is exactly the "outside any known
-        # registry" case the ValueError arm below already resolves, so take the
-        # same road rather than crashing on None (@aipass changed find_registry
-        # to answer absence with None on 2026-08-31).
         logger.info("[spawn] No registry above %s — resolving project-local registry", target)
         reg_path = _find_project_registry(target)
     try:
@@ -228,35 +149,15 @@ def mint_citizen(
         reg_path = _find_project_registry(target)
     citizen_number = get_next_citizen_number(reg_path)
 
-    # Resolve the PROJECT credential (the registry's own metadata.id) for the
-    # passport's citizenship.registry_id. resolve_project_credential mints one
-    # when the registry does not exist yet, which is what a brand-new external
-    # project is — resolving it HERE rather than at registration time is the
-    # whole point: the passport is written at step 1 and the registry at step 4,
-    # so reading it later would stamp the passport with a credential that had
-    # not been minted yet and fall back to AIPass's own id. Same mint-once
-    # ordering as citizen_id below; the value is handed to add_to_registry so
-    # the file that eventually lands carries the id the passport already claims.
-    #
-    # The mint is asked for BY NAME. It used to be a side effect of loading a
-    # path that did not exist, which meant every reader of a missing registry
-    # minted one too (@memory, 2026-08-31). This site is a creator and says so.
+    # Resolved before the copy: the passport is written before the registry, so both must carry this id.
     resolved_registry_id = resolve_project_credential(reg_path)
 
-    # Mint the citizen's own unique id ONCE, here, so the passport and the
-    # registry entry carry the same value. Minting it inside add_to_registry
-    # (step 4) would be too late: the passport is written at step 1, so the two
-    # facts would be two different UUIDs for one citizen.
+    # Minted once here: inside add_to_registry the passport and registry would get two UUIDs.
     citizen_id = str(uuid.uuid4())
 
-    # The class is decided HERE, at mint, from the citizen number: a project's
-    # first citizen manages it, everyone after is a specialist (DPLAN-0319 R3).
-    # citizen_number is only known now — after the registry was resolved — which
-    # is why the decision cannot live in the signature default. An explicit
-    # caller-supplied class still wins; retired names already refused above.
+    # citizen_number is only known now, so the class cannot be a signature default.
     resolved_class = citizen_class or class_for_citizen_number(citizen_number)
 
-    # Build placeholder replacements
     meta_tabs = load_meta_tabs(folder_name)
     replacements = build_replacements_dict(
         target,
@@ -272,23 +173,12 @@ def mint_citizen(
         registry_path=reg_path,
     )
 
-    # Step 1: Copy template with placeholder replacement in content
     ensure_directory(target)
     copied, skipped = copy_template(template, target, replacements)
 
-    # Step 2: Rename any {{BRANCH}} dirs/files that weren't caught by path replacement
     renamed = rename_placeholder_paths(target, folder_name)
 
-    # Step 2b: Write caller-supplied traits into the passport.
-    #
-    # citizenship.owner used to be written here. R8 DROPPED that field from the
-    # schema — the registry entry's owner:true flag (ensure_project_has_owner,
-    # step 5) is the sealed authority and a second copy in the passport was a
-    # self-declared duplicate of it.
-    #
-    # traits is a post-render write because the 2.0 template makes identity.traits
-    # an empty LIST and no longer carries a {{TRAITS}} placeholder. Without this,
-    # `spawn create --traits ...` would accept the value and silently drop it.
+    # The template has no {{TRAITS}} placeholder, so traits are written after render or silently dropped.
     traits_issues = []
     if traits:
         passport_path = target / ".trinity" / "passport.json"
@@ -304,22 +194,14 @@ def mint_citizen(
         for issue in traits_issues:
             logger.warning("[spawn] %s", issue)
 
-    # Step 3: Regenerate .template_registry.json with fresh hashes
     regenerate_template_registry(target)
 
-    # Step 3b: Generate branch metadata for tracking
     template_registry = load_template_registry(target)
     if template_registry:
         branch_meta = generate_branch_meta(target, template_registry)
         save_branch_meta(target, branch_meta)
 
-    # Step 3c: The mint must have delivered what the template claims — refuse
-    # loudly if not. Deliberately placed BEFORE the registry write: a citizen
-    # that cannot be born must not exist in the registry at all, and refusing
-    # first means there is nothing to roll back (a rollback that itself fails
-    # leaves the half-citizen this guard is here to prevent). The partial tree
-    # is left on disk on purpose — spawn refuses, it does not delete a
-    # directory the caller may want to inspect.
+    # Verified before the registry write, so a refusal has nothing to roll back; the partial tree stays.
     missing = verify_mint(template, target, replacements, branch_lower)
     if missing:
         json_handler.log_operation("mint_refused", data={"branch": branch_upper, "missing": missing})
@@ -333,28 +215,14 @@ def mint_citizen(
             f"Nothing was registered; the partial tree is left at {target} for inspection."
         )
 
-    # Step 3d: Stamp the trinity receipt. A newborn without one scores 0 on the
-    # receipt group and 80 on the file set from its first minute — born in
-    # violation of a standard it never had a chance to break. Placed AFTER mint
-    # verification (the receipt is spawn's own stamp, not a file the template
-    # claims) and BEFORE registration, so a registered citizen always carries one.
-    # A failure here does not abandon the birth: the gold templates belong to
-    # another branch, and a citizen that cannot be born because @memory's files
-    # are unreadable is a worse outcome than a citizen missing a receipt. It is
-    # surfaced instead of swallowed — validation_issues is what the CLI prints.
+    # Receipts go before registration; a failed stamp is surfaced, never fatal (the gold files are another branch's).
     receipt_result = write_birth_receipt(target / ".trinity")
     receipt_issues = [] if receipt_result["success"] else [f"Birth receipt not stamped: {receipt_result['error']}"]
 
-    # Step 3e: The same stamp one step over — @seedgo's test template receipt in
-    # tests/, plus the page itself (DPLAN-0354). Same rules as 3d: the gold
-    # manifest is another branch's file, so a miss is surfaced and the birth
-    # continues, and a manifest that cannot be read leaves no receipt at all.
     test_template_result = write_test_template_receipt(target / "tests")
     if not test_template_result["success"]:
         receipt_issues.append(f"Test template receipt not stamped: {test_template_result['error']}")
 
-    # Step 4: Register in project registry
-    # Store path relative to registry location (works for both AIPass and external projects)
     try:
         registry_branch_path = target.relative_to(reg_path.parent).as_posix()
     except ValueError as e:
@@ -371,15 +239,10 @@ def mint_citizen(
         credential=resolved_registry_id,
     )
 
-    # Step 5: Ensure at least one agent in the project is the owner
     ensure_project_has_owner(reg_path)
 
-    # Step 6: Validate no unreplaced placeholders
     issues = validate_no_placeholders(target) + receipt_issues + traits_issues
 
-    # Birth is observable: the log names who was born, where, and which trinity
-    # template version they carry. @trigger's bus has no subscriber for a birth
-    # event today, so a listener nobody fires for would be scaffolding, not signal.
     logger.info(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
         branch_upper,

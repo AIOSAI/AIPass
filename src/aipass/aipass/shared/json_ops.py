@@ -3,14 +3,12 @@
 # Description: Shared JSON operations — deep merge and backup
 # Version: 1.0.0
 # Created: 2026-06-06
-# Modified: 2026-06-10
+# Modified: 2026-10-17
 # =============================================
 
-"""Shared JSON operations — deep merge and backup utilities.
+"""Shared JSON operations — deep merge and backup utilities."""
 
-Dependency-free: uses only stdlib. Importable before drone/prax exist.
-"""
-
+# Stdlib only: importable before drone/prax exist.
 import logging
 import shutil
 from datetime import datetime
@@ -23,20 +21,8 @@ logger = logging.getLogger(__name__)
 def deep_merge(template_data: Any, existing_data: Any) -> Any:
     """Recursively merge template structure with existing data.
 
-    Merge strategy:
-    - Both dicts: merge keys. Template defines structure, existing fills values.
-    - Template has key that existing doesn't: add from template (default).
-    - Existing has key that template doesn't: KEEP existing key (don't prune).
-    - Both lists: keep existing list (don't overwrite user data).
-    - Scalar values: keep existing value (don't overwrite).
-    - If existing is None/empty but template has value: use template value.
-
-    Args:
-        template_data: Template structure (provides fields and defaults).
-        existing_data: Existing data (provides values to preserve).
-
-    Returns:
-        Merged result combining template structure with existing values.
+    Existing data wins and is never pruned; the template only fills missing keys,
+    None, empty lists and empty strings.
     """
     if existing_data is None:
         return template_data
@@ -75,24 +61,7 @@ def deep_merge(template_data: Any, existing_data: Any) -> Any:
 
 
 def backup_json(file_path: Path, backup_dir: Path | None = None) -> Path:
-    """Create a timestamped backup of a JSON file.
-
-    By default the backup is placed in a ``.recovery/`` directory alongside the
-    file. Callers can override with ``backup_dir`` to consolidate backups
-    elsewhere (e.g. ``.spawn/.recovery/``).
-
-    Args:
-        file_path: Path to the JSON file to back up.
-        backup_dir: Optional override for the backup destination directory.
-            Defaults to ``file_path.parent / ".recovery"``.
-
-    Returns:
-        Path to the backup file.
-
-    Raises:
-        FileNotFoundError: If the source file doesn't exist.
-        IOError: If the backup copy fails.
-    """
+    """Create a timestamped backup of a JSON file."""
     file_path = Path(file_path)
 
     if not file_path.exists():

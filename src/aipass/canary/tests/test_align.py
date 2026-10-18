@@ -3,7 +3,7 @@
 # Description: Tests for the column aligner - drone @canary align, its JSON form and its refusals
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/align.py and the table aligner it drives."""
@@ -20,19 +20,9 @@ import pytest
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.table import aligner
 
-# Driven through the entry point's main() with real module discovery, so the
-# exit codes asserted here are the ones drone hands back to a caller.
-#
-# The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing
-# to stdout. A table is the kind of output that gets piped, so a half-aligned
-# one printed beside a refusal would be read as the answer. Every refusal is
-# run twice, plain and --json, because the JSON form is the one a caller parses
-# without looking - and because an empty result prints as nothing in the plain
-# form, where it hides (canary key learning 31).
-#
-# Alignment is asserted as exact lines, never as "contains". Padding IS the
-# output: a test that only checked for the fields would pass on a formatter
-# that never padded anything at all.
+# Through main() with real discovery, so these exit codes are drone's. The contract is the pair: a refusal
+# exits 2 AND writes nothing to stdout, plain and --json, since a piped half-table reads as the answer.
+# Alignment is asserted as exact lines, never "contains": padding is the output.
 
 
 def _run(monkeypatch, argv):
@@ -51,14 +41,7 @@ def _table(tmp_path, text, name="table.txt"):
 def _stderr(captured):
     """Stderr as one line, whitespace flattened.
 
-    @cli renders a refusal through rich, which wraps it at the console width -
-    80 when stdout is not a terminal. A refusal that names a long path is
-    therefore broken across lines at whichever space happens to fall near
-    column 80, so 'has no non-blank lines' arrived here as 'has\nno non-blank
-    lines' and only for the parametrised cases whose tmp_path was long enough.
-    The wrapping is the shared console's, not this branch's; flattening it
-    keeps these assertions about the reason rather than about path length.
-    """
+    The shared console wraps a refusal naming a long path; flattening keeps asserts off path length."""
     return " ".join(captured.err.split())
 
 
@@ -66,11 +49,6 @@ def _json_payload(monkeypatch, capsys, tmp_path, text):
     """Run the JSON form over one table and return the parsed payload."""
     assert _run(monkeypatch, ["align", "--json", _table(tmp_path, text)]) == 0
     return json.loads(capsys.readouterr().out)
-
-
-# =============================================================================
-# WHAT IT ALIGNS
-# =============================================================================
 
 
 def test_every_column_is_padded_to_its_widest_value(monkeypatch, capsys, tmp_path):
@@ -231,10 +209,7 @@ def test_a_file_with_no_final_newline_still_reads_its_last_row(monkeypatch, caps
 def test_crlf_line_endings_read_the_same(monkeypatch, capsys, tmp_path):
     """A file written on Windows is not a one-row table with a stray carriage return.
 
-    This one is a behaviour pin, not a discriminator: strip() removes the
-    trailing \\r on its own, so it passes whether the file is cut by
-    splitlines() or by split("\\n"). The two tests below are what separate them.
-    """
+    A behaviour pin, not a discriminator: strip() removes the \\r either way; the two below separate."""
     path = tmp_path / "crlf.txt"
     path.write_bytes(b"alice 12\r\nbob 3\r\n")
 
@@ -256,11 +231,7 @@ def test_carriage_return_alone_ends_a_line(monkeypatch, capsys, tmp_path):
 def test_a_vertical_tab_ends_a_line_like_a_newline(monkeypatch, capsys, tmp_path):
     """The other half of the separator ruling, measured rather than asserted in prose.
 
-    A vertical tab never reaches the question of what separates two fields:
-    str.splitlines() treats it as a line boundary, so it cuts the FILE before
-    anything cuts a row. Reading the file with split("\\n") instead would make
-    this one row of four fields.
-    """
+    splitlines() cuts the file at the vertical tab; split("\\n") would make this one row of four fields."""
     table = _table(tmp_path, "alice 12\x0bbob 3\n")
 
     assert _run(monkeypatch, ["align", table]) == 0
@@ -275,11 +246,6 @@ def test_markup_in_a_field_prints_as_typed(monkeypatch, capsys, tmp_path):
     assert _run(monkeypatch, ["align", table]) == 0
 
     assert capsys.readouterr().out.splitlines() == ["[bold]x[/bold]  1", "ab              2"]
-
-
-# =============================================================================
-# THE JSON FORM
-# =============================================================================
 
 
 @pytest.mark.parametrize(
@@ -322,19 +288,10 @@ def test_a_non_ascii_field_survives_the_json_form(monkeypatch, capsys, tmp_path)
     assert payload == [["zoë", "4"]]
 
 
-# =============================================================================
-# THE CONTRACT: A REFUSAL EXITS 2 AND WRITES NOTHING TO STDOUT
-# =============================================================================
-
-
 def test_the_json_flag_alone_is_refused_rather_than_answered(monkeypatch, capsys):
     """Bare 'align' is a question and exits 0; 'align --json' asked for output with no FILE.
 
-    The flag is what separates them, and it is the only way to reach the
-    no-FILE refusal at all: with no arguments whatsoever the module prints its
-    usage instead. An empty array here would answer a question nobody finished
-    asking.
-    """
+    The flag is the only route to the no-FILE refusal; an empty array would answer an unfinished question."""
     assert _run(monkeypatch, ["align", "--json"]) == 2
 
     captured = capsys.readouterr()
@@ -426,9 +383,7 @@ def test_a_bad_row_is_named_by_its_line_number(monkeypatch, capsys, tmp_path):
 def test_a_one_field_row_is_named_as_that_and_not_as_a_count_mismatch(monkeypatch, capsys, tmp_path):
     """Both checks apply to this row; the more specific one has to run first.
 
-    A refusal that fires first hides every check behind it (canary key learning
-    23), so which one speaks is the contract, not an implementation detail.
-    """
+    A refusal that fires first hides every check behind it, so which one speaks is the contract."""
     table = _table(tmp_path, "alice 12 red\nbob\n")
 
     assert _run(monkeypatch, ["align", table]) == 2
@@ -441,9 +396,7 @@ def test_a_one_field_row_is_named_as_that_and_not_as_a_count_mismatch(monkeypatc
 def test_the_rows_before_a_bad_one_are_not_printed(monkeypatch, capsys, tmp_path):
     """One bad row refuses the whole file: a table missing its last row is not that table.
 
-    The two good rows are read and held before line 3 is reached, so this is
-    the case where a partial table would escape if anything printed as it went.
-    """
+    The good rows are held before line 3 is read: a partial table escapes if anything prints as it goes."""
     table = _table(tmp_path, "alice 12\nbob 3\ncarol\n")
 
     assert _run(monkeypatch, ["align", table]) == 2
@@ -462,11 +415,6 @@ def test_the_argument_count_is_checked_before_a_file_is_opened(monkeypatch, caps
     captured = capsys.readouterr()
     assert "too many arguments" in _stderr(captured)
     assert "file not found" not in _stderr(captured)
-
-
-# =============================================================================
-# USAGE AND HELP NEVER ALIGN
-# =============================================================================
 
 
 def test_bare_align_prints_the_usage_and_exits_zero(monkeypatch, capsys):
@@ -493,10 +441,7 @@ def test_bare_align_prints_the_usage_and_exits_zero(monkeypatch, capsys):
 def test_help_anywhere_explains_and_aligns_nothing(monkeypatch, capsys, tmp_path, argv_builder):
     """Help prints the page, exits 0, and never reads the file.
 
-    An aligned row is a line of fields and nothing else, so that is what must be
-    absent: the help page quotes 'alice  12  red' inside an example line, and a
-    substring check would pass for the wrong reason.
-    """
+    No line is an aligned row; a substring check passes wrongly, the page quotes 'alice  12  red'."""
     table = _table(tmp_path, "alice 12 red\nbo 3 blue\n")
 
     assert _run(monkeypatch, argv_builder(table)) == 0
@@ -505,11 +450,6 @@ def test_help_anywhere_explains_and_aligns_nothing(monkeypatch, capsys, tmp_path
     assert "Usage:" in captured.out
     assert not any(line.strip() in ("alice  12  red", "bo     3   blue") for line in captured.out.splitlines())
     assert captured.err == ""
-
-
-# =============================================================================
-# THE HANDLER ITSELF
-# =============================================================================
 
 
 def test_read_rows_returns_the_fields_in_file_order(tmp_path):

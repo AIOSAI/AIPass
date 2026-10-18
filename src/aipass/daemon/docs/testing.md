@@ -6,100 +6,68 @@ How the daemon test suite is run, and the two hard rules — no writes into anot
 
 ---
 
-## Test Suite
+## Running the suite
 
-The live count is whatever pytest reports; every number on this page is a dated measurement kept
-for its story, not a claim about today. Two runs, and they must agree:
+The live count is whatever pytest reports. Two runs, and they must agree:
 
 ```
 .venv/bin/python -m pytest src/aipass/daemon -c pyproject.toml --rootdir=. -q   # the CI shape, from the repo root
 python -m pytest -q                                                             # from the branch directory
 ```
 
-**2026-09-11 (FPLAN-0543, DPLAN-0338 wave 1a):** 616 → **698 passed** from both rootdirs. The
-82 new cases pin command jobs: validation in `test_discovery.py`, the subprocess and fire path and
-the runstate row in `test_run_module.py`, and the queue preview in `test_scheduler_bot.py`. 20 of
-20 mutants went red, and each harness restored the tree byte-identical. `tests/conftest.py` gained
-`_seal_command_launcher`, an autouse seal on `command_job.LAUNCHER`, so no test can start the
-real drone or send a real mail. That seal was not mutation-run: removing it would do exactly that.
-The counts below are the 2026-09-08 baseline.
+- A test that exercises a name gate pins the roster it resolves against. The dev machine's
+  registry is not a fixture: a CI checkout has no registry, so `activity_collector.get_branch_paths`
+  answers `[]` there.
+- Every `tests/test_*.py` file runs in CI. The recovery lane's own pins (`recovery.py`) are held
+  outside `tests/`, because a new test file needs the test-write gate's permission; they come in
+  when the gate allows the file.
+- A parked suite is named here, with its reason and what has to be true to un-park it: a silently
+  skipped suite reads as coverage that does not exist.
 
-All numbers below re-measured 2026-09-08 (FPLAN-0527), not carried.
+## The seals
 
-- **534 test functions** across 19 test files; parametrization expands these to **598 cases**
-  (`.venv/bin/python -m pytest src/aipass/daemon -c pyproject.toml --rootdir=. -q` →
-  `598 passed in 25.51s`, 0 failed, 0 skipped; **598 passed in 25.63s** from the branch directory)
-- **DPLAN-0332's own 59 pins are NOT in that count.** They are written, green and
-  mutation-proved (17/17 red) but parked at `docs.local/pending/test_recovery.py.pending`:
-  the test-write gate (the owner, 2026-09-01, DPLAN-0323) refuses new test files and daemon
-  cannot flip it. They were not appended into an existing test file instead — the gate names
-  that as its deliberate residual, and using it would be routing around a human ruling.
-  The ask is with @devpulse.
-- Re-run with `activity_collector.get_branch_paths` forced to `[]` — the CI condition, where a
-  checkout has no registry — also **596 passed**. Any test that exercises a name gate pins the
-  roster it resolves against; the dev machine's registry is not a fixture (learned from CI red
-  on b681c085, cured in 5c132a5e)
-- 10/10 modules covered — every module under `apps/modules/` is imported by at least one live test file
-- **57 of 61 public functions tested** (seedgo's count; was 47/51 before ruling 6 added
-  the catch-up, MISSED and slot surfaces, and 54/58 before wave 2b added the argument gate)
-- Seedgo audit **100%**, every scored category at 100 including Trinity, with 22 bypass rows
-- The bypass list holds **22 rows**. The `apps/daemon_wakeup.py` *encapsulation* row added by
-  a6956b0f is **gone** — seedgo cured the derivation (251f2eb9) and Encapsulation now scores 100
-  with no row for that file, so it is not needed. The row still present for `daemon_wakeup.py` is
-  the long-standing *architecture* one (entry-point script outside the 3-layer structure).
-- *Unverified:* the old "99% with the bypass list emptied" figure was not re-measured tonight —
-  emptying the list is a seedgo-side change, out of scope for a docs pass.
+`tests/conftest.py` holds one autouse seal per route by which a test could reach live state.
+Each sits on the seam, session-wide, not on the row that first reached it: the next test to use
+the route has no reason to know the seal exists.
 
-*Last Updated: 2026-09-15*
+| seal | seam | what it keeps the suite out of |
+|---|---|---|
+| `_seal_timer_host_state` | `timer_install._run_systemctl`, `_UNIT_DIR`, `_STATE_DIR` | the user's systemd and `~/.aipass` |
+| `_seal_runstate_file` | `runstate.RUNSTATE_FILE` | the live `daemon_json/daemon_runstate.json` |
+| `_seal_branch_wake_prompt` | `recovery._branch_daemon_dir` | every other citizen's `.daemon/` |
+| `_seal_command_launcher` | `command_job.LAUNCHER` | the real drone, and real mail |
 
 ## The suite may not write into another citizen's tree
 
-Found by @devpulse on 2026-09-09, not by me: Vera-Studio's live
-`.daemon/last_wake_prompt.txt` held exactly the 16 bytes `tend your branch` —
-`test_run_blocked_contract.py`'s `_job()` default prompt, mtime 2026-09-08
-20:45:18, the minute the daemon suite ran during the PR #759 landing. The path is
-`_fire_job` → `recovery.record_wake_prompt` → `_branch_daemon_dir`, which resolves
-`@vera` through `discovery.active_citizens()` to the **real** Vera-Studio tree and
-writes. The `FakeStatus` seam stops a wake reaching a live tmux; nothing stopped the
-transcript reaching a live branch.
-
-**Sealed on the seam, session-wide** (`_seal_branch_wake_prompt`), not on the row that
-bit. Nine real citizen emails appear as fixture owners in this suite — `@commons`,
-`@backup`, `@vera`, `@devpulse`, `@daemon`, `@seedgo`, `@baud`, `@flow`, `@api` — so a
-guard scoped to one test module would have left it open for the tenth. The fixture
-returns a tmp directory rather than `None`, so a test can still assert the
+A fire writes the wake transcript twice: to the daemon's own `daemon_json` and to the owner's
+`.daemon/last_wake_prompt.txt`, which `_branch_daemon_dir` resolves through
+`discovery.active_citizens()` to the **real** branch tree. Real citizen addresses (`@commons`,
+`@backup`, `@vera`, `@devpulse`, `@daemon`, `@seedgo`, `@baud`, `@flow`, `@api`) appear as
+fixture owners, so `_seal_branch_wake_prompt` redirects every branch-side write to a tmp
+directory. It returns that directory rather than `None`, so a test can still assert the
 branch-side write *happened*; only its destination changes.
 
-**The sentinel tells a test from a real fire, precisely.** The live scheduler runs
-while the suite runs — a ~2 minute timer against a ~30 second suite — and a genuine
-fire legitimately rewrites a branch's transcript (@vera's did at 07:45:19 on 09-09).
-But `record_wake_prompt` always writes **both** destinations with the same text, and
-the suite's `daemon_json` copy is sealed to tmp. So a branch file that changed *and*
-now matches `daemon_json` is a real tick from another process; one that changed and
-does not match is this suite. That discriminator is what lets the sentinel be strict
-without crying wolf.
-
-Removing the seal reproduces the exact evidence — `tend your branch` back in Vera's
-file — and the sentinel names it, plus a **second** escaped citizen the original
-report had not found: `@commons`.
+**The sentinel tells a test from a real fire, precisely.** The live scheduler runs while the
+suite runs — a ~2 minute timer against a ~30 second suite — and a genuine fire legitimately
+rewrites a branch's transcript. But `record_wake_prompt` always writes **both** destinations
+with the same text, and the suite's `daemon_json` copy is sealed to tmp. So a branch file that
+changed *and* now matches `daemon_json` is a real tick from another process; one that changed
+and does not match is this suite. That discriminator lets the sentinel be strict without crying
+wolf.
 
 ## The suite may not move host state
 
-**The owner's ruling on 2026-09-08 (FPLAN-0524), in their words:** *"tests can't disable processes, they should restore to exact
-same state before the test. The test is fine and good that it can enter something."*
+A test may touch the real thing, but it never disables a process: it leaves the host exactly as
+it found it.
 
-**What went wrong.** `tests/test_cli_routing.py` runs the real router over every verb in
-`GATED_VERBS`, and two of those verbs are `install-timer` and `uninstall-timer`. With the argument
-gate in place the refusal comes first and the verb never runs — so the committed suite was safe.
-Without it (a red-first run, or any mutation run that disables the gate) `_install()` and
-`_uninstall()` executed against the user's real systemd. `journalctl --user` recorded seven
-Started/Stopped pairs across four such runs on 2026-09-07, ending on a **Stop at 11:46:40**.
-Nothing ticked for twenty-three hours: `@vera/release-watch` and `@daemon/inbox-sweep` both missed
-their windows, and no MISSED line could be written, because writing one takes a tick. The suite
-reported `594 passed` every time.
+`tests/test_cli_routing.py` runs the real router over every verb in `GATED_VERBS`, and two of
+those verbs are `install-timer` and `uninstall-timer`. The argument gate's refusal comes first, so
+the verb never runs. Without the gate (a red-first run, or any mutation run that disables it)
+`_install()` and `_uninstall()` would execute, and an uninstalled timer stops every tick, so no
+MISSED line can be written either. The seal is what stands between that and the user's systemd.
 
-**The seal.** `tests/conftest.py` holds `_seal_timer_host_state` — **autouse, unconditional**,
-patching the three seams by which `timer_install` can change host state:
+**The seal.** `_seal_timer_host_state` is **autouse, unconditional**, and patches the three seams
+by which `timer_install` can change host state:
 
 | seam | what it covers |
 |---|---|
@@ -107,45 +75,38 @@ patching the three seams by which `timer_install` can change host state:
 | `_UNIT_DIR` | where unit files are copied to and unlinked from |
 | `_STATE_DIR` | the `~/.aipass` mkdir |
 
-Session-wide rather than on the two rows that bit, because the defect is not *"two rows reach
+It is session-wide rather than on the two gated verbs, because the defect is not *"two rows reach
 systemd"* — it is *"a test can reach systemd at all"*, and the next verb added to `GATED_VERBS`
-would inherit the hole silently. `TestRunSystemctl` is unaffected: it binds `_run_systemctl` by
-direct import at module load, so it still exercises the real function against a patched
-`subprocess.run`.
+would inherit the hole silently. Every test runs with `_run_systemctl` as a
+`MagicMock(return_value=True)` (the fixture yields it, so a test can read its calls) and
+`_UNIT_DIR` / `_STATE_DIR` under that test's own `tmp_path`. The one exception is a test that asks
+for `systemctl_on_path` (`test_timer_install.py`): it keeps the real wrapper, and the seal moves
+the other door instead. PATH becomes an empty directory, so the only `systemctl` the wrapper can
+find is the stub that fixture lays. The live host's `systemctl` is unreachable either way.
 
 **The sentinel.** `_host_state_sentinel` (session-scoped, autouse) snapshots the live timer at
 session start and asserts it unchanged at session end. It is the backstop for a route nobody has
 thought of yet — a test that shells `drone @daemon uninstall-timer`, a helper calling `systemctl`
 directly. It does **not** restore: a sentinel that quietly put the timer back would hide the
-defect it exists to report. Proven by mutation — with the end-of-session reading doctored to
-`active: inactive`, the run reports `14 passed, 1 error`. A suite can no longer pass and take the
-scheduler down in the same run.
-
-**No test reaches the real timer.** The conftest offers no fixture that opens the seal: every test
-runs with `_run_systemctl` as a `MagicMock(return_value=True)` (the fixture yields it, so a test can
-read its calls) and `_UNIT_DIR` / `_STATE_DIR` under that test's own `tmp_path`. A test that
-patches `_run_systemctl` again only swaps one stand-in for another. What stands behind the seal is
-the sentinel above, and it reads the live timer; nothing in the suite writes it.
+defect it exists to report. A suite cannot pass and take the scheduler down in the same run.
+`_runstate_sentinel` fails a session that put fixture rows into the live runstate (it compares
+job keys, not bytes, because a real tick mid-session legitimately rewrites real rows), and
+`_branch_wake_prompt_sentinel` for every citizen's wake transcript.
 
 ## Making a mutation run safe
 
 A mutation run is the dangerous case, because the whole point of one is to disable a guard and see
 what still passes — and the guard being disabled is often the one holding the verb back.
 
-- **A harness that shells out to `pytest` is safe with nothing to remember.** The seal is autouse
-  and applies to every test (function-scoped, one fresh `tmp_path` each), so every subprocess run
-  that collects from `tests/` inherits it. This is the shape used for FPLAN-0524's
-  own four mutations.
+- **A harness that shells out to `pytest` is safe with nothing to remember.** The seals are
+  autouse and apply to every test (function-scoped, one fresh `tmp_path` each), so every
+  subprocess run that collects from `tests/` inherits them.
 - **A harness that imports `timer_install` and calls a verb directly is not.** It bypasses the
   conftest entirely and must patch the three seams itself (`_run_systemctl`, `_UNIT_DIR`,
-  `_STATE_DIR`), as `_seal_timer_host_state` does.
-- **Say plainly what changed:** the FPLAN-0492 wave 2b harness (2026-09-07) had neither. It
-  replaced the gate call and ran the pins in-process, which is exactly how the scheduler ended up
-  uninstalled. The rule above is the line that changes.
-
-Every mutation in FPLAN-0524 was chosen so the assertion is exercised without the destructive path
-ever running: the gate patch removed (proves the verb executes), `shutil.copy2` disabled (proves
-the sealed-dir assertion is live), the test's `live_dir` redirected (proves the live comparison
-bites), and the sentinel's end reading doctored (proves the session fails). The unsealed world was
-**not** re-run to prove it dangerous — 2026-09-07's journal already measured that, and repeating
-the damage to re-derive a known fact is not evidence, it is a second outage.
+  `_STATE_DIR`), as `_seal_timer_host_state` does. A harness that replaces the gate call and runs
+  the pins in-process without them uninstalls the live scheduler.
+- **Choose each mutation so the assertion is exercised without the destructive path running.**
+  Remove the gate patch to prove the verb executes, disable `shutil.copy2` to prove the
+  sealed-dir assertion is live, redirect the test's `live_dir` to prove the live comparison bites,
+  doctor the sentinel's end reading to prove the session fails. Never re-run the unsealed world to
+  prove it dangerous: repeating the damage is not evidence, it is a second outage.

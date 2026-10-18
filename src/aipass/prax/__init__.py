@@ -1,27 +1,14 @@
 """Prax - Monitoring and logging for AIPass.
 
-The package init is LAZY (PEP 562). Importing ``aipass.prax`` costs nothing but
-this file: ``logger``, ``append_jsonl`` and ``json_handler`` are resolved on
-first attribute access and cached in ``globals()``. Eager consumers are
-unchanged — ``from aipass.prax import logger`` triggers ``__getattr__`` and
-still hands back the same ``SystemLogger`` INSTANCE it always did.
-
-Why: the eager form pulled the whole logger graph (30 aipass modules plus
-watchdog and aipass.trigger) into every process that touched prax for any
-reason. The json service (DPLAN-0325) must be reachable without it.
-
-``__getattr__`` uses ``importlib.import_module`` and never a from-import: a
-from-import inside this function re-enters ``aipass.prax`` and recurses.
-"""
+Lazy (PEP 562). Reference: docs/json_service.md
+``__getattr__`` uses ``importlib.import_module``, never a from-import: that re-enters ``aipass.prax`` and recurses."""
 
 import importlib
 import logging as _logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    # Type-checker view only — never executed. Keeps `logger` resolving to
-    # SystemLogger and `json_handler` to the module, exactly as the eager
-    # imports did.
+    # Type-checker view only: `logger` is a SystemLogger, `json_handler` the module.
     from aipass.prax.apps.handlers.json import json_service as json_handler
     from aipass.prax.apps.modules.logger import append_jsonl as append_jsonl
     from aipass.prax.apps.modules.logger import system_logger as logger
@@ -35,11 +22,7 @@ _JSON_MODULE = "aipass.prax.apps.handlers.json.json_service"
 class NullLogger:
     """Fallback logger when prax SystemLogger fails to import.
 
-    Branches must not crash if prax is broken. Provides info/warning/error/debug
-    so callers keep running. Every method on SystemLogger must exist here too: a
-    branch that adopts a level the fallback lacks would crash with AttributeError
-    precisely when prax is already broken.
-    """
+    Every SystemLogger method must exist here too, or a branch crashes exactly when prax is broken."""
 
     def __init__(self):
         self._logger = _logging.getLogger("aipass.prax.fallback")
@@ -61,12 +44,7 @@ class NullLogger:
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve a public prax name on first access, then cache it in globals().
-
-    The fallback's moment moves from import time to first access: a broken
-    logger chain still yields a NullLogger, and append_jsonl still degrades to
-    None, exactly as the eager try/except did.
-    """
+    """Resolve a public prax name on first access, then cache it in globals()."""
     if name == "logger":
         try:
             value = importlib.import_module(_LOGGER_MODULE).system_logger

@@ -3,20 +3,12 @@
 # Description: Kernel-safe path resolution via openat2 RESOLVE_BENEATH
 # Version: 1.1.2
 # Created: 2026-06-09
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Kernel-safe path resolution via openat2 RESOLVE_BENEATH.
 
-Re-resolves an agent-supplied path string server-side so the broker never
-trusts the raw string. Uses Linux openat2(2) with RESOLVE_BENEATH |
-RESOLVE_NO_SYMLINKS to guarantee the final target is strictly beneath an
-allowed base directory and traverses no symlinks.
-
-Falls back to a pure-Python per-component walk (O_NOFOLLOW openat) when
-openat2 is unavailable (non-Linux, older kernels). That fallback is the lane
-every non-Linux host takes, so it holds the same containment contract with
-portable spellings only -- no /proc, no hardcoded Linux flag numbers.
+The O_NOFOLLOW walk fallback is every non-Linux host's lane: same contract, portable spellings only.
 """
 
 from __future__ import annotations
@@ -37,10 +29,7 @@ RESOLVE_BENEATH = 0x08
 RESOLVE_NO_SYMLINKS = 0x04
 SYS_OPENAT2 = 437
 
-# openat2(2) is handed raw kernel flags, so O_PATH here is the Linux number by
-# definition. The walk below runs on hosts that spell these flags differently --
-# 0o0400000 is O_NOFOLLOW on Linux and O_NOCTTY on macOS -- so it takes its own
-# from `os`, which always carries the value of the host it is running on.
+# openat2 takes raw Linux flag numbers; the walk takes host values from `os` (flag numbers differ on macOS).
 O_PATH = 0o010000000
 
 _WALK_O_PATH = getattr(os, "O_PATH", 0)
@@ -56,10 +45,7 @@ def _openat2_available() -> bool:
 
 
 def _openat2(dirfd: int, pathname: bytes, flags: int, resolve: int) -> int:
-    """Call openat2(2) via ctypes syscall.
-
-    Returns an fd on success, raises OSError on failure.
-    """
+    """Call openat2(2) via ctypes syscall; returns an fd, raises OSError on failure."""
     open_how = struct.pack("QQQ", flags, 0, resolve)
     libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
     result = libc.syscall(
@@ -76,14 +62,7 @@ def _openat2(dirfd: int, pathname: bytes, flags: int, resolve: int) -> int:
 
 
 def resolve_beneath(base: Path, relpath: str) -> Path:
-    """Resolve *relpath* strictly beneath *base*, refusing escapes and symlinks.
-
-    Uses openat2 RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS on Linux x86-64,
-    falls back to a per-component O_NOFOLLOW walk otherwise.
-
-    Returns the resolved absolute path on success.
-    Raises OSError on traversal failure (escape, symlink, missing component).
-    """
+    """Resolve *relpath* strictly beneath *base*, refusing escapes and symlinks (OSError)."""
     json_handler.log_operation("resolve_beneath", {"base": str(base), "relpath": relpath})
 
     cleaned = os.path.normpath(relpath)
@@ -100,17 +79,9 @@ def resolve_beneath(base: Path, relpath: str) -> Path:
 
 
 def _fd_path(fd: int) -> Path:
-    """The path the kernel holds for an open fd, read out of /proc.
+    """The path the kernel holds for an open fd, read out of /proc (Linux openat2 lane only).
 
-    /proc is Linux furniture: macOS and Windows have none, so only the openat2
-    lane may ask here, and that lane is entered only when _openat2_available()
-    has said the host is Linux. The walk proves its answer by inode instead
-    (_verify_leaf); it once read this and raised FileNotFoundError on every
-    call on the hosts it exists for.
-
-    Why this is its own function is the test, said plainly: tests/test_broker.py
-    replaces it with a reader that fails, to prove the walk lane never reaches
-    for /proc. The product would read the same with the readlink inline.
+    Test seam: tests replace it with a failing reader to prove the walk never reaches /proc.
     """
     return Path(os.readlink(f"/proc/self/fd/{fd}"))
 
@@ -138,10 +109,7 @@ def _resolve_via_openat2(base: Path, cleaned: str) -> Path:
 def _stat_leaf(component: str, dir_fd: int) -> os.stat_result:
     """Measure the last component relative to its already-verified parent.
 
-    The leaf is stat'd, not opened: an open would need a read right the caller
-    may not hold and would block on a fifo, and its identity is all the
-    verification below asks for. A symlink is refused here exactly as
-    O_NOFOLLOW refuses one on the components above it.
+    Stat, not open: an open needs a read right and blocks on a fifo. Symlinks are refused.
     """
     info = os.stat(component, dir_fd=dir_fd, follow_symlinks=False)
     if stat.S_ISLNK(info.st_mode):
@@ -152,13 +120,7 @@ def _stat_leaf(component: str, dir_fd: int) -> os.stat_result:
 def _verify_leaf(resolved: Path, leaf: os.stat_result, parts: list[str]) -> None:
     """Prove the path handed back still names the inode the walk verified.
 
-    This is what the Linux lane gets from reading the fd's own path out of
-    /proc, and there is no portable door to that. So the contract is closed
-    from the other side: the walk verified an inode through fds, one per
-    component, that no rename can redirect; the assembled path is returned only
-    if it lstats to that same (device, inode) right now. Swap a component under
-    the walk and the pair no longer matches, so the caller gets an error rather
-    than a path pointing at something nobody checked.
+    The portable stand-in for /proc: a component swapped under the walk changes (dev, ino).
     """
     try:
         seen = os.lstat(resolved)
@@ -180,14 +142,7 @@ def _verify_leaf(resolved: Path, leaf: os.stat_result, parts: list[str]) -> None
 def _real_base(base: Path) -> Path:
     """The base named by its real path — the string the walk's answer is rebuilt from.
 
-    It is read after the walk, by name, and nothing ties it to the fds the walk
-    held: a component renamed in between makes it name something else. That gap
-    is why the assembled path must pass _verify_leaf before it is handed back.
-
-    Why this is its own function is the test, said plainly: no product reason
-    asks for it. tests/test_broker.py replaces it to stand a rename between the
-    walk and this read, which cannot be timed from outside, and so proves
-    _verify_leaf refuses the path that results.
+    Read by name after the walk, hence _verify_leaf. Test seam: tests stage a rename here.
     """
     return Path(os.path.realpath(base))
 

@@ -3,25 +3,13 @@
 # Description: Tick-side glue for the DPLAN-0332 catch-up lane
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-09-08
+# Modified: 2026-10-17
 # =============================================
 
 """The catch-up lane as a tick sees it: detect and queue, then drain one.
 
-``recovery.py`` answers questions about a gap — how wide, what closed inside it,
-who is next, what the header says. THIS module is the part that happens *during a
-tick*: it walks the enabled jobs, writes the queue, picks the one entry that may
-fire, and reports each decision in the operator's log. That is why it is separate
-from recovery and separate from run.py — recovery has no tick, and run.py had
-grown past the size a reader can hold.
-
-**It fires nothing itself.** ``fire`` and ``log`` arrive as callables from the
-caller. That is not ceremony: a handler may not import a module (seedgo's
-encapsulation rule, and the circular import it exists to prevent), and the
-firing lane lives in ``apps/modules/run.py``. Injecting them keeps this file
-testable without a tick and keeps the dependency arrow pointing one way.
-
-Everything here is inert while ``runstate.RECOVERY_LANE_LIVE`` is False.
+``fire`` and ``log`` are injected because a handler may not import a module (run.py).
+Reference: docs/recovery_and_catch_up.md
 """
 
 from datetime import datetime
@@ -38,12 +26,8 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     update_job_runstate,
 )
 
-#: The vocabulary a fire attempt answers in. BLOCKED is the third state and the
-#: reason there are three: a wake refused before it started (occupancy, lock,
-#: pause) is not a run and must not consume the job's period — the S54
-#: BLOCKED-IS-NOT-RAN contract. Defined here because both run.py and this
-#: module's drain branch on it, and a shared vocabulary belongs to neither
-#: caller alone.
+#: BLOCKED is a wake refused before it started (occupancy, lock, pause): not a
+#: run, so it must not consume the job's period.
 OUTCOME_FIRED = "fired"
 OUTCOME_FAILED = "failed"
 OUTCOME_BLOCKED = "blocked"
@@ -57,10 +41,7 @@ def detect_and_queue(
 ) -> Tuple[Optional[dict], int]:
     """Find the gap, enumerate what closed inside it, queue one entry per job.
 
-    Returns ``(gap or None, jobs_queued)``. Runs BEFORE the due check, because a
-    job whose regular window is open right now must be able to supersede its own
-    queued entry on this same tick — the missed list then rides the on-time wake
-    instead of a second one.
+    Runs before the due check so a job's open on-time window can supersede its own queued entry.
     """
     if not RECOVERY_LANE_LIVE:
         return None, 0
@@ -107,11 +88,7 @@ def drain_one(
     log: Callable[[str], None],
     fire: Callable[..., Tuple[str, str]],
 ) -> int:
-    """Fire at most ONE queued catch-up. Returns 1 if one fired, else 0.
-
-    The owner's rule, and the reason this function can only ever return 0 or 1:
-    "imagine 10 missed events all firing at once."
-    """
+    """Fire at most ONE queued catch-up. Returns 1 if one fired, else 0."""
     if not RECOVERY_LANE_LIVE:
         return 0
 
@@ -122,8 +99,7 @@ def drain_one(
     by_key = {job_key(j["owner"], j["id"]): j for j in enabled}
     job = by_key.get(job_key(entry["owner"], entry["job_id"]))
     if job is None:
-        # The job left the fleet while it was queued. Drop it rather than
-        # retrying forever against a schedule nobody publishes any more.
+        # The job left the fleet while queued: drop it rather than retry forever.
         recovery.drop_from_queue(runstate, entry["owner"], entry["job_id"])
         log(f"CATCH-UP DROPPED: {entry['owner']}/{entry['job_id']} — job no longer discovered")
         if not dry_run:

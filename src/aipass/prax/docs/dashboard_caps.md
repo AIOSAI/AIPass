@@ -10,7 +10,7 @@ outside prax from `aipass.prax.apps.modules.dashboard` (handlers are internal).
 Units are **chars** — `len()` over the rendered text, the number `wc -m` reports.
 Never bytes, never tokens.
 
-Owner: @prax (DPLAN-0347, boardroom thread 16, 2026-09-15).
+Owner: @prax.
 
 ## The import
 

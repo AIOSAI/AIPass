@@ -3,17 +3,10 @@
 # Description: Tests for OpenRouter caller detection handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py's detect_caller_category()."""
-
-# Tests for openrouter.caller — caller detection handler.
-#
-# Tests:
-# - detect_caller_category for flow paths
-# - detect_caller_category for prax paths
-# - detect_caller_category for unknown paths (including former skills paths)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — get_caller_info() and detect_caller_from_stack(), tests/test_caller_detection.py
@@ -22,17 +15,8 @@
 from aipass.api.apps.handlers.openrouter.caller import detect_caller_category
 
 
-# =============================================
-# detect_caller_category tests
-# =============================================
-
-
 class TestDetectCallerCategory:
-    """Tests for caller.detect_caller_category().
-
-    test_exception_returns_unknown was retired with the try it pinned: it fed a
-    Path whose parts raise, an input no caller can make (api, fleet green leg 4).
-    """
+    """Tests for caller.detect_caller_category()."""
 
     def test_flow_path_returns_flow(self, tmp_path):
         """Path containing 'flow' part should return 'flow'."""

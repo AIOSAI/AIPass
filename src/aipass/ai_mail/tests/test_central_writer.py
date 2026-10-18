@@ -3,12 +3,10 @@
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
 # Version: 1.1.2
 # Created: 2026-04-03
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
-
-# Inbox stats aggregation, central file output.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
@@ -23,9 +21,6 @@ from unittest.mock import MagicMock
 import aipass.ai_mail.apps.handlers.central_writer as mod
 
 
-# --- Fixtures --------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _suppress_json_handler(monkeypatch):
     """Prevent json_handler from touching real files."""
@@ -36,9 +31,6 @@ def _suppress_json_handler(monkeypatch):
 def _suppress_logger(monkeypatch):
     """Suppress logger output during tests."""
     monkeypatch.setattr(mod, "logger", MagicMock())
-
-
-# --- extract_branch_name tests ----------------------------------------
 
 
 def test_extract_branch_name_standard_path(tmp_path):
@@ -57,9 +49,6 @@ def test_extract_branch_name_lowercase_dir(tmp_path):
     """Lowercase directory name is uppercased."""
     inbox = tmp_path / "prax" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "PRAX"
-
-
-# --- read_inbox_stats tests -------------------------------------------
 
 
 def test_read_inbox_stats_valid_inbox(tmp_path):
@@ -86,9 +75,6 @@ def test_read_inbox_stats_partial_fields(tmp_path):
     assert mod.read_inbox_stats(inbox) == (7, 0)
 
 
-# --- calculate_system_totals tests ------------------------------------
-
-
 def test_calculate_system_totals_multiple_branches():
     """Correct sums across multiple branches."""
     branch_stats = {
@@ -104,9 +90,6 @@ def test_calculate_system_totals_empty_dict():
     """Empty dict gives zero totals."""
     result = mod.calculate_system_totals({})
     assert result == {"total_unread": 0, "total_messages": 0}
-
-
-# --- build_central_data tests -----------------------------------------
 
 
 def test_build_central_data_has_required_keys():
@@ -133,14 +116,10 @@ def test_build_central_data_includes_totals():
     assert result["system_totals"]["total_messages"] == 12
 
 
-# --- find_all_inbox_files tests ----------------------------------------
-
-
 def test_find_all_inbox_files_discovers_inboxes(tmp_path, monkeypatch):
     """Finds inbox.json files inside .ai_mail.local directories."""
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
-    # Create two branch inbox structures
     for branch in ("seedgo", "drone"):
         mail_dir = tmp_path / "src" / "aipass" / branch / ".ai_mail.local"
         mail_dir.mkdir(parents=True)
@@ -154,10 +133,7 @@ def test_find_all_inbox_files_discovers_inboxes(tmp_path, monkeypatch):
 
 def test_find_all_inbox_files_never_enters_a_sandbox_or_output_dir(tmp_path, monkeypatch):
     """A mailbox planted under dropbox, .archive, docs.local, artifacts or system_logs is not counted.
-
-    The repo root itself stands inside a directory named dropbox: the prune judges the
-    names below the root, never the root's own path. Pinned red first (leg 3): the walk
-    counted the dropbox, docs.local, artifacts and system_logs plants.
+    The prune judges the names below the repo root, never the root's own path (here inside a dropbox).
     """
     root = tmp_path / "dropbox" / "repo"
     monkeypatch.setattr(mod, "_REPO_ROOT", root)
@@ -201,12 +177,10 @@ def test_find_all_inbox_files_skips_archive(tmp_path, monkeypatch):
     """Skips .ai_mail.local dirs inside .archive paths."""
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
-    # Valid inbox
     valid = tmp_path / "branch" / ".ai_mail.local"
     valid.mkdir(parents=True)
     (valid / "inbox.json").write_text("{}", encoding="utf-8")
 
-    # Archived inbox -- should be skipped
     archived = tmp_path / ".archive" / "old" / ".ai_mail.local"
     archived.mkdir(parents=True)
     (archived / "inbox.json").write_text("{}", encoding="utf-8")
@@ -219,12 +193,10 @@ def test_find_all_inbox_files_skips_backup(tmp_path, monkeypatch):
     """Skips .ai_mail.local dirs inside .backup paths."""
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
-    # Valid inbox
     valid = tmp_path / "branch" / ".ai_mail.local"
     valid.mkdir(parents=True)
     (valid / "inbox.json").write_text("{}", encoding="utf-8")
 
-    # Backup inbox -- should be skipped
     backup = tmp_path / ".backup" / "snap" / ".ai_mail.local"
     backup.mkdir(parents=True)
     (backup / "inbox.json").write_text("{}", encoding="utf-8")
@@ -235,11 +207,7 @@ def test_find_all_inbox_files_skips_backup(tmp_path, monkeypatch):
 
 def test_find_all_inbox_files_skips_backups_dir(tmp_path, monkeypatch):
     """Skips .ai_mail.local dirs inside a `backups/` tree, on every platform.
-
-    This used to assert 2 on Windows and 1 everywhere else: the old check was a
-    literal `"/backups/" in str(path)`, and Windows renders that separator as a
-    backslash, so the same tree counted on one OS and not the other. Exclusions
-    are path COMPONENTS now, which have no separator to disagree about.
+    Exclusions are path components, so no OS separator can make the count differ.
     """
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
@@ -261,24 +229,14 @@ def test_find_all_inbox_files_ignores_dir_without_inbox(tmp_path, monkeypatch):
 
     empty_mail = tmp_path / "branch" / ".ai_mail.local"
     empty_mail.mkdir(parents=True)
-    # No inbox.json created
 
     result = mod.find_all_inbox_files()
     assert len(result) == 0
 
 
-# --- get_valid_branch_names tests --------------------------------------
-
-
 def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
     """Every registry row's name comes back, uppercased, from the registry it is pointed at.
-
-    The aggregate tests patch this function out, so its body never ran. The
-    autouse sandboxed_central fixture points BRANCH_REGISTRY under tmp_path;
-    the registry written there is the only one read.
-
-    Mutant: `branch["name"].upper()` -> `branch["name"]` returns the rows as
-    written and is caught here.
+    The autouse sandboxed_central fixture points BRANCH_REGISTRY under tmp_path.
     """
     registry = tmp_path / "central_sandbox" / "AIPASS_REGISTRY.json"
     registry.parent.mkdir(parents=True)
@@ -290,12 +248,8 @@ def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
     assert mod.get_valid_branch_names() == {"SEEDGO", "DRONE", "AI_MAIL"}
 
 
-# --- aggregate_branch_stats tests --------------------------------------
-
-
 def test_aggregate_branch_stats_multiple_branches(tmp_path, monkeypatch):
     """Aggregates stats from multiple branches, filtering by registry."""
-    # Create inbox files
     seedgo_mail = tmp_path / "seedgo" / ".ai_mail.local"
     seedgo_mail.mkdir(parents=True)
     (seedgo_mail / "inbox.json").write_text(
@@ -390,9 +344,6 @@ def test_aggregate_branch_stats_skips_malformed_inbox(tmp_path, monkeypatch):
     assert "GOOD" in result
 
 
-# --- write_central_file tests ------------------------------------------
-
-
 def test_write_central_file_creates_file(tmp_path, monkeypatch):
     """Creates the central file with correct JSON content."""
     central_dir = tmp_path / ".ai_central"
@@ -446,28 +397,17 @@ def test_write_central_file_overwrites_existing(tmp_path, monkeypatch):
     assert "old" not in written
 
 
-# --- Walk pruning: the exclusion must PRUNE, not filter after descending ----
-#
-# find_all_inbox_files() used rglob(".ai_mail.local") and then discarded hits
-# whose path contained .backup/.archive/backups. Discarding a RESULT does not
-# save the WALK: rglob still descended every excluded tree first. On the live
-# repo that meant walking 57GB of .backup and 68GB of projects/ to return 26
-# inboxes -- 2.9s per call, and update_central() calls this on every delivery.
+# Excluded trees must be pruned from the walk, not filtered after it: update_central() walks on every delivery.
 
 
 def test_find_all_inbox_files_does_not_descend_into_excluded_dirs(tmp_path, monkeypatch):
-    """The excluded trees must never be WALKED, not merely filtered from results.
-
-    Red-first against the rglob implementation: rglob visits everything and the
-    skip only drops results, so the decoy tree below was fully traversed.
-    """
+    """The excluded trees must never be WALKED, not merely filtered from results."""
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
     valid = tmp_path / "branch" / ".ai_mail.local"
     valid.mkdir(parents=True)
     (valid / "inbox.json").write_text("{}", encoding="utf-8")
 
-    # A deep decoy under each excluded name. Nothing here may be visited.
     for excluded in (".backup", ".archive", "backups"):
         deep = tmp_path / excluded / "a" / "b" / "c" / ".ai_mail.local"
         deep.mkdir(parents=True)
@@ -486,19 +426,14 @@ def test_find_all_inbox_files_does_not_descend_into_excluded_dirs(tmp_path, monk
     result = mod.find_all_inbox_files()
 
     assert len(result) == 1, "only the non-excluded inbox may be returned"
-    # Without this the test is BLIND: an implementation that never calls
-    # os.walk leaves `visited` empty, and an empty list trespasses nowhere.
+    # Without this the test is blind: an implementation that never calls os.walk trespasses nowhere.
     assert Path(visited[0]) == tmp_path, "find_all_inbox_files must walk the root via os.walk so descent can be pruned"
     trespassed = [d for d in visited if any(part in Path(d).parts for part in (".backup", ".archive", "backups"))]
     assert not trespassed, f"walk descended into excluded trees: {trespassed}"
 
 
 def test_find_all_inbox_files_excludes_are_named_not_substrings(tmp_path, monkeypatch):
-    """A directory merely CONTAINING an excluded name is a real branch, not a backup.
-
-    The old check was `".backup" in str(path)`, so a legitimate branch living in
-    e.g. `my.backup.tools/` was silently invisible to central stats.
-    """
+    """A directory merely CONTAINING an excluded name is a real branch, not a backup."""
     monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
 
     legit = tmp_path / "my.backup.tools" / ".ai_mail.local"

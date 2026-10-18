@@ -3,7 +3,7 @@
 # Description: A help flag anywhere in args must explain, never execute (DPLAN-0291 rule E)
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for a trailing --help in apps/modules/feedback.py, admin_grant.py, watchdog.py and compass.py."""
@@ -78,10 +78,7 @@ def test_feedback_trailing_help_never_executes(capsys):
 def test_short_help_flag_mid_args_never_executes(mod, cmd, args, handler, capsys):
     """-h anywhere is the same contract as --help anywhere.
 
-    The handler the command would reach is the canary: help outranks the caller
-    gate in watchdog and compass has no gate, so no guard is patched here (the
-    old create=True patch made a _guard_caller on compass that nothing read).
-    Mutant: `_wants_help` answering False in either module -> red.
+    No guard is patched: help outranks watchdog's caller gate and compass has none.
     """
     with patch.object(mod, handler) as canary:
         result = mod.handle_command(cmd, args)
@@ -94,8 +91,7 @@ def test_short_help_flag_mid_args_never_executes(mod, cmd, args, handler, capsys
 def test_compass_value_containing_help_word_still_executes():
     """A quoted VALUE that merely contains the word help is not a help flag.
 
-    Bare word 'help' triggers only at position 0; later positions must be
-    exact --help/-h. Guards the predicate against over-matching free text.
+    Bare word 'help' triggers only at position 0; later positions must be exact --help/-h.
     """
     with patch.object(compass_mod, "_handle_query", return_value=True) as target:
         result = compass_mod.handle_command("compass", ["query", "how help works"])

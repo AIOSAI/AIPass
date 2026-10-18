@@ -46,7 +46,7 @@ Code never stores, logs, or exposes raw keys. The `api` branch provides authenti
 
 ### 1. `.gitignore`
 - `.env` — blocks all dotenv files
-- `src/aipass/api/` — API branch excluded from public repo (contains key handling code)
+- `src/aipass/*/apps/integrations/**` — private integration drivers stay out of the repo; only the scaffold `README.md` is tracked
 - `~/.secrets/` is outside the repo entirely
 
 ### 2. Pre-commit Hook (`.git/hooks/pre-commit`)

@@ -3,33 +3,15 @@
 # Description: assemble every row, declare the blind spots, publish the artifact
 # Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 THE ARTIFACT. One row per test function, a summary a human can read, and the
 list of everything this report cannot see.
 
-THE BLIND SPOTS ARE IN THE ARTIFACT, NOT IN A README. A reader who opens the
-rows and not the documentation is the normal reader, and a limitation they have
-to go looking for is a limitation that will not be found. So `blind_spots` sits
-beside the numbers, at the top, and the writer REFUSES to publish without it.
-
-RUN IDENTITY IS STAMPED because the artifact is overwritten in place. A finding
-quoted from one run and the live file from the next look identical and are not;
-`run_identity` carries the commit, the wall clock, the tool version and the
-counts, so a quote can be checked against the run it came from.
-
-ROWS GO TO JSONL, THE SUMMARY GOES TO JSON. 19,413 rows is a 20 MB object that
-no editor opens and no diff reads. Line-delimited rows stream, grep, and sort
-with the tools already on the machine, and the summary stays small enough to
-read whole.
-
-NOTHING HERE EMITS A VERDICT. `assert_no_delete_language` is run over every
-published band and field name before the write, and a hit refuses the write
-rather than warning about it - because the entire argument for this report is
-that a static signal cannot authorise a deletion, and a build that let the
-vocabulary drift back in would have conceded the argument quietly.
+Blind spots sit beside the numbers and the writer refuses to publish without
+them; a published label carrying delete-family vocabulary refuses the write.
 """
 
 import json
@@ -50,7 +32,6 @@ from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, h
 SEEDGO_ROOT = module_file(__file__).parents[3]
 ARTIFACT_DIR = SEEDGO_ROOT / ".seedgo"
 
-#: The three files one run publishes.
 ROWS_NAME = "test_inventory_rows.jsonl"
 SUMMARY_NAME = "test_inventory.json"
 READABLE_NAME = "test_inventory.md"
@@ -58,15 +39,11 @@ READABLE_NAME = "test_inventory.md"
 ARTIFACT_VERSION = "test-inventory/1"
 TOOL_VERSION = "1.0.0"
 
-#: The one rule that separates a published CATEGORY from published PROSE. A
-#: string shorter than this is read as a label a skim-reader would take as a
-#: verdict; anything longer is an explanation, and the explanations here have
-#: to be free to say the word the labels may not.
+#: Shorter strings are labels a skim-reader takes as verdicts; longer ones are
+#: prose, free to say the word the labels may not.
 CATEGORY_LENGTH = 40
 
-#: What this report cannot see. Published beside the numbers, and the writer
-#: refuses to publish an empty list - a report that declared no blind spots
-#: would be the only untrue sentence in it.
+#: What this report cannot see; the writer refuses to publish an empty list.
 BLIND_SPOTS: tuple = (
     "NO COVERAGE DATA. Nothing here knows which lines any test executes. Phase B adds "
     "--cov-context=test to the existing CI coverage job; until then no row can say whether a "
@@ -172,11 +149,6 @@ def _row(
         "days_since_touch": unit_history.days_since_touch,
         "score": score.as_dict(),
     }
-
-
-# =============================================================================
-# SUMMARY
-# =============================================================================
 
 
 def _summary(
@@ -323,18 +295,8 @@ def _top(rows: Sequence[dict], limit: int = 25) -> List[dict]:
     ]
 
 
-# =============================================================================
-# PUBLICATION
-# =============================================================================
-
-
 def publish(inventory: Inventory, directory: Optional[Path] = None) -> Dict[str, Path]:
-    """Write the rows, the summary and the readable digest. Returns the paths.
-
-    The blind-spot list and the no-verdict check are asserted BEFORE the first
-    byte is written, so a report that lost either is never on disk to be quoted
-    from.
-    """
+    """Write the rows, the summary and the readable digest. Returns the paths."""
     assert_publishable(inventory.summary)
 
     directory = directory or ARTIFACT_DIR
@@ -376,17 +338,8 @@ def assert_publishable(summary: dict) -> None:
 def _vocabulary(summary: dict) -> List[str]:
     """Every field name and label the summary publishes as a category.
 
-    Deliberately NOT the prose: the blind-spot text says the word "delete"
-    repeatedly, on purpose, to explain why this report never issues one. What
-    must stay clean is the vocabulary a machine or a skim-reader would take as
-    a category - the keys and the enum-shaped values.
-
-    That distinction is made in ONE place, by CATEGORY_LENGTH below. This
-    function once also skipped the `blind_spots` and `ranking` keys by name,
-    and a mutation sweep deleted that skip without failing a single test: the
-    length rule already covered every string it was protecting. Two guards for
-    one property means the weaker one is never exercised and nobody finds out
-    which is which.
+    Prose is told apart by CATEGORY_LENGTH alone: the blind-spot text says
+    "delete" on purpose, and a second skip-by-key guard would never be exercised.
     """
     found: List[str] = []
 

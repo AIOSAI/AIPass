@@ -3,92 +3,12 @@
 # Description: Discarded Patch Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Discarded Patch Standards Checker Handler
+"""Discarded Patch Standards Checker Handler
 
-Crack class R from the 2026-09-22 eyes-on review of @backup's tests: a test
-replaces a function in ITS OWN BRANCH with a mock, hands the mock nothing,
-binds it to nothing, and asserts nothing about it. The replacement is pure
-silence. The product's call to that function is then unpinned, and the call
-can be deleted with the suite green.
-
-@backup's ``test_ceiling_guard.py`` is the shape in one file. Every test wraps
-``check_ceiling`` in ``patch("aipass.backup...audit.trail.log_operation")``
-and discards the mock. The reviewer's finding: **delete ``_log_breach``
-(ceiling.py:168-179) entirely and all 21 tests pass.** The refusal's ops-log
-entry is the only forensic trace of a runaway refusal, and nothing pins it.
-
-WHAT STAYS LEGAL, and each acquittal is a measured cut:
-
-  * PATCHING ANOTHER BRANCH, A GATEWAY, THE CLOCK OR THE NETWORK. That is an
-    edge, and sealing an edge is what a test is supposed to do. Only a target
-    inside the test file's OWN branch is judged -- the branch is read from
-    the file's path, and the target from an ``aipass.<branch>.`` string or a
-    name imported from that package.
-  * A REPLACEMENT HANDED OVER. ``patch(target, tmp_path)`` redirects a path
-    constant at a test-owned directory; ``return_value=``, ``side_effect=``,
-    ``new=``, ``new_callable=``, ``wraps=``, ``spec=`` and ``autospec=`` all
-    drive or shape what the product gets. That is a seam doing work, not a
-    mock thrown away. This one acquittal took the count from 1,025 to 692.
-  * AN ``as`` BINDING THAT IS REFERENCED, and a ``@patch`` parameter that is
-    referenced. Asserting on the mock is the whole cure.
-  * A PATCH IN A FIXTURE OR A HELPER. The branch conftest's seam is the
-    sanctioned place to silence infrastructure; a patch in a test body that
-    duplicates it is the defect. Only ``def test_*`` bodies are judged.
-
-THE THIRD SPELLING, ``monkeypatch.setattr``, WHICH THE DISPATCH NAMED. It has
-no bare-mock form -- the replacement is a required argument -- so the
-handed-over acquittal above lets every one of the fleet's 1,838 own-branch
-calls through. 222 of them hand over something ANONYMOUS: ``Mock()`` with no
-arguments, or ``lambda *a, **k: None``. Nothing binds it, it records nothing,
-and the silenced call is exactly as unpinned as a discarded ``patch``. A
-NAMED replacement is acquitted (the name is read at the ``setattr`` itself and
-no name set can tell an asked mock from an ignored one); a RECORDER lambda is
-acquitted by its body, which is how ``test_share.py`` stays clean.
-
-CHECK FIRST, measured 2026-09-22 over the fleet's 561 test files:
-
-  * 73 files convicted, 529 hits, 6.4s. Top three: @seedgo 12 files,
-    @commons 10, @api 7 -- my own branch is worst, and it stays worst until
-    it is cured. The worst single file is @ai_mail's
-    ``test_dispatch_monitor.py`` at 65, then @seedgo's
-    ``test_coverage_audit.py`` at 56.
-  * BY SPELLING: ``patch`` / ``patch.object`` 47 files and 309 hits,
-    ``monkeypatch.setattr`` 26 files and 220 hits.
-  * FIVE CUTS, 6,401 -> 309, and the LAST one was the biggest correction.
-    Any patch with an unused binding: 250 files, 6,401 hits. Own-branch
-    targets only: 203 / 3,547. Nothing handed over: 111 / 1,025, then
-    97 / 692 once ``patch(target, new)``'s second POSITIONAL argument was
-    read as the replacement it is. Test bodies only, plus the ``@patch``
-    decorator form: 110 / 786 over the whole ``with`` shape.
-  * THEN 786 -> 309, because the mock is very often asserted AFTER the
-    ``with`` block closes, not inside it. Reading only the block's own
-    statements convicted 51 files and 331 hits that are perfectly sound.
-    That single mistake was worth more than half the remaining count.
-
-WHICH OF THE DISPATCH'S EVIDENCE LINES IT CONVICTS:
-
-  * ``test_ceiling_guard.py`` -- 14 lines, every ``log_operation`` discard.
-    CONVICTED, and this is the reviewer's own finding 5. Its line 278 is NOT
-    convicted: it binds two patchers and asserts ``assert_not_called`` on
-    both, one line below the block. That is the cure, working.
-  * ``test_handlers_filesystem.py`` -- 15 lines. CONVICTED at 71 and 89, the
-    ``log_operation`` halves of those two ``with`` blocks.
-  * ``test_handlers_filesystem.py`` 68 and 83, the
-    ``whitelist.config.load_project_config`` patches: **DECLINED, and the
-    reviewer agrees the defect is real but it is not this one.** Its verdict
-    is OUT-OF-PLACE because ``filter_paths`` NEVER REACHES the patched
-    function -- a dead patch, not a discarded one. That needs the product's
-    call graph; one file's AST cannot see it. Both also carry
-    ``return_value=``, so the mock is not discarded, it is answering.
-  * ``test_share.py`` 100, 112, 122: **DECLINED, and they are right.** Each
-    is ``monkeypatch.setattr(share_module, "run_share", lambda ...:
-    ran.append(...))`` followed by ``assert ran == []``. The reviewer marked
-    them SOUND -- "recorder proves run_share unreached". A recorder that is
-    asserted is the cure, not the defect.
+Reference: discarded_patch.md
 """
 
 import ast
@@ -105,20 +25,16 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "DISCARDED_PATCH"
 STANDARD_KEY = "discarded_patch"
 
-#: The product's import root.
 PRODUCT = "aipass"
 
 #: A branch's test package: what is imported from it is test code, not the product.
 TESTS = "tests"
 
-#: Prefix that makes a function a test, which is the only unit this rule judges.
 TEST_PREFIX = "test_"
 
-#: The two spellings of a patch that this rule can read a target off.
 _PATCH_VERBS: frozenset[str] = frozenset({"patch", "object"})
 
-#: Keywords that either DRIVE the product or shape what the mock will refuse.
-#: Any one of them means the replacement is in use, not thrown away.
+#: Keywords that DRIVE the product or shape the mock: the replacement is in use.
 _HANDED_OVER: frozenset[str] = frozenset(
     {"return_value", "side_effect", "new", "new_callable", "wraps", "autospec", "spec"}
 )
@@ -151,10 +67,8 @@ def _base_name(node: ast.expr) -> str:
 def branch_of(module_path: str) -> str:
     """The branch a test file lives in, read from its own path.
 
-    ``src/aipass/backup/tests/test_x.py`` is @backup's, so
-    ``aipass.backup.*`` is its own code and everything else is an edge. The
-    path is the only honest source: a test file imports a dozen branches and
-    no import tells you which one it belongs to.
+    The path is the only honest source: a test file imports a dozen branches and no import
+    tells you which one it belongs to.
     """
     parts = Path(module_path).resolve().parts
     for index in range(len(parts) - 1, 0, -1):
@@ -164,14 +78,7 @@ def branch_of(module_path: str) -> str:
 
 
 def _own_names(tree: ast.Module, branch: str) -> Set[str]:
-    """Names this file binds from its OWN branch's package, its tests/ excepted.
-
-    A name imported from ``aipass.<branch>.tests.support_x`` is test code --
-    a constant the split rules moved out of the file -- and is judged exactly as
-    the same constant bound in the file would be (1.1.0, fleet green split legs:
-    api duplicated its PATCH_* per file because the import convicted and the
-    local binding did not).
-    """
+    """Names this file binds from its OWN branch's package, its tests/ excepted."""
     package = f"{PRODUCT}.{branch}"
     tests = f"{package}.{TESTS}"
     names: Set[str] = set()
@@ -188,15 +95,8 @@ def _own_names(tree: ast.Module, branch: str) -> Set[str]:
 def _tests(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.AST], Set[str]]]:
     """Each test, its own nodes, and every name read inside it -- ONE descent.
 
-    Three separate walks (find the tests, collect each one's names, find each
-    one's ``with`` blocks) re-walk every node three times, and the names pass
-    used ``ast.unparse`` on top. One stack descent carrying the enclosing test
-    down took the fleet from 8.1s with identical findings -- the same shape
-    ``state_leak`` needed for the same reason.
-
-    Names are collected as ``ast.Name`` ids rather than rendered source: a
-    binding called ``m`` matched the letter m inside any identifier when the
-    body was text.
+    One stack descent carrying the enclosing test down, not three walks. Names are
+    ``ast.Name`` ids, not rendered source: a binding ``m`` matched the letter m in text.
     """
     nodes: Dict[int, List[ast.AST]] = {}
     names: Dict[int, Set[str]] = {}
@@ -233,14 +133,7 @@ def _targets_own_branch(call: ast.Call, branch: str, own: Set[str]) -> bool:
 
 
 def _handed_over(call: ast.Call) -> bool:
-    """Whether a replacement was handed to the patch rather than left as a bare mock.
-
-    ``patch(target, NEW)`` puts the replacement in the SECOND positional slot
-    and ``patch.object(obj, "name", NEW)`` in the third. Missing that cost
-    333 false convictions -- every ``patch("...FLOW_JSON_DIR", tmp_path)`` in
-    @flow and every ``patch("...MODULES_DIR", tmp_path)`` in @aipass, which
-    are the seam pointing the product at a test-owned directory.
-    """
+    """Whether a replacement was handed to the patch rather than left as a bare mock."""
     if {keyword.arg for keyword in call.keywords} & _HANDED_OVER:
         return True
     slot = 2 if _tail_name(call.func) == "patch" else 3
@@ -255,21 +148,7 @@ def _is_monkeypatch(node: ast.AST) -> bool:
 
 
 def _anonymous_silence(call: ast.Call) -> bool:
-    """Whether the replacement handed over is a throwaway nothing can observe.
-
-    ``monkeypatch.setattr`` has no bare-mock form -- the replacement is a
-    required argument -- so ``_handed_over`` acquits every one of the fleet's
-    1,838 own-branch calls. 222 of them hand over something ANONYMOUS:
-    ``Mock()`` with no arguments, or ``lambda *a, **k: None``. Nothing binds
-    it, it records nothing, and the product's call to the silenced function is
-    exactly as unpinned as a discarded ``patch``.
-
-    A NAMED replacement is acquitted even when nothing asks it, because the
-    name is read at the ``setattr`` call itself and no name set can tell the
-    two apart. A recorder lambda is acquitted by its body: @backup's
-    ``test_share.py`` 100, 112 and 122 append to a list and then assert on it,
-    which both reviewers marked SOUND.
-    """
+    """Whether the replacement handed over is a throwaway nothing can observe."""
     replacement = call.args[-1]
     if isinstance(replacement, ast.Lambda):
         return isinstance(replacement.body, ast.Constant) and replacement.body.value is None
@@ -307,12 +186,7 @@ def _loaded(node: ast.AST) -> Set[str]:
 
 
 def _seeds(node: ast.AST) -> Set[str]:
-    """Names this one node puts in front of an oracle, or configures as an answer.
-
-    An ``assert`` reads them; an ``assert_*`` call asks its mock and its
-    arguments; ``m.return_value = ...`` / ``m.side_effect = ...`` hands the
-    mock an answer, which is what a patch that is not discarded does.
-    """
+    """Names this one node puts in front of an oracle, or configures as an answer."""
     if isinstance(node, ast.Assert):
         return _loaded(node.test)
     if isinstance(node, ast.Call) and _tail_name(node.func).startswith("assert"):
@@ -334,14 +208,7 @@ def _binding(node: ast.AST) -> Tuple[List[ast.AST], ast.AST | None]:
 
 
 def _witnessed(nodes: List[ast.AST]) -> Set[str]:
-    """Names that reach an oracle, directly or through a name bound from them.
-
-    Reading a mock is not observing it (seedgo, fleet green leg 9; ai_mail's
-    report): ``with patch(...) as m`` followed by ``_ = m`` or ``print(m)``
-    cleared the row while it pinned nothing. ``calls = m.call_args_list`` then
-    ``assert calls == [...]`` still observes m, so a binding carries the
-    witness back to every name its value read.
-    """
+    """Names that reach an oracle, directly or through a name bound from them."""
     witnessed: Set[str] = set()
     sources: Dict[str, Set[str]] = {}
     for node in nodes:
@@ -360,15 +227,7 @@ def _witnessed(nodes: List[ast.AST]) -> Set[str]:
 
 
 def _discarded_in_with(nodes: List[ast.AST], branch: str, own: Set[str], body: Set[str]) -> List[Tuple[int, str]]:
-    """Every ``with patch(...)`` in this test whose mock nothing ever touches.
-
-    ``body`` is every name read anywhere in the WHOLE test, not just inside
-    the ``with`` block. ``snap.assert_not_called()`` lives AFTER the block
-    closes -- @backup's ``test_ceiling_guard.py:278`` binds two patchers and
-    asserts both one line below the ``with``. Reading only the block's own
-    statements convicted it twice, and that one mistake was 51 files and 331
-    hits fleet-wide: 640 hits fell to 309.
-    """
+    """Every ``with patch(...)`` in this test whose mock nothing ever touches."""
     findings: List[Tuple[int, str]] = []
     for node in nodes:
         if not isinstance(node, ast.With):
@@ -458,15 +317,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for patches of its own branch that nothing observes.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for patches of its own branch that nothing observes."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -489,8 +340,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, _one_check(True, f"Every patch of @{branch}'s own code is observed"), 100)
 
     # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per patch would show the
-    # first and hide the rest behind a count.
+    # check and appends "(+N more)", so one check per patch would hide the rest.
     detail = "\n".join(
         f"{path.name}:{line} {target} is patched and never observed - {CURE}" for line, target in findings
     )

@@ -72,6 +72,11 @@ Two arms, and only two:
 A literal is *rooted* when it starts with `/` or `\`, or when it starts with a
 drive letter: `C:/tmp`, `C:\tmp`.
 
+A resolver reached through a module that names its dialect — `ntpath.abspath`,
+`posixpath.realpath` — is not flagged. `os.path` is the hazard because it is
+`posixpath` on one leg and `ntpath` on the other; `ntpath` means one thing on
+every host, and it is the cure a flagged site is rewritten into.
+
 ### Arm 3, split down the middle — `RENDERED-PATH` (scored) and `RETURNED-PATH` (nominated)
 
 The arm reads an `==`, `!=`, `in`, `not in`, `startswith` or `endswith` where

@@ -3,53 +3,13 @@
 # Description: nominator - a raw needle matched against output the same test normalises (WIDTH-FRAGILE-ASSERT)
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-A raw substring matched against captured console output, in a test that
+"""A raw substring matched against captured console output, in a test that
 ELSEWHERE normalises the SAME output for exactly this reason.
 
-THE DEFECT. Rich - and every other console renderer - wraps at the terminal
-width. A literal needle matched against un-normalised captured output is
-therefore green only above some column count, and red below it, with nothing
-in the test naming the dependency. The suite passes on the author's terminal
-and fails in a narrow CI pane, which reads as a flake rather than as the
-measurement it actually is.
-
-MEASURED, on the canary fixture this rule was calibrated against: at
-``COLUMNS=40`` and ``41`` the suite reports **18 failures**, at ``42`` it
-reports **nine**, and from ``43`` upward all **34** tests pass. Nothing in the
-suite mentions a column count.
-
-WHY THE AUTHOR'S OWN INCONSISTENCY IS THE WHOLE SIGNAL. Matching raw console
-output is not a defect on its own - most suites do it, most of the time
-correctly, and a rule that flagged every ``assert "Usage:" in out`` would
-nominate the fleet and teach nobody anything. What this rule looks for is
-narrower and far more damning: the SAME test that normalises a haystack in one
-assertion matches a raw literal against that haystack in the next. The author
-who wrote the normalising call already knew the output wraps. The raw assert
-beside it is an oversight, not a style choice, and it is the one the author
-would fix if shown it.
-
-WHAT IT DELIBERATELY DOES NOT FLAG:
-
-  - a test that never normalises anything. No inconsistency, no nomination -
-    however raw its needles are.
-  - a haystack that is not captured console output. A needle matched against a
-    file's bytes or a return value does not wrap, so the species does not
-    apply and this rule does not look there.
-  - the normalising assertion itself. Both of its sides are normalised; it is
-    the correct half of the pair and it is what proves the other half wrong.
-  - a call that cannot be a normalised form of the text - ``len``, ``bool``,
-    ``int`` and friends return a number, not a comparable rendering.
-
-NOMINATION, NEVER CONVICTION (Law M1). A test can have a legitimate reason to
-match one needle raw and normalise another - a needle with no spaces in it
-cannot be broken by a word wrap, and an author may have reasoned exactly that.
-This tier names the inconsistency and reports BOTH halves of it in evidence,
-with line numbers, so a reader can settle it in one glance. The execution tier
-convicts.
+Reference: raw_needle.md
 """
 
 import ast
@@ -58,23 +18,17 @@ from typing import Dict, List, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
 
-#: The adapter group this nominator fills. Namespaced by the core.
 GROUP = "static_raw_needle"
 
 #: pytest's capture fixtures. A haystack is only "console output" when it came
 #: from one of these - a needle matched against file bytes does not wrap.
 CAPTURE_FIXTURES: frozenset = frozenset({"capsys", "capfd", "capsysbinary", "capfdbinary"})
 
-#: The method that drains a capture fixture.
 CAPTURE_READER = "readouterr"
 
-#: The two streams a drained capture exposes.
 CAPTURE_STREAMS: frozenset = frozenset({"out", "err"})
 
-#: Calls that CANNOT be a normalised rendering of the text, because what they
-#: return is a number or a type rather than something a needle can live in.
-#: Without this, ``assert len(out) > 0`` beside ``assert "x" in out`` would
-#: read as an author normalising their own haystack, and it is neither.
+#: They return a number or a type, so ``len(out) > 0`` is not the author normalising ``out``.
 NON_NORMALISING_CALLS: frozenset = frozenset(
     {"len", "bool", "int", "float", "id", "type", "hash", "isinstance", "print", "getattr", "hasattr"}
 )
@@ -115,17 +69,7 @@ SPECIFICATION = {
 def _key(node: ast.AST) -> str:
     """A stable source-text key for an expression, or "" when it has none.
 
-    Two expressions are "the same haystack" when they spell the same thing, so
-    the key is the source text rather than the node. An expression that will
-    not unparse is REPORTED, never skipped quietly: a haystack this rule could
-    not read is a haystack it never cleared, and Law S1 forbids that reading
-    the same as clean.
-
-    Args:
-        node: Any expression node.
-
-    Returns:
-        The unparsed source text, or "" when it could not be produced.
+    An expression that will not unparse is reported, never skipped (Law S1).
     """
     try:
         return ast.unparse(node)
@@ -154,20 +98,7 @@ def _is_capture_drain(node: ast.AST) -> bool:
 def _capture_keys(unit: corpus.TestUnit) -> Set[str]:
     """Every expression in a unit that holds captured console output.
 
-    Two spellings, both of them common and both present in the calibration
-    fixture: the capture read used inline (``capsys.readouterr().err``), and a
-    local name bound from one (``err = capsys.readouterr().err``). A tuple
-    unpack of the drained result binds both streams at once.
-
-    ONE HOP, DELIBERATELY. A name bound from a name bound from a capture is
-    not followed, which biases this rule toward FEWER nominations - the safe
-    direction for a rule whose whole claim is an author's inconsistency.
-
-    Args:
-        unit: The test function.
-
-    Returns:
-        Source-text keys naming captured output.
+    One hop, deliberately: a name bound from a name is not followed (toward fewer nominations).
     """
     keys: Set[str] = set()
 
@@ -199,15 +130,7 @@ def _comparisons_in(unit: corpus.TestUnit) -> List[ast.Compare]:
 
 
 def _raw_needles(unit: corpus.TestUnit, capture: Set[str]) -> List[Tuple[str, str, int, ast.Compare]]:
-    """Literal-in-captured-output tests, un-normalised.
-
-    Args:
-        unit: The test function.
-        capture: Keys naming captured console output in this unit.
-
-    Returns:
-        `(needle, haystack_key, lineno, comparison)` per raw membership test.
-    """
+    """Literal-in-captured-output tests, un-normalised."""
     found: List[Tuple[str, str, int, ast.Compare]] = []
 
     for node in _comparisons_in(unit):
@@ -224,19 +147,7 @@ def _raw_needles(unit: corpus.TestUnit, capture: Set[str]) -> List[Tuple[str, st
 
 
 def _normalisers(unit: corpus.TestUnit, capture: Set[str]) -> Dict[str, List[Tuple[str, int, int]]]:
-    """Every comparison that puts a captured haystack THROUGH a call.
-
-    This is the other half of the pair, and the half that makes the rule
-    precise: it is the author's own statement that this output must be
-    normalised before it can be matched.
-
-    Args:
-        unit: The test function.
-        capture: Keys naming captured console output in this unit.
-
-    Returns:
-        haystack key -> `(call name, lineno, id of the enclosing comparison)`.
-    """
+    """Every comparison that puts a captured haystack THROUGH a call."""
     found: Dict[str, List[Tuple[str, int, int]]] = {}
 
     for comparison in _comparisons_in(unit):
@@ -295,14 +206,7 @@ def _row(unit: corpus.TestUnit, needle: str, haystack: str, lineno: int, call_na
 
 
 def nominate(scanned: corpus.Corpus) -> List[dict]:
-    """Every raw needle matched against output its own test normalises.
-
-    Args:
-        scanned: The parsed corpus.
-
-    Returns:
-        Nomination rows, one per raw membership test with a normalised twin.
-    """
+    """Every raw needle matched against output its own test normalises."""
     rows: List[dict] = []
 
     for parsed in scanned.files:

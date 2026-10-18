@@ -36,6 +36,28 @@ The checker parses each Python file with `ast.parse()` and walks every `ExceptHa
 
 ---
 
+## What is not a silent catch
+
+Four shapes are not silent. Each is a separate named clause, so a finding removed from the
+checker traces to the clause that removed it.
+
+- **The exception becomes a value.** The handler names a specific exception type (not a bare
+  `except:` or `except Exception`; dotted names compare whole, so `pytest.skip.Exception` is
+  specific) and its body is exactly one `return` of a constant or of the empty answer of any
+  type (`[]`, `{}`, `()`, `set()`, `frozenset()`, zero-argument `dict()` / `list()` / `tuple()`).
+  `except FileNotFoundError: return "absent"` hands the caller the classification, and a logger
+  call there would route production logging out of a test suite. A return that uses the bound
+  exception (`except AssertionError as exc: return ("FAILED", str(exc))`) carries more than a
+  constant and counts too. `return [1, 2]` or `set(c)` fabricates an answer and keeps its finding.
+- **The failure reaches a stream.** A body that writes to `sys.stdout` or `sys.stderr` puts the
+  exception on the operator's screen, which is not silence. This holds anywhere; whether a stream
+  is the right instrument is the CLI standard's question, and that standard still asks it.
+- **The handler guards a diagnostic.** The block it protects does nothing but report, so what
+  is caught is the failure of the report.
+- **The exception is handed on.** It leaves the handler as an argument.
+
+---
+
 ## Code Examples
 
 ### Violations

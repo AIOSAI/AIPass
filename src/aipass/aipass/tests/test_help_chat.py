@@ -3,7 +3,7 @@
 # Description: Tests for help_chat module — section-aware v2 (DPLAN-0282 P3)
 # Version: 2.1.4
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/help_chat.py."""
@@ -38,10 +38,7 @@ def _ask(
 ) -> tuple[str, str, dict]:
     """Run `aipass help <words>` over one README under tmp_path; return (stdout, stderr, logged data).
 
-    Every branch in `branches` (default ["drone"]) resolves to the same README path, both in
-    help_chat and in readme_map (which read_readme_lines reads through). `readme` None leaves no
-    README path at all. The logged data is what handle_command hands json_handler.log_operation
-    ({} when it logs nothing).
+    Every branch resolves to the same README, in help_chat and readme_map; `readme` None leaves none.
     """
     path = readme_path or tmp_path / "src" / "aipass" / "drone" / "README.md"
     if readme is not None:
@@ -59,10 +56,6 @@ def _ask(
     return out, err, (call.kwargs["data"] if call else {})
 
 
-# =============================================================================
-# CONSTANTS / SHARED DATA
-# =============================================================================
-
 _FAKE_BRANCHES = ["drone", "seedgo", "prax", "cli", "flow", "ai_mail", "spawn"]
 
 _SAMPLE_README = """\
@@ -79,11 +72,6 @@ Drone supports multiple branches.
 
 # Ensure encoding='utf-8' appears in this file (PATTERN check scans file-wide)
 _ENCODING = "utf-8"
-
-
-# =============================================================================
-# HELPERS — reduce nesting in test functions via ExitStack
-# =============================================================================
 
 
 def _call_handle_command_drone_question(readme_content: str, readme_path: Path):
@@ -139,11 +127,6 @@ def _capture_depth_offer_prints(readme_path: Path) -> None:
         handle_command("help", ["drone"])
 
 
-# =============================================================================
-# Keyword extraction (_extract_keywords), read through `aipass help`
-# =============================================================================
-
-
 class TestExtractKeywords:
     """Keyword extraction, read from the keywords `aipass help` logs for its question."""
 
@@ -194,11 +177,6 @@ class TestExtractKeywords:
         assert data["keywords"] == ["send", "mail", "another", "branch"]
 
 
-# =============================================================================
-# Branch matching (_match_branches), read through `aipass help`
-# =============================================================================
-
-
 class TestMatchBranches:
     """Branch matching, read from the branches `aipass help` logs as searched (first three)."""
 
@@ -246,12 +224,6 @@ class TestMatchBranches:
         """Passing the same keyword twice must not produce duplicate branch entries."""
         _out, _err, data = _ask(tmp_path, ["drone", "drone"], capsys, branches=_FAKE_BRANCHES)
         assert data["branches_searched"] == ["drone"]
-
-
-# =============================================================================
-# Section splitting and ranking (_split_sections, _score_section, _search_readme),
-# read through `aipass help`
-# =============================================================================
 
 
 class TestSplitSections:
@@ -377,11 +349,6 @@ class TestSearchReadme:
         assert out.index("drone — Drone") < out.index("drone — Commands")
 
 
-# =============================================================================
-# Answer rendering (_format_answer), read through `aipass help`
-# =============================================================================
-
-
 class TestFormatAnswer:
     """Answer rendering — citations, titles, truncation — as `aipass help` prints it."""
 
@@ -429,11 +396,6 @@ class TestFormatAnswer:
         """A preamble section with no heading renders with an (intro) label."""
         out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme="drone preamble text\n")
         assert "drone — (intro)" in out
-
-
-# =============================================================================
-# handle_command
-# =============================================================================
 
 
 class TestHandleCommand:

@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/aipass_proof/
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_proof/interface.py and apps/handlers/aipass_proof/triplet.py."""
@@ -15,11 +15,6 @@
 
 from aipass.seedgo.apps.handlers.aipass_proof.interface import scan as interface_scan
 from aipass.seedgo.apps.handlers.aipass_proof.triplet import scan as triplet_scan
-
-
-# ---------------------------------------------------------------------------
-# Tests -- interface.scan
-# ---------------------------------------------------------------------------
 
 
 def test_interface_scan_missing_directory(tmp_path):
@@ -78,16 +73,8 @@ def test_interface_scan_branch_level_checker(tmp_path):
     assert result["pass_count"] == 1
 
 
-# ---------------------------------------------------------------------------
-# Tests -- interface AST helpers
-# ---------------------------------------------------------------------------
-
-
 def test_extract_audit_scope_from_source(tmp_path):
-    """_extract_audit_scope extracts AUDIT_SCOPE value from AST.
-
-    Mutant: AUDIT_SCOPE's value never read (return None) in apps/handlers/aipass_proof/interface.py — killed.
-    """
+    """_extract_audit_scope extracts AUDIT_SCOPE value from AST."""
     (tmp_path / "example_check.py").write_text(
         'AUDIT_SCOPE = "entry_point"\nx = 1\n\ndef check_module(module_path, bypass_rules=None):\n    return {}\n',
         encoding="utf-8",
@@ -97,18 +84,10 @@ def test_extract_audit_scope_from_source(tmp_path):
 
 
 def test_extract_audit_scope_none_when_missing(tmp_path):
-    """_extract_audit_scope returns None when AUDIT_SCOPE not defined.
-
-    Mutant: a missing AUDIT_SCOPE read as "all_files" in apps/handlers/aipass_proof/interface.py — killed.
-    """
+    """_extract_audit_scope returns None when AUDIT_SCOPE not defined."""
     (tmp_path / "example_check.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
     result = interface_scan(tmp_path)
     assert result["results"][0]["audit_scope"] is None
-
-
-# ---------------------------------------------------------------------------
-# Tests -- triplet.scan
-# ---------------------------------------------------------------------------
 
 
 def test_triplet_scan_complete_triplet(tmp_path):

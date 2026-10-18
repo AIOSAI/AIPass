@@ -3,14 +3,11 @@
 # Description: Catchup Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Catchup Orchestration Module
-
-Thin router for the catchup command. Delegates query logic
-to handlers/catchup/catchup_ops.py and renders results with Rich.
 
 Handles: catchup command.
 """
@@ -44,22 +41,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle catchup-related commands.
-
-    Args:
-        command: Command name (catchup)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle catchup-related commands."""
     if command != "catchup":
         return False
 
@@ -68,11 +51,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     return _handle_catchup()
-
-
-# =============================================================================
-# DISPLAY HANDLER
-# =============================================================================
 
 
 def _handle_catchup() -> bool:
@@ -94,7 +72,6 @@ def _handle_catchup() -> bool:
         console.print(f"[bold cyan]Since your last visit[/bold cyan] [dim]({time_label}):[/dim]")
     console.print()
 
-    # Mentions
     unread_mentions = data["unread_mentions"]
     if unread_mentions:
         for mention in unread_mentions:
@@ -105,7 +82,6 @@ def _handle_catchup() -> bool:
     else:
         console.print("  [yellow]@MENTIONS:[/yellow] [dim]None[/dim]")
 
-    # Replies
     replies = data["replies"]
     if replies:
         reply_posts: dict = {}
@@ -123,7 +99,6 @@ def _handle_catchup() -> bool:
     else:
         console.print("  [green]REPLIES:[/green] [dim]None[/dim]")
 
-    # Trending
     trending = data["trending"]
     if trending and trending["vote_score"] > 0:
         console.print(
@@ -134,12 +109,10 @@ def _handle_catchup() -> bool:
     else:
         console.print("  [bold cyan]TRENDING:[/bold cyan] [dim]Nothing trending right now[/dim]")
 
-    # New activity
     console.print(
         f"  [blue]NEW:[/blue] {data['new_posts_count']} new post(s), {data['new_comments_count']} new comment(s)"
     )
 
-    # Karma
     karma_change = data["karma_change"]
     if karma_change > 0:
         console.print(f"  [green]KARMA:[/green] +{karma_change} since last session")
@@ -150,7 +123,6 @@ def _handle_catchup() -> bool:
 
     console.print()
 
-    # Onboarding nudge
     nudge = result.get("nudge")
     if nudge:
         console.print(f"  [yellow]TIP:[/yellow] {nudge}")

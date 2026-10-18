@@ -3,14 +3,11 @@
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
 # Version: 1.2.3
 # Created: 2026-08-13
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
-# The canaries below assert that asking for help NEVER performs the action.
-# Every doing-path is stubbed before the canary runs (prax doctrine: the
-# failing state RUNS, so a red canary must not be able to reach a real init,
-# install, enroll or spawn).
+# Every doing-path is stubbed first: a red canary must never reach a real init, install, enroll or spawn.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module under apps/modules/ this file gates parses and imports
@@ -28,11 +25,6 @@ from aipass.aipass.apps.modules import help_chat, init_flow, trust
 
 # Ensure encoding='utf-8' appears (PATTERN check)
 _ENCODING = "utf-8"
-
-
-# =============================================================================
-# TestWantsHelp — the pure predicate
-# =============================================================================
 
 
 class TestWantsHelp:
@@ -84,21 +76,14 @@ class TestWantsHelp:
         assert wants_help(["myapp", "--template", "python"]) is False
 
 
-# =============================================================================
-# Per-module canaries — asking must never act
-# =============================================================================
-
-
 def _discovered(stem: str):
-    """The module for a stem, found the way the CLI finds it: discover_modules() (fleet green leg 5)."""
+    """The module for a stem, found the way the CLI finds it: discover_modules()."""
     found = {module.__name__.rsplit(".", 1)[-1]: module for module in discover_modules()}
     assert stem in found, f"{stem} is not a discovered command module"
     return found[stem]
 
 
-# (module stem, command, args that would ACT if the gate missed). Only the modules
-# the CLI routes to: discover_modules skips _doctor_fix and _doctor_wire, so no user
-# reaches their handle_command (devpulse's ruling, fleet green leg 9).
+# (module stem, command, args that would ACT if the gate missed), only modules the CLI routes to;
 # test_gate_cases_cover_every_routed_module pins this list to discover_modules().
 _GATE_CASES = [
     ("init_flow", "init", ["agent", "--help"]),
@@ -121,9 +106,7 @@ _GATE_CASES = [
 def test_gate_cases_cover_every_routed_module() -> None:
     """The canary list is the set of modules the CLI routes to, read from the product, never empty.
 
-    A parametrized loop over an empty or short list asserts nothing for what it
-    misses: before leg 9 the list carried two modules the CLI never routes to and
-    lacked baud, which the CLI does route to.
+    A parametrized loop over a short list asserts nothing for what it misses.
     """
     routed = {module.__name__.rsplit(".", 1)[-1] for module in discover_modules()}
     assert routed, "discover_modules() found no command module"
@@ -134,9 +117,7 @@ def test_gate_cases_cover_every_routed_module() -> None:
 def _stub_every_doing_path():
     """Stub every path that could spawn, install, enroll or write.
 
-    Autouse and fail-closed: a canary that reaches a REAL init would create
-    an agent or scaffold a directory. Patched at the source module so it does
-    not matter where a caller imported the name from.
+    Patched at the source module, so where a caller imported the name from cannot matter.
     """
     stubs = {
         "subprocess.run": MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr="")),
@@ -227,9 +208,7 @@ class TestInitFlowStandaloneDoor:
 class TestTrustEnrollmentCanary:
     """The shape live-proven this morning: `aipass trust <dir> --help` enrolled.
 
-    Uses a REAL directory with a real .aipass/hooks.json so the probe reaches
-    the enrollment call site — `enroll` itself is stubbed, so a red run
-    records the attempt without touching the trust registry.
+    A real enrollable directory, so the probe reaches the stubbed enroll call site.
     """
 
     def test_help_probe_does_not_enroll(

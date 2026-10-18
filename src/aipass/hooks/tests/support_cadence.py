@@ -3,15 +3,12 @@
 # Description: Helpers shared by test_cadence.py and test_cadence_regroup.py: module path, cache reset, state writer
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Helpers for the cadence tests (no test_ prefix: never collected).
 
-Shared by test_cadence.py (the fire decision) and test_cadence_regroup.py (the
-regroup and counter machinery), both of apps/modules/cadence.py. The caches
-_reset_module_globals writes are put back by conftest's _restore_cadence_globals,
-which both files request for every test through pytestmark.
+conftest's _restore_cadence_globals puts back the caches _reset_module_globals writes.
 """
 
 # The declared pass — what is NOT tested here, and what covers it instead:

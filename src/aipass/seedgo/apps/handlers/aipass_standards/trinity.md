@@ -156,6 +156,37 @@ Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, 
 
 **Retired 2026-09-15 — Todos hygiene** (was group 8, weight 5). It flagged a todo kept as `status: done`. Todos v2 (DPLAN-0345) has no `status` field, so that trophy can only be spelled as a key outside the closed shape, which Entry shapes flags by name; the 5 points moved there. A replacement was measured first and not built: a done-marker read of task text (`DONE`, `✅`, `[x]`, …) found 1 hit in 191 fleet todos, and it was not a trophy. Nor is a pad over its size a violation: the roll cures it, the same as sessions past their keep count.
 
+**Unmeasurable inputs fail by name.** A missing, unreadable or invalid file fails every group
+that depends on it; a field of the wrong type is reported with the type found, never coerced or
+`len()`-ed; an unreadable `memory.config.json` fails Char caps and Entry shapes (binary 0)
+instead of falling back to remembered numbers or a remembered shape; unreadable gold templates
+fail Meta lines (binary 0). A config that publishes no `fields` for a section is an error row
+naming the key. `passport.json` matters for existence only: nothing inside a passport is read.
+
+**Units per group:**
+- Entry shapes — every entry in the four containers; a container that is missing, not a list,
+  or in an unreadable file counts as one failed unit.
+- Top-level keys — 17 fixed sub-rules: eight per file (parses, key set, key order, duplicate
+  keys, `document_metadata` fields, no `status` block, `document_name`, `managed_by`) plus one
+  cross-file `managed_by` agreement. An unreadable file fails all eight of its own.
+  `document_metadata` is a closed set; `status` keeps its own message.
+- Ordering & numbering, Char caps — every entry.
+- File set — the five canonical names plus one unit per stray.
+- Meta lines & `_usage` — seven byte-match units: four `*_meta` lines, two `_usage` strings, and
+  the `guidelines` block of observations.json.
+- Receipt — six units: parses, `template_versions` shape, `template_versions` values, and the
+  three timestamp/actor strings.
+- Freshness — two units, one per file.
+
+**A clean checkout is not measured.** `.trinity/` and `AIPASS_REGISTRY.json` are both
+gitignored, so a fresh clone (CI) carries no memories. When BOTH are absent — no registry
+anywhere up the tree and no citizen `.trinity/` one level beside the branch — the standard
+returns `not_applicable` with score `None`, and `branch_audit` leaves it out of the gating
+average: 0 would blame the branch for the environment, 100 would claim a measurement that never
+happened. A live installation that has lost one branch's `.trinity/` still has the registry, so
+that stays a violation. `spawn/templates/*/.trinity` is tracked but sits deeper, so it does not
+make a clone look live. An unreadable fleet directory answers "live installation".
+
 ---
 
 ## Examples
@@ -205,7 +236,8 @@ heaviest because it breaks the machinery, freshness lightest):
 | Receipt | 8 |
 | Freshness | 3 |
 
-Final score = weighted sum of each group's own 0-100 subscore. Subscores are proportional
+Final score = weighted sum of each group's own 0-100 subscore, rounded, and never rounded up
+to 100 while any group is below 100. Subscores are proportional
 where a natural denominator exists (entries checked, files checked), binary otherwise.
 
 **One scoring rule carries THE ONE LAW:** a group holding any violation record never scores

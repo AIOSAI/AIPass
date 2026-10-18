@@ -3,21 +3,12 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/monitor/memory_watcher.py."""
 
-# Covers:
-#     from aipass.memory.apps.handlers.monitor.memory_watcher import start_memory_watcher
-#     from aipass.memory.apps.handlers.monitor.memory_watcher import stop_memory_watcher
-#     from aipass.memory.apps.handlers.monitor.memory_watcher import is_memory_watcher_active
-#     from aipass.memory.apps.handlers.monitor.memory_watcher import get_watcher_status
-#     from aipass.memory.apps.handlers.monitor.memory_watcher import MemoryFileWatcher
-#
-# Tests watcher lifecycle (start/stop/status), the MemoryFileWatcher.on_modified
-# callback, and edge cases like missing watchdog or already-running observers.
 # All tests use mocks -- no live filesystem watchers or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -38,19 +29,10 @@ from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.schema import normalize
 
 
-# ---------------------------------------------------------------------------
-# Helpers: prepare the mock graph needed to import memory_watcher
-# ---------------------------------------------------------------------------
-
-
 def _pin_lazy_import(monkeypatch, module):
     """Make a lazy ``from <module> import name`` inside the watcher read THIS real module.
 
-    The lazy import resolves through sys.modules when it runs, and other files
-    in this suite evict and re-import these modules. Left to chance, the lookup
-    could land on a fresh, unpatched copy — for the orchestrator that is a real
-    rollover over the live fleet. So the real module imported at the top of
-    this file is registered for the test (restored at teardown) and patched.
+    Other files evict and re-import these modules; an unpatched copy of the orchestrator is a real fleet rollover.
     """
     monkeypatch.setitem(sys.modules, module.__name__, module)
     return module
@@ -59,13 +41,7 @@ def _pin_lazy_import(monkeypatch, module):
 def _prepare_watcher_mocks(monkeypatch):
     """Patch, at the edge, every collaborator memory_watcher.py reaches.
 
-    The watcher module itself is the real one imported at the top of this
-    file. Its bound collaborators (line counter, detector check, watchdog
-    Observer, json service, logger) are replaced on the module; the two it
-    imports lazily inside functions (normalize, rollover orchestrator) are
-    replaced on their real modules, which is where the lazy import reads them.
-
-    Returns a dict of key mock objects so tests can assert against them.
+    The two lazy imports (normalize, rollover orchestrator) are patched on their real modules, where they read.
     """
     mock_update_line_count = MagicMock(return_value={"success": True, "lines": 150})
     monkeypatch.setattr(memory_watcher, "update_line_count", mock_update_line_count)
@@ -102,21 +78,12 @@ def _prepare_watcher_mocks(monkeypatch):
 
 
 def _import_watcher(monkeypatch):
-    """Patch the real memory_watcher's edges and return it.
-
-    Returns (module, mocks_dict).
-    """
+    """Patch the real memory_watcher's edges and return (module, mocks_dict)."""
     mocks = _prepare_watcher_mocks(monkeypatch)
 
-    # Reset the global _observer to None for a clean slate each test
     monkeypatch.setattr(memory_watcher, "_observer", None)
 
     return memory_watcher, mocks
-
-
-# ===========================================================================
-# Tests: start_memory_watcher
-# ===========================================================================
 
 
 class TestStartMemoryWatcher:
@@ -142,7 +109,6 @@ class TestStartMemoryWatcher:
         """Starting when observer is already alive returns error."""
         mod, mocks = _import_watcher(monkeypatch)
 
-        # Simulate already running observer
         mock_existing = MagicMock()
         mock_existing.is_alive.return_value = True
         setattr(mod, "_observer", mock_existing)
@@ -190,11 +156,6 @@ class TestStartMemoryWatcher:
         assert result["count"] == 1
 
 
-# ===========================================================================
-# Tests: stop_memory_watcher
-# ===========================================================================
-
-
 class TestStopMemoryWatcher:
     """Verify stop_memory_watcher lifecycle."""
 
@@ -202,7 +163,6 @@ class TestStopMemoryWatcher:
         """Stopping a running watcher returns success."""
         mod, mocks = _import_watcher(monkeypatch)
 
-        # Set up a running observer
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = True
         setattr(mod, "_observer", mock_obs)
@@ -236,11 +196,6 @@ class TestStopMemoryWatcher:
         assert result["success"] is False
 
 
-# ===========================================================================
-# Tests: is_memory_watcher_active
-# ===========================================================================
-
-
 class TestIsMemoryWatcherActive:
     """Verify is_memory_watcher_active boolean checks."""
 
@@ -269,11 +224,6 @@ class TestIsMemoryWatcherActive:
         setattr(mod, "_observer", mock_obs)
 
         assert mod.is_memory_watcher_active() is False
-
-
-# ===========================================================================
-# Tests: get_watcher_status
-# ===========================================================================
 
 
 class TestGetWatcherStatus:
@@ -328,11 +278,6 @@ class TestGetWatcherStatus:
         assert len(result["paths"]) == 3
 
 
-# ===========================================================================
-# Tests: MemoryFileWatcher.on_modified
-# ===========================================================================
-
-
 class TestMemoryFileWatcherOnModified:
     """Verify MemoryFileWatcher.on_modified callback behavior."""
 
@@ -363,10 +308,7 @@ class TestMemoryFileWatcherOnModified:
         mocks["update_line_count"].assert_not_called()
 
     def test_processes_memory_file_modification(self, monkeypatch, tmp_path):
-        """Valid memory file modification triggers line count update and check.
-
-        Mutant: `check_single_file(file_path)` -> `check_single_file(file_path.parent)` reddens this.
-        """
+        """Valid memory file modification triggers line count update and check."""
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
@@ -380,10 +322,7 @@ class TestMemoryFileWatcherOnModified:
         mocks["check_single_file"].assert_called_once_with(Path(event.src_path))
 
     def test_rollover_triggered_when_threshold_exceeded(self, monkeypatch, tmp_path):
-        """When check_single_file says should_rollover, execute_rollover is called.
-
-        Mutant: dropping `self._recent_modifications.add(file_key)` before the rollover reddens this.
-        """
+        """When check_single_file says should_rollover, execute_rollover is called."""
         mod, mocks = _import_watcher(monkeypatch)
 
         mocks["check_single_file"].return_value = {
@@ -407,8 +346,7 @@ class TestMemoryFileWatcherOnModified:
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
-        # Use str(Path(...)) to match how on_modified normalizes the key
-        # (Path converts separators on Windows).
+        # str(Path(...)) matches how on_modified normalizes the key on Windows.
 
         file_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
         file_key = str(Path(file_path))
@@ -420,7 +358,6 @@ class TestMemoryFileWatcherOnModified:
 
         watcher.on_modified(event)
 
-        # Should skip and not call update_line_count
         mocks["update_line_count"].assert_not_called()
         # The file key should be removed from recent modifications after skip
         assert file_key not in watcher._recent_modifications
@@ -464,10 +401,7 @@ class TestMemoryFileWatcherOnModified:
         mocks["execute_rollover"].assert_not_called()
 
     def test_processes_observations_json(self, monkeypatch, tmp_path):
-        """observations.json files in .trinity/ are also processed.
-
-        Mutant: `update_line_count(file_path)` -> `update_line_count(file_path.parent)` reddens this.
-        """
+        """observations.json files in .trinity/ are also processed."""
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
@@ -480,10 +414,7 @@ class TestMemoryFileWatcherOnModified:
         mocks["update_line_count"].assert_called_once_with(Path(event.src_path))
 
     def test_rollover_exception_does_not_propagate(self, monkeypatch, tmp_path):
-        """If execute_rollover raises, the exception is caught.
-
-        Mutant: `logger.error(f"[memory_watcher] Rollover failed: {e}")` -> `pass` reddens this.
-        """
+        """If execute_rollover raises, the exception is caught."""
         mod, mocks = _import_watcher(monkeypatch)
         log = MagicMock()
         monkeypatch.setattr(memory_watcher, "logger", log)
@@ -500,17 +431,13 @@ class TestMemoryFileWatcherOnModified:
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
 
-        # Should not raise
         watcher.on_modified(event)
 
         mocks["execute_rollover"].assert_called_once_with()
         assert any("Rollover crashed" in str(call) for call in log.error.call_args_list)
 
     def test_normalize_called_on_modification(self, monkeypatch, tmp_path):
-        """on_modified calls normalize_memory_file before update_line_count.
-
-        Mutant: `normalize_memory_file(file_path)` -> `normalize_memory_file(file_path.parent)` reddens this.
-        """
+        """on_modified calls normalize_memory_file before update_line_count."""
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
@@ -567,14 +494,8 @@ class TestMemoryFileWatcherOnModified:
 class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
     """A dropbox and an .archive are sandboxes: nothing the watcher does reaches them.
 
-    The branch is scheduled recursively, so the observer hears a copy of a
-    memory file anywhere below it. Before leg 4 of fleet green (DPLAN-0354) the
-    handler accepted any ``.trinity/local.json`` it heard: a copy inside
-    ``<branch>/dropbox/...`` or ``<branch>/.archive/`` was rewritten by
-    normalize, measured, and its check could start a fleet rollover. The
-    handler is taken from the observer's own schedule call, so these pins judge
-    the watcher ``start_memory_watcher`` really builds. Normalize, the line
-    count, the check and the rollover are recorders; nothing is written.
+    The observer hears memory files anywhere below a recursive schedule. The handler is taken from
+    the observer's own schedule call, so these pins judge the watcher ``start_memory_watcher`` builds.
     """
 
     def _scheduled_watcher(self, monkeypatch, branch):
@@ -621,12 +542,9 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         mocks["check_single_file"].assert_called_once_with(own)
 
     def test_a_root_reached_through_a_symlink_is_heard_at_its_real_path(self, monkeypatch, tmp_path):
-        """An observer may report the real path behind a symlinked root (found by @devpulse, leg 4).
+        """An observer may report the real path behind a symlinked root .
 
-        Scheduled as the link, reported as the target: before leg 5 the two
-        spellings differed and the branch's own file was turned away in silence.
-        A platform that cannot make a symlink is asked here, and the root is
-        then the real directory itself.
+        A platform that cannot make a symlink uses the real directory as the root.
         """
         real = tmp_path / "real_branch"
         real.mkdir()
@@ -649,18 +567,8 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
 class TestTheBranchPathWalkReadsNamesNotSpellings:
     """The fourth of this tree's ``*_REGISTRY.json`` walks — detector's twin.
 
-    Same caller-cwd walk, and the consequence is the one that reaches disk: a
-    folded match's "branches" become paths this watcher ROLLS OVER, which means
-    rewrites them. @seedgo's fleet discriminator named this site alongside
-    ``detector`` after ``registry_scope`` was cured; the filter now has one
-    implementation in ``handlers/repo_root.py`` for all four.
-
-    A NOTE ON WHAT THIS NEARLY SHIPPED. ``_get_branch_paths`` rebinds the local
-    name ``repo_root`` to a Path, shadowing the module import of the same name,
-    so the first version of this fix read ``repo_root.exactly_named`` off a
-    Path. It did not fail the suite — nothing exercised the line. The module
-    imports ``exactly_named`` by name now, and this class is what would have
-    caught it.
+    A folded match's "branches" become paths this watcher rewrites. Trap: ``_get_branch_paths``
+    shadows ``repo_root`` with a Path local, so ``exactly_named`` is imported by name.
     """
 
     @pytest.fixture
@@ -669,8 +577,7 @@ class TestTheBranchPathWalkReadsNamesNotSpellings:
         home = tmp_path / "aipass_home"
         home.mkdir()
         (home / "AIPASS_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
-        # The watcher walks the ROLLOVER scope now (2026-09-18), so the root it
-        # stands on is the detector's; its own _find_repo_root only finds plans.
+        # The watcher walks the rollover scope, so the root it stands on is the detector's.
         monkeypatch.setattr(detector, "_REPO_ROOT", home)
 
         foreign = tmp_path / "foreign_project"
@@ -707,12 +614,7 @@ class TestTheBranchPathWalkReadsNamesNotSpellings:
         assert "bait" not in names
 
     def test_a_caller_outside_the_aipass_root_contributes_nothing_to_roll_over(self, caller_tree, monkeypatch):
-        """The watcher's half of 2026-09-17: its walk also PERSISTED the caller's registry.
-
-        With the fence standing on the fake home, the foreign project beside it
-        is another repository, and everything it lists stays out of a lane that
-        normalizes and rolls over what it is handed.
-        """
+        """A foreign project beside the fenced home is another repository: nothing it lists is rolled over."""
 
         monkeypatch.setattr(write_fence, "ROOT", caller_tree.parent / "aipass_home")
 
@@ -722,13 +624,7 @@ class TestTheBranchPathWalkReadsNamesNotSpellings:
         }
 
     def test_a_declared_resident_reaches_the_watcher_with_nothing_remembered(self, tmp_path, monkeypatch):
-        """@baud was in this lane only because known_registries.json happened to name it.
-
-        Retiring that file would have quietly dropped a resident from the watcher
-        while rollover kept it — two write lanes, two fleets, the split
-        ``registry_scope`` exists to end. The watcher reads the rollover scope
-        instead, so residents arrive through their declaration and nothing else.
-        """
+        """A declared resident reaches the watcher through the rollover scope: one fleet for both write lanes."""
 
         home = tmp_path / "aipass_home"
         branch = home / "projects" / "guest" / "src" / "guest"
@@ -751,10 +647,7 @@ class TestTheBranchPathWalkReadsNamesNotSpellings:
 class TestTheTrinityMatchIsAFilenameNotAPattern:
     """``local.json`` has no wildcard in it, so it was never a glob's job.
 
-    On a folding filesystem ``trinity_dir.glob("local.json")`` also matches
-    ``Local.json``, and what this loop matches gets ROLLED OVER — rewritten.
-    A near-miss here is damage, not a miscount, which is why it moved to
-    ``repo_root.exists_exactly``.
+    On a folding filesystem a glob also matches ``Local.json``, and what this loop matches gets rewritten.
     """
 
     def test_a_differently_cased_memory_file_is_not_checked(self, tmp_path, monkeypatch, case_insensitive_filesystem):
@@ -763,9 +656,7 @@ class TestTheTrinityMatchIsAFilenameNotAPattern:
         (branch / ".trinity").mkdir(parents=True)
         (branch / ".trinity" / "Local.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(memory_watcher, "_get_branch_paths", lambda: [branch])
-        # check_and_rollover is once-per-process by design; without this reset
-        # the SECOND test in this class reads "already checked" and asserts
-        # nothing. Found by the positive half failing, which is what it is for.
+        # check_and_rollover is once-per-process; without this reset the second test asserts nothing.
         monkeypatch.setattr(memory_watcher, "_startup_check_done", False)
 
         assert memory_watcher.check_and_rollover()["files_checked"] == 0
@@ -777,16 +668,14 @@ class TestTheTrinityMatchIsAFilenameNotAPattern:
         (branch / ".trinity").mkdir(parents=True)
         (branch / ".trinity" / "local.json").write_text("{}", encoding="utf-8")
         monkeypatch.setattr(memory_watcher, "_get_branch_paths", lambda: [branch])
-        # check_and_rollover is once-per-process by design; without this reset
-        # the SECOND test in this class reads "already checked" and asserts
-        # nothing. Found by the positive half failing, which is what it is for.
+        # check_and_rollover is once-per-process; without this reset the second test asserts nothing.
         monkeypatch.setattr(memory_watcher, "_startup_check_done", False)
 
         assert memory_watcher.check_and_rollover()["files_checked"] == 1
 
 
 class TestAnUnreadableRegistryIsAnsweredByEveryEntry:
-    """Each watcher entry answers its own failure shape, naming the registry, never a raise (DPLAN-0354 leg 3b).
+    """Each watcher entry answers its own failure shape, naming the registry, never a raise.
 
     The registry read raises at its home in detector; the real _get_branch_paths runs. No observer starts.
     """

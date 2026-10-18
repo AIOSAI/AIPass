@@ -3,19 +3,12 @@
 # Description: Plan Creation Implementation Handler
 # Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Plan Creation Operations Handler
-
-Implements plan creation business logic, extracted from create_plan module.
-Handles the full plan creation workflow including registry and dashboard updates.
+"""Plan Creation Operations Handler
 
 Returns data - module handles all display.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.create_ops import create_plan_impl, slugify_subject
 """
 
 import re
@@ -25,12 +18,8 @@ from typing import Callable, Tuple, List, Dict, Any
 
 from aipass.prax import logger
 
-# logger imported from aipass.prax
 from aipass.flow.apps.handlers.json import json_handler
 
-# =============================================
-# INFRASTRUCTURE
-# =============================================
 
 from aipass.flow.apps.handlers.registry.load_registry import next_free_number
 from aipass.flow.apps.handlers.repo_root import module_file
@@ -38,10 +27,6 @@ from aipass.flow.apps.handlers.repo_root import module_file
 _PKG_ROOT = module_file(__file__).parents[4]  # handlers/plan/ -> handlers/ -> apps/ -> flow/ -> aipass/
 
 MODULE_NAME = "create_plan"
-
-# =============================================
-# HELPERS
-# =============================================
 
 
 def slugify_subject(subject: str, max_length: int = 40) -> str:
@@ -51,17 +36,11 @@ def slugify_subject(subject: str, max_length: int = 40) -> str:
     return slug.strip("_")[:max_length]
 
 
-# =============================================
-# CREATE PLAN IMPLEMENTATION
-# =============================================
-
-
 def create_plan_impl(
     location: str | None = None,
     subject: str = "",
     template_type: str = "default",
     plan_type_config: Dict[str, Any] | None = None,
-    # Dependencies injected from module
     ecosystem_root: Path | None = None,
     load_registry: Callable[..., Dict[str, Any]] | None = None,
     save_registry: Callable[..., bool] | None = None,
@@ -76,35 +55,11 @@ def create_plan_impl(
     push_to_plans_central: Callable[..., bool] | None = None,
     push_flow_to_branch_dashboard: Callable[..., bool | None] | None = None,
 ) -> Tuple[bool, int, str, str, str, List[Dict[str, Any]]]:
-    """
-    Implement plan creation workflow
-
-    Workflow Steps:
-        1. Load registry
-        2. Auto-cleanup orphaned plans
-        3. Get next plan number
-        4. Resolve location (@folder syntax support)
-        5. Calculate relative path for display
-        6. Build plan file path
-        7. Get template content
-        8. Create plan file
-        9. Build and save registry entry
-        10. Update dashboards
-        11. Log and display results
-
-    Args:
-        location: Target directory for plan (@folder syntax supported)
-        subject: Plan subject/title
-        template_type: Template to use (default, master, etc.)
-        (remaining args): Handler/service dependencies injected by module
-
-    Returns:
-        (success, plan_number, location_description, template_type, error_message, messages)
-        messages is a list of dicts with type/text for the module to display
+    """Implement plan creation workflow
+    Returns (success, plan_number, location_description, template_type, error_message, messages).
     """
     messages: List[Dict[str, Any]] = []
 
-    # Validate required dependencies are provided
     required_deps = {
         "load_registry": load_registry,
         "save_registry": save_registry,
@@ -125,7 +80,7 @@ def create_plan_impl(
             logger.error(f"[{MODULE_NAME}] {error_msg}")
             return False, 0, "", "", error_msg, messages
 
-    # All deps validated as non-None above; assign to satisfy type checker
+    # Narrowing for the type checker; the loop above already refused None.
     assert load_registry is not None
     assert save_registry is not None
     assert auto_close_orphaned_plans is not None
@@ -139,34 +94,28 @@ def create_plan_impl(
     assert push_to_plans_central is not None
     assert push_flow_to_branch_dashboard is not None
 
-    # Extract plan type settings from config (or fall back to FPLAN defaults)
     prefix = plan_type_config["prefix"] if plan_type_config else "FPLAN"
     digits = plan_type_config["digits"] if plan_type_config else 4
     slug_max = plan_type_config.get("slug_max_length", 45) if plan_type_config else 40
     registry_file = plan_type_config.get("registry_file") if plan_type_config else None
 
     try:
-        # STEP 1: Load registry (type-specific when registry_file provided)
         registry = load_registry(registry_file=registry_file)
 
-        # STEP 2: Auto-cleanup orphaned plans
         registry, auto_closed_count = auto_close_orphaned_plans(registry)
         if auto_closed_count > 0:
             save_registry(registry, registry_file=registry_file)
             messages.append({"type": "dim", "text": f"[AUTO-CLEANUP] Closed {auto_closed_count} orphaned plan(s)"})
 
-        # STEP 3: Get next plan number -- never one a row already holds
+        # Never a number a row already holds, whatever next_number says.
         NEXT_NUM = next_free_number(registry)
 
-        # STEP 4: Resolve location (@folder syntax support)
         success, target_dir, error_msg = resolve_plan_location(location, ecosystem_root)
         if not success:
             return False, 0, "", "", error_msg, messages
 
-        # STEP 5: Calculate relative path for display
         RELATIVE_LOCATION = calculate_relative_location(target_dir, ecosystem_root)
 
-        # STEP 6: Build plan file path ({PREFIX}-{XXXX}_{topic_slug}_{date}.md)
         topic_slug = slugify_subject(subject, max_length=slug_max)
         date_str = datetime.now().strftime("%Y-%m-%d")
         formatted_num = f"{NEXT_NUM:0{digits}d}"
@@ -175,8 +124,6 @@ def create_plan_impl(
         else:
             PLAN_FILE = target_dir / f"{prefix}-{formatted_num}_{date_str}.md"
 
-        # STEP 7: Get template content
-        # Resolve template path from plan_type_config — no fallback
         template_path: Path | None = None
         if plan_type_config is not None:
             tmpl_name = plan_type_config.get("default_template", "default")
@@ -185,10 +132,9 @@ def create_plan_impl(
                 available = sorted(p for p in tmpl_dir.glob("*.md")) if tmpl_dir.is_dir() else []
                 candidate = tmpl_dir / f"{tmpl_name}.md"
                 if candidate.is_file():
-                    # Exact template match
                     template_path = candidate
                 elif len(available) == 1:
-                    # Single template in directory — use it regardless of name
+                    # A lone template is used whatever its name.
                     template_path = available[0]
                 elif len(available) > 1:
                     names = [p.stem for p in available]
@@ -213,12 +159,10 @@ def create_plan_impl(
             logger.error(f"[{MODULE_NAME}] {error_msg}")
             return False, 0, "", "", error_msg, messages
 
-        # STEP 8: Create plan file
         success, error_msg = create_plan_file(PLAN_FILE, CONTENT)
         if not success:
             return False, 0, "", "", error_msg, messages
 
-        # STEP 9: Build registry entry
         if "plans" not in registry:
             registry["plans"] = {}
 
@@ -227,24 +171,20 @@ def create_plan_impl(
         )
         registry["next_number"] = NEXT_NUM + 1
 
-        # STEP 10: Save updated registry (type-specific when registry_file provided)
         if not save_registry(registry, registry_file=registry_file):
             error_msg = "Failed to save registry after plan creation"
             logger.error(f"[{MODULE_NAME}] {error_msg}")
             messages.append({"type": "warning", "text": f"[WARNING] {error_msg}"})
 
-        # STEP 11: Update dashboards (3-tier: modules log, handlers don't)
         dashboard_success = update_dashboard_local()
         central_success = push_to_plans_central()
 
-        # Log dashboard update results. None is "flow has no dashboard", not a
-        # failure (flow's decision, leg 4).
+        # None is "flow has no dashboard", not a failure.
         if dashboard_success is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not central_success:
             logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
 
-        # STEP 11b: Push flow section to branch's dashboard via write-through
         # None: no dashboard there. False: the push failed (already logged).
         branch_dashboard_success = push_flow_to_branch_dashboard(target_dir)
         if branch_dashboard_success is None:
@@ -259,11 +199,9 @@ def create_plan_impl(
                 }
             )
 
-        # STEP 12: Log success
         plan_id = f"{prefix}-{formatted_num}"
         logger.info(f"[{MODULE_NAME}] Created {plan_id} in {RELATIVE_LOCATION}")
 
-        # Build display message
         display_msg = display_plan_created(
             NEXT_NUM,
             RELATIVE_LOCATION,
@@ -274,7 +212,6 @@ def create_plan_impl(
         )
         messages.append({"type": "display", "text": display_msg})
 
-        # Fire trigger event for plan creation
         try:
             from aipass.trigger.apps.modules.core import trigger
 

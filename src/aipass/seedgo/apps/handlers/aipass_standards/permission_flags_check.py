@@ -3,22 +3,13 @@
 # Description: Permission Flags Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Permission Flags Standards Checker Handler
 
-Validates that only the approved permission bypass pattern is used.
-The ONLY acceptable permission flag is '--permission-mode bypassPermissions'.
-Any other permission bypass pattern (e.g., --dangerously-skip-permissions,
---skip-permissions, --no-permissions) is a violation.
-
-THE STANDARD:
-- '--permission-mode bypassPermissions' is the AIPass standard
-- '--dangerously-skip-permissions' is PROHIBITED
-- Any other skip/bypass permission patterns are PROHIBITED
-- Documentation files that mention these flags for reference are exempt
+Reference: permission_flags.md
 """
 
 import re
@@ -28,16 +19,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 # APPLIES_TO: a test that chmods 0o777 leaves the same hole.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 
 def _get_non_code_lines(lines: List[str]) -> set:
-    """
-    Build a set of line numbers that are inside docstrings or comments.
-    """
+    """Build a set of line numbers that are inside docstrings or comments."""
     skip: set = set()
     in_docstring = False
 
@@ -63,21 +51,7 @@ def _get_non_code_lines(lines: List[str]) -> set:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows permission flags standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip certain checks
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str
-        }
-    """
+    """Check if module follows permission flags standards"""
     checks = []
     path = Path(module_path)
 
@@ -110,7 +84,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "PERMISSION_FLAGS",
         }
 
-    # Skip files that don't reference any permission patterns
     has_permission_ref = re.search(
         r"skip.?permissions|dangerously.?skip|permission.?mode|bypass.?permission", content, re.IGNORECASE
     )
@@ -129,11 +102,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "PERMISSION_FLAGS",
         }
 
-    # Check 1: No dangerous skip-permissions flags
     dangerous_flags_check = check_no_dangerous_flags(lines, module_path, bypass_rules=bypass_rules)
     checks.append(dangerous_flags_check)
 
-    # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
@@ -146,11 +117,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def check_no_dangerous_flags(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that no dangerous permission bypass flags are used.
-    Only '--permission-mode bypassPermissions' is acceptable.
-    """
-    # Patterns that are PROHIBITED
+    """Check that no dangerous permission bypass flags are used."""
     dangerous_patterns = [
         r"dangerously.?skip.?permissions",
         r"--skip.?permissions",

@@ -3,7 +3,7 @@
 # Description: Tests for the duration parser - drone @canary span, its JSON form and its refusals
 # Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/span.py and the duration parser it drives."""
@@ -20,14 +20,8 @@ import pytest
 from aipass.canary.apps import canary as canary_entry
 from aipass.canary.apps.handlers.duration import parser
 
-# Driven through the entry point's main() with real module discovery, so the
-# exit codes asserted here are the ones drone hands back to a caller.
-#
-# The load-bearing assertion is the pair: a refusal exits 2 AND writes nothing
-# to stdout. A refusal that printed a number would be read as an answer by
-# whatever consumes the output, so "it exited non-zero" alone is not the
-# contract. Every refusal case is run twice, plain and --json, because the JSON
-# form is the one a caller parses without looking.
+# Through main() with real discovery, so these exit codes are drone's. The contract is the pair: a refusal
+# exits 2 AND writes nothing to stdout, plain and --json, since a printed number reads as an answer.
 
 VALID = {
     "days_and_hours": ("2d 4h", 187200),
@@ -74,11 +68,6 @@ def _run(monkeypatch, argv):
     return canary_entry.main()
 
 
-# =============================================================================
-# WHAT IT PARSES
-# =============================================================================
-
-
 @pytest.mark.parametrize(("text", "seconds"), list(VALID.values()), ids=list(VALID))
 def test_a_written_duration_prints_its_total_in_seconds(monkeypatch, capsys, text, seconds):
     """One line, the number and nothing else, exit 0."""
@@ -96,11 +85,6 @@ def test_unquoted_words_are_one_duration(monkeypatch, capsys):
     assert capsys.readouterr().out.splitlines() == ["187200"]
 
 
-# =============================================================================
-# THE JSON FORM
-# =============================================================================
-
-
 @pytest.mark.parametrize(
     "argv",
     [["span", "--json", "1h30m"], ["span", "1h30m", "--json"]],
@@ -115,11 +99,6 @@ def test_json_form_prints_one_object_with_one_key_and_nothing_else(monkeypatch, 
     payload = json.loads(lines[0])
     assert payload == {"seconds": 5400}
     assert list(payload) == ["seconds"]
-
-
-# =============================================================================
-# THE CONTRACT: A REFUSAL EXITS 2 AND WRITES NOTHING TO STDOUT
-# =============================================================================
 
 
 @pytest.mark.parametrize("flags", [[], ["--json"]], ids=["plain", "json"])
@@ -151,11 +130,6 @@ def test_json_flag_with_no_text_is_refused_rather_than_answered(monkeypatch, cap
     assert "no duration text" in captured.err
 
 
-# =============================================================================
-# USAGE AND HELP NEVER PARSE
-# =============================================================================
-
-
 def test_bare_span_prints_the_usage_and_exits_zero(monkeypatch, capsys):
     """No text at all is a question, not a refusal."""
     assert _run(monkeypatch, ["span"]) == 0
@@ -180,21 +154,13 @@ def test_bare_span_prints_the_usage_and_exits_zero(monkeypatch, capsys):
 def test_help_anywhere_explains_and_parses_nothing(monkeypatch, capsys, argv):
     """Help prints the page, exits 0, and never turns the text into a number.
 
-    An answer is a line that is nothing but the number, so that is what must be
-    absent: the help page itself quotes 187200 inside an example line, and a
-    substring check would pass for the wrong reason.
-    """
+    No line is only digits; a substring check passes wrongly, the page quotes 187200 in an example."""
     assert _run(monkeypatch, argv) == 0
 
     captured = capsys.readouterr()
     assert "Usage:" in captured.out
     assert not any(line.strip().isdigit() for line in captured.out.splitlines())
     assert captured.err == ""
-
-
-# =============================================================================
-# THE PARSER ITSELF
-# =============================================================================
 
 
 def test_parse_duration_returns_an_int_and_refusals_carry_their_reason():

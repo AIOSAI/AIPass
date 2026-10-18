@@ -3,7 +3,7 @@
 # Description: Tests for aipass feedback — toggle alias for @hooks feedback pulse
 # Version: 1.1.4
 # Created: 2026-07-18
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/feedback.py and the feedback toggle command it drives."""
@@ -83,11 +83,8 @@ class TestHandleCommand:
     def test_drone_not_found_refuses_non_zero(self) -> None:
         """An unreachable drone is a refusal: it names the reason and exits non-zero.
 
-        Rewritten 2026-09-07 (FPLAN-0492 wave 6, the owner's standing ruling that a
-        refusal exits non-zero and names its reason). This test previously
-        asserted only that warning() was called and nothing raised -- which is
-        exactly what PINNED the exit-0 defect: the code computed 1, and
-        handle_command discarded it, so a missing drone reported success.
+        Asserting only that a warning printed would pin the defect where handle_command
+        discarded the 1 and a missing drone reported success.
         """
         with (
             patch(f"{_MOD}.subprocess.run", side_effect=FileNotFoundError("drone")),

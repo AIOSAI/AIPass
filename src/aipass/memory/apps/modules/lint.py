@@ -3,32 +3,11 @@
 # Description: Lint module — CLI routing for entry limit auditing
 # Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Lint Module — Entry Limit Violation Scanner
-
-Thin CLI routing layer that discovers branches via the registry,
-delegates scanning to the lint handler, and formats results for
-the console.
-
-Strictly **read-only** — never writes, modifies, truncates, or
-deletes any file.
-
-Two modes, both read-only:
-
-    ``lint`` / ``lint run``   the canonical scan — entries over their
-                             character cap.  Unchanged.
-    ``lint fields``           the closed-shape INVENTORY (FPLAN-0593) —
-                             every string field listed by characters, with
-                             the ones outside the shape flagged.
-
-Usage:
-    drone @memory lint                    # Scan all branches
-    drone @memory lint @devpulse          # Scan one branch
-    drone @memory lint fields             # Field inventory, all branches
-    drone @memory lint fields @devpulse   # Field inventory, one branch
 """
 
 import os
@@ -47,65 +26,32 @@ from aipass.cli.apps.modules import console, error, success, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
-# Handler import (same package family — json handlers)
 from aipass.memory.apps.handlers.json.lint_handler import PASSPORT_FILE, run_lint, run_lint_fields
 
-# Cross-handler access for branch discovery (module layer bridges handlers).
-# read_scope, not _read_registry: lint reads and never writes, so its scope is
-# the declared fleet including externals. The write scope stops at the repo edge.
+# read_scope, not _read_registry: lint never writes, so externals are in scope.
 from aipass.memory.apps.handlers.monitor.detector import read_scope
 
-# The mode word, named once: the router matches it and the help prints it.
 FIELDS_MODE = "fields"
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def handle_command(command: str, args: list[str]) -> bool:
-    """Handle lint commands with seedgo-compliant introspection.
-
-    Routing:
-        lint (no args)            -> print_introspection()
-        lint --help / -h / help   -> print_help()
-        lint @branch              -> scan one branch
-        lint run                  -> scan all branches
-        lint run @branch          -> scan one branch
-        lint fields               -> field inventory, all branches
-        lint fields @branch       -> field inventory, one branch
-
-    Args:
-        command: Command name.
-        args: Additional arguments.
-
-    Returns:
-        True if command handled, False otherwise.
-    """
+    """Handle lint commands: no args introspects, ``run`` is optional, ``fields`` is the inventory."""
     if command != "lint":
         return False
 
-    # No args -> introspection (seedgo standard)
     if not args:
         print_introspection()
         return True
 
-    # Help — a flag ANYWHERE wins; lint takes no free-text arguments,
-    # so a bare `help` counts in any slot too
+    # lint takes no free text, so a bare `help` counts in any slot.
     if wants_help(args, allow_bare_word=True):
         print_help()
         return True
 
-    # Parse optional @branch filter
     branch_filter = _extract_branch(args)
 
-    # "run" subcommand is accepted but optional — lint always runs
     filtered_args = [a for a in args if a != "run" and not a.startswith("@")]
 
-    # FIELDS MODE (FPLAN-0593) — additive by construction: the mode is a word
-    # the old syntax never accepted, so every invocation that parsed yesterday
-    # takes exactly the path it took yesterday.
     if filtered_args and filtered_args[0] == FIELDS_MODE:
         return _route_fields(filtered_args[1:], branch_filter)
 
@@ -120,11 +66,6 @@ def handle_command(command: str, args: list[str]) -> bool:
     return True
 
 
-# =============================================================================
-# ARGUMENT HELPERS
-# =============================================================================
-
-
 def _extract_branch(args: list[str]) -> str | None:
     """Extract @branch from args, return branch name or None."""
     for arg in args:
@@ -134,15 +75,7 @@ def _extract_branch(args: list[str]) -> str | None:
 
 
 def _route_fields(rest: list[str], branch_filter: str | None) -> bool:
-    """Run the fields mode, refusing any argument it does not understand.
-
-    Args:
-        rest: The arguments after the ``fields`` mode word.
-        branch_filter: The @branch filter already parsed off the line.
-
-    Returns:
-        True — the command is handled either way, refusal included.
-    """
+    """Run the fields mode, refusing any argument it does not understand."""
     if rest:
         error(
             f"Unknown lint fields argument: {rest[0]}",
@@ -154,24 +87,10 @@ def _route_fields(rest: list[str], branch_filter: str | None) -> bool:
     return True
 
 
-# =============================================================================
-# LINT EXECUTION
-# =============================================================================
-
-
 def _resolve_branches(branch_filter: str | None) -> list[dict[str, Any]] | None:
-    """Read the registry and validate the @branch filter against it.
+    """Read the fleet and validate @branch; None means stop (already reported).
 
-    Branch discovery happens in the module layer (bridges handlers), and both
-    modes come through here so an unknown branch cannot be a refusal in one of
-    them and a clean bill of health in the other.
-
-    Args:
-        branch_filter: The requested branch, or None for the whole fleet.
-
-    Returns:
-        The registry rows, or None when the caller must stop — every failure
-        path has already reported itself through ``error()``.
+    Both modes come through here so an unknown branch cannot pass in one of them.
     """
     try:
         branches = read_scope()
@@ -184,8 +103,7 @@ def _resolve_branches(branch_filter: str | None) -> list[dict[str, Any]] | None:
         error("No branches found in registry")
         return None
 
-    # An unknown branch must not read as a clean bill of health. The handlers
-    # match case-insensitively, so the guard has to as well.
+    # Case-insensitive because the handlers match that way.
     if branch_filter:
         known = {str(b.get("name", "")).lower() for b in branches}
         if branch_filter.lower() not in known:
@@ -200,11 +118,7 @@ def _resolve_branches(branch_filter: str | None) -> list[dict[str, Any]] | None:
 
 
 def _execute_lint(branch_filter: str | None = None) -> None:
-    """Run the lint scan and display results.
-
-    Args:
-        branch_filter: If provided, only lint this branch.
-    """
+    """Run the lint scan and display results."""
     branches = _resolve_branches(branch_filter)
     if branches is None:
         return
@@ -219,11 +133,7 @@ def _execute_lint(branch_filter: str | None = None) -> None:
 
 
 def _execute_lint_fields(branch_filter: str | None = None) -> None:
-    """Run the field inventory and display results.
-
-    Args:
-        branch_filter: If provided, only inventory this branch.
-    """
+    """Run the field inventory and display results."""
     branches = _resolve_branches(branch_filter)
     if branches is None:
         return
@@ -237,18 +147,8 @@ def _execute_lint_fields(branch_filter: str | None = None) -> None:
     _display_field_results(result, branch_filter)
 
 
-# =============================================================================
-# DISPLAY
-# =============================================================================
-
-
 def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
-    """Format and display lint results via Rich console.
-
-    Args:
-        result: Result dict from ``run_lint``.
-        branch_filter: The branch filter used (for display context).
-    """
+    """Format and display lint results via Rich console."""
     violations = result.get("violations", [])
     scanned = result.get("branches_scanned", 0)
     skipped = result.get("branches_skipped", 0)
@@ -262,7 +162,6 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
         console.print()
         return
 
-    # Per-violation detail (sorted worst-first by handler)
     warning(f"{total} violation(s) found")
     console.print()
 
@@ -279,9 +178,7 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
             branch_count = 0
 
         branch_count += 1
-        # An unmeasurable field has no honest length to print: "0/300 chars"
-        # would read as compliant, which is the exact silence this violation
-        # exists to break. Say what was found instead.
+        # No honest length to print here: "0/300 chars" would read as compliant.
         if v.get("reason") == "missing_field":
             console.print(
                 f"    [red]![/red] {v['file']}:{v['container']}/{v['key']} "
@@ -315,18 +212,8 @@ def _display_results(result: dict[str, Any], branch_filter: str | None) -> None:
     )
 
 
-# =============================================================================
-# DISPLAY — FIELDS MODE
-# =============================================================================
-
-
 def _field_line(row: dict[str, Any]) -> str:
-    """Render one summary row: a field's worst and typical size against its cap.
-
-    ``max`` beside ``p95`` is the whole point of the inventory — a field whose
-    max is 917 and whose p95 is 12 has one bad entry, not a bad cap, and the
-    two numbers say which without opening a file.
-    """
+    """Render one summary row: max beside p95 tells one bad entry from a bad cap."""
     cap = str(row["cap"]) if row["cap"] else "-"
     line = (
         f"      {row['field'][:16]:<16} max {row['max']:>5}/{cap:<5} "
@@ -352,12 +239,7 @@ def _passport_line(row: dict[str, Any]) -> str:
 
 
 def _flag_line(violation: dict[str, Any]) -> str:
-    """Render one flagged field, saying what to DO about it.
-
-    Four species, four sentences: a field outside the shape is removed or
-    declared, a missing one is added, a wrongly-typed one is retyped, and an
-    over-cap one is shortened. "Violation" alone is not an instruction.
-    """
+    """Render one flagged field, saying what to DO about it."""
     where = f"{violation.get('file', '')}:{violation.get('container', '')}/{violation.get('key', '')}"
     label = f"[dim]({violation.get('entry_type', '')})[/dim]"
     field = violation.get("field", "?")
@@ -395,12 +277,7 @@ def _flag_line(violation: dict[str, Any]) -> str:
 
 
 def _print_inventory(summary: list[dict[str, Any]], passports: list[dict[str, Any]]) -> None:
-    """Print the per-branch field inventory, passport row first.
-
-    Args:
-        summary: Summary rows from ``run_lint_fields``.
-        passports: Whole-file passport rows for the same scan.
-    """
+    """Print the per-branch field inventory, passport row first."""
     pending = {row["branch"]: row for row in passports}
     current_branch: str | None = None
     current_type: str | None = None
@@ -419,8 +296,7 @@ def _print_inventory(summary: list[dict[str, Any]], passports: list[dict[str, An
             console.print(f"    [yellow]{current_type}[/yellow] [dim]{row['file']}[/dim]")
         console.print(_field_line(row))
 
-    # A branch with a passport but no measurable entries still gets its row —
-    # an empty block says "scanned and empty", a missing one says nothing.
+    # A passport-only branch still gets its row: absence would say nothing.
     for row in pending.values():
         console.print()
         console.print(f"  [bold cyan]{row['branch']}[/bold cyan]")
@@ -441,12 +317,7 @@ def _print_flags(violations: list[dict[str, Any]]) -> None:
 
 
 def _display_field_results(result: dict[str, Any], branch_filter: str | None) -> None:
-    """Format and display the field inventory via Rich console.
-
-    Args:
-        result: Result dict from ``run_lint_fields``.
-        branch_filter: The branch filter used (for display context).
-    """
+    """Format and display the field inventory via Rich console."""
     summary = result.get("summary", [])
     violations = result.get("violations", [])
     passports = result.get("passport", [])
@@ -469,8 +340,6 @@ def _display_field_results(result: dict[str, Any], branch_filter: str | None) ->
         console.print()
         _print_flags(violations)
     else:
-        # A clean fleet says so. An empty screen is indistinguishable from a
-        # scan that never ran.
         success(f"No fields outside the shape across {scope} ({scanned} scanned)")
 
     console.print()
@@ -487,16 +356,8 @@ def _display_field_results(result: dict[str, Any], branch_filter: str | None) ->
     )
 
 
-# =============================================================================
-# INTROSPECTION
-# =============================================================================
-
-
 def print_introspection() -> None:
-    """Display module introspection (seedgo standard).
-
-    Called when ``lint`` is invoked with no arguments.
-    """
+    """Display module introspection (seedgo standard)."""
     console.print()
     console.print("[bold cyan]lint Module[/bold cyan]")
     console.print("Audits .trinity entries for over-limit character violations (read-only)")

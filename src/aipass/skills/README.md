@@ -70,7 +70,7 @@ skill from a template; the validator checks requirements; the switch owns the
 on/off state and its systemd actuation. Two handlers are infrastructure rather
 than a verb: `module_paths.py`, which locates a module without ever reading the
 working directory, and the `json/` shim, which binds the fleet's one JSON
-service. One module is not a command but a door (DPLAN-0404): `door_notifier`
+service. One module is not a command but a door: `door_notifier`
 publishes the Telegram push notification to @daemon, so no other branch
 imports this branch's handlers. `apps/handlers/__init__.py` is the fence that
 refuses one that tries.
@@ -87,7 +87,7 @@ re-derived from the real tree and read on every prompt.
 | [docs/skill_contract.md](docs/skill_contract.md) | The three tiers, the `SKILL.md` format, the search paths, creating a skill |
 | [docs/off_switch.md](docs/off_switch.md) | What OFF means, what it stops, how it fails closed |
 | [docs/runner_notes.md](docs/runner_notes.md) | How a skill is executed, and the doors that bypass the runner |
-| [docs/system_status.md](docs/system_status.md) | The system_status skill and `machine_vitals()`, the published read |
+| [docs/system_status.md](docs/system_status.md) | The system_status skill and its published reads, `machine_vitals()` and `machine_processes()` |
 | [docs/telegram.md](docs/telegram.md) | The retired Telegram bridge: what retirement means here |
 | [docs/dead_cwd.md](docs/dead_cwd.md) | Importing without a readable working directory |
 | [docs/json_handler.md](docs/json_handler.md) | Why the JSON handler is a shim, and what may not be added to it |
@@ -120,7 +120,7 @@ The same index, with the pages beside each other, is in [docs/](docs/).
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)

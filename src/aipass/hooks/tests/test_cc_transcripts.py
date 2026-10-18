@@ -5,15 +5,12 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/cc_transcripts.py."""
 
-# The picker used to enumerate processes and call them chats. On 2026-08-18 that
-# cost a conversation: Ctrl+C removes the dead chat's session file, so the chat
-# the owner wanted was the one thing a PID list could not show, while three bg
-# leftovers were offered as if they were his.
+# The picker lists transcripts, not processes: Ctrl+C removes a dead chat's session file, so a PID list hides it.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that modules/cc_transcripts.py parses and imports
@@ -62,11 +59,6 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 class TestManglingRule:
     """The rule, not the platform string.
 
-    A CI run on Windows read `D--home-p-...` where this test had hardcoded
-    `-home-p-...` — because Path.resolve() prepends a drive letter there, not
-    because the mangling differs. The rule below is transcribed from the
-    shipping CLI (2.1.228) and cross-checked against its own JavaScript:
-
         dpo(e) = e.replace(/[^a-zA-Z0-9]/g, "-")
         gv(e)  = dpo(e).length <= 200 ? dpo(e) : dpo(e).slice(0,200) + "-" + hash(e)
         hash(e): t = 0; per UTF-16 unit c: t = (t<<5) - t + c | 0 -> abs(t).toString(36)
@@ -77,14 +69,12 @@ class TestManglingRule:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            # Measured 2026-10-04 by Claude Code 2.1.289's own cP(), copied verbatim from its bundle into
-            # node; the same code gave the old oracle for the old path, so the measure is the CLI's.
+            # Vectors from the CLI's own cP() run in node, so the measure is the CLI's.
             ("/srv/aipass/src/aipass/hooks", "-srv-aipass-src-aipass-hooks"),
-            # A Windows path: the colon and both backslashes are just
-            # non-alphanumerics. There is NO drive-letter special case.
+            # A Windows path: colon and backslashes are plain non-alphanumerics; NO drive-letter special case.
             ("C:\\Work\\aipass\\ai_mail", "C--Work-aipass-ai-mail"),
             ("", ""),
-            ("/srv/é–ø/x", "-srv-----x"),  # measured 10-04 22:15 with the same cP(); /tmp gave the old oracle
+            ("/srv/é–ø/x", "-srv-----x"),
             # Non-BMP: JS sees a SURROGATE PAIR and writes TWO dashes.
             ("/a/\U0001d518nicode/b", "-a---nicode-b"),
         ],
@@ -101,12 +91,11 @@ class TestManglingRule:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            # Measured 2026-10-04 by 2.1.289's own Le()/Hee() in node (it gives tmdi4s, the old oracle, for the
-            # old developer path): a neutral path, so no person's home ships in a public test.
+            # The CLI's own Le()/Hee() in node; a neutral path, so no person's home ships in a public test.
             ("/srv/aipass/src/aipass/hooks", "nn2k9g"),
             ("C:\\Work\\aipass\\ai_mail", "vlvg33"),
             ("", "0"),
-            ("/srv/é–ø/x", "yc66z4"),  # measured 10-04 22:15 with the same Le(); /tmp gave the old cac2i8
+            ("/srv/é–ø/x", "yc66z4"),
             ("/a/\U0001d518nicode/b", "u24wth"),
             ("/x/" + "deep/" * 60 + "branch", "z99g94"),
         ],

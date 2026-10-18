@@ -3,13 +3,12 @@
 # Description: Plan Display Handler
 # Version: 0.2.0
 # Created: 2025-11-15
-# Modified: 2026-03-17
+# Modified: 2026-10-17
 # =============================================
 
 """
 Plan Display Handler
 
-All display and formatting functions for plan operations.
 Returns formatted strings - caller handles actual output.
 """
 
@@ -20,9 +19,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 
 
-# CREATE PLAN DISPLAY FUNCTIONS
-
-
 def display_plan_created(
     plan_num: int,
     relative_location: str,
@@ -31,20 +27,7 @@ def display_plan_created(
     prefix: str = "FPLAN",
     digits: int = 4,
 ) -> str:
-    """
-    Format plan creation success messages
-
-    Args:
-        plan_num: Created plan number
-        relative_location: Relative path to plan
-        subject: Plan subject
-        template_type: Template used
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-        digits: Number of zero-padded digits in the plan number
-
-    Returns:
-        Multi-line formatted string for display
-    """
+    """Format plan creation success messages"""
     plan_id = f"{prefix}-{plan_num:0{digits}d}"
     lines = [
         f"[FLOW] Created {plan_id} in {relative_location}",
@@ -66,21 +49,7 @@ def display_plan_result(
     prefix: str = "FPLAN",
     digits: int = 4,
 ) -> str:
-    """
-    Display plan creation result with rich formatting
-
-    Args:
-        success: True if plan created successfully
-        plan_num: Plan number (ignored if not success)
-        location: Relative location (ignored if not success)
-        template_type: Template type (ignored if not success)
-        error: Error message (ignored if success)
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-        digits: Number of zero-padded digits in the plan number
-
-    Returns:
-        Formatted result string with emoji and color markup
-    """
+    """Display plan creation result with rich formatting"""
     if success:
         plan_id = f"{prefix}-{plan_num:0{digits}d}"
         return f"\n[green]Created {plan_id} in {location}/ using {template_type} template[/green]\n"
@@ -88,21 +57,8 @@ def display_plan_result(
         return f"\n[red]ERROR: {error}[/red]\n"
 
 
-# DELETE PLAN DISPLAY FUNCTIONS
-
-
 def format_plan_deletion_header(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FPLAN") -> str:
-    """
-    Format plan information header for deletion confirmation
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0001")
-        plan_info: Plan metadata dictionary from registry
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted header string with Rich markup for plan details
-    """
+    """Format plan information header for deletion confirmation"""
     plan_file = Path(plan_info.get("file_path", ""))
 
     lines = [
@@ -126,18 +82,7 @@ def format_plan_error(
     details: str | None = None,
     prefix: str = "FPLAN",
 ) -> str:
-    """
-    Format error messages for plan operations
-
-    Args:
-        error_type: Type of error ("not_found", "invalid_number", "general")
-        plan_num: Plan number if relevant
-        details: Additional error details
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted error message
-    """
+    """Format error messages for plan operations"""
     if error_type == "not_found":
         return f"[ERROR] {prefix}-{plan_num} not found in registry"
     elif error_type == "invalid_number":
@@ -149,55 +94,23 @@ def format_plan_error(
 
 
 def format_plan_deletion_success(plan_key: str, prefix: str = "FPLAN") -> str:
-    """
-    Format success message for completed plan deletion
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0001")
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted success message
-    """
+    """Format success message for completed plan deletion"""
     return f"\n[SUCCESS] {prefix}-{plan_key} closed successfully\n"
 
 
 def format_deletion_cancelled() -> str:
-    """
-    Format cancellation message
-
-    Returns:
-        Formatted cancellation message
-    """
+    """Format cancellation message"""
     return "Deletion cancelled"
 
 
 def format_delete_usage_error() -> str:
-    """
-    Format usage error message for delete command
-
-    Returns:
-        Formatted usage instructions
-    """
+    """Format usage error message for delete command"""
     lines = ["", "ERROR: Plan number required", "", "Usage: delete <plan_number> [--yes]", ""]
     return "\n".join(lines)
 
 
-# RESTORE PLAN DISPLAY FUNCTIONS
-
-
 def format_restore_header(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FPLAN") -> str:
-    """
-    Format plan information header for restore confirmation
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0001")
-        plan_info: Plan metadata dictionary from registry
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted header string with Rich markup for plan details
-    """
+    """Format plan information header for restore confirmation"""
     plan_file = Path(plan_info.get("file_path", ""))
     closed_date = plan_info.get("closed", "unknown")
     closed_reason = plan_info.get("closed_reason", "N/A")
@@ -220,17 +133,7 @@ def format_restore_header(plan_key: str, plan_info: Dict[str, Any], prefix: str 
 
 
 def format_restore_success(plan_key: str, restored_location: str | None = None, prefix: str = "FPLAN") -> str:
-    """
-    Format success message for completed plan restore
-
-    Args:
-        plan_key: Normalized plan number (e.g., "0001")
-        restored_location: Where the plan was restored to
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted success message
-    """
+    """Format success message for completed plan restore"""
     if restored_location:
         return f"\n[SUCCESS] {prefix}-{plan_key} restored to open status at: {restored_location}\n"
     return f"\n[SUCCESS] {prefix}-{plan_key} restored to open status\n"
@@ -239,18 +142,7 @@ def format_restore_success(plan_key: str, restored_location: str | None = None, 
 def format_restore_error(
     error_type: str, plan_key: str | None = None, details: str | None = None, prefix: str = "FPLAN"
 ) -> str:
-    """
-    Format error messages for restore operations
-
-    Args:
-        error_type: Type of error ("not_found", "already_open", "file_missing", "invalid_number", "general")
-        plan_key: Plan number if relevant
-        details: Additional error details
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN")
-
-    Returns:
-        Formatted error message
-    """
+    """Format error messages for restore operations"""
     if error_type == "not_found":
         return f"[ERROR] {prefix}-{plan_key} not found in registry"
     elif error_type == "already_open":
@@ -266,36 +158,16 @@ def format_restore_error(
 
 
 def format_restore_usage_error() -> str:
-    """
-    Format usage error message for restore command
-
-    Returns:
-        Formatted usage instructions
-    """
+    """Format usage error message for restore command"""
     lines = ["", "ERROR: Plan number required", "", "Usage: restore <plan_number>", ""]
     return "\n".join(lines)
 
 
-# LIST PLAN DISPLAY FUNCTIONS
-
-
 def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FPLAN") -> str:
-    """
-    Format a single plan's information for display
-
-    Args:
-        plan_key: Plan number (e.g., "0001")
-        plan_info: Plan metadata dictionary
-        prefix: Plan prefix (e.g. "FPLAN", "DPLAN").
-            Overridden by ``_source_prefix`` in *plan_info* when present
-            (set by list_ops when merging multi-registry plans).
-
-    Returns:
-        Formatted string with plan details
-    """
+    """Format a single plan's information for display"""
     from datetime import datetime
 
-    # Use source prefix if tagged by list_ops, otherwise fall back to arg
+    # list_ops tags _source_prefix and _plan_num when merging multi-registry plans.
     display_prefix = plan_info.get("_source_prefix", prefix)
 
     subject = plan_info.get("subject", "No subject")
@@ -303,7 +175,6 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
     status = plan_info.get("status", "unknown")
     created = plan_info.get("created", "unknown")
 
-    # Format created date if it's an ISO timestamp
     if created != "unknown":
         try:
             dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
@@ -311,7 +182,6 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
         except (ValueError, AttributeError) as e:
             logger.warning(f"[display] Failed to parse created date '{created}': {e}")
 
-    # Use original plan number if available (set by list_ops merge), else use key
     display_num = plan_info.get("_plan_num", plan_key)
     return f"  {display_prefix}-{display_num}  [{status:>6}]  {location:<30}  {subject:<40}  {created}"
 
@@ -319,21 +189,10 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
 def format_plans_list(
     plans: Dict[str, Dict[str, Any]], filter_status: str | None = None, show_header: bool = True
 ) -> str:
-    """
-    Format multiple plans for display with optional filtering
-
-    Args:
-        plans: Dictionary of plan_key -> plan_info
-        filter_status: Filter by status ("open", "closed", None for all)
-        show_header: Whether to show column headers
-
-    Returns:
-        Formatted multi-line string with plan list
-    """
+    """Format multiple plans for display with optional filtering"""
     if not plans:
         return "[dim]No plans found in registry[/dim]"
 
-    # Filter plans if needed
     if filter_status:
         filtered_plans = {k: v for k, v in plans.items() if v.get("status") == filter_status}
     else:
@@ -353,7 +212,6 @@ def format_plans_list(
         lines.append(f"  [dim]{'Number':<8}  {'Status':<8}  {'Location':<30}  {'Subject':<40}  Created[/dim]")
         lines.append("[dim]─" * 120 + "[/dim]")
 
-    # Sort by plan number
     sorted_plans = sorted(filtered_plans.items(), key=lambda x: x[0])
 
     for plan_key, plan_info in sorted_plans:
@@ -367,15 +225,7 @@ def format_plans_list(
 
 
 def format_statistics_summary(stats: Dict[str, Any]) -> str:
-    """
-    Format statistics summary
-
-    Args:
-        stats: Statistics dictionary from get_registry_statistics
-
-    Returns:
-        Formatted statistics string
-    """
+    """Format statistics summary"""
     lines = [
         "",
         "[bold]Summary:[/bold]",

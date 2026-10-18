@@ -3,13 +3,10 @@
 # Description: Format a BackupResult into a human-readable CLI string
 # Version: 1.0.0
 # Created: 2026-04-16
-# Modified: 2026-04-23
+# Modified: 2026-10-17
 # =============================================
 
-"""Backup result formatter.
-
-Turns a BackupResult into a summary suitable for terminal display.
-"""
+"""Backup result formatter."""
 
 from ..audit import trail
 from .result import BackupResult
@@ -26,14 +23,7 @@ def _human_bytes(byte_count: int) -> str:
 
 
 def format_result(result: BackupResult) -> str:
-    """Format a backup run outcome for CLI display.
-
-    Args:
-        result: The backup run outcome to render.
-
-    Returns:
-        Multi-line string summarizing mode, counts, duration, and errors.
-    """
+    """Format a backup run outcome for CLI display."""
     lines = [
         f"Backup complete ({result.mode})",
         f"  Project:  {result.project_root}",
@@ -51,6 +41,3 @@ def format_result(result: BackupResult) -> str:
 
     trail.log_operation("format_result", {"mode": result.mode})
     return "\n".join(lines)
-
-
-# =============================================

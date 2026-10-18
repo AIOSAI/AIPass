@@ -1,16 +1,14 @@
 # =================== AIPass ====================
 # Name: merge_plugin.py
 # Description: Merge a PR and sync local main
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-10-17
 # =============================================
 
 """Merge a PR and sync local main.
 
-Merges the given PR number via ``gh``, deletes the remote branch,
-pulls to sync local main, and returns the merge commit hash and PR title.
-Only authorized callers (verified via :mod:`auth`) may invoke this.
+Merges the PR via ``gh``, pulls, and returns the merge commit hash and PR title.
 """
 
 from __future__ import annotations
@@ -19,7 +17,9 @@ import subprocess
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.handlers.git import external_pr_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
+from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 
 
 PROTECTED_BRANCHES = ("dev", "main")
@@ -36,6 +36,8 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         Dict with success, pr_number, title, merge_commit, and message.
     """
     repo_root = find_repo_root()
+    if not is_aipass_repo(repo_root):
+        return external_pr_handler.merge_pr(repo_root, pr_number, caller)
 
     result: dict = {
         "success": False,
@@ -46,7 +48,6 @@ def merge_pr(pr_number: str, caller: str) -> dict:
     }
 
     try:
-        # Step 0: Get PR head ref to decide delete-branch behavior
         head_proc = subprocess.run(
             ["gh", "pr", "view", pr_number, "--json", "headRefName", "--jq", ".headRefName"],
             capture_output=True,
@@ -55,10 +56,7 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         )
         head_ref = head_proc.stdout.strip() if head_proc.returncode == 0 else ""
 
-        # Step 1: Merge the PR — only delete the head branch when we can
-        # POSITIVELY confirm it is a non-protected branch. If the head ref is
-        # unknown (gh lookup failed → empty string), fail SAFE and never delete:
-        # this is the exact path that destroyed `dev` in S183.
+        # An unknown head ref (gh lookup failed) never deletes: a protected branch may be behind it.
         merge_cmd = ["gh", "pr", "merge", pr_number, "--merge"]
         if head_ref and head_ref not in PROTECTED_BRANCHES:
             merge_cmd.append("--delete-branch")
@@ -76,10 +74,7 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         )
         if merge.returncode != 0:
             merge_stderr = merge.stderr.strip()
-            # gh pr merge --delete-branch fails with non-zero if the local branch
-            # can't be deleted (e.g. checked out in a worktree). The GitHub-side
-            # merge + remote branch deletion already completed — only local
-            # cleanup failed. Treat this as a warning and continue.
+            # A local branch held by a worktree fails gh's cleanup after GitHub already merged.
             if "cannot delete branch" in merge_stderr and "worktree" in merge_stderr:
                 logger.warning(
                     "merge_pr: PR #%s merged but local branch cleanup skipped (branch in use by worktree): %s",
@@ -91,8 +86,7 @@ def merge_pr(pr_number: str, caller: str) -> dict:
                 logger.error(result["message"])
                 return result
 
-        # Step 2: Sync local main — stash any unstaged changes first so
-        # git pull --rebase doesn't abort on a dirty working tree.
+        # Stashed first: git pull --rebase aborts on a dirty working tree.
         stash = subprocess.run(
             ["git", "stash"],
             capture_output=True,
@@ -132,7 +126,6 @@ def merge_pr(pr_number: str, caller: str) -> dict:
                     pop.stderr.strip(),
                 )
 
-        # Step 3: Get the merge commit hash
         rev = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             capture_output=True,
@@ -141,7 +134,6 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         )
         merge_commit = rev.stdout.strip() if rev.returncode == 0 else "unknown"
 
-        # Step 4: Get the PR title
         title_proc = subprocess.run(
             ["gh", "pr", "view", pr_number, "--json", "title", "--jq", ".title"],
             capture_output=True,
@@ -150,7 +142,6 @@ def merge_pr(pr_number: str, caller: str) -> dict:
         )
         title = title_proc.stdout.strip() if title_proc.returncode == 0 else "unknown"
 
-        # Step 5: Return to dev branch
         current_branch = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True,

@@ -3,48 +3,24 @@
 # Description: Memory File Line Counter Handler
 # Version: 0.2.1
 # Created: 2025-11-16
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Line Counter Handler
-
-Updates document_metadata.status.current_lines field in memory files.
-Called after any edit to keep metadata accurate.
-
-Purpose:
-    Keep memory file metadata in sync with actual file state.
-    Provides accurate current_lines count for rollover detection.
-
-Independence:
-    Uses json_handler for safe, atomic metadata updates
 """
 
 from pathlib import Path
 from typing import Dict, Any
 
-# Handler imports (relative within package)
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
 logger = get_system_logger()
 
 
-# =============================================================================
-# LINE COUNTING
-# =============================================================================
-
-
 def _count_physical_lines(file_path: Path) -> int:
-    """
-    Count physical lines in file
-
-    Args:
-        file_path: Path to file
-
-    Returns:
-        Number of lines
-    """
+    """Count physical lines in file"""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return len(f.readlines())
@@ -53,33 +29,8 @@ def _count_physical_lines(file_path: Path) -> int:
         return 0
 
 
-# =============================================================================
-# METADATA UPDATE
-# =============================================================================
-
-
 def update_line_count(file_path: Path) -> Dict[str, Any]:
-    """
-    Count the physical lines of a memory file and report them.
-
-    **Reads only — this function no longer writes to the file.** Its single
-    write was a `status.last_health_check` date stamp, deleted from the
-    standard on 2026-08-25 (health is computed by the checker at run time,
-    never stored). The line count itself was never persisted: it was computed,
-    returned, and dropped, while the function's name and docstring both
-    implied otherwise.
-
-    That leaves `drone @memory rollover sync-lines` a read-only reporter. It
-    is reported as such rather than quietly retired — whether that verb should
-    still exist is a design question for its owner, not a call to smuggle into
-    a stamping-removal build.
-
-    Args:
-        file_path: Path to memory JSON file
-
-    Returns:
-        Dict with success status and the measured line count
-    """
+    """Count the physical lines of a memory file and report them; reads only, writes nothing."""
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
@@ -91,13 +42,7 @@ def update_line_count(file_path: Path) -> Dict[str, Any]:
 
 
 def update_all_memory_files() -> Dict[str, Any]:
-    """
-    Update line counts for all memory files in AIPASS_REGISTRY
-
-    Returns:
-        Dict with update statistics, or ``{"success": False, "error": ...}``
-        naming the registry when it cannot be read (DPLAN-0354 leg 3b).
-    """
+    """Update line counts for all memory files in AIPASS_REGISTRY; an unreadable registry returns success False."""
     from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, _read_registry, _get_memory_file_path
 
     try:

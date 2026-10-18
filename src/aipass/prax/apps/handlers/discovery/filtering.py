@@ -3,33 +3,24 @@
 # Description: Path Filtering
 # Version: 1.1.0
 # Created: 2025-11-10
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Discovery Filtering
-
-Path filtering for module discovery using ignore patterns.
-"""
+"""PRAX Discovery Filtering"""
 
 from pathlib import Path
 
-# Import from prax config
 from aipass.prax.apps.handlers.config.ignore_patterns import load_ignore_patterns_from_config
 from aipass.prax.apps.handlers.json import json_handler
 
-# The owner's ruling of 09-27 (20:37, 20:42): nothing looks into a dropbox, it is a
-# sandbox like .archive. Three literal names, kept here rather than imported.
+# Nothing looks into a dropbox: it is a sandbox like .archive. Literal names, not imported.
 SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
 def in_sandbox(path: Path, root: Path) -> bool:
     """True when path lies in a dropbox, an .archive or a __pycache__ below root.
 
-    Only the parts of the path below root are compared, so a root that itself
-    stands inside a directory of one of these names still sees its own tree. A
-    path outside root is in none of root's sandboxes: False.
-    """
+    Only parts below root count, so a root inside such a directory still sees its own tree."""
     try:
         parts = Path(path).relative_to(root).parts
     except ValueError:
@@ -38,20 +29,11 @@ def in_sandbox(path: Path, root: Path) -> bool:
 
 
 def should_ignore_path(path: Path) -> bool:
-    """Check if path should be ignored based on patterns from config
-
-    Args:
-        path: Path to check against ignore patterns
-
-    Returns:
-        True if path should be ignored, False otherwise
-    """
+    """Check if path should be ignored based on patterns from config"""
     path_parts = path.parts  # Keep original case for exact matching
 
-    # Load ignore patterns from config (with fallback to hardcoded)
     ignore_patterns = load_ignore_patterns_from_config()
 
-    # Check against ignore patterns
     for part in path_parts:
         if part in ignore_patterns:
             json_handler.log_operation("discovery_filtered", {"ignored_path": str(path)})

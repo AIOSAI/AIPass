@@ -3,61 +3,13 @@
 # Description: Logged Fallback Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-09-25
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Logged Fallback Standards Checker Handler
 
-``silent_catch``'s sibling. ``silent_catch`` acquits any ``except`` that calls
-the logger; this rule reads what the handler RETURNS. A handler that logs and
-then returns a value the success path can also return hands its caller a
-failure dressed as an answer: the caller cannot tell "it failed" from "it
-worked and found nothing".
-
-  ``backup/apps/handlers/drive/client.py:184``: ``get_or_create_backup_folder``
-  logs a failed folder search and returns ``None``, and ``None`` is also what
-  its success path returns when there is no Drive service. The caller cannot
-  tell "the search failed" from "no folder". ``_api_call`` at ``:128`` is NOT
-  convicted: its success path returns a call, so its ``None`` is a sentinel.
-
-THE SHAPE. An ``except`` handler that
-
-  * does not raise anywhere in its body (bare ``raise``, ``raise X``,
-    ``raise X from Y``), and
-  * ENDS in ``return`` of a literal default: a constant (``None``, ``False``,
-    ``0``, ``""`` ...), an empty container (``{}``, ``[]``, ``()``, ``set()``,
-    ``dict()``, ``list()``, ``tuple()``), or a string built from the exception
-    (an f-string naming it, or ``str(exc)``), and
-  * sits in a function whose SUCCESS PATH can return that same value.
-
-"Can return that same value" is mechanical: some ``return`` outside every
-handler of the function returns (a) a literal equal to the default -- same
-type, same value, so ``False`` is not ``0`` -- or (b) a name whose FIRST
-binding in the function is that literal (``results = []`` ... ``return
-results``). A string built from the exception matches any string literal, or
-a name first bound to one. Logging never acquits. The hit is reported on the
-handler's ``return`` line.
-
-NOT CONVICTED, each for its reason (the page names every one):
-  * A SENTINEL: the default is a value no success return produces --
-    ``return None`` where every success return is a dict, ``return -1`` where
-    the success path returns a count. The caller can tell them apart.
-  * A handler that raises, anywhere in its body.
-  * A handler whose last statement is not a ``return``: it assigns the
-    default and falls through, or falls through to a ``return`` after the
-    ``try``. That shape is real (@backup's ``state/backup_timestamps.py`` and
-    ``drive/share.py``) and this rule does not read it.
-  * A generator: ``yield`` functions have no return value to compare.
-  * A ``return`` inside ``finally``: it runs on both paths, so it is not the
-    success path.
-  * A success ``return`` of a call, an attribute, or a name first bound to
-    anything but a literal (a parameter, a call, a loop target): what it
-    returns cannot be read from the statement.
-  * Nested functions are judged on their own returns, never their parent's.
-
-CHECK FIRST (2026-09-25, before the rule landed). See the page's check-first
-section for the fleet, per-branch and sample numbers.
+Reference: logged_fallback.md
 """
 
 import ast
@@ -181,9 +133,7 @@ def first_bindings(function: ast.AST, nodes: List[ast.AST]) -> Dict[str, Optiona
 def _reported_failures(function: ast.AST, nodes: List[ast.AST]) -> Set[int]:
     """ids of the statements that directly follow a bare ``error(...)`` call (only a return's is read).
 
-    The caller was already shown the failure, so that return is a failure path,
-    not an answer: ai_mail's main() returns 1 after error("Unknown command")
-    and 1 from its handler, and both say "failed" (seedgo, fleet green leg 10).
+    The caller was already shown the failure, so that return is a failure path, not an answer.
     """
     blocks = [getattr(node, field, None) for node in [function, *nodes] for field in ("body", "orelse")]
     pairs = [pair for block in blocks if isinstance(block, list) for pair in zip(block, block[1:])]
@@ -269,15 +219,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a product file for a handler that returns a default the success path also returns.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a product file for a handler that returns a default the success path also returns."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -298,8 +240,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not hits:
         return _result(True, _one_check(True, "No handler returns a default the success path can also return"), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per hit would hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} except returns {default} - {WHY}; {CURE}" for line, default in hits)
 
     json_handler.log_operation(

@@ -3,14 +3,11 @@
 # Description: Entry point CLI for drone @spawn
 # Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 SPAWN Branch - Agent Creation System
-
-Creates new AIPass agents from templates.
-Provides CLI interface to the spawn_agent() workflow.
 """
 
 import os
@@ -117,11 +114,7 @@ def print_help():
 
 
 def _class_candidates(args):
-    """Yield every arg that create could read as a class or template value.
-
-    That is the leading positional (``create <class> <path>``) and any
-    ``--template`` value — the two doors a forbidden class could walk in.
-    """
+    """Yield every arg that create could read as a class or template value."""
     if args:
         yield args[0]
     for i, arg in enumerate(args):
@@ -129,24 +122,16 @@ def _class_candidates(args):
             yield args[i + 1]
 
 
-# create's known flags, used only to find the lone class-or-path positional
-# when flags follow it — see _create_positionals().
 _CREATE_VALUE_FLAGS = ("--role", "--traits", "--purpose", "--template", "--registry")
 _CREATE_BARE_FLAGS = ("--dry-run",)
 
-# A bare positional counts as path-shaped only when it carries an explicit
-# marker — every documented single-positional create example does (a
-# separator, home-dir '~', relative '.'/'..', or '@' branch-address shorthand
-# like README's `create @existing`, normally pre-resolved by drone before
-# spawn ever sees the literal token).
+# A bare positional is path-shaped only with a marker; '@' covers `create @existing` before drone resolves it.
 _PATH_PREFIXES = ("~", ".", "@")
 
 
 def _create_positionals(args):
     """Positional tokens in create's argv, with known flags (and their values)
-    filtered out — an accurate count regardless of how many `--role`/
-    `--purpose`/etc. flags follow the class-or-path slot.
-    """
+    filtered out."""
     positionals = []
     i = 0
     while i < len(args):
@@ -164,12 +149,7 @@ def _create_positionals(args):
 def _looks_like_path(token):
     """True when a bare positional reads as a path rather than a class name.
 
-    Pure syntax check, no filesystem I/O — the same "refuse in front of the
-    parser" shape as the admin fence (DPLAN-0288). A bare identifier with none
-    of the markers below (e.g. "wizard") reads exactly as plausibly as a
-    mistyped class as it does a path, so it does NOT count as path-like —
-    the caller must disambiguate (see handle_create's unknown-class refusal).
-    """
+    Pure syntax, no I/O: a bare identifier ("wizard") could be a typo'd class, so it is not path-like."""
     if not token:
         return False
     if "/" in token or "\\" in token:
@@ -190,31 +170,18 @@ def handle_create(args):
         error("target path required", suggestion="drone @spawn create [class] <target_path> [--role ...]")
         return 1
 
-    # Intercept --help before argparse (argparse has add_help=False)
     if "--help" in args or "-h" in args:
         print_help()
         return 0
 
-    # Forbidden AND retired class/template values refuse here — before argparse
-    # turns "admin" into a target path or a raw template directory (DPLAN-0288),
-    # and before a retired name like "aipass_framework" falls through to the
-    # parser and dies as a bare SystemExit(2) instead of saying what happened
-    # to it (DPLAN-0319 R4).
+    # Before argparse, which would read "admin" as a target path and a retired name as SystemExit(2).
     for value in _class_candidates(args):
         refusal = refuse_retired_or_forbidden(value)
         if refusal:
             error(refusal)
             return 1
 
-    # Check if first arg is a citizen class.
-    #
-    # None means "no class was typed — decide at mint from the citizen number"
-    # (DPLAN-0319 R3: a project's first citizen is its manager, everyone after is
-    # a specialist). This used to seed get_default_class() here, which handed
-    # spawn_agent an EXPLICIT "specialist" on every CLI create — and an explicit
-    # class always wins, so the mint-time decision could never fire through the
-    # CLI. `drone @spawn create ./firstborn` in a fresh project minted a
-    # specialist with no manager anywhere in it.
+    # None, never get_default_class(): an explicit class always wins, so the mint-time decision would never fire.
     citizen_class = None
     remaining_args = args
     if validate_class(args[0]):
@@ -224,12 +191,7 @@ def handle_create(args):
             error("target path required after class name")
             return 1
     else:
-        # General unknown-class refusal (APLAN-0007 open item 1; devpulse
-        # ruling: refuse in front of the parser, not another special case).
-        # A lone positional that is neither a registered class nor
-        # path-shaped is refused here — not silently read as the target
-        # path. Without this, `create wizard` (typo'd class, no path arg)
-        # silently created a branch named WIZARD in ./wizard.
+        # A lone positional that is neither a class nor path-shaped is refused, not read as the target.
         positionals = _create_positionals(args)
         if len(positionals) == 1 and not _looks_like_path(positionals[0]):
             token = positionals[0]
@@ -255,7 +217,6 @@ def handle_create(args):
 
     parsed = parser.parse_args(remaining_args)
 
-    # --template can be a class name (e.g. "specialist") or a raw path
     template_dir = parsed.template
     if parsed.template and validate_class(parsed.template):
         citizen_class = parsed.template
@@ -293,11 +254,7 @@ def handle_create(args):
 def _dry_run_create(target_path, citizen_class, parsed):
     """Preview what create would do without making changes.
 
-    ``citizen_class`` is None when the caller typed no class — the real class is
-    then decided at mint from the citizen number, which needs a registry read the
-    preview deliberately does not do. The preview says so instead of guessing.
-    Both classes share one template dir, so the template shown is right either way.
-    """
+    No registry read, so a None class is shown as decided at mint, never guessed."""
     from pathlib import Path
     from aipass.spawn.apps.modules.core import (
         get_template_dir,
@@ -332,7 +289,6 @@ def _dry_run_create(target_path, citizen_class, parsed):
         error(f"Template not found: {template}")
         return 1
 
-    # Count template files
     file_count = sum(1 for f in template.rglob("*") if f.is_file() and "__pycache__" not in str(f))
     dir_count = sum(1 for d in template.rglob("*") if d.is_dir() and "__pycache__" not in str(d))
 
@@ -372,26 +328,13 @@ def print_introspection():
 def _resolved(code: int) -> int:
     """Never let a command that called ``error()`` exit 0.
 
-    THE EXIT SEAM (fleet refusal sweep 2026-09-07). ``error()`` marks the process
-    failed, but that mark decides nothing unless somebody reads it — so a handler
-    that refused loudly and returned 0 still exited 0. Every routed command's code
-    passes through here: a non-zero code is its own answer and is returned
-    untouched, and a 0 is re-asked of ``resolve_exit``, which answers 2 when the
-    command reported a failure and 0 when it did not.
-
-    Args:
-        code: The exit code the routed handler returned.
-
-    Returns:
-        The handler's code, or 2 when it returned 0 after calling ``error()``.
-    """
+    Every routed command passes through here; returns 2 when a handler returned 0 after ``error()``."""
     return code if code else resolve_exit(True)
 
 
 def main():
     """Main entry point."""
-    # A stale failure flag from an earlier in-process command would otherwise
-    # convict this one — the flag is process-level, and drone routes in-process.
+    # The failure flag is process-level and drone routes in-process: a stale one would convict this command.
     reset_command_state()
     args = sys.argv[1:]
 

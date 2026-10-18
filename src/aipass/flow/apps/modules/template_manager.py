@@ -3,7 +3,7 @@
 # Description: Template registry management module
 # Version: 1.1.0
 # Created: 2026-03-18
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -34,24 +34,19 @@ if sys.platform == "win32":
 
 from typing import List
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[3]  # file.py -> modules/ -> apps/ -> flow/ -> aipass/
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# External: Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# JSON handler for operation tracking
 from aipass.flow.apps.handlers.cli.arg_gate import UnknownArgument, refuse_extra
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
 from aipass.flow.apps.handlers.json import json_handler
 
-# CLI services for display
 from aipass.cli.apps.modules import console, error, warning, success
 
-# Template registry handlers
 from aipass.flow.apps.handlers.template.registry_ops import (
     load_registry,
     add_type,
@@ -59,25 +54,13 @@ from aipass.flow.apps.handlers.template.registry_ops import (
     scan_unregistered,
 )
 
-# =============================================
-# CONFIGURATION
-# =============================================
-
 MODULE_NAME = "template_manager"
 
-# The four verbs this module claims. handle_command answers help for exactly
-# these — a command we do not own must fall through to the next module, help
-# flag or not.
+# Help is answered only for these; any other command falls through to the next module.
 TEMPLATE_COMMANDS = ("templates", "register", "unregister", "scan")
 
-# What the help table prints for this module. Read by flow.py's module_verbs():
-# the filename-derived short name would be "template", a verb that does not
-# exist, because this module owns four verbs rather than one.
+# Read by flow.py's module_verbs(): the filename-derived "template" is not a verb.
 COMMAND_VERBS = TEMPLATE_COMMANDS
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -135,18 +118,8 @@ def print_help():
     console.print()
 
 
-# =============================================
-# DISPLAY HELPERS
-# =============================================
-
-
 def _suggest_prefix(dir_name: str) -> str:
-    """Generate a suggested prefix from a directory name.
-
-    Takes the first word of the dir name (split on underscores),
-    uppercases the first letter, and appends 'PLAN'.
-    E.g. 'testing' -> 'TPLAN', 'skills_plans' -> 'SPLAN'.
-    """
+    """Generate a suggested prefix from a directory name."""
     first_word = dir_name.split("_")[0]
     return first_word[0].upper() + "PLAN" if first_word else "XPLAN"
 
@@ -176,7 +149,6 @@ def _display_registered_types(registry: dict) -> None:
         console.print(f"    Shorthand:  [cyan]{shorthand}[/cyan]")
         console.print(f"    Registered: [dim]{registered}[/dim]")
 
-        # Scan the actual directory for .md templates
         templates_dir = FLOW_ROOT / "templates" / dir_name
         if templates_dir.is_dir():
             md_files = sorted(p.stem for p in templates_dir.iterdir() if p.suffix == ".md")
@@ -190,48 +162,20 @@ def _display_registered_types(registry: dict) -> None:
         console.print()
 
 
-# =============================================
-# COMMAND HANDLER
-# =============================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle command routing for template_manager module
 
-    Routes:
-        templates  - Show registered types
-        register   - Register new plan type
-        unregister - Remove plan type registration
-        scan       - Find unregistered template directories
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if command was recognized, False if not
-
-    Raises:
-        SystemExit: Code 1 when a door was handed an argument it does not read
-            (ruling 2026-09-07). The gate decides; this is where it is shown.
+    Returns False only for a command this module does not own.
+    Raises SystemExit(1) when a verb is handed an argument it does not read.
     """
     if not args:
-        # `templates` with nothing after it IS the listing — print_introspection
-        # loads the registry and renders the types. The old code reached the
-        # same display a second way, by ignoring whatever token followed the
-        # verb, which is the door the 2026-09-07 ruling closes; the log line
-        # moved here so listing still leaves its audit record.
         if command == "templates":
             json_handler.log_operation("templates_listed", {"command": command, "args": args})
             print_introspection()
             return True
 
-    # Help is answered HERE, before any verb reads its arguments — one gate for
-    # all four verbs. It used to sit inside each branch of _route(); a reader
-    # (human or checker) looking at handle_command could not then see that
-    # `--help` never reaches business logic, which is exactly the property
-    # being claimed.
+    # One help gate for all four verbs, before any verb reads its arguments.
     if command in TEMPLATE_COMMANDS and wants_help(args):
         print_help()
         return True
@@ -244,28 +188,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 
 def _route(command: str, args: List[str]) -> bool:
-    """Dispatch the four template verbs. See :func:`handle_command`.
-
-    Args:
-        command: Command name.
-        args: Additional arguments.
-
-    Returns:
-        True if command was recognized, False if not.
-
-    Note:
-        Help never arrives here — handle_command answers it for all four verbs
-        before delegating, so every branch below sees real arguments only.
-    """
-    # ---- templates ----
+    """Dispatch the four template verbs. See :func:`handle_command`."""
     if command == "templates":
-        # Reached only WITH arguments — the empty case is the listing, handled
-        # in handle_command. `templates` reads nothing after the verb, and
-        # ignoring a token here printed the listing under a name the caller
-        # never asked for, with exit 0.
+        # Reached only with arguments, and `templates` reads none.
         refuse_extra(args, door="templates")
 
-    # ---- register ----
     if command == "register":
         if not args or len(args) < 2:
             error("Usage: drone @flow register <dir> <PREFIX>")
@@ -279,7 +206,6 @@ def _route(command: str, args: List[str]) -> bool:
         if args[2:]:
             refuse_extra(args[2:], door=f"register {dir_name} {prefix}")
 
-        # Validate PREFIX convention: uppercase and ends with PLAN
         if not prefix.isupper() or not prefix.endswith("PLAN"):
             error(f"PREFIX must be uppercase and end with 'PLAN' (got '{prefix}')")
             console.print()
@@ -287,7 +213,6 @@ def _route(command: str, args: List[str]) -> bool:
             console.print()
             return True
 
-        # Log the operation
         json_handler.log_operation(
             "type_registered",
             {"dir_name": dir_name, "prefix": prefix},
@@ -306,7 +231,6 @@ def _route(command: str, args: List[str]) -> bool:
 
         return True
 
-    # ---- unregister ----
     if command == "unregister":
         if not args:
             error("Usage: drone @flow unregister <dir>")
@@ -319,7 +243,6 @@ def _route(command: str, args: List[str]) -> bool:
         if args[1:]:
             refuse_extra(args[1:], door=f"unregister {dir_name}")
 
-        # Log the operation
         json_handler.log_operation(
             "type_unregistered",
             {"dir_name": dir_name},
@@ -336,12 +259,10 @@ def _route(command: str, args: List[str]) -> bool:
 
         return True
 
-    # ---- scan ----
     if command == "scan":
         if args:
             refuse_extra(args, door="scan")
 
-        # Log the operation
         json_handler.log_operation(
             "templates_scanned",
             {"command": command},
@@ -372,35 +293,25 @@ def _route(command: str, args: List[str]) -> bool:
 
         return True
 
-    # Not our command
     return False
 
 
-# =============================================
-# STANDALONE EXECUTION (for testing)
-# =============================================
-
 if __name__ == "__main__":
-    # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_introspection()
         sys.exit(0)
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Confirm logger connection
     logger.info("Prax logger connected to template_manager")
 
-    # Log standalone execution
     json_handler.log_operation(
         "template_manager",
         {"command": "standalone"},
     )
 
-    # Route through handle_command
     args = sys.argv[1:] if len(sys.argv) > 1 else []
     cmd = args[0] if args else "templates"
     cmd_args = args[1:] if len(args) > 1 else []
@@ -410,6 +321,5 @@ if __name__ == "__main__":
     if result:
         sys.exit(0)
     else:
-        # Unknown command -- show help
         print_help()
         sys.exit(1)

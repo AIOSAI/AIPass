@@ -3,32 +3,13 @@
 # Description: Tests that a delivered message can be traced back to the sender's sent record
 # Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the reply/inbox_ops/inbox_cleanup correlation it enables."""
 
-# WHY THIS EXISTS — a false outage, 2026-08-16.
-#
-# @seedgo replied to @devpulse at 10:03:15. The reply landed correctly. But
-# @devpulse searched their inbox for the id in @seedgo's ``sent/`` record
-# (``de0cef3e``) and found nothing, because delivery mints a FRESH id for the
-# recipient's copy (that message is ``361cefd6`` in their store). They reasonably
-# concluded a fleet-internal reply had been eaten mid-flight, and escalated it as
-# a live delivery outage caused by my in-flight fence work.
-#
-# Nothing was eaten. The two ids are two names for one message, and no field on
-# either side pointed at the other, so the message was untraceable by design.
-# On a branch whose whole job is delivering mail, "you cannot prove this message
-# arrived" is a real defect even when the delivery itself is perfect.
-#
-# The lanes also disagreed: ``deliver_to_inbox_file`` (cross-project replies)
-# already preserved the sender's id via ``setdefault``, while the main lane threw
-# it away. One system, two answers to "what is this message called".
-#
-# The fix is additive — the recipient's id stays authoritative for view/reply/
-# close, and the sender's id rides along as ``sent_id`` so either side can find
-# the other.
+# Delivery mints a fresh id for the recipient's copy; the sender's id rides along
+# as ``sent_id`` so either side can find the other. The recipient's id stays authoritative.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(notify) — delivery.py's _emit_notification_event call, silenced here; see tests/test_notify.py
@@ -124,8 +105,7 @@ class TestSentIdRidesAlong:
     def test_grepping_the_mailbox_for_the_sent_id_finds_the_message(self, tmp_path, repo_root, noop_inbox_lock):
         """What @devpulse actually did — search the mailbox for the sender's id.
 
-        Asserted at the file level, not the dict, because the operator's tool
-        was grep over inbox.json, not a Python attribute lookup.
+        Asserted at the file level because the operator's tool is grep over inbox.json.
         """
         branches = _setup_branch(tmp_path)
 
@@ -138,9 +118,7 @@ class TestSentIdRidesAlong:
     def test_recipient_id_stays_distinct_and_authoritative(self, tmp_path, repo_root, noop_inbox_lock):
         """sent_id is a back-reference, NOT a replacement.
 
-        The inbox id must stay the recipient's own — it keys view/reply/close
-        and must be unique within their mailbox regardless of what a sender
-        chose. Two senders picking the same id must not collide here.
+        The inbox id keys view/reply/close and must stay unique whatever id a sender chose.
         """
         branches = _setup_branch(tmp_path)
 
@@ -154,9 +132,7 @@ class TestSentIdRidesAlong:
     def test_delivery_without_a_sender_id_omits_the_field(self, tmp_path, repo_root, noop_inbox_lock):
         """No invented correlation.
 
-        Not every producer stamps an id (trigger delivers directly). Writing a
-        placeholder would be worse than absence — it would look like a real
-        sent record that no ``sent/`` folder contains.
+        A placeholder would look like a real sent record that no ``sent/`` folder contains.
         """
         branches = _setup_branch(tmp_path)
 
@@ -166,12 +142,7 @@ class TestSentIdRidesAlong:
         assert "sent_id" not in _delivered(branches)
 
     def test_both_lanes_agree_on_correlation(self, tmp_path, noop_inbox_lock):
-        """The cross-project reply lane must correlate the same way.
-
-        ``deliver_to_inbox_file`` preserves the sender's id as the message id
-        outright, so a reader keyed on ``sent_id`` would find nothing there.
-        Both lanes must answer "which sent record is this" identically.
-        """
+        """The cross-project reply lane must correlate the same way."""
         mailbox = tmp_path / ".ai_mail.local"
         mailbox.mkdir(parents=True)
         inbox_file = mailbox / "inbox.json"
@@ -190,11 +161,7 @@ class TestSentIdRidesAlong:
 class TestReplyLaneCorrelates:
     """The reply lane is the one that actually failed.
 
-    Caught by checking my own reply to @devpulse AFTER reporting the fix done:
-    it landed with ``sent_id: None``. ``send_reply`` minted the reply id AFTER
-    calling delivery — purely to name the sent/ file — so at delivery time the
-    reply carried no id to copy. Stamping ``sent_id`` in delivery.py fixed
-    every lane except the one @seedgo's message travelled.
+    The reply id must be minted before delivery, or the delivered copy carries no id to copy.
     """
 
     def test_reply_sent_id_matches_the_senders_sent_record(self, tmp_path, repo_root, noop_inbox_lock):
@@ -238,13 +205,7 @@ class TestReplyLaneCorrelates:
 class TestFindMessage:
     """One resolver for "which message did the operator mean".
 
-    Storing ``sent_id`` only helps if the commands accept it. @devpulse held
-    ``de0cef3e`` and had no way to act on it — ``view de0cef3e`` said "not
-    found" on a message sitting in their own inbox.
-
-    This is deliberately ONE shared function rather than a fallback bolted onto
-    each of the three lookup sites. S143's outage was two resolvers answering
-    one question differently; three would be worse.
+    One shared function for all lookup sites, so two resolvers never answer differently.
     """
 
     def test_finds_by_inbox_id(self):
@@ -263,10 +224,7 @@ class TestFindMessage:
     def test_inbox_id_wins_over_a_sent_id_collision(self):
         """Precedence must be total, not positional.
 
-        If one message's sent_id equals another's inbox id, the inbox id is
-        authoritative — it is the name the operator was shown and the name
-        reply/close print back. Resolution must not depend on list order, so
-        the decoy is placed FIRST.
+        The inbox id wins over another message's equal sent_id; the decoy is placed FIRST.
         """
 
         decoy = {"id": "aaaaaaaa", "sent_id": "shared01"}

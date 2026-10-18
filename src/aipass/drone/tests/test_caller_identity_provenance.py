@@ -3,7 +3,7 @@
 # Description: Caller identity ships with the evidence it came from
 # Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/router_handler.py: a caller's identity ships with the provenance it came from."""
@@ -24,23 +24,8 @@ from aipass.drone.apps.handlers.router_handler import (
 from aipass.drone.apps.handlers import router_handler
 
 
-# A caller's identity and WHERE it came from must travel together.
-#
-# Two different questions were being answered with one string:
-#
-#     (a) agent assigned @commons, standing in /tmp  -> CALLER_BRANCH=commons
-#     (b) nobody assigned, standing at the repo root -> CALLER_BRANCH=aipass
-#
-# (a) is a credential — a dispatched agent that cd'd out of its branch is still
-# itself (S102). (b) is a DIRECTORY NAME that happens to collide with the citizen
-# @aipass, so ai_mail's contact lookup found a real row and stamped it "verified":
-# a dispatch sent from the repo root on 2026-08-21 went out as @aipass and the
-# wake-back woke the wrong citizen (11 turns, $1.41, DPLAN-0315 item 3).
-#
-# Downstream could not tell them apart, so ai_mail's identity fence had to refuse
-# BOTH — which re-broke the S102 case it was protecting. Stamping the provenance
-# next to the name is what lets a consumer accept "assigned" from anywhere and
-# refuse "project" everywhere.
+# An assigned name is a credential; a repo-root project name only collides with a
+# citizen. The source travels with the name so a consumer can tell them apart.
 
 
 def _plant_passport(directory: Path, branch_name: str) -> Path:
@@ -73,7 +58,7 @@ class TestProvenanceTravelsWithTheName:
         assert resolve_caller_identity_signal(nowhere) == ("commons", "assigned")
 
     def test_assigned_wins_and_is_still_sourced_assigned_over_a_passport(self, temp_test_dir: Path, monkeypatch):
-        """S102: cd'ing into another branch does not relabel you as that branch."""
+        """cd'ing into another branch does not relabel you as that branch."""
         home = _plant_passport(temp_test_dir / "aipass", "AIPASS")
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 
@@ -87,7 +72,7 @@ class TestProvenanceTravelsWithTheName:
         assert resolve_caller_identity_signal(home) == ("drone", "passport")
 
     def test_project_name_is_sourced_project(self, temp_test_dir: Path, monkeypatch):
-        """THE $1.41 CASE: a repo root yields a project name, not a citizen."""
+        """A repo root yields a project name, not a citizen."""
         root = _plant_registry(temp_test_dir / "AIPass", "aipass")
         monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
 
@@ -191,24 +176,9 @@ class TestProvenanceIsStampedIntoTheEnvironment:
         assert "AIPASS_CALLER_IDENTITY_SOURCE" not in env
 
 
-# ---------------------------------------------------------------------------
-# Routing must survive a caller whose directory no longer exists
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.deletable_cwd
 class TestRoutingFromADeletedDirectory:
-    """``drone rm`` on your own cwd now succeeds — so the NEXT command runs here.
-
-    Every routed invocation reads the caller's cwd twice: once to ship
-    AIPASS_CALLER_CWD to the target, once to resolve who is calling. Both reads
-    were bare, and a process whose directory was deleted raises ENOENT on each.
-
-    The delete lane was fixed first, which is what made this reachable rather
-    than theoretical: before that fix the delete itself crashed, so nobody ever
-    got to type a second command from a directory that was gone. @trigger found
-    the count was three reads, not the two this branch first reported.
-    """
+    """``drone rm`` on your own cwd succeeds, so the NEXT command runs from a deleted directory."""
 
     def test_routing_does_not_crash_when_the_cwd_was_deleted(self, tmp_path, monkeypatch):
         """Mutant killed: the routed command dropped from the args handed to execute_command."""
@@ -257,7 +227,7 @@ class TestRoutingFromADeletedDirectory:
         assert captured["env"].get("AIPASS_CALLER_CWD") != str(doomed)
 
     def test_assigned_identity_still_answers_without_a_cwd(self, tmp_path, monkeypatch):
-        """Who this process IS never depended on where it was standing (S102)."""
+        """Who this process IS never depended on where it was standing."""
 
         doomed = tmp_path / "scratch"
         doomed.mkdir()
@@ -273,16 +243,7 @@ class TestRoutingFromADeletedDirectory:
     def test_the_handlers_package_imports_at_all_without_a_cwd(self, tmp_path):
         """Every guard above is unreachable if the IMPORT raises first.
 
-        ``handlers/__init__.py`` runs a stack walk at import to block
-        cross-branch imports, and it called ``Path(filename).resolve()`` on each
-        frame BEFORE the line that skips Python's internals. ``resolve()`` on a
-        relative name — ``<frozen importlib._bootstrap>`` is in every import
-        stack — goes through ``abspath``, which reads the current directory, so
-        importing drone's handlers from a deleted directory raised ENOENT
-        before any of this branch's cwd guards existed to run.
-
-        A subprocess with a deleted cwd, not a mock: ``Path.resolve()`` reaches
-        ``os.getcwd`` inside C, so patching ``Path.cwd`` reproduces nothing.
+        A real subprocess, not a mock: the import-time ``Path.resolve()`` reaches ``os.getcwd`` in C.
         """
         import subprocess
         import sys
@@ -313,19 +274,9 @@ class TestRoutingFromADeletedDirectory:
 
 
 class TestRoutingWithoutACwdOnEveryOS:
-    """The same three claims as the class above, built portably.
+    """The same three claims as the class above, built portably (Windows refuses deleting the cwd).
 
-    Those tests delete the directory they stand in, which Windows refuses (see
-    WINDOWS_CWD_REASON in conftest), so on Windows they are skipped and this is
-    the only cover routing's cwd guards have there.
-
-    Supplied state, not produced: the cwd read beneath ``caller_cwd`` raises the
-    ENOENT ``Path.cwd`` raises for real. The fourth claim of that class — that the handlers package IMPORTS at
-    all from a dead directory — has no portable sibling and is not given a fake
-    one. Its own docstring says why: the import-time walk reaches ``os.getcwd``
-    inside C via ``Path.resolve()``, where patching ``Path.cwd`` reproduces
-    nothing. On Windows that claim is genuinely untested, and saying so is
-    better than a test that would pass without exercising it.
+    The import claim has no portable sibling: on Windows it is genuinely untested.
     """
 
     @pytest.fixture()
@@ -361,17 +312,13 @@ class TestRoutingWithoutACwdOnEveryOS:
         assert self._route(tmp_path), "routing died with no current directory"
 
     def test_the_absent_cwd_is_omitted_rather_than_faked(self, no_cwd, tmp_path):
-        """The target reads AIPASS_CALLER_CWD as a location. It must not get a lie.
-
-        Omitted, not blanked: an empty string is a value the target would try to
-        resolve, and a sentinel is a path somebody eventually treats as one.
-        """
+        """The target reads AIPASS_CALLER_CWD as a location: omitted, not blanked or faked."""
         captured = self._route(tmp_path)
 
         assert "AIPASS_CALLER_CWD" not in captured["env"]
 
     def test_assigned_identity_still_answers(self, no_cwd, monkeypatch):
-        """Who this process IS never depended on where it was standing (S102)."""
+        """Who this process IS never depended on where it was standing."""
 
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 

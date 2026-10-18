@@ -3,7 +3,7 @@
 # Description: Unit tests for medic_state handler — real file I/O via tmp_path
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the medic_state handler (apps/handlers/medic_state.py)."""
@@ -21,11 +21,6 @@ from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.json import json_handler
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 _RECORDERS: dict = {}
 
 
@@ -33,15 +28,12 @@ _RECORDERS: dict = {}
 def _mock_infrastructure(monkeypatch, tmp_path):
     """Keep every test off live state: medic_state's own names, patched at home.
 
-    The four path constants are bound at import off the live TRIGGER_ROOT, so
-    they are pointed into tmp_path here for every test, not just the ones that
-    remember. The config helpers (atomic write, retrying read, the real flock)
-    stay real: read_config parses what they return, and only the real lock
-    proves the nested migration does not deadlock the process against itself.
+    The path constants bind at import off the live TRIGGER_ROOT. The flock stays real:
+    only the real lock proves the nested migration does not deadlock against itself.
     """
     monkeypatch.setattr(medic_state, "logger", MagicMock())
 
-    # -- trigger json handler: the operation log is live, record instead -----
+    # The operation log is live: record instead.
     json_recorder = MagicMock()
     json_recorder.log_operation.return_value = True
     monkeypatch.setattr(json_handler, "log_operation", json_recorder.log_operation)
@@ -62,11 +54,6 @@ def state_mod():
 def _get_json_handler():
     """Return the recorder whose log_operation stands in json_handler's at its home."""
     return _RECORDERS["json_handler"]
-
-
-# ---------------------------------------------------------------------------
-# Tests -- read_config
-# ---------------------------------------------------------------------------
 
 
 class TestReadConfig:
@@ -93,9 +80,7 @@ class TestReadConfig:
     def test_read_config_corrupt_file_raises_and_is_never_overwritten(self, state_mod):
         """An unreadable state file raises; a mute cannot write a blank over it.
 
-        Before 2026-09-27 read_config answered {} here, the same value as a
-        missing file, and the next mute persisted that blank over every mute
-        and the on/off state. Mutant run: the old `return {}` reddens this.
+        A blank read_config answer would be persisted over every mute and the on/off state.
         """
         config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -107,11 +92,6 @@ class TestReadConfig:
             state_mod.mute_branch("flow")
 
         assert config_file.read_text(encoding="utf-8") == "not valid json {{{"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- write_config
-# ---------------------------------------------------------------------------
 
 
 class TestWriteConfig:
@@ -138,11 +118,6 @@ class TestWriteConfig:
 
         assert result is True
         assert config_file.parent.exists()
-
-
-# ---------------------------------------------------------------------------
-# Tests -- is_enabled
-# ---------------------------------------------------------------------------
 
 
 class TestIsEnabled:
@@ -183,11 +158,6 @@ class TestIsEnabled:
         result = state_mod.is_enabled()
 
         assert result is True
-
-
-# ---------------------------------------------------------------------------
-# Tests -- set_enabled
-# ---------------------------------------------------------------------------
 
 
 class TestSetEnabled:
@@ -242,11 +212,6 @@ class TestSetEnabled:
         assert data["config"]["other_key"] == "keep_me"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- _normalize_branch_name
-# ---------------------------------------------------------------------------
-
-
 class TestNormalizeBranchName:
     """Tests for _normalize_branch_name."""
 
@@ -270,11 +235,6 @@ class TestNormalizeBranchName:
     def test_plain_name(self, state_mod):
         """_normalize_branch_name passes through a plain lowercase name."""
         assert state_mod._normalize_branch_name("trigger") == "trigger"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- get_muted_branches
-# ---------------------------------------------------------------------------
 
 
 class TestGetMutedBranches:
@@ -313,11 +273,6 @@ class TestGetMutedBranches:
         assert result == ["speakeasy", "api"]
 
 
-# ---------------------------------------------------------------------------
-# Tests -- mute_branch
-# ---------------------------------------------------------------------------
-
-
 class TestMuteBranch:
     """Tests for mute_branch."""
 
@@ -354,11 +309,6 @@ class TestMuteBranch:
         assert set(muted) == {"speakeasy", "api", "drone"}
 
 
-# ---------------------------------------------------------------------------
-# Tests -- unmute_branch
-# ---------------------------------------------------------------------------
-
-
 class TestUnmuteBranch:
     """Tests for unmute_branch."""
 
@@ -389,11 +339,6 @@ class TestUnmuteBranch:
         assert result is True
         muted = state_mod.get_muted_branches()
         assert "flow" not in muted
-
-
-# ---------------------------------------------------------------------------
-# Tests -- get_suppression_stats
-# ---------------------------------------------------------------------------
 
 
 class TestGetSuppressionStats:
@@ -445,11 +390,6 @@ class TestGetSuppressionStats:
         assert result["last_suppressed"] == "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- get_rate_limit_stats
-# ---------------------------------------------------------------------------
-
-
 class TestGetRateLimitStats:
     """Tests for get_rate_limit_stats."""
 
@@ -498,11 +438,6 @@ class TestGetRateLimitStats:
         assert result["last_rate_limited"] == "unknown"
 
 
-# ---------------------------------------------------------------------------
-# Tests -- parse_duration
-# ---------------------------------------------------------------------------
-
-
 class TestParseDuration:
     """Tests for parse_duration."""
 
@@ -523,11 +458,6 @@ class TestParseDuration:
         result = state_mod.parse_duration("abc")
 
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Tests -- mute_branch TTL
-# ---------------------------------------------------------------------------
 
 
 class TestMuteBranchTTL:
@@ -569,11 +499,6 @@ class TestMuteBranchTTL:
         muted = data["config"]["muted_branches"]
         assert len(muted) == 1
         assert muted[0]["expires_at"] is None
-
-
-# ---------------------------------------------------------------------------
-# Tests -- get_muted_branches TTL filtering
-# ---------------------------------------------------------------------------
 
 
 class TestGetMutedBranchesTTL:
@@ -641,11 +566,6 @@ class TestGetMutedBranchesTTL:
         assert result == ["speakeasy"]
 
 
-# ---------------------------------------------------------------------------
-# Tests -- get_muted_branches_detail
-# ---------------------------------------------------------------------------
-
-
 class TestGetMutedBranchesDetail:
     """Tests for get_muted_branches_detail."""
 
@@ -675,11 +595,6 @@ class TestGetMutedBranchesDetail:
         assert len(result) == 2
         assert result[0] == {"name": "api", "expires_at": future_ts}
         assert result[1] == {"name": "speakeasy", "expires_at": None}
-
-
-# ---------------------------------------------------------------------------
-# Tests -- is_enabled TTL
-# ---------------------------------------------------------------------------
 
 
 class TestIsEnabledTTL:
@@ -732,11 +647,7 @@ class TestIsEnabledTTL:
         assert result is False
 
     def test_is_enabled_permanent_off(self, state_mod):
-        """A permanent off clears an older timed off's expiry, so it stays off.
-
-        Mutant run: set_enabled keeping the stale medic_disabled_until reads as
-        expired, turns medic back on and reddens this.
-        """
+        """A permanent off clears an older timed off's expiry, so it stays off."""
         config_file = state_mod.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         past = (datetime.now() - timedelta(hours=1)).isoformat()
@@ -749,11 +660,6 @@ class TestIsEnabledTTL:
 
         assert state_mod.get_disabled_until() is None
         assert state_mod.is_enabled() is False
-
-
-# ---------------------------------------------------------------------------
-# Tests -- set_enabled with duration
-# ---------------------------------------------------------------------------
 
 
 class TestSetEnabledDuration:
@@ -777,32 +683,22 @@ class TestSetEnabledDuration:
 
     def test_set_enabled_on_clears_disabled_until(self, state_mod):
         """set_enabled(True) clears any existing medic_disabled_until."""
-        # First disable with TTL
         state_mod.set_enabled(False, duration_seconds=3600)
         config_file = state_mod.MEDIC_STATE_FILE
         data = json.loads(config_file.read_text(encoding="utf-8"))
         assert "medic_disabled_until" in data["config"]
 
-        # Then re-enable
         state_mod.set_enabled(True)
         data = json.loads(config_file.read_text(encoding="utf-8"))
         assert data["config"]["medic_enabled"] is True
         assert "medic_disabled_until" not in data["config"]
 
 
-# ---------------------------------------------------------------------------
-# Tests -- get_disabled_until
-# ---------------------------------------------------------------------------
-
-
 class TestGetDisabledUntil:
     """Tests for get_disabled_until."""
 
     def test_get_disabled_until_returns_timestamp(self, state_mod):
-        """get_disabled_until returns the ISO timestamp when set.
-
-        Mutant run: set_enabled doubling the TTL reddens this.
-        """
+        """get_disabled_until returns the ISO timestamp when set."""
         before = datetime.now()
         state_mod.set_enabled(False, duration_seconds=86400)
         after = datetime.now()
@@ -818,11 +714,6 @@ class TestGetDisabledUntil:
         result = state_mod.get_disabled_until()
 
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Tests -- unmute_branch with dict entries
-# ---------------------------------------------------------------------------
 
 
 class TestUnmuteBranchDict:
@@ -868,11 +759,6 @@ class TestUnmuteBranchDict:
         assert "drone" in muted
 
 
-# ---------------------------------------------------------------------------
-# Tests -- _clean_expired_mutes
-# ---------------------------------------------------------------------------
-
-
 class TestCleanExpiredMutes:
     """Tests for _clean_expired_mutes."""
 
@@ -908,11 +794,6 @@ class TestCleanExpiredMutes:
         assert "drone" in names
         assert "flow" in names
         assert len(remaining) == 3
-
-
-# ---------------------------------------------------------------------------
-# Tests -- write_config cleans expired mutes
-# ---------------------------------------------------------------------------
 
 
 class TestWriteConfigCleansMutes:
@@ -965,11 +846,6 @@ class TestWriteConfigCleansMutes:
         muted = written["config"]["volume_muted_branches"]
         assert len(muted) == 1
         assert muted[0]["name"] == "drone"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- volume mutes are an independent class from content mutes
-# ---------------------------------------------------------------------------
 
 
 class TestVolumeMutes:
@@ -1103,20 +979,9 @@ class TestLegacyPathMigration:
         assert not legacy.exists()
 
 
-# ---------------------------------------------------------------------------
-# a refused read must not blank the medic state
-# ---------------------------------------------------------------------------
-
-
 class TestARefusedReadDoesNotBlankTheState:
     """read_config returns {} when it cannot read, and write_config persists
-    exactly what it is handed — so one refused read costs every mute and the
-    circuit-breaker state at once.
-
-    Same species as the json_handler loss on Windows CI (32167459635), with a
-    larger blast radius: there it was one document's entries, here it is the
-    whole operational state of medic. The read is retried now, and since
-    2026-09-27 a refusal that never clears raises instead of blanking.
+    exactly what it is handed, so a refused read must raise rather than blank every mute.
     """
 
     def test_a_transient_refusal_does_not_cost_the_mutes(self, state_mod):

@@ -3,7 +3,7 @@
 # Description: System health aggregation — aipass doctor command
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -107,7 +107,6 @@ def _check_system() -> List[CheckResult]:
     """Run System group checks."""
     results: List[CheckResult] = []
 
-    # Python
     py = detect_python()
     if py["ok"]:
         glyph, detail, rem = GLYPH_PASS, py["version"], ""
@@ -119,23 +118,19 @@ def _check_system() -> List[CheckResult]:
         rem = "Upgrade Python: https://python.org/downloads"
     results.append(CheckResult("python", glyph, detail, rem))
 
-    # git
     git = detect_git()
     if git["found"]:
         results.append(CheckResult("git", GLYPH_PASS, git["version"], ""))
     else:
         results.append(CheckResult("git", GLYPH_FAIL, "not found", "Install git: https://git-scm.com/downloads"))
 
-    # shell
     sh = detect_shell()
     results.append(CheckResult("shell", GLYPH_PASS, sh["name"], ""))
 
-    # OS
     os_info = detect_os()
     detail = f"{os_info['os_name']} {os_info['release']}".strip()
     results.append(CheckResult("OS", GLYPH_PASS, detail, ""))
 
-    # RAM
     ram = detect_ram()
     ram_detail = f"{ram['total_gb']} GB"
     if ram["ok"]:
@@ -145,11 +140,9 @@ def _check_system() -> List[CheckResult]:
     else:
         results.append(CheckResult("RAM", GLYPH_FAIL, ram_detail, "AIPass requires at least 2 GB RAM"))
 
-    # CPU
     cpu = detect_cpu()
     results.append(CheckResult("CPU", GLYPH_PASS, f"{cpu['count']} cores", ""))
 
-    # install method
     method = detect_install_method()
     results.append(CheckResult("install", GLYPH_PASS, method, ""))
 
@@ -212,31 +205,14 @@ def _check_global_aipass_home() -> List[CheckResult]:
 def _check_home_agreement(active: str, configured: str) -> List[CheckResult]:
     """Compare the tree doctor is standing in against the one Claude Code uses.
 
-    Doctor has always printed both on adjacent lines and never compared them.
-    That gap hides a SPLIT-BRAIN install: a second install to a different home
-    takes an unconditional overwrite of ``~/.claude/settings.json``, so terminal
-    tooling (bashrc, symlinks) keeps pointing at tree 1 while Claude Code's env
-    and every hook command point at tree 2 — two registries, two citizen_id
-    sets, and every individual doctor row still green.
-
-    Silent when they agree: both values are already on screen, so a third row
-    saying so would be noise. Loud when they do not, because unlike an optional
-    capability this is never a valid state.
-
-    Args:
-        active: The tree this doctor run resolved (registry parent / env).
-        configured: ``env.AIPASS_HOME`` from ``~/.claude/settings.json``.
-
-    Returns:
-        One CheckResult when the trees disagree, one WARN row when the pair
-        cannot be compared (resolve raised), otherwise an empty list. Silence
-        there would read as agreement.
+    A second install to another home overwrites ``~/.claude/settings.json``, so terminal
+    tooling and Claude Code point at different trees while every row stays green. Silent
+    when they agree; a pair that cannot be resolved is a WARN row (silence reads as agreement).
     """
     if not active or not configured:
         return []
     try:
-        # resolve() collapses trailing slashes and symlinks — the same tree
-        # reached two ways is one tree, not a split.
+        # resolve(): the same tree reached through a symlink or trailing slash is not a split.
         same = Path(active).resolve() == Path(configured).resolve()
     except (OSError, RuntimeError) as exc:  # RuntimeError: a symlink loop, Python 3.12 and older
         logger.warning("[doctor] could not resolve AIPASS_HOME pair: %s", exc)
@@ -338,7 +314,6 @@ def check_identity() -> List[CheckResult]:
     """Run Identity group checks. Public for tests/test_doctor.py; product caller: _compute_doctor_groups."""
     results: List[CheckResult] = []
 
-    # Project root + registry — single lookup
     reg_path = _find_registry()
     if reg_path:
         active_home = str(reg_path.parent)
@@ -358,7 +333,6 @@ def check_identity() -> List[CheckResult]:
             )
 
     results.extend(_check_global_aipass_home())
-    # Both values are now on screen — say so when they disagree (silent when they agree)
     results.extend(_check_home_agreement(active_home, _configured_aipass_home()))
 
     if reg_path is None:
@@ -376,13 +350,11 @@ def check_identity() -> List[CheckResult]:
         results.append(CheckResult("registry", GLYPH_FAIL, "corrupt JSON", "Manually inspect AIPASS_REGISTRY.json"))
         return results
 
-    # Registry valid — has branches key
     if "branches" in reg_data:
         results.append(CheckResult("registry valid", GLYPH_PASS, "", ""))
     else:
         results.append(CheckResult("registry valid", GLYPH_FAIL, "missing 'branches' key", "Re-run 'aipass init'"))
 
-    # hooks.json presence (project-level hook config)
     hooks_json = reg_path.parent / ".aipass" / "hooks.json"
     if hooks_json.exists():
         results.append(CheckResult("hooks.json", GLYPH_PASS, "present", ""))
@@ -396,7 +368,6 @@ def check_identity() -> List[CheckResult]:
             )
         )
 
-    # Passport readable
     passport = _BRANCH_ROOT / ".trinity" / "passport.json"
     if passport.exists():
         try:
@@ -447,19 +418,8 @@ def check_provider_manifest(
 ) -> List[CheckResult]:
     """Check provider settings against manifest. Returns hook/env/permission results.
 
-    Public because a second module reads it: init_flow's report gathers the
-    manifest gaps through it without a full doctor run. Doctor's own callers:
-    the gated group, the Configuration group, and _compute_doctor_groups. The
-    --fix write is not here: it plans, shows and asks in fix_provider_settings
-    (FPLAN-0646), and this check reads the result.
-
-    Args:
-        interactive: Offer the wire prompt (the plan, its diff, one question).
-        settings_path: The provider settings file, ``~/.claude/settings.json``
-            when None. os_name: handed to platform_bridge_command, ``os.name``
-            when None. Both are seams for the tests — a tmp settings file and a
-            forced platform without replacing Path.home or os process-wide;
-            every product caller passes neither.
+    Public: init_flow's report reads the manifest gaps through it. The --fix write lives in
+    fix_provider_settings. settings_path and os_name are test seams; product callers pass neither.
     """
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
@@ -486,7 +446,6 @@ def check_provider_manifest(
         results.append(CheckResult("hooks", GLYPH_WARN, "manifest has no claude section", ""))
         return results
 
-    # --- Hook commands wired in provider settings ---
     manifest_hooks = claude_section.get("hooks", [])
     provider_settings_path = settings_path
     provider_hooks: dict = {}
@@ -498,7 +457,7 @@ def check_provider_manifest(
 
     missing_hooks = []
     for hook in manifest_hooks:
-        # Same OS transform provider_wire applies at write time, so verify agrees with write (DPLAN-0234).
+        # Same OS transform provider_wire applies at write time, so verify agrees with write.
         command = platform_bridge_command(hook.get("command", ""), os_name)
         event = hook.get("event", "")
         if not command or not event:
@@ -529,7 +488,6 @@ def check_provider_manifest(
             )
         )
 
-    # --- Env vars in provider settings ---
     missing_env: List[str] = []
     manifest_env = claude_section.get("env", {})
     if manifest_env:
@@ -554,7 +512,6 @@ def check_provider_manifest(
                 )
             )
 
-    # --- Permissions ---
     missing_deny: List[str] = []
     missing_ask: List[str] = []
     manifest_perms = claude_section.get("permissions", {})
@@ -574,7 +531,6 @@ def check_provider_manifest(
 
         # Check deny rules (use ~ form only, skip expanded $HOME duplicates)
         missing_deny = [r for r in manifest_deny if r not in provider_deny]
-        # Check ask rules
         missing_ask = [r for r in manifest_ask if r not in provider_ask]
         total_expected = len(manifest_deny) + len(manifest_ask)
         total_missing = len(missing_deny) + len(missing_ask)
@@ -591,11 +547,9 @@ def check_provider_manifest(
                 )
             )
 
-    # --- Settings scalars the manifest names (DPLAN-0347) ---
     settings_rows, missing_settings = check_settings_scalars(manifest, settings_path)
     results.extend(CheckResult(*row) for row in settings_rows)
 
-    # --- Interactive auto-wire prompt ---
     # Gate on what the wire verb would actually change, not on the glyphs: a settings key
     # the user set to their own value warns forever and must never trigger the prompt.
     if interactive and (missing_hooks or missing_env or missing_deny or missing_ask or missing_settings):
@@ -636,9 +590,7 @@ def _registry_citizen_names() -> set[str]:
 def _drone_system_names(stdout: str) -> list[str]:
     """Names drone routes, read from the START of each line.
 
-    Deliberately anchored: the old row counted every line CONTAINING "@", so a
-    description mentioning another branch inflated the count. A routed name is
-    the first token on its line, never one quoted inside prose.
+    Anchored: a description that mentions another @branch must not count.
     """
     names: list[str] = []
     for line in stdout.splitlines():
@@ -651,15 +603,8 @@ def _drone_system_names(stdout: str) -> list[str]:
 def _check_drone_systems() -> List[CheckResult]:
     """The `drone` row — routed systems, reconciled against the registry.
 
-    ``drone systems`` lists everything ADDRESSABLE; the registry lists
-    CITIZENS. They are different sets: ``@git`` is routed by drone but owns no
-    branch directory and no passport, so a healthy install shows 19 routed
-    against 18 registered. Printing the bare routed count next to the
-    registry's count elsewhere on the same screen made two correct numbers look
-    like a discrepancy — two independent readers tripped on it the same day.
-
-    So the row now reconciles and NAMES the difference. It stays a PASS either
-    way: a routed service without a passport is normal, not a fault.
+    ``@git`` is routed but owns no passport, so routed and registered counts differ on a
+    healthy install; the row names the difference and stays PASS.
     """
     results: List[CheckResult] = []
     try:
@@ -716,9 +661,7 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
 
     results.extend(_check_drone_systems())
 
-    # pytest --collect-only
     try:
-        # Find repo root (where src/ lives)
         repo_root = None
         for parent in _BRANCH_ROOT.parents:
             if (parent / "src").exists() and (parent / "pyproject.toml").exists():
@@ -756,11 +699,9 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
             )
         )
 
-    # hooks + env + permissions — manifest-driven provider check
     manifest_checks = check_provider_manifest()
     results.extend(manifest_checks)
 
-    # wire_verify guard — catch empty/orphaned/duplicate provider hook entries
     results.extend(CheckResult(*r) for r in check_wire_verify())
 
     # stale rm deny rules — detect only (fix runs in run_doctor when --fix)
@@ -779,14 +720,13 @@ def _check_community() -> List[CheckResult]:
     """Run Community group checks."""
     results: List[CheckResult] = []
 
-    # ai_mail readable
     mail_dir = _BRANCH_ROOT / ".ai_mail.local"
     if mail_dir.exists() and mail_dir.is_dir():
         results.append(CheckResult("ai_mail", GLYPH_PASS, "readable", ""))
     else:
         results.append(CheckResult("ai_mail", GLYPH_FAIL, "not found", "Run 'aipass init' to set up mailbox"))
 
-    # dropbox writable — only check if project has agents (dropbox is optional for fresh projects)
+    # dropbox is optional for fresh projects: checked only once the project has agents
     reg_path = _find_registry()
     dropbox = None
     if reg_path:
@@ -799,9 +739,6 @@ def _check_community() -> List[CheckResult]:
             results.append(CheckResult("dropbox", GLYPH_WARN, "not writable", "Check dropbox directory permissions"))
 
     return results
-
-
-# --- Structure check group ---
 
 
 def _check_structure() -> List[CheckResult]:
@@ -839,7 +776,6 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("placement", GLYPH_PASS, "all agents correctly placed", ""))
 
-    # Pollution
     pollution = detect_pollution(agents)
     if pollution:
         for hit in pollution:
@@ -855,7 +791,6 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("pollution", GLYPH_PASS, "no duplicates", ""))
 
-    # Registry consistency
     reg_path = _discover_registry(start_path=project_root)
     if reg_path and reg_path.exists():
         reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
@@ -870,12 +805,9 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("registry", GLYPH_WARN, "not found", "Expected *_REGISTRY.json in project root"))
 
-    # Detect AIPASS_HOME once — used both to skip the standard root .venv
-    # (setup.sh creates a real, non-symlink .venv there by design) and for
-    # the CLAUDE.md fence check below.
+    # setup.sh creates a real (non-symlink) .venv at AIPASS_HOME by design; root artifacts skip it.
     aipass_home = _detect_aipass_home()
 
-    # Root artifacts
     root_hits = check_root_artifacts(project_root, aipass_home=aipass_home)
     if root_hits:
         for hit in root_hits:
@@ -884,7 +816,6 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("root artifacts", GLYPH_PASS, "none misplaced", ""))
 
-    # Pyproject
     pyproject = check_pyproject(project_root)
     if pyproject["found"]:
         results.append(CheckResult("pyproject.toml", GLYPH_PASS, "present", ""))
@@ -909,9 +840,6 @@ def _check_structure() -> List[CheckResult]:
             results.append(CheckResult("CLAUDE.md fence", GLYPH_PASS, "all nested projects fenced", ""))
 
     return results
-
-
-# --- Sandbox check group ---
 
 
 def _check_sandbox() -> List[CheckResult]:
@@ -1005,9 +933,6 @@ def _check_sandbox() -> List[CheckResult]:
     return results
 
 
-# --- Cross-OS pre-flight group: rows built in handlers/cross_os/doctor_rows.py, printed here ---
-
-
 def run_cross_os(run_e2e: bool = False) -> int:
     """Render only the cross-OS pre-flight group (`aipass doctor --cross-os`).
 
@@ -1053,9 +978,7 @@ def run_cross_os(run_e2e: bool = False) -> int:
 def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
     """Generate a machine pre-flight Run Record (`aipass doctor --cross-os --record`).
 
-    Thin console wrapper: generation (env capture + machine-provable rows, human
-    rows left blank/marked) lives in the cross_os handler. Returns 0 on success,
-    1 if the file could not be written (never crashes).
+    Returns 0 on success, 1 if the file could not be written (never crashes).
     """
     console.print()
     console.print("[bold cyan]aipass doctor --cross-os --record[/bold cyan]")
@@ -1082,12 +1005,7 @@ def run_cross_os_record(path: str | None = None, run_e2e: bool = False) -> int:
 
 
 def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[CheckResult]:
-    """Compare a project's tier0 kernel against AIPASS_HOME, with provenance.
-
-    Split out of ``_check_scaffold`` to keep both readable: the interesting part
-    is not the comparison but WHICH of four states the file is in, and that
-    deserves to be legible on its own.
-    """
+    """Compare a project's tier0 kernel against AIPASS_HOME, with provenance."""
     from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
 
     canonical = Path(aipass_home) / ".aipass" / "tier0_kernel.md" if aipass_home else None
@@ -1106,10 +1024,8 @@ def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[Chec
         # will refresh it, so the preview command is the whole answer.
         return [CheckResult("tier0_kernel.md", GLYPH_WARN, "template moved on", preview)]
 
-    # A file the project edited, or one AIPass cannot prove it wrote. A bare
-    # "differs" reads as a fault the manager cannot clear, when in fact the
-    # update will KEEP it and there are exactly two ways to settle it — so name
-    # both instead of warning about neither.
+    # The update KEEPS a project-edited or unprovable file: name both ways to settle it, not a
+    # bare "differs" the manager cannot clear.
     provenance = "kept (local edits)" if recorded_hash else "kept (unknown provenance)"
     return [
         CheckResult(
@@ -1125,10 +1041,8 @@ def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[Chec
 def _check_scaffold() -> List[CheckResult]:
     """Run Scaffold group checks — is this project's AIPass scaffold current?
 
-    Read-only by design, including under ``--fix``. Applying a scaffold update
-    is a decision (it can replace files a manager wrote), not a repair, and
-    DPLAN-0335 puts that decision with the owner or devpulse. Doctor's whole job
-    here is to report the drift and name the command that previews it.
+    Read-only even under ``--fix``: a scaffold update can replace files a manager wrote, so
+    it is the owner's decision; doctor reports the drift and names the preview command.
     """
     from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
     from aipass.aipass.apps.handlers.init.bootstrap import _MANIFEST_TRACKED, _handler_names
@@ -1172,8 +1086,7 @@ def _check_scaffold() -> List[CheckResult]:
     if not sm.is_ignored(".aipass/tier0_kernel.md", ignored):
         results.extend(_check_tier0(root, aipass_home, preview))
 
-    # hooks.json — handler keys, not mere existence. Presence-only is how a
-    # project passed doctor carrying a hooks file two months stale.
+    # hooks.json by handler keys, not existence: presence-only passed a hooks file months stale.
     hooks_path = root / ".aipass" / "hooks.json"
     template_path = Path(aipass_home) / ".aipass" / "project_hooks.json" if aipass_home else None
     if not hooks_path.exists():
@@ -1206,9 +1119,6 @@ def _check_scaffold() -> List[CheckResult]:
     return results
 
 
-# --- Main doctor run ---
-
-
 def _compute_doctor_groups(
     verbose: bool = False,
     interactive: bool = False,
@@ -1218,8 +1128,8 @@ def _compute_doctor_groups(
 ) -> Dict[str, List[CheckResult]]:
     """Run all six check groups (optionally auto-fixing). Returns them by group name.
 
-    With *fix*, the settings step shows its plan and asks once before writing
-    (FPLAN-0646): *yes* skips the question, door ``install`` never asks, and *door*
+    With *fix*, the settings step shows its plan and asks once before writing:
+    *yes* skips the question, door ``install`` never asks, and *door*
     names the writer in the settings backup and receipt.
     """
     group_specs = [
@@ -1309,13 +1219,8 @@ def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = Fal
 def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
     """Run doctor automatically in the install tail, before the concierge says hello.
 
-    The owner's ruling (round-2 addendum 2): doctor must run as part of install,
-    not be offered later as a chat option — and hook wiring is P1, so a
-    still-broken hooks/wire-verify result is surfaced separately for the
-    caller to put at the TOP of the ACTION NEEDED block.
-
-    Returns (error_count, hook_action_items) — hook_action_items is empty
-    when provider hooks are fully wired after the fix pass.
+    Hook wiring is P1: a still-broken hooks/wire-verify result comes back separately for the
+    top of the ACTION NEEDED block. Returns (error_count, hook_action_items).
     """
     console.print()
     console.print("[bold cyan]Running aipass doctor...[/bold cyan]")
@@ -1331,9 +1236,6 @@ def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
         f"{r.label}: {r.detail}" for r in groups.get("Services", []) if r.label in hook_labels and r.glyph != GLYPH_PASS
     ]
     return error_count, hook_action_items
-
-
-# --- Output formatting ---
 
 
 def print_introspection() -> None:
@@ -1370,19 +1272,8 @@ def print_help() -> None:
     console.print()
 
 
-# --- Command handler ---
-
-
 def handle_command(command: str, args: list[str]) -> bool:
-    """Handle 'doctor' command routing.
-
-    Args:
-        command: Command name.
-        args: Additional arguments.
-
-    Returns:
-        True if handled (command == 'doctor'), False otherwise.
-    """
+    """Handle 'doctor' command routing."""
     if command != "doctor":
         return False
 

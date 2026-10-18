@@ -3,7 +3,7 @@
 # Description: Pins devpulse imports against a dead working directory
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py and apps/handlers/module_root.py with no readable working directory."""
@@ -17,10 +17,7 @@ from pathlib import Path
 
 from aipass.devpulse.apps.handlers import module_root
 
-# ntpath.realpath reads os.getcwd() for every path and Path.resolve() routes through
-# it (Windows CI, 2026-08-31). The world injects that as a condition, in a child
-# process before any aipass import; where resolve() never reaches the denial the
-# probe says PROBE_VACUOUS, and the test allows that only on pre-3.11 interpreters.
+# ntpath.realpath reads os.getcwd() for every path, and Path.resolve() routes through it.
 WORLD = r"""
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before the denial. Their dead-cwd cure is their own build (fleet
@@ -71,12 +68,7 @@ print("IMPORTED")
 
 
 def _inspect_stack_calls(source: str) -> list[int]:
-    """Line numbers of every inspect.stack() call in *source*, by parse.
-
-    An AST matcher, never a string scan: the guard's own docstring names
-    inspect.stack() while explaining the defect, and a spelling ban would
-    convict the explanation while acquitting the code.
-    """
+    """Line numbers of every inspect.stack() call in *source*, by parse: prose naming it is not a call."""
     import ast
 
     tree = ast.parse(source)
@@ -92,15 +84,7 @@ def _inspect_stack_calls(source: str) -> list[int]:
 
 
 def test_the_guard_never_calls_inspect_stack():
-    """Structural pin on the guard cure - import probes cannot carry this.
-
-    The deleted second inspect.stack() walk sat in the caller-is-None branch,
-    which no import-shaped world ever reached while apps/__init__.py supplied
-    a real-file frame. @trigger measured the hole - restoring the defect left
-    their whole suite green. Only a parse of the file convicts it. The fence
-    v2 (DPLAN-0404) walks sys._getframe and resolves each frame's file under
-    its own except OSError; inspect has no place in it.
-    """
+    """Structural pin on the guard cure - import probes cannot reach the branch, only a parse convicts it."""
     guard = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "__init__.py").read_text(encoding="utf-8")
 
     assert _inspect_stack_calls(guard) == [], (
@@ -112,33 +96,20 @@ def test_the_guard_never_calls_inspect_stack():
         "the guard imports inspect again - nothing in the cured shape needs it"
     )
 
-    # Positive control: the matcher must convict a real call...
     assert _inspect_stack_calls("import inspect\nframes = inspect.stack()\n") == [2]
-    # ...and clear prose that names the defect (docstring negative control).
     assert _inspect_stack_calls('"""inspect.stack() is banned here."""\n') == []
-    # ...and clear an unrelated .stack attribute (numpy.stack shape).
     assert _inspect_stack_calls("import numpy\nnumpy.stack([])\n") == []
 
 
 class _UnresolvablePath(type(Path())):
-    """A path whose resolve() fails the way a dead working directory makes it fail.
-
-    Bound as module_root's own Path (@daemon's shape, 2026-09-27), so only
-    module_file() meets it: pathlib.Path is left alone for the rest of the process.
-    """
+    """A path whose resolve() fails as a dead cwd makes it; bound as module_root's own Path only."""
 
     def resolve(self, strict=False):
         raise OSError("resolve denied")
 
 
 def test_fallback_diagnostics_never_take_the_lane_down(monkeypatch, capsys):
-    """@daemon's flag on this branch (2026-08-31): module_file's fallback
-    logged OUTSIDE its own protection. The world that reaches the fallback
-    is exactly the world where the logger may be down too - prax's logger
-    construction reads the cwd - so an unguarded diagnostic becomes the
-    import crash the helper exists to prevent. Mutant-verified: restoring
-    the unprotected logger.debug in module_file's except turns this red.
-    """
+    """module_file's fallback diagnostic is guarded: the logger may be down in the same dead-cwd world."""
 
     def _logger_is_down(*args, **kwargs):
         raise OSError("logger lane is down with the cwd")
@@ -148,10 +119,8 @@ def test_fallback_diagnostics_never_take_the_lane_down(monkeypatch, capsys):
 
     result = module_root.module_file(__file__)
 
-    # The right file still comes back, in its unresolved spelling...
     assert result == Path(__file__)
-    # ...and the double failure reached the last-resort channel rather than
-    # vanishing - the wrapper reports, it never swallows.
+    # The wrapper reports the double failure, it never swallows it.
     assert "cannot record it" in capsys.readouterr().err
 
 
@@ -199,15 +168,9 @@ print("GUARD_RETURNED")
 
 
 def test_the_fence_survives_a_denied_resolve_from_a_file_less_seat():
-    """Behavioural sibling of the AST ban, against v2's public shape.
+    """Behavioural sibling of the AST ban: this world RUNS the fence's walk with every resolve denied.
 
-    The AST pin is a parse, not a run; this world RUNS the fence's walk with
-    every resolve denied. Mutant-proven: _frame_path without its except OSError
-    arm dies here (M8, DPLAN-0404), and a regrown inspect.stack() walk dies the
-    same way. The resolve-level probe is asserted on 3.11+, where pathlib routes
-    resolve through os.path.realpath; 3.10 resolves through a copy pathlib
-    captured at its first import, so the arm is out of this world's reach there
-    and the import's survival is all it can pin.
+    The resolve probe is asserted on 3.11+ only; 3.10's pathlib never reaches os.path.realpath.
     """
     result = subprocess.run(
         [sys.executable, "-c", DENIED_RESOLVE_WORLD],

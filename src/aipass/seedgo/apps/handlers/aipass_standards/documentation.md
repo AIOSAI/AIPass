@@ -445,3 +445,16 @@ FILE_RENAMES = {
 **Source of truth for META format:** `seedgo/apps/standards/aipass/handlers/standards/meta_check.py`
 
 META block format aligned with checker enforcement on 2026-03-06.
+
+## How the checker reads a file
+
+Both checks read the parse tree, never the spelling:
+
+- **Module docstring:** the first statement of the module body IS a string (`ast.get_docstring`).
+  A prefixed docstring (`r"""..."""`) counts; a triple-quoted string later in the file (a class
+  or function docstring, a multi-line constant) does not.
+- **Function docstrings:** public functions (not starting with `_`) are AST `def` and `async def`
+  nodes, nested ones included. A `def` inside a docstring example or a source string is not a
+  function.
+- A file that does not parse falls back to a line scan and says so in the message, so a
+  fallback never reads like a verdict from the real arm.

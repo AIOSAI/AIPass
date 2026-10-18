@@ -3,7 +3,7 @@
 # Description: metadata.id — the project credential a new registry is born with
 # Version: 1.0.2
 # Created: 2026-08-24
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry.py's project-credential mint (metadata.id)."""
@@ -28,35 +28,8 @@ from aipass.spawn.apps.handlers.registry import (
 )
 from aipass.spawn.apps.modules.core import spawn_agent
 
-# A project registry's ``metadata.id`` is the branch-registry lock: every passport
-# in that project carries it as ``citizenship.registry_id``, and BAUD renders it
-# as "Branch reg no.". A registry born WITHOUT one is not merely incomplete — its
-# first citizen's passport falls back to whatever registry discovery finds next,
-# which in practice is AIPass's own id, so a brand-new project's agent displays a
-# number belonging to a project it has never been part of.
-#
-# The mint is deliberately ASYMMETRIC, and these tests pin that asymmetry:
-#
-#   - registry file ABSENT  -> a genuinely new project -> mint a credential.
-#   - registry file PRESENT but unreadable -> the project ALREADY HAS a
-#     credential we simply cannot read. Minting a fresh one here would
-#     re-credential a live project and orphan every existing passport, so this
-#     path must NOT invent one.
-#
-# MOVED 2026-08-31: that asymmetry used to live inside ``load_registry``, which
-# meant a READ minted an identity for any path that did not exist — and the shared
-# resolver used to hand out ``Path.cwd() / AIPASS_REGISTRY.json`` for an absence,
-# so the two composed into a project credential appearing in whatever directory
-# the caller stood in (@memory). The asymmetry is unchanged and still pinned; it
-# now lives in ``resolve_project_credential``, which the create sites call by
-# name. The three tests that asserted the mint against ``load_registry`` moved to
-# ``TestResolveProjectCredentialIsTheExplicitMint`` rather than being deleted —
-# the behaviour they guard is the same behaviour, one layer over.
-
-
-# =============================================================================
-# ABSENT REGISTRY — a new project earns a credential
-# =============================================================================
+# The mint is deliberately asymmetric: an ABSENT registry is a new project and earns a
+# credential; an UNREADABLE one already has one, and minting would orphan every passport.
 
 
 def test_minted_default_keeps_the_rest_of_the_schema(tmp_path):
@@ -67,11 +40,6 @@ def test_minted_default_keeps_the_rest_of_the_schema(tmp_path):
     assert result["metadata"]["total_branches"] == 0
     assert result["branches"] == []
     assert "last_updated" in result["metadata"]
-
-
-# =============================================================================
-# EXISTING REGISTRY — never re-credential what we merely failed to read
-# =============================================================================
 
 
 def test_real_registry_credential_is_never_replaced(tmp_path):
@@ -86,8 +54,7 @@ def test_real_registry_credential_is_never_replaced(tmp_path):
 
 
 def test_unreadable_registry_does_not_mint_a_replacement_credential(tmp_path):
-    """An unreadable file is not a new project — inventing an id here would
-    silently re-credential a live project and orphan every passport in it."""
+    """An unreadable file is not a new project: an id here would orphan every passport."""
     corrupt = tmp_path / "CORRUPT_REGISTRY.json"
     corrupt.write_text("{not valid json", encoding="utf-8")
 
@@ -108,19 +75,8 @@ def test_unreadable_variants_all_withhold_a_credential(tmp_path, content):
     assert load_registry(path)["metadata"].get("id") in (None, "")
 
 
-# =============================================================================
-# CALLER-SUPPLIED CREDENTIAL — one project, one id
-# =============================================================================
-
-
 def test_new_registry_adopts_the_callers_credential(tmp_path):
-    """The credential already stamped into the passport is the one that lands.
-
-    Regression guard for a double mint: load_registry mints an id for a missing
-    file, so an "is the id already set?" check would see that fresh mint and
-    silently discard the caller's — leaving the passport claiming one credential
-    and the registry file carrying a different one.
-    """
+    """The credential already stamped into the passport is the one that lands (no double mint)."""
 
     reg = tmp_path / "NEW_REGISTRY.json"
     branch = tmp_path / "widget"
@@ -148,34 +104,10 @@ def test_existing_registry_credential_survives_a_new_citizen(tmp_path):
     assert json.loads(reg.read_text(encoding="utf-8"))["metadata"]["id"] == "the-real-lock"
 
 
-# =============================================================================
-# THE LOAD-SIDE MINT — a read must not create an identity
-# =============================================================================
-
-
 class TestLoadDoesNotMint:
     """Loading is a READ. Minting a project credential is a DECISION.
 
-    MEASURED by @memory 2026-08-31, statically proven against live code: the
-    shared resolver ``registry_discovery.find_registry`` returns
-    ``Path.cwd() / AIPASS_REGISTRY.json`` when nothing exists — a PATH for an
-    ABSENCE — and ``load_registry`` then answered that path with a well-formed
-    document carrying a freshly minted ``metadata.id``. Compose the two and
-    ``save_registry`` writes a registry with a brand-new project credential into
-    whatever directory the caller happened to be standing in. Nobody calls it
-    that way today: a loaded gun, not a fired one.
-
-    The 2026-08-24 fix this replaces was right about the DEFECT — a new project
-    whose first citizen inherits AIPass's own id — and wrong about WHERE to fix
-    it. The create path knows it is creating; the load path does not know
-    anything. So the mint moved to ``resolve_project_credential``, which the two
-    real create sites call by name, and ``load_registry`` went back to being a
-    read. The asymmetry the old file pinned survives intact, one layer over:
-    absent means mint (when a creator asks), unreadable never does.
-
-    Fleet ruling this implements: absence is a signal said out loud, never
-    silently papered into a valid-looking value.
-    """
+    A minting read, saved, would put a fresh credential in whatever directory the caller stands in."""
 
     def test_missing_registry_yields_no_credential(self, tmp_path):
         result = load_registry(tmp_path / "NEW_REGISTRY.json")
@@ -187,9 +119,7 @@ class TestLoadDoesNotMint:
     def test_missing_registry_still_returns_a_usable_empty_document(self, tmp_path):
         """Refusing to mint must not break the sixteen callers that just read branches.
 
-        And a read is only a read: the empty document is answered, never written
-        to disk, where the next reader would take it for a real registry.
-        """
+        The empty document is never written: the next reader would take it for a real registry."""
         result = load_registry(tmp_path / "NEW_REGISTRY.json")
 
         assert result["branches"] == []
@@ -266,31 +196,10 @@ class TestResolveProjectCredentialIsTheExplicitMint:
         assert list(tmp_path.iterdir()) == []
 
 
-# =============================================================================
-# THE OTHER HALF LANDED FIRST — find_registry now answers absence with None
-# =============================================================================
-
-
 class TestAbsentRegistryResolverIsHandled:
-    """@aipass's half of tonight's ruling is already in the tree, and it reaches here.
+    """find_registry answers absence with None; each caller answers it by name, never crashes.
 
-    FOUND, not authored by me: ``aipass/shared/registry_discovery.find_registry``
-    now returns ``None`` on absence instead of ``Path.cwd() / AIPASS_REGISTRY.json``.
-    Its docstring names the reason and names this branch — "a path that need not
-    exist is a lie with a type signature, and @spawn's load_registry mints a
-    fresh metadata.id for exactly such a path". Correct, and it is the resolver
-    half of the same fix as TestLoadDoesNotMint above.
-
-    The consequence is mine: spawn had ~18 call sites written against a resolver
-    that always returned a Path, and four of them dereference the result with no
-    guard. Those were not type-checker noise — ``None.exists()`` is an
-    AttributeError, and in ``is_protected`` it would escape a try that only
-    catches OSError/ValueError/KeyError, turning "no registry here" into a crash
-    inside a SAFETY check.
-
-    Absence is answered by name, in each function's own vocabulary: not
-    protected, refused, no owner.
-    """
+    In is_protected, None.exists() would escape the try and crash a SAFETY check."""
 
     def test_is_protected_answers_not_protected_when_there_is_no_registry(self, tmp_path, monkeypatch):
         """Mutant: is_protected skips find_registry and assumes None -> red."""
@@ -306,8 +215,7 @@ class TestAbsentRegistryResolverIsHandled:
     def test_the_protected_floor_still_wins_without_a_registry(self, tmp_path, monkeypatch):
         """A missing registry must never unprotect infrastructure.
 
-        Mutant: the hardcoded floor check disabled (if False) -> red.
-        """
+        Mutant: the hardcoded floor check disabled (if False) -> red."""
         asked: list = []
         monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: asked.append((a, k)))
 
@@ -340,12 +248,7 @@ class TestAbsentRegistryResolverIsHandled:
 class TestCreatePathStillStampsACredential:
     """END-TO-END regression guard for the 2026-08-24 defect, after the move.
 
-    The mint left ``load_registry``; it must not have left the product. A
-    citizen created into a brand-new project must still be born with a real
-    project credential in its passport, and the registry that lands must carry
-    the SAME one — the whole reason the credential is resolved before the
-    passport is written rather than at registration time.
-    """
+    A new project's citizen gets a real credential, and the registry carries the same one."""
 
     def test_a_new_project_citizen_gets_a_real_credential_in_both_files(self, tmp_path):
 
@@ -398,18 +301,7 @@ class TestNoRegistryAnywhereIsHandledOnTheCreatePath:
 
 
 class TestEveryResolverConsumerRefusesByName:
-    """Sweep pin: no spawn entry point may crash on an absent registry.
-
-    @aipass's resolver change reached eleven more sites than the four the first
-    pass caught — none exercised by a test that runs without a registry, all of
-    them one ``None.parent`` away from a traceback. Type errors found them; these
-    pins keep them found, because "the type checker was green that day" is not a
-    thing a future reader can verify.
-
-    Each refuses in its own vocabulary rather than raising: a delete that cannot
-    consult the protection layer must not run, a sync has nothing to synchronise,
-    an adoption has no project to adopt into.
-    """
+    """Sweep pin: no spawn entry point may crash on an absent registry."""
 
     def _no_registry(self, monkeypatch, module):
         monkeypatch.setattr(module, "find_registry", lambda *a, **k: None)
@@ -461,23 +353,8 @@ class TestEveryResolverConsumerRefusesByName:
 class TestAnUnreadableRegistryIsNeverOverwritten:
     """FPLAN-0492: a live registry that cannot be parsed must never be written over.
 
-    ``load_registry`` answers a MISSING file and an UNREADABLE one with the same
-    empty document, which is the right answer for a reader and a destructive one
-    for a writer: the read-modify-write cycle then rebuilds ``branches`` from
-    nothing. Measured 2026-09-07 with the guard disabled, on a 3-branch project
-    whose registry was truncated mid-file:
-
-      add_to_registry   -> 3 branches and metadata.id 'proj-cred-123' became
-                           1 branch and no metadata.id at all
-      sync_registry     -> the same file came back with 3 freshly minted
-        (fix=True)         uppercase entries, new registry_ids, and no
-                           metadata.id — every passport carrying the real
-                           credential orphaned
-
-    delete_branch and repair's move_branch were probed the same way and refuse on
-    their own ("Branch 'x' not found in registry"), so they are safe by structure
-    rather than by guard; they are not re-pinned here.
-    """
+    load_registry reads missing and unreadable alike as empty; a writer would rebuild from nothing.
+    delete_branch and move_branch refuse by structure ("not found in registry"), so are not pinned."""
 
     LIVE = {
         "metadata": {"version": "1.0.0", "last_updated": "2026-09-07", "total_branches": 2, "id": "proj-cred-123"},

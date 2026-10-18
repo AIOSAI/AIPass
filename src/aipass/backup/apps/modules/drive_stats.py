@@ -3,7 +3,7 @@
 # Description: Drive stats module — shows file tracker statistics and the Drive account quota
 # Version: 1.1.1
 # Created: 2026-04-17
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Drive Stats Module — displays tracker statistics for a project and the Drive account quota."""
@@ -49,15 +49,7 @@ def print_help():
 def show_drive_quota() -> bool:
     """Print the Drive account's storage used and limit, as two lines.
 
-    Reads ``about.get(fields="storageQuota")`` through an authenticated
-    DriveClient, the client every other Drive verb uses, by way of
-    handlers/drive/quota.py, the read drive_sync's headroom check shares. Drive sends the
-    numbers as strings and leaves ``limit`` out for an account with unlimited
-    storage; an absent field is said, never filled in.
-
-    Returns:
-        True when both lines were printed, False when a number was missing or
-        Drive could not be asked (the reason goes to stderr).
+    Drive leaves ``limit`` out for unlimited storage; an absent field is said, never filled in.
     """
     from aipass.backup.apps.handlers.drive.client import DriveClient
     from aipass.backup.apps.handlers.drive.quota import read_quota
@@ -86,14 +78,7 @@ def show_drive_quota() -> bool:
 
 
 def run_drive_stats(project_root: str) -> bool:
-    """Show tracker statistics for a project.
-
-    Args:
-        project_root: Absolute path to the project.
-
-    Returns:
-        True if stats were displayed, False on error.
-    """
+    """Show tracker statistics for a project."""
     from aipass.backup.apps.handlers.drive.tracker import (
         get_stats,
         load_tracker,
@@ -135,11 +120,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
@@ -148,8 +130,6 @@ def handle_command(command: str, args: list) -> bool:
     run_drive_stats(project_root)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

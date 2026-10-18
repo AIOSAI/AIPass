@@ -3,7 +3,7 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.2.3
 # Created:2026-06-15
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -47,13 +47,7 @@ class TestHandleCommand:
     def test_rejects_unknown(self):
         result = handle_command("unknown", [])
         assert result is False
-        # The return TYPE, pinned where the command actually runs. It used to
-        # be asserted in tests/test_contracts.py, one of the DPLAN-0059 stamp
-        # files — which had stopped RUNNING (it skipped module-wide on a
-        # JSON_DIR the shim does not have) while still reading as covered to a
-        # text scan. Archived with the sweep; the claim moves here, to a test
-        # that executes. A truthy int would satisfy `is False` nowhere, but it
-        # would satisfy `== False`, and callers branch on this.
+        # The return TYPE: a truthy int would satisfy `== False`, and callers branch on this.
         assert isinstance(result, bool), f"handle_command answered {type(result).__name__}, not bool"
 
     def test_help_flag(self, capsys):
@@ -61,10 +55,7 @@ class TestHandleCommand:
         out = capsys.readouterr().out
         assert result is True
         assert isinstance(result, bool), f"handle_command answered {type(result).__name__}, not bool"
-        # The capture was requested and never read: a True receipt says the call
-        # returned, not that anything was printed. run's help is its own — the
-        # heading names this verb, so a router that answered with some other
-        # module's help would fail here instead of passing on the receipt.
+        # The heading names this verb, so a router answering with another module's help fails here.
         assert "run — Decentralized Scheduler Tick" in out, f"run --help printed: {out[:200]!r}"
         assert "USAGE:" in out, "run --help must print a USAGE: block"
 
@@ -158,8 +149,6 @@ class TestRunTick:
         assert row["last_error"] == "wake failed", row
 
 
-# ── orphan prune persistence (DPLAN-0287 piece 3) ────
-
 RUN = "aipass.daemon.apps.modules.run"
 
 
@@ -179,12 +168,8 @@ class TestPrunePersistence:
     def _quiet_tick(self, runstate, dry_run=False):
         """Run a tick where nothing is due, returning the save mock.
 
-        ``missed_window`` is pinned False because these tests are about PRUNE
-        persistence and nothing else. live_job() is a daily 04:00 job, so from
-        04:16 until midnight its window is genuinely closed-and-unrun and the
-        MISSED pass writes its once-per-day marker - a real write, covered by
-        TestMissedWindowLine, that would otherwise make the assertions here
-        pass or fail on the wall clock the suite happened to run at.
+        ``missed_window`` is pinned False: live_job() is a daily 04:00 job, so after 04:16 the MISSED pass
+        writes its marker and the assertions here would depend on the wall clock.
         """
         with (
             patch(f"{RUN}.discover_jobs", return_value=[live_job()]),
@@ -199,29 +184,16 @@ class TestPrunePersistence:
     def test_prune_is_saved_even_when_nothing_fires(self):
         runstate = {"jobs": {"@ghost/retired": {"last_run": "2026-06-25T08:11:05"}, "@commons/live": {}}}
         mock_save = self._quiet_tick(runstate)
-        # The bug: pruning mutated memory every tick but only ever saved inside
-        # the fire loop, so a quiet tick threw the prune away.
-        #
-        # Was assert_called_once. Since DPLAN-0332 every tick also stamps
-        # last_tick, so a quiet tick writes twice and the count no longer
-        # identifies the prune. The claim never was "exactly one write" — it is
-        # "the prune reaches disk", so that is what this now asserts.
+        # Pruning mutated memory every tick but was saved only inside the fire loop; the claim is
+        # "the prune reaches disk", not a write count (every tick also stamps last_tick).
         assert mock_save.called, "a quiet tick must still persist its prune"
         assert all("@ghost/retired" not in call[0][0]["jobs"] for call in mock_save.call_args_list)
         assert "@ghost/retired" not in runstate["jobs"]
 
     def test_a_clean_quiet_tick_writes_only_its_tick_stamp(self):
-        """DPLAN-0332 superseded the old claim, and this is the honest remainder.
+        """A tick with nothing to prune or fire writes exactly once, and only the last_tick stamp.
 
-        Was test_clean_runstate_is_not_rewritten / assert_not_called: a tick
-        with nothing to prune and nothing to fire wrote nothing at all. It now
-        writes exactly once, because recording last_tick IS the tick's product —
-        gap detection reads it, and a tick that saved nothing would be
-        indistinguishable from a tick that never happened.
-
-        What the original pin was really protecting — no gratuitous rewrite for
-        work that was not done — survives as the count: one write, and its only
-        content is the stamp.
+        Gap detection reads last_tick, so a tick that saved nothing would look like one that never happened.
         """
         runstate = {"jobs": {"@commons/live": {}}}
         mock_save = self._quiet_tick(runstate)
@@ -253,9 +225,6 @@ class TestPrunePersistence:
         assert runstate["jobs"] == {"@commons/live": {}}
         for call in mock_save.call_args_list:
             assert call[0][0]["jobs"] == {"@commons/live": {}}, "a save must never carry a wiped roster"
-
-
-# ── rotation delegation (DPLAN-0287 piece 1) ─────────
 
 
 class TestRotationDelegation:
@@ -318,9 +287,7 @@ class TestRotationDelegation:
 def flat(text: str) -> str:
     """Collapse whitespace so Rich's line wrapping cannot break a substring check.
 
-    Measured: at the suite's terminal width the tick summary arrives as
-    "0 \nseeded", which fails `"0 seeded" in out` for a reason that has nothing
-    to do with the behaviour under test.
+    At the suite's terminal width the tick summary arrives as "0 \nseeded".
     """
     return " ".join(text.split())
 
@@ -344,8 +311,7 @@ def freeze_runstate_clock(monkeypatch, at: str) -> None:
     """Stop the clock that runstate reads (the slot seeder and the due check) at ``at``.
 
     A seeded slot is rolled forward to the latest occurrence at or before now, so
-    its expected value is a fact about now. A test that lets the wall clock supply
-    now is only true for a week (main went red at 2026-09-13T03:00 on exactly this).
+    its expected value is a fact about now, so a test on the wall clock is only true for a week.
     """
     frozen = datetime.fromisoformat(at)
     real = runstate_mod.datetime
@@ -358,9 +324,8 @@ def freeze_runstate_clock(monkeypatch, at: str) -> None:
     monkeypatch.setattr(runstate_mod, "datetime", Frozen)
 
 
-# (frozen now, the last_run the weekly Sunday 03:00 slot must seed). The expected
-# values are written out by hand from a calendar, never derived with the
-# arithmetic under test, so a wrong roll-forward cannot agree with itself.
+# (frozen now, the last_run the weekly Sunday 03:00 slot must seed), written by hand from a calendar
+# so a wrong roll-forward cannot agree with itself.
 SLOT_SEED_CASES = [
     ("2026-09-13T12:31:00", "2026-09-13T03:00:00"),
     ("2026-10-04T12:00:00", "2026-10-04T03:00:00"),
@@ -411,9 +376,6 @@ class TestMissedWindowLine:
         assert (first["missed"], second["missed"]) == (1, 0)
 
     def test_the_marker_is_persisted(self):
-        # Was assert_called_once; since DPLAN-0332 the tick also stamps
-        # last_tick, so the count no longer identifies this write. The claim is
-        # that the marker reaches disk, and that is asserted directly.
         runstate = {"jobs": {}}
         _results, mock_save = self._tick(runstate)
         assert mock_save.called
@@ -423,26 +385,15 @@ class TestMissedWindowLine:
         ), "the MISSED marker never reached a save"
 
     def test_a_job_that_opts_out_is_told_it_is_not_firing(self, capsys):
-        # SUPERSEDED SHAPE, SAME DEFECT. This pin used to pass no catch_up field
-        # at all, because under ruling 6 (2026-09-07) absent meant off. DPLAN-0332
-        # reversed the default on 2026-09-08, so absent now means ON and only an
-        # explicit false opts out — the opt-out is what has to be stated here.
-        #
-        # The defect is unchanged and is the reason the pin survives the reversal:
-        # on 2026-09-08 at 11:37:52 this line read "catch_up is off — not firing"
-        # and the same tick fired the job three seconds later, because the line
-        # read the raw field while is_job_due() read catch_up_on(). One predicate
-        # now answers both.
+        # Absent means ON; only an explicit false opts out. The line once read the raw field while is_job_due()
+        # read catch_up_on(), so it said "not firing" and the tick fired anyway.
         self._tick({"jobs": {}}, catch_up=False)
         assert "catch_up is off — not firing" in flat(capsys.readouterr().out)
 
     def test_an_unset_catch_up_is_told_it_is_firing_late(self, capsys):
-        # The flip itself: a job that states nothing is caught up, and the line
-        # says so. Every enabled job in the fleet left this field unset, which is
-        # exactly why nothing recovered from the 23-hour gap on 2026-09-08.
+        # A job that states nothing is caught up, and the line says so.
         self._tick({"jobs": {}})
-        # Reads the flag: the lane is gated while @devpulse and the owner run the
-        # controlled live proof, and the line must tell the truth in BOTH worlds.
+        # Reads the flag: the line must tell the truth whether RECOVERY_LANE_LIVE is on or off.
         expected = "on — firing late this tick" if runstate_mod.RECOVERY_LANE_LIVE else "off — not firing"
         assert f"catch_up is {expected}" in flat(capsys.readouterr().out)
 
@@ -499,7 +450,7 @@ class TestSlotSeeding:
 
     @pytest.mark.parametrize("bad_interval", ["sixty", None], ids=["text", "null"])
     def test_a_slotted_job_with_an_unreadable_interval_costs_only_itself(self, caplog, bad_interval):
-        """One bad job costs that one job, never the tick (DPLAN-0354 leg 3, item 2).
+        """One bad job costs that one job, never the tick.
 
         A never-run slotted job whose interval_minutes is text or null raised
         TypeError in _slot_anchor and stopped the whole tick for every job. Now it
@@ -584,9 +535,6 @@ class TestCaughtUpTick:
             results = run_tick()
         assert results["caught_up"] == 0
         assert mock_update.call_args.kwargs["caught_up"] is False
-
-
-# ── command jobs (DPLAN-0338) ────────────────────────
 
 
 def fake_drone(tmp_path, program: str = "", mail_exit: int = 0) -> tuple:
@@ -1115,10 +1063,8 @@ class TestCommandJobTick:
 
     @pytest.mark.parametrize("now", ["2026-10-11T03:00:00", "2026-10-11T12:00:00", "2026-10-11T23:59:00"])
     def test_a_late_daily_command_job_is_caught_up_like_any_other(self, tmp_path, monkeypatch, telegram, no_wake, now):
-        # catch_up is opt-in while RECOVERY_LANE_LIVE is False; opted in, the
-        # window closed unrun long ago, so the real predicates say "late". The
-        # test owns the clock: unfrozen, it read the wall clock and answered
-        # (1, 0) in the minute before today's 00:01 window (CI, 2026-10-11T00:0xZ).
+        # catch_up is opt-in while RECOVERY_LANE_LIVE is False. The test owns the clock: unfrozen, it
+        # answered (1, 0) in the minute before today's 00:01 window.
         freeze_runstate_clock(monkeypatch, now)
         job = command_job_dict(tmp_path, schedule={"type": "daily", "time": "00:01", "catch_up": True})
         launcher, _ = fake_drone(tmp_path, "print('ok')\n")

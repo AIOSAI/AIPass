@@ -3,22 +3,13 @@
 # Description: Imports Standards Checker Handler
 # Version: 2.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Imports Standards Checker Handler
 
-Validates module compliance with AIPass import standards for pip packages.
-Checks for clean pip-style imports: no AIPASS_ROOT, no sys.path hacking,
-proper aipass.* namespace usage, correct import order.
-
-FIVE OF THE SIX SUB-RULES ARE TRUE OF A TEST FILE. The sixth is not: a test
-file owes no logger, and asking it for one is asking it to log. That sub-rule
-is gated by ``applicability.is_test_path`` rather than by declaring the whole
-checker production -- ordering, grouping, namespace, AIPASS_ROOT and sys.path
-all read the same in a test, and demoting the checker would have muted them on
-more than a third of every branch's Python to silence one rule.
+Reference: imports.md
 """
 
 import re
@@ -30,7 +21,6 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 # APPLIES_TO: ordering and grouping read the same in a test file. The prax
 # logger sub-rule is the one exception and gates itself below.
 APPLIES_TO = "everywhere"
@@ -38,24 +28,13 @@ AUDIT_SCOPE = "all_files"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows import standards for pip packages.
-
-    Checks:
-    1. No AIPASS_ROOT usage (pip packages don't need it)
-    2. No sys.path hacking (pip packages resolve via installed paths)
-    3. Prax logger via aipass.prax namespace (production files only)
-    4. Handler independence (no parent module imports)
-    5. Import order (stdlib -> third-party -> aipass.*)
-    6. No bare/invalid imports (must use aipass.* namespace)
-    """
+    """Check if module follows import standards for pip packages."""
     checks = []
     path = Path(module_path)
 
     # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
-    # Python package marker — no imports required by convention
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -106,36 +85,30 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     is_handler = "/handlers/" in module_path
     is_init_file = path.name == "__init__.py"
     is_small_file = len([line for line in lines if line.strip() and not line.strip().startswith("#")]) < 20
-    # A door re-exports and logs nothing, whatever its length (DPLAN-0404).
+    # A door re-exports and logs nothing, whatever its length.
     is_door = path.name.startswith("door_") and path.parent.name == "modules"
 
-    # Check 1: No AIPASS_ROOT (pip packages must not use it)
     if not is_init_file:
         checks.append(check_no_aipass_root(import_lines, module_path, bypass_rules))
 
-    # Check 2: No sys.path hacking (pip packages resolve via installed paths)
     if not is_init_file:
         checks.append(check_no_sys_path(import_lines, module_path, bypass_rules))
 
-    # Check 3: Prax logger via aipass.prax (production only — see check_prax_logger)
     exempt = is_init_file or is_small_file or is_door or is_handler
     if not exempt and not applicability.is_test_path(module_path):
         prax_check = check_prax_logger(import_lines, module_path, bypass_rules)
         if prax_check:
             checks.append(prax_check)
 
-    # Check 4: Handler independence (handlers must not import parent modules)
     if is_handler:
         handler_check = check_handler_independence(import_lines, module_path, bypass_rules)
         if handler_check:
             checks.append(handler_check)
 
-    # Check 5: Import order (stdlib -> third-party -> aipass.*)
     order_check = check_import_order(import_lines, module_path, bypass_rules)
     if order_check:
         checks.append(order_check)
 
-    # Check 6: No bare/invalid imports (must use aipass.* namespace)
     if not is_init_file:
         bare_check = check_no_bare_imports(import_lines, module_path, bypass_rules)
         if bare_check:
@@ -153,28 +126,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 def _opening_marker(stripped: str, in_docstring: bool, docstring_marker: Optional[str]) -> str:
     """Which triple quote this line is actually using.
 
-    WHICHEVER COMES FIRST, not whichever is preferred. This used to read
-    `'\"\"\"' if '\"\"\"' in stripped else \"'''\"`, so a line opening a `'''`
-    block whose CONTENT begins with a `\"\"\"` was measured against the wrong
-    marker - counted twice, read as an open-and-close pair, and the block was
-    left un-blanked. Measured 2026-09-19 on
-    `tests_pytest_standards/envdiff.py`, whose payload string opens
-    `f'''\"\"\"Per-test verdict recorder...\"\"\"`: the whole 200-line payload
-    stayed visible, its `import json` was read as a real stdlib import 200
-    lines below the real ones, and the file was reported as having its imports
-    out of order when they are in order.
-
-    Every check downstream of `filter_docstrings` read that same un-blanked
-    payload, so this is one fix for all of them - the same shape as the
-    off-by-docstring-lines defect recorded in that function's docstring.
-
-    Args:
-        stripped: The line, already stripped.
-        in_docstring: Whether a block is currently open.
-        docstring_marker: The marker that opened it, if one is open.
-
-    Returns:
-        The marker to count on this line.
+    WHICHEVER COMES FIRST: a ``'''`` block whose content begins with ``\"\"\"`` is measured against its own
+    opening marker, or the block is left un-blanked and its payload read as imports.
     """
     if in_docstring and docstring_marker:
         # Inside a block only its OWN marker can close it; the other is content.
@@ -207,16 +160,8 @@ def _process_docstring_marker(stripped, in_docstring, docstring_marker):
 def filter_docstrings(lines: List[str]) -> List[str]:
     """Blank out docstring lines, PRESERVING every line's position.
 
-    The blanking is not cosmetic. This function used to `continue` past
-    docstring lines, which COMPACTED the list — so every check that runs on the
-    result enumerated a shorter list and reported an index into it rather than a
-    line in the file. @memory was sent to line 40 for a violation at line 106
-    (2026-08-30), and the defect was never this one check's: check_no_sys_path,
-    check_prax_logger, check_import_order and check_no_bare_imports all read the
-    same list and all carried the same off-by-however-many-docstring-lines.
-
-    Every one of those checks already skips an empty line, so neutralising the
-    content while keeping the position costs nothing and fixes all five.
+    Blanked, not skipped: every check on the result reports an index into this list as a file line,
+    so compacting it would send each one to the wrong line.
     """
     filtered_lines = []
     in_docstring = False
@@ -249,21 +194,13 @@ def find_import_section_end(lines: List[str]) -> int:
     return len(lines)
 
 
-#: AIPASS_ROOT as a WHOLE TOKEN. A substring match convicted
-#: `DECLARED_ROOTS = "AIPASS_ROOTS.json"` — a machine-managed filename that sits
-#: beside AIPASS_REGISTRY.json and reads no environment variable of any name
-#: (@memory, 2026-08-30). Every present and future `AIPASS_ROOT*` collided the
-#: same way, so the fix is not a longer exception list. `_` is a word character,
-#: so this also declines to match `MY_AIPASS_ROOT` and `AIPASS_ROOT_MAP`: the
-#: check means the env var, and the env var is the only thing it may claim.
+#: AIPASS_ROOT as a WHOLE TOKEN: the check means the env var, so ``AIPASS_ROOTS.json``, ``MY_AIPASS_ROOT``
+#: and ``AIPASS_ROOT_MAP`` never match.
 _AIPASS_ROOT_TOKEN = re.compile(r"\bAIPASS_ROOT\b")
 
 
 def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Dict:
-    """
-    Check that file does NOT use AIPASS_ROOT.
-    Pip packages resolve paths via installed package paths, not AIPASS_ROOT.
-    """
+    """Check that file does NOT use AIPASS_ROOT."""
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "No AIPASS_ROOT", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -285,10 +222,7 @@ def check_no_aipass_root(lines: List[str], file_path: str = "", bypass_rules: li
 
 
 def check_no_sys_path(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Dict:
-    """
-    Check that file does NOT hack sys.path.
-    Pip packages resolve imports via installed package paths.
-    """
+    """Check that file does NOT hack sys.path. Pip packages resolve imports via installed package paths."""
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "No sys.path hacking", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -314,45 +248,9 @@ def check_no_sys_path(lines: List[str], file_path: str = "", bypass_rules: list 
 def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
     """Check that logging is routed through the `aipass.prax` namespace.
 
-    A TEST FILE IS NEVER ASKED. The caller gates this sub-rule on
-    ``applicability.is_test_path``, and the reason is what the rule actually
-    says: it is about ROUTING -- that a file which logs does so through prax
-    rather than round a side channel. A test file does not log. pytest owns its
-    output, capsys reads it, and a logger in a test writes into the product's
-    real log stream from a run that is not the product. So the rule's premise is
-    absent, and a rule whose premise is absent must not convict: when tests/
-    joined the audit corpus on 2026-09-21 this one line scored 42 of @memory's
-    43 test files at 80% for not importing something they were right not to
-    import. Measured, reported by @devpulse, gated the same day.
-
-    The gate is here and not on APPLIES_TO because the checker's other five
-    sub-rules are all true of a test file. Demoting the whole checker to
-    production would have been the cheap fix and the wrong one.
-
-    BOTH BINDING FORMS PASS, and the reason is the standard's own intent:
-
-        from aipass.prax import logger      # binds the logger OBJECT
-        from aipass import prax             # binds the MODULE; prax.logger.x()
-
-    This standard is about ROUTING - that logging goes through prax rather than
-    round a side channel. Both forms route identically, so a check that accepts
-    only the first was enforcing a BINDING STYLE the standard never asked for -
-    narrower than the rule it speaks for, the same defect as the handlers check
-    that once forbade every apps.modules import.
-
-    AND THE NARROWER FORM HAS A MEASURED COST. `from aipass.prax import logger`
-    binds the object at import time, so it is UNREBINDABLE: a conftest that
-    swaps sys.modules["aipass.prax"] in an autouse fixture - which is most of
-    this fleet - cannot reach a name already bound. Raised by @memory
-    2026-08-30 with fleet numbers (1552 writes in @memory, 1968 in @daemon) and
-    reproduced here: ONE daemon test under plain pytest performed 23 atomic
-    writes into @prax's REAL prax_json/, attributed by audit hook rather than
-    inferred from a before/after diff, which a live machine's ambient writes
-    make unattributable. The module form is rebindable because the attribute is
-    looked up at CALL time.
-
-    Which form is RECOMMENDED is @prax's contract to set, not this checker's.
-    This check no longer takes that decision by rejecting one of them.
+    A test file is never asked (the caller gates on ``applicability.is_test_path``): the rule is about
+    ROUTING, and a test does not log. ``from aipass.prax import logger`` and ``from aipass import prax``
+    both pass: they route identically, and which form is recommended is @prax's contract (imports.md).
     """
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "Prax logger import", "passed": True, "message": "Bypassed by bypass rules"}
@@ -391,12 +289,7 @@ def _imports_prax_module(stripped: str) -> bool:
 def check_handler_independence(
     lines: List[str], module_path: str = "", bypass_rules: list | None = None
 ) -> Optional[Dict]:
-    """
-    Check that handlers don't import from parent branch modules.
-    Allowed: from aipass.prax import ... (infrastructure)
-    Allowed: from aipass.cli import ... (infrastructure)
-    Forbidden: from <parent>.apps.modules import ...
-    """
+    """Check that handlers don't import from parent branch modules."""
     if is_bypassed(module_path, "imports", None, bypass_rules):
         return {"name": "Handler independence", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -440,14 +333,7 @@ def check_handler_independence(
 
 
 def check_import_order(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
-    """
-    Check import order: stdlib -> third-party -> aipass.*
-
-    For pip packages, the order should be:
-    1. Standard library (import os, from pathlib, etc.)
-    2. Third-party packages (import rich, etc.)
-    3. aipass.* namespace imports (from aipass.prax, from aipass.cli, etc.)
-    """
+    """Check import order: stdlib -> third-party -> aipass.*"""
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "Import order", "passed": True, "message": "Bypassed by bypass rules"}
 
@@ -458,11 +344,9 @@ def check_import_order(lines: List[str], file_path: str = "", bypass_rules: list
     if not imports:
         return None
 
-    # Track where aipass.* imports appear vs stdlib
     last_stdlib_line = 0
     first_aipass_line = None
 
-    # Common stdlib modules
     stdlib_prefixes = (
         "import os",
         "import sys",
@@ -512,26 +396,10 @@ def check_import_order(lines: List[str], file_path: str = "", bypass_rules: list
 
 
 def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
-    """
-    Check that file does NOT use bare or invalid import patterns.
-
-    INVALID patterns:
-    - from handlers.{name} import ...  (bare handler import, missing namespace)
-    - from modules.{name} import ...   (bare module import, missing namespace)
-    - from {module}.apps...            (bare module, missing aipass. prefix)
-    - from <old>.apps...               (old namespace, now aipass.seedgo)
-    - from prax.apps...                (bare, should be from aipass.prax...)
-
-    VALID patterns:
-    - from aipass.{module}.apps.modules.{name} import ...
-    - from aipass.{module}.apps.handlers.{name} import ...
-    - from .{name} import ...  (relative re-export in __init__.py ONLY — excluded by caller)
-    - Standard library / third-party imports
-    """
+    """Check that file does NOT use bare or invalid import patterns."""
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "No bare imports", "passed": True, "message": "Bypassed by bypass rules"}
 
-    # Known AIPass module names (used to detect bare module imports like "from drone.apps...")
     aipass_modules = {
         "drone",
         "seedgo",
@@ -545,7 +413,6 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
         "devpulse",
     }
 
-    # Old namespaces that should not appear
     old_namespaces = {"seed", "cortex", "nexus", "atlas", "sentinel"}
 
     violations = []
@@ -557,19 +424,15 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
 
         code_part = line.split("#")[0].strip() if "#" in line else stripped
 
-        # Only check import statements
         if not (code_part.startswith("from ") or code_part.startswith("import ")):
             continue
 
-        # Extract the module path from "from X import Y" or "import X"
         if code_part.startswith("from "):
-            # "from X.Y.Z import thing" -> extract "X.Y.Z"
             match = re.match(r"from\s+([\w.]+)", code_part)
             if not match:
                 continue
             import_path = match.group(1)
         else:
-            # "import X.Y.Z" -> extract "X.Y.Z"
             match = re.match(r"import\s+([\w.]+)", code_part)
             if not match:
                 continue
@@ -578,7 +441,6 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
         parts = import_path.split(".")
         first_part = parts[0] if parts else ""
 
-        # Check 1: Bare handler/module imports (from handlers.X or from modules.X)
         if first_part in ("handlers", "modules"):
             violations.append(
                 f'Line {i}: bare import "from {import_path}" '
@@ -586,14 +448,12 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
             )
             continue
 
-        # Check 2: Old namespaces (pre-AIPass imports that should not appear)
         if first_part in old_namespaces and len(parts) > 1:
             violations.append(
                 f'Line {i}: old namespace "from {import_path}" (old namespace, must use aipass.* namespace)'
             )
             continue
 
-        # Check 3: Bare AIPass module imports (from drone.apps... instead of from aipass.drone.apps...)
         if first_part in aipass_modules and len(parts) > 1 and "apps" in parts:
             violations.append(
                 f'Line {i}: bare module import "from {import_path}" '
@@ -602,7 +462,6 @@ def check_no_bare_imports(lines: List[str], file_path: str = "", bypass_rules: l
             continue
 
     if violations:
-        # Show up to 3 violations in the message
         shown = violations[:3]
         extra = f" (+{len(violations) - 3} more)" if len(violations) > 3 else ""
         return {"name": "No bare imports", "passed": False, "message": "; ".join(shown) + extra}

@@ -3,14 +3,11 @@
 # Description: Drone - Command Router & Discovery
 # Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Drone - Command Router & Discovery for AIPass
-
-Routes commands to registered branches and internal modules.
-Standard branch entry point (apps/drone.py pattern).
 """
 
 import functools
@@ -90,23 +87,14 @@ def _extract_timeout(args: list[str]) -> tuple[list[str], int | None]:
 def _report_inert_timeout(explicit_timeout: int | None, reason: str) -> None:
     """Say so when an accepted ``--drone-timeout`` cannot be applied.
 
-    Two lanes take no timeout at all: module routing runs in-process, and
-    interactive commands inherit the terminal instead of being captured. The
-    flag parses fine in both, so an operator who names a number there is
-    silently ignored — and a silently discarded cap is the same species of
-    defect as a silent kill. It is a WARNING, not an error: the command still
-    runs, it just runs unbounded.
+    Module routing (in-process) and interactive commands take no timeout; a silently dropped
+    cap is a defect, so warn. A warning, not an error: the command still runs, unbounded.
     """
     if explicit_timeout is None:
         return
     message = f"--drone-timeout {explicit_timeout} not applied — {reason}"
     logger.warning("%s", message)
     err_console.print(f"drone: {message}")
-
-
-# =============================================================================
-# AUTO-DISCOVERY
-# =============================================================================
 
 
 def _discover_modules() -> list[tuple[str, str]]:
@@ -124,11 +112,6 @@ def _discover_modules() -> list[tuple[str, str]]:
         except Exception as exc:
             logger.warning("Failed to discover module %s: %s", module_name, exc)
     return discovered
-
-
-# =============================================================================
-# HELP & INTROSPECTION
-# =============================================================================
 
 
 def print_help() -> None:
@@ -199,11 +182,6 @@ def print_introspection() -> None:
     console.print()
 
 
-# =============================================================================
-# COMMAND HANDLERS
-# =============================================================================
-
-
 def _print_home_tip(exc: Exception) -> None:
     """Under "Branch not found", say what was tried — only when no AIPass home resolved."""
     if not isinstance(exc, BranchNotFoundError):
@@ -219,9 +197,7 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
     A caller whose directory was deleted has no CWD to be "within", so the walk
     is skipped and the AIPass home — which never needed a location — still answers.
     """
-    # No location is not a failure to read one. ``caller_cwd`` is the single
-    # reader (router_handler); a private try/except here would be the tenth copy
-    # of the same three lines, which is the species this sweep closed.
+    # ``caller_cwd`` is the single CWD reader; do not add a private try/except copy here.
     cwd = caller_cwd()
     if cwd is not None:
         for i, parent in enumerate([cwd] + list(cwd.parents)):
@@ -229,8 +205,6 @@ def _cwd_has_registry(max_depth: int = 10) -> bool:
                 break
             if registries_in(parent):
                 return True
-    # The AIPass home — AIPASS_HOME, else the interpreter's install, else an
-    # enrolled home — for external projects / global drone usage
     home = resolve_aipass_home().path
     return home is not None and home.is_dir() and bool(registries_in(home))
 
@@ -244,17 +218,13 @@ def _handle_systems() -> int:
     all_branches = get_all_branches()
     modules = list_modules()
 
-    # Split registry branches into services (profile=library) and project branches
     services = [b for b in all_branches if b.get("profile") == "library"]
     project_branches = [b for b in all_branches if b.get("profile") != "library"]
 
-    # Infrastructure section — drone is the router, not a routable module
     console.print("Infrastructure:")
     console.print(f"  @{'drone':<18} Command routing and module discovery (v{VERSION})")
     console.print()
 
-    # AIPass Services — internal modules + registry services (deduplicated)
-    # Exclude registry services that duplicate internal modules or drone itself
     exclude = set(modules) | {"drone"}
     deduped_services = [s for s in services if s.get("name", "").lower() not in exclude]
     service_count = len(modules) + len(deduped_services)
@@ -278,9 +248,7 @@ def _handle_systems() -> int:
         for branch in sorted(project_branches, key=lambda b: b.get("name", "").lower()):
             console.print(f"  @{branch.get('name', '').lower()}")
 
-    # Hint for external projects missing AIPass core branches.
-    # If no AIPass home resolves AND 'drone' isn't among the local branches,
-    # we're in an external project that can't see the core branch set.
+    # No AIPass home and no local 'drone': an external project that cannot see the core branches.
     if resolve_aipass_home().path is None:
         branch_names = {b.get("name", "").lower() for b in all_branches}
         if "drone" not in branch_names:
@@ -313,8 +281,6 @@ def _handle_module(name: str, args: List[str]) -> int:
             # None is the handler's "the adapter could not load"; "" is a quiet module.
             return _module_unavailable(name, "it could not load (see drone log)")
         if intro_text:
-            # Text.from_ansi handles both pre-formatted ANSI (external modules)
-            # and plain text (internal modules) correctly
             console.print(Text.from_ansi(intro_text), end="")
         else:
             console.print(f"No information available for @{name}.")
@@ -417,15 +383,10 @@ def _handle_rm(args: list[str]) -> int:
 
 
 def _handle_custom_command(args: list[str]) -> int:
-    """Handle a custom command shortcut by matching and routing.
-
-    Uses greedy multi-word matching to resolve user input to a registered
-    custom command, then routes through the same path as ``@target`` commands.
-    """
+    """Handle a custom command shortcut by matching and routing."""
     from aipass.drone.apps.modules.commands import match
 
-    # A command registry that cannot load (its heal failed) is a failure to
-    # name, never "no match" and never a traceback for whoever typed the word.
+    # A registry that cannot load is a named failure, never "no match" and never a traceback.
     try:
         matched = match(args)
     except Exception as exc:
@@ -505,11 +466,8 @@ def _read_inbox_ids(inbox: Path) -> set[str]:
 def _find_seat_inbox() -> Path | None:
     """Walk up from CWD to the nearest citizen seat and return its inbox.json.
 
-    Stops at the first directory holding a passport — that seat's inbox is the
-    only one this caller may address, whether or not the file exists yet.
-
-    No CWD means no seat: the seat is inferred from where the caller stands,
-    and a caller standing nowhere addresses nothing.
+    The first passport found is the only seat this caller may address, even if its inbox is absent.
+    No CWD means no seat.
     """
     cwd = caller_cwd()
     if cwd is None:
@@ -525,17 +483,9 @@ def _find_seat_inbox() -> Path | None:
 def _resolve_mail_token(token: str) -> str:
     """Resolve a `view` argument to a message ID — a real ID always wins.
 
-    ai_mail IDs are ``str(uuid.uuid4())[:8]``: 8 hex chars with no version
-    nibble, so (10/16)^8 = 2.3% of them contain no a-f and cannot be told from
-    an inbox index by shape. Reading the token as an index first made about one
-    message in 43 unopenable by the ID the inbox listing had just printed, and
-    — for an all-digit ID small enough to be a valid index — silently opened a
-    DIFFERENT message (@trigger, 2026-08-13).
-
-    So the ID set is consulted before the index is considered, which removes the
-    ambiguity class rather than narrowing it. On any failure the ORIGINAL token
-    is returned untouched: ``str(int("08532166"))`` drops the leading zero, and
-    a not-found error naming an ID the user never typed is its own bug.
+    ai_mail IDs are 8 hex chars; about 2.3% are all digits and look like an inbox index, so
+    the ID set is consulted before the index. On any failure the ORIGINAL token is returned:
+    ``str(int("08532166"))`` drops the leading zero and names an ID the user never typed.
     """
     inbox = _find_seat_inbox()
 
@@ -561,15 +511,9 @@ def _handle_target(args: List[str]) -> int:
     is_presentational = not rest or first_cmd is None
     needs_interactive = is_presentational or first_cmd in INTERACTIVE_COMMANDS or module_name in INTERACTIVE_BRANCHES
 
-    # Route to a module — unless this command needs a live terminal AND there is
-    # a branch behind the name to deliver it. Interactive mode is a property of
-    # BRANCH routing: it means "inherit the terminal instead of capturing the
-    # subprocess", and _handle_module runs in-process and takes no interactive
-    # parameter. So deferring a module-only target like @git to branch routing
-    # buys nothing and costs a BranchNotFoundError on every single call —
-    # 1335 of 1337 lines in drone_drone.log were that fallback firing on the
-    # happy path (DPLAN-0315). @seedgo and @cli are both module and branch, and
-    # still take the subprocess lane so their Rich output renders live.
+    # Interactive mode exists only for branch routing (_handle_module is in-process), so a
+    # module-only target (@git) never defers to branch routing: that costs a BranchNotFoundError
+    # per call. Module-and-branch names (@seedgo, @cli) needing a live terminal take the subprocess.
     if is_module(module_name) and not (needs_interactive and branch_exists(target)):
         _report_inert_timeout(explicit_timeout, "module routing runs in-process and is not timed")
         return _handle_module(module_name, rest)
@@ -577,7 +521,6 @@ def _handle_target(args: List[str]) -> int:
     if needs_interactive:
         _report_inert_timeout(explicit_timeout, "interactive commands inherit the terminal and are not timed")
 
-    # No args = pass through to branch (introspection — inherit terminal for color)
     if not rest:
         try:
             result = route_command(target, interactive=True)
@@ -588,7 +531,6 @@ def _handle_target(args: List[str]) -> int:
             return 1
         return result.exit_code
 
-    # --help / -h = help (inherit terminal for color)
     if rest in (["--help"], ["-h"]):
         try:
             result = route_command(target, rest[0], interactive=True)
@@ -599,17 +541,13 @@ def _handle_target(args: List[str]) -> int:
             return 1
         return result.exit_code
 
-    # drone @branch command [args...]
     command = rest[0]
     cmd_args = rest[1:]
 
-    # B3: translate an inbox display index to a message ID for @ai_mail view N.
-    # No .isdigit() guard here — an all-digit token can be a real message ID,
-    # so _resolve_mail_token decides by looking the token up, not by its shape.
+    # No .isdigit() guard: an all-digit token can be a real message ID; the lookup decides.
     if module_name == "ai_mail" and command == "view" and cmd_args:
         cmd_args = [_resolve_mail_token(cmd_args[0])] + cmd_args[1:]
 
-    # needs_interactive already computed above
     interactive = needs_interactive
 
     try:
@@ -633,17 +571,11 @@ def _handle_target(args: List[str]) -> int:
     return result.exit_code
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 @_reports_passport_fault
 def main() -> int:
     """Main entry point - routes commands or shows help."""
     args = sys.argv[1:]
 
-    # No args -> introspection
     if not args:
         try:
             print_introspection()
@@ -653,19 +585,16 @@ def main() -> int:
             return 1
         return 0
 
-    # --version
     if args[0] in ["--version", "-V"]:
         console.print(f"drone v{VERSION}")
         return 0
 
-    # --help
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         return 0
 
     command = args[0]
 
-    # systems — list branches and modules
     if command == "systems":
         try:
             return _handle_systems()
@@ -678,7 +607,6 @@ def main() -> int:
             err_console.print(f"drone: unexpected error: {exc}")
             return 1
 
-    # scan — discover available commands in a branch
     if command == "scan":
         if len(args) < 2:
             err_console.print("drone: scan requires a target (e.g., drone scan @seedgo)")
@@ -688,7 +616,6 @@ def main() -> int:
         results = scan(args[1])
         return 0 if results is not None else 1
 
-    # activate — scan + register all discovered commands from a branch
     if command == "activate":
         if len(args) < 2 or args[1] in ("--help", "-h"):
             console.print("Usage: drone activate @branch")
@@ -698,18 +625,15 @@ def main() -> int:
             return 0
         return _handle_activate(args[1])
 
-    # list — show registered custom commands
     if command == "list":
         return _handle_list()
 
-    # remove — remove a custom command by name
     if command == "remove":
         if len(args) < 2:
             err_console.print("drone: remove requires a command name (e.g., drone remove audit)")
             return 1
         return _handle_remove(args[1])
 
-    # rm — contained safe-delete
     if command == "rm":
         return _handle_rm(args[1:])
 
@@ -726,12 +650,9 @@ def main() -> int:
         )
         return 1
 
-    # @target — route to branch or module
     if command.startswith("@"):
         return _handle_target(args)
 
-    # Module routing — discovered modules are routable as bare commands
-    # e.g. `drone commands list` or `drone @drone commands list` (via subprocess)
     discovered = _discover_modules()
     module_names = [m[0] for m in discovered]
     if command in module_names:
@@ -753,23 +674,12 @@ def main() -> int:
             return result.get("exit_code", 0)
         return 0 if result else 1
 
-    # Custom command matching (greedy multi-word, before unknown error)
     custom_result = _handle_custom_command(args)
     if custom_result != -1:
         return custom_result
 
-    # Unknown command — check if it's a bare branch name missing @
-    #
-    # The @ prefix is a hard contract: it's our routing convention and cannot be
-    # silently auto-inferred. Bare `drone prax` must error — any relaxation makes
-    # typos route to branches and hides bugs.
-    #
-    # Windows caveat: PowerShell treats `@` as a splatting operator, so
-    # `drone @prax` reaches drone as `drone prax` — the @ is consumed before we
-    # ever see it. This is NOT fixed here. It is fixed via a PowerShell profile
-    # wrapper (setup.sh writes it for Windows users) that uses $MyInvocation.Line
-    # to reconstruct the original command string with @ intact. See issue #340.
-    # Git Bash on Windows is fine — it passes @ through like Linux.
+    # The @ prefix is a hard contract: bare `drone prax` must error, or typos route to branches.
+    # PowerShell eats `@` (splatting); the setup.sh profile wrapper restores it, not this code.
     try:
         from aipass.drone.apps.modules.resolver import branch_exists
 

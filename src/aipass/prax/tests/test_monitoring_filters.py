@@ -3,15 +3,10 @@
 # Description: Unit tests for monitoring_filters.py
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/monitoring_filters.py."""
-
-# Unit tests for monitoring filter patterns and helper functions.
-#
-# Tests pure functions: should_monitor, get_priority, get_content_filter,
-# filter_log_content, and apply_content_filter.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — the HIGHLIGHT_PATTERNS entries beyond those the get_priority() tests sample
@@ -28,16 +23,8 @@ from aipass.prax.apps.handlers.monitoring.monitoring_filters import (
 )
 
 
-# =============================================
-# should_monitor TESTS
-# =============================================
-
-
 class TestShouldMonitorSandboxes:
-    """should_monitor(path, root) is False below a dropbox or an .archive under root.
-
-    The owner's ruling of 09-27: nothing looks into a dropbox, a sandbox like .archive.
-    """
+    """should_monitor(path, root) is False below a dropbox or an .archive under root."""
 
     def test_a_dropbox_and_an_archive_are_not_monitored_and_the_live_file_is(self, tmp_path):
         root = tmp_path / "eco"
@@ -70,7 +57,7 @@ class TestShouldMonitor:
 
     def test_venv_ignored(self, tmp_path):
         """.venv directories should be ignored (non-ALWAYS files)."""
-        # Use a .cfg file that is not in ALWAYS patterns
+        # A .cfg file, because an ALWAYS pattern would win over IGNORE.
         assert should_monitor(tmp_path / "project" / ".venv" / "pyvenv.cfg") is False
 
     def test_git_ignored(self, tmp_path):
@@ -87,15 +74,11 @@ class TestShouldMonitor:
 
     def test_ai_mail_local_not_ignored(self, tmp_path):
         """.ai_mail.local should NOT be caught by .local ignore rule."""
-        # .ai_mail.local contains ".local" as a substring but is not the
-        # ".local" directory — the part-only check should skip it.
-        # The file itself is an .ai_mail.json which is in ALWAYS patterns.
         result = should_monitor(tmp_path / "project" / ".ai_mail.local" / "inbox.ai_mail.json")
         assert result is True
 
     def test_always_overrides_ignore_py_in_cache(self, tmp_path):
         """ALWAYS patterns override IGNORE — .py in .cache should be monitored."""
-        # .cache is in IGNORE, but *.py is in ALWAYS (checked first)
         assert should_monitor(tmp_path / ".cache" / "script.py") is True
 
     def test_claude_json_backup_early_exit(self, tmp_path):
@@ -133,11 +116,6 @@ class TestShouldMonitor:
     def test_zip_file_ignored(self, tmp_path):
         """Archive files like *.zip should be ignored."""
         assert should_monitor(tmp_path / "project" / "archive.zip") is False
-
-
-# =============================================
-# get_priority TESTS
-# =============================================
 
 
 class TestGetPriority:
@@ -186,11 +164,6 @@ class TestGetPriority:
         assert result == "medium"
 
 
-# =============================================
-# get_content_filter TESTS
-# =============================================
-
-
 class TestGetContentFilter:
     """Tests for get_content_filter(path)."""
 
@@ -221,11 +194,6 @@ class TestGetContentFilter:
         result = get_content_filter(Path("AIPASS_REGISTRY.json"))
         assert result is not None
         assert result["filter_mode"] == "keys_only"
-
-
-# =============================================
-# filter_log_content TESTS
-# =============================================
 
 
 class TestFilterLogContent:
@@ -285,11 +253,6 @@ class TestFilterLogContent:
         content = "INFO: all systems go"
         result = filter_log_content(content, show_errors=False, show_warnings=False, show_info=True)
         assert result == "INFO: all systems go"
-
-
-# =============================================
-# apply_content_filter TESTS
-# =============================================
 
 
 class TestApplyContentFilter:

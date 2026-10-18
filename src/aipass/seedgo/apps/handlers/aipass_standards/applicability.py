@@ -3,40 +3,15 @@
 # Description: Where each standard applies - production, tests, or everywhere
 # Version: 1.1.0
 # Created: 2026-08-09
-# Modified: 2026-09-21
+# Modified: 2026-10-17
 # =============================================
 
 """Single source of truth for WHERE a standard applies.
 
-Two lanes run these checkers and they used to decide scope independently:
-``branch_audit`` walked ``apps/`` no matter what a checker said, and
-``run_checklist`` filtered nothing at all — so the same standard was
-production-only in one lane and everywhere in the other. Structural
-standards (architecture, encapsulation, meta) then failed on nearly every
-test file in the fleet, and branches papered over it with bypass rules,
-which is how a scoping problem turns into 400 lines of suppression.
-
-A checker declares ``APPLIES_TO`` once; both lanes consult this module.
-
-    APPLIES_TO = "production"   # source code only — structural conventions
-    APPLIES_TO = "tests"        # test files only
-    APPLIES_TO = "everywhere"   # default when the constant is absent
-
-The default is ``everywhere`` on purpose. A new checker that finds real bugs
-(an unguarded ``/tmp`` path, a swallowed exception, a committed key) is
-useful on a test file from the day it lands — Windows CI runs the whole
-suite, so a test breaks the build exactly like a module does. Forgetting the
-constant therefore costs noise, never a missed bug; the reverse default would
-mute new checkers silently on more than a third of every branch's Python.
-
-APPLIES_TO is NOT ``AUDIT_SCOPE``. AUDIT_SCOPE says where a result is
-REPORTED (per entry point, per file, per branch); APPLIES_TO says which files
-the standard is meaningful for. Conflating those two axes on one constant is
-what produced the disagreement in the first place, so they stay separate.
-
-One honest limit: branch-level checkers (``check_branch``) walk the tree
-themselves, so nothing here can filter them — for those the constant is
-documentation of what their own walk already does. Per-file lanes enforce it.
+A checker declares ``APPLIES_TO`` ("production", "tests", or "everywhere", the default)
+once, and both lanes, ``branch_audit`` and ``run_checklist``, consult this module. The
+default is ``everywhere`` so a forgotten constant costs noise, never a missed bug. It is
+not ``AUDIT_SCOPE``, which says where a result is reported.
 """
 
 import re
@@ -53,27 +28,13 @@ EVERYWHERE = "everywhere"
 DEFAULT_APPLIES_TO = EVERYWHERE
 VALID_APPLIES_TO: frozenset[str] = frozenset({PRODUCTION, TESTS, EVERYWHERE})
 
-# Directory names that mark a test tree. Deliberately NOT a filename rule:
-# "test_map.py" is a production module in this very branch, and a
-# ``name.startswith("test_")`` heuristic would quietly exempt it from every
-# structural standard. conftest.py is the one filename that is always a test.
+# Directory names, deliberately not a filename rule: "test_map.py" is a production module
+# in this branch. conftest.py is the one filename that is always a test.
 TEST_DIR_NAMES: frozenset[str] = frozenset({"tests", "test"})
 TEST_FILE_NAMES: frozenset[str] = frozenset({"conftest.py"})
 
-# Retired code is not lintable — it is kept for reference, not maintained, and
-# a standard that lands after the code was archived can never be satisfied by
-# it. Excluded from BOTH lanes. These names already appear in
-# skip_dirs.SOURCE_SKIP_DIRS and ignore_handler.AUDIT_IGNORE_PATTERNS, which
-# the checklist lane never consulted; test_applicability asserts they stay in
-# step so this cannot become a third list that drifts.
-#
-# "parked" joined the list on 2026-09-21, when the audit's corpus grew to
-# include tests/. A parked directory is the fleet's name for code set aside
-# pending a decision — api, cli and memory each keep one under tests/, with a
-# conftest whose only job is to stop pytest collecting what is in it. Six of
-# the nine parked files were already excluded by the house `(disabled)` suffix;
-# the three collection-barrier conftests were not, and would have entered the
-# corpus as live test files the moment tests/ did.
+# Retired code is excluded from BOTH lanes; test_applicability asserts these stay in step
+# with skip_dirs.SOURCE_SKIP_DIRS and ignore_handler.AUDIT_IGNORE_PATTERNS.
 RETIRED_DIRS: frozenset[str] = frozenset({".archive", ".sorting_unprocessed", ".backup", "deprecated", "parked"})
 
 
@@ -83,12 +44,8 @@ _SEPARATOR = re.compile(r"[\\/]+")
 def _components(file_path: str) -> tuple[str, ...]:
     """Path components, split on BOTH separators regardless of host platform.
 
-    ``Path(...).parts`` only splits the separator the interpreter is running
-    on: on Linux a Windows path arrives as a single component and every
-    directory test silently answers False. That is the same shape as the bug
-    this module exists to fix — the audit lane's ignore list matches the
-    substring ``"/.archive/"``, which never matches on Windows, so archived
-    code was skipped locally and audited in Windows CI.
+    ``Path(...).parts`` only splits the host's separator: on Linux a Windows path is one
+    component and every directory test would answer False.
     """
     return tuple(part for part in _SEPARATOR.split(file_path) if part)
 
@@ -111,8 +68,7 @@ def is_retired_path(file_path: str) -> bool:
 def applies_to(checker: Any) -> str:
     """The declared applicability of a checker, defaulting to ``everywhere``.
 
-    An unrecognised value is reported and treated as ``everywhere``: a typo in
-    a checker's constant must never be the reason a standard stops running.
+    An unrecognised value is reported and treated as ``everywhere``.
     """
     declared = getattr(checker, "APPLIES_TO", DEFAULT_APPLIES_TO)
     if declared in VALID_APPLIES_TO:
@@ -131,8 +87,7 @@ def applies_to(checker: Any) -> str:
 def applies_to_file(checker: Any, file_path: str) -> bool:
     """Whether this checker is meaningful for this file.
 
-    The single gate both lanes call. Retired paths are excluded here too, so a
-    lane that forgets its own early-out still cannot check archived code.
+    The single gate both lanes call; retired paths are excluded here too.
     """
     if is_retired_path(file_path):
         return False

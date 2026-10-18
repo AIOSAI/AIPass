@@ -3,13 +3,11 @@
 # Description: Email Reply Handler
 # Version: 1.1.2
 # Created: 2025-11-30
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Reply Handler
-
-Handles replying to emails and auto-closing the original.
 """
 
 import json
@@ -33,24 +31,11 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Services imported in __main__ only (handlers should not display)
-
 
 def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
-    """
-    Get an email from inbox by its ID.
+    """Get an email from inbox by its ID.
 
-    Args:
-        inbox_file: Path to inbox.json
-        message_id: ID of message to find
-
-    Returns:
-        Email dict or None if not found
-
-    Raises:
-        OSError, ValueError: the inbox could not be read or parsed. None would
-            read as "message not found" about a broken inbox; handle_reply turns
-            the raise into its error line (ai_mail, leg 10).
+    An unreadable inbox raises (OSError, ValueError): None would read as "message not found".
     """
     if not inbox_file.exists():
         return None
@@ -64,64 +49,39 @@ def get_email_by_id(inbox_file: Path, message_id: str) -> Optional[Dict]:
 
 
 def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str) -> Tuple[bool, str, Optional[str]]:
-    """
-    Send a reply to an email's original sender.
-
-    This imports delivery and create handlers to send the reply,
-    then closes the original email.
-
-    Args:
-        from_branch_path: Path to the replying branch
-        original_email: The original email being replied to
-        reply_message: The reply message content
-
-    Returns:
-        Tuple of (success: bool, message: str, reply_id: str or None)
-    """
+    """Send a reply to an email's original sender."""
     json_handler.log_operation(
         "send_reply", {"from_branch": str(from_branch_path), "reply_to": original_email.get("from", "unknown")}
     )
-    # Import here to avoid circular imports
     from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
     from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
     from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_closed_and_archive
     from aipass.ai_mail.apps.handlers.users.branch_detection import get_branch_info_from_registry
 
-    # Get sender info from current branch
     sender_info = get_branch_info_from_registry(from_branch_path)
     if not sender_info:
         return False, "Could not detect sender branch", None
 
-    # REPLY CHAIN VALIDATION: Check if this was a dispatched email
-    # If dispatched_to is set, only that branch should be replying
     dispatched_to = original_email.get("dispatched_to")
     current_sender = sender_info.get("email", "@unknown")
 
-    # Normalize dispatched_to to email format if it's a path
-    # DRONE's preprocess_args converts @branch to paths, so we may receive
-    # a filesystem path instead of "@trigger"
+    # drone's preprocess_args turns @branch into a path, so dispatched_to may be one.
     if dispatched_to and not dispatched_to.startswith("@"):
-        # It's a path - look up email in registry
         dispatch_info = get_branch_info_from_registry(Path(dispatched_to))
         if dispatch_info:
             dispatched_to = dispatch_info.get("email", dispatched_to)
 
     if dispatched_to and dispatched_to != current_sender:
         error_msg = f"IDENTITY MISMATCH: Dispatched to {dispatched_to}, reply from {current_sender}"
-        # Fail loud - raise exception to stop execution (caller logs this)
         raise RuntimeError(error_msg)
 
-    # Get reply destination - use reply_to if set, otherwise use original sender
-    # This allows emails to specify where replies should go (e.g., broadcasts from devpulse)
     reply_destination = original_email.get("reply_to") or original_email.get("from", "")
     if not reply_destination:
         return False, "Original email has no sender or reply_to address", None
 
-    # Create reply subject
     original_subject = original_email.get("subject", "No subject")
     reply_subject = f"RE: {original_subject}" if not original_subject.startswith("RE:") else original_subject
 
-    # Build reply email data
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     reply_email_data = {
         "from": sender_info.get("email", "@unknown"),
@@ -131,23 +91,13 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
         "message": reply_message,
         "timestamp": timestamp,
         "in_reply_to": original_email.get("id"),  # Link to original message
-        # Return address. Without it a cross-project conversation died after one
-        # round: an external citizen's reply landed here fine, but replying back
-        # missed the registry (correct — they are external) and had no stored path
-        # to fall back on. Stamped unconditionally: internal replies ignore it, and
-        # it is derived from from_branch_path — the branch actually replying —
-        # rather than delivery.py's AIPASS_CALLER_CWD guess, which the sender
-        # misattribution showed can name the wrong branch entirely.
+        # Return address for external recipients; from the replying branch, never the CWD guess.
         "reply_path": str(from_branch_path / ".ai_mail.local" / "inbox.json"),
     }
 
-    # Dispatch authorship, same reason as create_email_file (FPLAN-0452 P1).
-    # Stamped on the SHARED dict, before either delivery lane runs, so the
-    # registry path and the stored reply_path lane both carry it — they write
-    # their own sent records and a stamp in only one would silently under-count.
+    # Stamped before either delivery lane runs, so both lanes' sent records carry it.
     stamp_dispatch_id(reply_email_data)
 
-    # Find recipient branch
     branches = get_all_branches()
     target_branch = None
     for branch in branches:
@@ -156,31 +106,19 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
             break
 
     if not target_branch:
-        # Fallback: cross-project delivery via reply_path stored at receive time
         stored_reply_path = original_email.get("reply_path")
         if stored_reply_path:
             return _deliver_via_reply_path(stored_reply_path, reply_email_data, from_branch_path, original_email)
         return False, f"Could not find branch for {reply_destination}", None
 
-    # Mint the id BEFORE delivering, not after.
-    #
-    # This used to be created further down, purely to name the sent/ file — so
-    # at delivery time the reply had no id at all, and the recipient's copy
-    # could not carry a sent_id pointing back here. The sender's sent/ record
-    # and the recipient's inbox copy ended up with two unrelated ids and no
-    # link between them, which on 2026-08-16 made a correctly delivered reply
-    # (@seedgo -> @devpulse) look like it had been eaten in flight.
-    #
-    # One id, minted once, used by both sides.
+    # Mint the id BEFORE delivering: the recipient's copy carries it as sent_id back to sent/.
     reply_id = str(uuid.uuid4())[:8]
     reply_email_data["id"] = reply_id
 
-    # Deliver the reply (pass email address, not path)
     success, error_msg = deliver_email_to_branch(reply_destination, reply_email_data)
     if not success:
         return False, f"Failed to deliver reply: {error_msg}", None
 
-    # Save to sender's sent folder
     sent_folder = from_branch_path / ".ai_mail.local" / "sent"
     sent_folder.mkdir(parents=True, exist_ok=True)
 
@@ -188,31 +126,13 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
     with open(sent_file, "w", encoding="utf-8") as f:
         json.dump(reply_email_data, f, indent=2)
 
-    # Close the dispatch register row this reply answers (FPLAN-0499 phase 2).
-    #
-    # Rows whose agent had already reported by mail sat outstanding until their
-    # expected_by and were then announced as dead monitors — a false alarm for
-    # work that was reported hours earlier. The reply is the completion
-    # evidence; nothing was reading it.
-    #
-    # AFTER DELIVERY, NEVER BEFORE. Closing a row for a reply that then failed
-    # to deliver would erase the promise while the work was still unanswered,
-    # which is the one thing the register exists to prevent. Best-effort and
-    # non-fatal for the same reason in reverse: a delivered reply must not be
-    # reported as failed because a register write did not land.
-    #
-    # MATCHED BY THREAD, not by the replier's dispatch stamp — see
-    # _close_dispatch_row_on_reply and register.close_on_reply for the incident
-    # that settled it. A report-first plan mail is not a reply on the thread, so
-    # a dispatch keeps being watched until its agent actually answers the brief.
+    # AFTER delivery, never before: closing for an undelivered reply erases an open promise.
     _close_dispatch_row_on_reply(reply_email_data)
 
-    # Auto-close the original email
     original_id = original_email.get("id")
     if original_id:
         close_success, close_msg = mark_as_closed_and_archive(from_branch_path, original_id)
         if not close_success:
-            # Reply sent but close failed - not critical
             return True, f"Reply sent (warning: original not closed: {close_msg})", reply_id
 
     return True, f"Reply sent to {reply_destination}, original closed", reply_id
@@ -221,17 +141,8 @@ def send_reply(from_branch_path: Path, original_email: Dict, reply_message: str)
 def _close_dispatch_row_on_reply(reply_email_data: Dict) -> None:
     """Close the dispatch register row this reply answers. Never raises.
 
-    Matched by THREAD — who is replying, who they are answering, and the
-    subject — not by the sender's dispatch stamp. The stamp names the dispatch
-    the agent is currently RUNNING UNDER, which is a different question: it
-    lands on a report-first plan mail sent before the work is done, and it
-    changes when an agent is resumed, so it both closes too early and misses
-    the real completion. ``register.close_on_reply`` carries the incident that
-    proved it.
-
-    Every failure is swallowed and logged. The reply is already DELIVERED by
-    the time this runs; letting a register problem surface as a reply failure
-    would report a sent message as unsent, which is the worse lie.
+    Matched by thread (replier, recipient, subject), not the dispatch stamp, which names the
+    dispatch the agent runs under. Never raises: the reply is already delivered.
     """
     try:
         from aipass.ai_mail.apps.handlers.dispatch import register
@@ -250,15 +161,7 @@ def _close_dispatch_row_on_reply(reply_email_data: Dict) -> None:
 def _validate_reply_path(reply_path: str) -> Tuple[bool, str]:
     """Validate that reply_path points to a legitimate inbox.json.
 
-    Checks: (a) path resolves, (b) ends with .ai_mail.local/inbox.json,
-    (c) a *_REGISTRY.json exists in an ancestor directory.
-
-    The ancestor check globs rather than matching AIPASS_REGISTRY.json literally.
-    This validator guards delivery TOWARD an external project, and external projects
-    name their registry PROJECTNAME_REGISTRY.json — so the literal name rejected
-    exactly the cross-project replies it was written to let through. Same bug class
-    as branch_detection 426a1c04 (compass #229), here in the outbound direction.
-    Existence is all that matters, so no sorted()/ordering concern applies.
+    The ancestor check globs *_REGISTRY.json: external projects name theirs PROJECTNAME_REGISTRY.json.
     """
     try:
         path = Path(reply_path).resolve()
@@ -284,21 +187,7 @@ def _deliver_via_reply_path(
     from_branch_path: Path,
     original_email: Dict,
 ) -> Tuple[bool, str, Optional[str]]:
-    """Deliver reply directly to an external project's inbox via stored reply_path.
-
-    Used when the recipient is not in the AIPass registry (cross-project reply).
-    Writes directly to the inbox.json at the stored path, then saves to sent/
-    and closes the original.
-
-    Args:
-        reply_path: Absolute path to the target inbox.json (stored at receive time).
-        reply_email_data: The reply email dict to deliver.
-        from_branch_path: Path to the replying branch (for sent folder and close).
-        original_email: The original email being replied to (for close).
-
-    Returns:
-        Tuple of (success, message, reply_id or None)
-    """
+    """Deliver reply directly to an external project's inbox via stored reply_path."""
     valid, reason = _validate_reply_path(reply_path)
     if not valid:
         logger.warning("[reply] reply_path rejected: %s", reason)
@@ -313,7 +202,6 @@ def _deliver_via_reply_path(
     reply_email_data["id"] = reply_id
     logger.info("[reply] Cross-project reply delivered to %s", reply_path)
 
-    # Save to sender's sent folder
     sent_folder = from_branch_path / ".ai_mail.local" / "sent"
     sent_folder.mkdir(parents=True, exist_ok=True)
     sent_file = sent_folder / f"{reply_id}.json"
@@ -323,7 +211,6 @@ def _deliver_via_reply_path(
     except Exception as e:
         logger.warning("[reply] failed to save sent copy: %s", e)
 
-    # Auto-close the original email
     from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_closed_and_archive
 
     original_id = original_email.get("id")

@@ -3,40 +3,15 @@
 # Description: Symbolic Memory Module — PARKED 2026-08-14
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-08-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 Symbolic Memory Module — PARKED 2026-08-14 (the owner's ruling).
 
-WHY THIS IS PARKED
-    The Agent Memory Atlas published a code-grounded review of AIPass memory at
-    revision 0d27e5ef (https://neoneye.github.io/agent-memory-atlas/systems/aipass/).
-    It praised the governance/entry-limit/rollover design and made one sharp
-    criticism: the symbolic tier's AUDN deduplicator hands an LLM a fragment, takes
-    a ``Delete`` verdict, and removes content with no record of what went or why —
-    an unauditable deletion inside a memory system. The tier was never wired into a
-    live lane: no hook entry, and no caller in rollover, the extractor, auto_process,
-    search or verify. The owner's ruling, 2026-08-14: park it — we may use it later —
-    and say where the active piece is.
-
-WHERE THE ACTIVE PIECE IS
-    Compass — @devpulse's curated-truth store. src/aipass/devpulse, SQLite + FTS5,
-    reached with ``drone @devpulse compass``. It carries the discipline this tier
-    lacked: a correcting entry archives and links what it replaces, so a change of
-    mind leaves a record instead of a hole.
-
-    Not parked, and not part of this tier: the surfacing governance engine
-    (apps/modules/governance.py). It is LIVE on the UserPromptSubmit lane — @hooks'
-    compass_recall calls should_surface/record_message/new_state on every prompt to
-    decide which Compass decisions may be shown.
-
-THE IMPLEMENTATION IS NOT GONE
-    All 1602 lines are at tests/parked/symbolic_20260814/modules/symbolic(disabled).py,
-    the handlers at tests/parked/symbolic_20260814/handlers/. That directory's
-    README.md has the revival steps. This stub stays in place so that anyone who
-    invokes a parked surface is told what happened rather than met with a bare
-    'unknown command'.
+Its AUDN deduplicator deleted on an LLM verdict with no record. The code and the
+revival steps are in tests/parked/symbolic_20260814/; this stub makes every parked
+surface say so. governance.py is not part of this tier and is live.
 """
 
 import sys
@@ -49,8 +24,7 @@ from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
 PARKED_DATE = "2026-08-14"
 
-# Subcommands the tier used to answer. Kept so a caller who types one gets the
-# ruling, not silence — and so revival knows exactly what it is restoring.
+# Kept so a caller who types one gets the ruling, not 'unknown command'.
 _PARKED_SUBCOMMANDS = {
     "demo": "Run demonstration analysis (v1 + v2 mock)",
     "analyze": "Analyze a conversation JSON file (v1 pipeline)",
@@ -76,13 +50,7 @@ class SymbolicTierParked(RuntimeError):
 
 
 def __getattr__(name: str) -> Any:
-    """
-    Answer for the whole old public API — extract_*, store_*, retrieve_*, and the rest.
-
-    Module-level __getattr__ (PEP 562) fires only for names this stub does not
-    define, so every parked function reports the ruling instead of raising a bare
-    AttributeError that says nothing about why it went.
-    """
+    """Answer for the whole old public API (PEP 562) with the ruling, not a bare AttributeError."""
     if name.startswith("__"):
         raise AttributeError(name)
     raise SymbolicTierParked(f"symbolic.{name} is {_PARKED_REASON}\n  Active: {_ACTIVE_PIECE}\n  {_ARCHIVE_HINT}")
@@ -133,16 +101,7 @@ def _refuse(surface: str) -> None:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle symbolic commands — every one of them refuses, loudly.
-
-    Args:
-        command: Command name
-        args: Additional arguments
-
-    Returns:
-        True if the command belonged to this module, False otherwise.
-    """
+    """Handle symbolic commands — every one of them refuses, loudly."""
     if command in ("--help", "-h", "help"):
         print_help()
         return True

@@ -48,13 +48,13 @@
       "file": "apps/handlers/aipass_standards/help_text_content.py",
       "standard": "help_text",
       "lines": [
-        28,
-        36,
-        37,
-        42,
-        50,
-        51,
-        52
+        21,
+        29,
+        30,
+        35,
+        43,
+        44,
+        45
       ],
       "reason": "Documentation, not code: a standard's page is a Rich string list, and these lines quote the pattern the standard is about as an example (python3 commands as the anti-pattern the standard flags). Replaces the no-standard '_content.py' rule, dead since 2026-09-25 18:55 (a rule needs a file and a standard)."
     },
@@ -178,7 +178,7 @@
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "logged_fallback",
-      "lines": [135],
+      "lines": [100],
       "reason": "Devpulse's ruling (c), fleet green leg 15: no raise here, the verdict path stays as it is. The failure is made loud instead: it is recorded in UNREADABLE_REGISTRIES, and the checklist and the audit each print one note naming the unreadable registry (registry_notes; pinned in test_checklist and test_standards_audit)."
     },
     {
@@ -234,43 +234,43 @@
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "hardcoded_path",
-      "lines": [57, 62, 72, 77, 82, 87, 92, 102, 107, 112, 135, 142, 150, 159, 171, 177, 206, 212, 217, 717, 719, 810, 834, 835, 836, 1601, 1603, 1604, 1606, 1636, 1649, 1650, 1651, 1657, 1661, 1670, 1680, 1687, 1708, 1727, 1762, 1773, 1793, 1838, 1842],
+      "lines": [52, 57, 67, 72, 77, 82, 87, 97, 102, 107, 125, 132, 140, 149, 161, 167, 187, 193, 198, 602, 604, 672, 678, 684, 686, 687, 688, 1263, 1265, 1266, 1268, 1298, 1311, 1312, 1313, 1319, 1323, 1332, 1342, 1349, 1370, 1389, 1424, 1435, 1455, 1488, 1492],
       "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs. Extended leg 19 (L1838, L1842): the docstring-table pins' inputs."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "developer_home",
-      "lines": [1601, 1602, 1603, 1604, 1606, 1607, 1636, 1640, 1670, 1680, 1682, 1687, 1708, 1713, 1727, 1731, 1762, 1767, 1773, 1793, 1800],
+      "lines": [1263, 1264, 1265, 1266, 1268, 1269, 1298, 1302, 1332, 1342, 1344, 1349, 1370, 1375, 1389, 1393, 1424, 1429, 1435, 1455, 1462],
       "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "windows_compat",
-      "lines": [1660],
+      "lines": [1322],
       "reason": "A control, not a path the test touches: '/tmp/pytest-of-.../x' is a string written into a tmp_path file to pin that a pytest temp path is not a home path (developer_home, 2026-10-04); nothing opens it."
     },
     {
       "file": "tests/test_checkers_batch8.py",
       "standard": "permission_flags",
-      "lines": [1224, 1251, 1263],
+      "lines": [1039, 1066, 1078],
       "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them."
     },
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "windows_compat",
-      "lines": [1160, 1167],
+      "lines": [934, 936],
       "reason": "Test input (fleet green leg 15; re-pinned +3 leg 16): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
     },
     {
       "file": "tests/test_posix_literal_nominator.py",
       "standard": "windows_compat",
-      "lines": [49, 50, 52, 54, 55, 56, 57, 69, 201],
+      "lines": [44, 45, 47, 49, 50, 51, 52, 64, 176],
       "reason": "The subject, not a path the test uses (fleet green leg 15): '/tmp' is the rooted literal the posix_literal nominator is about, handed only to ntpath/posixpath string functions to measure the hazard, or written as source text into tmp_path for the nominator to read (69) and as a parametrize case of the rooted-literal predicate (201); nothing touches the filesystem at it."
     },
     {
       "file": "tests/test_posix_literal_nominator.py",
       "standard": "literal_path",
-      "lines": [49, 50, 57],
+      "lines": [44, 45, 52],
       "reason": "The subject, not a path the test uses (fleet green leg 15): the rooted literal is the nominator's own species, handed to ntpath.splitdrive/posixpath.splitdrive/posixpath.abspath, which are string functions; no host reads it."
     },
     {
@@ -281,7 +281,7 @@
     {
       "file": "tests/test_audit_tests_lane_gate.py",
       "standard": "literal_path",
-      "lines": [166],
+      "lines": [135],
       "reason": "Data, not a host path (fleet green leg 15): plugin._split_path splits a STRING on separators and never touches disk; '/weird/back\\\\slash.txt' is the input whose backslash must survive on POSIX."
     },
     {
@@ -312,25 +312,25 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [870],
+      "lines": [713],
       "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_core.py",
       "standard": "through_the_command",
-      "lines": [685, 714, 728, 740, 753, 764, 779, 787, 794],
+      "lines": [631, 651, 665, 677, 690, 701, 711, 719, 726],
       "reason": "No public route (fleet green leg 15): runner._m10_proof is reached by the lane only after a full suite run under the gate. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_lane_adapter.py",
       "standard": "through_the_command",
-      "lines": [518],
+      "lines": [472],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split, re-pinned after the fire_canary tests): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
-      "lines": [423],
+      "lines": [402],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): statement_deletion._mutant_text, the unparseable-mutant answer, is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -342,7 +342,7 @@
     {
       "file": "tests/test_coverage_arch_checklist.py",
       "standard": "through_the_command",
-      "lines": [653],
+      "lines": [592],
       "reason": "Fleet green leg 15 (line moved by devpulse's landing edit, which imports the checklist scope helpers from their public home in verdicts): architecture_check._relative_spelling is fed PureWindowsPath so the Windows spelling is pinned on any host; check_module would ask the host's own Path. Named in the leg 15 reply to @devpulse."
     },
     {
@@ -498,7 +498,7 @@
     {
       "file": "tests/test_audit_tests_lane.py",
       "standard": "windows_compat",
-      "lines": [760],
+      "lines": [670],
       "reason": "An argv token, not a location (surfaced by the 10-08 split, hidden until then under the file-wide classify_sqlite row): '/tmp/some_project' is a documented `audit-tests <path>` invocation handed to the verb's parser, whose runner is a recorder; nothing opens it."
     },
     {
@@ -514,25 +514,25 @@
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [388, 419, 430],
+      "lines": [229, 260, 271],
       "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (388), and an unreadable or corrupt entry is a cache miss (419, 430). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
       "file": "apps/handlers/audit_tests/artifact.py",
       "standard": "logged_fallback",
-      "lines": [79],
+      "lines": [57],
       "reason": "The checker is wrong on this line (fleet green leg 14). An unreadable previous artifact is no baseline, the same as an absent one, and load_previous's docstring says so: the caller records a missing baseline and skips the S3 diff, never 'nothing vanished'. The failure is logged as a warning and as the json op previous_artifact_unreadable."
     },
     {
       "file": "apps/handlers/bypass/ignore_handler.py",
       "standard": "logged_fallback",
-      "lines": [262],
+      "lines": [158],
       "reason": "The checker is wrong on this line (fleet green leg 14). relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not ignored: a branch's .seedgoignore governs its own tree only. False here is the answer, not a failure, and the case is logged."
     },
     {
       "file": "apps/handlers/aipass_standards/cli_check.py",
       "standard": "logged_fallback",
-      "lines": [86, 317],
+      "lines": [51, 180],
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
     },
     {
@@ -544,79 +544,79 @@
     {
       "file": "apps/handlers/aipass_standards/json_structure_check.py",
       "standard": "logged_fallback",
-      "lines": [444, 462],
+      "lines": [324, 342],
       "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned +3 10-08, resolve_relative's docstring grew): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
     },
     {
       "file": "apps/handlers/aipass_standards/ruff_check.py",
       "standard": "logged_fallback",
-      "lines": [59, 111],
+      "lines": [44, 96],
       "reason": "The checker is wrong on these lines (fleet green leg 14): an unreadable ruff_bypass.json answers 'no ruff bypass', the STRICT answer. Every ruff finding is reported and none is waived on a file nothing could read, and the failure is logged as a warning naming the file."
     },
     {
       "file": "apps/handlers/aipass_proof/plugin_integrity.py",
       "standard": "logged_fallback",
-      "lines": [277],
+      "lines": [209],
       "reason": "The checker is wrong on this line (fleet green leg 15): an unparseable file gives the AST lane no findings, but scan() runs _scan_file_regex on the same file beside it, so the file is still judged; the AST lane only filters docstrings and display strings more precisely. The parse failure is logged."
     },
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [414],
+      "lines": [319],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
       "file": "apps/handlers/aipass_standards/json_handler_check.py",
       "standard": "logged_fallback",
-      "lines": [90],
+      "lines": [54],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. check_branch reads None as 'Handler exists' failed, so an unreadable handler fails the row; the read error is logged as a warning."
     },
     {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
-      "lines": [309],
+      "lines": [234],
       "reason": "No verdict reads this value (fleet green leg 15): measure_pack_corpus feeds the corpus banner only, its docstring says a raising measurer answers None so the caller keeps its own count rather than print a fabricated 0, and the failure is logged as a warning naming the measurer."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/envdiff.py",
       "standard": "logged_fallback",
-      "lines": [873, 892],
+      "lines": [664, 683],
       "reason": "The checker is wrong on these lines (fleet green leg 15): the failure answer is the strict one. read_records' docstring names both: an unreadable log is an empty list and its emptiness produces the refusal; an undecodable line is dropped with a warning naming the file and line, and the missing session record it leaves is refused upstream."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "logged_fallback",
-      "lines": [316],
+      "lines": [235],
       "reason": "Named, not silent (fleet green leg 15): the hook must never raise inside the suite it measures, and _note_error carries the realpath failure to the artifact, where Law M10 reports it. Only reachable in symlink-sibling mode, off by default."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/statement_deletion.py",
       "standard": "logged_fallback",
-      "lines": [780],
+      "lines": [614],
       "reason": "No verdict reads this value (fleet green leg 15): _outermost_callee only picks the callee NAME a conviction line prints, and its caller keeps the regex reading (`or fields['callee']`) for a line that will not parse, as the docstring says. The conviction itself is unchanged either way."
     },
     {
       "file": "apps/modules/proof_query.py",
       "standard": "logged_fallback",
-      "lines": [136],
+      "lines": [79],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. None is only ever a failure here; error() prints why and the caller raises CommandRefused(EXIT_UNPROVEN)."
     },
     {
       "file": "apps/modules/standards_query.py",
       "standard": "logged_fallback",
-      "lines": [182],
+      "lines": [100],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. None is only ever a failure here; error() prints why and _display_content raises CommandRefused(EXIT_UNPROVEN)."
     },
     {
       "file": "apps/handlers/aipass_standards/trinity_check.py",
       "standard": "logged_fallback",
-      "lines": [356],
+      "lines": [204],
       "reason": "The checker is wrong on this line (fleet green leg 14): an unlistable fleet dir answers 'not a clean checkout', the STRICT answer, which keeps a missing .trinity a violation. The comment above it gives the reason, and the case is logged as a warning."
     },
     {
       "file": "apps/handlers/aipass_standards/trinity_groups.py",
       "standard": "logged_fallback",
-      "lines": [1301],
+      "lines": [980],
       "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
     }
   ],

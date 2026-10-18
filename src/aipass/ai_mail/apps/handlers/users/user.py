@@ -3,21 +3,15 @@
 # Description: User Info Handler
 # Version: 2.3.0
 # Created: 2025-11-30
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """
 User Info Handler
 
-Handles user information retrieval and management for AI_Mail system.
-Uses branch detection to identify sender - NO FALLBACKS.
-
-PHILOSOPHY: Fail hard if detection fails. Fallbacks hide bugs.
+Fails hard if sender detection fails; fallbacks hide bugs.
 """
 
-# =============================================
-# IMPORTS
-# =============================================
 import os
 from pathlib import Path
 from typing import Dict, Optional
@@ -25,31 +19,18 @@ from typing import Dict, Optional
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 
-# Import branch detection functions
 from .branch_detection import detect_branch_from_pwd, find_branch_root
-
-# =============================================
-# USER INFO FUNCTIONS
-# =============================================
 
 
 def _detection_failure_reason() -> str:
     """Explain WHY sender detection failed, naming the path actually walked.
 
-    Sender identity comes from the AIPASS_CALLER_* env vars that drone sets,
-    NOT from this process's working directory — drone runs the target branch
-    with cwd=<target branch>, so Path.cwd() here is always a valid branch and
-    is never the thing that failed. Reporting it as the cause sent two separate
-    investigations chasing a phantom passport problem (error 0bd8b4f5).
+    Sender identity comes from drone's AIPASS_CALLER_* env vars, never this process's cwd (always the target branch).
     """
     caller_branch = os.environ.get("AIPASS_CALLER_BRANCH")
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
 
-    # Checked BEFORE the CALLER_BRANCH claim. When the caller stood outside any
-    # branch that IS the reason resolution failed, and the claim text below would
-    # misreport CALLER_CWD as unset — it is set, it is just not in a branch. This
-    # is the condition detect_branch_from_pwd() now refuses on, and this sentence
-    # is the one @devpulse asked to arrive: it names the mistake and the remedy.
+    # Checked before the CALLER_BRANCH claim: a caller outside any branch is the real reason, not an unset CWD.
     if caller_cwd and not find_branch_root(Path(caller_cwd)):
         return (
             f"AIPASS_CALLER_CWD={caller_cwd} is not inside a branch — no "
@@ -65,10 +46,7 @@ def _detection_failure_reason() -> str:
             "is unset so no external identity could be synthesized."
         )
     if caller_cwd:
-        # Reached only when the cwd DOES sit in a branch (the case above already
-        # returned otherwise) — so the branch exists on disk but nothing in the
-        # registry claims it. Saying "not inside a branch" here would be the same
-        # class of lie the docstring above warns about.
+        # Here the cwd does sit in a branch; only the registry claim is missing.
         return (
             f"AIPASS_CALLER_CWD={caller_cwd} sits inside a branch, but no registry "
             "entry matches that path — the branch is not registered under this "
@@ -81,24 +59,7 @@ def _detection_failure_reason() -> str:
 
 
 def get_current_user() -> Dict:
-    """
-    Get current user's information from branch detection (AIPASS_REGISTRY.json)
-
-    Uses PWD/CWD to detect which branch is calling, then looks up info
-    in AIPASS_REGISTRY.json. NO FALLBACKS - fails hard if detection fails.
-
-    Returns:
-        Dict containing user information:
-        {
-            "email_address": "@branch",
-            "display_name": "BRANCH_NAME",
-            "mailbox_path": "/path/to/branch/.ai_mail.local",
-            "timestamp_format": "%Y-%m-%d %H:%M:%S"
-        }
-
-    Raises:
-        RuntimeError: If branch detection fails (not called from a branch directory)
-    """
+    """Get current user's information from branch detection (AIPASS_REGISTRY.json)"""
     json_handler.log_operation("get_current_user", {"cwd": str(Path.cwd())})
 
     # Detect branch from PWD
@@ -113,7 +74,6 @@ def get_current_user() -> Dict:
             "No fallback configured - this is intentional to catch bugs."
         )
 
-    # Extract info from branch_info (from AIPASS_REGISTRY.json)
     from .branch_detection import BRANCH_REGISTRY_PATH
 
     _repo_root = BRANCH_REGISTRY_PATH.parent
@@ -134,11 +94,9 @@ def get_current_user() -> Dict:
             "Check AIPASS_REGISTRY.json for missing fields."
         )
 
-    # Construct mailbox path (branch_path guaranteed non-None by check above)
     assert branch_path is not None
     mailbox_path = branch_path / ".ai_mail.local"
 
-    # Return user info in expected format
     return {
         "email_address": email,
         "display_name": branch_name,
@@ -148,24 +106,12 @@ def get_current_user() -> Dict:
 
 
 def get_user_by_email(email: str) -> Optional[Dict]:
-    """
-    Get user information by email address from AIPASS_REGISTRY.json
+    """Get user information by email address from AIPASS_REGISTRY.json
 
-    Args:
-        email: Email address (e.g., "@seedgo")
-
-    Returns:
-        Dict containing user info, or None if not found; None also when no
-        registry file exists, which is the one answer the read can give.
-
-    Raises:
-        RegistryUnreadable: the registry exists and cannot be read. Read as None,
-            it answered like an unknown user (ai_mail, leg 17); no product
-            caller exists today, only the package re-export.
+    None when unknown or no registry exists; raises RegistryUnreadable when the registry exists but cannot be read.
     """
     from .branch_detection import BRANCH_REGISTRY_PATH, _get_branches_list
 
-    # Use registry lookup
     registry_path = BRANCH_REGISTRY_PATH
     if not registry_path.exists():
         return None
@@ -198,17 +144,7 @@ def get_user_by_email(email: str) -> Optional[Dict]:
 
 
 def get_all_users() -> Dict[str, Dict]:
-    """
-    Get all users from AIPASS_REGISTRY.json
-
-    Returns:
-        Dict mapping branch emails to user info dicts; {} when no registry exists.
-
-    Raises:
-        RegistryUnreadable: the registry exists and cannot be read. Read as {},
-            it answered like a registry naming nobody (ai_mail, leg 15); no
-            product caller exists today, only the package re-export.
-    """
+    """Get all users from AIPASS_REGISTRY.json"""
     from .branch_detection import BRANCH_REGISTRY_PATH, _get_branches_list
 
     registry_path = BRANCH_REGISTRY_PATH

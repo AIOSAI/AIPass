@@ -1052,3 +1052,21 @@ The checker was grepping a **verb** where the rule asks an **authorship** questi
 The exemption keys on the **argument**, so it cannot be borrowed by writing your own
 string; and it requires the stream names to match, so a captured `stderr` written to
 `stdout` stays a violation — that is a real bug this check should keep catching.
+
+## Exemption — a raw write before the module's own console import
+
+A raw `sys.stdout/stderr.write()` is **allowed** when it lexically precedes the module's own
+module-level `aipass.cli` import. An entry point that repairs `sys.path` must run that repair
+before any cross-branch import, so in those lines the console this standard demands does not
+exist yet and the rule is unsatisfiable.
+
+Both clauses are required: the module must import the cli console at all (a module with no
+console import gets no window, or every console-less module would be exempt), and the write
+must sit before that import. A file that does not parse gets no window and keeps every finding.
+
+## Exemption — a handler's `print(..., file=sys.stderr)`
+
+Handler separation exists so a handler does not **display**, and display is stdout. A print
+directed at `sys.stderr` is a diagnostic, the same as the `sys.stderr.write(msg)` spelling that
+has always passed, so handler separation does not flag it. The stream must be **named**: a bare
+`print()` or `file=sys.stdout` is display. A source that does not parse gets no exemption.

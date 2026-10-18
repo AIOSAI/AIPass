@@ -3,13 +3,12 @@
 # Description: Pure system detection logic for aipass doctor
 # Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 System Detector — Pure detection logic for doctor checks.
 
-Returns plain dicts with facts about the running environment.
 No Rich markup — display concerns belong to the UI layer.
 """
 
@@ -26,25 +25,11 @@ from typing import Any, Callable, Dict
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
 
-# =============================================================================
-# PYTHON
-# =============================================================================
-
 
 def detect_python(version_info: Any = sys.version_info) -> Dict[str, Any]:
     """Return Python version info and ok/warning flags.
 
-    Args:
-        version_info: The interpreter's version, sys.version_info by default.
-            A seam for the tests: 3.8 and 3.7 are read without replacing sys
-            process-wide. Every product caller passes nothing.
-
-    Returns:
-        version: str like "3.11.5"
-        major: int
-        minor: int
-        ok: bool — True if >=3.9
-        warning: bool — True if ==3.8 (supported but near end)
+    version_info is a test seam so sys is never replaced; product callers pass nothing.
     """
     info = version_info
     version = f"{info.major}.{info.minor}.{info.micro}"
@@ -59,18 +44,8 @@ def detect_python(version_info: Any = sys.version_info) -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# GIT
-# =============================================================================
-
-
 def detect_git() -> Dict[str, Any]:
-    """Return git availability and version string.
-
-    Returns:
-        found: bool
-        version: str — e.g. "2.43.0" or ""
-    """
+    """Return git availability and version string."""
     git_path = shutil.which("git")
     if git_path is None:
         return {"found": False, "version": ""}
@@ -84,7 +59,6 @@ def detect_git() -> Dict[str, Any]:
             timeout=5,
         )
         raw = result.stdout.strip()
-        # "git version 2.43.0" → "2.43.0"
         parts = raw.split()
         if len(parts) >= 3:
             version = parts[-1]
@@ -96,23 +70,10 @@ def detect_git() -> Dict[str, Any]:
     return {"found": True, "version": version}
 
 
-# =============================================================================
-# SHELL
-# =============================================================================
-
-
 def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> str | None:
     """POSIX fallback: read the invoking parent process's command name via /proc.
 
-    Many containers/CI runners don't export $SHELL even though a real shell
-    (bash/sh) is running the process — this is knowable via /proc/<ppid>/comm
-    on Linux. Returns None if unavailable (non-Linux, /proc missing, read
-    failure) — callers should keep the existing "unknown" fallback.
-
-    Args:
-        os_name: os.name by default; getppid: os.getppid by default. Seams for
-            the tests, handed down by detect_shell: a forced platform or parent
-            pid without replacing os process-wide.
+    Containers and CI runners often run a real shell without exporting $SHELL.
     """
     if os_name != "posix":
         return None
@@ -130,17 +91,7 @@ def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] =
 def detect_shell(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> Dict[str, Any]:
     """Return shell name and path.
 
-    Falls back to the parent process's command name (via /proc/<ppid>/comm on
-    Linux) when $SHELL isn't set — common in containers/CI runners that don't
-    export it even though a real shell is running the process.
-
-    Args:
-        os_name: os.name by default; getppid: os.getppid by default. Seams for
-            the tests, handed to the /proc fallback; product callers pass nothing.
-
-    Returns:
-        name: str — e.g. "bash", "zsh", or "unknown"
-        path: str — full path or ""
+    os_name and getppid are test seams; product callers pass nothing.
     """
     shell_path = os.environ.get("SHELL", "")
     if shell_path:
@@ -156,29 +107,13 @@ def detect_shell(os_name: str = os.name, getppid: Callable[[], int] = os.getppid
     return {"name": "unknown", "path": ""}
 
 
-# =============================================================================
-# OS
-# =============================================================================
-
-
 def detect_os() -> Dict[str, Any]:
-    """Return OS name, release, and machine architecture.
-
-    Returns:
-        os_name: str — "Linux", "Darwin", "Windows", etc.
-        release: str — kernel/OS release string
-        machine: str — e.g. "x86_64"
-    """
+    """Return OS name, release, and machine architecture."""
     return {
         "os_name": platform.system() or "unknown",
         "release": platform.release() or "",
         "machine": platform.machine() or "",
     }
-
-
-# =============================================================================
-# RAM
-# =============================================================================
 
 
 def _read_meminfo_kb() -> int:
@@ -212,15 +147,7 @@ def _total_ram_gb() -> float:
 
 
 def detect_ram() -> Dict[str, Any]:
-    """Return total RAM in GB and ok/warning flags.
-
-    Tries psutil first, falls back to /proc/meminfo on Linux, else 0.
-
-    Returns:
-        total_gb: float
-        ok: bool — True if >=4 GB
-        warning: bool — True if 2<=x<4 GB
-    """
+    """Return total RAM in GB and ok/warning flags."""
     total_gb = _total_ram_gb()
     ok = total_gb >= 4.0
     warning = 2.0 <= total_gb < 4.0
@@ -229,35 +156,14 @@ def detect_ram() -> Dict[str, Any]:
     return result
 
 
-# =============================================================================
-# CPU
-# =============================================================================
-
-
 def detect_cpu() -> Dict[str, Any]:
-    """Return logical CPU count.
-
-    Returns:
-        count: int — number of logical CPUs (0 if unknown)
-    """
+    """Return logical CPU count."""
     count = os.cpu_count() or 0
     return {"count": count}
 
 
-# =============================================================================
-# INSTALL METHOD
-# =============================================================================
-
-
 def detect_install_method() -> str:
-    """Return how aipass was installed: 'pip', 'dev', 'clone', or 'fork'.
-
-    Logic:
-      - If this file's path contains 'site-packages' → pip
-      - If .git exists AND pyproject.toml is in the same tree → dev (editable install / source contributor)
-      - If .git exists → clone
-      - Default → 'unknown'
-    """
+    """Return how aipass was installed: 'pip', 'dev', 'clone', or 'fork'."""
     this_file = Path(__file__).resolve()
 
     if "site-packages" in str(this_file):
@@ -270,11 +176,6 @@ def detect_install_method() -> str:
             return "clone"
 
     return "unknown"
-
-
-# =============================================================================
-# OPTIONAL TOOLS
-# =============================================================================
 
 
 def detect_tmux() -> bool:

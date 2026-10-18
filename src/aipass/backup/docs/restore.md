@@ -9,13 +9,9 @@ touches the source tree except at the output path you name.
 
 `restore` takes a bare filename or a path from the project root. A path names
 exactly one file; a bare filename takes the first match the store walk meets, so
-use the path when two files share a basename.
-
-Until 2026-09-14 only the bare form worked: the lookup joined the whole argument
-onto the matched folder and looked for `<store>/src/main.py/src/main.py`, which
-never exists. Both the `--help` examples and this branch's own documentation
-spelled the failing form. It is pinned now by
-`test_find_file_folder_path_shaped` in `tests/test_versioned_engine.py`.
+use the path when two files share a basename. The path form is pinned by
+`test_a_relative_path_restores_the_right_one_of_two_same_named_files` in
+`tests/test_versioned_engine.py`.
 
 ## Why the store layout decides the lookup
 
@@ -29,16 +25,19 @@ The versioned store wraps each file in a folder of its own name
 
 so the folder and the file inside it share a name, and a lookup has to match the
 folder by the path and the file by its basename. A name longer than 50
-characters is shortened for the folder only (`<name[:30]>_<md5[:8]>`), which the
-lookup does not reproduce.
+characters is shortened for the folder only (`<name[:30]>_<md5[:8]>`). The
+lookup (`_find_file_folder()` in `modules/restore.py`) asks the builder where a
+name would be written rather than re-deriving the layout, so a long name is
+found under its hashed folder, by path or by bare name.
 
 ## Subcommands
 
-`list <file>` prints every version it holds: the current copy and the dated
-baseline beside it, newest marked. `file <file> <output>` writes the current
-version to the output path you give, creating parent directories as needed. A
-failed restore says so and exits non-zero rather than leaving you with a
-half-written file.
+`list <file>` prints every version the file-folder holds: the baseline, the
+current copy (marked `*`), and one row per dated diff in `<name>_diffs/`.
+`file <file> <output>` copies the current version to the output path you give,
+creating parent directories as needed; diffs are listed, not replayed. A file
+the store does not hold, or a folder with no readable current copy, is named on
+stderr, nothing is written, and the verb exits non-zero.
 
 ---
 

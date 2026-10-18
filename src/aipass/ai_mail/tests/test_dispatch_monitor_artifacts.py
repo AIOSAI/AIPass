@@ -3,13 +3,10 @@
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
 # Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
-
-# Split out of test_dispatch_monitor.py on 2026-10-08 to keep that file under the
-# 1,200-line target: the five fixes that keep a failed attempt's evidence.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
@@ -26,13 +23,6 @@ from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import BG_TASKS_MARK
 from aipass.ai_mail.tests.support_dispatch_monitor import _run_main
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
-
-
-# --- Fix 1: per-attempt stdout preservation ---------------------------
-
-
-# The direct _rotate_attempt_stdout units retired 2026-10-10 (dispatch 0c8667bf) to
-# tests/.archive/retired_2026-10-10_test_dispatch_monitor_artifacts.py; main() reaches them below.
 
 
 def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
@@ -65,14 +55,9 @@ def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
 
     assert "attempt-1-failure" in (logs_dir / "dispatch_stdout.attempt-1.log").read_text(encoding="utf-8")
     assert "attempt-2-failure" in (logs_dir / "dispatch_stdout.attempt-2.log").read_text(encoding="utf-8")
-    # Final (3rd) attempt's stdout is left in place, unrotated, for post-processing
     assert "attempt-3-failure" in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
-    # The bounce names the last attempt's result, read from the unrotated log
     bounce.assert_called_once()
     assert "attempt-3-failure" in bounce.call_args.args[1]
-
-
-# --- Fix 2: per-attempt exit codes in the branch-local stderr log -----
 
 
 def test_per_attempt_exit_code_written_to_stderr_log(monkeypatch, main_argv, tmp_path):
@@ -122,9 +107,6 @@ def test_per_attempt_startup_timeout_noted_in_stderr_log(monkeypatch, main_argv,
     bounce.assert_not_called()
 
 
-# --- Fix 3: parsed stdout result JSON reaches the bounce reason -------
-
-
 def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp_path):
     """Bounce reason names the actual failure cause from the result JSON,
     not just the bare exit code."""
@@ -158,9 +140,6 @@ def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp
     assert "is_error=True" in reason
 
 
-# --- Fix 4: lock-ownership-verified cleanup ----------------------------
-
-
 # The owner-deletes and missing-lock cases are pinned once, through main(), in
 # tests/test_dispatch_monitor.py::test_lock_cleanup_on_success and
 # tests/test_dispatch_monitor_helpers.py::test_a_lock_gone_before_cleanup_is_not_recreated.
@@ -191,9 +170,6 @@ def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
     assert lock_file.exists()
     assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == successor_pid
     bounce.assert_not_called()
-
-
-# --- Fix 5: orphaned background tasks are not a silent success --------
 
 
 def test_bg_tasks_still_running_treated_as_incomplete(monkeypatch, main_argv, tmp_path):
@@ -257,9 +233,6 @@ def test_bg_tasks_marker_from_prior_attempt_does_not_leak_forward(monkeypatch, m
 
     assert exc_info.value.code == 0
     mock_bounce.assert_not_called()
-
-
-# --- The same artifacts, each reached through main() -------------------------
 
 
 def test_a_failed_attempts_stdout_is_moved_aside_not_copied(monkeypatch, main_argv, tmp_path):

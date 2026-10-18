@@ -3,14 +3,11 @@
 # Description: Inbox Operations Handler
 # Version: 1.1.1
 # Created: 2025-11-15
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 Inbox Operations Handler
-
-Handles inbox file I/O operations for AI_Mail system.
-Independent handler - no module dependencies.
 """
 
 import json
@@ -29,7 +26,6 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Lazy import for inbox file lock
 _inbox_lock = None
 
 
@@ -46,25 +42,8 @@ def _get_inbox_lock():
 def find_message(messages: List[Dict], message_id: str) -> Optional[Dict]:
     """Resolve a user-supplied id against a message list.
 
-    A delivered message has TWO names: the id the recipient's mailbox minted
-    (authoritative — it is what view/reply/close print back) and ``sent_id``,
-    the id in the sender's ``sent/`` record. An operator holding either one
-    means the same message, so both must resolve.
-
-    The inbox id wins outright: every inbox id is checked before any sent_id,
-    so resolution never depends on message order. A sender cannot shadow a
-    recipient's message by choosing a colliding id.
-
-    This is the single resolution site for all three commands. Bolting a
-    fallback onto each of them separately is how S143's outage was built —
-    two resolvers for one question, disagreeing under load.
-
-    Args:
-        messages: Inbox message dicts
-        message_id: Either the recipient's inbox id or the sender's sent_id
-
-    Returns:
-        The matching message dict, or None
+    Matches the inbox id first, then sent_id, so a sender cannot shadow a recipient's id.
+    The one resolver for view/reply/close: never bolt a separate fallback onto a command.
     """
     for msg in messages:
         if isinstance(msg, dict) and msg.get("id") == message_id:
@@ -78,18 +57,7 @@ def find_message(messages: List[Dict], message_id: str) -> Optional[Dict]:
 
 
 def load_inbox(inbox_file: Path) -> Dict:
-    """
-    Load inbox data from inbox.json file.
-
-    Args:
-        inbox_file: Path to inbox.json file
-
-    Returns:
-        Inbox data dict with 'messages' key (empty list if file doesn't exist or error)
-
-    Raises:
-        Exception: If file cannot be read or parsed
-    """
+    """Load inbox data from inbox.json file."""
     json_handler.log_operation("load_inbox", {"inbox_file": str(inbox_file)})
     if not inbox_file.exists():
         return {"messages": []}
@@ -98,11 +66,10 @@ def load_inbox(inbox_file: Path) -> Dict:
         with open(inbox_file, "r", encoding="utf-8") as f:
             inbox_data = json.load(f)
 
-        # Validate structure
         if not isinstance(inbox_data, dict):
             return {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}
 
-        # Auto-migrate old format {"inbox": []} → v2 schema
+        # Old format {"inbox": []} migrates to the v2 schema.
         migrated = False
 
         if "inbox" in inbox_data and "messages" not in inbox_data:
@@ -138,7 +105,6 @@ def load_inbox(inbox_file: Path) -> Dict:
         except Exception as e:
             logger.warning("[inbox] sweep_closed in load_inbox failed: %s", e)
 
-        # Persist migration under lock to prevent concurrent write races
         if migrated:
             try:
                 with _get_inbox_lock()(inbox_file):

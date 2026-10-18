@@ -3,32 +3,12 @@
 # Description: Prune handler — finds and removes stored copies whose project path the ignore spec now matches
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Prune handler — stored copies of paths the ignore spec now matches.
 
-A directory added to ``.backupignore`` after a backup stays in the stores:
-mirror cleanup (``mirror.py``) only removes snapshot files whose SOURCE is gone,
-and the versioned store has no cleanup at all. This handler finds those copies
-and, when asked, removes them.
-
-The rule is the backup's own filter (``scan/filter.py``): a path is pruned when
-``load_spec`` (the project's ``.backupignore`` behind the built-in floor)
-matches its project-relative path and the project's whitelist does not keep it.
-A whitelisted path is one the next run copies straight back, so it is never a
-candidate.
-
-Two stores, two units:
-
-- ``snapshots/<rel_path>`` — one candidate per FILE.
-- ``versioned/`` — one candidate per FILE-FOLDER (``build_versioned_file_path``):
-  ``<parent>/<folder>/`` holding the current copy ``<name>``, its baseline and its
-  ``<name>_diffs/``. The folder is ``<name>``, or ``<name[:30]>_<md5[:8]>`` for
-  a name longer than 50 characters; a root-level file's parent is ``root``.
-  ``root/<name>/<name>`` is therefore read as the root-level file ``<name>``: the
-  layout gives a project file ``root/<name>`` the same folder, and cannot say
-  which one it holds.
+Reference: docs/store_cleanup.md
 """
 
 import hashlib
@@ -57,7 +37,7 @@ def _raise_walk_error(err: OSError) -> None:
 
 
 def _folder_name(name: str) -> str:
-    """The file-folder name the versioned store gives a file called ``name``."""
+    """The file-folder name the versioned store gives a file called ``name``; mirrors path/builder.py."""
     if len(name) > _LONG_NAME:
         return name[:30] + "_" + hashlib.md5(name.encode()).hexdigest()[:8]
     return name
@@ -138,19 +118,7 @@ def _group(candidates: list[dict]) -> dict[str, dict]:
 
 
 def find_prunable(project_root: str) -> dict:
-    """List the stored copies the ignore spec now matches, in both stores.
-
-    Args:
-        project_root: Absolute path to the project root.
-
-    Returns:
-        ``{"snapshots": [...], "versioned": [...], "groups": {lane: {top: {count,
-        bytes}}}, "count": int, "bytes": int}``. Each candidate is a dict with
-        ``rel_path`` (project-relative), ``path`` (in the store) and ``bytes``.
-
-    Raises:
-        OSError: A store directory could not be listed.
-    """
+    """List the stored copies the ignore spec now matches, in both stores; OSError on an unlistable store."""
     spec = load_spec(project_root)
     whitelist = load_whitelist(project_root)
     snapshots = _snapshot_candidates(build_snapshot_path(project_root), spec, whitelist)
@@ -209,16 +177,7 @@ def _remove_empty_parents(paths: list[Path], store: Path) -> None:
 
 
 def apply_prune(project_root: str, found: dict) -> dict:
-    """Delete what ``find_prunable`` listed, one trail row per removed path.
-
-    Args:
-        project_root: Absolute path to the project root.
-        found: The listing ``find_prunable`` returned for this root.
-
-    Returns:
-        ``{"removed": int, "bytes": int, "errors": [str]}``. A path that could
-        not be removed is an error, never counted as removed.
-    """
+    """Delete what ``find_prunable`` listed, one trail row per removed path; a failure is never counted removed."""
     removed = 0
     freed = 0
     errors: list[str] = []
@@ -250,6 +209,3 @@ def apply_prune(project_root: str, found: dict) -> dict:
     )
     logger.info(f"[prune] Removed {removed} stored paths ({freed} bytes) for {project_root}")
     return {"removed": removed, "bytes": freed, "errors": errors}
-
-
-# =============================================

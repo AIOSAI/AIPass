@@ -3,18 +3,13 @@
 # Description: OS-dispatched CLI session launch — tmux, wt.exe, fallback
 # Version: 1.0.1
 # Created: 2026-04-20
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 handoff_platform — OS-dispatched CLI session launch.
 
-Consumers: modules/handoff.py, modules/init_flow.py (stage 11).
-
-Linux/Mac: tmux new-session -d -s aipass-handoff -c <cwd>; send-keys '<cli> "<prompt>"'
-Windows:   wt.exe -w 0 nt -d <cwd> <cli> "<prompt>"  (Windows Terminal)
-Fallback:  caller receives command string for manual display — no silent fail.
-
+Fallback: the caller receives the command string for manual display, never a silent fail.
 All public functions return data; presentation is handled by the module layer.
 """
 
@@ -177,15 +172,8 @@ def launch_inline(
 ) -> None:
     """Replace the current process with the CLI in the agent directory. Does not return.
 
-    Wraps the CLI in a shell so a return-path breadcrumb prints once the
-    session exits (see ``return_path_breadcrumb``) — ``execvp`` replaces this
-    process outright, so nothing after this call can print once the CLI
-    starts; the breadcrumb has to be baked into the exec'd command itself.
-
-    ``which``, ``chdir`` and ``execvp`` exist for the test: it hands in three
-    recorders rather than patching shutil and os, which are the whole process's,
-    where a patch that fails to apply would move the run or replace it. The
-    defaults are shutil.which, os.chdir and os.execvp, so every caller runs as before.
+    ``execvp`` replaces this process, so the breadcrumb is baked into the exec'd shell command.
+    ``which``, ``chdir`` and ``execvp`` are test seams so the test never patches os or shutil.
     """
     import os
     import shlex
@@ -220,14 +208,7 @@ def launch_handoff(
     """
     Dispatch CLI launch to the appropriate platform handler.
 
-    Returns (launched, manual_command):
-      launched=True  — tmux/wt session was started successfully
-      launched=False — auto-launch unavailable; caller displays manual_command
-      manual_command — always populated; equivalent command for manual run
-
-    If inline=True, replaces the current process (does not return).
-
-    Order: inline → terminal (Linux/Mac) → wt.exe (Windows) → tmux → fallback.
+    Returns (launched, manual_command); manual_command is always populated for display.
     """
     manual_cmd = build_manual_command(cli, prompt, cwd, flag_variant)
 

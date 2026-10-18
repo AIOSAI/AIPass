@@ -3,25 +3,14 @@
 # Description: The home-paths verb — the developer_home standard over the whole tracked tree, for CI
 # Version: 1.0.0
 # Created: 2026-10-04
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The `home-paths` verb. Scans every tracked text file of the repository for a
-developer's home directory (the `developer_home` standard) and exits non-zero
-on any hit — the CI gate for the owner's 2026-10-04 ruling.
+"""The `home-paths` verb. Scans every tracked text file of the repository for a
+developer's home directory (the `developer_home` standard); it is the CI gate.
 
-    drone @seedgo home-paths                 what the verb is
-    drone @seedgo home-paths scan            scan the repo holding this branch
-    drone @seedgo home-paths scan <root>     scan the repo at <root>
-
-CI runs the same verb through the seedgo entry module, from the repo root;
-the exact command is in developer_home.md.
-
-A bare call describes the verb rather than firing it (the introspection
-standard); `scan` is the word that runs. Each branch's `.seedgo/bypass.json`
-is honoured for its own files. A red exits 1; a tree git cannot list exits 2,
-because "could not measure" is not "clean"; an unknown flag exits 7.
+A bare call describes the verb; `scan` runs it. A red exits 1; a tree git cannot list
+exits 2, because "could not measure" is not "clean"; an unknown flag exits 7.
 """
 
 from pathlib import Path
@@ -36,13 +25,10 @@ from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.modules import CommandRefused
 
-#: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("home-paths", "home_paths")
 
-#: Every option this verb accepts.
 FLAGS: tuple = ("--help", "-h")
 
-#: The word that runs the scan.
 SCAN_TOKEN = "scan"
 
 
@@ -121,11 +107,6 @@ def _scan(root: Path) -> None:
         error(total)
         raise CommandRefused(refusal.EXIT_SCORED_FAILED, "home-paths")
     success(total)
-
-
-# =============================================================================
-# DISPLAY
-# =============================================================================
 
 
 def print_help() -> None:

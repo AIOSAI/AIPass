@@ -3,66 +3,15 @@
 # Description: Runaway log event handler with per-file cooldown gating
 # Version: 1.5.1
 # Created: 2026-07-14
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Runaway Log Detected Event Handler
 
-Handles runaway_log_detected events fired by prax's rate tracker.
-Volume-based detection (rate of log output), orthogonal to error_detected
-(content-based ERROR line matching).
-
-Event payload from prax:
-    - file_path: Path to the runaway log file
-    - rate_lines_per_min: Current log rate
-    - sustained_duration_sec: How long the rate has been sustained
-    - severity: "warning" or "critical"
-    - branch: Responsible branch name
-
-Severity doctrine — WARNING observes, CRITICAL wakes:
-    - WARNING (100 lines/min sustained 12 intervals) is OBSERVE-ONLY. It writes
-      the alert and the decision entry with full fidelity and records the
-      per-file cooldown, but it sends no email and wakes nobody. The 100/min
-      threshold predates routine multi-agent fleets: it fires overwhelmingly on
-      healthy chatty logs under normal load, and agents were being woken out of
-      sleep for a system behaving exactly as designed.
-    - CRITICAL (600 lines/min sustained 6 intervals) is unchanged. Email plus
-      wake_branch, bypassing a volume mute if one is set.
-
-    Accepted trade-off, ruled deliberately and not an oversight: a sustained
-    moderate leak — say ~150 lines/min for days — never climbs to CRITICAL, so
-    under observe-only nobody is ever woken for it. It lands in alerts.json and
-    in the decision log, plainly visible to anyone who looks, but nobody is
-    told. We chose a quiet record over a fleet that stops trusting the wake.
-
-Gating:
-    - Per-file cooldown (30min default) — independent of medic circuit breaker
-    - VOLUME mute check (volume_muted_branches in medic_state.json). An
-      unreadable medic_state.json is not a mute: the alert goes on (a runaway
-      must reach someone) and the trail records reason "mute_unreadable".
-    - UNKNOWN/missing branch → dispatch to @prax as fallback
-
-Mute classes are deliberately separate. Medic CONTENT mutes (muted_branches)
-never gate runaway alerts: every dispatch checklist tells agents to medic-mute
-before build/edit work, which is exactly when log floods happen, so gating on
-the content mute made this channel structurally dead in its own peak window.
-A volume mute must be set deliberately, and CRITICAL runaways bypass even that
-— a machine-eating flood is never something you asked to silence.
-
-The trail, logs/runaway_suppressed.jsonl, records what happened to every event
-past the file_path check: one line each, with an `outcome` field ("suppressed",
-"observed", "delivered" or "failed") and a `reason`. "observed" is the
-observe-only WARNING outcome: recorded, nobody told. A critical that was sent is
-"delivered" with its gate reason, or "critical" when no gate touched it; one that
-could not be sent is "failed" with "no_callback" or "send_refused". This is
-@trigger's decision in fleet green leg 4 (2026-09-29): before it, the trail held
-every event the gate stopped and none it passed. Entries written before the
-`outcome` field existed are all suppressions.
-
-Alerts written to .aipass/alerts.json expire after 24h by default (same TTL
-convention as medic_state.py's DEFAULT_MUTE_SECONDS) — pass forever=True to
-skip expiry.
+WARNING observes (alert, trail, cooldown; no mail, no wake); CRITICAL mails, wakes and bypasses a volume mute.
+Medic content mutes never gate runaways; an unreadable medic_state.json is not a mute.
+Trail outcomes in logs/runaway_suppressed.jsonl: suppressed, observed, delivered, failed (older lines: suppressed).
 """
 
 import json
@@ -86,19 +35,15 @@ from aipass.trigger.apps.handlers.json import json_handler
 
 DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
 
-# Volume mutes are a separate class from medic's content mutes (muted_branches).
 VOLUME_MUTE_KEY = "volume_muted_branches"
 
 
-# Deliberately NOT prax: this handler runs on the event path the log watchers
-# read, so a line through prax would be detected and fired straight back at it.
-# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+# Not prax: the watchers would read its line and fire it back; they skip `.jsonl`.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "runaway_handler.jsonl")
 
 
 _REPO_ROOT = find_repo_root(caller="runaway_handler")
 ALERTS_FILE = _REPO_ROOT / ".aipass" / "alerts.json"
-# Live medic state — see medic_state.py for why it is not on the trio path.
 MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
 LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
@@ -110,36 +55,19 @@ DEFAULT_ALERT_TTL_SECONDS = 86400  # 24 hours — matches medic_state.py DEFAULT
 
 
 def set_send_email_callback(callback: Callable[..., bool]) -> None:
-    """Set the callback function for sending emails.
-
-    Must be called by the registry layer before events fire.
-
-    Args:
-        callback: Function matching deliver_email_to_branch adapter signature
-    """
+    """Set the callback function for sending emails; the registry layer sets it before events fire."""
     global _send_email
     _send_email = callback
 
 
 def _is_file_on_cooldown(file_path: str) -> bool:
-    """Check if a file is still within its dispatch cooldown window.
-
-    Args:
-        file_path: Path to the log file
-
-    Returns:
-        True if cooldown has not expired
-    """
+    """Check if a file is still within its dispatch cooldown window."""
     last = _file_cooldowns.get(file_path, 0.0)
     return (time.time() - last) < COOLDOWN_SECONDS
 
 
 def _record_file_dispatch(file_path: str) -> None:
-    """Record a dispatch timestamp for per-file cooldown.
-
-    Args:
-        file_path: Path to the log file that was dispatched
-    """
+    """Record a dispatch timestamp for per-file cooldown."""
     _file_cooldowns[file_path] = time.time()
 
 
@@ -158,19 +86,7 @@ def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
 
 
 def _is_branch_volume_muted(branch_name: str) -> Optional[bool]:
-    """Check if a branch is VOLUME-muted for runaway dispatch.
-
-    Reads volume_muted_branches from medic_state.json — deliberately NOT
-    muted_branches, which is the medic content-mute list. Supports both
-    plain-string entries (permanent) and dict entries with TTL.
-
-    Args:
-        branch_name: Branch name (case-insensitive)
-
-    Returns:
-        True if branch is actively volume-muted, False if it is not, None if
-        medic_state.json could not be read — unknown, never "not muted".
-    """
+    """Check if a branch is VOLUME-muted for runaway dispatch; None means unreadable, never "not muted"."""
     try:
         migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
         if not MEDIC_STATE_FILE.exists():
@@ -186,16 +102,7 @@ def _is_branch_volume_muted(branch_name: str) -> Optional[bool]:
 
 
 def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) -> None:
-    """Write a gating decision to the runaway decision trail.
-
-    Args:
-        outcome: "suppressed" (alert dropped), "delivered" (alert sent),
-            "observed" (recorded, nobody woken — observe-only WARNING) or
-            "failed" (a critical that could not be sent)
-        reason: Machine-readable cause, e.g. "cooldown", "volume_muted"
-        file_path: Path to the runaway log file
-        branch: Responsible branch name
-    """
+    """Write a gating decision to the runaway decision trail."""
     entry = {
         "ts": datetime.now().isoformat(),
         "outcome": outcome,
@@ -210,16 +117,7 @@ def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) 
 def _write_alert(
     file_path: str, severity: str, branch: str, rate: float, duration: float, forever: bool = False
 ) -> None:
-    """Write an alert entry to .aipass/alerts.json.
-
-    Args:
-        file_path: Path to the runaway log file
-        severity: "warning" or "critical"
-        branch: Responsible branch name
-        rate: Lines per minute
-        duration: Sustained duration in seconds
-        forever: If True, alert never auto-expires (default: 24h TTL)
-    """
+    """Write an alert entry to .aipass/alerts.json."""
     try:
         expires_at = None if forever else (datetime.now() + timedelta(seconds=DEFAULT_ALERT_TTL_SECONDS)).isoformat()
         alert = {
@@ -255,24 +153,7 @@ def handle_runaway_log_detected(
     forever: bool = False,
     **kwargs: Any,
 ) -> None:
-    """Handle runaway_log_detected event — observe WARNING, dispatch CRITICAL.
-
-    Volume-based detection, independent of medic error_detected pipeline.
-    Uses per-file cooldown (30min) instead of the medic circuit breaker.
-
-    WARNING is observe-only: alert, decision entry and cooldown are recorded,
-    but no email is sent and no branch is woken. CRITICAL keeps the full
-    dispatch path — email, wake_branch, alert, cooldown.
-
-    Args:
-        file_path: Path to the runaway log file — REQUIRED
-        rate_lines_per_min: Current log rate
-        sustained_duration_sec: How long the rate has been sustained
-        severity: "warning" or "critical"
-        branch: Responsible branch name (None/UNKNOWN → dispatch to @prax)
-        forever: If True, the resulting alert never auto-expires (default: 24h TTL)
-        **kwargs: Additional event data (ignored)
-    """
+    """Handle runaway_log_detected event — observe WARNING, dispatch CRITICAL."""
     try:
         if not file_path:
             return
@@ -285,26 +166,20 @@ def handle_runaway_log_detected(
         target_branch = branch or "UNKNOWN"
         is_critical = severity.lower() == "critical"
 
-        # One event writes one trail line. The gate decides its reason; the line
-        # itself is written where the outcome is known, so "delivered" is never
-        # written before the send has returned True.
+        # One trail line per event, written where the outcome is known: never "delivered" before the send.
         gate_reason: Optional[str] = None
         muted = False if is_unknown else _is_branch_volume_muted(target_branch)
         if muted is None:
-            # Unread is not muted: a runaway must reach someone. The trail says
-            # the mute was never read, so it is not mistaken for "nobody muted it".
+            # Unread is not muted: a runaway must reach someone.
             gate_reason = "mute_unreadable"
         elif muted:
             if not is_critical:
                 _write_decision_log("suppressed", "volume_muted", file_path, target_branch)
                 return
-            # A machine-eating flood is never something you asked to silence.
             gate_reason = "bypass_critical"
 
         if not is_critical:
-            # Observe-only: record with full fidelity, wake nobody. The cooldown
-            # is recorded too — without it every detection interval would append
-            # another alert and the record would become its own flood.
+            # The cooldown is recorded too, or every interval appends another alert.
             _write_alert(
                 file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec, forever=forever
             )
@@ -352,14 +227,11 @@ def handle_runaway_log_detected(
         _write_decision_log("delivered", gate_reason or "critical", file_path, target_branch)
 
         try:
-            # Through ai_mail's published door (DPLAN-0404), never its handlers.
+            # Through ai_mail's published door, never its handlers.
             from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
             wake_branch(recipient, fresh=False, sender="@trigger")
         except Exception as exc:
-            # Not fatal — the email is already delivered and waits in the inbox.
-            # But a wake that never lands means nobody reads it until they next
-            # wake anyway, so the miss is recorded rather than swallowed.
             logger.warning(f"wake failed for {recipient} ({file_path}): {exc}")
 
         _write_alert(file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec, forever=forever)

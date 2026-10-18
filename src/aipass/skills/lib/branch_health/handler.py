@@ -9,9 +9,6 @@
 """
 Branch Health skill handler.
 
-Quick health check for AIPass branches -- counts Python source files,
-test files, and test functions per branch.
-
 Called by: drone @skills run branch_health <action>
 """
 
@@ -19,16 +16,7 @@ from pathlib import Path
 
 
 def run(action, args=None, config=None):
-    """Execute a branch health action.
-
-    Args:
-        action: One of: summary (default), tests, or a specific branch name
-        args: Dict of action arguments (unused for this skill)
-        config: Dict of resolved config values (unused for this skill)
-
-    Returns:
-        {"success": bool, "output": str, "error": str|None}
-    """
+    """Execute a branch health action: summary, tests, or a branch name."""
     args = args or {}
     config = config or {}
 
@@ -51,11 +39,6 @@ def get_actions():
     return ["summary", "tests", "<branch_name>"]
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
 def _src_root():
     """Return the src/ directory by navigating up from this handler."""
     # handler.py -> branch_health/ -> lib/ -> skills/ -> aipass/ -> src/
@@ -66,12 +49,10 @@ def _find_branches():
     """Yield (branch_name, branch_path) for all branches."""
     src = _src_root()
 
-    # src/aipass/*/ branches
     aipass_dir = src / "aipass"
     if aipass_dir.is_dir():
         for branch_dir in sorted(aipass_dir.iterdir()):
             if branch_dir.is_dir() and not branch_dir.name.startswith((".", "_")):
-                # Only yield actual branches (have apps/ or tests/ or .trinity/)
                 if (
                     (branch_dir / "apps").is_dir()
                     or (branch_dir / "tests").is_dir()
@@ -79,7 +60,6 @@ def _find_branches():
                 ):
                     yield (branch_dir.name, branch_dir)
 
-    # src/skills/ itself
     skills_dir = src / "skills"
     if skills_dir.is_dir():
         yield ("skills", skills_dir)
@@ -194,7 +174,6 @@ def _single_branch(branch_name):
     """Stats for a single branch."""
     src = _src_root()
 
-    # Check src/aipass/<branch_name>/ first, then src/<branch_name>/
     candidates = [
         src / "aipass" / branch_name,
         src / branch_name,

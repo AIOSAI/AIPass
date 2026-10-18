@@ -3,15 +3,11 @@
 # Description: Reaction Query Handlers
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Reaction Query Handlers for The Commons
-
-Database operations for emoji reactions on posts and comments.
-Supports: thumbsup, interesting, agree, disagree, celebrate, thinking.
-Pure sqlite3 - no external dependencies.
 """
 
 import sqlite3
@@ -20,7 +16,6 @@ from typing import Optional, Dict, List
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# Emoji display map
 REACTION_EMOJI = {
     "thumbsup": "\U0001f44d",
     "interesting": "\U0001f914",
@@ -40,14 +35,7 @@ def add_reaction(
     post_id: Optional[int] = None,
     comment_id: Optional[int] = None,
 ) -> bool:
-    """
-    Add a reaction to a post or comment.
-
-    Exactly one of post_id or comment_id must be provided.
-
-    Returns:
-        True if new reaction added, False if already exists or invalid
-    """
+    """Add a reaction to exactly one of post_id or comment_id; False if duplicate or invalid."""
     if reaction not in VALID_REACTIONS:
         return False
 
@@ -84,12 +72,7 @@ def remove_reaction(
     post_id: Optional[int] = None,
     comment_id: Optional[int] = None,
 ) -> bool:
-    """
-    Remove a reaction from a post or comment.
-
-    Returns:
-        True if removed, False if didn't exist or invalid
-    """
+    """Remove a reaction from a post or comment."""
     if reaction not in VALID_REACTIONS:
         return False
 
@@ -115,12 +98,7 @@ def get_reactions(
     post_id: Optional[int] = None,
     comment_id: Optional[int] = None,
 ) -> Dict[str, int]:
-    """
-    Get reaction counts for a post or comment.
-
-    Returns:
-        Dict mapping reaction type to count
-    """
+    """Get reaction counts for a post or comment."""
     if (post_id is None) == (comment_id is None):
         return {}
 
@@ -147,12 +125,7 @@ def get_reactions_detailed(
     post_id: Optional[int] = None,
     comment_id: Optional[int] = None,
 ) -> Dict[str, List[str]]:
-    """
-    Get detailed reactions with agent names for a post or comment.
-
-    Returns:
-        Dict mapping reaction type to list of agent names
-    """
+    """Get detailed reactions with agent names for a post or comment."""
     if (post_id is None) == (comment_id is None):
         return {}
 
@@ -186,12 +159,7 @@ def get_reaction_summary(
     post_id: Optional[int] = None,
     comment_id: Optional[int] = None,
 ) -> str:
-    """
-    Get a formatted emoji summary string for reactions.
-
-    Returns:
-        Formatted string like "thumbsup3 thinking1" or empty string
-    """
+    """Get a formatted emoji summary string for reactions."""
     counts = get_reactions(conn, post_id=post_id, comment_id=comment_id)
 
     if not counts:

@@ -3,21 +3,14 @@
 # Description: Tests for seedgo's entry point routing, help and introspection
 # Version: 1.0.3
 # Created: 2026-09-03
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/seedgo.py, the entry point: routing, help and introspection."""
 
-# Covers the four things the entry point promises: no-args shows introspection,
-# --help shows help without executing anything, a subcommand's --help never runs
-# that subcommand, and an unknown command fails loudly with a non-zero code.
-#
-# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-# shell reads as success, so the refusal path is pinned by test rather than assumed.
-#
-# Not pinned here, and by no declared pass either: main() handing a module's
-# CommandRefused code to the shell, and the UTF-8 stream setup that runs only
-# when the file is executed as a script.
+# The entry point's four promises: no-args introspects, --help never executes, a subcommand's --help never runs
+# it, and an unknown command exits non-zero (a refusal that exits 0 reads as success to the shell).
+# Not pinned here or by any declared pass: main() handing CommandRefused's code on, and the script-only UTF-8 setup.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's loading; discover_modules runs whole
@@ -59,11 +52,6 @@ def _run(monkeypatch, argv):
     return branch_entry.main()
 
 
-# =============================================================================
-# HELP AND INTROSPECTION OUTPUT
-# =============================================================================
-
-
 def test_print_introspection_renders_identity_and_help_pointer(capsys):
     """print_introspection names the branch and points at --help."""
     branch_entry.print_introspection()
@@ -75,21 +63,12 @@ def test_print_introspection_renders_identity_and_help_pointer(capsys):
 
 
 def test_print_help_has_usage_and_examples(capsys):
-    """print_help carries the two sections the house pattern requires.
-
-    USAGE: in seedgo's own casing -- the entry point is the contract, and a
-    test does not get to rename its headings.
-    """
+    """print_help carries the two sections the house pattern requires."""
     branch_entry.print_help()
 
     out = capsys.readouterr().out
     assert "USAGE:" in out
     assert "Examples:" in out
-
-
-# =============================================================================
-# TOP-LEVEL ROUTING
-# =============================================================================
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -119,11 +98,6 @@ def test_version_flag_prints_version(monkeypatch, capsys, flag):
     assert branch_entry.VERSION in out
 
 
-# =============================================================================
-# COMMAND ROUTING - SUCCESS AND FAILURE PATHS
-# =============================================================================
-
-
 def test_route_command_returns_true_for_known_command(stub_module):
     """A handled command returns a real bool True, not a truthy value."""
     result = branch_entry.route_command("probe", [], [stub_module])
@@ -139,33 +113,14 @@ def test_route_command_returns_false_for_unknown_command(stub_module):
     assert result is False
 
 
-#: Every spelling the two newest verbs declare, read as literals rather than
-#: from the modules, because a test that imports COMMANDS and asserts against
-#: COMMANDS agrees with itself however the verb is renamed. These four strings
-#: are the contract: `drone @seedgo shadow-cycle` and `drone @seedgo
-#: test-inventory` are what a human and a daemon schedule actually type.
+#: Literals, not the modules' COMMANDS (a test asserting COMMANDS against COMMANDS agrees with itself):
+#: these are what a human and a daemon schedule actually type.
 DECLARED_VERB_SPELLINGS = ("shadow-cycle", "shadow_cycle", "test-inventory", "test_inventory")
 
 
 @pytest.mark.parametrize("verb", DECLARED_VERB_SPELLINGS)
 def test_every_declared_verb_spelling_is_claimed_by_the_real_router(verb, capsys):
-    """The verb reaches its module through the door a caller uses.
-
-    THE SUITE HAD NEVER SAID THESE FOUR WORDS OUT LOUD (entry_point_diff, 33%
-    on 2026-09-07). `test-inventory` appeared in this branch's tests only in a
-    header comment and a docstring, and prose is not a mention: rename the verb
-    in `COMMANDS` and every test still passed, while the daemon job and every
-    typed invocation broke. `shadow-cycle` is the sharper case of the two - it
-    is fired weekly by @daemon from `.daemon/schedule.json`, where the string
-    is spelled out in a prompt no test reads.
-
-    Routed through the REAL `discover_modules()` and the REAL `route_command`,
-    with no stub in the way: the claim under test is that this word, typed at
-    this entry point, finds a module that answers to it. `[]` is the documented
-    no-argument form for both verbs - each prints its introspection and
-    returns True - so the pin costs one render and executes no cycle and no
-    inventory walk.
-    """
+    """The verb reaches its module through the door a caller uses."""
     modules = branch_entry.discover_modules()
 
     assert branch_entry.route_command(verb, [], modules) is True, f"no discovered module claimed '{verb}'"
@@ -174,13 +129,7 @@ def test_every_declared_verb_spelling_is_claimed_by_the_real_router(verb, capsys
 
 @pytest.mark.parametrize("verb", DECLARED_VERB_SPELLINGS)
 def test_a_near_miss_of_a_declared_verb_is_not_claimed(verb, capsys):
-    """Negative control, and the reason the pin above is not a tautology.
-
-    A router that claimed everything would satisfy every assertion in the test
-    above. Each declared spelling is offered with one trailing character, which
-    is what a prefix match or a substring claim would swallow - and the module
-    docstrings say in writing that the match is never a prefix.
-    """
+    """Negative control, and the reason the pin above is not a tautology."""
     modules = branch_entry.discover_modules()
 
     assert branch_entry.route_command(f"{verb}s", [], modules) is False, (
@@ -227,11 +176,6 @@ def test_unknown_command_exits_nonzero(monkeypatch, stub_module, capsys):
     assert "Unknown command" in capsys.readouterr().err
 
 
-# =============================================================================
-# SUBCOMMAND HELP
-# =============================================================================
-
-
 def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
     """`seedgo probe --help` asks the module for help; it never runs bare."""
     assert _run(monkeypatch, ["probe", "--help"]) == 0
@@ -240,13 +184,7 @@ def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
 
 
 def test_subcommand_help_on_unknown_command_falls_back_to_general_help(monkeypatch, stub_module, capsys):
-    """`seedgo ghost --help` shows the general help and exits 0.
-
-    Pinned as seedgo WROTE it, not as the template wished: when no module
-    claims the command, main() falls through to print_help() and returns 0. A
-    help request answered with help is not a refusal, so there is nothing here
-    for a non-zero exit to mean. The entry point is not bent to fit the test.
-    """
+    """`seedgo ghost --help` shows the general help and exits 0."""
     result = _run(monkeypatch, ["nonexistent", "--help"])
 
     assert result == 0

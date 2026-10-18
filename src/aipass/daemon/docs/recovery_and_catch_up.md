@@ -8,12 +8,9 @@ How the scheduler detects a missed tick window, queues and drains catch-up wakes
 
 ## Recovery after a gap
 
-Built 2026-09-08 under DPLAN-0332. On 2026-09-07 the scheduler timer went away at 11:46 and nothing ticked for 23 hours.
-@vera/release-watch and @daemon/inbox-sweep both missed their windows. The fleet came
-back and **nothing noticed** — no gap was detected, no catch-up was owed, and the
-agents that eventually woke were told nothing about the time they had lost. The owner's
-ruling that morning: the scheduler must recover on its own, and the agent must be
-told the truth about time.
+When the timer stops, nothing ticks, and no MISSED line can be written, because writing one
+takes a tick. Recovery is how the scheduler notices the gap on its own once ticking resumes,
+and tells the agents it wakes the truth about the time they lost.
 
 The principle the header follows: **the system informs, the agent reasons.** The
 header states facts about time and stops. It never tells the agent what to conclude
@@ -32,68 +29,54 @@ and it never replays history at it.
 | inform | `recovery.scheduled_header` / `catch_up_header` | prepended to the prompt, filed to the target's `.daemon/last_wake_prompt.txt` **and** `daemon_json/last_wake_prompt.txt`, and logged to `run.log` |
 
 **Cause is read from the host, or refused by name.** `psutil` first (it answers on every
-host the code tolerates, Windows included), `/proc/stat btime` second, then `BootTimeUnavailable` — never a guess,
+host the code tolerates), `/proc/stat btime` second, then `BootTimeUnavailable` — never a guess,
 because a guessed boot time becomes a confident false sentence in a citizen's wake
 header.
 
 | Boot time | Cause | What the sentence says |
 |-----------|-------|------------------------|
-| before the gap opened | `scheduler_stopped` | ticking stopped at X while the machine was up — 09-07's shape |
+| before the gap opened | `scheduler_stopped` | ticking stopped at X while the machine was up |
 | inside the gap | `scheduler_stopped_then_rebooted` | ticking stopped at X, **and** the host booted at Y, inside the gap, after it had already opened |
 | not readable | `unknown` | the cause could not be read from this host — the gap is still reported |
 
-Three values, not the DPLAN's original two. @devpulse ruled on 2026-09-08 after
-measuring 09-07: the incident was **both** — the timer was removed at 11:46 while the
-machine was up, and the machine then rebooted at 16:14 inside the same gap. A
-two-valued cause reports only the reboot and hides the defect that actually mattered.
-There is no `machine_off` value, because boot-inside-the-gap cannot be told apart
-from "shut down for the night" without positive evidence the host was up during the
-gap, and no cross-platform source provides it — so the cause names what is **known**
+A gap can be **both** a stopped timer and a reboot, and a two-valued cause would report only
+the reboot and hide the stop. There is no `machine_off` value, because boot-inside-the-gap
+cannot be told apart from "shut down for the night" without positive evidence the host was up
+during the gap, and no cross-platform source provides it — so the cause names what is **known**
 and the sentence states both instants rather than picking a story.
 
 **One catch-up, never a replay.** Ten days off is one wake carrying ten dates, not
-ten wakes — "imagine 10 missed events all firing at once" (the owner). The header ends
-with *do not replay each one*, because an agent handed ten dates may otherwise
-reasonably try to do ten days of work. A refused fire retries after the cooldown;
-three attempts and it is **parked at the tail of the queue, not dropped** — "we could
-not reach this branch" and "this branch owed nothing" are not the same sentence.
+ten wakes. The header ends with *do not replay each one*, because an agent handed ten dates
+may otherwise reasonably try to do ten days of work. A refused fire retries after the
+cooldown; three attempts and it is **parked at the tail of the queue, not dropped** — "we
+could not reach this branch" and "this branch owed nothing" are not the same sentence.
 
 **The queue is visible.** `drone @daemon queue` prints a Catch-up Queue under the job
 table (owner, windows missed, oldest, cause, state, attempts) whenever anything is
-owed, and `--json` gained an additive `catch_up_queue` key. The eleven job fields and
-the three original top-level keys are untouched, so @skills' scheduler bot sees
-exactly what it saw before.
+owed, and `--json` carries it under an additive `catch_up_queue` key beside the three
+original top-level keys and the eleven job fields, which @skills' scheduler bot reads.
 
-**Where the wake transcript is filed.** Both places, per @devpulse's ruling of
-2026-09-08: the target branch's `.daemon/last_wake_prompt.txt` **and** daemon's own
-`daemon_json/last_wake_prompt.txt`. `.daemon/` is the scheduler's surface in every
-branch — the owner writes `schedule.json` into it, the scheduler writes its outputs
-beside it — so this is the daemon's own artifact in the daemon's own directory, not a
-cross-branch edit of somebody's code. Written atomically (tmp then replace) so a
-branch waking mid-write never reads half a header, and fail-soft **per destination**
-so a read-only external tree costs neither the local copy nor the wake. The owner is
-resolved by **email** through discovery's roster, never by directory name: two
-citizens can share a directory name across federated roots, and filing a wake under
-the wrong one hands a citizen somebody else's instructions. ai_mail's write at
-`wake.py:802` stays for the tmux manager lane; the headless scheduled lane it never
-covered now has this second writer.
+**Where the wake transcript is filed.** Both places: the target branch's
+`.daemon/last_wake_prompt.txt` **and** daemon's own `daemon_json/last_wake_prompt.txt`.
+`.daemon/` is the scheduler's surface in every branch — the owner writes `schedule.json`
+into it, the scheduler writes its outputs beside it — so this is the daemon's own artifact in
+the daemon's own directory, not a cross-branch edit of somebody's code. Written atomically
+(tmp then replace) so a branch waking mid-write never reads half a header, and fail-soft
+**per destination** so a read-only external tree costs neither the local copy nor the wake.
+The owner is resolved by **email** through discovery's roster, never by directory name: two
+citizens can share a directory name across federated roots, and filing a wake under the
+wrong one hands a citizen somebody else's instructions. ai_mail's `wake.py` writes the same
+file for the tmux manager lane; this writer covers the headless scheduled lane.
 
 **`RECOVERY_LANE_LIVE` (`runstate.py`) is `False`, and everything above is built but
-NOT IN SERVICE.** The systemd tick runs this **working tree** every two minutes, not a
-commit — an edit here is production the moment it is saved. That bit the fleet twice
-in one morning: at 11:31:42 the half-flipped default fired @vera/release-watch out of
-window with no header, and at 12:04:39, minutes after the flag went `True`, the very
-next timer tick fired her a *second* time that day under a `Scheduled` header whose
-"Last run 2026-09-07 09:46" was false — she had run at 11:31:42.
+NOT IN SERVICE.** While it is `False`, `catch_up` is opt-in (only an explicit
+`"catch_up": true` turns it on), and there is no gap detection, no queue and no drain. The
+systemd tick runs this **working tree** every two minutes, not a commit — an edit here is
+production the moment it is saved — so nothing under the flag may be `True` at any moment
+nobody is watching a tick. The flag is flipped only by a controlled live proof from
+@devpulse's seat with the owner.
 
-@devpulse's ruling, 2026-09-08: *"the tree is production while the timer is installed,
-so nothing under the flag may be True at any moment you are not personally watching a
-tick."* The flag stays `False` until the controlled live proof runs from @devpulse's
-seat with the owner. `False` is exactly the pre-DPLAN-0332 behaviour: `catch_up` is
-opt-in again, no gap detection, no queue, no drain.
-
-**Two refusals detect_gap owes the fleet**, both found by @devpulse reading run.log
-against the journal after my own probes wrote false sentences into it:
+**Two refusals detect_gap owes the fleet:**
 
 - **No `last_tick` is not a gap.** A runstate full of older instants (`last_run`,
   `last_success_at`, `next_run`) is the temptation; reaching for one invents an
@@ -102,7 +85,6 @@ against the journal after my own probes wrote false sentences into it:
   to *say* so rather than merely mention the instant — a boot named next to a gap
   reads as cause to anyone skimming it.
 
-**Probes run against copies.** The live runstate is host state under the rule that
-landed at `0d14e8c1`: never run the `run` verb from a seat against it. Every
-experiment takes a `tmp_path` copy of the runstate and the schedule file.
-
+**Probes run against copies.** The live runstate is host state: never run the `run` verb
+from a seat against it. Every experiment takes a `tmp_path` copy of the runstate and the
+schedule file.

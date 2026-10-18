@@ -3,7 +3,7 @@
 # Description: Unit tests for skills.py CLI routing
 # Version: 1.1.0
 # Created: 2026-03-10
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: skills/tests
 # =============================================
 
@@ -18,8 +18,11 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from aipass.skills.apps import skills as entry
 from aipass.skills.apps.modules import runner
+from aipass.skills.apps.modules.switch import read_state
 from aipass.skills.apps.skills import handle_command, print_help, print_introspection
 
 
@@ -90,8 +93,6 @@ class TestHandleCommand:
     def test_version_command(self, capsys):
         result = handle_command("--version")
         assert result is True
-        # One version string: the printed line is the module's own constant,
-        # never a literal that drifts from the file header.
         assert capsys.readouterr().out.strip() == f"SKILLS v{entry.VERSION}"
 
     def test_version_short_flag(self, capsys):
@@ -173,11 +174,6 @@ class TestHandleCommand:
         assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
 
 
-# ===================================================================
-# Missing coverage: no_args, print_help, print_introspection, output_capture
-# ===================================================================
-
-
 class TestNoArgs:
     """Test no_args behavior -- None command triggers introspection."""
 
@@ -185,8 +181,6 @@ class TestNoArgs:
         """no_args_triggers: calling with None produces introspection output."""
         handle_command(None)
         captured = capsys.readouterr()
-        # The old either/or passed on either half; None routes to
-        # print_introspection, so pin the banner that proves it did.
         assert "skills Entry Point" in captured.out
         assert "Connected Modules:" in captured.out
 
@@ -198,13 +192,10 @@ class TestPrintHelp:
         """print_help: calling --help produces help text."""
         print_help()
         captured = capsys.readouterr()
-        # Both halves of the old `or` were about the same output, so it could
-        # not fail. print_help emits both blocks - pin both.
         assert "Usage:" in captured.out
         assert "Commands:" in captured.out
         assert "drone @skills <command> [args]" in captured.out
-        # Doors the dispatcher answers that the page did not name until 2026-09-15:
-        # a skill's own page, the create flags, and the two --help aliases.
+        # Every door the dispatcher answers must be named on the page.
         assert "run <name> --help" in captured.out
         assert "create <name> --help" in captured.out
         assert "--help, -h, help" in captured.out
@@ -269,9 +260,6 @@ class TestOutputCapture:
         """output_capture: --version produces version string."""
         handle_command("--version")
         captured = capsys.readouterr()
-        # The banner is built from skills.VERSION; the old `or` passed on either
-        # half of it, so a half-broken version line read green. Pinned to the
-        # constant, which is also this file's header version.
         assert captured.out.strip() == f"SKILLS v{entry.VERSION}"
         assert entry.VERSION == "1.1.1"
 
@@ -279,19 +267,13 @@ class TestOutputCapture:
         """output_capture: unknown command names itself and points at help."""
         handle_command("bogus_xyz")
         captured = capsys.readouterr()
-        # The old assertion ended in `or len(captured.out) > 0`, which passes on
-        # any output at all — it could not fail. Pin the actual contract.
         assert "Unknown command" in captured.out
         assert "bogus_xyz" in captured.out
         assert "--help" in captured.out
 
 
 class TestExitCodes:
-    """The process exit code is the only failure signal a caller can script on.
-
-    drone runs a branch command as a subprocess and propagates its return code,
-    so a discarded handle_command() result made every failure exit 0.
-    """
+    """The exit code is the only failure signal a caller can script on (drone propagates it)."""
 
     def _run(self, *args):
         entry = Path(__file__).resolve().parent.parent / "apps" / "skills.py"
@@ -331,12 +313,7 @@ class TestExitCodes:
 
 
 class TestRunHelpDoesNotDispatch:
-    """`run <skill> --help` must document the skill, not dispatch "--help".
-
-    branch_health and inbox_check treat an unrecognised action as a branch name,
-    so the old routing answered `run branch_health --help` with
-    "Branch '--help' not found" instead of help.
-    """
+    """`run <skill> --help` must document the skill, not dispatch "--help" (read as a branch name)."""
 
     def test_run_help_is_not_passed_as_an_action(self):
         with patch("aipass.skills.apps.skills._cmd_run") as mock_run:
@@ -357,3 +334,18 @@ class TestRunHelpDoesNotDispatch:
             handle_command("run", ["telegram", "status"])
         mock_run.assert_called_once()
         assert mock_run.call_args[0][1] == "status"
+
+
+class TestSwitchVerbsHelpWritesNothing:
+    """`on`, `off` and `switch` take a help flag as a request for usage, never as a skill name to record."""
+
+    @pytest.mark.parametrize("verb", ["on", "off", "switch"])
+    @pytest.mark.parametrize("flag", ["--help", "-h", "help"])
+    def test_a_help_flag_prints_the_switch_usage_and_records_no_skill(self, capsys, verb, flag):
+        assert handle_command(verb, [flag]) is True
+        assert "Skills Switch - Disconnect and reconnect a skill" in capsys.readouterr().out
+        assert read_state() == {}
+
+    def test_a_skill_name_is_still_recorded(self, capsys):
+        assert handle_command("off", ["github"]) is True
+        assert read_state()["github"]["enabled"] is False

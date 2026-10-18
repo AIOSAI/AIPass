@@ -3,7 +3,7 @@
 # Description: Drive clear module — clears Drive file tracker (requires --force)
 # Version: 1.0.0
 # Created: 2026-04-17
-# Modified: 2026-06-12
+# Modified: 2026-10-17
 # =============================================
 
 """Drive Clear Module — clears the Drive file tracker for a project."""
@@ -45,15 +45,7 @@ def print_help():
 
 
 def run_drive_clear(project_root: str, force: bool = False) -> bool:
-    """Clear Drive tracker. Requires force=True.
-
-    Args:
-        project_root: Absolute path to the project.
-        force: Must be True to proceed.
-
-    Returns:
-        True if cleared, False otherwise.
-    """
+    """Clear Drive tracker. Requires force=True."""
     from aipass.backup.apps.handlers.drive.tracker import clear_all
 
     if not force:
@@ -83,11 +75,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
@@ -97,8 +86,6 @@ def handle_command(command: str, args: list) -> bool:
     run_drive_clear(project_root, force=force)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

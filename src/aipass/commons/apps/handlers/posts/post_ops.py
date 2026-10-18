@@ -3,16 +3,11 @@
 # Description: Post operations handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Post Operations Handler
-
-Implementation logic for creating, viewing, and deleting posts
-in The Commons social network.
-
-All functions return dicts - no direct console output.
 """
 
 from typing import List
@@ -26,32 +21,8 @@ from aipass.commons.apps.handlers.search.search_queries import sync_post_to_fts
 from aipass.commons.apps.handlers.profiles.profile_queries import increment_post_count
 
 
-# =============================================================================
-# CREATE POST
-# =============================================================================
-
-
 def create_post(args: List[str]) -> dict:
-    """
-    Create a new post in a room.
-
-    Parses arguments for room, title, content, and optional --type flag.
-    Validates the room exists, inserts the post, extracts mentions,
-    and stores them.
-
-    Args:
-        args: List of arguments [room, title, content, --type <type>].
-              Minimum 3 required (room, title, content).
-              Optional --type flag: discussion|review|question|announcement.
-
-    Returns:
-        dict with success/error info.
-        Success: {"success": True, "post_id": int, "title": str,
-                  "room": str, "author": str, "post_type": str,
-                  "mentions": list}
-        Error:   {"success": False, "error": str}
-    """
-    # --- Parse --type flag before validating positional args ---
+    """Create a new post in a room."""
     post_type = "discussion"
     filtered_args: List[str] = []
     i = 0
@@ -63,7 +34,6 @@ def create_post(args: List[str]) -> dict:
             filtered_args.append(args[i])
             i += 1
 
-    # --- Validate positional args ---
     if len(filtered_args) < 3:
         return {
             "success": False,
@@ -81,7 +51,6 @@ def create_post(args: List[str]) -> dict:
             "error": f"Invalid post type '{post_type}'. Valid types: {', '.join(valid_types)}",
         }
 
-    # --- Get caller identity ---
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:
@@ -98,13 +67,11 @@ def create_post(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # --- Verify room exists ---
         room = conn.execute("SELECT name FROM rooms WHERE name = ?", (room_name,)).fetchone()
 
         if not room:
             return {"success": False, "error": f"Room '{room_name}' not found"}
 
-        # --- Insert post ---
         cursor = conn.execute(
             "INSERT INTO posts (room_name, author, title, content, post_type) VALUES (?, ?, ?, ?, ?)",
             (room_name, author, title, content, post_type),
@@ -113,7 +80,6 @@ def create_post(args: List[str]) -> dict:
         assert post_id is not None, "INSERT must return a lastrowid"
         conn.commit()
 
-        # --- Extract and store mentions ---
         full_text = f"{title} {content}"
         mentions = extract_mentions(full_text)
         mentions_error = ""
@@ -135,14 +101,12 @@ def create_post(args: List[str]) -> dict:
         if mentions:
             conn.commit()
 
-        # --- Sync to FTS5 search index ---
         try:
             sync_post_to_fts(conn, post_id, title, content, author, room_name)
             conn.commit()
         except Exception as e:
             logger.warning(f"[post_ops] FTS sync failed for post #{post_id}: {e}")
 
-        # --- Increment author post count ---
         try:
             increment_post_count(conn, author)
             conn.commit()
@@ -172,23 +136,8 @@ def create_post(args: List[str]) -> dict:
             close_db(conn)
 
 
-# =============================================================================
-# VIEW THREAD
-# =============================================================================
-
-
 def view_thread(args: List[str]) -> dict:
-    """
-    View a post and all its comments (thread view).
-
-    Args:
-        args: List containing [post_id].
-
-    Returns:
-        dict with post and comments data.
-        Success: {"success": True, "post": dict, "comments": list[dict]}
-        Error:   {"success": False, "error": str}
-    """
+    """View a post and all its comments (thread view)."""
     if not args:
         return {"success": False, "error": "Usage: thread <post_id>"}
 
@@ -202,7 +151,6 @@ def view_thread(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # --- Fetch post ---
         post_row = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
 
         if not post_row:
@@ -210,7 +158,6 @@ def view_thread(args: List[str]) -> dict:
 
         post = dict(post_row)
 
-        # --- Fetch comments ---
         comment_rows = conn.execute(
             "SELECT * FROM comments WHERE post_id = ? ORDER BY created_at ASC",
             (post_id,),
@@ -233,27 +180,8 @@ def view_thread(args: List[str]) -> dict:
             close_db(conn)
 
 
-# =============================================================================
-# DELETE POST
-# =============================================================================
-
-
 def delete_post(args: List[str]) -> dict:
-    """
-    Delete a post and all associated data (cascade).
-
-    Only the post author can delete their own post. Cascade deletes:
-    votes on comments, mentions on comments, mentions on post,
-    comments, votes on post, and finally the post itself.
-
-    Args:
-        args: List containing [post_id].
-
-    Returns:
-        dict with success/error info.
-        Success: {"success": True, "post_id": int, "title": str, "author": str}
-        Error:   {"success": False, "error": str}
-    """
+    """Delete a post and all associated data (cascade). Author only."""
     if not args:
         return {"success": False, "error": "Usage: delete <post_id>"}
 
@@ -263,7 +191,6 @@ def delete_post(args: List[str]) -> dict:
         logger.warning(f"[post_ops] Invalid post_id for delete_post: {args[0]!r}")
         return {"success": False, "error": "Invalid post_id - must be an integer"}
 
-    # --- Get caller identity ---
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:
@@ -280,7 +207,6 @@ def delete_post(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # --- Verify post exists and author matches ---
         post_row = conn.execute("SELECT id, title, author FROM posts WHERE id = ?", (post_id,)).fetchone()
 
         if not post_row:
@@ -295,12 +221,10 @@ def delete_post(args: List[str]) -> dict:
                 "error": f"Permission denied: post #{post_id} belongs to {post_author}, not {author}",
             }
 
-        # --- Cascade delete ---
-        # 1. Get all comment IDs for this post
+        # Children first (votes and mentions hang off comment ids), the post row last.
         comment_rows = conn.execute("SELECT id FROM comments WHERE post_id = ?", (post_id,)).fetchall()
         comment_ids = [r["id"] for r in comment_rows]
 
-        # 2. Delete votes on comments
         if comment_ids:
             placeholders = ",".join("?" * len(comment_ids))
             conn.execute(
@@ -308,25 +232,20 @@ def delete_post(args: List[str]) -> dict:
                 comment_ids,
             )
 
-            # 3. Delete mentions on comments
             conn.execute(
                 f"DELETE FROM mentions WHERE comment_id IN ({placeholders})",
                 comment_ids,
             )
 
-        # 4. Delete mentions on post
         conn.execute("DELETE FROM mentions WHERE post_id = ?", (post_id,))
 
-        # 5. Delete comments
         conn.execute("DELETE FROM comments WHERE post_id = ?", (post_id,))
 
-        # 6. Delete votes on post
         conn.execute(
             "DELETE FROM votes WHERE target_type = 'post' AND target_id = ?",
             (post_id,),
         )
 
-        # 7. Delete the post
         conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
 
         conn.commit()

@@ -3,61 +3,13 @@
 # Description: Windows compat - a text-mode fixture with a newline meets a bytes oracle (advisory arm, tests)
 # Version: 1.0.0
 # Created: 2026-10-15
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 r"""
 Windows compat -- a fixture written in text mode, checked as bytes.
 
-The incident (CI 38843541023, Windows): hooks' settings-backup test wrote its
-fixture with ``(claude / "settings.json").write_text('{"model": "before"}\n',
-encoding="utf-8")`` and asserted ``kept == b'{"model": "before"}\n'`` on the
-backup's ``read_bytes()``.  Text mode on Windows writes each ``\n`` as
-``\r\n``; the product copied the file byte for byte, so ``kept`` ended in
-``\r\n`` and the literal did not.  POSIX text mode writes ``\n`` unchanged, so
-no Linux or macOS run can go red on it.
-
-The shape, per test function:
-
-* FIXTURE -- a text-mode write whose literal content holds a ``\n``:
-  ``P.write_text(<str literal or f-string with "\n">, ...)`` where ``P`` is a
-  path (mock_repr_path's PATH kind), or a handle from ``open(x, "w"/"a"/"x"/"+")``
-  / ``P.open(...)`` given ``.write(<literal with "\n">)`` / ``.writelines([...])``.
-  A name bound to such a literal carries it.  The fixture may sit in the test,
-  in a same-module ``@pytest.fixture`` the test names as a parameter, or in a
-  same-module function the test calls by name (``_seed(...)``, ``self._seed(...)``),
-  followed transitively.
-* ORACLE -- in the test itself, ``==`` / ``!=`` of bytes read off the disk
-  against a literal: ``X.read_bytes()`` vs a bytes literal (or a str literal's
-  ``.encode()``); ``hashlib.<algo>(<read_bytes>).hexdigest()`` / ``.digest()``
-  vs a str / bytes literal or a digest of a bytes literal; ``len(<read_bytes>)``
-  vs an int literal or the length of a bytes literal.  Names bound to any of
-  these carry them.  The oracle may read ANY path -- the incident read the
-  backup copy, not the file the fixture wrote.
-
-The line reported is the oracle's.
-
-Deliberately NOT flagged:
-
-* ``newline=""`` (or ``newline="\n"``) on the ``write_text`` / ``open`` -- no
-  translation on write; that is one cure.  ``write_bytes(b"...")`` is the other.
-* A ``read_text`` oracle: text mode reads ``\r\n`` back as ``\n``.
-* A bytes oracle in a function with no text-mode newline fixture.
-* A ``write_text`` whose literal holds no ``\n``.
-* Bytes compared with bytes the test did not spell (``kept == source.read_bytes()``,
-  a digest compared with one the product recorded): both sides carry the same
-  translation.
-* A test inside a ``sys.platform`` / ``os.name`` guard or skipif.
-
-Known misses, named rather than hidden: opaque content (``json.dumps(...)``,
-``textwrap.dedent(...)``, a helper's return, a parameter); ``print(..., file=f)``;
-a ``write_text`` receiver the flow pass cannot read as a path (an ordinary
-fixture parameter, an attribute); a fixture from conftest or another module, or
-one renamed with ``@pytest.fixture(name=...)``; an oracle in a helper rather than
-the test; bytes read by ``open(p, "rb").read()``; ``in`` / ``startswith`` on
-the bytes; a literal held in a module constant.
-
-Pure: takes a parsed tree, never touches the disk.
+Pure: takes a parsed tree, never touches the disk. Reference: windows_compat.md.
 """
 
 import ast
@@ -315,15 +267,7 @@ def _tests(node: ast.AST, skipped: bool) -> Iterator[tuple[ast.FunctionDef | ast
 
 
 def find_text_fixture_bytes_oracles(tree: ast.Module, platform_guarded: set[int]) -> list[tuple[int, str]]:
-    """Bytes oracles in tests whose fixture was written in text mode with a newline.
-
-    Args:
-        tree: Parsed module.
-        platform_guarded: Line numbers inside sys.platform / os.name guards.
-
-    Returns:
-        (line, description) per offending comparison, in source order.
-    """
+    """Bytes oracles in tests whose fixture was written in text mode with a newline."""
     module = _Module(tree)
     found: dict[int, str] = {}
     for func, skipped in _tests(tree, False):

@@ -3,7 +3,7 @@
 # Description: Memory health handler tests — .trinity files present, well-shaped and fresh
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/memory_health.py — a branch's .trinity files present, valid and fresh."""
@@ -21,11 +21,6 @@ from unittest.mock import patch
 import pytest
 
 from aipass.daemon.apps.handlers.monitoring import memory_health as mh
-
-
-# =============================================
-# HELPERS
-# =============================================
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -73,11 +68,6 @@ def _setup_full_branch(tmp_path: Path) -> Path:
     _write_json(branch / "DASHBOARD.local.json", {"status": "ok"})
 
     return branch
-
-
-# =============================================
-# FILE EXISTENCE TESTS
-# =============================================
 
 
 class TestCheckMemoryFilesExist:
@@ -164,11 +154,6 @@ class TestCheckMemoryFilesExist:
 
         assert result["required"]["README.md"] is False
         assert "README.md" in result["missing_required"]
-
-
-# =============================================
-# STRUCTURE VALIDATION TESTS
-# =============================================
 
 
 class TestValidateMemoryStructure:
@@ -336,11 +321,6 @@ class TestValidateMemoryStructure:
         assert result["has_metadata"] is False
 
 
-# =============================================
-# FRESHNESS TESTS
-# =============================================
-
-
 class TestCheckFreshness:
     """Tests for check_freshness()."""
 
@@ -432,11 +412,6 @@ class TestCheckFreshness:
         result = mh.check_freshness(str(f))
 
         assert result["days_ago"] == 1.23
-
-
-# =============================================
-# OVERALL HEALTH STATUS TESTS
-# =============================================
 
 
 class TestGetMemoryHealthStatus:
@@ -576,17 +551,10 @@ class TestGetMemoryHealthStatus:
         assert isinstance(result["branch_name"], str)
 
 
-# =============================================
-# REAL .trinity TESTS (production truth, not fixtures)
-# =============================================
-
-
 class TestRealTrinityFiles:
     """Validate against @daemon's OWN live .trinity files.
 
-    The limits check survived for months because the fixture carried a field no
-    real branch had. A synthetic fixture cannot fail the way production failed,
-    so these tests read the real files on disk (@memory's call, 2026-08-13).
+    A synthetic fixture cannot fail the way production failed, so these read the real files on disk.
     """
 
     BRANCH_ROOT = Path(__file__).resolve().parents[1]
@@ -617,16 +585,8 @@ class TestRealTrinityFiles:
     def test_a_fully_populated_branch_reports_no_structure_issues(self, tmp_path: Path) -> None:
         """Full health status on a built branch surfaces no structure issues.
 
-        Used to run against @daemon's OWN live .trinity files, but that
-        directory is gitignored (fresh_clone, 2026-09-08) — a fresh clone or
-        CI checkout has none, so the checker found nothing to cover and this
-        went red for a reason unrelated to the code. The branch this test
-        reads is now built here with the same two files and the same valid
-        shapes ``_setup_full_branch`` gives every other test in this module,
-        so the claim is proven against a tree the repo actually ships.
-
-        Freshness and optional-file status are free to vary; a structure issue
-        on a healthy, fully-populated branch is the noise this replaced.
+        Built here rather than read from the live .trinity, which is gitignored: a fresh clone has none.
+        Freshness and optional-file status are free to vary.
         Mutant killed: the log_operation call removed from get_memory_health_status.
         """
         branch = _setup_full_branch(tmp_path)
@@ -635,10 +595,7 @@ class TestRealTrinityFiles:
             result = mh.get_memory_health_status(str(branch), "DAEMON")
         log.assert_called_once_with("memory_health_check", {"branch": "DAEMON"})
 
-        # The floor, and it pins names rather than a count. An empty
-        # structure_checks would make the loop a silent pass, and a health
-        # status that quietly stopped checking one of the two files would shrink
-        # the dict while every remaining entry still read valid.
+        # The floor, pinned by names: an empty or shrunken structure_checks would leave the loop a silent pass.
         assert sorted(result["structure_checks"]) == [
             ".trinity/local.json",
             ".trinity/observations.json",

@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -33,11 +33,6 @@ import pytest
 from aipass.commons.apps.handlers.activity.activity_ops import run_activity
 from aipass.commons.apps.handlers.catchup.catchup_ops import run_catchup
 from aipass.commons.apps.handlers.digest.digest_ops import show_digest
-
-
-# =============================================================================
-# HELPERS — insert test data
-# =============================================================================
 
 
 def _insert_agent(conn, branch_name: str, display_name: str | None = None) -> None:
@@ -170,51 +165,39 @@ def _digest() -> Dict[str, Any]:
     return result
 
 
-# =============================================================================
-# activity's relative time — the "time" column of 'commons activity'
-# =============================================================================
-
-
 def test_relative_time_just_now(activity_db: sqlite3.Connection) -> None:
     """Timestamps less than 60 seconds ago should show 'just now'.
 
-    Mutant: `if total_seconds < 60:` -> `if total_seconds < 5:` reddens this.
-    """
+    Mutant: `if total_seconds < 60:` -> `if total_seconds < 5:` reddens this."""
     assert _one_activity(activity_db, created_at=_ago(seconds=10))["time"] == "just now"
 
 
 def test_relative_time_minutes_ago(activity_db: sqlite3.Connection) -> None:
     """Timestamps a few minutes ago should show '<N>m ago'.
 
-    Mutant: `minutes = total_seconds // 60` -> `minutes = total_seconds // 30` reddens this.
-    """
+    Mutant: `minutes = total_seconds // 60` -> `minutes = total_seconds // 30` reddens this."""
     assert _one_activity(activity_db, created_at=_ago(minutes=5))["time"] == "5m ago"
 
 
 def test_relative_time_hours_ago(activity_db: sqlite3.Connection) -> None:
     """Timestamps a few hours ago should show '<N>h ago'.
 
-    Mutant: `hours = total_seconds // 3600` -> `hours = total_seconds // 60` reddens this.
-    """
+    Mutant: `hours = total_seconds // 3600` -> `hours = total_seconds // 60` reddens this."""
     assert _one_activity(activity_db, created_at=_ago(hours=3))["time"] == "3h ago"
 
 
 def test_relative_time_days_ago(activity_db: sqlite3.Connection) -> None:
     """Timestamps days ago should show '<N>d ago'.
 
-    Mutant: `days = total_seconds // 86400` -> `days = total_seconds // 3600` reddens this.
-    """
+    Mutant: `days = total_seconds // 86400` -> `days = total_seconds // 3600` reddens this."""
     assert _one_activity(activity_db, created_at=_ago(days=7))["time"] == "7d ago"
 
 
 def test_relative_time_future_timestamp(activity_db: sqlite3.Connection) -> None:
     """Future timestamps produce negative deltas; should show 'just now' (negative seconds < 60).
 
-    Mutant: `if total_seconds < 60:` -> `if 0 <= total_seconds < 60:` reddens this.
-    """
-    # A negative delta is still < 60, so the first arm claims it and a clock
-    # skew reads as "just now" rather than "unknown" or a negative "-60m ago".
-    # Naming the string is what makes that a decision instead of an accident.
+    Mutant: `if total_seconds < 60:` -> `if 0 <= total_seconds < 60:` reddens this."""
+    # Deliberate: clock skew reads as "just now", not "unknown" or "-60m ago".
     assert _one_activity(activity_db, created_at=_ago(hours=-1))["time"] == "just now"
 
 
@@ -222,31 +205,23 @@ def test_relative_time_future_timestamp(activity_db: sqlite3.Connection) -> None
 def test_relative_time_invalid_string(mock_logger: MagicMock, activity_db: sqlite3.Connection) -> None:
     """Invalid timestamp strings should show 'unknown'.
 
-    Mutant: the except branch's `return "unknown"` -> `return "just now"` reddens this.
-    """
+    Mutant: the except branch's `return "unknown"` -> `return "just now"` reddens this."""
     assert _one_activity(activity_db, created_at="not-a-timestamp")["time"] == "unknown"
     assert _one_activity(activity_db, created_at="")["time"] == "unknown"
     assert mock_logger.warning.call_count == 2
 
 
-# =============================================================================
-# activity's truncation — the "content" column of 'commons activity' (60 chars)
-# =============================================================================
-
-
 def test_truncate_short_text_unchanged(activity_db: sqlite3.Connection) -> None:
     """Text shorter than max_len should be shown as-is.
 
-    Mutant: `if len(text) <= max_len:` -> `if len(text) <= 5:` reddens this.
-    """
+    Mutant: `if len(text) <= max_len:` -> `if len(text) <= 5:` reddens this."""
     assert _one_activity(activity_db, content="hello world")["content"] == "hello world"
 
 
 def test_truncate_long_text_with_ellipsis(activity_db: sqlite3.Connection) -> None:
     """Text longer than max_len should be truncated with '...' appended.
 
-    Mutant: `text[: max_len - 3] + "..."` -> `text[:max_len] + "..."` reddens this.
-    """
+    Mutant: `text[: max_len - 3] + "..."` -> `text[:max_len] + "..."` reddens this."""
     result = _one_activity(activity_db, content="A" * 100)["content"]
     assert len(result) == 60
     assert result.endswith("...")
@@ -255,38 +230,29 @@ def test_truncate_long_text_with_ellipsis(activity_db: sqlite3.Connection) -> No
 def test_truncate_exact_boundary(activity_db: sqlite3.Connection) -> None:
     """Text exactly at max_len should not be truncated.
 
-    Mutant: `if len(text) <= max_len:` -> `if len(text) < max_len:` reddens this.
-    """
+    Mutant: `if len(text) <= max_len:` -> `if len(text) < max_len:` reddens this."""
     text = "A" * 60
     assert _one_activity(activity_db, content=text)["content"] == text
-
-
-# =============================================================================
-# catchup's time label — how 'commons catchup' names the last visit
-# =============================================================================
 
 
 def test_calculate_time_label_minutes(catchup_db: sqlite3.Connection) -> None:
     """Timestamps less than an hour ago should show minutes.
 
-    Mutant: `if hours < 1:` -> `if hours < 0:` reddens this.
-    """
+    Mutant: `if hours < 1:` -> `if hours < 0:` reddens this."""
     assert _catchup_label(catchup_db, _ago(minutes=15)) == "15 minutes ago"
 
 
 def test_calculate_time_label_hours(catchup_db: sqlite3.Connection) -> None:
     """Timestamps a few hours ago should show hours.
 
-    Mutant: `elif hours < 24:` -> `elif hours < 2:` reddens this.
-    """
+    Mutant: `elif hours < 24:` -> `elif hours < 2:` reddens this."""
     assert _catchup_label(catchup_db, _ago(hours=6)) == "6 hours ago"
 
 
 def test_calculate_time_label_days(catchup_db: sqlite3.Connection) -> None:
     """Timestamps more than 24 hours ago should show days.
 
-    Mutant: `days = hours // 24` -> `days = hours // 12` reddens this.
-    """
+    Mutant: `days = hours // 24` -> `days = hours // 12` reddens this."""
     assert _catchup_label(catchup_db, _ago(days=3)) == "3 days ago"
 
 
@@ -294,16 +260,10 @@ def test_calculate_time_label_days(catchup_db: sqlite3.Connection) -> None:
 def test_calculate_time_label_invalid(mock_logger: MagicMock, catchup_db: sqlite3.Connection) -> None:
     """Invalid timestamps should show the fallback string.
 
-    Mutant: the except branch's `return "your last visit"` -> `return "the last 24 hours"` reddens this.
-    """
+    Mutant: the except branch's `return "your last visit"` -> `return "the last 24 hours"` reddens this."""
     assert _catchup_label(catchup_db, "garbage") == "your last visit"
     parse_warnings = [c for c in mock_logger.warning.call_args_list if "last_active" in str(c)]
     assert len(parse_warnings) == 1
-
-
-# =============================================================================
-# run_activity — orchestrator with mocked DB
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.activity.activity_ops.json_handler", autospec=True)
@@ -332,11 +292,6 @@ def test_run_activity_returns_formatted_activity(
     assert "thoughtful" in result["activities"][0]["content"]
 
 
-# =============================================================================
-# run_catchup — orchestrator with mocked DB
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.update_last_active")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.query_catchup_data")
@@ -355,14 +310,7 @@ def test_run_catchup_first_visit(
 ) -> None:
     """run_catchup for a first-time visitor should set is_first_visit True.
 
-    get_onboarding_nudge is no longer patched here: catchup_ops imports it
-    locally inside run_catchup (`from ...welcome_handler import
-    get_onboarding_nudge`), so a patch on the catchup_ops module attribute
-    never reaches the call — a dead patch (discarded_patch.md's known limit),
-    not a discarded one. Dropping it changes nothing: the real function
-    already ran against the mocked db connection either way, and any error
-    it raises is swallowed by run_catchup's own except-and-warn.
-    """
+    get_onboarding_nudge is imported inside run_catchup, so a catchup_ops patch of it would be dead."""
     mock_caller.return_value = {"name": "NEW_BRANCH"}
     mock_get_db.return_value = MagicMock()
     mock_close.side_effect = lambda c: None
@@ -393,16 +341,10 @@ def test_run_catchup_no_caller(mock_caller: MagicMock) -> None:
     assert "Could not detect" in result["error"]
 
 
-# =============================================================================
-# DIGEST — the four boards of 'commons digest', reached through show_digest
-# =============================================================================
-
-
 def test_get_activity_totals_with_data(digest_db: sqlite3.Connection) -> None:
     """The digest totals count posts and comments from the last 24h.
 
-    Mutant: the comment total's `FROM comments WHERE created_at >=` -> `FROM posts WHERE created_at >=` reddens this.
-    """
+    Mutant: the comment total's `FROM comments WHERE created_at >=` -> `FROM posts WHERE created_at >=` reddens this."""
     conn = digest_db
 
     _insert_agent(conn, "DIGEST_BRANCH", "Digest Tester")
@@ -418,8 +360,7 @@ def test_get_activity_totals_with_data(digest_db: sqlite3.Connection) -> None:
 def test_get_activity_totals_empty_db(digest_db: sqlite3.Connection) -> None:
     """The digest totals on an empty DB are zeros.
 
-    Mutant: _get_activity_totals' return -> `{"total_posts": post_count + 1, ...}` reddens this.
-    """
+    Mutant: _get_activity_totals' return -> `{"total_posts": post_count + 1, ...}` reddens this."""
     totals = _digest()["totals"]
     assert totals["total_posts"] == 0
     assert totals["total_comments"] == 0
@@ -428,21 +369,18 @@ def test_get_activity_totals_empty_db(digest_db: sqlite3.Connection) -> None:
 def test_get_most_active_branches(digest_db: sqlite3.Connection) -> None:
     """The digest's active branches are sorted by activity.
 
-    Mutant: `ORDER BY total_activity DESC` -> `ORDER BY total_activity ASC` reddens this.
-    """
+    Mutant: `ORDER BY total_activity DESC` -> `ORDER BY total_activity ASC` reddens this."""
     conn = digest_db
 
     _insert_agent(conn, "ACTIVE_A", "Active A")
     _insert_agent(conn, "ACTIVE_B", "Active B")
 
-    # ACTIVE_A: 2 posts, ACTIVE_B: 1 post
     _insert_post(conn, "Post 1", "Content", "general", "ACTIVE_A")
     _insert_post(conn, "Post 2", "Content", "general", "ACTIVE_A")
     _insert_post(conn, "Post 3", "Content", "general", "ACTIVE_B")
 
     branches = _digest()["active_branches"]
     assert len(branches) >= 2
-    # First branch should be the most active
     assert branches[0]["agent"] == "ACTIVE_A"
     assert branches[0]["total_activity"] == 2
 
@@ -450,9 +388,7 @@ def test_get_most_active_branches(digest_db: sqlite3.Connection) -> None:
 def test_get_new_branches(digest_db: sqlite3.Connection) -> None:
     """The digest's new branches include a branch that joined just now.
 
-    Mutant: `AND branch_name NOT IN ('SYSTEM',` -> `AND branch_name IN ('SYSTEM',` reddens this.
-    """
-    # Insert a branch with a recent joined_at (default is 'now')
+    Mutant: `AND branch_name NOT IN ('SYSTEM',` -> `AND branch_name IN ('SYSTEM',` reddens this."""
     _insert_agent(digest_db, "FRESH_BRANCH", "Fresh Branch")
 
     new_branches = _digest()["new_branches"]
@@ -462,14 +398,12 @@ def test_get_new_branches(digest_db: sqlite3.Connection) -> None:
 def test_get_top_posts_by_engagement(digest_db: sqlite3.Connection) -> None:
     """The digest's top posts are ordered by engagement.
 
-    Mutant: `COALESCE(c.comment_count, 0) AS comment_count,` -> `0 AS comment_count,` reddens this.
-    """
+    Mutant: `COALESCE(c.comment_count, 0) AS comment_count,` -> `0 AS comment_count,` reddens this."""
     conn = digest_db
 
     _insert_agent(conn, "TOP_AUTHOR", "Top Author")
     post_id = _insert_post(conn, "Popular Post", "Great content", "general", "TOP_AUTHOR")
 
-    # Add some comments for engagement
     _insert_comment(conn, post_id, "TOP_AUTHOR", "Self-reply 1")
     _insert_comment(conn, post_id, "TOP_AUTHOR", "Self-reply 2")
 
@@ -480,12 +414,9 @@ def test_get_top_posts_by_engagement(digest_db: sqlite3.Connection) -> None:
 
 
 def test_run_catchup_refuses_naming_a_failed_caller_lookup():
-    """A broken caller lookup is refused by name, not as "run from a branch directory".
+    """A broken caller lookup is refused by name, not as "run from a branch directory", before any DB opens.
 
-    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
-    The lookup raises before any database is opened.
-    Mutant: catchup_ops `except CallerLookupFailed as exc:` -> `except KeyError as exc:` turns this red.
-    """
+    Mutant: catchup_ops `except CallerLookupFailed as exc:` -> `except KeyError as exc:` turns this red."""
     with (
         patch(
             "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",

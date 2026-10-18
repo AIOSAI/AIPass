@@ -2,7 +2,7 @@
 
 # Store cleanup — what exists and what does not
 
-Which deletions this branch performs, what triggers each, and what it still advertises but does not do.
+Which deletions this branch performs, what triggers each, and what it advertises but does not do.
 
 Two lanes delete from a store, each on its own trigger:
 
@@ -16,10 +16,9 @@ Two lanes delete from a store, each on its own trigger:
 Removes a snapshot file **whose source no longer exists**. That is its only
 trigger: a file that is still in the source tree keeps its snapshot copy even
 when it became ignored, because `_should_delete()` only asks whether the source
-exists. (`cleanup_deleted_files()` used to accept a `should_ignore` callback it
-never called; the parameter was dropped 2026-09-27.) It never touches `versioned/`.
+exists. It never touches `versioned/`.
 
-### `prune` — copies the ignore spec now matches (2026-10-16, DPLAN-0411)
+### `prune` — copies the ignore spec now matches
 
 ```
 drone @backup prune <project_root|@name>            # list, delete nothing
@@ -48,7 +47,7 @@ it is never counted as removed.
 `prune` never touches the remote copy. Drive entries for pruned files are not
 removed from Drive; that remains the owner's by hand.
 
-### What is still not implemented
+### What is not implemented
 
 **`max_versions` does nothing.** `.backup/config.json` carries a `max_versions`
 key (default `10`), `register` writes it, and `status` prints it as "Max
@@ -59,25 +58,12 @@ still backed up; `prune` removes whole file-folders of ignored paths only. Treat
 The versioned store is otherwise append-only and holds two copies of every new
 file (current + baseline), so it grows to roughly 2× the source.
 
-**The `*.tmp` copies made before the rule (2026-09-11).** The AIPass store
-(`/.backup/`, last snapshotted 2026-08-15) held 498 temp copies in `snapshots/`
-(14,265,519 B) and 996 in `versioned/` (498 file-folders × current + baseline,
-28,531,038 B), every one from a `*_json` folder: 458 prax, 36 memory, 3 trigger,
-1 seedgo. None of the 498 snapshot copies still had a source.
-
-- `snapshots/` — **pruned** with `drone rm --stale 10d .backup/snapshots`, the
-  fleet's logged delete: 498 matched, 498 deleted, 0 refusals, 0 left. They
-  could never be restored as anything useful, and with no source they would
-  only have gone at the next AIPass snapshot.
-- `versioned/` — **left in place, 996 files.** The stale sweep matches only
-  files directly inside a `*_json` folder, and this store wraps each file in a
-  `<name>.tmp/` folder. The plain `drone rm` lane refuses the folders
-  (`Protected: path is inside sibling branch memory/`) because the store
-  mirrors `src/aipass/<branch>/`. The gate is not routed around. The copies
-  are inert: `drive_sync` re-filters the store through `load_spec()`, so they
-  never upload. They go when a pruning lane exists.
-  *(2026-10-16: `prune` is that lane. `*.tmp` is in the built-in floor, so
-  `prune` lists these file-folders; they stay until `--apply` is run.)*
+**Copies taken before an ignore rule existed stay until `prune --apply`.** A new
+rule (the built-in `*.tmp` floor included) stops new copies; it removes none.
+Mirror cleanup removes such a snapshot copy only once its source is gone, and
+nothing removes the `versioned/` file-folder except `prune --apply`. Until then
+the copies are inert for the Drive lane: `drive_sync` re-filters the store
+through `load_spec()` before uploading, so they never upload.
 
 ---
 

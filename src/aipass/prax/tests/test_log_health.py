@@ -3,26 +3,13 @@
 # Description: Tests for the log-health command module
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/log_health.py."""
 
-# The snapshot display is the reason this file exists. `snapshot` reports the
-# rates a previous scan measured, and when it has none it used to render
-# identically to a genuinely quiet system: "329 idle files (0 lines/min)".
-# An operator cannot tell a calm fleet from a tracker that never ran, so the
-# zero-state has to name its own cause.
-#
-# Every display test renders through the product's own Rich console, read back
-# with capsys — a recording mock never renders, so it could not fail on
-# anything that happens at render time.
-#
-# Covers:
-# - snapshot with no recent samples says so instead of reporting idle
-# - snapshot with fresh samples reports their age
-# - scan output is unchanged by the staleness reporting
-# - subcommand routing and the unknown-subcommand path
+# A snapshot with no recent samples must name its cause, not read as a quiet fleet. Rendered
+# through the product's own console: a recording mock never renders, so it could not fail.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(help_flag_safety) — -h routing to print_help, covered by tests/test_help_flag_safety.py
@@ -54,11 +41,7 @@ def render(monkeypatch, capsys):
 
 
 def _row(logs_dir, name="prax_monitor.log", rate=0.0, age=None, branch="PRAX"):
-    """Build one get_snapshot()/scan_rates() result row.
-
-    ``path`` is built under ``logs_dir`` (a tmp_path) so no relative path is left;
-    _display_rates never reads it.
-    """
+    """Build one get_snapshot()/scan_rates() result row, its path under ``logs_dir``."""
     return {
         "file": name,
         "path": str(logs_dir / name),
@@ -127,11 +110,7 @@ class TestRouting:
         assert log_health.handle_command("monitor", ["run"]) is False
 
     def test_unknown_subcommand_reports_and_shows_help(self):
-        """A bogus subcommand is refused by name and never reported as handled.
-
-        It used to print the right words and return True, which the router turns
-        into exit 0 (@devpulse's fleet CLI sweep, 2026-09-07).
-        """
+        """A bogus subcommand is refused by name and never reported as handled (True would exit 0)."""
         with pytest.raises(UnknownArgument) as refusal:
             log_health.handle_command("log-health", ["bogus"])
 

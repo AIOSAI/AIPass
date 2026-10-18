@@ -4,17 +4,12 @@
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
 
-# DPLAN-0294 phase 1b: the handler no longer does the work inline. It calls
-# @memory's spawn_background(), which detaches a child and returns immediately.
-# The old pool/rollover counters are gone at hook time — the child reports them
-# to memory_json/auto_process_log.json — so nothing here asserts on them.
-#
-# The session guard now means "kicked once this session", not "ran once".
+# The handler only kicks @memory's spawn_background(); the detached child owns the counters.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — _GUARD_DIR's value; it is tempfile.gettempdir() and the tests patch it
@@ -61,10 +56,7 @@ def _make_mock_module(**spawn_return):
 def _served(module: Any) -> Iterator[None]:
     """Stand `module` in sys.modules as @memory's auto_process, where the real import_module looks first.
 
-    importlib itself is never replaced (fleet green leg 7, stdlib_patch). Only the
-    exact name the handler imports is served, so reaching the stand-in's
-    spawn_background proves the name too. None makes the real import raise
-    ModuleNotFoundError, the stdlib's documented answer for a None entry.
+    importlib is never replaced; None makes the real import raise ModuleNotFoundError.
     """
     with pytest.MonkeyPatch.context() as mp:
         if module is not None:
@@ -87,7 +79,7 @@ class TestAutoProcessHandler:
         assert result["sound"] == "auto process"
 
     def test_calls_spawn_background_and_never_the_inline_worker(self):
-        """The whole point of 1b: the prompt lane must not run the work itself."""
+        """The prompt lane must not run the work itself."""
         mock_module = _make_mock_module()
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=False):
@@ -204,7 +196,7 @@ class TestAutoProcessHandler:
         assert ups["auto_process"]["handler"] == "aipass.hooks.apps.handlers.lifecycle.auto_process.handle"
 
     def test_both_registered_events_take_the_same_spawn_path(self):
-        """One handler serves both events — 1b must not fix only the prompt lane."""
+        """One handler serves both events: neither lane runs the work inline."""
         for payload in ({"hook_event_name": "UserPromptSubmit"}, {"hook_event_name": "PreCompact"}):
             mock_module = _make_mock_module()
             with patch(f"{MODULE}._already_ran_this_session", return_value=False):
@@ -230,19 +222,7 @@ class TestAutoProcessHandler:
 
 class TestSessionGuard:
     def test_the_guard_decides_whether_the_kick_happens(self):
-        """MERGED 2026-09-07 (DPLAN-0323 contested band): was two tests.
-
-        ``test_skips_when_already_ran`` and ``test_runs_when_not_yet_ran`` were
-        the negative and positive control on ONE assertion — whether the memory
-        module gets imported — with the guard state as the only difference
-        between them. Split apart, the positive half read as a third copy of the
-        spawn-path setup. Held together in one body, the claim is what it always
-        was: the guard is what decides. Both original assertions survive
-        verbatim, the negative half's exit code included.
-
-        Deliberately not parametrized: two parametrized cases collect as two
-        tests, which is a rename rather than a merge.
-        """
+        """Negative and positive control in one body: the guard state alone decides the kick."""
         mock_module = _make_mock_module()
 
         with patch(f"{MODULE}._already_ran_this_session", return_value=True):
@@ -298,8 +278,7 @@ class TestSessionGuard:
 
         mock_mark.assert_not_called()
 
-    # The guard is read through handle() (fleet green leg 8): its file in a tmp
-    # _GUARD_DIR, and whether @memory's stand-in was kicked.
+    # The guard is read through handle(): its file in a tmp _GUARD_DIR, and whether the stand-in was kicked.
 
     @staticmethod
     def _kicks(monkeypatch, guard_dir, session_id: str | None, times: int = 1) -> int:
@@ -349,19 +328,15 @@ class TestSessionGuard:
 
 
 class TestProbeSuppression:
-    """The test runner must not put @memory to work (DPLAN-0323 tie-up).
+    """The test runner must not put @memory to work.
 
-    The session guard does not cover this: it keys on CLAUDE_CODE_SESSION_ID,
-    so the first probe run of a given mock id spawned a real background child.
-    Measured 2026-09-06 — the guard file for the mock id was dated the previous
-    night's probe run.
+    The session guard keys on CLAUDE_CODE_SESSION_ID, so a probe's first run of a mock id would spawn.
     """
 
     def test_probe_run_does_not_spawn(self, monkeypatch, tmp_path):
 
         mock_module = _make_mock_module()
-        # _GUARD_DIR is the real tempdir: without redirecting it these tests
-        # write guard files that outlive the run and silence the NEXT one.
+        # Unredirected, guard files in the real tempdir outlive the run and silence the next one.
         monkeypatch.setattr(auto_process, "_GUARD_DIR", tmp_path)
         monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "probe-suppression-on")
         monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")

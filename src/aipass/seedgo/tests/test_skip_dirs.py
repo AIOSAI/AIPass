@@ -3,15 +3,12 @@
 # Description: Unit tests for skip_dirs (is_throwaway_path routine-case logging regression)
 # Version: 1.0.3
 # Created: 2026-07-27
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/skip_dirs.py's is_throwaway_path and in_skipped_dir."""
 
-# Regression coverage for the runaway-log bug (@trigger dispatch 98833403):
-# is_throwaway_path used to logger.info() every time a path was NOT under a temp
-# dir -- the routine outcome for ~100% of files during a branch audit walk,
-# flooding system_logs/seedgo_skip_dirs.log at hundreds of lines/min.
+# is_throwaway_path logs nothing on the routine not-under-temp outcome, or an audit walk floods seedgo_skip_dirs.log.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — is_disabled_file's DISABLED_FILE_MARKER substring check

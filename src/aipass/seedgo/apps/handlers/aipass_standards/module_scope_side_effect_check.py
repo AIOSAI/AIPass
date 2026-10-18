@@ -3,104 +3,13 @@
 # Description: Module Scope Side Effect Standards Checker Handler
 # Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Module Scope Side Effect Standards Checker Handler
 
-Module-level code in a ``test_*.py`` file runs at COLLECTION: once, before any
-test, in whatever order pytest happens to import files. A side effect there
-leaks into every test in the session, and a failure there takes the whole file
--- sometimes the whole session -- down before a single test has run.
-
-  ``backup/tests/test_cli_routing.py`` (7cbe39e5, lines 443, 444, 457):
-  ``_SECRETS_ROOT = str(Path.home() / ".secrets")`` reads the host at import,
-  so a RuntimeError there takes all 99 tests; ``_SECRETS_TOUCHED`` is a global
-  recorder the functions rebind through ``global``; and
-  ``sys.addaudithook(_secrets_audit_hook)`` is installed for the rest of the
-  session and can never be removed.
-
-WHAT IS MODULE SCOPE. Code that runs when the module is imported:
-  * top-level statements, including inside top-level ``if``/``try``/``with``/
-    ``for`` blocks -- but not under ``if __name__ == "__main__":``, whose
-    ``else`` does run;
-  * class bodies, not method bodies;
-  * decorator expressions, on top-level functions, classes and methods;
-  * default-argument expressions of any ``def`` or ``lambda`` reached at
-    import, which are evaluated when the ``def`` runs.
-Function, method and lambda BODIES are not module scope.
-
-THE EIGHT SHAPES, each finding naming its own:
-  audit_hook         ``sys.addaudithook(...)``
-  host_read          ``Path.home()``, ``Path.cwd()``, ``os.path.expanduser()``,
-                     ``os.getcwd()``, ``Path(...).expanduser()``
-  environ_write      ``os.environ[k] = v``, its mutating methods, ``del``,
-                     ``os.putenv`` / ``os.unsetenv``
-  sys_modules_write  ``sys.modules[k] = v``, its mutating methods, ``del``
-  sys_path_write     ``sys.path.insert/append/...``, ``sys.path[...] =``,
-                     ``sys.path = ...``
-  module_attr_write  ``X.attr = v`` or ``setattr(X, ...)`` where X is bound by
-                     an import in this file -- monkeypatching at import
-  cwd_change         ``os.chdir(...)``
-  global_recorder    a module-level name some function rebinds via ``global``
-Names are resolved through the file's own imports, so ``from os import
-environ`` and ``from pathlib import Path as P`` are followed. Anything else --
-constants, ``pytestmark``, fixture definitions, imports, typing -- is not a
-side effect this rule judges.
-
-WHERE IT DOES NOT LOOK, for the first eight shapes (the ninth, below, is
-judged everywhere). ``conftest.py`` is exempt: its module scope is the
-declared, once-per-session harness, and test template v1 conftest C0 even
-requires it to set ``AIPASS_TEST_LOG_DIR`` in ``os.environ`` above its
-imports. In a ``test_*.py`` the same code is session state smuggled in by
-collection order. Other files under ``tests/`` (helpers, fixtures modules)
-are not collected as tests and are not judged.
-
-``state_leak`` is the other half: it judges writes at TEST time and says in
-its own docstring that it never judges one at import. ``import_site``
-convicts a module-level ``sys.modules[...] = stub`` naming an aipass module
-by literal; measured, none of this rule's sys_modules_write hits is convicted
-there (they are ``setdefault`` calls and variable keys), so no line gets two
-verdicts today.
-
-THE NINTH SHAPE IS JUDGED EVERYWHERE (1.1.0, 2026-10-11).
-  signal_disposition ``signal.signal(...)``, ``signal.alarm(...)``,
-                     ``signal.setitimer(...)``
-A test file's module scope is not the only module scope that runs at
-collection: every module a test file imports runs its own, inside the same
-pytest worker. @ai_mail's ``apps/ai_mail.py:33``, @commons' ``commons.py:68``
-and @flow's ``flow.py:46`` each reset SIGPIPE to SIG_DFL at import, and their
-tests import them, so every xdist worker in the fleet ran with SIGPIPE at
-default from collection on. Python ignores SIGPIPE so that a write to a dead
-pipe raises BrokenPipeError; at default the kernel ends the process instead,
-with no traceback and nothing for faulthandler to print. Measured from this
-seat: ``subprocess.run(input=...)`` to a child that exits without reading
-survives as-is and dies with status 141 after importing either entry. CI runs
-38132534544 (ubuntu, gw1, api) and 38128154826 (macOS, gw0, memory) each lost a
-worker as "node down: Not properly terminated"; memory's crashed test does
-exactly that write. @ai_mail's ``dispatch/daemon.py:71-72`` replace SIGTERM and
-SIGINT the same way. So this one shape is judged in EVERY file the checker is
-handed -- production modules and conftest.py too -- while the other eight stay
-test-file-only, where their reasoning lives. A TEST FILE MEANS ONE IN A TESTS
-TREE (``applicability.is_test_path``), not a test-shaped name anywhere: 1.1.0
-decided by name alone and convicted @ai_mail's product module
-``apps/handlers/dispatch/test_token.py:27`` for an environ write its 19
-siblings carry unjudged (1.1.1, @devpulse dispatch 125bec60). Reading a disposition
-(``signal.getsignal``) changes nothing and is not judged.
-
-CHECK FIRST (2026-09-25, before the rule landed). 557 ``test_*.py`` files
-judged across 18 branches: 15 convicted, 32 hits -- commons 3 files / 15,
-skills 4 / 4, prax 1 / 4, backup 1 / 3, api 2 / 2, hooks 2 / 2, ai_mail 1 / 1,
-seedgo 1 / 1, the other ten branches 0. Per shape: sys_modules_write 16,
-host_read 6, global_recorder 5, sys_path_write 4, audit_hook 1,
-environ_write 0, module_attr_write 0, cwd_change 0. @backup's three
-specimens are still on disk (being edited; 427, 428, 441 at the time of
-measuring). THE PRICE OF THE EXEMPTION: were conftest.py judged, all 18 of
-18 would score 0 -- 18 of their 21 hits are the C0 ``AIPASS_TEST_LOG_DIR``
-line the template requires; the other three are @api's and @backup's
-``sys.modules`` handler stubs and @daemon's ``Path.home()``. The model file
-``tests/test_readme_update.py`` scores 100.
+Reference: module_scope_side_effect.md
 """
 
 import ast
@@ -416,13 +325,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     A collected test file in a tests tree is judged for every shape; any other
     file, conftest.py and a test-named product module included, for
     EVERYWHERE_SHAPES alone.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
     """
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
@@ -446,8 +348,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         message = "Nothing at module scope outlives the file's own tests" if every_shape else ONLY_SIGNALS_PASS
         return _result(True, _one_check(True, message), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per hit would hide the rest.
+    # One check for every hit: checklist._format_failure prints only the first failed check plus "(+N more)".
     lines = source.splitlines()
     detail = "\n".join(
         f"{path.name}:{line} {shape}: {_snippet(lines, line)} - {WHY[shape]}; {CURES.get(shape, CURE)}"

@@ -3,7 +3,7 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -25,13 +25,7 @@ from aipass.spawn.apps.handlers.class_registry import get_available_classes, get
 from aipass.spawn.apps.modules import core
 from aipass.spawn.apps.modules.core import spawn_agent
 
-# Birth receipt lane (DPLAN-0318 marker 7). The receipt names which trinity
-# template version a citizen carries. @memory's push stamps it for living
-# branches; spawn stamps it at birth so a newborn is never born in violation
-# of the receipt group.
-#
-# The shape is @memory's contract, copied not imported — the drift tests
-# below go red if their sanctioned lane name or their gold source moves.
+# The receipt shape is @memory's contract, copied not imported; the drift tests go red if it moves.
 
 
 MEMORY_RECEIPT_SOURCE = (
@@ -41,13 +35,13 @@ SPAWN_TEMPLATES = Path(__file__).resolve().parents[1] / "templates"
 GOLD_DIR = Path(__file__).resolve().parents[2] / "memory" / "templates"
 FLEET = Path(__file__).resolve().parents[2]
 
-#: @seedgo's published README cap (DPLAN-0347, ruled by the owner 2026-09-15 16:02).
+#: @seedgo's published README cap.
 SEEDGO_CONTEXT_PACK = FLEET / "seedgo" / "apps" / "handlers" / "context_standards" / "pack.json"
 
 #: @memory's whole-file budgets for the three .trinity files, plus its per-string cap.
 MEMORY_CONFIG = FLEET / "memory" / "memory_json" / "custom_config" / "memory.config.json"
 
-#: @seedgo's gold test template: the manifest spawn stamps a newborn against (DPLAN-0354).
+#: @seedgo's gold test template: the manifest spawn stamps a newborn against.
 SEEDGO_TEMPLATES = FLEET / "seedgo" / "templates"
 
 
@@ -64,11 +58,6 @@ def _seedgo_test_template_page() -> str:
     """The gold page text a newborn is meant to receive, named by seedgo's own manifest."""
     page = _seedgo_manifest()["files"]["test_template"]["page"]
     return (SEEDGO_TEMPLATES / page).read_text(encoding="utf-8")
-
-
-# =============================================================================
-# GOLD VERSIONS
-# =============================================================================
 
 
 def test_gold_versions_read_schema_version_from_both_templates():
@@ -91,11 +80,6 @@ def test_gold_versions_refuse_when_template_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(receipt_ops, "_gold_dir", lambda: tmp_path)
     with pytest.raises(ValueError):
         receipt_ops.gold_template_versions()
-
-
-# =============================================================================
-# RECEIPT WRITER
-# =============================================================================
 
 
 def test_write_birth_receipt_writes_exactly_the_four_keys(tmp_path):
@@ -143,11 +127,6 @@ def _raise_value_error():
     raise ValueError("gold unreadable")
 
 
-# =============================================================================
-# DRIFT AGAINST @memory (copied, never imported)
-# =============================================================================
-
-
 def test_stamped_by_matches_memorys_sanctioned_birth_lane():
     """@memory's writer refuses any lane name outside its own constants."""
     tree = ast.parse(MEMORY_RECEIPT_SOURCE.read_text(encoding="utf-8"))
@@ -166,16 +145,7 @@ def test_spawn_does_not_import_memorys_receipt_handler():
     assert "aipass.memory" not in source
 
 
-# =============================================================================
-# SEEDS MATCH THE GOLD TRINITY TEMPLATES
-# =============================================================================
-
-
-# There is ONE template on disk now (DPLAN-0319 R3) — the class-named dirs
-# retired to templates/.archive/ — so the seed checks below stop parametrizing
-# over classes and read the one citizen template. The "aipass new" divergence
-# the old project_agent seed carried retired with that template: a single seed
-# has nothing left to diverge from, so the normalisation for it is gone too.
+# One template on disk: the seed checks read it rather than parametrizing over classes.
 CITIZEN_TRINITY = SPAWN_TEMPLATES / "citizen" / ".trinity"
 
 
@@ -187,9 +157,7 @@ def test_trinity_seed_matches_gold_template(seed_name, gold_name):
     """A seed that drifts from gold mints a citizen that fails the meta-line group."""
     seed = (CITIZEN_TRINITY / seed_name).read_text(encoding="utf-8")
     gold = (GOLD_DIR / gold_name).read_text(encoding="utf-8")
-    # Gold spells the placeholder as spawn does ({{BRANCH}} -> lower) since
-    # memory's 2026-09-15 fix, so the seed is a byte copy of gold: no
-    # normalisation, a drift of one character fails here.
+    # Gold spells the placeholder as spawn does, so the seed is a byte copy: one character of drift fails.
     assert seed == gold
 
 
@@ -210,11 +178,6 @@ def test_the_one_template_is_what_every_class_mints_from():
         assert get_template_dir(citizen_class) / ".trinity" == CITIZEN_TRINITY
 
 
-# =============================================================================
-# BIRTH END TO END
-# =============================================================================
-
-
 def test_a_minted_citizen_arrives_carrying_a_valid_receipt(tmp_path):
 
     result = spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="receipt e2e")
@@ -229,10 +192,9 @@ def test_a_minted_citizen_arrives_carrying_a_valid_receipt(tmp_path):
 
 
 def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, capsys):
-    """The same stamp, one step further: @seedgo's test template (DPLAN-0354).
+    """The same stamp, one step further: @seedgo's test template.
 
-    The versions are read from seedgo's gold manifest at assert time, never
-    copied here, so a bump over there moves this pin with it.
+    Versions are read from seedgo's manifest at assert time, so a bump there moves this pin.
     """
     import datetime
 
@@ -302,11 +264,6 @@ def test_the_receipt_is_stamped_before_the_citizen_is_registered(tmp_path, monke
     assert seen["receipt_existed_at_registration"] is True
 
 
-# =============================================================================
-# RETIRE — THE MEMORY LEAVES WITH THE CITIZEN
-# =============================================================================
-
-
 def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch):
     """The archive is the only copy after the rmtree — a receipt left behind is lost."""
 
@@ -333,11 +290,6 @@ def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch
     assert "LEAVER" not in names
 
 
-# =============================================================================
-# ADOPTION — FILL THE HOLE, NEVER REWRITE THE RECORD
-# =============================================================================
-
-
 def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path, monkeypatch):
     """Adoption's template update resolves the branch by name through update_ops.find_registry,
     which walks from the CWD - it is pointed at the tmp_path registry, never the live one."""
@@ -353,11 +305,6 @@ def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path, monkeypatch
     assert result["success"] is True
     written = json.loads((target / ".trinity" / receipt_ops.RECEIPT_NAME).read_text(encoding="utf-8"))
     assert written["stamped_by"] == receipt_ops.STAMPED_BY_BIRTH
-
-
-# =============================================================================
-# THE BIRTH CONTRACT — A NEWBORN STARTS INSIDE EVERY CAP (DPLAN-0347)
-# =============================================================================
 
 
 def _readme_cap() -> int:
@@ -387,10 +334,7 @@ def _memory_file_budgets() -> dict:
 def _newborn_budget() -> dict:
     """Every startup file's cap, keyed by branch-relative path.
 
-    Read from the FOUR owners every time it is called — seedgo's pack, hooks'
-    module, memory's config, prax's module. Nothing here is a literal, which is
-    the contract: an owner that moves a cap moves this pin with it, and a cap
-    copied into spawn would go stale silently instead.
+    Read from the four owners on every call; a cap copied into spawn would go stale silently.
     """
     budgets = _memory_file_budgets()
     return {
@@ -415,12 +359,9 @@ def _strings(node) -> list:
 
 
 def test_a_newborn_is_born_inside_every_owners_cap(tmp_path):
-    """The birth contract (DPLAN-0347, FPLAN-0593 Phase 3).
+    """The birth contract.
 
-    spawn is not the source of the fleet's README fat — a citizen is born at
-    ~2k and grows to a 46k median on its own — but the day the template drifts
-    past a cap, every newborn starts in violation. This is the pin that makes
-    that a red instead of a discovery six months later.
+    If the template drifts past a cap, every newborn starts in violation.
     """
 
     result = spawn_agent(str(tmp_path / "budgeted"), role="Test", purpose="birth budget")
@@ -446,13 +387,9 @@ def test_every_newborn_passport_string_is_inside_memorys_per_string_cap(tmp_path
 
 
 def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
-    """A directory with no dashboard is not a branch (DPLAN-0347).
+    """A directory with no dashboard is not a branch.
 
-    @flow's writer stopped CREATING a missing DASHBOARD.local.json (2.1.0), so
-    the question is what birth relies on. Measured: neither @flow nor @prax —
-    the dashboard ships in the template and lands rendered at mint, which is why
-    flow's change costs a newborn nothing. This pin is what would go red if the
-    file ever left the template and birth started depending on another branch.
+    The dashboard ships in the template and lands rendered at mint: birth depends on neither @flow nor @prax.
     """
 
     spawn_agent(str(tmp_path / "dashed"), role="Test", purpose="dashboard at birth")
@@ -469,11 +406,9 @@ def _docs_page_cap() -> int:
 
 
 def test_the_stamped_docs_index_copies_no_cap_and_points_at_the_standard():
-    """The docs index every newborn is born with names no number seedgo owns (DPLAN-0351).
+    """The docs index every newborn is born with names no number seedgo owns.
 
-    A cap typed into a template is stamped into every branch and keeps saying so
-    after its owner moves it. The index names the standard instead, and the
-    standard reads the cap live.
+    A cap typed into a template keeps saying so after its owner moves it; the standard reads it live.
     """
     cap = _docs_page_cap()
     index = (SPAWN_TEMPLATES / "citizen" / "docs" / "README.md").read_text(encoding="utf-8")
@@ -486,11 +421,7 @@ def test_the_stamped_docs_index_copies_no_cap_and_points_at_the_standard():
 def test_every_cap_is_read_from_its_owner_and_never_copied_into_this_file():
     """A hand-copied cap is the failure this pin exists for.
 
-    Each number lives with the branch that enforces it; a literal here would
-    keep passing after its owner moved, which is precisely how three README
-    counts in my own docs once drifted apart. So: every cap must resolve to a
-    positive int through an owner's door, and none of those values may appear
-    as a literal anywhere in this module.
+    A literal here would keep passing after its owner moved it.
     """
     budget = _newborn_budget()
     assert len(budget) == 6, f"a startup file lost its cap door: {sorted(budget)}"

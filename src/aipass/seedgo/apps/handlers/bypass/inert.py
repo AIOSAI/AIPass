@@ -3,23 +3,13 @@
 # Description: Detects bypass rules that can never match, for the audit info channel and the checklist
 # Version: 1.2.0
 # Created: 2026-08-09
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Detects bypass rules whose declared scope can never be evaluated.
 
-``is_bypassed`` only honours a rule's ``lines``/``functions`` scope when the
-calling checker actually supplies ``line=``/``name=``. Most checkers gate the
-whole standard once at the top of ``check_module`` and supply neither — so a
-``lines`` rule written against one of those standards is INERT: it narrows
-nothing because it never matches at all.
-
-Before FPLAN-0382 such a rule fell through to a match and silently suppressed
-the entire file. Now it correctly does nothing — which is just as silent from
-the author's chair. This module makes it speak, on the audit's non-scored info
-channel, by reading which parameters each standard's checker actually passes
-straight out of the checker sources. Nothing here is hardcoded, so a checker
-that starts threading ``line=`` stops being reported the moment it does.
+A ``lines``/``functions`` rule only matches when the checker passes ``line=``/``name=``;
+which ones do is read from the checker sources, never hardcoded.
 """
 
 import ast
@@ -33,42 +23,19 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.module_root import module_file
 
-# Every checker in the pack lives under this package's parent.
 HANDLERS_ROOT = module_file(__file__).parents[1]
 PACK_ROOT = HANDLERS_ROOT / "aipass_standards"
 
 
-# is_bypassed(file_path, standard, line=None, bypass_rules=None, name=None) -- the
-# scope arguments are as passable positionally as by keyword, and most call sites use
-# the positional form. Reading only keywords is how the first version of this map
-# reported ten live standards as line-blind.
+# Most call sites pass the scope arguments positionally; reading keywords only
+# reports live standards as line-blind.
 _SHARED_SIGNATURE = ("file_path", "standard", "line", "bypass_rules", "name")
 _SHARED_IMPORT = "aipass.seedgo.apps.handlers.bypass.utils"
-# Both entry points of the shared matcher, same signature: is_bypassed() answers
-# yes/no, matching_rule() hands back the rule for its category/reason annotations.
 _SHARED_NAMES = ("is_bypassed", "matching_rule")
 _SCOPE_ARG = {"line": "lines", "name": "functions"}
 
-# ---------------------------------------------------------------------------
-# The advisory declares its own unreliability, in the advisory.
-#
-# Three branches measured this list independently and it is wrong in BOTH
-# directions. @skills: 27 rules named dead, 6 of the 7 that were measurable were
-# LIVE. @aipass: told 41, a control run (re-audit with bypass_rules=[]) proved
-# 59 -- including 22 non-test rules this list structurally never mentions.
-# @spawn: told 21, measured 41, and one rule dead in both lanes appeared in
-# neither list. The cause is structural, not a typo: everything here is computed
-# in the AUDIT lane, which walks apps/ and never tests/, so a tests/* rule reads
-# as dead while it still suppresses findings in the CHECKLIST lane the edit hook
-# runs; and some standards are branch_level and report in prose through
-# checks[].message rather than a *_violations list, so a sweep over violation
-# RECORDS sees nothing and calls those rules dead too.
-#
-# Fixing that means simulating the checklist lane per rule. Until someone does,
-# the honest move is the one this branch applies to every filter and cap: the
-# limitation announces itself, in the output, where the conclusions are read --
-# a caveat kept in a plan file or a docstring is a caveat nobody was handed.
-# ---------------------------------------------------------------------------
+# The advisory is computed in the audit lane only (apps/, prose-reporting
+# branch_level standards unseen), so it carries its own caveat in its output.
 ADVISORY_CAVEAT = (
     "UNVERIFIED — this bypass advisory is wrong in BOTH directions, so it cannot be pruned from on its "
     "own. It calls LIVE rules dead: it is measured in the audit lane, which walks apps/ and never tests/, "
@@ -82,11 +49,8 @@ ADVISORY_CAVEAT = (
     "delete only what it proves dead. Treat the lines below as a place to start looking, not as findings.",
 )
 
-# Info lines are stored and re-rendered one at a time (audit artifact,
-# audit_display), so the doubt travels on each conclusion as well as at the head
-# of the block: a line quoted or read on its own must still arrive marked.
+# Info lines are stored and re-rendered one at a time, so each carries the doubt.
 _UNVERIFIED = "unverified: "
-# A bypass.json nothing could read: no rule in it was judged, and that is said.
 UNREADABLE = "bypass.json unreadable, so none of its rules was judged: "
 
 
@@ -109,11 +73,7 @@ def _is_supplied(node: ast.expr | None) -> bool:
 def _binds_shared_matcher(tree: ast.AST) -> bool:
     """Whether the matcher names in this module mean the shared utility.
 
-    ``bypass_handler.is_bypassed`` shares the name with a different parameter
-    ORDER (file_path, branch_path, standard, line), so reading positional
-    arguments against the wrong signature yields confident nonsense. Resolve the
-    binding before trusting it: a module that defines its own is disqualified,
-    and one that imports from the shared package is not.
+    ``bypass_handler.is_bypassed`` has the same name but a different parameter order.
     """
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _SHARED_NAMES:
@@ -143,13 +103,7 @@ def _module_strings(tree: ast.Module) -> Dict[str, str]:
 
 
 def _standard_named(node: ast.expr | None, strings: Dict[str, str]) -> str | None:
-    """The standard a call passes: a string literal, or a module constant holding one.
-
-    Literals only, before 2026-10-03: every checker that passes ``STANDARD_KEY``
-    (most of the v5-era pack, sleep_in_test among them) was missing from the map,
-    and a missing standard is left alone, so its inert rules went unreported
-    (spawn leg 8, relayed by @devpulse).
-    """
+    """The standard a call passes: a string literal, or a module constant holding one."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.Name):
@@ -161,15 +115,7 @@ def _standard_named(node: ast.expr | None, strings: Dict[str, str]) -> str | Non
 def scope_support() -> Dict[str, Set[str]]:
     """Map each standard to the scope kinds its checker can actually evaluate.
 
-    Returns e.g. ``{"cli": {"lines"}, "handlers": set()}`` — an empty set meaning that
-    standard only ever gates file-wide, so no ``lines``/``functions`` rule written
-    against it can match.
-
-    Read from the checker sources by AST rather than from a maintained list: a list
-    would drift the same way the bypass rules themselves did. A standard counts as
-    supporting a scope if ANY of its call sites supplies it — a checker that gates
-    file-wide at the top of check_module and then re-checks per line still lets a
-    ``lines`` rule narrow those per-line findings.
+    ANY call site supplying a scope counts: a file-wide gate plus per-line re-checks still narrows.
     """
     support: Dict[str, Set[str]] = {}
     for source in sorted(HANDLERS_ROOT.rglob("*.py")):
@@ -195,12 +141,7 @@ def scope_support() -> Dict[str, Set[str]]:
 
 
 def inert_scopes(rule: dict) -> Tuple[str, ...]:
-    """The scope keys on this rule that its standard's checker can never evaluate.
-
-    Empty when the rule is fine — unscoped, or scoped on something the checker
-    supplies. A rule with no ``standard`` key applies to every standard, so it is
-    only inert if no checker anywhere supplies that scope kind.
-    """
+    """The scope keys on this rule that its standard's checker can never evaluate."""
     declared = tuple(key for key in ("lines", "functions") if rule.get(key))
     if not declared:
         return ()
@@ -208,8 +149,7 @@ def inert_scopes(rule: dict) -> Tuple[str, ...]:
     standard = rule.get("standard")
     support = scope_support()
     if standard:
-        # An unknown standard is a separate defect (a rule against nothing); this
-        # channel reports scope, so say nothing rather than guess.
+        # An unknown standard is a separate defect; this channel reports scope only.
         if standard not in support:
             return ()
         evaluable = support[standard]
@@ -222,12 +162,7 @@ def inert_scopes(rule: dict) -> Tuple[str, ...]:
 def inert_notes(file_path: str, standard: str, bypass_rules: list | None) -> list[str]:
     """One line per rule naming this file and standard whose scope can never match.
 
-    The checklist prints these beside the standard's verdict (seedgo fleet green
-    leg 13): a ``lines`` rule against a checker that passes no line closes
-    nothing, and before this nothing said so in the lane the edit hook runs. The
-    file and standard are matched as :func:`bypass.utils.matching_rule` matches
-    them; only the scope is judged here, by :func:`inert_scopes`. A note, not a
-    finding: the verdict is the checker's and stays as it was.
+    File and standard match as :func:`bypass.utils.matching_rule` does; a note, never a verdict change.
     """
     file_posix = Path(file_path).as_posix()
     notes = []
@@ -250,10 +185,7 @@ def inert_notes(file_path: str, standard: str, bypass_rules: list | None) -> lis
 def standard_constants() -> Dict[str, Dict[str, str]]:
     """Each standard's module-level string constants, read from the checker sources.
 
-    Read by AST rather than by importing the pack: branch_audit imports this
-    module, so importing branch_audit's discover_checkers() back would be a
-    cycle. These are module-level string constants, exactly as readable from
-    the source as from the loaded module.
+    By AST, not import: branch_audit imports this module, so importing it back is a cycle.
     """
     declared: Dict[str, Dict[str, str]] = {}
     for source in sorted(PACK_ROOT.glob("*_check.py")):
@@ -277,19 +209,7 @@ def standard_constants() -> Dict[str, Dict[str, str]]:
 def out_of_scope_reason(rule: dict) -> str | None:
     """Why this rule can no longer match, when its file is outside its standard's scope.
 
-    A bypass rule suppresses a violation. If the standard is never evaluated on
-    that kind of file, there is no violation to suppress and the rule is dead
-    weight — not wrong, just no longer doing anything.
-
-    Says nothing about two cases it genuinely cannot see. A wildcard file
-    pattern covers both kinds of file at once. And a branch-level checker walks
-    the tree itself: every rule in the `pytest_quality` pack declares
-    AUDIT_SCOPE branch_level and reads test units directly, so reading its
-    rules against the per-file lanes' scope would confidently report live
-    rules as dead — the same mistake this module already made once by reading
-    half a call site. The example here was v4 `test_quality`, whose
-    module-coverage category named PRODUCTION modules while the standard was
-    about tests; it retired 2026-09-07 and the hazard outlived it.
+    Silent on wildcard files and branch_level checkers, which walk the tree themselves.
     """
     path = rule.get("file")
     if not path or any(ch in path for ch in "*?["):
@@ -315,16 +235,7 @@ def out_of_scope_reason(rule: dict) -> str | None:
 def check_branch_info(branch_path: str) -> list[str]:
     """Non-scored signpost lines about a branch's bypass rules, led by their caveat.
 
-    Every conclusion here is a SUSPICION, not a finding: see ADVISORY_CAVEAT for
-    what this lane cannot see in either direction. The caveat is returned as the
-    first two lines whenever there is anything to report, so no renderer, quote
-    or artifact can carry the list without it.
-
-    Kept off the violation channel on purpose: bypass hygiene is the branch's own
-    housekeeping, not a standards failure.
-
-    A bypass.json that cannot be read or parsed answers one line naming it, never
-    the empty list a branch with nothing to report gets (seedgo fleet green leg 14).
+    The caveat leads whenever anything is reported; an unreadable bypass.json answers one line, never [].
     """
     bypass_file = Path(branch_path) / ".seedgo" / "bypass.json"
     if not bypass_file.exists():
@@ -352,23 +263,14 @@ def check_branch_info(branch_path: str) -> list[str]:
             continue
         scopes = " and ".join(f"'{key}'" for key in inert)
         verb = "never match" if len(inert) > 1 else "never matches"
-        # Parentheses, not brackets: audit_display renders every info line through
-        # Rich, which reads "[handlers]" as a style tag and deletes it. This line
-        # named a file and silently swallowed which standard it meant.
+        # Parentheses, not brackets: audit_display renders through Rich, which eats "[handlers]".
         lines.append(
             f"{_UNVERIFIED}{rule.get('file', '?')} ({standard}): {scopes} {verb} — that checker gates "
             f"file-wide and passes no line/name, so this rule looks inert. Widen it to file-wide, or "
             f"confirm with a control run before dropping it."
         )
 
-    # Out-of-scope rules are grouped by standard and NAMED. They were once only
-    # counted, to keep a 118-rule cleanup from becoming a 118-line wall. @prax
-    # showed that trade is backwards: a branch told '9 of your 10 architecture
-    # rules are dead' cannot find the nine except by re-auditing once per rule,
-    # so the safe move is to delete none -- the opposite of the nudge's purpose.
-    # Grouping keeps it to one line per standard while handing over the
-    # identities, and nothing here is capped: a silent cap would recreate the
-    # same unactionable count one layer down.
+    # Named, not counted, and uncapped: a branch cannot act on a bare count.
     if out_of_scope:
         total = sum(len(files) for files in out_of_scope.values())
         lines.append(

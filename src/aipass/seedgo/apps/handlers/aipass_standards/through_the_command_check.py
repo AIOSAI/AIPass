@@ -3,71 +3,13 @@
 # Description: Through The Command Standards Checker Handler
 # Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Through The Command Standards Checker Handler
 
-Test template v1, item 10: a test reaches behaviour the way a user does --
-through the module's commands and its public functions. An underscore helper
-is never called directly by a test.
-
-A private helper is not a contract. It is the shape the author happened to cut
-the work into this week, and a test bolted to it pins that shape rather than
-the behaviour: rename the helper and a green suite goes red without a single
-user-visible change; reroute the command past the helper and the suite stays
-green while the product breaks. Reaching through the command tests what is
-promised. If a helper's logic cannot be reached through any command at all,
-that is a question about the product -- an unreachable branch -- and not a
-licence to test it directly.
-
-Two shapes, both convicted:
-
-  * An import of an underscore name from a product module, at any scope:
-    ``from aipass.x.y import _helper``.
-  * A call or attribute READ of an underscore name on a base this file bound
-    from a product import: ``m._helper(...)`` or ``m._TABLE`` where ``m`` came
-    from ``import aipass.a.b as m`` or ``from aipass.a import b``.
-    ``getattr(m, "_helper")`` with a str literal is the same read.
-
-The base is resolved from the file's own import bindings and nothing deeper.
-A name this file never imported from the product is not the product.
-
-Never convicted, each for its own reason:
-
-  * Dunder names (``__init__``, ``__version__``, ``__all__``). Language
-    surface, not a private helper.
-  * Underscore helpers the test file or its conftest defines itself. They are
-    the test's own scaffolding, not the product -- which is also why a product
-    module under ``tests/`` (``aipass.x.tests.conftest``) is not treated as a
-    product module here.
-  * An attribute read on a value RETURNED by a product call
-    (``result._x``). That is dataflow, and this checker does not follow it: it
-    resolves a base to an import binding or it declines.
-  * A WRITE to a private name -- ``m._cache = {}``, ``monkeypatch.setattr(m,
-    "_cache", ...)``, or a ``patch("aipass.x._helper")`` target string. Those
-    are item 15, mock only at the edge, and they are a different cure. 152
-    direct writes and 2,113 patch-target strings were measured on the fleet
-    2026-09-21 and deliberately left to that rule. An f-string target
-    (``patch(f"{MODULE}._x")``) is the same write (leg 10).
-
-One known limit, measured rather than assumed: ``import aipass.x._private as
-m`` -- the plain-import form of shape (a) -- is not convicted, because item 10
-names the ``from`` form. No fleet test file uses it today (0 of 591 checked
-2026-09-21); the day one does, this is where it goes.
-
-Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
-
-  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
-    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
-    real row with a percentage and it moves the branch score.
-  * ``check_module`` in the per-file checklist lane -- the same function, fired
-    by the PostToolUse hook, so the rule also meets an author on the write.
-
-The ``check_branch_info`` backlog line retired with that ruling: an unscored
-grey line was the workaround for a corpus that handed this checker no files,
-and the scored row is the record now.
+Reference: through_the_command.md
 """
 
 import ast
@@ -84,16 +26,11 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "THROUGH_THE_COMMAND"
 STANDARD_KEY = "through_the_command"
 
-# The product namespace. A single root, because every branch in the fleet
-# imports through it -- `from aipass.<branch>.apps...` is the house rule.
 PRODUCT_ROOT = "aipass"
 
-# Path segments that mark a module as test scaffolding rather than product.
-# A test importing a helper from another test file is sharing its own fixtures,
-# which item 10 says nothing about.
+# A helper imported from another test file is the test's own scaffolding, not product.
 _TEST_SEGMENTS: frozenset[str] = frozenset({"tests", "conftest"})
 
-# The builtin that reads an attribute by its string name.
 GETATTR = "getattr"
 
 FIX = (
@@ -116,13 +53,7 @@ def _is_product_module(dotted: str | None) -> bool:
 
 
 def _product_bases(tree: ast.Module) -> Dict[str, str]:
-    """Names this file bound to a product module, mapped to what they point at.
-
-    Both import forms bind a name that later carries attribute access:
-    ``import aipass.a.b as m`` binds ``m``; ``from aipass.a import b`` binds
-    ``b``; a bare ``import aipass.a.b`` binds only ``aipass``, so the chain
-    ``aipass.a.b._x`` is rooted there.
-    """
+    """Names this file bound to a product module, mapped to what they point at."""
     bases: Dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -142,9 +73,8 @@ def _bases_from_import(node: ast.Import) -> Dict[str, str]:
 def _bases_from_import_from(node: ast.ImportFrom) -> Dict[str, str]:
     """Product names bound by one ``from ... import ...`` statement.
 
-    A private name imported here is shape (a), reported by ``_private_imports``
-    and never bound as a base -- otherwise ``_helper.__doc__`` would be counted
-    a second time as a reach.
+    A private name here is shape (a), reported by ``_private_imports``; binding it
+    as a base would count ``_helper.__doc__`` a second time as a reach.
     """
     if node.level or not _is_product_module(node.module):
         return {}
@@ -168,12 +98,7 @@ def _private_imports(tree: ast.Module) -> List[Tuple[int, str]]:
 
 
 def _root_name(node: ast.AST) -> Tuple[str, List[str]] | None:
-    """Walk an attribute chain back to its root Name, returning (root, path).
-
-    ``a.b.c`` yields ``("a", ["b", "c"])``. Anything not rooted in a plain
-    name -- a subscript, a call result, a literal -- yields None, which is the
-    dataflow this checker declines to follow.
-    """
+    """Walk an attribute chain back to its root Name, returning (root, path), or None."""
     path: List[str] = []
     while isinstance(node, ast.Attribute):
         path.append(node.attr)
@@ -186,8 +111,7 @@ def _root_name(node: ast.AST) -> Tuple[str, List[str]] | None:
 def _private_reads(tree: ast.Module, bases: Dict[str, str]) -> List[Tuple[int, str]]:
     """Every read of a private attribute on a name bound from a product import.
 
-    Only ``Load`` context counts. A store or a delete is a test writing into
-    the product's private state, which is item 15's shape and item 15's cure.
+    Only ``Load`` counts: a store or delete into private state is item 15's shape.
     """
     found: List[Tuple[int, str]] = []
     for node in ast.walk(tree):
@@ -209,11 +133,7 @@ def _private_reads(tree: ast.Module, bases: Dict[str, str]) -> List[Tuple[int, s
 
 
 def _getattr_read(node: ast.AST) -> ast.Attribute | None:
-    """``getattr(m, "_helper")`` as the attribute read it is, or None.
-
-    The string spelling reaches the same private name, so it is read the same
-    way (seedgo, fleet green leg 10).
-    """
+    """``getattr(m, "_helper")`` as the attribute read it is, or None."""
     if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == GETATTR):
         return None
     if len(node.args) < 2 or not isinstance(node.args[1], ast.Constant) or not isinstance(node.args[1].value, str):
@@ -225,9 +145,7 @@ def _getattr_read(node: ast.AST) -> ast.Attribute | None:
 def scan(source: str) -> List[Tuple[int, str, str]]:
     """(line, name, fix) for every hit in one test file's source, in line order.
 
-    A file that does not parse yields nothing: ruff already convicts the
-    syntax error, and guessing at the call sites of a file Python cannot read
-    would put a line number on a statement that may not exist.
+    A file that does not parse yields nothing: ruff already convicts the syntax error.
     """
     try:
         tree = ast.parse(source)
@@ -260,15 +178,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file for private product helpers reached directly.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file for private product helpers reached directly."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -281,9 +191,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not hits:
         return _result(True, _one_check(True, "Every product reach goes through a public name"), 100)
 
-    # One line per hit, all inside ONE check rather than one check each --
-    # checklist._format_failure prints the FIRST failed check and appends
-    # "(+N more)", so N checks would show one hit and hide the rest.
+    # Every hit on ONE check: checklist._format_failure prints the first failed
+    # check and appends "(+N more)", so one check per hit would hide the rest.
     detail = "\n".join(f"{path.name}:{line} {name} - {fix}" for line, name, fix in hits)
 
     json_handler.log_operation(

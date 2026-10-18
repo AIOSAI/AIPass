@@ -3,7 +3,7 @@
 # Description: Tests for the dispatch daemon's run loop - poll_cycle, spawn_agent, run_daemon
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- the run loop: poll_cycle, the stop signal, spawn_agent, run_daemon."""
@@ -146,7 +146,7 @@ def test_the_registered_stop_signal_sets_shutdown(tmp_path, monkeypatch, signame
     """The handler the started daemon registers for a stop signal sets SHUTDOWN.
 
     Reached through the handler table run_daemon fills, not by name, and
-    called directly: no signal is sent to the test process (ai_mail, leg 14).
+    called directly: no signal is sent to the test process.
     """
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
     monkeypatch.setattr(daemon_mod, "SHUTDOWN", True)
@@ -211,7 +211,7 @@ def test_spawn_agent_success(tmp_path):
     assert result is True
     assert state["daily_counts"]["@testbranch"] == 1
     assert state["session_cycles"][str(branch_path)] == 1
-    # log_dispatch writes the live dispatch log, so the patch stays and is asserted (ai_mail, leg 5)
+    # log_dispatch writes the live dispatch log, so the patch stays and is asserted
     mock_log_dispatch.assert_called_once()
     assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
     mock_notify.assert_called_once_with(
@@ -507,7 +507,7 @@ def test_run_daemon_kill_switch_pauses(tmp_path, monkeypatch):
         run_daemon()
 
     assert call_count["n"] >= 2
-    # The paused loop waits before re-checking, and shutdown still cleans its pid file (ai_mail, leg 5)
+    # The paused loop waits before re-checking, and shutdown still cleans its pid file
     assert mock_sleep.called
     mock_remove_pid.assert_called_once_with()
 
@@ -564,7 +564,7 @@ def test_run_daemon_write_pid_failure_returns_early(tmp_path, monkeypatch):
 
 
 def test_run_daemon_does_not_start_on_an_unreadable_config(tmp_path, monkeypatch):
-    """An unreadable safety config stops the daemon before a cycle, and its pid file goes (ai_mail, leg 13)."""
+    """An unreadable safety config stops the daemon before a cycle, and its pid file goes."""
     pid_file = tmp_path / "daemon.pid"
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
     (tmp_path / "safety_config.json").write_text("{{broken", encoding="utf-8")
@@ -579,7 +579,7 @@ def test_run_daemon_does_not_start_on_an_unreadable_config(tmp_path, monkeypatch
 
 
 def test_run_daemon_skips_a_cycle_on_unreadable_state(tmp_path, monkeypatch):
-    """A cycle whose state file cannot be read spawns nothing (ai_mail, leg 13)."""
+    """A cycle whose state file cannot be read spawns nothing."""
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
     (tmp_path / "daemon_state.json").write_text("{{broken", encoding="utf-8")
     config = {"poll_interval_seconds": 0, "kill_switch_path": str(tmp_path / "pause"), "autonomous_branches": []}
@@ -820,14 +820,14 @@ def test_poll_cycle_spawn_failure_not_counted(tmp_path, monkeypatch):
     assert result == 0
 
 
-# ---- _is_registered_sender tests (DPLAN-0159 S2) ----------------
+# ---- _is_registered_sender tests ----------------
 
 
 def _sender_admitted(tmp_path, monkeypatch, registry, sender):
     """Run an auto_execute dispatch from sender through spawn_agent; True if the sender gate let it by.
 
     An admitted dispatch reaches the lock, which answers held, so nothing is
-    spawned either way (ai_mail, leg 14). registry None leaves the file missing.
+    spawned either way. registry None leaves the file missing.
     """
     reg_file = tmp_path / "AIPASS_REGISTRY.json"
     if registry is not None:
@@ -858,7 +858,7 @@ def _sender_admitted(tmp_path, monkeypatch, registry, sender):
     ids=["registered", "unregistered", "missing_registry_admits", "empty_branches"],
 )
 def test_the_sender_gate_admits_only_a_registered_sender(tmp_path, monkeypatch, registry, sender, admitted):
-    """Only a sender the registry lists passes; a missing registry admits (DPLAN-0159 S2)."""
+    """Only a sender the registry lists passes; a missing registry admits."""
     assert _sender_admitted(tmp_path, monkeypatch, registry, sender) is admitted
 
 
@@ -867,7 +867,7 @@ def test_an_auto_execute_dispatch_is_refused_when_the_registry_cannot_be_read(tm
 
     Before leg 12 _is_registered_sender answered True on an unreadable registry
     (fail open) and spawn_agent ran an auto_execute dispatch from any sender. A
-    missing registry still answers True, as pinned above (ai_mail, leg 12).
+    missing registry still answers True, as pinned above.
     """
     reg_file = tmp_path / "AIPASS_REGISTRY.json"
     reg_file.write_text("{not json", encoding="utf-8")
@@ -895,7 +895,7 @@ def test_an_auto_execute_dispatch_is_refused_when_the_registry_cannot_be_read(tm
     assert state["daily_counts"] == {}
 
 
-# ---- spawn_agent sender auth tests (DPLAN-0159 S2) ----------------
+# ---- spawn_agent sender auth tests ----------------
 
 
 def test_spawn_agent_rejects_unregistered_auto_execute(tmp_path, monkeypatch):

@@ -96,6 +96,8 @@ Decided from the template's text, not by taste. The numbered items live under th
 
 21 conftests are in the corpus; 7 already open with a header.
 
+A file under `tests/` that holds no top-level `test*` function and no `Test*` class is a test plugin, and like a conftest it has no subject for item 6 to name. That is read from the AST, never from the file name.
+
 ---
 
 ## Fleet standing on arrival

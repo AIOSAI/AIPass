@@ -4,18 +4,12 @@
 # Description: Pins against the live .aipass/hooks.json and .aipass/project_hooks.json
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the live .aipass/ hook configs that apps/handlers/config/loader.py hands the engine."""
 
-# Pins against the live .aipass/ configs, not fixtures — see each class docstring.
-#
-# Both classes here read the REAL repo-root files on purpose, which is why this
-# file is one of the four that red a copied tree in @seedgo's audit-tests control
-# run: measuring the live installation is the whole point, and a copy is not it.
-# New live-config pins belong HERE rather than in a fifth file, so that
-# position-dependence stays concentrated where it is declared.
+# Reads the REAL repo-root configs on purpose (a copied tree fails here); new live-config pins go here.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — _run_handler's timeout_s default of 30, owned by tests/test_engine.py
@@ -25,10 +19,7 @@
 class TestLiveProjectConfigTimeouts:
     """Pins the shipped .aipass/hooks.json, not a fixture.
 
-    UserPromptSubmit handlers ran on the hardcoded 30 because no entry carried a
-    timeout key. The owner hit a 30s kill with output discarded on 2026-08-13 21:22.
-    These assert the config half of the stopgap is present in the file the engine
-    actually reads — a fixture-based test would not have caught its absence.
+    A UserPromptSubmit entry without a timeout key is killed at the hardcoded 30, output discarded.
     """
 
     @staticmethod
@@ -56,12 +47,7 @@ class TestLiveProjectConfigTimeouts:
 class TestTheProjectTemplateCarriesTheTestWriteGate:
     """Pins the shipped .aipass/project_hooks.json — what every NEW project inherits.
 
-    The owner ruled the test-write gate fleet-wide on 2026-09-01 (DPLAN-0323).
-    A template is the one place a fleet-wide ruling can be silently absent: the
-    gate can be correct, wired and green in this tree while every project stamped
-    tomorrow starts without it, and no suite that reads a fixture would notice.
-    That is the same species as the timeout gap above — the config half missing
-    while the code half is fine.
+    The test-write gate is fleet-wide; a template can drop it while this tree stays green.
     """
 
     @staticmethod
@@ -94,12 +80,7 @@ class TestTheProjectTemplateCarriesTheTestWriteGate:
 class TestTheTemplateRuling:
     """Pins the 2026-09-09 ruling on .aipass/project_hooks.json (DPLAN-0335 leg 2).
 
-    The template had drifted 13 handlers behind the framework config and still
-    shipped `auto_watchdog`, whose handler file had already been renamed to
-    `auto_watchdog(disabled).py` — a dotted path in a shipped config resolving to
-    nothing, in every project stamped since. Same species as the two classes
-    above: the config half wrong while the code half is fine, and invisible to
-    any test that reads a fixture instead of the file `aipass init` copies.
+    A shipped dotted path that resolves to nothing breaks every project `aipass init` stamps.
     """
 
     @staticmethod
@@ -122,8 +103,7 @@ class TestTheTemplateRuling:
 
     def test_every_template_handler_actually_imports(self):
         """The auto_watchdog cure, generalised: a shipped entry whose module or
-        function does not exist is a hook every new project silently never gets.
-        Import is the only check that cannot be fooled by a plausible string."""
+        function does not exist is a hook every new project silently never gets."""
         import importlib
 
         broken = []
@@ -156,8 +136,7 @@ class TestTheTemplateRuling:
 
     def test_the_framework_only_handlers_stay_out(self):
         """Silence here is the ruling too: each of these needs an AIPass-only
-        service (@memory, the compass, the fleet seat rule, Telegram) that a
-        project does not have, so shipping one buys a per-turn no-op at best."""
+        service (@memory, the compass, the fleet seat rule, Telegram) a project lacks."""
         entries = self._entries()
         for name in (
             "presence_gate",
@@ -176,11 +155,7 @@ class TestTheTemplateRuling:
     def test_the_scripted_lane_is_live_in_the_template(self):
         """A matcher without Bash is a fence only the tool lane can see.
 
-        The framework file has carried Bash since 2026-08-30, when the scripted
-        lane shipped. The template never did, so every project `aipass init`
-        created got the cross-project fence on Edit/Write and nothing at all on
-        `sed -i` — the exact gap the lane was built to close, reopened for every
-        seat outside this repo (feedback c273274e, 2026-09-16).
+        Without it, `sed -i` in every project `aipass init` creates bypasses the cross-project fence.
         """
         matcher = self._template()["PreToolUse"]["pre_edit_gate"]["matcher"]
         assert "Bash" in matcher.split("|"), f"the scripted lane is dark in the template: {matcher}"
@@ -191,13 +166,8 @@ class TestTheTemplateRuling:
         assert entry["enabled"] is True
 
     def test_the_comment_records_where_the_ruling_lives(self):
-        """A config that silently stopped mirroring the framework file has to say
-        so in the file itself, or the next reader re-derives the drift as a bug.
-
-        The pointer has to name the file the table actually lives in: the README
-        diet (FPLAN-0593 Phase 4) moved it to docs/, and a comment still naming
-        the README would send the next reader to a page that no longer carries it.
-        """
+        """A template that is not a mirror says so and names the page and section holding the table."""
         comment = self._template()["_comment"]
-        assert "RULING 2026-09-09" in comment
+        assert "not a mirror" in comment
         assert "docs/project_config.md" in comment
+        assert "The template ruling" in comment

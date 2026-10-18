@@ -3,87 +3,17 @@
 # Description: two-environment verdict diff - the width_coupling execution group
 # Version: 1.0.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Run the suite twice under two named environments and diff the per-test verdicts.
+"""Run the suite twice under two named environments and diff the per-test verdicts.
 
-WHAT THIS MEASURES. A test suite can be green only at some terminal widths.
-Rich - and every console renderer under it - wraps at the reported column
-count, so `assert "some phrase" in captured.err` passes at 200 columns and
-fails at 40 because the phrase now spans a line break. The suite is green on
-the developer's wide terminal and red in CI, or the reverse, and NOTHING in
-the suite names the width it depends on. This group names it: the output is
-the set of nodeids whose verdict CHANGES between a narrow run and a wide run.
-A verdict delta is not a suspicion about a test, it is the defect itself.
-
-WHY THIS AND NOT A STATIC RULE. A static rule was measured first and rejected
-with numbers. The shape "whitespace needle matched against a pytest capture in
-a module pinning no width" fires on 6 rows in the banked canary fixture, 3 in
-seedgo, 22 in hooks and 0 in ai_mail - it does not drown, but it catches only
-ONE of the two shapes actually present. It finds `assert reason in
-captured.err` and is structurally blind to `assert not any(line.strip()
-.isdigit() for line in captured.out.splitlines())`, which is 5 of the 30
-coupled cases on the fixture. The dynamic diff catches both, and every shape
-nobody has thought of yet, because it never looks at the source at all.
-
-THE GENERAL MECHANISM, AND THE NEXT AXIS. The core here is deliberately NOT
-about width. `run_axis()` takes two `Variant` objects - a name, a set of
-environment overrides, a sentence of description - runs the suite once per
-variant, and returns the nodeids whose verdict differs. Width is simply the
-first axis built on it (`width_variants()`). The spine's `order_dependence`
-group is the SAME mechanism with a different knob: variant A runs the suite in
-declaration order, variant B shuffles it, and the diff is read identically.
-That group is currently `not_applicable: "not built"`. Building it means
-adding one `order_variants()` beside `width_variants()` and nothing else in
-this file; it is deliberately left unbuilt rather than half-built.
-
-THE INSTRUMENT-DEFORMATION PROBLEM, WHICH IS THE WHOLE CRUX OF THIS BUILD.
-The obvious way to get per-test verdicts is to parse pytest's own output. That
-is unsound HERE in a way it is not unsound elsewhere, because the narrow
-variant deliberately sets COLUMNS=40, and the reported width is exactly what
-deforms the summary being parsed. Measured, on a throwaway one-test file with
-a long nodeid:
-
-    COLUMNS=200  FAILED test_...trimmed - AssertionError: the phrase was not found
-    COLUMNS=40   FAILED test_...trimmed
-
-pytest's `_get_line_with_reprcrash_message` trims the ` - <message>` tail to
-the reported width and drops it entirely when the nodeid alone already
-overflows. So the human readout loses information as a function of the single
-variable under test: the narrow run is precisely the run whose readout is
-worst, and any count read from it would be a count of the instrument's own
-blindness. This pack has been bitten by that once already.
-
-THE FIX: THE VERDICTS NEVER TRAVEL THROUGH THE TERMINAL. A tiny stdlib-only
-pytest plugin is written into a scratch directory and loaded with `-p`. It
-records one JSONL line per `pytest_runtest_logreport` - nodeid, phase,
-outcome, xfail flag - straight to a file path handed to it by environment
-variable. That channel has no width, no wrapping and no trimming, so the
-narrow run's verdicts are byte-identical in form to the wide run's. Proven
-rather than assumed, two ways: (1) the collapsed JSONL verdicts for the canary
-fixture's `tests/test_span.py` at COLUMNS=40 are 25 failed / 31 passed, which
-is exactly what pytest's own tally line reports for that run - the machine
-channel and the human channel agree on the counts while only the machine
-channel keeps the nodeids intact; (2) the plugin also writes a header record
-carrying the width the CHILD actually resolved, and `run_axis()` REFUSES the
-whole axis if a child did not resolve the width its variant asked for. The
-axis cannot silently measure nothing.
-
-REFUSAL, NEVER A ZERO. If either variant fails to produce verdicts - import
-error, no tests collected, budget expiry, a pytest exit code that means the
-session was interrupted - the group reports `not_applicable` with the reason.
-A divergence count computed from one successful run is not a small number, it
-is a meaningless one. A nodeid present in one run and absent from the other is
-its own finding and travels in `collection_delta`; it is never dropped from
-the comparison in silence.
-
-WHAT THE ADAPTER OWES AND WHAT IT DOES NOT. Nothing here constructs an
-environment, copies a tree or imports the target. The interpreter, the working
-directory, the PYTHONPATH and the test argument arrive as a `Target`, which an
-adapter fills from its `envcopy.EnvSpec` in one line. This module only runs
-that target twice and subtracts.
+The output is the set of nodeids whose verdict changes between a narrow and a wide
+run: the width coupling itself, which a static rule only half catches. `run_axis()`
+knows nothing about width; another axis is one more `*_variants()` beside it.
+Verdicts never travel through the terminal: COLUMNS=40 trims pytest's own summary,
+so an injected plugin writes JSONL, and its header records the width the child
+actually resolved. Either variant failing refuses the axis, never a zero.
 """
 
 import json
@@ -101,29 +31,18 @@ from aipass.seedgo.apps.handlers.json import json_handler
 
 GROUP = "width_coupling"
 
-#: The axis this module ships. The name is published in the group document so
-#: a second axis built on the same core is distinguishable in an artifact.
+#: Published so a second axis on the same core is distinguishable in an artifact.
 AXIS_WIDTH = "width"
 
-#: The two widths, named because an inline `40` three calls deep is a magic
-#: number nobody can argue with. 40 is where the canary fixture's coupling
-#: peaks (25 of 56 tests in `test_span.py` flip); 200 is wide enough that
-#: nothing observed in the fixture or in seedgo wraps at all.
+#: 40 is where the canary fixture's coupling peaks; at 200 nothing observed wraps.
 NARROW_COLUMNS = 40
 WIDE_COLUMNS = 200
 
 VARIANT_NARROW = "narrow"
 VARIANT_WIDE = "wide"
 
-#: Held IDENTICAL across both variants, so the only difference between the two
-#: runs is the axis itself.
-#:
-#: `LINES` is pinned because a renderer that pages on height would otherwise
-#: be a second uncontrolled variable. `PYTHONHASHSEED` is pinned because set
-#: and dict iteration order can decide a verdict, and an unpinned seed turns
-#: ordinary nondeterminism into a false divergence. `TERM` is a real terminal
-#: name rather than empty or `dumb`: Rich treats `dumb`/`unknown` as a fixed
-#: 80x25 console and would ignore the axis entirely.
+#: Identical across variants so only the axis differs. `TERM` is a real name: Rich
+#: treats `dumb`/`unknown` as a fixed 80x25 console and would ignore the axis.
 SHARED_ENVIRONMENT: Dict[str, str] = {
     "TERM": "xterm-256color",
     "LINES": "24",
@@ -131,14 +50,10 @@ SHARED_ENVIRONMENT: Dict[str, str] = {
     "PYTHONDONTWRITEBYTECODE": "1",
 }
 
-#: The variable the child writes its verdict log to. The plugin REFUSES to
-#: load without it, so a run that lost the channel dies loudly instead of
-#: reporting an empty and entirely believable zero.
+#: The plugin refuses to load without it, so a lost channel dies loudly, not as zero.
 VERDICT_LOG_ENV = "AUDIT_TESTS_VERDICT_LOG"
 
-#: The width knob. Read by `shutil.get_terminal_size()` and by Rich's
-#: `Console.size`, both of which prefer it over the real tty size - which is
-#: what makes the axis work at all in a non-tty child.
+#: Preferred over the tty size by `shutil` and Rich, which makes the axis work in a non-tty child.
 COLUMNS_ENV = "COLUMNS"
 
 PLUGIN_MODULE = "envdiff_verdict_plugin"
@@ -146,13 +61,11 @@ PLUGIN_FILENAME = f"{PLUGIN_MODULE}.py"
 VERDICT_LOG_TEMPLATE = "verdicts_{variant}.jsonl"
 WORKDIR_PREFIX = "audit_tests_envdiff_"
 
-#: Record kinds in the verdict log.
 RECORD_HEADER = "header"
 RECORD_REPORT = "report"
 RECORD_COLLECT_ERROR = "collect_error"
 RECORD_SESSION = "session"
 
-#: pytest phase names, as `TestReport.when` spells them.
 PHASE_SETUP = "setup"
 PHASE_CALL = "call"
 PHASE_TEARDOWN = "teardown"
@@ -168,21 +81,13 @@ VERDICT_SKIPPED = "skipped"
 VERDICT_XFAILED = "xfailed"
 VERDICT_XPASSED = "xpassed"
 
-#: The only two pytest exit codes that mean "the session ran to its end and
-#: every verdict in the log is final". 2 (interrupted), 3 (internal error),
-#: 4 (usage error) and 5 (no tests collected) all leave a partial or empty
-#: log, and a partial suite that reports a number is forgery by omission.
+#: The only exit codes whose log is final; 2-5 leave a partial or empty log.
 PYTEST_EXIT_OK = 0
 PYTEST_EXIT_TESTS_FAILED = 1
 COMPLETING_EXIT_CODES: Tuple[int, ...] = (PYTEST_EXIT_OK, PYTEST_EXIT_TESTS_FAILED)
 
-#: Invocation flags shared by both runs. `-p no:cacheprovider` keeps the run
-#: from writing a `.pytest_cache` into somebody else's tree; `-p no:randomly`
-#: neutralises pytest-randomly, which reseeds per session and would make the
-#: two runs disagree for reasons that have nothing to do with the axis. Both
-#: are no-ops when the plugin is absent. The target's own configuration is
-#: otherwise left entirely in effect: overriding `addopts` would measure a
-#: suite nobody runs.
+#: `no:randomly` stops per-session reseeding from faking a divergence. The target's
+#: own config stays in effect: overriding `addopts` would measure a suite nobody runs.
 PYTEST_BASE_ARGS: Tuple[str, ...] = (
     "-B",
     "-m",
@@ -200,22 +105,15 @@ PYTEST_TAIL_ARGS: Tuple[str, ...] = (
     "--tb=no",
 )
 
-#: Wall-clock ceiling on ONE variant run, matching the adapter's T-BUDGET
-#: default. The axis costs two of these.
+#: Per variant run, matching the adapter's T-BUDGET default; the axis costs two.
 DEFAULT_BUDGET_SECONDS = 900
 
-#: How much of a run's stdout is kept for a reader. The verdicts do not come
-#: from here; this is a diagnostic tail for the refusal cases.
 STDOUT_TAIL_CHARS = 2000
 
-#: How much of that tail a refusal reason quotes, and how many failing
-#: collection nodeids it names. A reason nobody reads because it is 2 KB long
-#: is a reason nobody can act on.
 REFUSAL_OUTPUT_CHARS = 400
 MAX_NAMED_COLLECT_ERRORS = 3
 
-#: Ceiling on the published divergence list. The COUNT is never capped - only
-#: the enumeration - and the document says when it truncated.
+#: Caps the enumeration only, never the count; the document says when it truncated.
 MAX_REPORTED_DIVERGENCES = 500
 
 GROUP_TIER = "exec"
@@ -223,8 +121,6 @@ GROUP_KIND = "measure_only"
 STATUS_MEASURED = "measured"
 STATUS_NOT_APPLICABLE = "not_applicable"
 
-#: The seam to the next axis, published in the document so a reader deciding
-#: whether to fund it can see how small it is.
 NEXT_AXIS_NOTE = (
     "order_dependence is the same mechanism with a different knob: two variants that "
     "differ in test order rather than in COLUMNS, diffed by this identical core. It is "
@@ -232,9 +128,7 @@ NEXT_AXIS_NOTE = (
     "an order_variants() beside width_variants() and changes nothing else here."
 )
 
-#: Everything this axis structurally cannot see. Plain sentences, published
-#: with every result, because a divergence count read without them invites
-#: exactly the over-reading the lane exists to refuse.
+#: Published with every result, so a divergence count is not over-read.
 WIDTH_AXIS_LIMITS: Tuple[str, ...] = (
     "Two widths are two points, not a sweep. A suite green at both 40 and 200 can "
     "still be coupled at some width in between, and this axis will call it clean.",
@@ -264,11 +158,8 @@ WIDTH_AXIS_LIMITS: Tuple[str, ...] = (
     "whose conftest set COLUMNS=120: both variants refused with the width they got.",
 )
 
-#: Named `GROUP_SPECIFICATION` and not `SPECIFICATION` on purpose: the pack's
-#: `render_spec.render()` hardcodes "TIER: STATIC - nominates, never convicts"
-#: into everything it is handed, and this is an execution group. A dict under
-#: the nominators' name would eventually be rendered and would publish a false
-#: tier for this group.
+#: Not `SPECIFICATION`: `render_spec` stamps the STATIC tier on everything it renders,
+#: and this is an execution group.
 GROUP_SPECIFICATION: Dict[str, object] = {
     "rule": "a suite's verdicts must not depend on the terminal width it is rendered at",
     "mechanism": "run the suite twice, identical in everything but COLUMNS, and subtract the per-nodeid verdicts",
@@ -284,24 +175,9 @@ GROUP_SPECIFICATION: Dict[str, object] = {
     ),
 }
 
-# =============================================================================
-# THE INJECTED PLUGIN
-# =============================================================================
 
-#: The verdict channel, as source. Written into a scratch directory at run
-#: time and loaded with `-p`; never imported by this process.
-#:
-#: IT IS STDLIB-ONLY AND IMPORTS NO AIPASS, and that is a hard property rather
-#: than a preference: this code is loaded inside a copy of somebody else's
-#: tree, where an aipass import would be the instrument reaching back into what
-#: it measures (Law M10). It is kept as a string in this module rather than as
-#: a file under `payload/` so that the pack ships exactly one new file; a later
-#: move into `payload/` is legitimate and would then be covered by
-#: `adapters.execution_isolation()`'s machine check on that directory.
-#:
-#: The header record is not decoration. It carries the width the child
-#: ACTUALLY resolved, which is what turns "COLUMNS takes effect in a non-tty
-#: child" from an assumption into a per-run assertion.
+#: Loaded with `-p` inside a foreign copy, never imported here: stdlib-only, no aipass
+#: import (Law M10). Outside `payload/`, so `execution_isolation()` does not check it.
 VERDICT_PLUGIN_SOURCE = f'''"""Per-test verdict recorder. Stdlib only. Imports no aipass, ever."""
 
 import json
@@ -362,19 +238,9 @@ class EnvDiffError(RuntimeError):
     """The axis could not be set up. Never raised for a suite that merely failed."""
 
 
-# =============================================================================
-# THE SHAPES
-# =============================================================================
-
-
 @dataclass(frozen=True)
 class Target:
-    """Where and how to invoke pytest. Built by the caller, never by this module.
-
-    Nothing here copies a tree, resolves an interpreter or imports the target.
-    An adapter holding an `envcopy.EnvSpec` fills this in one line, and a
-    caller measuring a branch in place fills it by hand.
-    """
+    """Where and how to invoke pytest. Built by the caller, never by this module."""
 
     python: Path
     cwd: Path
@@ -394,10 +260,7 @@ class Target:
 class Variant:
     """One named environment the suite is run under.
 
-    `env` holds ONLY what makes this variant different plus what both variants
-    must agree on; it is layered over the parent environment by
-    `_child_environment()` rather than replacing it, because a suite stripped
-    of PATH and HOME measures a machine nobody has.
+    `env` is layered over the parent environment: a suite stripped of PATH and HOME measures nothing real.
     """
 
     name: str
@@ -477,10 +340,7 @@ class Divergence:
 class CollectionDelta:
     """One nodeid one variant collected and the other did not.
 
-    This is a finding in its own right and never a silent drop: two runs that
-    collected different tests are not two measurements of one suite, and a
-    divergence count that quietly ignored the difference would be describing a
-    comparison it did not make.
+    A finding, never a silent drop: different collections are not one suite measured twice.
     """
 
     nodeid: str
@@ -540,24 +400,10 @@ class AxisResult:
         return document
 
 
-# =============================================================================
-# THE WIDTH AXIS
-# =============================================================================
-
-
 def width_variants(narrow: int = NARROW_COLUMNS, wide: int = WIDE_COLUMNS) -> Tuple[Variant, Variant]:
     """The two variants of the width axis: same everything, different COLUMNS.
 
-    Args:
-        narrow: Columns for the narrow variant.
-        wide: Columns for the wide variant.
-
-    Returns:
-        The narrow variant and the wide variant, in that order.
-
-    Raises:
-        EnvDiffError: If the two widths are not two distinct positive widths -
-            an axis whose ends coincide would report a confident zero.
+    Raises EnvDiffError unless the widths are two distinct positives: coinciding ends report a confident zero.
     """
     if narrow < 1 or wide < 1:
         raise EnvDiffError(f"a terminal width must be positive: narrow={narrow}, wide={wide}")
@@ -584,19 +430,12 @@ def width_variants(narrow: int = NARROW_COLUMNS, wide: int = WIDE_COLUMNS) -> Tu
 def expected_columns(variant: Variant) -> Optional[int]:
     """The width this variant asked the child for, or None when it asked for none.
 
-    Used to check the child against its own instructions. A non-numeric COLUMNS
-    is reported as "asked for nothing" rather than crashing the axis, because
-    the caller may legitimately be running a non-width axis through this core.
+    A non-numeric COLUMNS is "asked for nothing": a non-width axis may run through this core.
     """
     raw = variant.env.get(COLUMNS_ENV, "")
     if not raw.isdigit():
         return None
     return int(raw)
-
-
-# =============================================================================
-# THE GENERIC CORE
-# =============================================================================
 
 
 def run_axis(
@@ -610,34 +449,8 @@ def run_axis(
 ) -> AxisResult:
     """Run the suite once per variant and return the nodeids whose verdict differs.
 
-    This is the whole general mechanism. It knows nothing about terminal width;
-    it knows that two named environments went in and two sets of per-nodeid
-    verdicts came out. Any axis expressible as "the same suite under a
-    different environment" is a `Variant` pair away.
-
-    THE AXIS REFUSES RATHER THAN SHRINKS. If either variant produced no
-    verdicts, did not reach `pytest_sessionfinish`, exited with a code that
-    means the session was cut short, or resolved a width other than the one it
-    was given, the result carries `refused=True` and a reason and an empty
-    divergence list. A divergence count derived from one good run and one bad
-    one is not a conservative number, it is a wrong one.
-
-    Args:
-        target: The interpreter, cwd, PYTHONPATH and test argument. Supplied by
-            the caller; this module builds no environment of its own.
-        variants: Exactly two variants to compare.
-        workdir: Where the injected plugin and the verdict logs are written. A
-            temporary directory is created and removed when this is None. It is
-            never the target's own tree.
-        budget_seconds: Wall-clock ceiling per variant run.
-        axis: The axis name published in the document.
-        limits: Plain sentences naming what this axis cannot see.
-
-    Returns:
-        The diff, both raw summaries, and the refusal reason if there is one.
-
-    Raises:
-        EnvDiffError: If `variants` is not exactly two distinctly-named variants.
+    Refuses rather than shrinks: a bad variant gives `refused=True`, a reason, and no divergences.
+    `workdir` is never the target's own tree.
     """
     _validate_variants(variants)
 
@@ -679,15 +492,7 @@ def _run_all(
 def install_plugin(workdir: Path) -> Path:
     """Write the verdict-recording plugin into `workdir` and return its directory.
 
-    Args:
-        workdir: A scratch directory. Never the target's tree.
-
-    Returns:
-        The directory to append to the child's PYTHONPATH.
-
-    Raises:
-        EnvDiffError: If the plugin could not be written - without it there is
-            no verdict channel, and a run without one must not start.
+    Raises EnvDiffError if it cannot: a run without the verdict channel must not start.
     """
     directory = Path(workdir)
     try:
@@ -701,9 +506,7 @@ def install_plugin(workdir: Path) -> Path:
 def _child_environment(target: Target, variant: Variant, plugin_dir: Path, log_path: Path) -> Dict[str, str]:
     """The parent environment, plus the shared pins, plus this variant's axis.
 
-    The plugin directory goes on the END of PYTHONPATH, never the front: the
-    caller's PYTHONPATH is what makes the target importable, and a scratch
-    directory shadowing it would measure a tree nobody asked about.
+    The plugin directory goes on the END of PYTHONPATH so it never shadows the target.
     """
     environment = dict(os.environ)
     environment.update(SHARED_ENVIRONMENT)
@@ -777,9 +580,7 @@ def _launch(
 def _clear_log(log_path: Path) -> None:
     """Remove a stale log, loudly if it will not go.
 
-    The plugin appends, so a leftover file from an earlier run would be read as
-    this run's verdicts. An unremovable one is reported rather than ignored,
-    because the alternative is a diff against somebody else's session.
+    The plugin appends, so a leftover file would read as this run's verdicts.
     """
     try:
         log_path.unlink(missing_ok=True)
@@ -811,8 +612,7 @@ def _absorb_log(run: VariantRun, log_path: Path) -> None:
 def _rule_on_run(run: VariantRun, variant: Variant) -> None:
     """Decide whether this variant is entitled to contribute verdicts at all.
 
-    Ordered most-diagnostic first, so the reason a reader gets names the
-    earliest thing that went wrong rather than its last symptom.
+    Most-diagnostic first, so the reason names the earliest thing that went wrong.
     """
     if run.refused:
         return
@@ -848,19 +648,10 @@ def _rule_on_run(run: VariantRun, variant: Variant) -> None:
         run.reason = f"the run executed no test at all - {detail}"
 
 
-# =============================================================================
-# THE VERDICT CHANNEL
-# =============================================================================
-
-
 def read_records(log_path: Path) -> List[dict]:
     """Every well-formed JSONL record in a verdict log.
 
-    A truncated final line is DROPPED AND SAID SO rather than raising: the
-    child flushes each line, so a partial tail means the process died
-    mid-write, which the refusal rules upstream already catch through the
-    missing session record. A missing file is an empty list, and its emptiness
-    is what produces the refusal.
+    A truncated final line is dropped, not raised: the missing session record refuses upstream.
     """
     path = Path(log_path)
     if not path.is_file():
@@ -899,14 +690,7 @@ def _decode(line: str, path: Path, number: int) -> Optional[dict]:
 def collapse_verdicts(records: Iterable[dict]) -> Dict[str, str]:
     """Per-nodeid verdicts, collapsed from pytest's three per-test phase reports.
 
-    pytest reports setup, call and teardown separately and a reader has to
-    combine them: a setup failure is an ERROR and not a failure, a skip
-    declared in setup never reaches call, an `xfail` marker turns a call
-    failure into `xfailed` and a call pass into `xpassed`, and a teardown
-    failure is an error against a test that may already have passed. The
-    combining rule is applied identically to both variants, so any residual
-    disagreement with pytest's own tally is a disagreement in both columns and
-    cannot manufacture a divergence.
+    One combining rule for both variants, so a residual tally disagreement cannot fake a divergence.
     """
     verdicts: Dict[str, str] = {}
     for record in records:
@@ -954,11 +738,6 @@ def _call_verdict(outcome: str, xfail: bool) -> str:
         OUTCOME_FAILED: VERDICT_FAILED,
         OUTCOME_SKIPPED: VERDICT_SKIPPED,
     }.get(outcome, "")
-
-
-# =============================================================================
-# THE SUBTRACTION
-# =============================================================================
 
 
 def _assemble(
@@ -1020,11 +799,6 @@ def _collection_delta(first: VariantRun, second: VariantRun) -> List[CollectionD
     return deltas
 
 
-# =============================================================================
-# THE GROUP DOCUMENT
-# =============================================================================
-
-
 def measure_width_coupling(
     target: Target,
     *,
@@ -1033,18 +807,7 @@ def measure_width_coupling(
     workdir: Optional[Path] = None,
     budget_seconds: int = DEFAULT_BUDGET_SECONDS,
 ) -> AxisResult:
-    """The width axis, end to end. One call for an adapter to wire.
-
-    Args:
-        target: Interpreter, cwd, PYTHONPATH and test argument.
-        narrow: Columns for the narrow variant.
-        wide: Columns for the wide variant.
-        workdir: Scratch directory for the plugin and the logs.
-        budget_seconds: Wall-clock ceiling per run; the axis costs two.
-
-    Returns:
-        The axis result, refused or measured.
-    """
+    """The width axis, end to end. One call for an adapter to wire."""
     variants = width_variants(narrow=narrow, wide=wide)
     return run_axis(
         target,
@@ -1059,11 +822,7 @@ def measure_width_coupling(
 def group_document(result: AxisResult) -> dict:
     """The `width_coupling` group, as the artifact publishes it.
 
-    Law S1 in one place: a refused axis is `not_applicable` WITH A REASON and
-    never a zero, because "no divergence found" and "nothing was measured" must
-    never produce the same document. `score` stays None either way - this group
-    is not in `SCORED_GROUPS`, and scoring is the core's job rather than an
-    adapter's.
+    Law S1: a refused axis is `not_applicable` with a reason, never a zero; `score` stays None.
     """
     measured = not result.refused
     document: Dict[str, object] = {
@@ -1081,15 +840,7 @@ def group_document(result: AxisResult) -> dict:
 
 
 def not_applicable_document(reason: str) -> dict:
-    """The group when the axis never ran at all. Law S1, stated once.
-
-    Args:
-        reason: Why nothing was measured. Mandatory - a `not_applicable`
-            without one is indistinguishable from a silent skip.
-
-    Returns:
-        The group document.
-    """
+    """The group when the axis never ran at all. Law S1, stated once."""
     return {
         "tier": GROUP_TIER,
         "kind": GROUP_KIND,
@@ -1107,11 +858,6 @@ def not_applicable_document(reason: str) -> dict:
         "collection_delta": [],
         "limits": list(WIDTH_AXIS_LIMITS),
     }
-
-
-# =============================================================================
-# HOUSEKEEPING
-# =============================================================================
 
 
 def _first(records: List[dict], kind: str) -> dict:
@@ -1132,10 +878,7 @@ def _as_optional_int(value: object) -> Optional[int]:
 def _remove_scratch(scratch: Path) -> None:
     """Delete a scratch directory this module created, and only one it created.
 
-    The guard is the M10 boundary rather than defensive habit: this deletes a
-    tree, so it refuses anything that is not a directory whose name this module
-    chose. A teardown that could be pointed at a real tree is worse than
-    anything the lane measures.
+    The M10 boundary: it refuses anything that is not a directory this module named.
     """
     path = Path(scratch)
     if not path.is_dir() or not path.name.startswith(WORKDIR_PREFIX):

@@ -22,9 +22,8 @@ when the command called `error()` and **0** when it did not.
 | `2` | The command returned 0 after calling `error()` — the seam caught it |
 
 `migrate-passports` against a root with no discoverable passports is the worked example: it
-prints that nothing was scanned and **exits non-zero**. It exited 0 until the refusal sweep,
-which made "I searched the wrong root" indistinguishable from "your fleet is already
-migrated" to anything reading the exit code.
+prints that nothing was scanned and **exits non-zero**, so "I searched the wrong root" is
+never mistaken for "your fleet is already migrated" by anything reading the exit code.
 
 ---
 
@@ -62,7 +61,7 @@ is the separate lane for callers that must distinguish "this passport has not be
 yet" from a hard error.
 
 `tests/test_modules_gateway.py` pins the door, and `tests/test_handlers_fence.py` pins
-spawn's own fence (`apps/handlers/__init__.py`, v2.1, DPLAN-0404) in a fresh interpreter per
+spawn's own fence (`apps/handlers/__init__.py`, v2.1) in a fresh interpreter per
 case. Every newborn is born with the same fence: `templates/citizen/apps/handlers/__init__.py`
 is devpulse's fence template verbatim, placeholders intact, and the template ships the pair
 `tests/test_handlers_fence.py` and `tests/support_fence.py` so a newborn pins its own fence
@@ -100,4 +99,4 @@ index copies no cap.
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-10-17

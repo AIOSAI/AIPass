@@ -3,17 +3,10 @@
 # Description: Tests for the monitor single-instance lock
 # Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py."""
-
-# Covers:
-# - _is_pid_alive() cross-platform liveness check
-# - try_acquire() creates lock, returns False for live duplicate, reclaims stale
-# - _current_boot_id() + cross-boot reclaim (PID reuse after reboot)
-# - release() removes lock file on clean shutdown
-# - Concurrent viewer: relay lock scoped to TG sends, never blocks display
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(json_structure) — try_acquire's log_operation record, covered by that row
@@ -31,12 +24,7 @@ from aipass.prax.apps.handlers.monitoring import instance_lock as mod
 
 @pytest.fixture(autouse=True)
 def lock_world(monkeypatch, tmp_path):
-    """Every edge of instance_lock.py, replaced where instance_lock binds it.
-
-    The logger and json_handler are recorders, so no line reaches a live log or
-    prax_json. The two lock globals are set through monkeypatch and restored at
-    teardown: the lock file is tmp_path / "relay.pid" and no lock is held.
-    """
+    """Every edge of instance_lock.py replaced where it binds it: recorders, lock file tmp_path / "relay.pid"."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setattr(mod, "json_handler", MagicMock())
     monkeypatch.setattr(mod, "logger", MagicMock())
@@ -50,11 +38,7 @@ def _held_by(tmp_path, pid: int) -> None:
 
 
 class TestIsPidAlive:
-    """Test cross-platform PID liveness check, read through try_acquire (prax, leg 5).
-
-    The liveness verdict has one reader, try_acquire: a live holder refuses the
-    lock (False), a dead one is reclaimed (True). Each verdict is asserted there.
-    """
+    """Cross-platform PID liveness, read through its one reader, try_acquire: live refuses, dead is reclaimed."""
 
     def test_live_pid_returns_true_posix(self, tmp_path):
         """os.kill(pid, 0) success means alive on POSIX."""
@@ -174,23 +158,13 @@ class TestBootIdentity:
         data = json.loads((tmp_path / "relay.pid").read_text(encoding="utf-8"))
         assert "boot_id" not in data
 
-    # The guard names the platform that HAS the recipe, not one platform that
-    # lacks it. It used to read `sys.platform == "win32"`, which let this run on
-    # macOS, where there is no procfs either: _current_boot_id() correctly
-    # answered None and `assert boot_id` went red on every macOS CI run
-    # (34707762639, 34707861282, 34708132945). The portable half of the contract
-    # — no procfs means None, never an exception — is the sibling above, which
-    # patches the read and so runs on every OS.
+    # Skip names the platform that HAS procfs (macOS lacks it too); the sibling above is the portable half.
     @pytest.mark.skipif(
         sys.platform != "linux",
         reason="reads /proc/sys/kernel/random/boot_id - no procfs here; the recipe is unavailable, not the state",
     )
     def test_current_boot_id_reads_proc_on_linux(self, tmp_path):
-        """Linux exposes a non-empty boot id that is stable within a boot.
-
-        Read through the lock it is written into: two acquisitions in one boot
-        record the same, non-empty id.
-        """
+        """Linux exposes a non-empty boot id, stable within a boot, read through the lock it is written into."""
         lock_path = tmp_path / "relay.pid"
         assert mod.try_acquire() is True
         first = json.loads(lock_path.read_text(encoding="utf-8")).get("boot_id")
@@ -212,12 +186,7 @@ class TestBootIdentity:
         assert data["boot_id"] == "boot-now"
 
     def test_reclaims_lock_from_previous_boot(self, tmp_path):
-        """A lock from an earlier boot is stale even if its PID is alive now.
-
-        This is the 2026-07-31 failure: relay.pid survived a reboot holding
-        PID 1567, which the new boot handed to an unrelated early process.
-        Liveness said "held", so the relay ran viewer-only for 1h51m.
-        """
+        """A lock from an earlier boot is stale even if its PID is alive now (PIDs are reused after reboot)."""
         lock_path = tmp_path / "relay.pid"
 
         lock_path.write_text(
@@ -296,10 +265,7 @@ class TestBootIdentity:
 
 
 def _a_later_holder_survives_release(tmp_path) -> bool:
-    """The hold is cleared when a lock written after the release outlives another release() (prax, leg 5).
-
-    release() deletes only the file it holds, so this is the cleared hold seen from outside.
-    """
+    """The hold is cleared when a lock written after the release outlives another release()."""
     lock_path = tmp_path / "relay.pid"
     lock_path.write_text("held by someone else", encoding="utf-8")
     mod.release()
@@ -326,12 +292,7 @@ class TestRelease:
         assert _a_later_holder_survives_release(tmp_path)
 
     def test_release_without_acquire_is_safe(self, tmp_path):
-        """release() is a no-op when no lock is held.
-
-        "No-op" is observable: no file is unlinked and nothing claims a release
-        that never happened, so a viewer that never took the relay lock cannot
-        delete the lock file the holder is standing on.
-        """
+        """release() is a no-op when no lock is held: a viewer never deletes the holder's lock file."""
         lock_path = tmp_path / "relay.pid"
         lock_path.write_text("held by someone else", encoding="utf-8")
 

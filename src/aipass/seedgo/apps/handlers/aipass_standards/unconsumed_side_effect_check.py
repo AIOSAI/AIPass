@@ -3,55 +3,13 @@
 # Description: Unconsumed Side Effect Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unconsumed Side Effect Standards Checker Handler
 
-Crack class F from the 2026-09-22 eyes-on review of @backup's tests. A test
-queues several answers for a mock and never checks that they were all taken::
-
-    drive_api.side_effect = [
-        {"files": []},
-        {"id": "new_folder_456"},
-        {"id": "new_folder_456", "name": "AIPass Backups"},
-    ]
-
-A ``side_effect`` list of three says the product will call this mock three
-times. Nothing in the test says so. If the product calls it twice, the third
-answer is never consumed, the test still passes, and whatever branch that third
-answer was written to feed is unpinned -- deletable, with the suite green.
-
-THE CURE IS ONE LINE: ``assert mock.call_count == 3``, or
-``assert_has_calls([...])`` when the arguments matter. Either one turns the
-list's length from a hope into a claim.
-
-WHAT ACQUITS, WHAT IS SCORED, WHAT IS COUNTED:
-
-  * ACQUITTED: the test asserts the mock's calls -- ``call_count``,
-    ``assert_called``/``assert_called_once``/``assert_called_with`` and their
-    kin, ``assert_has_calls``, ``mock_calls``, ``call_args``,
-    ``assert_not_called``, and the ``await_`` forms. 9 of the fleet's 26.
-  * SCORED: the mock is never mentioned in any assertion in the test. 17.
-  * COUNTED, not charged: the mock is asserted some OTHER way -- its return
-    value reaches an assert, say -- so the test is watching it, just not
-    counting it. Zero in this fleet today; the bucket is here because the
-    shape is legitimate and the count should be ready when it appears.
-
-A list of ONE is never judged: a single queued answer is a return value spelled
-differently, and there is no unconsumed tail to lose.
-
-CHECK FIRST, measured 2026-09-23 over the fleet's 572 test files:
-
-  * 5 files, 17 scored, 0 counted, 9 acquitted.
-  * Lengths among the judged: 2 eleven times, 3 five times, 4 once.
-  * @backup carries 4, @backup's share suite 7, @hooks 4, @api and @drone 1
-    each.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: the list's length is an assertion the
-test declines to make. The fix is additive -- one more assert -- and no
-threshold exists to tune.
+Reference: unconsumed_side_effect.md
 """
 
 import ast
@@ -68,7 +26,6 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "UNCONSUMED_SIDE_EFFECT"
 STANDARD_KEY = "unconsumed_side_effect"
 
-#: The attribute that queues several answers for one mock.
 SIDE_EFFECT = "side_effect"
 
 #: Every way a test can claim how many times, or with what, the mock was called.
@@ -219,15 +176,7 @@ def _clean_message(reported: int) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for queued mock answers nothing counts.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for queued mock answers nothing counts."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 

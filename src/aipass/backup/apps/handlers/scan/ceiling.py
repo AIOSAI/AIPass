@@ -3,26 +3,13 @@
 # Description: Per-run size/file-count ceiling — refuses runaway backups loudly
 # Version: 1.0.0
 # Created: 2026-08-20
-# Modified: 2026-08-20
+# Modified: 2026-10-17
 # =============================================
 
 """Per-run backup ceiling.
 
-A backup that is far larger than the operator expects is almost never a
-big project — it is an ignore-pattern miss. baud proved the failure mode:
-a Rust ``src-tauri/target`` tree (33,093 files / 18GB) was absent from
-.backupignore, so a run started at 01:14 was still copying ``.rcgu.o``
-files at 08:50 and had written 50GB of build artifacts into the stores.
-Nothing in the pipeline objected, because nothing was measuring.
-
-This module measures the filtered set BEFORE any copying starts and
-refuses the run when it breaches a ceiling, naming the directories that
-caused the breach so the operator can add them to .backupignore. It fails
-loud rather than grinding silently: a refused run costs seconds, a
-runaway costs hours and tens of gigabytes.
-
-Both ceilings are per-project config keys. Set either to 0 to disable it
-for a project that really is that large.
+A run far larger than expected is an ignore-pattern miss, not a big project: it is
+refused before any copying, naming the directories to add to .backupignore.
 """
 
 import os
@@ -36,10 +23,7 @@ from ..audit import trail
 DEFAULT_MAX_FILES = 25_000
 DEFAULT_MAX_TOTAL_GB = 10
 
-# Offenders are reported at this path depth: deep enough to name the real
-# culprit ("app/src-tauri/target"), shallow enough to paste straight into
-# .backupignore. Reporting the deepest heavy dir would name
-# "target/debug/deps" — true, but the wrong line to add.
+# Deep enough to name "app/src-tauri/target", shallow enough to paste into .backupignore.
 _OFFENDER_DEPTH = 3
 _OFFENDER_LIMIT = 5
 
@@ -108,20 +92,11 @@ def check_ceiling(
     files: list[tuple[str, str]],
     config: dict,
 ) -> CeilingBreach | None:
-    """Measure a filtered file set against the per-run ceilings.
-
-    Args:
-        files: Filtered (absolute_path, relative_path) tuples about to be copied.
-        config: Project config; reads max_backup_files and max_backup_size_gb.
-
-    Returns:
-        A CeilingBreach when the run should be refused, else None.
-    """
+    """Measure a filtered file set against the per-run ceilings; a CeilingBreach refuses the run."""
     max_files = config.get("max_backup_files", DEFAULT_MAX_FILES)
     max_gb = config.get("max_backup_size_gb", DEFAULT_MAX_TOTAL_GB)
 
-    # File count first: it is free, and a count breach means the byte pass
-    # would be another stat storm over the very tree we are refusing.
+    # Count first: it is free, and the byte pass would stat the very tree being refused.
     if max_files and len(files) > max_files:
         breach = CeilingBreach(
             reason="file_count",
@@ -143,9 +118,7 @@ def check_ceiling(
         try:
             size = os.path.getsize(abs_path)
         except OSError as e:
-            # A file that vanished between filter and here contributes nothing.
-            # Never abort the measurement over it — the walker already tolerates
-            # a live tree changing underneath it.
+            # A file that vanished since the filter counts nothing; never abort over a live tree.
             logger.info(f"[backup] Ceiling measure skipped {rel_path}: {e}")
             continue
         sizes[rel_path] = size
@@ -177,6 +150,3 @@ def _log_breach(breach: CeilingBreach) -> None:
         },
     )
     logger.error(f"[backup] Run refused — {breach.summary()}")
-
-
-# =============================================

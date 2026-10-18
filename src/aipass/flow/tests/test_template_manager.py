@@ -3,7 +3,7 @@
 # Description: Unit tests for apps/modules/template_manager.py
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/template_manager.py."""
@@ -17,24 +17,11 @@ from unittest.mock import patch
 
 from aipass.flow.apps.modules.template_manager import handle_command
 
-# ---------------------------------------------------------------------------
-# Module-level patch targets (patch where used, not where defined)
-# ---------------------------------------------------------------------------
-
 _MOD = "aipass.flow.apps.modules.template_manager"
 
 
-# ---------------------------------------------------------------------------
-# _suggest_prefix pure-function tests
-# ---------------------------------------------------------------------------
-
-
 def _scan_suggestion(dir_name: str, capsys: pytest.CaptureFixture[str]) -> str:
-    """Run `scan` over one unregistered dir and return what it printed to stdout.
-
-    The suggested prefix is only ever shown to a user as the register command
-    `scan` prints, so that line is where these tests read it.
-    """
+    """Run `scan` over one unregistered dir and return what it printed to stdout."""
     with (
         patch(f"{_MOD}.scan_unregistered", return_value=[{"dir_name": dir_name, "template_count": 1}]),
         patch(f"{_MOD}.json_handler", spec=True),
@@ -90,11 +77,6 @@ class TestSuggestPrefix:
         assert "drone @flow register Flow FPLAN\n" in _scan_suggestion("Flow", capsys)
 
 
-# ---------------------------------------------------------------------------
-# handle_command routing tests
-# ---------------------------------------------------------------------------
-
-
 class TestHandleCommandRouting:
     """Verify handle_command routes to the correct function for each input."""
 
@@ -116,10 +98,7 @@ class TestHandleCommandRouting:
     def test_every_verb_answers_help_before_reading_arguments(self, verb: str, help_flag: str):
         """Help is answered for all four verbs, not just `templates`.
 
-        The gate moved into handle_command (2026-09-07) so one place answers
-        help for every verb; this pins the whole surface rather than the one
-        verb that used to be covered. Without it, `unregister --help` reaches
-        remove_type() with '--help' as the type name.
+        Without it, `unregister --help` reaches remove_type() with '--help' as the type name.
         """
         with patch(f"{_MOD}.print_help") as mock_help:
             result = handle_command(verb, [help_flag])
@@ -128,11 +107,7 @@ class TestHandleCommandRouting:
             assert result is True
 
     def test_help_does_not_make_this_module_claim_a_command_it_does_not_own(self):
-        """A shared gate must stay scoped -- `frobnicate --help` is not ours.
-
-        A gate written as `if wants_help(args)` with no verb check would answer
-        help for every command in the fleet and stop routing dead.
-        """
+        """A shared gate must stay scoped -- `frobnicate --help` is not ours."""
         with patch(f"{_MOD}.print_help") as mock_help:
             assert handle_command("frobnicate", ["--help"]) is False
             mock_help.assert_not_called()
@@ -151,16 +126,13 @@ class TestHandleCommandRouting:
             mock_display.assert_called_once_with(mock_registry)
             assert result is True
 
-    # ---- register command ----
-
     def test_register_no_args_shows_error(self, capsys: pytest.CaptureFixture[str]):
         """'register' with insufficient args should show usage error.
 
         Mutant: [dim]Example: drone @flow register testing TPLAN -> [dim]Example: drone @flow register reddens this.
         """
         with patch(f"{_MOD}.error") as mock_error:
-            # Note: empty args triggers introspection gate first,
-            # so we pass one arg to get past introspection but still < 2
+            # One arg: empty args would hit the introspection gate first.
             result = handle_command("register", ["testing"])
 
             mock_error.assert_called_once()
@@ -235,8 +207,6 @@ class TestHandleCommandRouting:
         out, _err = capsys.readouterr()
         assert "Convention: first letter of dir + 'PLAN' (e.g., testing -> TPLAN)" in out
 
-    # ---- unregister command ----
-
     def test_unregister_no_args_shows_error(self):
         """'unregister' with no dir arg should show usage error."""
         with patch(f"{_MOD}.error") as mock_error:
@@ -283,8 +253,6 @@ class TestHandleCommandRouting:
         out, _err = capsys.readouterr()
         assert out == "\n"
 
-    # ---- scan command ----
-
     def test_scan_no_unregistered_dirs(self, capsys: pytest.CaptureFixture[str]):
         """scan with all dirs registered should show success message.
 
@@ -323,13 +291,10 @@ class TestHandleCommandRouting:
             assert "2" in mock_warn.call_args[0][0]  # "Found 2 unregistered..."
             assert result is True
         out, _err = capsys.readouterr()
-        # Should print suggested registration commands
         assert "testing/  (2 template(s))" in out
         assert "drone @flow register testing TPLAN" in out
         assert "skills_plans/  (1 template(s))" in out
         assert "drone @flow register skills_plans SPLAN" in out
-
-    # ---- unknown command ----
 
     def test_unknown_command_returns_false(self):
         """Unrecognized command should return False."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-07-17
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -24,6 +24,20 @@ from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 COMMAND = "new"
+
+
+def __getattr__(name: str):
+    """The door for other branches: create_project and TEMPLATES, resolved on first use.
+
+    The CLI imports every module at startup, so the handler (and spawn behind
+    it) stays off that path until a caller actually creates a project. The host
+    API reads both names off this module (FPLAN-0649).
+    """
+    if name in ("create_project", "TEMPLATES"):
+        from aipass.aipass.apps.handlers import new_project as handler
+
+        return getattr(handler, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def print_introspection() -> None:

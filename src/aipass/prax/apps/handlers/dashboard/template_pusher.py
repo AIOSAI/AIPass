@@ -3,26 +3,13 @@
 # Description: Dashboard Template Push Handler
 # Version: 1.1.0
 # Created: 2026-02-25
-# Modified: 2026-08-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Dashboard Template Push Handler
 
-Pushes dashboard template updates to ALL registered branch dashboards.
-Updates structural elements (sections, _warning header, quick_status keys)
-without overwriting existing service data (ai_mail counts, flow plans, etc.).
-
-Purpose:
-    When the dashboard schema evolves (new sections, deprecated sections,
-    schema bumps), this handler propagates those structural changes
-    system-wide while preserving each branch's live service data.
-
-Independence:
-    Reads template and registry directly. No service or module dependencies.
-    Quick status is calculated by the one shared implementation in status.py —
-    the copy that used to live here drifted and shipped a block with no
-    todo_count.
+Reference: docs/dashboard.md
 """
 
 import json
@@ -40,36 +27,19 @@ from .status import calculate_quick_status, merge_quick_status
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
 
-# =============================================================================
-# PATH RESOLUTION
-# =============================================================================
-
 _PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root, never reading the cwd.
-
-    Delegates to ``handlers/repo_root.py``. Prax carried eight private copies of
-    this walk, every one ending ``return Path.cwd()`` — @memory reported the
-    consequence with a traceback on 2026-08-31: the walk runs at IMPORT time in
-    most of the fleet, so a deleted working directory crashed the import, and a
-    registry-less checkout (every clean CI clone) resolved against wherever the
-    shell stood.
-    """
+    """Walk up from this file to find the repo root, never reading the cwd."""
     return find_repo_root(Path(__file__))
 
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
 
 TEMPLATE_DIR = _PRAX_ROOT / "templates"
 TEMPLATE_FILE = TEMPLATE_DIR / "DASHBOARD.template.json"
 VERSION_FILE = TEMPLATE_DIR / ".dashboard_version.json"
 AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-# Deprecated sections to REMOVE during push
 DEPRECATED_SECTIONS = [
     "bulletin_board",
     "devpulse",
@@ -80,16 +50,11 @@ DEPRECATED_SECTIONS = [
     "todo",
 ]
 
-# Deprecated quick_status keys to REMOVE during push.
-#
-# A key belongs here only when NOBODY writes it. commons_mentions was listed
-# because prax stopped computing it — but @flow took ownership rather than
-# retiring it (flow/apps/handlers/dashboard/push_branch_dashboard.py OWNED_KEYS),
-# so this list outlived the ownership change and would have deleted a live key
-# from every branch on the next push. Removed 2026-08-13.
+# Deleted from every branch on push: a key belongs here only when NOBODY writes it.
+# commons_mentions is live (@flow's push_branch_dashboard.py OWNED_KEYS) and stays off.
 DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
 
-# Required sections with their default data (must match template)
+# Must match templates/DASHBOARD.template.json.
 REQUIRED_SECTIONS = {
     "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
     "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
@@ -97,22 +62,8 @@ REQUIRED_SECTIONS = {
 }
 
 
-# =============================================================================
-# PLACEHOLDER REPLACEMENT
-# =============================================================================
-
-
 def _replace_placeholders(template: dict, branch_name: str) -> dict:
-    """
-    Recursively replace {{BRANCHNAME}} with branch_name in all string values.
-
-    Args:
-        template: Template dict with placeholder strings
-        branch_name: Uppercase branch name to substitute
-
-    Returns:
-        New dict with placeholders replaced
-    """
+    """Recursively replace {{BRANCHNAME}} with branch_name in all string values."""
 
     def _walk(val: Any) -> Any:
         if isinstance(val, str):
@@ -128,34 +79,10 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
     return result
 
 
-# =============================================================================
-# QUICK STATUS CALCULATION (DELEGATES TO status.py)
-# =============================================================================
-
-
 def _calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) -> Dict:
-    """
-    Calculate quick_status from live section data.
-
-    Thin delegate to the single implementation in status.py. This was a fourth
-    self-contained copy until 2026-08-13, and being self-contained is exactly
-    what made it dangerous: it had no todo_count at all, so the fleet-wide push
-    published a block missing a counter every other writer maintains.
-
-    Args:
-        sections: All dashboard sections dict
-        branch_path: Branch root, for counts sourced from local files. None for
-            spawn's builder template, which has no .trinity/ or inbox to read.
-
-    Returns:
-        Quick status dict with counts, action flag, and summary
-    """
+    """Calculate quick_status from live section data."""
+    # Delegate only: a local copy drifted and pushed a block without todo_count fleet-wide.
     return calculate_quick_status(sections, branch_path)
-
-
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
 
 
 def _create_from_template(template: dict, branch_name: str) -> dict:
@@ -212,27 +139,15 @@ def _update_spawn_template(
 def _apply_structural_updates(
     data: dict, template: dict, branch_actions: List[str], branch_path: "Path | None" = None
 ) -> tuple:
-    """Apply structural updates from template to existing dashboard data.
-
-    Args:
-        data: The dashboard dict to update in place.
-        template: Template to take structural elements from.
-        branch_actions: Running list of human-readable actions taken.
-        branch_path: Branch root, so quick_status counts come from the branch's
-            own files. None for spawn's builder template, which has none.
-
-    Returns (changed: bool, branch_actions: list).
-    """
+    """Apply structural updates from template to existing dashboard data."""
     changed = False
 
-    # Remove deprecated sections
     for section in DEPRECATED_SECTIONS:
         if section in data.get("sections", {}):
             del data["sections"][section]
             branch_actions.append(f"removed deprecated section: {section}")
             changed = True
 
-    # Remove deprecated quick_status keys
     qs = data.get("quick_status", {})
     for key in DEPRECATED_QUICK_STATUS_KEYS:
         if key in qs:
@@ -240,7 +155,6 @@ def _apply_structural_updates(
             branch_actions.append(f"removed deprecated quick_status key: {key}")
             changed = True
 
-    # Add missing required sections with defaults
     sections = data.setdefault("sections", {})
     for section_name, defaults in REQUIRED_SECTIONS.items():
         if section_name not in sections:
@@ -248,15 +162,13 @@ def _apply_structural_updates(
             branch_actions.append(f"added missing section: {section_name}")
             changed = True
 
-    # Update _warning header from template
     template_warning = template.get("_warning")
     if template_warning and data.get("_warning") != template_warning:
         data["_warning"] = template_warning
         branch_actions.append("updated _warning header")
         changed = True
 
-    # Recalculate quick_status from live data, merging so this push cannot
-    # delete a key another service owns (the invariant agreed with @flow).
+    # Merged: no writer deletes a quick_status key it did not write (shared with @flow).
     if "sections" in data:
         new_qs = merge_quick_status(data.get("quick_status"), _calculate_quick_status(data["sections"], branch_path))
         if data.get("quick_status") != new_qs:
@@ -266,26 +178,8 @@ def _apply_structural_updates(
     return changed, branch_actions
 
 
-# =============================================================================
-# MAIN PUSH FUNCTION
-# =============================================================================
-
-
 def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
-    """
-    Push dashboard template to all registered branches.
-
-    Updates structural elements (sections, _warning, quick_status keys)
-    without overwriting existing service data. Removes deprecated sections.
-    Adds missing required sections with defaults.
-
-    Args:
-        dry_run: If True, report what would change without writing files
-
-    Returns:
-        Dict with success, dry_run, branches_scanned, branches_updated,
-        branches_created, branches_skipped, changes list, and errors list
-    """
+    """Push dashboard template to all registered branches."""
     result: Dict[str, Any] = {
         "success": True,
         "dry_run": dry_run,
@@ -297,7 +191,6 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
         "errors": [],
     }
 
-    # Load template
     if not TEMPLATE_FILE.exists():
         result["success"] = False
         result["errors"].append(f"Template file not found: {TEMPLATE_FILE}")
@@ -311,7 +204,6 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
         result["errors"].append(f"Invalid template JSON: {e}")
         return result
 
-    # Load AIPASS registry
     if not AIPASS_REGISTRY.exists():
         result["success"] = False
         result["errors"].append(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
@@ -325,7 +217,6 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
         result["errors"].append(f"Invalid registry JSON: {e}")
         return result
 
-    # Filter to active branches only
     branches = [b for b in registry.get("branches", []) if b.get("status") == "active"]
     branches_updated_list: List[str] = []
 
@@ -375,11 +266,9 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
             branches_updated_list.append(branch_name)
             result["changes"].append({"branch": branch_name, "actions": branch_actions})
 
-    # Update spawn template (scaffold for new branches)
     spawn_template_path = repo_root / "src" / "aipass" / "spawn" / "templates" / "builder" / "DASHBOARD.local.json"
     _update_spawn_template(spawn_template_path, template, dry_run, result, branches_updated_list)
 
-    # Update version file if any branches were modified
     if not dry_run and branches_updated_list:
         _update_version_file(branches_updated_list)
 
@@ -396,21 +285,8 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
     return result
 
 
-# =============================================================================
-# VERSION TRACKING
-# =============================================================================
-
-
 def _update_version_file(branches_pushed: List[str]) -> bool:
-    """
-    Update .dashboard_version.json with push timestamp and branch list.
-
-    Args:
-        branches_pushed: List of branch names that were updated
-
-    Returns:
-        True if version file updated successfully, False on error
-    """
+    """Update .dashboard_version.json with push timestamp and branch list."""
     try:
         version_data: Dict[str, Any] = {}
         if VERSION_FILE.exists():
@@ -427,15 +303,7 @@ def _update_version_file(branches_pushed: List[str]) -> bool:
 
 
 def get_template_status() -> Dict[str, Any]:
-    """
-    Get current template version and push status.
-
-    Reads the .dashboard_version.json file and returns its contents
-    along with template file existence checks.
-
-    Returns:
-        Dict with version info, last push timestamp, template existence
-    """
+    """Get current template version and push status."""
     status: Dict[str, Any] = {
         "version_file": str(VERSION_FILE),
         "templates_dir": str(TEMPLATE_DIR),
@@ -463,10 +331,6 @@ def get_template_status() -> Dict[str, Any]:
 
     return status
 
-
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
 
 if __name__ == "__main__":
     import sys as _sys

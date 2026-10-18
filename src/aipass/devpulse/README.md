@@ -126,7 +126,7 @@ Git operations for the whole project, dispatch orchestration, watchdog reports, 
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-10-17
 
 ---
 

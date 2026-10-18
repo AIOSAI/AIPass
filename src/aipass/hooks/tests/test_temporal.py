@@ -4,7 +4,7 @@
 # Description: Tests for temporal prompt handler
 # Branch: hooks
 # Created: 2026-07-21
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/prompt/temporal.py."""
@@ -87,15 +87,10 @@ class TestHandle:
         assert result["sound"] == "temporal"
 
     def test_uses_host_local_tz_not_a_hardcoded_one(self):
-        # Test host's own zone — never assume PDT/UTC/anything specific,
-        # a clone running in another zone must see its own local time.
+        # A clone in another zone must see its own local time, never a hardcoded one.
         expected_tz = datetime.now().astimezone().strftime("%Z")
         result = handle({})
-        # The guard is gone. %Z on an aware datetime always names the host's
-        # zone - it is empty only for a naive one, which astimezone() rules
-        # out - so "if expected_tz:" could not be false, and if it ever HAD
-        # been false the test would have passed having compared nothing and
-        # the run would not have said which happened. Asserted, so it says.
+        # Asserted, not guarded: an empty zone would compare nothing and pass silently.
         assert expected_tz != ""
         assert expected_tz in result["stdout"]
 

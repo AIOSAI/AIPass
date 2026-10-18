@@ -3,48 +3,13 @@
 # Description: Post-copy completeness check — did the mint deliver the template?
 # Version: 1.0.0
 # Created: 2026-08-17
-# Modified: 2026-08-17
+# Modified: 2026-10-17
 # =============================================
 
 """Verify a freshly minted citizen against the template that minted it.
 
-Why this exists: on 2026-08-17 the repo-root ``.gitignore`` was found to swallow
-six of the then-``templates/project_agent``'s eighteen files (that template was
-retired by DPLAN-0319; every citizen mints from ``templates/citizen`` now, and
-the same hole would swallow the same files there) — blanket ignores for
-``.ai_mail.local/``, ``DASHBOARD.local.json``, ``logs/`` and ``artifacts/`` with
-no negation for that template. Every fresh clone therefore held an INCOMPLETE
-template, and the mint copied whatever it found: exit 0, "Agent created",
-"Registry: updated" — and a citizen with an empty ``artifacts/`` (no birth
-certificate) and an empty ``.ai_mail.local/`` (no ``inbox.json``, so it could not
-receive mail at all). The hospital worked only on the machine that authored the
-template, and said nothing anywhere else.
-
-The invariant this module enforces:
-
-    A mint must produce every file its template CLAIMS to carry. Not a
-    hardcoded list — the template's own claim.
-
-Two sources make up that claim, unioned:
-
-* ``.spawn/.template_registry.json`` — the template's manifest. This is the
-  load-bearing half: it is a tracked file, so it survives a truncated clone and
-  keeps naming files the clone no longer has. A check that only walked the
-  template on disk would see nothing wrong, because the missing files are
-  missing from the source too — that is exactly how the bug stayed silent.
-* the template's on-disk contents — catches the other direction, a file that is
-  present in the template but never landed in the target (a copy that failed
-  quietly, a manifest that predates a new file).
-
-Path claims are mapped through the same two transforms the copy performs
-(``{{PLACEHOLDER}}`` substitution per path component, then the ``{{BRANCH}}``
-rename pass), so ``apps/{{BRANCH}}.py`` is checked as ``apps/my_agent.py``.
-
-Custom templates (``create --template <dir>``) usually carry no manifest. That
-is not a defect and must never be treated as one: with nothing declared, the
-on-disk half alone applies, which cannot false-positive because it is derived
-from the very tree the copy read.
-"""
+A mint must produce every file its template claims: the tracked manifest (it survives a
+clone that dropped ignored files) unioned with the on-disk contents. Reference: docs/birth.md"""
 
 from pathlib import Path
 from typing import List
@@ -65,10 +30,7 @@ def _is_skipped(rel_path: str) -> bool:
 def _map_path(rel_path: str, replacements: dict, branch_lower: str) -> str:
     """Render a template-relative path the way the copy renders it.
 
-    Mirrors ``file_ops._replace_path_placeholders`` (substitution per component)
-    followed by ``file_ops.rename_placeholder_paths`` (the ``{{BRANCH}}`` pass),
-    so a claim can be compared against what actually landed on disk.
-    """
+    Must mirror file_ops._replace_path_placeholders then rename_placeholder_paths."""
     parts = []
     for part in Path(rel_path).parts:
         part = replace_placeholders(part, replacements or {})
@@ -78,16 +40,7 @@ def _map_path(rel_path: str, replacements: dict, branch_lower: str) -> str:
 
 
 def expected_mint_paths(template_dir, replacements: dict, branch_lower: str) -> List[str]:
-    """Return every target-relative file path the template claims, sorted.
-
-    Args:
-        template_dir: The template the mint copied from.
-        replacements: The placeholder mapping used for this mint.
-        branch_lower: Lowercased branch folder name (the ``{{BRANCH}}`` value).
-
-    Returns:
-        Sorted list of POSIX-style relative paths expected under the target.
-    """
+    """Return every target-relative file path the template claims, sorted."""
     template_dir = Path(template_dir)
     claimed = set()
 
@@ -112,18 +65,7 @@ def expected_mint_paths(template_dir, replacements: dict, branch_lower: str) -> 
 
 
 def verify_mint(template_dir, target_dir, replacements: dict, branch_lower: str) -> List[str]:
-    """Return the claimed paths that never landed in the target — empty is good.
-
-    Args:
-        template_dir: The template the mint copied from.
-        target_dir: The freshly minted citizen directory.
-        replacements: The placeholder mapping used for this mint.
-        branch_lower: Lowercased branch folder name (the ``{{BRANCH}}`` value).
-
-    Returns:
-        Sorted list of missing target-relative paths. Empty when the mint
-        delivered everything its template claims.
-    """
+    """Return the claimed paths that never landed in the target — empty is good."""
     target_dir = Path(target_dir)
     return [
         rel for rel in expected_mint_paths(template_dir, replacements, branch_lower) if not (target_dir / rel).is_file()

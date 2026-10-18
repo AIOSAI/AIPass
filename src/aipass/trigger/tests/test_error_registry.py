@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -25,22 +25,11 @@ from pathlib import Path
 import aipass.trigger.apps.handlers.error_registry as er
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _registry_on_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Point every file the registry writes at tmp_path and start each test from a fresh breaker.
 
-    The real module is imported once at the top; what it reaches outside is
-    patched here: REGISTRY_FILE and CB_STATE_FILE (both module constants built
-    off TRIGGER_ROOT at import, so the live trigger_json/ unless swapped),
-    json_handler.log_operation, and the logger. The breaker and the
-    per-fingerprint dicts are module state restored from the live
-    trigger_cb_state.json at import; each test gets empty ones.
-    """
+    REGISTRY_FILE and CB_STATE_FILE are built off TRIGGER_ROOT at import: the live files unless swapped."""
     json_dir = tmp_path / "trigger_json"
     monkeypatch.setattr(er, "REGISTRY_FILE", json_dir / "error_registry.json")
     monkeypatch.setattr(er, "CB_STATE_FILE", json_dir / "trigger_cb_state.json")
@@ -56,11 +45,6 @@ def _import_registry():
     return er
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _seed_registry(tmp_path: Path, errors: dict | None = None) -> Path:
     """Write a registry JSON file into tmp_path and return its path."""
     registry_dir = tmp_path / "trigger_json"
@@ -72,11 +56,6 @@ def _seed_registry(tmp_path: Path, errors: dict | None = None) -> Path:
     }
     registry_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return registry_file
-
-
-# ===========================================================================
-# 1. Error fingerprinting
-# ===========================================================================
 
 
 def test_same_error_produces_same_fingerprint() -> None:
@@ -104,11 +83,6 @@ def test_different_error_type_produces_different_fingerprint() -> None:
     assert fp1 != fp2
 
 
-# ===========================================================================
-# 2. Message normalization
-# ===========================================================================
-
-
 def test_normalize_strips_timestamps() -> None:
     """normalize_message replaces ISO timestamps with a placeholder."""
     er = _import_registry()
@@ -130,10 +104,7 @@ def test_normalize_strips_paths(tmp_path: Path) -> None:
 def test_normalize_strips_windows_paths() -> None:
     """normalize_message replaces a drive-letter path with either separator (compass 458).
 
-    Two Windows errors differing only by path must share one fingerprint; a
-    pattern that begins with '/' replaced nothing in a backslash path and kept
-    the drive letter of a forward-slash one.
-    """
+    Two Windows errors differing only by path must share one fingerprint."""
     er = _import_registry()
     backslash = er.normalize_message(r"failed at C:\work\AIPass\src\foo.py line 12")
     forward = er.normalize_message("failed at D:/work/AIPass/src/bar.py line 99")
@@ -164,11 +135,6 @@ def test_normalize_collapses_whitespace() -> None:
     raw = "Error   in    module"
     normalized = er.normalize_message(raw)
     assert "  " not in normalized
-
-
-# ===========================================================================
-# 3. Error registration -- report() creates new entry
-# ===========================================================================
 
 
 def test_report_creates_new_entry(tmp_path: Path) -> None:
@@ -223,11 +189,6 @@ def test_report_invalid_severity_defaults_to_medium(tmp_path: Path) -> None:
     assert result["severity"] == "medium"
 
 
-# ===========================================================================
-# 4. Duplicate detection
-# ===========================================================================
-
-
 def test_duplicate_report_increments_count(tmp_path: Path) -> None:
     """Reporting the same error twice increments count and returns is_new=False."""
     _seed_registry(tmp_path)
@@ -264,11 +225,6 @@ def test_different_components_are_not_duplicates(tmp_path: Path) -> None:
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     data = json.loads(registry_file.read_text(encoding="utf-8"))
     assert len(data["errors"]) == 2
-
-
-# ===========================================================================
-# 5. resolve / update_status
-# ===========================================================================
 
 
 def test_update_status_resolves_error(tmp_path: Path) -> None:
@@ -323,11 +279,6 @@ def test_update_status_suppressed_stores_reason(tmp_path: Path) -> None:
     assert entry["suppress_reason"] == "known_flaky"
 
 
-# ===========================================================================
-# 6. Circuit breaker
-# ===========================================================================
-
-
 def test_circuit_breaker_closed_allows_dispatch(tmp_path: Path) -> None:
     """Circuit breaker in closed state allows dispatch."""
     _seed_registry(tmp_path)
@@ -343,7 +294,6 @@ def test_circuit_breaker_trips_after_threshold(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    # Record enough errors to exceed the default trip_threshold (10)
     for _ in range(11):
         er.circuit_breaker_record_error()
 
@@ -352,11 +302,7 @@ def test_circuit_breaker_trips_after_threshold(tmp_path: Path) -> None:
 
 
 def test_errors_outside_the_trip_window_do_not_trip_the_breaker(tmp_path: Path) -> None:
-    """Nine errors a window ago and one now are one error in the window, not ten.
-
-    Green on the tree from its first run; its proof is the mutant.
-    Mutant 2026-09-29: circuit_breaker_record_error reading its own clock reddens this.
-    """
+    """Nine errors a window ago and one now are one error in the window, not ten."""
     _seed_registry(tmp_path)
     er = _import_registry()
     er.circuit_breaker_reset()
@@ -412,18 +358,14 @@ def test_circuit_breaker_half_open_allows_one_dispatch(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    # Trip the breaker
     er.circuit_breaker_trip(reason="test")
 
-    # A clock reading one second past the cooldown, handed in
     tripped = er.get_circuit_breaker_status()
     later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
-    # First call transitions open -> half_open and allows dispatch
     assert er.circuit_breaker_allows(now=later) is True
     assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
-    # Second call in half_open should be blocked (probe already used)
     assert er.circuit_breaker_allows(now=later) is False
 
 
@@ -435,22 +377,15 @@ def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path:
 
     base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
-    # Trip and expire cooldown
     er.circuit_breaker_trip(reason="test")
     later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
     er.circuit_breaker_allows(now=later)  # Transition to half_open
 
-    # Record an error during half_open
     er.circuit_breaker_record_error(now=later)
 
     status = er.get_circuit_breaker_status(now=later)
     assert status["state"] == "open"
     assert status["cooldown_seconds"] == base_cooldown * 2
-
-
-# ===========================================================================
-# 7. should_dispatch -- per-fingerprint backoff
-# ===========================================================================
 
 
 def test_should_dispatch_true_for_new_fingerprint(tmp_path: Path) -> None:
@@ -509,11 +444,6 @@ def test_record_dispatch_increments_count(tmp_path: Path) -> None:
     assert er.get_dispatch_count(fp) == 3
     # The third dispatch sets the backoff: one minute short of it, still held
     assert er.should_dispatch(fp, now=time.time() + er.get_backoff_seconds(3) - 60) is False
-
-
-# ===========================================================================
-# 7b. should_dispatch -- registry suppression gate (compass #219)
-# ===========================================================================
 
 
 def test_should_dispatch_false_when_suppressed(tmp_path: Path) -> None:
@@ -639,11 +569,6 @@ def test_is_suppressed_fails_open_on_registry_error(tmp_path: Path, monkeypatch:
     assert er.should_dispatch("any_fingerprint") is True
 
 
-# ===========================================================================
-# 8. list / query
-# ===========================================================================
-
-
 def test_query_returns_all_entries(tmp_path: Path) -> None:
     """query() with no filters returns all entries."""
     _seed_registry(tmp_path)
@@ -718,11 +643,6 @@ def test_query_empty_registry(tmp_path: Path) -> None:
     assert results == []
 
 
-# ===========================================================================
-# 9. get_entry / prefix matching
-# ===========================================================================
-
-
 def test_get_entry_exact_match(tmp_path: Path) -> None:
     """get_entry returns the entry for an exact fingerprint."""
     _seed_registry(tmp_path)
@@ -757,11 +677,6 @@ def test_get_entry_not_found(tmp_path: Path) -> None:
     assert er.get_entry("does_not_exist") is None
 
 
-# ===========================================================================
-# 10. clear_resolved
-# ===========================================================================
-
-
 def test_clear_resolved_removes_old_resolved(tmp_path: Path) -> None:
     """clear_resolved removes resolved entries older than N days."""
     _seed_registry(tmp_path)
@@ -770,7 +685,6 @@ def test_clear_resolved_removes_old_resolved(tmp_path: Path) -> None:
     result = er.report("ImportError", "old error", "FLOW")
     er.update_status(result["fingerprint"], "resolved")
 
-    # Backdate last_seen to 30 days ago
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     data = json.loads(registry_file.read_text(encoding="utf-8"))
     for entry in data["errors"].values():
@@ -804,7 +718,6 @@ def test_clear_resolved_keeps_non_resolved(tmp_path: Path) -> None:
 
     er.report("ImportError", "active error", "FLOW")
 
-    # Backdate last_seen
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     data = json.loads(registry_file.read_text(encoding="utf-8"))
     for entry in data["errors"].values():
@@ -816,10 +729,7 @@ def test_clear_resolved_keeps_non_resolved(tmp_path: Path) -> None:
 
 
 def test_clear_resolved_unreadable_shape_returns_minus_one(tmp_path: Path) -> None:
-    """A registry clear_resolved cannot walk answers -1, never the 0 of "nothing to clear".
-
-    Red first 2026-09-27 against the old except that returned 0.
-    """
+    """A registry clear_resolved cannot walk answers -1, never the 0 of "nothing to clear"."""
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     registry_file.parent.mkdir(parents=True, exist_ok=True)
     registry_file.write_text(json.dumps({"errors": [], "metadata": {}}), encoding="utf-8")
@@ -827,11 +737,6 @@ def test_clear_resolved_unreadable_shape_returns_minus_one(tmp_path: Path) -> No
 
     assert er.clear_resolved(days=7) == -1
     assert json.loads(registry_file.read_text(encoding="utf-8"))["errors"] == []
-
-
-# ===========================================================================
-# 11. get_stats
-# ===========================================================================
 
 
 def test_get_stats_empty_registry(tmp_path: Path) -> None:
@@ -861,11 +766,6 @@ def test_get_stats_counts_correctly(tmp_path: Path) -> None:
     assert stats["by_component"].get("BACKUP") == 1
     assert stats["by_severity"].get("high") == 2
     assert stats["by_severity"].get("low") == 1
-
-
-# ===========================================================================
-# 12. update_source_fix_status
-# ===========================================================================
 
 
 def test_update_source_fix_status_valid(tmp_path: Path) -> None:
@@ -905,11 +805,6 @@ def test_update_source_fix_status_missing_fingerprint(tmp_path: Path) -> None:
     assert success is False
 
 
-# ===========================================================================
-# 13. User-error auto-suppression
-# ===========================================================================
-
-
 def test_user_error_auto_suppressed(tmp_path: Path) -> None:
     """Errors matching user-error patterns are auto-suppressed on report."""
     _seed_registry(tmp_path)
@@ -937,21 +832,8 @@ def test_non_user_error_not_suppressed(tmp_path: Path) -> None:
     assert result["status"] == "new"
 
 
-# ===========================================================================
-# 14. Registry I/O edge cases
-# ===========================================================================
-
-
 def test_load_registry_creates_default_when_file_missing(tmp_path: Path) -> None:
-    """A missing registry reads as the empty default: the first report starts it with version 1.0.0.
-
-    Through report(), the loader's caller, since leg 7 (it called _load_registry
-    directly). The default's own last_updated is not asserted: every save
-    restamps it, so no caller can see it. report's failure dict carries no
-    fingerprint, so a loader that broke on a missing file reddens the first assert.
-    Mutant run (leg 7): the default's version "1.0.0" -> "0.0.0", and its errors
-    {} -> {"stale": {}}, each redden this.
-    """
+    """A missing registry reads as the empty default: the first report starts it with version 1.0.0."""
     er = _import_registry()
     assert not er.REGISTRY_FILE.exists()
 
@@ -964,14 +846,7 @@ def test_load_registry_creates_default_when_file_missing(tmp_path: Path) -> None
 
 
 def test_a_status_change_is_saved_with_a_fresh_stamp(tmp_path: Path) -> None:
-    """update_status answers with the save's own result, and the save restamps last_updated.
-
-    Through update_status, which returns what the save returns, since leg 7 (it
-    called _save_registry directly, and asserted the parent directory, which
-    json_file_lock and atomic_write_json in config.py both create before any save).
-    Mutant run (leg 7): the save's restamp line removed, and the save answering
-    False on success, each redden this.
-    """
+    """update_status answers with the save's own result, and the save restamps last_updated."""
     _seed_registry(tmp_path, {"fp_saved": {"fingerprint": "fp_saved", "status": "new"}})
     er = _import_registry()
 
@@ -981,11 +856,6 @@ def test_a_status_change_is_saved_with_a_fresh_stamp(tmp_path: Path) -> None:
     assert saved["errors"]["fp_saved"]["status"] == "investigating"
     assert saved["metadata"]["version"] == "1.0.0"
     assert saved["metadata"]["last_updated"] != "2026-01-01T00:00:00", "the save did not restamp the document"
-
-
-# ===========================================================================
-# 15. Contract gap tests
-# ===========================================================================
 
 
 def test_normalize_message_empty_string() -> None:
@@ -1000,10 +870,8 @@ def test_normalize_message_unicode_and_emoji() -> None:
     er = _import_registry()
     raw = "Error: \u2603 snowman failed \U0001f525 fire at line 99"
     normalized = er.normalize_message(raw)
-    # Emoji and unicode should survive normalization
     assert "\u2603" in normalized
     assert "\U0001f525" in normalized
-    # But line number should be stripped
     assert "line 99" not in normalized
     assert "line N" in normalized
 
@@ -1014,7 +882,6 @@ def test_compute_fingerprint_empty_strings() -> None:
     fp = er.compute_fingerprint("", "", "")
     assert isinstance(fp, str)
     assert len(fp) == 40
-    # Deterministic: same inputs always produce same hash
     fp2 = er.compute_fingerprint("", "", "")
     assert fp == fp2
 
@@ -1022,12 +889,7 @@ def test_compute_fingerprint_empty_strings() -> None:
 def test_report_returns_the_whole_entry_not_a_summary_of_it(tmp_path: Path) -> None:
     """report() returns every ErrorEvent field plus is_new — callers read them.
 
-    This asserted isinstance(result, dict), which the six-key fallback dict in
-    report()'s except branch satisfies too. The difference is the whole point:
-    a caller reaching for result["fingerprint"] or result["id"] gets a KeyError
-    off that degraded path, so "it is a dict" is exactly the claim that cannot
-    tell the good return from the broken one. The field set is the contract.
-    """
+    The except branch's fallback dict passes isinstance(dict) too; the field set is the contract."""
     _seed_registry(tmp_path)
     er = _import_registry()
 
@@ -1041,21 +903,11 @@ def test_report_returns_the_whole_entry_not_a_summary_of_it(tmp_path: Path) -> N
     assert result["fingerprint"] == er.compute_fingerprint("ValueError", er.normalize_message("test message"), "API")
 
 
-# ---------------------------------------------------------------------------
-# Empty / corrupt JSON file resilience
-# ---------------------------------------------------------------------------
-
-
 class TestEmptyJsonResilience:
     """Verify no crashes when JSON files are empty or corrupt."""
 
     def test_load_registry_empty_file(self, tmp_path: Path) -> None:
-        """An empty registry file reads as the empty default: the report lands as its only entry.
-
-        Through report() since leg 7 (it called _load_registry directly).
-        Mutant run (leg 7): the loader's empty-file arm answering {} reddens
-        this at the fingerprint assert (report falls to its failure dict).
-        """
+        """An empty registry file reads as the empty default: the report lands as its only entry."""
         registry_dir = tmp_path / "trigger_json"
         registry_dir.mkdir(parents=True, exist_ok=True)
         registry_file = registry_dir / "error_registry.json"
@@ -1069,13 +921,7 @@ class TestEmptyJsonResilience:
         assert list(saved["errors"]) == [result["fingerprint"]]
 
     def test_load_registry_corrupt_json(self, tmp_path: Path) -> None:
-        """A corrupt registry reads as the empty default, and the report writes a valid one in its place.
-
-        Through report() since leg 7 (it called _load_registry directly). The
-        loader's docstring names the residual: the blank is written straight back.
-        Mutant run (leg 7): the loader catching KeyError only (so the decode
-        error escapes) reddens this at the fingerprint assert.
-        """
+        """A corrupt registry reads as the empty default, and the report writes a valid one in its place."""
         registry_dir = tmp_path / "trigger_json"
         registry_dir.mkdir(parents=True, exist_ok=True)
         registry_file = registry_dir / "error_registry.json"
@@ -1092,8 +938,7 @@ class TestEmptyJsonResilience:
         """_load_circuit_breaker_state returns default when its state file is empty."""
         config_dir = tmp_path / "trigger_json"
         config_dir.mkdir(parents=True, exist_ok=True)
-        # The breaker persists to trigger_cb_state.json — writing any other
-        # file here would leave this test passing without reading anything.
+        # The breaker persists here; any other file would pass without reading anything.
         config_file = config_dir / "trigger_cb_state.json"
         config_file.write_text("", encoding="utf-8")
 
@@ -1120,11 +965,6 @@ class TestEmptyJsonResilience:
         assert result["count"] == 1
 
 
-# ===========================================================================
-# 16. purge_stale
-# ===========================================================================
-
-
 def test_purge_stale_removes_old_entries(tmp_path: Path) -> None:
     """purge_stale removes entries older than N days regardless of status."""
     _seed_registry(tmp_path)
@@ -1133,7 +973,6 @@ def test_purge_stale_removes_old_entries(tmp_path: Path) -> None:
     er.report("ImportError", "old error", "FLOW")
     er.report("IOError", "another old error", "BACKUP")
 
-    # Backdate last_seen to 60 days ago
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     data = json.loads(registry_file.read_text(encoding="utf-8"))
     for entry in data["errors"].values():
@@ -1168,7 +1007,6 @@ def test_purge_stale_ignores_status(tmp_path: Path) -> None:
     r2 = er.report("IOError", "old suppressed error", "BACKUP")
     er.update_status(r2["fingerprint"], "suppressed", reason="known")
 
-    # Backdate both entries
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     data = json.loads(registry_file.read_text(encoding="utf-8"))
     for entry in data["errors"].values():
@@ -1189,10 +1027,7 @@ def test_purge_stale_returns_zero_on_empty_registry(tmp_path: Path) -> None:
 
 
 def test_purge_stale_unreadable_shape_returns_minus_one(tmp_path: Path) -> None:
-    """A registry purge_stale cannot walk answers -1, never the 0 of "nothing stale".
-
-    Red first 2026-09-27 against the old except that returned 0.
-    """
+    """A registry purge_stale cannot walk answers -1, never the 0 of "nothing stale"."""
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     registry_file.parent.mkdir(parents=True, exist_ok=True)
     registry_file.write_text(json.dumps({"errors": [], "metadata": {}}), encoding="utf-8")
@@ -1209,7 +1044,6 @@ def test_purge_stale_custom_days(tmp_path: Path) -> None:
 
     er.report("ImportError", "semi-old error", "FLOW")
 
-    # Backdate to 10 days ago
     registry_file = tmp_path / "trigger_json" / "error_registry.json"
     data = json.loads(registry_file.read_text(encoding="utf-8"))
     from datetime import datetime, timedelta
@@ -1219,16 +1053,9 @@ def test_purge_stale_custom_days(tmp_path: Path) -> None:
         entry["last_seen"] = ten_days_ago
     registry_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    # 30-day cutoff should keep it
     assert er.purge_stale(days=30) == 0
 
-    # 7-day cutoff should remove it
     assert er.purge_stale(days=7) == 1
-
-
-# ===========================================================================
-# 17. Circuit breaker self-heal (_evaluate_state, probe_succeeded, status)
-# ===========================================================================
 
 
 def test_evaluate_state_transitions_open_to_half_open_after_cooldown(tmp_path: Path) -> None:
@@ -1238,7 +1065,6 @@ def test_evaluate_state_transitions_open_to_half_open_after_cooldown(tmp_path: P
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # A clock reading ten seconds past the cooldown, handed in
     tripped = er.get_circuit_breaker_status()
     later = tripped["opened_at"] + tripped["cooldown_seconds"] + 10
 
@@ -1278,7 +1104,6 @@ def test_probe_succeeded_closes_breaker(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
     base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
-    # Trip the breaker and expire cooldown to get to half_open
     er.circuit_breaker_trip(reason="test")
     later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
     er.circuit_breaker_allows(now=later)  # Transitions to half_open
@@ -1351,15 +1176,12 @@ def test_breaker_half_open_on_read_then_allows_probe(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # A clock reading past the cooldown, handed in
     tripped = er.get_circuit_breaker_status()
     later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
-    # First call: transitions open -> half_open, returns True (probe allowed)
     result = er.circuit_breaker_allows(now=later)
     assert result is True
     assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
-    # The probe slot is spent: a second ask is refused
     assert er.circuit_breaker_allows(now=later) is False
 
 
@@ -1371,19 +1193,15 @@ def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
 
     base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
-    # Trip the breaker
     er.circuit_breaker_trip(reason="test")
     tripped = er.get_circuit_breaker_status()
     assert tripped["state"] == "open"
 
-    # A clock reading past the cooldown, handed in
     later = tripped["opened_at"] + base_cooldown + 1
 
-    # Probe dispatch: transitions open -> half_open and allows
     assert er.circuit_breaker_allows(now=later) is True
     assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
-    # Probe succeeded: transitions half_open -> closed
     er.circuit_breaker_probe_succeeded()
     status = er.get_circuit_breaker_status(now=later)
     assert status["state"] == "closed"
@@ -1391,18 +1209,10 @@ def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
     assert status["opened_at"] == 0.0
 
 
-# ===========================================================================
-# 18. get_dispatch_count -- read-only view for the escalation lane
-# ===========================================================================
-
-
 def test_get_dispatch_count_unknown_fingerprint_is_zero(tmp_path: Path) -> None:
     """A fingerprint nobody has dispatched reads as 0, never a KeyError.
 
-    The escalation lane calls this on every repeating error to tell "the owner
-    has been told and it is STILL happening" apart from "medic has not had its
-    turn yet" — a raise here would take the whole count down with it.
-    """
+    The escalation lane calls it on every repeating error; a raise would take the count down."""
     _seed_registry(tmp_path)
     er = _import_registry()
 
@@ -1459,19 +1269,10 @@ def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
     assert "read_only_fp" not in er._fingerprint_dispatch_count
 
 
-# ---------------------------------------------------------------------------
-# a refused read must not blank the registry
-# ---------------------------------------------------------------------------
-
-
 def _refuse_once(mp, er):
     """Refuse ONE read of target with a Windows sharing violation.
 
-    The same transient os.replace already retries for, seen from the reading
-    side. json_handler lost whole documents to it on Windows CI (32167459635)
-    and _load_registry has the identical shape: a refused read returns a blank
-    registry, and every caller writes that blank straight back.
-    """
+    _load_registry turns a refused read into a blank registry that callers write straight back."""
     state = {"left": 1, "seen": 0}
 
     # The concrete flavour (PosixPath or WindowsPath): before 3.12 a bare Path subclass has no _flavour.
@@ -1490,10 +1291,7 @@ def _refuse_once(mp, er):
 
 
 def test_a_refused_read_does_not_wipe_the_registry(tmp_path: Path) -> None:
-    """A sharing violation mid-write must not cost the whole registry.
-
-    Mutant run 2026-09-27: _load_registry reads REGISTRY_FILE.read_text directly (no retry) -> red.
-    """
+    """A sharing violation mid-write must not cost the whole registry."""
     _seed_registry(tmp_path)
     er = _import_registry()
     er.report(error_type="ImportError", message="first", component="FLOW")

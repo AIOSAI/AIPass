@@ -3,21 +3,13 @@
 # Description: Log Level Hygiene Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Log Level Hygiene Standards Checker Handler
 
-Validates that ERROR level is reserved for system failures only,
-and WARNING level is used for user input errors instead.
-
-THE STANDARD:
-- ERROR = System failures (crashes, timeouts, unhandled exceptions,
-  import failures, file I/O errors, connection failures)
-- WARNING = User input errors (unknown command, invalid arguments,
-  missing required args, bad syntax, typos)
-- INFO = Normal operations, successful completions, discoveries
+Reference: log_level.md
 """
 
 import re
@@ -27,28 +19,13 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Audit scope: all Python files
 # APPLIES_TO: level choice is a product decision.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows log level hygiene standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip certain checks
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': str
-        }
-    """
+    """Check if module follows log level hygiene standards"""
     checks = []
     path = Path(module_path)
 
@@ -81,7 +58,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "LOG_LEVEL",
         }
 
-    # Only check files that use logger
     has_logger = re.search(r"\blogger\.(error|warning|info|debug)\s*\(", content)
     if not has_logger:
         return {
@@ -98,16 +74,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "LOG_LEVEL",
         }
 
-    # Check 1: ERROR not used for user input errors
     error_misuse_check = check_error_not_user_input(lines, module_path, bypass_rules=bypass_rules)
     checks.append(error_misuse_check)
 
-    # Check 2: Unknown/unrecognized command patterns use WARNING
     command_routing_check = check_command_routing_level(content, lines, module_path, bypass_rules)
     if command_routing_check:
         checks.append(command_routing_check)
 
-    # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
@@ -118,13 +91,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def _get_non_code_lines(lines: List[str]) -> set:
-    """
-    Build a set of line numbers that are inside docstrings or comments.
-
-    Uses AST-aware triple-quote counting: if a line has an even number of
-    triple-quote delimiters it is self-contained (e.g. single-line docstring
-    or string assignment). Only odd counts toggle the in-docstring state.
-    """
+    """Build a set of line numbers that are inside docstrings or comments."""
     skip: set = set()
     in_docstring = False
 
@@ -157,13 +124,7 @@ def _matches_user_input_pattern(line_lower: str, patterns: List[str]) -> bool:
 
 
 def check_error_not_user_input(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that ERROR level is not used for user input validation.
-
-    User input patterns (should be WARNING, not ERROR):
-    - "unknown command", "invalid argument", "not found" (for user input),
-      "unrecognized", "no such command", "bad syntax", "missing required"
-    """
+    """Check that ERROR level is not used for user input validation."""
     user_input_patterns = [
         r"unknown\s+command",
         r"unknown\s+action",
@@ -206,12 +167,7 @@ def check_error_not_user_input(lines: List[str], file_path: str, bypass_rules: l
 def check_command_routing_level(
     content: str, lines: List[str], file_path: str, bypass_rules: list | None = None
 ) -> Optional[Dict]:
-    """
-    Check that command routing failures use WARNING, not ERROR.
-
-    Entry points and modules that route commands should log unrecognized
-    commands as WARNING (user typed wrong thing) not ERROR (system broke).
-    """
+    """Check that command routing failures use WARNING, not ERROR."""
     has_command_routing = bool(re.search(r"(route_command|handle_command|args\.command)", content))
     if not has_command_routing:
         return None

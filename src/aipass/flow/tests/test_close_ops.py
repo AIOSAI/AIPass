@@ -3,7 +3,7 @@
 # Description: Tests for close_ops handler — plan closure business logic
 # Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -31,11 +31,7 @@ from aipass.flow.tests.support_close_ops import _make_deps
 class TestABareNumberNeverClosesTheNamesakeOfAnUnreadableRegistry:
     """close 12: not in FPLAN, DPLAN's registry unreadable, PBPLAN-12 open.
 
-    Until leg 6 the cross-registry search skipped the registry it could not
-    read and went on, so 12 resolved to PBPLAN-12 and that plan was closed
-    (and the load answered an unreadable registry with an empty one). Red
-    first on that code; mutant: the search's load wrapped back in
-    `try: ... except Exception: continue`.
+    Skipping the unreadable registry would resolve 12 to PBPLAN-12 and close the wrong plan.
     """
 
     def test_the_close_refuses_and_writes_nothing(self, tmp_path, monkeypatch):
@@ -72,8 +68,6 @@ class TestABareNumberNeverClosesTheNamesakeOfAnUnreadableRegistry:
         assert theirs.exists()
 
 
-# ─── Helpers ─────────────────────────────────────────────
-
 _APPEND = "aipass.flow.apps.handlers.plan.append_closed_plan"
 
 
@@ -81,16 +75,8 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     """A stand-in for the append's _create_exclusive seam that answers the way
     Windows does mid-release.
 
-    Windows answers an exclusive create against a lock another writer is still
-    removing (delete-pending) with PermissionError, not FileExistsError; Linux
-    cannot show that, so it is manufactured, handed in through the product's
-    own seam so os.open stays whole for every other reader. The first
-    ``denials`` creates of ``lock_path`` are denied (None = never clears);
-    after that the real exclusive create is made on disk.
-
-    Returns:
-        (side_effect, attempts, raised): attempts counts every exclusive create
-        of lock_path; raised holds each PermissionError handed out.
+    Windows delete-pending raises PermissionError, which Linux can never show. The first
+    ``denials`` creates of ``lock_path`` are denied (None = forever), then the real create runs.
     """
     attempts: list[int] = []
     raised: list[PermissionError] = []
@@ -107,17 +93,8 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
     return fake_create, attempts, raised
 
 
-# ═══════════════════════════════════════════════════════════
-# 1. _extract_prefix
-# ═══════════════════════════════════════════════════════════
-
-
 class TestExtractPrefix:
-    """_extract_prefix, reached through canonical_plan_id, its public caller (leg 10).
-
-    The prefix is read off the row's file name: only a [A-Z]+PLAN prefix
-    counts, case-blind and stripped, and it comes back upper case.
-    """
+    """_extract_prefix, reached through canonical_plan_id, its public caller (leg 10)."""
 
     @pytest.mark.parametrize(
         ("file_name", "expected"),
@@ -136,11 +113,6 @@ class TestExtractPrefix:
     )
     def test_the_prefix_read_off_the_file_name(self, file_name, expected):
         assert canonical_plan_id("1", {"file_path": file_name}) == expected
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. close_plan_impl — single plan closure
-# ═══════════════════════════════════════════════════════════
 
 
 class TestClosePlanImplNoNumber:
@@ -192,7 +164,6 @@ class TestClosePlanImplAlreadyClosed:
     @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
     def test_already_closed_no_orphan(self, _mock_find, _mock_resolve, tmp_path):
-        # Plan file does NOT exist on disk (already archived)
         plan_file = tmp_path / "FPLAN-0002_closed_2026-03-18.md"
         registry = {
             "plans": {
@@ -205,7 +176,6 @@ class TestClosePlanImplAlreadyClosed:
         }
         deps = _make_deps()
         deps["load_registry"].return_value = registry
-        # First call: default registry check returns True (exists in default)
         deps["validate_plan_exists"].return_value = (True, None)
 
         result = close_plan_impl(plan_num="2", **deps)
@@ -221,7 +191,6 @@ class TestClosePlanImplAlreadyClosedOrphan:
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
     def test_already_closed_orphan_cleanup(self, _mock_find, _mock_resolve, tmp_path):
 
-        # Create orphan file on disk
         plan_file = tmp_path / "FPLAN-0002_closed_2026-03-18.md"
         plan_file.write_text("# FPLAN-0002: closed", encoding="utf-8")
 
@@ -242,18 +211,12 @@ class TestClosePlanImplAlreadyClosedOrphan:
 
         assert result["success"] is True
         assert result["plan_key"] == "2"
-        # Registry should have been saved with cleanup flags
         deps["save_registry"].assert_called()
         assert any("orphan" in m.get("text", "").lower() for m in result["messages"])
 
 
 class TestCloseNeverArchivesAFileThatIsNotAPlan:
-    """Leg 9: rows registered before leg 7 name reports; close would archive them.
-
-    Live: FPLAN 0564 to 0583 named devpulse's FPLAN-0508_rows_*.md reports.
-    Red first on the close of leg 8. Mutants leg9 K1 (normal-path guard off),
-    K2 (orphan-path guard off) and K3 (None let through) each redden a test here.
-    """
+    """Leg 9: rows registered before leg 7 name reports; close would archive them."""
 
     REPORT = "FPLAN-0508 rows seedgo\nmeasured rows, not a plan\n"
 
@@ -354,11 +317,7 @@ class TestCloseNeverArchivesAFileThatIsNotAPlan:
 
 
 class TestAFailedSaveIsSaidNotSwallowed:
-    """Leg 10: save_registry answers False when it could not write, and never raises.
-
-    Close ignored that False at three saves: it said "closed" with the registry
-    unwritten, and "archived" with the row still reading unarchived.
-    """
+    """Leg 10: save_registry answers False when it could not write, and never raises."""
 
     @staticmethod
     def _close(tmp_path, row: dict, deps: dict) -> dict:
@@ -448,7 +407,6 @@ class TestClosePlanImplDryRun:
         assert result["plan_key"] == "1"
         assert any("DRY RUN" in m.get("text", "") for m in result["messages"])
         assert any("No action taken" in m.get("text", "") for m in result["messages"])
-        # Must NOT save registry in dry run
         deps["save_registry"].assert_not_called()
 
 
@@ -488,12 +446,9 @@ class TestClosePlanImplSuccess:
         assert result["success"] is True
         assert result["plan_key"] == "1"
         assert result["cancelled"] is False
-        # The CLOSED_PLANS entry lands beside the plan; the detached runner is spawned.
         mock_append.assert_called_once_with("1", ANY, tmp_path)
         mock_subprocess.Popen.assert_called_once()
-        # Registry was saved (at least for marking closed)
         deps["save_registry"].assert_called()
-        # Dashboard updates were called
         deps["update_dashboard_local"].assert_called_once()
         deps["push_to_plans_central"].assert_called_once()
 
@@ -572,9 +527,6 @@ class TestClosePlanImplSuccess:
     def test_closed_plans_append_waits_out_a_delete_pending_lock(self, tmp_path):
         """The CLOSED_PLANS append lock takes a Windows delete-pending denial as
         a held lock and retries it; the entry lands in CLOSED_PLANS.local.json.
-
-        It used to escape _acquire_append_lock on the first denial, so every
-        close that raced a concurrent append reported a failed append.
         """
         closed_plans = tmp_path / "CLOSED_PLANS.local.json"
         lock = closed_plans.with_suffix(".lock")
@@ -584,7 +536,6 @@ class TestClosePlanImplSuccess:
         result = self._close_with_real_append(tmp_path, fake_open, sleep)
 
         assert result["success"] is True
-        # The result first: the entry landed and no failed append was said.
         assert not any("CLOSED_PLANS" in m.get("text", "") for m in result["messages"])
         assert closed_plans.exists()
         entries = json.loads(closed_plans.read_text(encoding="utf-8"))["closed_plans"]
@@ -608,43 +559,32 @@ class TestClosePlanImplSuccess:
         result = self._close_with_real_append(tmp_path, fake_open, sleep)
 
         assert result["success"] is True
-        # The count the warning states is the count of creates made, read off
-        # the attempts rather than the private budget constant.
+        # Read off the attempts, not the private budget constant.
         budget = len(attempts)
         assert budget > 1
         assert not closed_plans.exists()
-        # The denial reaches the user with its reason. Before leg 5 the append
-        # logged it and answered False, read as a held lock: "append failed",
-        # no reason. Red first on that code; mutant `raise` -> `return False`.
+        # The denial reaches the user with its reason. Mutant `raise` -> `return False`.
         reported = [m["text"] for m in result["messages"] if "CLOSED_PLANS" in m.get("text", "")]
         assert len(reported) == 1
         assert reported[0].startswith("  CLOSED_PLANS update failed: Lock ")
         assert str(lock) in reported[0]
         waited = sum(c.args[0] for c in sleep.call_args_list)
         assert reported[0].endswith(f"after {budget} attempts ({waited:.2f}s waited)")
-        # The logged arguments themselves, never str(call): a call's repr doubles
-        # every backslash, so a Windows path is never a substring of it.
+        # Never str(call): its repr doubles backslashes, hiding a Windows path.
         warned = " ".join(str(arg) for c in mock_logger.warning.call_args_list for arg in c.args)
         assert str(lock) in warned
         assert f"{budget} attempts" in warned
-        # What each wait was given: positive, doubling, summed into the message.
-        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
-        # `(2**attempt)` growth each redden this.
+        # Positive, doubling, summed into the message.
         delays = [c.args[0] for c in sleep.call_args_list]
         assert len(delays) == len(attempts)
         assert delays[0] > 0
         assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
         assert f"({sum(delays):.2f}s waited)" in warned
-        # Retired leg 10: the direct call to _acquire_append_lock that pinned
-        # its PermissionError's __cause__. Close reports the append failure as
-        # text only, so no caller can see the chain; the message above is what
-        # reaches anyone.
 
 
 class TestTemplateDetectionNeverDeletes:
     """FPLAN-0370/0371 bug: is_template_content()==True must NOT fast-delete the
-    file or the registry row anymore -- it must close/archive exactly like any
-    other plan (full parity between template-flagged and real-content closes)."""
+    file or the registry row; it closes and archives like any other plan."""
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
@@ -678,14 +618,11 @@ class TestTemplateDetectionNeverDeletes:
             result = close_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is True
-        # File was NOT unlinked directly -- archive_plan_fn is the only thing
-        # allowed to move/remove it, never a raw unlink() in close_ops itself.
+        # archive_plan_fn is the only thing allowed to move or remove the file.
         assert plan_file.exists()
         deps["archive_plan_fn"].assert_called_once_with(plan_file)
-        # Registry row survives (marked closed), never deleted outright.
         assert "1" in registry["plans"]
         assert registry["plans"]["1"]["status"] == "closed"
-        # Full pipeline parity: dashboards + CLOSED_PLANS append still ran.
         deps["update_dashboard_local"].assert_called_once()
         mock_append.assert_called_once()
         mock_subprocess.Popen.assert_called_once()

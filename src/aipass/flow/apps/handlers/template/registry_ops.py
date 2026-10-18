@@ -3,29 +3,13 @@
 # Description: Template registry CRUD operations
 # Version: 1.1.0
 # Created: 2026-03-18
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Template Registry CRUD Operations.
 
-Core operations for loading, saving, and managing the template registry.
-The registry maps template directory names to plan type prefixes so that
-:mod:`plan_type_loader` can discover plan types dynamically instead of
-relying on a hardcoded ``PREFIX_MAP``.
-
-The registry lives at ``flow_json/template_registry.json``.
-
-Usage:
-    from aipass.flow.apps.handlers.template.registry_ops import (
-        load_registry, save_registry, add_type, remove_type,
-        get_prefix_map, get_type_map, scan_unregistered,
-    )
-
-    registry = load_registry()
-    add_type("task_plans", "TPLAN")
-    prefix_map = get_prefix_map()          # {"flow_plans": "FPLAN", ...}
-    type_map   = get_type_map()            # {"fplan": "flow_plans", ...}
-    unregistered = scan_unregistered()     # dirs without a registry entry
+Maps template directory names to plan type prefixes (flow_json/template_registry.json),
+so plan types are discovered from disk instead of a hardcoded PREFIX_MAP.
 """
 
 from __future__ import annotations
@@ -39,17 +23,12 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.flow.apps.handlers.repo_root import module_file
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 MODULE_NAME = "registry_ops"
 
 # registry_ops.py -> template/ -> handlers/ -> apps/ -> flow/
 FLOW_ROOT: Path = module_file(__file__).parents[3]
 REGISTRY_PATH: Path = FLOW_ROOT / "flow_json" / "template_registry.json"
 
-# Default seed data -- ensures existing plan types work on fresh install
 _DEFAULT_TYPES: Dict[str, Dict[str, str]] = {
     "flow_plans": {
         "prefix": "FPLAN",
@@ -65,13 +44,7 @@ _DEFAULT_TYPES: Dict[str, Dict[str, str]] = {
     },
 }
 
-# Plan types that cannot be removed via remove_type()
 _PROTECTED_TYPES: frozenset[str] = frozenset({"flow_plans", "dev_plans"})
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 def _today() -> str:
@@ -80,10 +53,7 @@ def _today() -> str:
 
 
 def _registry_path() -> Path:
-    """Return the current registry file path.
-
-    Wrapped in a function so tests can monkeypatch ``REGISTRY_PATH``.
-    """
+    """Return the current registry file path; a function so tests can monkeypatch REGISTRY_PATH."""
     return REGISTRY_PATH
 
 
@@ -100,20 +70,11 @@ def _empty_registry() -> Dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Core CRUD
-# ---------------------------------------------------------------------------
-
-
 def _read_or_seed(path: Path) -> Tuple[Dict[str, Any], bool]:
     """Return ``(registry, seeded)`` for `path`, seeding defaults when unusable.
 
-    Missing, unparseable and structurally wrong all mean the same thing --
-    there is nothing here to trust -- so all three seed the same defaults.
-    The seed is RETURNED rather than saved-and-returned: the caller runs
-    auto-discovery over it first, so a fresh install writes its file once,
-    complete, instead of writing a two-type file and correcting it on the
-    next read.
+    The seed is returned, not saved: the caller runs auto-discovery first so a fresh install
+    writes its file once, complete.
     """
     if not path.exists():
         logger.info("[%s] Registry not found, creating at %s", MODULE_NAME, path)
@@ -136,28 +97,16 @@ def _read_or_seed(path: Path) -> Tuple[Dict[str, Any], bool]:
 def load_registry() -> Dict[str, Any]:
     """Load the template registry from disk, auto-creating if missing.
 
-    Auto-heals missing ``types`` or ``metadata`` keys, prunes orphans, and
-    registers template directories that are on disk but not yet in the file.
-
-    THE ORDER MATTERS. Auto-discovery runs on the seeded registry too, not
-    only on one read back from disk. It used to run only on the read path, so
-    the first command on a fresh install answered with FPLAN and DPLAN while
-    five more template directories sat beside them, and the second command
-    answered with all seven. The registered set must not depend on how many
-    times it has been asked for.
-
-    Returns:
-        Registry dict with ``types`` and ``metadata`` keys.
+    Auto-discovery runs on a seeded registry too: the registered set must not depend on how
+    many times it has been asked for.
     """
     path = _registry_path()
     data, seeded = _read_or_seed(path)
 
-    # Auto-heal: missing "types" key
     if "types" not in data:
         logger.warning("[%s] Missing 'types' key, recreating with defaults", MODULE_NAME)
         data["types"] = dict(_DEFAULT_TYPES)
 
-    # Auto-heal: missing "metadata" key
     if "metadata" not in data:
         data["metadata"] = {
             "version": "1.0.0",
@@ -165,10 +114,7 @@ def load_registry() -> Dict[str, Any]:
             "type_count": len(data["types"]),
         }
 
-    # Auto-heal: prune orphans + register new dirs. A SEEDED registry is always
-    # written, even when discovery adds nothing -- otherwise a corrupt file that
-    # happens to need no new types would be left on disk to be re-parsed and
-    # re-warned about on every single read.
+    # A seeded registry is always written, or a corrupt file is re-parsed and re-warned every read.
     changed = _prune_orphaned_types(data)
     changed = _auto_register_new_types(data) or changed
     if changed or seeded:
@@ -178,10 +124,7 @@ def load_registry() -> Dict[str, Any]:
 
 
 def _prune_orphaned_types(data: Dict[str, Any]) -> bool:
-    """Remove registry entries whose template directory no longer exists.
-
-    Returns True if any entries were pruned.
-    """
+    """Remove registry entries whose template directory no longer exists."""
     templates_dir = FLOW_ROOT / "templates"
     orphaned = [d for d in data["types"] if d not in _PROTECTED_TYPES and not (templates_dir / d).is_dir()]
     if not orphaned:
@@ -202,10 +145,7 @@ def _prune_orphaned_types(data: Dict[str, Any]) -> bool:
 
 
 def _auto_register_new_types(data: Dict[str, Any]) -> bool:
-    """Detect unregistered template directories and register them.
-
-    Returns True if any new types were registered.
-    """
+    """Detect unregistered template directories and register them."""
     templates_dir = FLOW_ROOT / "templates"
     if not templates_dir.is_dir():
         return False
@@ -240,31 +180,9 @@ def _auto_register_new_types(data: Dict[str, Any]) -> bool:
 def _derive_prefix(dir_name: str, used: set) -> str | None:
     """Derive a unique prefix from a directory name, or None if collision.
 
-    THE RULE: one initial per meaningful word, then ``PLAN``. A trailing
-    ``plans`` segment is the noun every directory carries and contributes
-    nothing, so it is dropped first — ``dev_plans`` -> ``DPLAN``,
-    ``team_dev_plans`` -> ``TDPLAN``.
-
-    It used to read the FIRST word only, which made the prefix depend on
-    install history rather than on the directory name: ``team_dev_plans``
-    derived ``TPLAN`` on a fresh install while this machine's registry already
-    held ``TDPLAN`` from an earlier manual registration, so every existing
-    ``TDPLAN-NNNN`` file was unreadable on a new clone. Ruled 2026-09-07
-    (FPLAN-0492 wave 4): TDPLAN on every install, and the derivation must be
-    deterministic — the same directory name yields the same prefix everywhere.
-    All seven template directories now derive the prefix their registry row
-    already holds.
-
-    Only the COLLISION fallback still consults *used*: a second directory
-    wanting a taken prefix widens to the first two letters of its first word,
-    and failing that returns None for manual registration.
-
-    Args:
-        dir_name: Template directory name, e.g. ``team_dev_plans``.
-        used: Prefixes already taken in the registry.
-
-    Returns:
-        The derived prefix, or None when it collides and cannot widen.
+    One initial per word, trailing ``plans`` dropped: ``team_dev_plans`` -> ``TDPLAN``. Must be
+    deterministic, or existing plan files are unreadable on a new clone. Only the collision
+    fallback (first two letters of the first word) consults *used*.
     """
     words = [word for word in dir_name.split("_") if word]
     if words and words[-1].lower() == "plans" and len(words) > 1:
@@ -292,27 +210,14 @@ def _create_plan_registry(shorthand: str) -> None:
 def save_registry(data: Dict[str, Any]) -> bool:
     """Save the template registry to disk.
 
-    Updates ``metadata.last_updated`` and ``metadata.type_count`` before
-    writing.
-
-    Args:
-        data: Registry dict to persist.
-
-    Returns:
-        True if saved successfully, False when the write failed (OSError).
-
-    Raises:
-        ValueError: ``data`` is not a dict with a ``types`` key. Every
-            caller passes a registry it loaded, so this is a caller's bug. It
-            used to answer False, the same as a failed write, so the caller
-            could not tell the two apart (flow's decision, leg 5).
+    Returns False only when the write failed (OSError).
+    Raises ValueError when ``data`` is not a dict with ``types``: a caller's bug, not a failed write.
     """
     path = _registry_path()
 
     if not isinstance(data, dict) or "types" not in data:
         raise ValueError(f"[{MODULE_NAME}] Cannot save invalid registry structure: {type(data).__name__}")
 
-    # Refresh metadata
     data.setdefault("metadata", {})
     data["metadata"]["last_updated"] = _today()
     data["metadata"]["type_count"] = len(data["types"])
@@ -376,28 +281,9 @@ def add_type(
     prefix: str,
     registered_by: str = "flow",
 ) -> bool:
-    """Register a new plan type in the template registry.
-
-    Validates that:
-    - ``dir_name`` is not already registered.
-    - ``prefix`` is not already taken by another type.
-    - The template directory exists under ``templates/``.
-    - The directory contains at least one ``.md`` file.
-
-    On success, also creates an empty plan registry JSON at
-    ``flow_json/<prefix_lower>_registry.json``.
-
-    Args:
-        dir_name: Subdirectory name under ``templates/``.
-        prefix: Plan ID prefix (e.g. ``"TPLAN"``).
-        registered_by: Who registered this type.
-
-    Returns:
-        True if added, False on validation failure or save error.
-    """
+    """Register a new plan type in the template registry."""
     registry = load_registry()
 
-    # Allow override of auto-registered entries with explicit prefix
     existing = registry["types"].get(dir_name)
     if existing and existing.get("registered_by") != "auto":
         logger.error(
@@ -414,7 +300,6 @@ def add_type(
             logger.error("[%s] %s", MODULE_NAME, override_err)
             return False
 
-    # Validate: prefix not already taken by another type (case-insensitive)
     upper = prefix.upper()
     if any(entry.get("prefix", "").upper() == upper for d, entry in registry["types"].items() if d != dir_name):
         logger.error(
@@ -424,7 +309,6 @@ def add_type(
         )
         return False
 
-    # Validate: template directory exists
     templates_dir = FLOW_ROOT / "templates" / dir_name
     if not templates_dir.is_dir():
         logger.error(
@@ -434,7 +318,6 @@ def add_type(
         )
         return False
 
-    # Validate: directory contains at least one .md file
     md_files = list(templates_dir.glob("*.md"))
     if not md_files:
         logger.error(
@@ -444,10 +327,8 @@ def add_type(
         )
         return False
 
-    # Derive shorthand from prefix
     shorthand = prefix.lower()
 
-    # Add entry
     registry["types"][dir_name] = {
         "prefix": prefix,
         "shorthand": shorthand,
@@ -455,11 +336,9 @@ def add_type(
         "registered_by": registered_by,
     }
 
-    # Save registry first
     if not save_registry(registry):
         return False
 
-    # Auto-create empty plan registry for the new type
     plan_registry_path = FLOW_ROOT / "flow_json" / f"{shorthand}_registry.json"
     if not plan_registry_path.exists():
         empty_plan_registry: Dict[str, Any] = {
@@ -486,18 +365,7 @@ def add_type(
 
 
 def remove_type(dir_name: str) -> bool:
-    """Unregister a plan type from the template registry.
-
-    Protected types (``flow_plans``, ``dev_plans``) cannot be removed.
-    This only removes the registry entry -- it does **not** delete the
-    template directory or the plan registry JSON file.
-
-    Args:
-        dir_name: The type directory name to unregister.
-
-    Returns:
-        True if removed, False if not found or protected.
-    """
+    """Unregister a plan type; the template directory and plan registry file are kept."""
     registry = load_registry()
 
     if dir_name not in registry["types"]:
@@ -524,17 +392,8 @@ def remove_type(dir_name: str) -> bool:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Lookup helpers
-# ---------------------------------------------------------------------------
-
-
 def get_prefix_map() -> Dict[str, str]:
-    """Return ``{dir_name: prefix}`` for all registered types.
-
-    This is the dynamic replacement for the hardcoded ``PREFIX_MAP`` in
-    :mod:`plan_type_loader`.
-    """
+    """Return ``{dir_name: prefix}`` for all registered types."""
     registry = load_registry()
     return {dir_name: entry["prefix"] for dir_name, entry in registry["types"].items() if "prefix" in entry}
 
@@ -542,8 +401,7 @@ def get_prefix_map() -> Dict[str, str]:
 def get_type_map() -> Dict[str, str]:
     """Return ``{shorthand: dir_name}`` for all registered types.
 
-    Always includes ``{"default": "flow_plans"}`` so callers can resolve
-    the bare ``flow`` command without extra logic.
+    Always includes ``{"default": "flow_plans"}`` so the bare ``flow`` command resolves.
     """
     registry = load_registry()
     result: Dict[str, str] = {"default": "flow_plans"}
@@ -554,21 +412,8 @@ def get_type_map() -> Dict[str, str]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Discovery
-# ---------------------------------------------------------------------------
-
-
 def scan_unregistered() -> list[Dict[str, str | int | list[str]]]:
-    """Scan ``templates/`` for directories not yet in the registry.
-
-    Skips directories whose names start with ``_`` or ``.``, and
-    directories that are already registered.
-
-    Returns:
-        List of dicts, each with ``dir_name``, ``template_count``, and
-        ``templates`` (list of ``.md`` file stems).
-    """
+    """Scan ``templates/`` for directories not yet in the registry."""
     registry = load_registry()
     registered = set(registry["types"].keys())
     templates_dir = FLOW_ROOT / "templates"

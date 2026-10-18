@@ -3,7 +3,7 @@
 # Description: Interactive Command Parser
 # Version: 0.2.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-17
 # =============================================
 
 """Parse interactive commands for monitor console. No filtering — all events display."""
@@ -14,14 +14,7 @@ from aipass.prax.apps.handlers.json import json_handler
 
 
 def parse_command(cmd: str) -> Tuple[Optional[str], List[str]]:
-    """Parse user command into action and arguments.
-
-    Args:
-        cmd: Raw command string from user input
-
-    Returns:
-        Tuple of (command_name, arguments) or (None, []) for empty input
-    """
+    """Parse user command into (command_name, arguments), or (None, []) for empty input."""
     if not cmd:
         return None, []
 
@@ -34,7 +27,6 @@ def parse_command(cmd: str) -> Tuple[Optional[str], List[str]]:
 
     json_handler.log_operation("filter_applied", {"command": command, "args": args})
 
-    # Normalize aliases
     if command in ["exit", "q"]:
         command = "quit"
 

@@ -3,29 +3,12 @@
 # Description: Pins the public cross-branch gateway for the fleet definition
 # Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/fleet.py."""
 
-# The fleet definition has one owner and now one door.
-#
-# @daemon reported (dispatch 2a70bbcd) that the cross-branch import I sanctioned
-# fails two of @seedgo's checks at once. The rule is not arbitrary and it is not
-# "do not consume @memory" — ``handlers_check.py:310`` says another branch's
-# ``modules`` package is its PUBLIC GATEWAY and sends cross-branch callers there
-# explicitly. ``apps/handlers/`` is private implementation.
-#
-# So the seam moves, and nothing else does. ``registry_scope`` stays the single
-# definition; this module is the door to it, owned here rather than shimmed in
-# each consumer's tree — a gateway living in @daemon would be a second public
-# surface for my module in a branch I do not control, and the next consumer would
-# import theirs or write a third.
-#
-# What is deliberately NOT re-exported is as much of the contract as what is:
-# ``resident_registry_paths`` and ``read_registry_branches`` are the mechanics of
-# HOW residents are found, and they stop being the whole story the moment the
-# external tier lands.
+# modules/ is the public gateway; handlers/ is private. The mechanics of finding residents are not re-exported.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — declared_residency answers, in tests/test_residency_scope.py
@@ -77,20 +60,7 @@ class TestTheGatewayIsADoorNotACopy:
 
 
 class TestTheCommandSurfaceIsIntrospectionOnly:
-    """A correction to my own first design, kept visible rather than quietly rewritten.
-
-    I built this gateway with no ``handle_command``, reasoning that a library
-    surface should stay invisible to ``apps/memory.py``'s duck-typed module
-    discovery, and wrote a test asserting exactly that. The branch's own
-    convention disagreed: ``health.py`` — the gateway built for the same
-    consumer, for the same reason — is discoverable and answers introspection,
-    and three @seedgo standards (cli, introspection, json_structure) fail
-    without it. The convention won and the test inverted.
-
-    What stays true either way is the part that matters: the CLI describes the
-    contract and never executes fleet work. A gateway whose command surface
-    starts answering fleet questions is the second definition all over again.
-    """
+    """Discoverable like health.py, but the CLI describes the contract and never executes fleet work."""
 
     def test_it_answers_only_its_own_command(self):
         """A module that claims a command it does not own swallows another module's work."""
@@ -103,20 +73,7 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         assert "fleet Module" in capsys.readouterr().out
 
     def test_an_unknown_subcommand_is_named_not_swallowed(self, capsys):
-        """Claimed and reported, never a silent no-op that looks like success.
-
-        Read from BOTH streams on purpose: the refusal routes to stderr under
-        @seedgo's output-routing standard, and asserting stdout alone made this
-        red on the first run for a reason that had nothing to do with the
-        behaviour being pinned.
-
-        REWRITTEN 2026-09-08 (the fleet refusal sweep). The docstring promised
-        "never a silent no-op that looks like success" and the test never
-        measured the success half: the refusal printed through `warning()`, the
-        failure flag stayed clear and the process exited 0, which is precisely
-        what looks like success to a caller. It goes through `error()` now and
-        the exit code is pinned.
-        """
+        """Claimed and reported, never a silent no-op that looks like success: exits 2, read from both streams."""
         reset_command_state()
         assert fleet.handle_command("fleet", ["nonsense"]) is True
         assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"
@@ -126,10 +83,7 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
     def test_the_command_surface_executes_no_fleet_work(self, monkeypatch):
         """The pin that keeps this a door: the CLI must never answer the question itself.
 
-        Both bindings are watched: ``fleet`` holds its own names for the handler's
-        functions, so patching ``registry_scope`` alone never saw a call made
-        through the gateway. Mutant: ``fleet_branches()`` called ahead of the
-        ``log_operation`` line in ``handle_command`` — killed.
+        Both bindings are watched: ``fleet`` holds its own names for the handler's functions.
         """
         called = []
         for owner in (registry_scope, fleet):
@@ -139,13 +93,7 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         assert called == [], "the gateway's CLI computed fleet state instead of describing the contract"
 
     def test_it_is_discovered_by_the_real_loops_own_rule(self):
-        """Asserted against the discovery rule rather than trusted.
-
-        ``apps/memory.py`` duck-types every file in ``modules/`` on
-        ``handle_command``. This runs the REAL ``discover_modules()`` and holds
-        it to the files on disk: every ``modules/*.py`` that defines
-        ``handle_command`` is discovered, and nothing that does not.
-        """
+        """Every ``modules/*.py`` defining ``handle_command`` is discovered by the real loop, and nothing else."""
         modules_dir = Path(fleet.__file__).parent
         on_disk = {
             path.stem

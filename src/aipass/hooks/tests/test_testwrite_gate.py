@@ -4,49 +4,13 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
 
-# testwrite_gate — the owner's 2026-09-01 no-agent-test-creation ruling.
-#
-# The owner ruled (devpulse DPLAN-0323) that agents are stripped of self-directed
-# test creation while @seedgo's test_quality v5 pack lands, enforced by a hook
-# behind a JSON switch so the way back is a field flip and not a rebuild.
-#
-# SEQUENCE, stated plainly because it was not test-first: the handler was written
-# first and these pins after it. The red evidence is therefore a mutation sweep
-# run afterwards rather than a red-then-green sequence — 13 mutants, all killed,
-# including a baseline mutant that stubs the gate to allow everything and reds 25
-# of the 53 pins below. One of the 13 SURVIVED the first round and is why the
-# ``writing_enabled`` contract pin exists: flipping the missing-policy constructor
-# to claim writing was ON killed nothing, because the gate reads ``error`` first.
-#
-# The file is organised by the question each block answers:
-#
-#  1. The switch does all three of its jobs: off blocks, a branch in ``allow``
-#     passes, ``on`` passes for everyone.
-#  2. The ruling stays where the owner drew it: creation is blocked, editing an
-#     existing test is not.
-#  3. Both lanes answer the same. The scripted lane reuses ``bash_writes``, so a
-#     ``cat > tests/test_x.py`` is refused exactly like a Write.
-#  4. The fail mode is OBSERVABLE, not merely chosen: missing and corrupt policy
-#     files both refuse, and both safety properties that make fail-closed
-#     survivable — ordinary work never reads the policy, and the policy file
-#     itself is always writable — have pins of their own.
-#  5. The admin seat passes on a VERIFIED grant only, and never on a directory
-#     name, mirroring test_edit_gate_bash.py's discipline.
-#
-# POSIX literals in this suite STAY (devpulse ruling, 2026-09-08): the literal
-# IS the test data - a command string is what the gate reads, spelled as agents
-# type it.
-#
-# A path put INTO a command string is spelled with as_posix(), the form bash takes
-# on every OS (C:/... on Windows). str() handed windows-setup a raw
-# C:\Users\... cd target. Bash eats those backslashes, and the gate's reading
-# of that did what bash would: cd'd into a directory named C:Users..., so an
-# existing test looked like a new one (devpulse 401ee814, PR #762).
+# Behind a JSON switch so the way back is a field flip. Creation is blocked, editing an existing test is not.
+# A path put INTO a command string is spelled as_posix(): bash eats a Windows str()'s backslashes.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — EDIT_TOOLS and ADMIN_SEAT's literal values; the gate's use of them is pinned
@@ -71,8 +35,7 @@ _RAIL = "aipass.ai_mail.apps.modules.door_verified_caller"
 def no_admin_grant():
     """Every seat is ordinary unless a test says otherwise.
 
-    Without this the real rail runs, and a machine that happens to hold a valid
-    devpulse grant would silently exempt half this file.
+    Without this, a machine holding a valid devpulse grant would silently exempt half this file.
     """
     with patch(f"{_RAIL}.is_verified_admin_caller", return_value=False):
         yield
@@ -86,14 +49,7 @@ def grant_granted():
 
 @pytest.fixture
 def project(tmp_path: Path) -> dict:
-    """An AIPass-shaped tree with one branch that already has a test suite.
-
-    <tmp>/AIPass/
-      AIPASS_REGISTRY.json
-      .aipass/test_write_policy.json      written per-test by _policy()
-      src/aipass/hooks/tests/test_existing.py
-      src/aipass/devpulse/                the admin seat
-    """
+    """An AIPass-shaped tree with one branch that already has a test suite."""
     return _build_project(tmp_path)
 
 
@@ -186,9 +142,7 @@ class TestTheSwitch:
     def test_the_refusal_names_what_the_ask_must_carry(self, project: dict):
         """The owner's awareness ruling: blocking without teaching is half a gate.
 
-        The navmap house rule is not "mail @devpulse", it is "mail @devpulse with
-        the defect or contract the test pins". Naming the recipient and omitting
-        that clause turns a reviewable request into a re-ask.
+        The ask must carry the defect or contract the test pins, or it comes back as a re-ask.
         """
         _policy(project)
         reason = _reason(_run(project["seat"], file_path=project["new_test"]))
@@ -290,10 +244,7 @@ class TestTheFailModeIsObservable:
     def test_the_missing_refusal_names_the_ruling_it_stands_in_for(self, project: dict):
         """The message a fresh project actually hits, so it carries the most weight.
 
-        `aipass init` stamps the gate but not a policy, so most projects meet this
-        refusal and never the configured one. Without the ruling named, it reads as
-        a broken install rather than a fleet decision — and the cure looks like
-        "repair something" instead of "opt in".
+        Without the ruling named it reads as a broken install, and the cure looks like repair, not opt-in.
         """
         reason = _reason(_run(project["seat"], file_path=project["new_test"]))
         assert "DPLAN-0323" in reason
@@ -337,10 +288,7 @@ class TestTheFailModeIsObservable:
     def test_a_policy_carrying_an_error_never_claims_writing_is_enabled(self, project: dict, tmp_path: Path):
         """The reader is a public module API, and ``error`` is not its only reader.
 
-        Found by mutation: flipping ``writing_enabled`` to True inside the
-        missing-policy constructor killed nothing, because the gate short-circuits
-        on ``error`` first. Any other caller reading ``.writing_enabled`` alone
-        would have been told test writing was ON precisely when no policy exists.
+        The gate reads ``error`` first, so only this pin sees ``writing_enabled`` lie when no policy exists.
         """
         missing = testgate_policy.load(tmp_path)
         assert missing.error is not None
@@ -383,14 +331,10 @@ class TestTheAdminSeat:
     def test_an_unimportable_admin_module_refuses_rather_than_opens(self, project: dict):
         """Caught live: reaching the rail through a second module adds a second failure.
 
-        The first cut let an ImportError propagate to the handler's crash guard,
-        which allows — so a missing admin_seat.py would have exempted EVERY seat.
-        edit_gate's own suite convicted the same shape in its half within the
-        minute. The delegation must not become a way in.
+        An ImportError reaching the allowing crash guard would exempt EVERY seat.
         """
         _policy(project)
-        # Only the rail's import is refused (a None entry halts it); the gate's
-        # other call-time imports still load, so the refusal is the rail's.
+        # Only the rail's import is refused, so the refusal is the rail's.
         new = str(project["root"] / "src" / "aipass" / "devpulse" / "tests" / "test_new.py")
         with patch.dict("sys.modules", {"aipass.hooks.apps.modules.admin_seat": None}):
             assert _blocked(_run(project["admin_seat"], file_path=new))
@@ -451,14 +395,7 @@ class TestTheResidualIsPublished:
 class TestRunningTestsIsNotWritingThem:
     """False fire #7, banked 2026-09-05, fixed 2026-09-07.
 
-    ``bash_writes`` reports every path an interpreter is handed, which is the
-    right breadth for edit_gate's cross-project fence — an interpreter holding
-    a foreign path cannot be distinguished from one writing to it. It is the
-    wrong breadth for THIS gate, whose question is narrower: is a NEW TEST
-    being created? A module-run of pytest creates nothing.
-
-    Reproduced live while measuring the fix: the diagnostic command written to
-    MEASURE this defect was itself refused by it.
+    bash_writes' interpreter breadth is right for edit_gate, wrong here: a module-run of pytest creates nothing.
     """
 
     @pytest.mark.parametrize(
@@ -473,11 +410,7 @@ class TestRunningTestsIsNotWritingThem:
     def test_a_test_run_is_allowed(self, project, command):
         """Every row names a path that does NOT exist yet, deliberately.
 
-        MUTATION-CHECK finding, 2026-09-07: rows written against the EXISTING
-        test file passed with the exemption disabled — an existing file is not
-        a creation, so nothing but the file's absence can discriminate. Naming
-        a path that is not there is still only naming it; a runner cannot bring
-        a source file into being, and that is the whole claim.
+        An existing file is not a creation, so only the file's absence discriminates.
         """
         _policy(project)
         filled = command.format(new_test=project["new_test"], root=project["root"])
@@ -516,9 +449,7 @@ class TestRunningTestsIsNotWritingThem:
         """devpulse 213c64fd, @aipass's shape from 2026-09-09: edit an EXISTING test
         with a python heredoc, cd to the repo root, run it by its root-relative path.
 
-        The python step used to claim the pytest argument and resolve it from the
-        seat, naming <seat>/src/aipass/hooks/tests/... - a path that does not
-        exist - so the gate refused an edit of a real file as a creation."""
+        The pytest argument must not resolve from the seat, or a real file reads as a creation."""
         _policy(project)
         own = "te" + "sts/" + Path(project["existing"]).name
         from_root = Path(project["existing"]).relative_to(project["root"]).as_posix()
@@ -537,11 +468,7 @@ class TestRunningTestsIsNotWritingThem:
         assert _blocked(_run(project["seat"], command=f"true\ntouch {Path(project['new_test']).as_posix()}"))
 
     def test_the_exemption_is_only_the_module_form(self):
-        """A bare script argument named pytest must not buy the exemption.
-
-        Read through testwrite_targets_bash (fleet green leg 8): a run drops the
-        interpreter's target, anything else keeps it.
-        """
+        """A bare script argument named pytest must not buy the exemption."""
         cwd = str(Path(tempfile.gettempdir()))
 
         def named(command):
@@ -557,15 +484,7 @@ class TestRunningTestsIsNotWritingThem:
 class TestNamingAPathIsNotWritingIt:
     """Three seats, one shape: DATA read as a target (devpulse DPLAN-0352, 09-19).
 
-    @seedgo was refused for an interpreter one-liner that PRINTED a test path
-    while measuring the fleet; @canary for a path literal inside a heredoc; this
-    branch for both. Nothing was being created in any of them — the interpreter
-    breadth that fences a foreign project convicted on a string.
-
-    The cure reads the program's OWN text for a write verb, in the grammar that
-    text is written in, and stands down when there is none. What it must never
-    do is claim that evidence about text it did not read: a script FILE keeps
-    the broad reading, pinned in the class above.
+    The program's OWN text is read for a write verb in its own grammar; a script FILE keeps the broad reading.
     """
 
     def test_an_inline_program_that_only_names_a_test_path_is_allowed(self, project):
@@ -612,12 +531,10 @@ class TestNamingAPathIsNotWritingIt:
     )
     def test_a_shelling_word_inside_a_named_path_is_not_code(self, tmp_path, parent, form):
         """xdist names its temp dirs popen-gw0: the word sat in the PATH, not the program,
-        and four pins here went red under -n 2 (compass 460, item 1). The further forms
-        are devpulse's path specimens of leg 2c, each one path the program only names."""
+        so each form here is a path the program only names."""
         project = _build_project(tmp_path / parent)
         _policy(project)
-        # The word closing an absolute path, and opening a relative one: each side of
-        # the boundary has a spelling of its own to stand down on.
+        # Each side of the word boundary has a spelling of its own to stand down on.
         names = [Path(project["new_test"]).as_posix(), (tmp_path / parent).as_posix(), f"{parent}/x"]
         single = str(PureWindowsPath(tmp_path / "aipass" / "spawn" / "tests"))
         doubled_last = str(PureWindowsPath(tmp_path / "aipass" / "spawn")).replace("\\", "\\\\")
@@ -698,7 +615,7 @@ class TestNamingAPathIsNotWritingIt:
     )
     def test_a_name_added_by_compass_480_inside_a_named_path_is_not_code(self, project, name):
         """One let-through pin per family: the new names stand under reading 1 alone, so a path
-        that holds one and no call bracket is still only named (compass 480, condition 1)."""
+        that holds one and no call bracket is still only named."""
         _policy(project)
         named = Path(project["new_test"]).as_posix()
         program = f"print('{named}', 'notes/{name}/x.md', 'notes/{name}-gw0')"
@@ -861,11 +778,7 @@ class TestNamingAPathIsNotWritingIt:
         assert not _blocked(_run(project["seat"], command=f"node - <<'EOF'\n{program}\nEOF"))
 
     def test_a_shell_program_is_read_in_shell_grammar(self, project):
-        """`>` is a redirection in a shell and a comparison in python — learning 245.
-
-        Handing one matcher both grammars is what refused a read-only awk filter
-        on a live turn, so the two vocabularies stay apart.
-        """
+        """`>` is a redirection in a shell and a comparison in python — learning 245."""
         _policy(project)
         new_test = Path(project["new_test"]).as_posix()
         assert _blocked(_run(project["seat"], command=f'bash -c "echo x > {new_test}"'))
@@ -884,11 +797,7 @@ class TestNamingAPathIsNotWritingIt:
 class TestAnOperandPathlibCannotExpand:
     """devpulse's decision C, leg 4: a tilde word pathlib cannot expand, in bash_writes._resolve.
 
-    The shell leaves ~nosuchuser as it is when no such user exists, so the write lands
-    under the working directory in a directory of that literal name. Before leg 4 the
-    operand was dropped and neither fence saw a target. Where the platform does expand
-    the word (Windows builds ~user from the profile directory and never refuses), the
-    reader names what the platform names, so the test asks the platform first.
+    The shell leaves ~nosuchuser literal; Windows expands it, so the test asks the platform first.
     """
 
     OPERAND = "~nosuchuser/tests/test_brand_new.py"
@@ -920,7 +829,7 @@ class TestAnOperandPathlibCannotExpand:
 
         result = _run(project["seat"], command=f"echo x >> {self.OPERAND}")
 
-        # Refused either way; the platform's reading decides which refusal (Windows: a new file, PR #774).
+        # Refused either way; the platform's reading decides which refusal.
         assert _blocked(result)
         assert ("Test file edit blocked" in _reason(result)) is (expected == literal)
 
@@ -928,19 +837,8 @@ class TestAnOperandPathlibCannotExpand:
 class TestTheTemplatePointer:
     """@seedgo's contract, this branch's hook — DPLAN-0354, devpulse c3ab29d2.
 
-    @seedgo houses the fleet's test template and distributes it as a page in each
-    branch's own ``tests/``, beside a receipt. On a PostToolUse touching
-    ``tests/**`` this branch injects exactly one line naming that LOCAL page and
-    the checklist to run next.
-
-    The page's presence is the whole question, read per call: a branch with no
-    page is unstamped, and the line is SUPPRESSED rather than pointing at a file
-    that is not there. Nothing here reads seedgo's manifest.
-
-    It prints nothing — there is no console channel to capture. The handler
-    returns a PostToolUse document and the ENGINE writes it (output_merge folds
-    it in beside auto_fix's), so every assertion below reads the returned
-    document through the handler's own entry point.
+    A PostToolUse on tests/** gets one line naming the branch's LOCAL template page, or none without a page.
+    The engine writes the returned document, so assertions read it through the handler's entry point.
     """
 
     LINE_HEAD = "Test template v1: "
@@ -1018,9 +916,7 @@ class TestTheTemplatePointer:
 
     def test_a_nested_test_tree_gets_its_own_page(self, project):
         """MUTATION-CHECK, and it survived the first sweep: the docstring said
-        "innermost on purpose" while nothing pinned it, so an outermost walk
-        passed every other pin here. The page sits beside the suite it
-        describes, so the inner tree's own page is the right pointer."""
+        "innermost on purpose"; the inner tree's own page is the right pointer."""
         self._stamp(project)
         inner = project["tests_dir"] / "integration" / "tests"
         inner.mkdir(parents=True)

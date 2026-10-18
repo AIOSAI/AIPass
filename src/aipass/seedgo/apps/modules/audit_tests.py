@@ -3,43 +3,14 @@
 # Description: the audit-tests verb - execution-tier test quality measurement
 # Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The `audit-tests` verb. Measures how much a test suite proves, by running it.
+"""The `audit-tests` verb. Measures how much a test suite proves, by running it.
 
-CLAIMING IS EXACT MATCH ONLY, and never a prefix. `route_command()` takes the
-first module returning truthy and iterates in sorted-name order, where
-`audit_tests.py` sorts BEFORE `standards_audit.py` — so a prefix claim on
-"audit" would silently swallow the audit verb entirely.
-
-CLAIM BEFORE YOU WORK. `route_command()` catches any exception a module raises
-and continues to the next module; if nothing claims, the user is told "Unknown
-command". A crash in this lane would therefore be INDISTINGUISHABLE FROM THE
-VERB NOT EXISTING. So the command is recognised, the claim is set, and
-everything after it is wrapped — this function returns True unconditionally
-once it has claimed.
-
-    drone @seedgo audit-tests @backup             one branch
-    drone @seedgo audit-tests .                   the current directory
-    drone @seedgo audit-tests /path/to/project    not an aipass branch at all
-    drone @seedgo audit-tests aipass              every citizen
-    drone @seedgo audit-tests @backup --budget 300
-    drone @seedgo audit-tests @backup --prove-refusal    canary point C
-    drone @seedgo audit-tests @backup --width-coupling   two widths, diffed
-    drone @seedgo audit-tests @backup --pseudo-tested    one mutant per function
-
-A REFUSAL NOW REACHES THE SHELL; A SCORE STILL DOES NOT. Until 2026-09-07 this
-verb returned truthy for everything and `seedgo.py` turned that into exit 0, so
-a consumer reading the exit code could not tell a refusal from a pass - the
-artifact's `status` field and the `REFUSED:` line were the only load-bearing
-signals. They still are for the VERDICT: a scored group that failed exits 0,
-because this lane is advisory and a non-zero there would make it a gate nobody
-ruled it to be. What changed is the other half: a refusal (`REFUSAL_CODES` -
-the harness could not run, no units, no adapter, budget spent, an argument
-nobody recognised) leaves with its own code, per the owner's standing ruling from
-the 2026-09-07 fleet sweep.
+Exact-match claims only (a prefix on "audit" would swallow the audit verb in sorted
+routing); once claimed every failure is caught here. A refusal leaves with its own
+exit code; a failed score exits 0, because this lane advises and does not gate.
 """
 
 from typing import Dict, List, NoReturn
@@ -53,40 +24,22 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.modules import CommandRefused
 
-#: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("audit-tests", "audit_tests")
 
-#: The flags that opt a BUILT execution group into a run, mapped to the bare
-#: group name the adapter publishes it under.
-#:
-#: ONE TABLE, READ BY BOTH THE PARSER AND THE DID-YOU-MEAN. Law ARGV's whole
-#: mechanism is that the loop which accepts a token and the list which
-#: suggests one cannot disagree; a flag added to the loop and forgotten in
-#: LANE_FLAGS would be accepted and then never offered to somebody who
-#: mistyped it, which is the drift the law exists to end.
-#:
-#: Neither is on by default and neither ever will be by accident: both cost
-#: whole extra suite executions - `--pseudo-tested` one per function, which is
-#: projected at ~2.44h on seedgo, and `--width-coupling` two per run.
+#: One table read by both the parser and the did-you-mean, so they cannot drift (Law ARGV).
+#: Never on by default: each costs whole extra suite executions.
 OPT_IN_GROUP_FLAGS: Dict[str, str] = {
     "--pseudo-tested": "pseudo_tested",
     "--width-coupling": "width_coupling",
     "--statement-deletion": "statement_deletion",
 }
 
-#: The key the opt-in list travels under, from here to `adapter.build_env()`
-#: and onto the EnvSpec that `nominate()` reads it back off.
+#: Travels to `adapter.build_env()` and onto the EnvSpec that `nominate()` reads.
 OPTION_EXECUTION_GROUPS = "execution_groups"
 
-#: Narrow the mutants to the changed lines of a commit or the working tree.
-#:
-#: A SEPARATE FLAG FROM THE GROUPS ON PURPOSE. It is not a campaign; it is a
-#: scope over one. On its own it measures nothing, and saying so in the
-#: refusal is cheaper than letting somebody type it alone and read the clean
-#: run that follows as a result.
+#: A scope over a campaign, not a campaign: alone it is refused, since it measures nothing.
 DIFF_SCOPE_FLAG = "--diff-scope"
 
-#: Every option this verb accepts, for the did-you-mean a stray token gets.
 LANE_FLAGS: tuple = (
     "--budget",
     "--prove-refusal",
@@ -105,10 +58,7 @@ SIBLING_VERBS: tuple = ("audit",)
 def handle_command(command: str, args: List[str]) -> bool:
     """Claim `audit-tests` and run it. Returns True once claimed, always.
 
-    The unconditional True is the whole safety property: an exception escaping
-    here would be swallowed by the router and reported to the user as an
-    unknown command, so a broken lane would look like a lane that was never
-    installed.
+    An escaping exception would be reported by the router as an unknown command.
     """
     if command not in COMMANDS:
         return False
@@ -124,21 +74,13 @@ def handle_command(command: str, args: List[str]) -> bool:
     try:
         _run(args)
     except CommandRefused:
-        # A REFUSAL IS NOT A CRASH, and this branch is what keeps the two
-        # apart. `_run` raises CommandRefused with the code the law names -
-        # 7 for an argument nobody recognised - and the generic handler below
-        # used to catch it and re-raise EXIT_UNPROVEN. Measured 2026-09-20:
-        # `audit-tests @seedgo --nonsense-flag` printed "law: ARGV  exit code:
-        # 7" and then exited 2, under a banner reading "This is a lane
-        # failure, not a measurement". The refusal was right on screen and
-        # wrong in the one place a script reads.
+        # A refusal is not a crash: the generic handler below would replace its code with EXIT_UNPROVEN.
         raise
     except Exception as exc:
         logger.error(f"[AUDIT-TESTS] the lane failed: {type(exc).__name__}: {exc}")
         error(f"audit-tests failed: {type(exc).__name__}: {exc}")
         console.print("[dim]No artifact was written. This is a lane failure, not a measurement.[/dim]")
-        # The lane's own vocabulary: a harness that could not prove it was
-        # entitled to publish. Exiting 0 here reported the crash as a run.
+        # Exiting 0 here would report the crash as a run.
         raise CommandRefused(refusal.EXIT_UNPROVEN, "audit-tests")
 
     return True
@@ -148,16 +90,12 @@ def _run(args: List[str]) -> None:
     """Parse the arguments, run every target, print what happened."""
     argument, options, unrecognized = _parse(args)
     if unrecognized:
-        # Before the missing-target message, because a token nobody read is the
-        # more specific fact: it may well BE the target, misspelt.
+        # Before the missing-target message: the stray token may be the target, misspelt.
         _refuse_unknown_argument(unrecognized[0], args)
     if not argument:
         error("audit-tests needs a target: @branch, a directory, or 'aipass' for every citizen")
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "audit-tests with no target")
     if options.get("scope_to_diff") and not options.get(OPTION_EXECUTION_GROUPS):
-        # A scope narrows a campaign; alone it narrows nothing. Refusing beats
-        # running the default lane and letting a clean report be read as "the
-        # change set is clean" when nothing mutated a line of it.
         error(f"{DIFF_SCOPE_FLAG} narrows a mutation campaign; on its own it measures nothing")
         console.print(f"[dim]add a group: {' '.join(sorted(OPT_IN_GROUP_FLAGS))}[/dim]")
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, f"{DIFF_SCOPE_FLAG} with no execution group")
@@ -166,18 +104,12 @@ def _run(args: List[str]) -> None:
     results, worst = runner.run(argument, options)
     _report(results, worst)
     if worst in refusal.REFUSAL_CODES:
-        # Refusals only. EXIT_SCORED_FAILED stays a 0 on purpose - see the
-        # module docstring: this lane advises, it does not gate.
+        # Refusals only: EXIT_SCORED_FAILED stays 0, this lane advises.
         raise CommandRefused(worst, argument)
 
 
 def _refuse_unknown_argument(token: str, args: List[str]) -> NoReturn:
-    """Refuse a token this verb never claimed, print the fix, and carry the code out (Law ARGV).
-
-    The same five lines as the audit verb's, deliberately: display belongs to
-    the verb, and a handler that printed for both would be a handler carrying a
-    console. The rule they share is the refusal vocabulary, not the rendering.
-    """
+    """Refuse a token this verb never claimed, print the fix, and carry the code out (Law ARGV)."""
     refused = refusal.refusal_for_unknown_argument(
         token,
         refusal.suggested_command(token, "audit-tests", args, LANE_FLAGS, SIBLING_VERBS),
@@ -193,10 +125,7 @@ def _refuse_unknown_argument(token: str, args: List[str]) -> NoReturn:
 def _parse(args: List[str]) -> tuple:
     """Split the argument list into `(target, options, unrecognized)`.
 
-    The third element is Law ARGV's whole mechanism: unknown tokens are
-    COLLECTED HERE, in the one loop that already knows what this verb accepts,
-    rather than screened by a second list that could drift out of step with it.
-    A token this loop does not claim is a token nobody claimed.
+    Unknown tokens are collected in the one loop that knows what the verb accepts (Law ARGV).
     """
     options: dict = {}
     unrecognized: List[str] = []
@@ -206,9 +135,7 @@ def _parse(args: List[str]) -> tuple:
     while index < len(args):
         token = args[index]
         if token == "--budget":
-            # A trailing '--budget' with nothing after it keeps the default and
-            # says so, rather than being refused as an argument nobody knows —
-            # the flag IS known; only its value is missing.
+            # A trailing bare '--budget' keeps the default: the flag is known, only its value is missing.
             options["budget_seconds"] = _as_int(args[index + 1] if index + 1 < len(args) else "")
             index += 2
             continue
@@ -225,25 +152,19 @@ def _parse(args: List[str]) -> tuple:
             index += 1
             continue
         if token == DIFF_SCOPE_FLAG or token.startswith(f"{DIFF_SCOPE_FLAG}="):
-            # `--diff-scope` is the working tree; `--diff-scope=HEAD~1` is a
-            # ref. Attached rather than positional so a trailing flag can
-            # never swallow the target as its value.
+            # The ref is attached (`=HEAD~1`), never positional, so it cannot swallow the target.
             options["scope_to_diff"] = True
             _, _, ref = token.partition("=")
             options["diff_scope_ref"] = ref or None
             index += 1
             continue
         if token in OPT_IN_GROUP_FLAGS:
-            # These APPEND rather than assign. `--pseudo-tested --width-coupling`
-            # asks for both campaigns, and a second flag that overwrote the
-            # first would run half of what the operator typed while reporting
-            # the other half as never requested.
+            # Append, not assign: two flags ask for both campaigns.
             _request_execution_group(options, OPT_IN_GROUP_FLAGS[token])
             index += 1
             continue
         if not token.startswith("-"):
-            # One target per run: `runner.run()` takes a single argument, so a
-            # second bare word names nothing. `aipass` is the fleet form.
+            # One target per run; `aipass` is the fleet form.
             if target:
                 unrecognized.append(token)
             else:
@@ -257,16 +178,7 @@ def _parse(args: List[str]) -> tuple:
 
 
 def _request_execution_group(options: dict, group: str) -> None:
-    """Add one opt-in execution group to the request, once.
-
-    De-duplicated here rather than downstream because the request is PUBLISHED
-    in the artifact's environment block: a flag typed twice must not read back
-    as two campaigns having been asked for.
-
-    Args:
-        options: The options dict being built by `_parse`.
-        group: The bare adapter group name the flag asks for.
-    """
+    """Add one opt-in execution group to the request, once."""
     requested = options.setdefault(OPTION_EXECUTION_GROUPS, [])
     if group not in requested:
         requested.append(group)
@@ -284,11 +196,7 @@ def _as_int(raw: str) -> int:
 def _report(results: list, worst: int) -> None:
     """Print each target's full report, then the fleet summary.
 
-    ONE TARGET GETS THE FULL RENDER; A FLEET GETS ONE LINE EACH. Eighteen full
-    reports scroll the first seventeen off the screen, and a summary a reader
-    cannot see is a summary that did not happen. Either way the per-target line
-    prints for EVERY target regardless of the fleet code, so the single number
-    is never the only signal a caller has.
+    A fleet gets one line per target: full reports would scroll the first ones off the screen.
     """
     if len(results) == 1:
         result = results[0]
@@ -306,9 +214,6 @@ def _report(results: list, worst: int) -> None:
         console.print("[dim]hygiene is the only scored group. SCORED is not GATING: this blocks nothing.[/dim]")
         console.print("[dim]Every other group reports not_applicable with a reason, never 0.[/dim]")
         if len(results) > 1:
-            # The single-target path already printed every group with its own
-            # count, so repeating the totals here would say the same thing
-            # twice on one screen. A fleet run has no such render and needs it.
             _print_nomination_totals(scored)
             _print_blind_spots(scored)
 
@@ -326,9 +231,7 @@ def _summary_line(result) -> None:
 def _print_nomination_totals(scored: list) -> None:
     """The static tier's totals per species group, across every target.
 
-    Printed even when the total is zero, and SAYING it is zero. A tier that
-    prints nothing when it finds nothing is indistinguishable from a tier that
-    did not run, which is Law S1 applied to the terminal.
+    Printed even at zero: a tier that prints nothing looks like a tier that did not run.
     """
     totals: dict = {}
     for result in scored:
@@ -350,9 +253,7 @@ def _print_nomination_totals(scored: list) -> None:
 def _print_blind_spots(scored: list) -> None:
     """State what the gate could not see, beside the number it produced.
 
-    Law S8 in its rendered form. A score of 100 printed alone reads as "this
-    suite is clean"; printed beside the count of child processes and sqlite
-    handles nobody watched, it reads as what it is — no violation SEEN.
+    Law S8: a bare 100 reads as clean; beside the unwatched counts it reads as none seen.
     """
     for result in scored:
         coverage = result.document.get("groups", {}).get("hygiene", {}).get("gate_coverage", {})

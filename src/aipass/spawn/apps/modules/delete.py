@@ -3,18 +3,13 @@
 # Description: Branch deletion — thin CLI layer for archive and deregister
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-14
+# Modified: 2026-10-17
 # =============================================
 
-"""Delete orchestrator for branch lifecycle management.
-
-Thin CLI module that parses arguments and delegates to the delete handler.
-All implementation logic lives in apps/handlers/delete_ops.py.
-"""
+"""Delete orchestrator for branch lifecycle management."""
 
 from aipass.prax import logger
 
-# CLI service: from cli.apps.modules import console (via aipass namespace)
 from aipass.cli.apps.modules import console, error, warning
 
 from aipass.spawn.apps.handlers.delete_ops import delete_branch
@@ -33,25 +28,11 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    Args:
-        command: The command string (e.g. "delete")
-        args: List of arguments for the command
-
-    Returns:
-        True if command was handled, False otherwise.
-    """
+    """Handle commands routed by the entry point."""
     if command != "delete":
         return False
 
-    # No args → introspection
     if not args:
         print_introspection()
         return True
@@ -63,22 +44,8 @@ def handle_command(command: str, args: list) -> bool:
     return handle_delete(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_delete(args: list[str]) -> int:
-    """Parse args and execute delete.
-
-    Args patterns:
-        ["@branch"]             -> delete with confirmation prompt
-        ["--yes", "@branch"]    -> skip confirmation
-        ["--dry-run", "@branch"] -> preview only
-
-    Returns exit code (0=success, 1=failure).
-    """
-    # Intercept --help before processing (argparse has add_help=False)
+    """Parse args and execute delete; returns exit code (0=success, 1=failure)."""
     if "--help" in args or "-h" in args:
         console.print("[bold cyan]Usage:[/bold cyan] drone @spawn delete <@branch> [--yes] [--dry-run]")
         console.print()
@@ -98,7 +65,6 @@ def handle_delete(args: list[str]) -> int:
     dry_run = "--dry-run" in args
     skip_confirm = "--yes" in args
 
-    # Filter out flags to find the target
     targets = [a for a in args if not a.startswith("--")]
 
     if not targets:
@@ -123,11 +89,6 @@ def handle_delete(args: list[str]) -> int:
 
     _print_summary(result, dry_run)
     return 0 if result.get("success") else 1
-
-
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
 
 
 def _print_summary(result: dict, dry_run: bool) -> None:

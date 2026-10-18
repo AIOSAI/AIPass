@@ -3,17 +3,10 @@
 # Description: Comment orchestration module
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Comment Orchestration Module
-
-Thin router for comment and vote workflows. Delegates all implementation
-to handlers/comments/comment_ops.py and renders the results.
-
-Handles: comment, vote commands.
-"""
+"""Comment Orchestration Module"""
 
 from typing import List
 
@@ -50,22 +43,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle comment and vote commands.
-
-    Args:
-        command: Command name (comment, vote).
-        args: Command arguments.
-
-    Returns:
-        True if command handled, False otherwise.
-    """
+    """Handle comment and vote commands; False if the command is not ours."""
     if command == "comment":
         result = _handle_comment(args)
     elif command == "vote":
@@ -76,11 +55,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
-
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 
 def _handle_comment(args: List[str]) -> bool:

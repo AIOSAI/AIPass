@@ -3,15 +3,11 @@
 # Description: Email Send Handler
 # Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Send Handler
-
-Core send logic for email delivery workflows.
-Handles sender resolution, email creation, and delivery orchestration.
-Independent handler - no module or display dependencies.
 """
 
 import sys
@@ -26,18 +22,7 @@ from aipass.ai_mail.apps.handlers.email.create import mark_sent_record_refused
 def _log_resolved_sender(user_info: Dict[str, Any], from_branch: Optional[str], strategy: str) -> Dict[str, Any]:
     """Record WHO the sender resolved to, alongside the input that produced it.
 
-    This function used to log only its pre-resolution input (`from_branch`), so when a
-    COMMONS-authored dispatch was filed under @aipass the log line read `from_branch: null`
-    and nothing else — no record of who it became or which path decided. That gap cost
-    @aipass hours of cross-mailbox forensics for a single misattributed message.
-
-    Args:
-        user_info: The resolved sender dict (email_address, display_name, mailbox_path, ...).
-        from_branch: The explicit sender argument, or None if identity was detected.
-        strategy: Which resolution path produced this sender.
-
-    Returns:
-        user_info unchanged — this is a pass-through recorder.
+    Logging only the input leaves a misattributed message with no trace of who it became or why.
     """
     json_handler.log_operation(
         "resolved_sender",
@@ -66,19 +51,7 @@ def resolve_sender_info(
     get_branch_by_email_fn,
     get_current_user_fn,
 ) -> Dict[str, Any]:
-    """
-    Resolve sender user_info from explicit branch or PWD detection.
-
-    Args:
-        from_branch: Optional explicit sender branch (e.g., '@trigger').
-        repo_root: Repository root path.
-        ai_mail_dir: AI_Mail module directory.
-        get_branch_by_email_fn: Callable to look up branch by email.
-        get_current_user_fn: Callable to detect current user from PWD.
-
-    Returns:
-        Dict with email_address, display_name, mailbox_path, timestamp_format.
-    """
+    """Resolve sender user_info from explicit branch or PWD detection."""
     json_handler.log_operation("resolve_sender", {"from_branch": from_branch})
     if from_branch:
         email_addr = f"@{from_branch.lstrip('@').lower()}"
@@ -128,25 +101,9 @@ def send_to_broadcast(
     log_operation_fn,
     update_central_fn,
 ) -> Tuple[bool, int, int, Any]:
-    """
-    Execute broadcast send to all branches.
+    """Execute broadcast send to all branches.
 
-    Takes no per-recipient on_delivered callback, deliberately. The only thing
-    that callback ever did was update_central(), which takes no arguments and
-    rescans every branch inbox from the repo root — so running it per recipient
-    recomputes one global answer N times and the last run is the only one any
-    reader sees. An 18-recipient @all did 19 of those scans, ~55s of its ~60s,
-    and drone killed it at the 60s cap with every message already delivered.
-    The single call after the loop leaves exactly the same central file.
-
-    A broadcast that ever needs genuine per-recipient side effects should be
-    given a broadcast-aware callback on purpose, not inherit the single-send
-    one by accident.
-
-    Returns:
-        Tuple of (success, success_count, total_count, results_or_error).
-        On failure: 4th element is an error string.
-        On success: 4th element is a list of (branch_name, success, error_msg) tuples.
+    No per-recipient on_delivered: update_central rescans every inbox, so N calls blow drone's 60s cap.
     """
     email_file = create_email_file_fn(
         "all", subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to
@@ -170,15 +127,11 @@ def send_to_broadcast(
 
     success_count = sum(1 for _, s, _ in results if s)
     if success_count == 0:
-        # Nothing left the building. The single sent record covers every
-        # recipient, so leaving it stamped "sent" claims a delivery that
-        # happened zero times.
+        # The one sent record covers every recipient; left "sent" it claims a delivery that never happened.
         first_error = next((err for _, s, err in results if not s and err), "no recipient accepted delivery")
         mark_sent_record_refused(email_file, first_error)
     log_operation_fn("broadcast_sent", {"recipients": len(branches), "successful": success_count})
 
-    # Fire trigger event (best-effort) - only when something was delivered, the
-    # rule the single send follows: a broadcast every recipient refused sent nothing.
     if success_count > 0:
         try:
             from aipass.trigger.apps.modules.core import trigger
@@ -187,7 +140,6 @@ def send_to_broadcast(
         except ImportError as e:
             logger.warning("[send] trigger import unavailable for broadcast event: %s", e)
 
-    # The one central aggregation for the whole broadcast (best-effort).
     try:
         if update_central_fn:
             update_central_fn()
@@ -214,16 +166,9 @@ def send_to_single(
     update_central_fn,
     upsert_key: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
-    """
-    Execute single-recipient email send.
+    """Execute single-recipient email send.
 
-    Args:
-        upsert_key: Optional stable signature for a repeating signal. When set,
-            delivery rewrites the open message already carrying this key from
-            this sender instead of stacking a new one. None = today's behavior.
-
-    Returns:
-        Tuple of (success, error_msg). error_msg is None on success.
+    upsert_key: delivery rewrites this sender's open message with the same key instead of stacking.
     """
     email_file = create_email_file_fn(
         to_branch, subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to
@@ -239,8 +184,7 @@ def send_to_single(
         email_data["dispatched_to"] = dispatched_to
     if no_memory_save:
         email_data["no_memory_save"] = True
-    # Carried on email_data rather than as a kwarg: delivery honors both, and
-    # this path takes its delivery function by injection.
+    # On email_data, not a kwarg: the delivery function here is injected.
     if upsert_key:
         email_data["upsert_key"] = upsert_key
 
@@ -248,12 +192,10 @@ def send_to_single(
 
     if success:
         payload = {"to": to_branch, "subject": subject, "auto_execute": auto_execute}
-        # Only present for upsert sends — a plain send logs exactly what it always did
         if email_data.get("upsert_action"):
             payload["upsert_action"] = email_data["upsert_action"]
         log_operation_fn("email_sent", payload)
 
-        # Fire trigger event (best-effort)
         try:
             from aipass.trigger.apps.modules.core import trigger
 
@@ -261,7 +203,6 @@ def send_to_single(
         except ImportError as e:
             logger.warning("[send] trigger import unavailable for send event: %s", e)
 
-        # Update central (best-effort)
         try:
             if update_central_fn:
                 update_central_fn()
@@ -270,29 +211,18 @@ def send_to_single(
 
         return True, None
     else:
-        # The sent record is written before delivery is attempted, so a refused
-        # send has already left a "sent" file on disk. Restamp it — a record the
-        # fence turned away must never read as delivered.
+        # The sent record predates delivery: a refused one must never read as delivered.
         mark_sent_record_refused(email_file, error_msg or "delivery refused")
         log_operation_fn("email_failed", {"to": to_branch, "error": error_msg})
         return False, error_msg
 
 
 def collect_interactive_input(branches: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
-    """
-    Collect send parameters from interactive user input.
+    """Collect send parameters from interactive user input.
 
-    Args:
-        branches: List of available branch dicts with 'name' and 'email' keys.
-
-    Returns:
-        Dict with 'to', 'subject', 'message' keys, or None if cancelled.
+    Returns None if cancelled.
     """
-    # Nobody is at the keyboard, so no prompt below can ever be answered. Under
-    # drone the routed subprocess inherits an open-but-silent stdin pipe: input()
-    # does not raise EOFError, it blocks until the 30s routing timeout kills the
-    # command. Refuse up front instead — "no input yet" and "no input ever" are
-    # indistinguishable once we are already waiting on the first read.
+    # Under drone stdin is an open, silent pipe: input() blocks until the 30s timeout, never EOFError.
     if not sys.stdin.isatty():
         logger.warning("[send] interactive send needs a terminal — no TTY on stdin")
         return None

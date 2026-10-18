@@ -5,22 +5,13 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-09
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Builds the manager-only notice that a project's scaffold is behind AIPass.
 
-A release mail can be read and closed; this is the half that stays until the
-scaffold is actually current. It reads two files and writes none: the cwd
-passport (to answer "is this seat a manager?") and the project's
-``.aipass/scaffold_manifest.json`` (to answer "which AIPass wrote this
-scaffold?"). It never runs ``aipass init update`` — applying is the owner's or
-devpulse's call, never the notice's (DPLAN-0335, the owner 2026-09-09 23:51).
-
-Shared by apps/handlers/lifecycle/release_notice.py (SessionStart) and
-apps/handlers/lifecycle/post_compact_regrounding.py (the post-compact regroup
-path), so both doors emit one identical block from one code path.
-"""
+Reads two files, writes none, and never runs ``aipass init update``: applying is the owner's call.
+SessionStart and the post-compact regroup share it, so both doors emit one identical block."""
 
 import json
 from pathlib import Path
@@ -30,18 +21,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-#: The only citizen_class this notice speaks to. A specialist cannot run
-#: ``aipass init update`` against its host project, so telling one is noise.
+#: A specialist cannot run ``aipass init update`` against its host project, so telling one is noise.
 MANAGER_CLASS = "manager"
 
-#: A project root is the directory holding a *_REGISTRY.json — the same marker
-#: edit_gate and @ai_mail's find_project_root use. Kept identical on purpose:
-#: the manifest belongs to whatever the rest of the system calls the project.
+#: The same project marker edit_gate and @ai_mail's find_project_root use, identical on purpose.
 _PROJECT_MARKER = "*_REGISTRY.json"
 
-#: Written by @aipass's init run / adopt / init update (DPLAN-0335 leg 3).
-#: Schema fixed in the plan: aipass_version (str), stamped_at (ISO 8601),
-#: files (rel path -> sha256). Only the first two are read here.
+#: Written by @aipass's init run / adopt / init update; only aipass_version and stamped_at are read.
 MANIFEST_REL = Path(".aipass") / "scaffold_manifest.json"
 
 
@@ -74,7 +60,7 @@ def _find_passport(start: Path) -> Path | None:
     except OSError as exc:
         logger.info("[HOOKS] release_notice: passport walk unresolvable for %s: %s", start, exc)
         return None
-    home = Path.home().resolve()  # both sides resolved: a symlinked home never stopped the walk (PR #774)
+    home = Path.home().resolve()  # both sides resolved: a symlinked home must still stop the walk
     while search != home and search.parent != search:
         passport = search / ".trinity" / "passport.json"
         if passport.exists():
@@ -86,11 +72,7 @@ def _find_passport(start: Path) -> Path | None:
 def _is_manager(passport: Path) -> bool:
     """True when the passport declares citizen_class manager.
 
-    Passport 2.0 moved the class inside ``identity`` (DPLAN-0319); the top level
-    is read as a fallback so a 1.0 passport is not silently treated as a
-    non-manager. Unreadable passport means "not a manager" — a notice that
-    cannot prove who it is talking to says nothing.
-    """
+    Reads ``identity.citizen_class`` (2.0), then the top level (1.0); unreadable means not a manager."""
     try:
         data = json.loads(passport.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -106,26 +88,14 @@ def _is_manager(passport: Path) -> bool:
 def _is_aipass_source_repo(root: Path) -> bool:
     """True for the AIPass source checkout itself.
 
-    ``aipass init update`` refuses its own repo, so a notice there could never
-    be cleared — it would nag every session forever. devpulse's own passport
-    says manager, so without this the loudest seat on the machine is the one
-    that gets the useless nag.
-    """
+    ``aipass init update`` refuses its own repo, so a notice there could never be cleared."""
     return (root / "src" / "aipass").is_dir() and (root / "pyproject.toml").exists()
 
 
 def _version_tuple(text: object) -> tuple[int, ...] | None:
     """Parse a dotted numeric version into a comparable tuple, or None.
 
-    A plain tuple compare rather than packaging.version: ``packaging`` is not in
-    this project's declared dependencies (pyproject ``dependencies`` is rich,
-    watchdog, requests, psutil, questionary, pathspec), so importing it here
-    would make a hook depend on whatever pip happened to leave in the venv.
-    AIPass versions are plain MAJOR.MINOR.PATCH, which a tuple orders correctly.
-
-    Leading digits of each dotted chunk are taken, so a hypothetical "2.9.0rc1"
-    reads as (2, 9, 0) — one release too low rather than unparseable.
-    """
+    Not packaging.version: ``packaging`` is not a declared dependency, and a hook must not lean on it."""
     parts: list[int] = []
     for chunk in str(text).strip().split("."):
         digits = ""
@@ -142,9 +112,7 @@ def _version_tuple(text: object) -> tuple[int, ...] | None:
 def _is_behind(stamped: tuple[int, ...], installed: tuple[int, ...]) -> bool:
     """Compare two version tuples, zero-padded to equal length.
 
-    Padding matters: without it a scaffold stamped "2.8" would read as behind
-    installed "2.8.0" forever, because (2, 8) < (2, 8, 0).
-    """
+    Padding matters: "2.8" would read as behind "2.8.0" forever, because (2, 8) < (2, 8, 0)."""
     width = max(len(stamped), len(installed))
     pad = (0,) * width
     return (stamped + pad)[:width] < (installed + pad)[:width]
@@ -172,9 +140,7 @@ def _read_manifest(root: Path) -> dict | None:
 
 def _stamp_date(stamped_at: str) -> str:
     """The date half of an ISO 8601 stamp — "2026-09-09T07:55:36.794203+00:00" is
-    a lot of characters to spend, every wake, on a block whose only job is "you
-    are behind". Anything that is not ISO-shaped is passed through untouched
-    rather than guessed at."""
+    a lot to spend every wake; anything not ISO-shaped passes through untouched."""
     head = stamped_at.split("T", 1)[0]
     return head if len(head) == 10 and head.count("-") == 2 else stamped_at
 
@@ -202,18 +168,8 @@ def _format_block(root: Path, installed: str, stamped: str, stamped_at: str) -> 
 def build_notice(hook_data: dict) -> str:
     """Return the notice block, or "" when this seat should hear nothing.
 
-    Silent for: a non-manager seat, a seat with no passport, a cwd outside any
-    project, the AIPass source repo, and a scaffold already at the installed
-    version. Absent or unparseable manifest counts as behind — a project that
-    cannot say which AIPass wrote it has not been stamped by leg 3 yet.
-
-    Args:
-        hook_data: The hook payload; only ``cwd`` is read, falling back to the
-            process cwd when the event does not carry one.
-
-    Returns:
-        The rendered block, or an empty string.
-    """
+    Silent for a non-manager, no passport, no project, the AIPass source repo, or a current scaffold;
+    an absent or unparseable manifest counts as behind."""
     start = Path(hook_data.get("cwd", "") or Path.cwd())
 
     passport = _find_passport(start)
@@ -227,8 +183,7 @@ def build_notice(hook_data: dict) -> str:
     installed_raw = _installed_version()
     installed = _version_tuple(installed_raw)
     if installed is None:
-        # An unreadable installed version is an AIPass defect, not a project's.
-        # Staying quiet keeps the bug out of every manager's prompt.
+        # An unreadable installed version is an AIPass defect; quiet keeps it out of every manager's prompt.
         logger.info("[HOOKS] release_notice: installed version unparseable: %r", installed_raw)
         return ""
 

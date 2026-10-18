@@ -1,88 +1,29 @@
 # =================== AIPass ====================
 # Name: state_leak_check.py
 # Description: State Leak Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-16
 # =============================================
 
 """
 State Leak Standards Checker Handler
 
-Test template v1, item 18: no test leaks state into the next. Every patch through
-``monkeypatch``, every file under ``tmp_path``, nothing left in ``sys.modules``.
-
-WHY THIS ONE IS DIFFERENT FROM THE OTHER SEVEN. A leaking test does not fail. It
-makes an UNRELATED test lie, in a file its author never opened, and alphabetical
-order decides whether anyone ever sees it. seedgo carried exactly one for months
-(todo 139): twenty-five files here share a fixture that stubs
-``sys.modules["...handlers.bypass"]`` with a MagicMock and re-imports a checker
-against it. ``monkeypatch`` restores the sys.modules ENTRY, but it cannot undo a
-name another module already bound -- ``trigger_check`` does
-``from ...bypass.utils import matching_rule`` at import time -- and the poisoned
-module then answers ``test_bypass.py`` with ``mock.utils.matching_rule()``.
-``test_bypass`` runs FIRST in a forward run, which is the only reason the suite
-was ever green.
-
-THE RULE IS: A WRITE TO SHARED STATE, AT TEST TIME, WITH NOTHING TO PUT IT BACK.
-Three shapes, measured 2026-09-22 over the fleet's 580 test files:
-
-  (a) A DIRECT WRITE to state the process shares --
-      ``os.environ[k] = v``, ``sys.path.insert(...)``, ``sys.modules[k] = v``,
-      ``mod.attr = value`` / ``setattr(mod, name, value)`` on an imported
-      product module.
-  (b) A PATCHER STARTED AND NEVER STOPPED, in two forms. ``p = patch(...)``
-      then ``p.start()`` with no ``.stop()``, ``addCleanup`` or teardown in the
-      same function -- that one at least HOLDS the patcher. And the one-line
-      form, ``patch(...).start()`` bare or ``mocked = patch(...).start()``,
-      which holds nothing: ``start()`` returns the MOCK, not the patcher, so
-      there is no object left to stop and only ``patch.stopall()`` can reach it.
-      1.0.0 missed that second form; @devpulse found it by probing the model
-      file. ``with patch(...)`` and ``@patch`` restore on exit and are never
-      convicted; only the manual forms can be left running.
-  (c) ``os.chdir(...)`` with no restore. ``monkeypatch.chdir`` is the cure and
-      the fleet already uses it 257 times.
-
-NEVER CONVICTED, each for a measured reason:
-
-  * EVERY ``monkeypatch`` VERB -- setattr (3,320), setitem (608), setenv (415),
-    chdir (257), delenv (178), delitem (104), delattr (5), undo (2). 4,889 uses
-    fleet-wide. They are the cure, not the offence.
-  * A RESTORING FIXTURE IN SCOPE. @ai_mail's ``clean_env`` pops fourteen keys,
-    yields, and puts them back; every raw ``os.environ[k] = v`` in a test that
-    REQUESTS it is covered. An ``autouse=True`` one covers the whole file.
-    Matching the fixture by request, not just by presence, is the difference
-    between 39 acquittals and a rule that trusts a fixture nobody asked for.
-  * A ``try`` WITH A ``finally`` in the same function -- @drone's
-    ``test_registry.py`` saves ``sys.modules[...]``, swaps in None, and restores
-    it in ``finally``. That is item 18 done by hand, and it works.
-  * A ``sys.modules`` STUB NAMING AN AIPASS MODULE. Item 8, ``import_site``,
-    already convicts it and this rule does not charge it twice -- which is why
-    the checker does NOT convict ``test_checkers_batch9.py``, the very file
-    whose leak this dispatch cured. The leak was real and import_site names it
-    at lines 43, 48 and 51. Said plainly in mock_console.md's sibling, and in
-    the reply.
-  * A WRITE AT IMPORT TIME. Item 18 says "no test leaks into the NEXT"; a
-    module-level write happens once, before any test, and every test in the file
-    sees the same thing. 22 fleet sites, counted in the passing message.
-  * A WRITE TO SOMETHING THE TEST BUILT -- a local, a Mock, a ``tmp_path``
-    file. The base of an attribute write has to be a name bound by an ``aipass``
-    import for this rule to see it at all.
-
-TWO STATED LIMITS.
-
-  * A FIXTURE IN THE FILE'S CONFTEST is invisible here. One pass reads one file,
-    so a restoring fixture next door cannot be credited. Nothing in the fleet
-    currently relies on one for these families, but a future one would be a
-    false positive, and it would be an obvious one.
-  * ``monkeypatch.delitem(sys.modules, name, raising=False)`` RECORDS NOTHING
-    when the key is absent -- the cold-run case -- so it is a restore that
-    restores nothing. It is the exact mechanism of todo 139 and it is NOT
-    convicted here, because the write it pairs with is import_site's. Counted
-    and reported instead: 104 sites in 68 files.
+Test template v1, item 18: no test leaks state into the next. A write to shared
+state at test time with nothing to put it back, in four shapes: (a) a direct
+write to ``os.environ``, ``sys.path``, ``sys.modules`` or an imported product
+module's attribute; (b) a patcher started and never stopped, held or one-line;
+(c) ``os.chdir`` with no restore; (d) a call to a product function that writes
+a module-level container the product's own public ``reset*`` writes, with no
+fixture in the file or any conftest.py calling that reset. Every monkeypatch
+verb, ``with patch``, ``@patch``, a ``try``/``finally`` and a restoring fixture
+the test requests are acquittals; an aipass ``sys.modules`` key is import_site's
+and an import-time write is counted, never charged. state_leak.md carries the
+measurements and the stated limits.
 """
 
 import ast
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
@@ -327,13 +268,8 @@ def _held_but_unstopped(started: List[Tuple[int, str]], stopped: Set[str]) -> Li
 def _unstopped_patchers(body: List[ast.AST]) -> List[Tuple[int, str]]:
     """(line, what was left running) for every patcher started and never stopped.
 
-    TWO SHAPES, and the second is the worse one. ``p = patch(...)`` then
-    ``p.start()`` at least HOLDS the patcher, so a later ``stop()`` is possible
-    and the rule looks for one. The one-line form -- ``patch(...).start()`` bare,
-    or ``mocked = patch(...).start()`` bound to the Mock that start() RETURNS --
-    keeps no reference to the patcher at all, so nothing in that test can ever
-    stop it. Only ``patch.stopall()`` reaches it, which is why the rule still
-    stands down when the function calls one of the _STOPPERS on something else.
+    A held ``p.start()`` needs a ``stop()``; the one-line ``patch(...).start()``
+    holds nothing, so only a _STOPPERS call on anything else stands it down.
     """
     started: List[Tuple[int, str]] = []
     unstoppable: List[Tuple[int, str]] = []
@@ -355,12 +291,9 @@ def _unstopped_patchers(body: List[ast.AST]) -> List[Tuple[int, str]]:
 
 
 def _functions(tree: ast.Module) -> Tuple[Dict[int, ast.AST], Dict[int, List[ast.AST]]]:
-    """(node -> the OUTERMOST function holding it, function -> its own nodes).
+    """(node -> the OUTERMOST function holding it, function -> its own nodes), in one descent.
 
-    One descent that carries the enclosing function down and collects each
-    function's body on the way, rather than a fresh ``ast.walk`` per function
-    per pass. The walk-per-function form spent 14.1s of the checker's 19.3s
-    over the fleet re-walking every node once for each function above it.
+    One descent, not an ``ast.walk`` per function: that form cost 14.1s of 19.3s.
     """
     holder: Dict[int, ast.AST] = {}
     bodies: Dict[int, List[ast.AST]] = {}
@@ -378,8 +311,9 @@ def _functions(tree: ast.Module) -> Tuple[Dict[int, ast.AST], Dict[int, List[ast
     return holder, bodies
 
 
+@lru_cache(maxsize=64)
 def _parse(source: str, what: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
+    """The file's tree, read-only and shared by every pass, or None when Python cannot read it.
 
     ruff already convicts a syntax error, and a line number invented for a
     statement Python cannot parse sends its author to the wrong place.
@@ -398,10 +332,8 @@ def _target_finding(target: ast.expr, covered: Set[str], product: Set[str]) -> s
         return None  # item 8, import_site, already charges it
     if family:
         return None if family in covered else f"a write to {family} with nothing to put it back"
-    # Depth ONE only. ``mod.FLAG = False`` rebinds the module's own name and the
-    # next test reads it; ``mod.helper.return_value = x`` configures an object the
-    # module holds, which is ordinarily a Mock and nobody's shared state. 45 of
-    # prax's and trigger's nominations are the second kind.
+    # Depth ONE only: ``mod.FLAG = x`` rebinds the module's name, while
+    # ``mod.helper.return_value = x`` configures a held object, ordinarily a Mock.
     if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
         if target.value.id in product and "attr" not in covered:
             return f"a write to the product's {target.value.id}.{target.attr}"
@@ -498,12 +430,7 @@ def _cure_for(what: str) -> str:
 
 
 def counted_import_time_writes(source: str) -> List[int]:
-    """Lines writing shared state at MODULE scope, before any test runs.
-
-    Counted, never convicted. Item 18 is about one test leaking into the NEXT;
-    a write at import time happens once and every test in the file sees the same
-    thing. 22 fleet sites.
-    """
+    """Lines writing shared state at MODULE scope, before any test runs: counted, never convicted."""
     tree = _parse(source, "counted")
     if tree is None:
         return []
@@ -516,6 +443,195 @@ def counted_import_time_writes(source: str) -> List[int]:
         if any(_family(target) for target in node.targets):
             lines.append(node.lineno)
     return sorted(set(lines))
+
+
+#: Calls that build a module-level container the product then writes in place.
+_CONTAINER_CALLS: frozenset[str] = frozenset({"dict", "list", "set"})
+
+#: In-place verbs on a dict, list or set.
+_IN_PLACE: frozenset[str] = _MUTATORS | frozenset({"add", "discard", "popitem"})
+
+_FUNCTION_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _module_containers(tree: ast.Module) -> Set[str]:
+    """Names a product module binds at its top level to a dict, list or set."""
+    names: Set[str] = set()
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else []
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        value = getattr(node, "value", None)
+        built = isinstance(value, ast.Call) and _tail_name(value.func) in _CONTAINER_CALLS
+        if isinstance(value, (ast.Dict, ast.List, ast.Set)) or built:
+            names.update(t.id for t in targets if isinstance(t, ast.Name))
+    return names
+
+
+def _containers_written(function: ast.AST, containers: Set[str]) -> Set[str]:
+    """Which module containers one product function writes: a subscript, an in-place verb, a ``global`` rebind."""
+    rebindable = {name for node in ast.walk(function) if isinstance(node, ast.Global) for name in node.names}
+    written: Set[str] = set()
+    for node in ast.walk(function):
+        targets = getattr(node, "targets", None) or [getattr(node, "target", None)]
+        for target in targets if isinstance(node, (ast.Assign, ast.Delete, ast.AugAssign, ast.AnnAssign)) else []:
+            if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                written.add(target.value.id)
+            elif isinstance(target, ast.Name) and target.id in rebindable:
+                written.add(target.id)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _IN_PLACE:
+            written.add(_base_name(node.func.value) if isinstance(node.func.value, ast.Name) else "")
+    return written & containers
+
+
+@lru_cache(maxsize=512)
+def product_resets(source: str) -> Tuple[frozenset[str], frozenset[str]]:
+    """(public ``reset*`` functions, functions writing what they reset, directly or via a same-module call)."""
+    tree = _parse(source, "read as a product") if "def reset" in source else None
+    if tree is None:
+        return frozenset(), frozenset()
+    containers = _module_containers(tree)
+    functions = {node.name: node for node in tree.body if isinstance(node, _FUNCTION_TYPES)}
+    writes = {name: _containers_written(node, containers) for name, node in functions.items()}
+    resets = {name for name, written in writes.items() if name.startswith("reset") and written}
+    reset_state = set().union(*(writes[name] for name in resets))
+    writers = {name for name, written in writes.items() if written & reset_state} - resets
+    grew = bool(writers)
+    while grew:
+        grew = False
+        for name, node in functions.items():
+            calls = {n.func.id for n in ast.walk(node) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+            if name not in writers | resets and calls & writers:
+                writers.add(name)
+                grew = True
+    return frozenset(resets), frozenset(writers)
+
+
+def _resolve(roots: List[Path], dotted: str) -> Path | None:
+    """The source file of an ``aipass`` module under one of the import roots."""
+    for root in roots:
+        base = root.joinpath(*dotted.split("."))
+        for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+_API = Tuple[frozenset[str], frozenset[str]]
+
+
+def _product_bindings(tree: ast.Module, test_path: Path) -> Tuple[Dict[str, _API], Dict[str, frozenset[str]]]:
+    """(module name -> (resets, writers), writer function name -> resets) for the file's top-level imports."""
+    roots = [directory for directory in test_path.parents if (directory / "aipass").is_dir()]
+    modules: Dict[str, _API] = {}
+    functions: Dict[str, frozenset[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.level or not (node.module or "").startswith("aipass"):
+            continue
+        for alias in node.names:
+            submodule = _resolve(roots, f"{node.module}.{alias.name}")
+            if submodule is not None:
+                resets, writers = product_resets(_read(submodule) or "")
+                if resets:
+                    modules[alias.asname or alias.name] = (resets, writers)
+                continue
+            parent = _resolve(roots, node.module or "")
+            resets, writers = product_resets(_read(parent) or "") if parent else (frozenset(), frozenset())
+            if alias.name in writers:
+                functions[alias.asname or alias.name] = resets
+    return modules, functions
+
+
+def _reset_fixtures(tree: ast.Module) -> Tuple[Set[str], Dict[str, Set[str]]]:
+    """(names every autouse fixture calls, names each requested fixture calls)."""
+    autouse: Set[str] = set()
+    by_name: Dict[str, Set[str]] = {}
+    for function in ast.walk(tree):
+        if not isinstance(function, _FUNCTION_TYPES):
+            continue
+        decorators = [ast.unparse(d) for d in function.decorator_list]
+        if not any("fixture" in d for d in decorators):
+            continue
+        calls = {_tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
+        if any("autouse=True" in d for d in decorators):
+            autouse |= calls
+        else:
+            by_name[function.name] = calls
+    return autouse, by_name
+
+
+def _conftests(test_path: Path) -> List[Path]:
+    """Every conftest.py pytest loads for this file, up to the project root."""
+    found: List[Path] = []
+    for directory in test_path.parents:
+        conftest = directory / "conftest.py"
+        if conftest.is_file() and conftest != test_path:
+            found.append(conftest)
+        if (directory / "pyproject.toml").is_file() or (directory / ".git").exists():
+            break
+    return found
+
+
+def _reset_credit(
+    test: ast.FunctionDef | ast.AsyncFunctionDef, autouse: Set[str], by_name: Dict[str, Set[str]]
+) -> Set[str]:
+    """Names a test is reset by: autouse fixtures, the fixtures it requests, its own ``finally``."""
+    credit = set(autouse)
+    requested = {arg.arg for arg in test.args.args}
+    for decorator in test.decorator_list:
+        if "usefixtures" in ast.unparse(decorator) and isinstance(decorator, ast.Call):
+            requested.update(str(a.value) for a in decorator.args if isinstance(a, ast.Constant))
+    for fixture in requested:
+        credit |= by_name.get(fixture, set())
+    for node in ast.walk(test):
+        if isinstance(node, ast.Try) and node.finalbody:
+            finals = [n for statement in node.finalbody for n in ast.walk(statement)]
+            credit.update(_tail_name(n.func) for n in finals if isinstance(n, ast.Call))
+    return credit
+
+
+def _writer_call(
+    node: ast.AST, modules: Dict[str, _API], functions: Dict[str, frozenset[str]]
+) -> Tuple[str, frozenset[str]]:
+    """(the call as written, the resets it owes) when a node calls a product writer, else ("", empty)."""
+    if not isinstance(node, ast.Call):
+        return "", frozenset()
+    func = node.func
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules:
+        resets, writers = modules[func.value.id]
+        return (f"{func.value.id}.{func.attr}", resets) if func.attr in writers else ("", frozenset())
+    if isinstance(func, ast.Name) and func.id in functions:
+        return func.id, functions[func.id]
+    return "", frozenset()
+
+
+def scan_product_resets(test_path: Path, source: str) -> List[Tuple[int, str, str]]:
+    """(line, what was left behind, the cure) for shape (d): a product's own reset that no fixture calls."""
+    tree = _parse(source, "scanned") if "aipass" in source else None
+    if tree is None:
+        return []
+    modules, functions = _product_bindings(tree, test_path)
+    if not modules and not functions:
+        return []
+    autouse, by_name = _reset_fixtures(tree)
+    for conftest in _conftests(test_path):
+        conftest_tree = _parse(_read(conftest) or "", "read as a conftest")
+        more_autouse, more_named = _reset_fixtures(conftest_tree) if conftest_tree else (set(), {})
+        autouse |= more_autouse
+        for name, calls in more_named.items():
+            by_name.setdefault(name, set()).update(calls)
+    hits: List[Tuple[int, str, str]] = []
+    for test in ast.walk(tree):
+        if not isinstance(test, _FUNCTION_TYPES) or not test.name.startswith("test"):
+            continue
+        credit = _reset_credit(test, autouse, by_name)
+        for node in ast.walk(test):
+            call, resets = _writer_call(node, modules, functions)
+            if isinstance(node, ast.Call) and call and not resets & credit:
+                reset = sorted(resets)[0]
+                what = f"{call}() writes the product's own state and nothing calls {reset}()"
+                hits.append((node.lineno, what, f"an autouse fixture in conftest.py calling {reset}()"))
+    return sorted(set(hits))
 
 
 def _read(path: Path) -> str | None:
@@ -569,7 +685,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if source is None:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
 
-    hits = [h for h in scan(source) if not is_bypassed(module_path, STANDARD_KEY, h[0], bypass_rules)]
+    found = sorted(scan(source) + scan_product_resets(path.resolve(), source))
+    hits = [h for h in found if not is_bypassed(module_path, STANDARD_KEY, h[0], bypass_rules)]
 
     if not hits:
         return _result(True, _one_check(True, _clean_message(counted_import_time_writes(source))), 100)

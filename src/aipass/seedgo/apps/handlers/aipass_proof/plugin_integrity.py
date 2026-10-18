@@ -3,23 +3,14 @@
 # Description: Verify core audit modules don't hardcode standard names
 # Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Plugin Integrity Proof -- Verify plugin architecture stays clean.
 
 The plugin architecture depends on dynamic discovery (glob + importlib).
 Core audit modules should never reference specific standard names in code
-logic.  This handler scans target modules with AST + regex and reports
-any hardcoded standard-name references.
-
-Interface:
-    scan(pack_dir: Path) -> dict
-    Returns: {"passed": bool, "issues": list, "summary": str, ...}
-
-Note: audit_display.py cosmetic refs are a known upgrade target (DPLAN-0047).
-
-Reference: tools/plugin_integrity_scanner.py (original prototype)
+logic.
 """
 
 from __future__ import annotations
@@ -32,17 +23,11 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
-
 # Modules whose hardcoded refs are cosmetic (display layer, not routing).
 COSMETIC_MODULES: set[str] = {"audit_display.py"}
 
 # Standard names that double as common infrastructure/English words.
-# These appear as directory names, import paths, variable names, Rich markup
-# labels, etc. -- not as hardcoded standard routing.  Never flag bare AST
-# string literals for these; only the regex patterns catch truly suspicious use.
+# Never flag bare AST string literals for these; only the regex patterns catch truly suspicious use.
 AMBIGUOUS_NAMES: set[str] = {
     "architecture",
     "cli",
@@ -64,22 +49,10 @@ AMBIGUOUS_NAMES: set[str] = {
 }
 
 
-# =============================================================================
-# TARGET MODULE RESOLUTION
-# =============================================================================
-
-
 def _resolve_target_modules(
     pack_dir: Path,
 ) -> list[dict[str, Path | str | bool]]:
-    """Build the list of core modules to scan, resolved from pack_dir.
-
-    Path layout (from pack_dir = .../apps/handlers/aipass_standards/):
-        seedgo_root  = pack_dir.parent.parent.parent   (.../seedgo/)
-        modules_dir  = seedgo_root / "apps" / "modules"
-        audit_dir    = pack_dir.parent / "audit"        (sibling handler dir)
-        entry_point  = seedgo_root / "apps" / "seedgo.py"
-    """
+    """Build the list of core modules to scan, resolved from pack_dir."""
     seedgo_root = pack_dir.parent.parent.parent
     modules_dir = seedgo_root / "apps" / "modules"
     audit_dir = pack_dir.parent / "audit"
@@ -114,17 +87,8 @@ def _resolve_target_modules(
     ]
 
 
-# =============================================================================
-# STANDARD NAME DISCOVERY
-# =============================================================================
-
-
 def _discover_standard_names(pack_dir: Path) -> list[str]:
-    """Discover standard names from *_check.py files in the pack directory.
-
-    Returns:
-        Sorted list of standard names (e.g. ["architecture", "cli", ...]).
-    """
+    """Discover standard names from *_check.py files in the pack directory."""
     if not pack_dir.is_dir():
         return []
     names: list[str] = []
@@ -132,11 +96,6 @@ def _discover_standard_names(pack_dir: Path) -> list[str]:
         name = check_file.stem.removesuffix("_check")
         names.append(name)
     return names
-
-
-# =============================================================================
-# AST HELPERS
-# =============================================================================
 
 
 def _enclosing_context(node: ast.AST, parents: dict[int, ast.AST]) -> str:
@@ -172,22 +131,14 @@ def _is_display_string(
 ) -> bool:
     """Check if a string constant is used in a display/print context.
 
-    Strings passed to console.print(), header(), logger.*, error(), warning()
-    or used inside f-strings are display text, not hardcoded routing.
-
     Raises:
-        KeyError: the node has no parent in the map. scan() builds the map from
-            the parsed module and hands over only its Constants, each with a
-            parent; the no-parent arm that answered False was dropped (seedgo,
-            fleet green leg 6).
+        KeyError: the node has no parent in the map; scan() hands over only Constants that have one.
     """
     parent = parents[id(node)]
 
-    # Inside an f-string -> display formatting
     if isinstance(parent, ast.JoinedStr):
         return True
 
-    # Direct argument to a display/logging call
     if isinstance(parent, ast.Call):
         func = parent.func
         if isinstance(func, ast.Attribute) and func.attr in (
@@ -205,7 +156,6 @@ def _is_display_string(
         ):
             return True
 
-    # Keyword arg inside a display call
     grandparent = parents.get(id(parent))
     if isinstance(grandparent, ast.Call):
         func = grandparent.func
@@ -230,45 +180,27 @@ def _is_dict_key_access(
 ) -> bool:
     """Check if a string is a dict key inside generic data-structure access.
 
-    Patterns like result.get('key') or result['key'] when iterating over
-    dynamic data are not hardcoded routing.
-
     Raises:
-        KeyError: the node has no parent in the map. scan() hands over only
-            the Constants of the parsed module, each with a parent; the
-            no-parent arm that answered False was dropped (seedgo, fleet green
-            leg 7).
+        KeyError: the node has no parent in the map; scan() hands over only Constants that have one.
     """
     parent = parents[id(node)]
 
-    # .get('key', default)
     if isinstance(parent, ast.Call):
         func = parent.func
         if isinstance(func, ast.Attribute) and func.attr == "get":
             return True
 
-    # ['key'] subscript
     if isinstance(parent, ast.Subscript):
         return True
 
     return False
 
 
-# =============================================================================
-# AST SCANNER
-# =============================================================================
-
-
 def _scan_file_ast(
     file_path: Path,
     standard_names: list[str],
 ) -> list[dict[str, str | int]]:
-    """Parse a file with AST and find string literals matching standard names.
-
-    Filters out docstrings, display strings, dict-key access, and
-    ambiguous names.  Only flags string literals that look like hardcoded
-    routing.
-    """
+    """Parse a file with AST and find string literals matching standard names."""
     source = file_path.read_text(encoding="utf-8")
     try:
         tree = ast.parse(source, filename=str(file_path))
@@ -276,7 +208,6 @@ def _scan_file_ast(
         logger.info("Skipped %s: SyntaxError during parse", file_path.name)
         return []
 
-    # Build child -> parent map
     parents: dict[int, ast.AST] = {}
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
@@ -318,11 +249,6 @@ def _scan_file_ast(
     return findings
 
 
-# =============================================================================
-# REGEX SCANNER
-# =============================================================================
-
-
 def _scan_file_regex(
     file_path: Path,
     standard_names: list[str],
@@ -360,15 +286,12 @@ def _scan_file_regex(
         if in_docstring:
             continue
 
-        # Skip pure comment lines
         if stripped.startswith("#"):
             continue
 
-        # Extract code portion (before inline comment)
         code_part = line.split("#")[0] if "#" in line else line
 
         for sn in standard_names:
-            # Pattern 1: check_<standard>( -- direct checker call
             fn_pat = rf"\bcheck_{re.escape(sn)}\s*\("
             if re.search(fn_pat, code_part):
                 findings.append(
@@ -381,7 +304,6 @@ def _scan_file_regex(
                     }
                 )
 
-            # Pattern 2: <standard>_violations -- hardcoded violation key
             viol_pat = rf"\b{re.escape(sn)}_violations\b"
             if re.search(viol_pat, code_part):
                 findings.append(
@@ -394,7 +316,6 @@ def _scan_file_regex(
                     }
                 )
 
-            # Pattern 3: == '<standard>' -- hardcoded branching
             branch_pat = rf"""==\s*['"]{re.escape(sn)}['"]"""
             if re.search(branch_pat, code_part):
                 findings.append(
@@ -410,30 +331,8 @@ def _scan_file_regex(
     return findings
 
 
-# =============================================================================
-# PUBLIC SCAN INTERFACE
-# =============================================================================
-
-
 def scan(pack_dir: Path) -> dict:
-    """Run the full plugin integrity scan.
-
-    Args:
-        pack_dir: Path to the standards pack directory
-                  (e.g. handlers/aipass_standards/).
-
-    Returns:
-        Dict with keys:
-            passed: True if flagged_count == 0 (cosmetic modules don't fail)
-            standard_names: list of discovered standard names
-            modules: list of per-module result dicts
-            clean_count: number of clean modules
-            flagged_count: modules with unexpected hardcoded references
-            cosmetic_count: modules with only cosmetic references
-            missing_count: modules whose file was not found
-            issues: list of human-readable issue strings
-            summary: one-line summary string
-    """
+    """Run the full plugin integrity scan."""
     logger.info("plugin_integrity: scanning pack_dir=%s", pack_dir)
 
     standard_names = _discover_standard_names(pack_dir)
@@ -462,7 +361,6 @@ def scan(pack_dir: Path) -> dict:
             module_results.append(result)
             continue
 
-        # Run both AST and regex scans
         ast_findings = _scan_file_ast(file_path, standard_names)
         regex_findings = _scan_file_regex(file_path, standard_names)
 
@@ -480,7 +378,6 @@ def scan(pack_dir: Path) -> dict:
                 seen.add(key)
                 combined.append(finding)
 
-        # Sort by line number
         combined.sort(key=lambda x: int(x["line"]))
 
         result["findings"] = combined
@@ -490,7 +387,6 @@ def scan(pack_dir: Path) -> dict:
                 result["status"] = "cosmetic"
             else:
                 result["status"] = "flagged"
-                # Build issue strings for flagged (non-cosmetic) modules
                 for finding in combined:
                     kind_label = {
                         "ast_string_literal": "string literal",
@@ -513,7 +409,6 @@ def scan(pack_dir: Path) -> dict:
 
     passed = flagged_count == 0
 
-    # Build summary
     total = len(module_results)
     parts: list[str] = [f"{clean_count}/{total} clean"]
     if cosmetic_count:

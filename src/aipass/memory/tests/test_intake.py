@@ -3,25 +3,10 @@
 # Description: Tests for the intake/pool_processor handler
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/intake/pool_processor.py."""
-
-# Tests for the intake/pool_processor handler.
-#
-# Covers:
-#   - pool_processor.find_source_file (active pool, archive, not found)
-#   - pool_processor.load_config (success, missing file)
-#   - pool_processor.get_pool_files (no files, sorted by mtime)
-#   - pool_processor.read_file_content (success, failure)
-#   - pool_processor.chunk_content (short text, long text, paragraph breaks)
-#   - pool_processor.process_file_to_vectors (mocked chromadb)
-#   - pool_processor.archive_old_files (under limit, moves old, duplicate names)
-#   - pool_processor.process_memory_pool (disabled, no files)
-#   - pool_processor.get_pool_status (mocked chromadb)
-#
-# All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — _notify_failure() sends real mail to @devpulse; stubbed, its call is asserted
@@ -33,11 +18,6 @@ import sys
 from unittest.mock import MagicMock
 
 from aipass.memory.apps.handlers.intake import pool_processor
-
-
-# ===========================================================================
-# Tests: find_source_file
-# ===========================================================================
 
 
 class TestFindSourceFile:
@@ -98,11 +78,6 @@ class TestFindSourceFile:
         assert result == active_file
 
 
-# ===========================================================================
-# Tests: load_config
-# ===========================================================================
-
-
 class TestLoadConfig:
     """Test load_config function."""
 
@@ -146,11 +121,6 @@ class TestLoadConfig:
 
         # deep_merge fills in memory_pool from DEFAULT_CONFIG
         assert result["enabled"] is True
-
-
-# ===========================================================================
-# Tests: get_pool_files
-# ===========================================================================
 
 
 class TestGetPoolFiles:
@@ -217,11 +187,6 @@ class TestGetPoolFiles:
         assert result[0].name == "data.json"
 
 
-# ===========================================================================
-# Tests: read_file_content
-# ===========================================================================
-
-
 class TestReadFileContent:
     """Test read_file_content function."""
 
@@ -250,11 +215,6 @@ class TestReadFileContent:
         assert "error" in result
 
 
-# ===========================================================================
-# Tests: chunk_content
-# ===========================================================================
-
-
 class TestChunkContent:
     """Test chunk_content function."""
 
@@ -271,13 +231,11 @@ class TestChunkContent:
     def test_long_text_multiple_chunks(self, monkeypatch):
         """Test that long text is split into multiple chunks."""
         mod = pool_processor
-        # Create text longer than chunk_size
         content = "word " * 300  # ~1500 chars
 
         result = mod.chunk_content(content, chunk_size=500, overlap=50)
 
         assert len(result) > 1
-        # All chunks have sequential indices
         indices = [c["chunk_index"] for c in result]
         assert indices == list(range(len(result)))
 
@@ -295,7 +253,6 @@ class TestChunkContent:
     def test_paragraph_break_splitting(self, monkeypatch):
         """Test that paragraph breaks (double newlines) trigger chunk splits."""
         mod = pool_processor
-        # Build content with a paragraph break in the right spot
         # chunk_size=100, so we need content > 100 chars
         # Place a paragraph break after the midpoint (>50 chars in)
         first_para = "A" * 70
@@ -304,7 +261,6 @@ class TestChunkContent:
 
         result = mod.chunk_content(content, chunk_size=100, overlap=10)
 
-        # Should have split at the paragraph break
         assert len(result) >= 2
 
     def test_empty_content_returns_single_chunk(self, monkeypatch):
@@ -328,11 +284,6 @@ class TestChunkContent:
         assert result[0]["text"] == content
 
 
-# ===========================================================================
-# Tests: process_file_to_vectors
-# ===========================================================================
-
-
 class TestProcessFileToVectors:
     """Test process_file_to_vectors with mocked chromadb."""
 
@@ -344,7 +295,6 @@ class TestProcessFileToVectors:
         test_file = tmp_path / "test.md"
         test_file.write_text("Test content for vectorization.", encoding="utf-8")
 
-        # Mock chromadb
         mock_collection = MagicMock()
         mock_collection.upsert = MagicMock()
         mock_client = MagicMock()
@@ -352,7 +302,6 @@ class TestProcessFileToVectors:
         mock_chromadb = MagicMock()
         mock_chromadb.PersistentClient.return_value = mock_client
 
-        # Mock fastembed
         mock_model = MagicMock()
         mock_model.embed.return_value = iter([MagicMock(tolist=MagicMock(return_value=[0.1, 0.2]))])
         mock_fastembed = MagicMock()
@@ -395,11 +344,6 @@ class TestProcessFileToVectors:
         assert "chromadb" in result["error"]
 
 
-# ===========================================================================
-# Tests: archive_old_files
-# ===========================================================================
-
-
 class TestArchiveOldFiles:
     """Test archive_old_files function."""
 
@@ -413,7 +357,6 @@ class TestArchiveOldFiles:
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
         monkeypatch.setattr(mod, "_MEMORY_ROOT", tmp_path)
 
-        # Mock load_config to return supported extensions
         monkeypatch.setattr(mod, "load_config", lambda: {"supported_extensions": [".md", ".txt"]})
 
         result = mod.archive_old_files(keep_recent=5)
@@ -432,7 +375,6 @@ class TestArchiveOldFiles:
 
         import os
 
-        # Create 4 files with distinct mtimes
         for i in range(4):
             f = pool / f"file{i}.md"
             f.write_text(f"content {i}", encoding="utf-8")
@@ -462,7 +404,6 @@ class TestArchiveOldFiles:
 
         import os
 
-        # Create files
         for i in range(3):
             f = pool / f"file{i}.md"
             f.write_text(f"content {i}", encoding="utf-8")
@@ -483,11 +424,6 @@ class TestArchiveOldFiles:
         # All files in archive (pre-existing + 2 moved, one renamed with timestamp)
         archived = list(archive_dir.iterdir())
         assert len(archived) == 3
-
-
-# ===========================================================================
-# Tests: process_memory_pool
-# ===========================================================================
 
 
 class TestProcessMemoryPool:
@@ -622,11 +558,6 @@ class TestProcessMemoryPool:
         mock_notify.assert_called_once()
 
 
-# ===========================================================================
-# Tests: get_pool_status
-# ===========================================================================
-
-
 class TestGetPoolStatus:
     """Test get_pool_status function."""
 
@@ -650,7 +581,6 @@ class TestGetPoolStatus:
             },
         )
 
-        # Mock chromadb
         mock_collection = MagicMock()
         mock_collection.name = "test_pool"
         mock_collection.count.return_value = 42
@@ -704,7 +634,6 @@ class TestGetPoolStatus:
             lambda: {"enabled": True, "supported_extensions": [".md"], "collection_name": "test_pool"},
         )
 
-        # chromadb returns empty collection list
         mock_client = MagicMock()
         mock_client.list_collections.return_value = []
         mock_chromadb = MagicMock()

@@ -3,16 +3,10 @@
 # Description: Time Capsule Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Time Capsule Operations Handler
-
-Implementation logic for sealing, listing, and opening time capsules.
-Time capsules are sealed messages that can't be opened until a specified date.
-Returns dicts for module display layer.
-"""
+"""Time Capsule Operations Handler"""
 
 from typing import List
 from datetime import datetime, timezone, timedelta
@@ -23,20 +17,8 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# SEAL A TIME CAPSULE
-# =============================================================================
-
-
 def seal_capsule(args: List[str]) -> dict:
-    """
-    Seal a time capsule that opens after N days.
-
-    Usage: commons capsule "title" "content" <days>
-
-    Returns:
-        Dict with success, capsule_id, title, creator, days, opens_at
-    """
+    """Seal a time capsule that opens after N days (clamped to 1-365)."""
     if len(args) < 3:
         return {"success": False, "error": 'Usage: commons capsule "title" "content" <days>'}
 
@@ -91,20 +73,8 @@ def seal_capsule(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# LIST TIME CAPSULES
-# =============================================================================
-
-
 def list_capsules() -> dict:
-    """
-    List all time capsules with status info.
-
-    Usage: commons capsules
-
-    Returns:
-        Dict with success, capsules list
-    """
+    """List all time capsules with status info."""
     try:
         conn = get_db()
 
@@ -144,20 +114,8 @@ def list_capsules() -> dict:
     return {"success": True, "capsules": capsules}
 
 
-# =============================================================================
-# OPEN A TIME CAPSULE
-# =============================================================================
-
-
 def open_capsule(args: List[str]) -> dict:
-    """
-    Open a time capsule if its opens_at date has passed.
-
-    Usage: commons open <capsule_id>
-
-    Returns:
-        Dict with success, capsule data, opener, already_opened flag
-    """
+    """Open a time capsule if its opens_at date has passed."""
     if not args:
         return {"success": False, "error": "Usage: commons open <capsule_id>"}
 

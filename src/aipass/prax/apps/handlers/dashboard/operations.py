@@ -3,15 +3,10 @@
 # Description: Dashboard Operations Handler
 # Version: 0.5.0
 # Created: 2026-02-25
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Dashboard Operations Handler
-
-Handles loading, saving, and updating dashboard files.
-All business logic for dashboard file operations.
-"""
+"""Dashboard Operations Handler"""
 
 import json
 from datetime import datetime
@@ -25,44 +20,21 @@ logger = get_direct_logger()
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import resolved_file
 
-# Resolve prax root from this file's location
 _PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
 
-# --------------------------------------------------------------------------
-# Dashboard size limits — one number per limit, read by every section writer.
-#
-# DPLAN-0347, boardroom thread 16: a dashboard is a glance, and every branch
-# reads its own on every greeting. The numbers live here so the refresh path,
-# the devpulse plugin and @flow's push writer cut at the same place instead of
-# carrying copies that drift apart. External branches import them from
-# aipass.prax.apps.modules.dashboard, which re-exports them; handlers are
-# internal. Chars, never bytes or tokens: len() over the rendered text, the
-# number wc -m reports.
-# --------------------------------------------------------------------------
-
-# Longest plan or commit subject a dashboard section may carry.
+# The one copy of the dashboard caps, in chars (len()); other branches import them
+# via aipass.prax.apps.modules.dashboard. Reference: docs/dashboard_caps.md
 SUBJECT_CAP = 120
 
-# Rendered dashboard size that earns a warning — never a refusal, never a trim.
 DASHBOARD_CHAR_BUDGET = 6000
 
-# What a cut subject ends with; counted inside SUBJECT_CAP, never added to it.
+# Counted inside SUBJECT_CAP, never added to it.
 TRUNCATION_MARKER = "..."
 
 
 def cap_subject(text: str) -> str:
-    """The first line of ``text``, cut to SUBJECT_CAP chars, marker included.
-
-    Truncate, never refuse: refusing a subject drops the plan from the glance,
-    and the full text is one ``drone @flow list`` or ``git log -1`` away.
-    Refusing an essay at authorship is @flow's create, not this writer's job.
-
-    Args:
-        text: Raw subject; may be empty, padded, or carry a body after line 1.
-
-    Returns:
-        At most SUBJECT_CAP chars, empty only if ``text`` held no first line.
-    """
+    """The first line of ``text``, cut to SUBJECT_CAP chars, marker included."""
+    # Truncate, never refuse: a refused subject drops the plan from the glance.
     stripped = (text or "").strip()
     if not stripped:
         return ""
@@ -73,85 +45,50 @@ def cap_subject(text: str) -> str:
 
 
 def get_dashboard_path(branch_path: Path) -> Path:
-    """
-    Get DASHBOARD.local.json path for a branch
-
-    Args:
-        branch_path: Path to branch root
-
-    Returns:
-        Path to dashboard file
-    """
+    """Get DASHBOARD.local.json path for a branch"""
     return branch_path / "DASHBOARD.local.json"
 
 
 def load_dashboard(branch_path: Path, template: Dict) -> Dict:
-    """
-    Load branch dashboard, creating if needed
-
-    Args:
-        branch_path: Path to branch root
-        template: Dashboard template to use for new dashboards
-
-    Returns:
-        Dashboard data dict
-    """
+    """Load branch dashboard, creating if needed"""
     dashboard_path = get_dashboard_path(branch_path)
 
     if dashboard_path.exists():
         content = dashboard_path.read_text().strip()
-        # Handle empty or whitespace-only files (race condition protection)
+        # Empty file: a concurrent writer may be mid-write.
         if not content:
-            # File exists but is empty - treat as new dashboard
             new_dashboard = template.copy()
             new_dashboard["branch"] = branch_path.name.upper()
             return new_dashboard
         try:
             data = json.loads(content)
         except json.JSONDecodeError as e:
-            # Corrupted file - recreate from template
             logger.warning("Corrupted dashboard JSON for %s, recreating from template: %s", branch_path.name, e)
             new_dashboard = template.copy()
             new_dashboard["branch"] = branch_path.name.upper()
             return new_dashboard
-        # Guard against valid JSON that is not a dict (e.g. a list)
         if not isinstance(data, dict):
             logger.warning("Dashboard JSON for %s is not a dict, recreating from template", branch_path.name)
             new_dashboard = template.copy()
             new_dashboard["branch"] = branch_path.name.upper()
             return new_dashboard
-        # Ensure sections exist
         if "sections" not in data:
             data["sections"] = template["sections"].copy()
         return data
 
-    # Return new dashboard from template
     new_dashboard = template.copy()
     new_dashboard["branch"] = branch_path.name.upper()
     return new_dashboard
 
 
 def save_dashboard(branch_path: Path, data: Dict) -> bool:
-    """
-    Save branch dashboard
-
-    Args:
-        branch_path: Path to branch root
-        data: Dashboard data to save
-
-    Returns:
-        True if saved successfully
-
-    Raises:
-        OSError: If file write fails
-    """
+    """Save branch dashboard"""
     data["last_updated"] = datetime.now().isoformat()
     dashboard_path = get_dashboard_path(branch_path)
     rendered = json.dumps(data, indent=2)
     if len(rendered) > DASHBOARD_CHAR_BUDGET:
-        # Warn, never refuse and never trim: a refused save leaves a stale
-        # dashboard, and stale is the failure the grounding hook already names —
-        # zero new mail reported while three sit in the inbox (DPLAN-0347).
+        # Warn, never refuse or trim: a refused save leaves a stale dashboard,
+        # which misreports mail counts on the next greeting.
         logger.warning(
             "Dashboard for %s is %d chars, over the %d budget — every greeting on that branch pays it",
             branch_path.name,
@@ -163,35 +100,18 @@ def save_dashboard(branch_path: Path, data: Dict) -> bool:
 
 
 def create_fresh_dashboard(branch_path: Path) -> Dict:
-    """
-    Create fresh dashboard with clean structure - NO preservation.
-
-    This is the master function for creating/resetting dashboards.
-    All services should call this, then populate their section.
-
-    Tries loading from the template file first for schema consistency,
-    falls back to hardcoded structure for backward compatibility.
-
-    Args:
-        branch_path: Path to branch root
-
-    Returns:
-        Fresh dashboard dict with warning and all sections
-    """
-    # Try loading from template file
+    """Create fresh dashboard with clean structure - NO preservation."""
     template_file = _PRAX_ROOT / "templates" / "DASHBOARD.template.json"
     if template_file.exists():
         try:
             template = json.loads(template_file.read_text())
             now = datetime.now().isoformat()
-            # Replace placeholders
             dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper()))
             dashboard["last_updated"] = now
             return dashboard
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load dashboard template file %s, falling back to hardcoded: %s", template_file, e)
 
-    # Fallback: hardcoded (backward compat)
     now = datetime.now().isoformat()
     return {
         "_warning": (
@@ -213,36 +133,16 @@ def create_fresh_dashboard(branch_path: Path) -> Dict:
 def update_section(
     branch_path: Path, section_name: str, section_data: Dict, template: Dict, calculate_status_func
 ) -> bool:
-    """
-    Update a specific section in branch dashboard (legacy interface).
-
-    Used by the module-level wrapper that passes template and status func.
-    For new integrations, prefer write_section() which is self-contained.
-
-    Args:
-        branch_path: Path to branch root
-        section_name: Section to update (flow, ai_mail, etc)
-        section_data: New data for section
-        template: Dashboard template for fallback
-        calculate_status_func: Function to calculate quick status
-
-    Returns:
-        True if updated successfully
-
-    Raises:
-        Exception: If load or save fails
-    """
+    """Update a specific section in branch dashboard (legacy interface)."""
     dashboard = load_dashboard(branch_path, template)
 
-    # Update only the specified section
     if "sections" not in dashboard:
         dashboard["sections"] = {}
 
     section_data["last_updated"] = datetime.now().isoformat()
     dashboard["sections"][section_name] = section_data
 
-    # Recalculate quick status, merged so this write cannot delete another
-    # service's key (e.g. @flow's commons_mentions).
+    # Merged, so this write cannot delete another service's key (e.g. @flow's commons_mentions).
     from .status import merge_quick_status
 
     dashboard["quick_status"] = merge_quick_status(
@@ -253,20 +153,8 @@ def update_section(
 
 
 def _calculate_quick_status_standalone(sections: Dict, branch_path: Path) -> Dict:
-    """
-    Calculate quick_status from branch data sources.
-
-    Thin delegate to the single implementation in status.py. This copy was the
-    only one carrying the list-shape guard; keeping three copies is what let the
-    other two ship without it (@flow, DPLAN-0290 item 4).
-
-    Args:
-        sections: All dashboard sections dict
-        branch_path: Path to branch root (for sourcing counts from local files)
-
-    Returns:
-        Quick status dict with summary, action flags, and counts
-    """
+    """Calculate quick_status from branch data sources."""
+    # Delegate only: separate copies of this logic drift (one lost the list-shape guard).
     from .status import calculate_quick_status
 
     return calculate_quick_status(sections, branch_path)
@@ -287,52 +175,22 @@ def _load_or_create_dashboard(dashboard_path: Path, branch_path: Path) -> Dict:
 
 
 def write_section(branch_path: Path, section_name: str, section_data: Dict) -> bool:
-    """
-    Write-through API: update a single section in a branch's dashboard.
-
-    This is THE function all services call to push their data into a
-    branch's DASHBOARD.local.json. It is dependency-free (no imports
-    from ai_mail, flow, etc.) and safe to call from any branch's code.
-
-    Behavior:
-        - Loads the branch's DASHBOARD.local.json (creates from template if missing)
-        - Updates ONLY the named section (preserves all other sections)
-        - Automatically adds "last_updated" ISO timestamp to section_data
-        - Recalculates quick_status from live section data
-        - Saves back to disk
-
-    Args:
-        branch_path: Path to branch root directory
-        section_name: Section key (e.g. "ai_mail", "flow", "commons_activity")
-        section_data: Dict of data for this section. Will be written as-is
-            with an auto-added "last_updated" timestamp.
-
-    Returns:
-        True if saved successfully, False on any error
-
-    Example:
-        >>> from aipass.prax.apps.modules.dashboard import write_section
-        >>> write_section(branch_path, "flow", {"active_plans": 2})
-        True
-    """
+    """Write-through API: update a single section in a branch's dashboard."""
+    # Called from every branch: keep it free of ai_mail/flow imports.
     try:
         branch_path = Path(branch_path)
         dashboard_path = get_dashboard_path(branch_path)
 
         dashboard = _load_or_create_dashboard(dashboard_path, branch_path)
 
-        # Ensure sections dict exists
         if "sections" not in dashboard:
             dashboard["sections"] = {}
 
-        # Stamp the section data with ISO timestamp
         section_data["last_updated"] = datetime.now().isoformat()
 
-        # Write ONLY the named section, preserve everything else
         dashboard["sections"][section_name] = section_data
 
-        # Recalculate quick_status from live data, merged so a write-through
-        # caller cannot delete a key another service owns.
+        # Merged, so a write-through caller cannot delete a key another service owns.
         from .status import merge_quick_status
 
         dashboard["quick_status"] = merge_quick_status(
@@ -340,7 +198,6 @@ def write_section(branch_path: Path, section_name: str, section_data: Dict) -> b
             _calculate_quick_status_standalone(dashboard["sections"], branch_path),
         )
 
-        # Save
         saved = save_dashboard(branch_path, dashboard)
 
         json_handler.log_operation(

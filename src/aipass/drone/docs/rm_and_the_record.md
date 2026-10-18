@@ -6,8 +6,8 @@
 `apps/handlers/deletion_log.py`
 
 `drone rm` is the fleet's only sanctioned delete path — raw recursive `rm` is gate-blocked — which
-makes it the choke point where the record belongs. The owner's ruling: *"if something deletes, there
-should be a record of it."* The rules and the flags are `drone rm --help`.
+makes it the choke point where the record belongs: if something deletes, there is a record of it.
+The rules and the flags are `drone rm --help`.
 
 ---
 
@@ -35,14 +35,13 @@ Four things worth knowing:
 - **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it
   was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than
   paying an unbounded walk.
-- **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is
+- **Severity is INFO on both channels.** A deletion through the sanctioned path is
   chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the
   guard speaking, and it is a separate line from the record.
 - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an
   optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon
   can serve a repository it is not standing in; resolving the store from cwd there files the record
-  under the standing project instead — which is exactly how a sandbox suite's deletions came to sit
-  in this ledger. `AIPASS_DELETION_LOG` still outranks
+  under the standing project instead. `AIPASS_DELETION_LOG` still outranks
   both, so the test and container seam cannot be defeated by a lane naming its own root. `rm`
   passes nothing and keeps the cwd walk, which is correct for it: the operator IS standing in the
   project they are deleting from.
@@ -77,10 +76,9 @@ up for `.trinity/`. It takes the **outermost** hit within the project, not the i
 `.trinity/` is not proof of a citizen: @spawn ships a complete branch skeleton under its templates,
 passport and all.
 
-Innermost-wins produced two bugs from one mimicry — refusals named a template, which has no mailbox
-to appeal to, and @spawn was locked out of its own templates because a skeleton's name never
-matches the branch you are standing in. The same mimicry sent the commit gate running pytest inside
-the template; outermost-citizen-wins is the mapping that fixed it there, applied here.
+Innermost-wins would name a template in a refusal, which has no mailbox to appeal to, and would
+lock @spawn out of its own templates, because a skeleton's name never matches the branch you are
+standing in. The commit gate maps a file to its branch by the same outermost rule.
 
 Safe because nothing above a branch carries `.trinity/` — not the project root, not `src/`, not
 `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the
@@ -91,10 +89,9 @@ project boundary.
 ## A folder that contains a citizen
 
 The sibling guard walks **up** from the target, so it only sees a citizen the target sits *inside*.
-Nothing above a branch carries `.trinity/`, so a target above the branches passed it. From any
-branch, `drone rm ..` is `src/aipass/` and `drone rm ../..` is `src/`. Both also passed
-containment, and rmtree would have taken every branch, `.trinity/` and all (measured 2026-09-11
-with the guards alone; DPLAN-0338 follow-up).
+Nothing above a branch carries `.trinity/`, so a target above the branches passes it. From any
+branch, `drone rm ..` is `src/aipass/` and `drone rm ../..` is `src/`. Both pass containment, and
+rmtree would take every branch, `.trinity/` and all, so a second guard looks the other way.
 
 `check_contained_citizens()` walks **down** and refuses at the first foreign citizen, naming it.
 
@@ -118,17 +115,16 @@ with the guards alone; DPLAN-0338 follow-up).
 - Refusals are recorded like every other refusal. A caller standing outside every branch finds
   every citizen foreign.
 
-Same lane, same change: the delete acts on the **resolved** path, the one every guard judged.
-Before, it acted on the path as typed. `drone rm ..` handed rmtree `spawn/..`, which emptied the
-tree and then failed its last `rmdir`, because `spawn` was gone by then — and the ledger recorded
-`failed` for a delete that had happened.
+The delete acts on the **resolved** path, the one every guard judged, never the path as typed: a
+typed `spawn/..` would empty the tree and then fail its last `rmdir`, because `spawn` is gone by
+then, and the ledger would record `failed` for a delete that happened.
 
 ---
 
 ## Stale mode — `drone rm --stale`
 
 `drone rm --stale AGE [--dry-run] DIR [DIR...]` sweeps staging temps: the `*.tmp` a staged write
-(temp + fsync + rename) leaves behind when its process is killed between the two (DPLAN-0338). It
+(temp + fsync + rename) leaves behind when its process is killed between the two. It
 is a second, narrower lane on the same verb; without `--stale` the verb is unchanged.
 
 | Rule | What it means |
@@ -147,11 +143,8 @@ delete. Standing in @api, `drone rm api_json --stale 10d` is a stale sweep, not 
 `api_json`. `--stale=10d` is read. `--staleness`, a repeated `--stale`, and any other `-` token in
 stale mode (most likely a mistyped `--dry-run`) are refused before anything is walked.
 
-Proved from a branch directory, dry run only, on 2026-09-11: the old-era `tmpXXXXXXXX.tmp` temps
-dominate the match set, concentrated in a handful of `*_json/` folders, and the new-era
-dot-prefixed temps were all younger than the age given and correctly skipped. The first real sweep
-is @prax's scheduled job (DPLAN-0338 wave 2). Re-measure with `--dry-run` rather than quoting that
-run: the number is a moment, the command is the truth.
+To see what a sweep would take, run it with `--dry-run`: the match set is a moment, the command is
+the truth.
 
 ---
 

@@ -3,55 +3,13 @@
 # Description: Subprocess Text True Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Subprocess Text True Standards Checker Handler
 
-``named_encoding``'s hazard one pipe over. ``subprocess.run(..., text=True)``
-with no ``encoding=`` decodes the child's stdout and stderr (and encodes
-``input=``) with ``locale.getpreferredencoding(False)``: UTF-8 on this fleet's
-Linux and macOS hosts, cp1252 on Windows. A child that prints a box character
-or an em dash then raises UnicodeDecodeError in the Windows lane, a failure of
-the TEST and not of the product. ``named_encoding`` judges ``open``,
-``read_text`` and ``write_text`` only; it never looks at a subprocess call.
-
-  ``backup/tests/test_dead_cwd_imports.py`` (7b51d118, lines 224, 706, 797,
-  852): four ``subprocess.run(..., capture_output=True, text=True)`` calls
-  that read a child interpreter's report with no encoding named.
-
-THE SHAPE. A call to ``subprocess.run``, ``Popen``, ``check_output``,
-``check_call`` or ``call`` with ``text=True`` or ``universal_newlines=True``
-(the literal ``True``) and no ``encoding=`` keyword, or ``encoding=None``,
-which is the locale again. The hit is reported on the ``text=`` line.
-``errors=`` alone does not cure it: it names the error handler, not the codec.
-Names resolve through the file's own imports, anywhere in the file:
-``import subprocess as sp`` and ``from subprocess import run`` are followed.
-
-NOT CONVICTED, each for its reason:
-  * ``encoding=`` given with any other value: the encoding is named. It
-    implies text mode on its own, so ``text=True`` beside it is harmless.
-  * ``text=False``, or no flag at all: bytes, nothing to decode.
-  * ``text=flag`` where flag is not a literal: whether it is text mode cannot
-    be read from the statement.
-  * A ``**kwargs`` splat: it can carry the encoding.
-  * A mock's ``assert_called_once_with(..., text=True)``, a helper that wraps
-    subprocess (its own call inside is judged, its callers are not), and the
-    same words inside a string: none of them is a subprocess call.
-  * ``getoutput`` / ``getstatusoutput``: always text, no flag to read. Zero
-    in the fleet's tests.
-
-CHECK FIRST (2026-09-25, before the rule landed). 598 test files under the
-pack's applicability, 127 subprocess calls (run 118, Popen 9): 115 convicted
-in 52 files across 18 branches -- memory 3 files / 21, aipass 6 / 15, skills
-3 / 10, api 5 / 8, prax 4 / 8, spawn 2 / 8, drone 5 / 7, seedgo 6 / 6,
-ai_mail 2 / 5, flow 2 / 5, hooks 3 / 5, backup 1 / 4, devpulse 2 / 4, cli
-3 / 3, commons 1 / 2, daemon 2 / 2, canary 1 / 1, trigger 1 / 1. Every one
-is ``subprocess.run`` with ``text=True``; universal_newlines 0, Popen 0.
-Compliant: 1 call names an encoding (encoding only, no flag), 0 pair it with
-``text=True``. Non-literal flags 0, splats 0. The model file
-``tests/test_readme_update.py`` scores 100.
+Reference: subprocess_text_true.md
 """
 
 import ast
@@ -68,12 +26,10 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "SUBPROCESS_TEXT_TRUE"
 STANDARD_KEY = "subprocess_text_true"
 
-#: The subprocess calls that take a text flag, by canonical dotted name.
 CALLS: frozenset[str] = frozenset(
     {"subprocess.run", "subprocess.Popen", "subprocess.check_output", "subprocess.check_call", "subprocess.call"}
 )
 
-#: The two spellings of text mode.
 FLAGS: Tuple[str, ...] = ("text", "universal_newlines")
 
 CURE = 'pass encoding="utf-8" (and errors= if the child may print bytes that are not utf-8)'
@@ -170,15 +126,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for a text-mode subprocess call that names no encoding.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard and per line.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for a text-mode subprocess call that names no encoding."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 

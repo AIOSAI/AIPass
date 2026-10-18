@@ -3,14 +3,11 @@
 # Description: Inbox operations — list, view, clear feedback messages
 # Version: 1.0.0
 # Created: 2026-04-11
-# Modified: 2026-04-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Feedback Inbox — reading and managing feedback messages.
-
-Provides list, view, clear, and summary operations for
-devpulse's personal feedback mailbox.
 """
 
 from rich.table import Table
@@ -24,10 +21,7 @@ console = err_console
 
 
 def list_messages() -> None:
-    """Display a Rich table of all feedback messages.
-
-    Shows id, from, subject, date, and read status for each message.
-    """
+    """Display a Rich table of all feedback messages."""
     json_handler.log_operation("list_messages")
     data = load_inbox()
     messages = data.get("messages", [])
@@ -57,11 +51,7 @@ def list_messages() -> None:
 
 
 def view_message(msg_id: str) -> None:
-    """Display a message and its thread, marking it as read.
-
-    Args:
-        msg_id: The 8-char hex message ID to view.
-    """
+    """Display a message and its thread, marking it as read."""
     data = load_inbox()
     messages = data.get("messages", [])
 
@@ -70,20 +60,17 @@ def view_message(msg_id: str) -> None:
         error(f"Message {msg_id} not found.")
         return
 
-    # Mark as read
     if not msg.get("read"):
         msg["read"] = True
         data["unread_count"] = max(0, data.get("unread_count", 1) - 1)
         save_inbox(data)
 
-    # Display message
     console.print(f"\n[bold cyan]From:[/bold cyan] {msg.get('from', '?')}")
     console.print(f"[bold cyan]Subject:[/bold cyan] {msg.get('subject', '(no subject)')}")
     console.print(f"[bold cyan]Date:[/bold cyan] {msg.get('timestamp', '?')}")
     console.print(f"[bold cyan]ID:[/bold cyan] {msg.get('id', '?')}")
     console.print(f"\n{msg.get('body', '')}")
 
-    # Display thread
     thread = msg.get("thread", [])
     if thread:
         console.print(f"\n[bold]Thread ({len(thread)} replies):[/bold]")
@@ -95,11 +82,7 @@ def view_message(msg_id: str) -> None:
 
 
 def clear_message(msg_id: str) -> None:
-    """Remove a single message from the inbox.
-
-    Args:
-        msg_id: The 8-char hex message ID to remove.
-    """
+    """Remove a single message from the inbox."""
     data = load_inbox()
     messages = data.get("messages", [])
 
@@ -139,11 +122,7 @@ def clear_all_read() -> None:
 
 
 def get_summary() -> str:
-    """Return a summary string of inbox status.
-
-    Returns:
-        str: Summary like "3 messages, 2 unread" or "No feedback messages."
-    """
+    """Return a summary string of inbox status, like "3 messages, 2 unread"."""
     data = load_inbox()
     total = data.get("total_messages", 0)
     unread = data.get("unread_count", 0)
@@ -155,15 +134,7 @@ def get_summary() -> str:
 
 
 def _find_message(messages: list, msg_id: str) -> dict | None:
-    """Find a message by ID in the messages list.
-
-    Args:
-        messages: List of message dicts.
-        msg_id: The message ID to find.
-
-    Returns:
-        The message dict if found, None otherwise.
-    """
+    """Find a message by ID in the messages list, or None."""
     for msg in messages:
         if msg.get("id") == msg_id:
             return msg

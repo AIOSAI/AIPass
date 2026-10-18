@@ -3,15 +3,9 @@
 # Description: Generic contract registry — maps contract names to driver functions
 # Version: 1.0.0
 # Created: 2026-04-15
-# Modified: 2026-04-15
+# Modified: 2026-10-17
 # =============================================
-"""
-Generic contract registry for @api driver layer.
-
-Contracts are string names (e.g. "memory", "search") that map to driver functions.
-Drivers register themselves; callers resolve by name.
-Bridge itself is stateless beyond the registry dict — no threading, no startup side effects.
-"""
+"""Generic contract registry for @api driver layer."""
 
 from typing import Callable
 
@@ -64,8 +58,6 @@ def clear() -> None:
 def handle_command(command: str, args: list) -> bool:
     """Bridge is a utility module — no drone commands. Always returns False.
 
-    Stays silent: bridge is discovered before the modules that own the real
-    commands, so printing here would prepend its banner to the output of every
-    no-arg command. Introspection is reachable via __main__ instead.
+    Silent: bridge is discovered first, so a print here would prepend its banner to every no-arg command.
     """
     return False

@@ -3,19 +3,13 @@
 # Description: ChromaDB Subprocess Handler
 # Version: 1.7.0
 # Created: 2025-11-27
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 ChromaDB Subprocess Handler
 
-Called via subprocess from rollover orchestrator to ensure ChromaDB operations
-run in the memory-specific venv (AIPASS_MEMORY_PYTHON).
-
-Self-contained — does NOT import from aipass package (not available in memory venv).
-
-Input: JSON on stdin with operation and parameters
-Output: JSON on stdout with result
+Runs in the memory venv (AIPASS_MEMORY_PYTHON): JSON request on stdin, JSON result on stdout.
 """
 
 import sys
@@ -29,22 +23,12 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# CHROMADB OPERATIONS (inline — no aipass imports)
-# =============================================================================
-
-# Default global chroma path: memory/.chroma
 _MEMORY_ROOT = module_file(__file__).parents[3]
 _DEFAULT_DB_PATH = _MEMORY_ROOT / ".chroma"
 
-# Sibling embedder script -- same venv, invoked by path. Encoding lives behind
-# this handler on purpose: a caller that picks its own embedding model can put
-# vectors from two models in one collection, which fails silently rather than
-# loudly (no error, just wrong neighbours). The store owns the model choice.
+# The store owns the model choice: two models in one collection give silently wrong neighbours.
 _EMBED_SCRIPT = module_file(__file__).parent.parent / "vector" / "embed_subprocess.py"
 
-# Singleton clients per path
 _clients = {}
 
 
@@ -76,20 +60,16 @@ def _store_vectors(branch, memory_type, embeddings, documents, metadatas, db_pat
         embedding_function=None,
     )
 
-    # Content-hash IDs — idempotent across runs.  When metadata carries
-    # source_file (e.g. plans intake), salt the hash so identical boilerplate
-    # from different files gets distinct IDs and per-file provenance survives.
+    # Content-hash IDs stay idempotent; the source_file salt keeps per-file provenance of shared text.
     ids = []
     for doc, meta in zip(documents, metadatas):
         salt = meta.get("source_file", "") if isinstance(meta, dict) else ""
         hash_input = f"{salt}:{doc}" if salt else doc
         ids.append(f"{branch}_{memory_type}_{hashlib.sha256(hash_input.encode()).hexdigest()[:16]}")
 
-    # Chroma expects lists, not numpy arrays
     embeddings_list = [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
 
-    # Safety net: deduplicate within batch — ChromaDB rejects non-unique IDs
-    # in a single upsert call.
+    # ChromaDB rejects non-unique IDs within one upsert call.
     seen = {}
     for i, doc_id in enumerate(ids):
         seen[doc_id] = i
@@ -100,7 +80,6 @@ def _store_vectors(branch, memory_type, embeddings, documents, metadatas, db_pat
         documents = [documents[i] for i in unique_indices]
         metadatas = [metadatas[i] for i in unique_indices]
 
-    # Upsert: idempotent — same content gets same ID, no duplicates
     collection.upsert(embeddings=embeddings_list, documents=documents, metadatas=metadatas, ids=ids)
 
     new_count = collection.count()
@@ -117,17 +96,7 @@ def _store_vectors(branch, memory_type, embeddings, documents, metadatas, db_pat
 def embedder_reason(completed) -> str:
     """The reason a failed embed run gave: its JSON refusal on stdout first, then stderr.
 
-    The embedder reports its own failure as ``{"success": false, "error": ...}`` on
-    stdout and exits 1, so a reader of stderr alone answered a bare "Embedding
-    failed" while the cause sat unread (194 refusals to ai_mail; leg 9 of DPLAN-0354).
-    Every caller of embed_subprocess.py reads its refusal through this one function:
-    this module, the rollover orchestrator, the search executor and the plans processor.
-
-    Args:
-        completed: The finished embed run (``subprocess.CompletedProcess``).
-
-    Returns:
-        The embedder's own error, else its stderr, else "no reason given".
+    Every caller of embed_subprocess.py reads its refusal through this one function.
     """
     try:
         reply = json.loads(completed.stdout)
@@ -142,19 +111,7 @@ def embedder_reason(completed) -> str:
 def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
     """Encode raw texts and store them -- the text-in entry point.
 
-    Callers send text and get a verdict; they never pick an embedding model.
-    Every failure returns success=False with a reason: a caller that deletes its
-    originals on the strength of this answer must be able to trust it.
-
-    Args:
-        branch: Owning branch name (e.g. "AI_MAIL")
-        memory_type: Collection suffix (e.g. "email_sent")
-        texts: Raw strings to encode and store
-        metadatas: One metadata dict per text, same order
-        db_path: Optional path to Chroma database
-
-    Returns:
-        Dict with success, collection, count -- or success=False and an error
+    Every failure returns success=False with a reason: callers delete their originals on this answer.
     """
     if not branch or not memory_type:
         return {"success": False, "error": "branch and memory_type are required"}
@@ -165,8 +122,7 @@ def _vectorize_and_store(branch, memory_type, texts, metadatas, db_path=None):
     if not texts:
         return {"success": True, "count": 0, "message": "No texts to store"}
 
-    # zip() in the store path would truncate a mismatch silently and hand a row
-    # someone else's provenance. Refuse instead.
+    # zip() in the store path would truncate a mismatch and hand a row someone else's provenance.
     if len(metadatas) != len(texts):
         return {"success": False, "error": f"metadatas ({len(metadatas)}) does not match texts ({len(texts)})"}
 
@@ -226,27 +182,13 @@ def _list_collections(db_path=None):
 
 
 def _source_matches(source, pattern):
-    """Whether pattern occurs in source at a non-alphanumeric boundary.
-
-    A plain `pattern in source` test lets a label match inside a longer one --
-    DPLAN-0012 answers to a TDPLAN-0012 filename, so verification miscounts and
-    the search pin promotes the wrong plan. A hit only counts when the label
-    starts the string or follows a non-alphanumeric character.
-
-    Args:
-        source: The source_file value from a chunk's metadata
-        pattern: The label to look for (e.g. "DPLAN-0012")
-
-    Returns:
-        True if pattern occurs at a boundary in source
-    """
+    """Whether pattern occurs in source at a non-alphanumeric boundary (DPLAN-0012 must not match TDPLAN-0012)."""
     if not source or not pattern:
         return False
 
     idx = source.find(pattern)
     while idx != -1:
-        # Keep scanning past a rejected hit: the same source may carry the
-        # label again at a real boundary ("TDPLAN-0012_supersedes_DPLAN-0012").
+        # Keep scanning: the label may recur at a real boundary ("TDPLAN-0012_supersedes_DPLAN-0012").
         if idx == 0 or not source[idx - 1].isalnum():
             return True
         idx = source.find(pattern, idx + 1)
@@ -255,15 +197,7 @@ def _source_matches(source, pattern):
 
 
 def _check_plan(plan_label, db_path=None):
-    """Check if a plan has been vectorized in ChromaDB.
-
-    Args:
-        plan_label: Plan label to search for (e.g., "FPLAN-0126")
-        db_path: Optional path to Chroma database
-
-    Returns:
-        Dict with found status, count of matching chunks, and source files
-    """
+    """Check if a plan has been vectorized in ChromaDB."""
     client = _get_client(db_path)
 
     collection_name = "flow_plans"
@@ -294,17 +228,7 @@ def _check_plan(plan_label, db_path=None):
 
 
 def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
-    """Fetch documents whose source_file metadata contains a pattern.
-
-    Args:
-        collection_name: Name of the ChromaDB collection
-        source_pattern: Label to match at a boundary in source_file metadata
-        n_results: Maximum number of results to return
-        db_path: Optional path to Chroma database
-
-    Returns:
-        Dict with success, results list (document, metadata, id)
-    """
+    """Fetch documents whose source_file metadata contains a pattern."""
     client = _get_client(db_path)
 
     try:
@@ -334,16 +258,7 @@ def _get_by_source(collection_name, source_pattern, n_results=5, db_path=None):
 
 
 def _delete_by_source(collection_name, source_pattern, db_path=None):
-    """Delete vectors whose source_file metadata contains a pattern.
-
-    Args:
-        collection_name: Name of the ChromaDB collection
-        source_pattern: Label to match at a boundary in source_file metadata
-        db_path: Optional path to Chroma database
-
-    Returns:
-        Dict with success, deleted count, and matched IDs
-    """
+    """Delete vectors whose source_file metadata contains a pattern."""
     client = _get_client(db_path)
 
     try:
@@ -367,21 +282,9 @@ def _delete_by_source(collection_name, source_pattern, db_path=None):
 
 
 def _get_by_ids(collection_name, ids, db_path=None):
-    """Fetch documents by their exact IDs -- the read-back behind verification.
+    """Fetch documents by their exact IDs -- the read-back behind verification; missing IDs are absent.
 
-    Exists so a caller that is about to DELETE its originals can prove the copy
-    landed instead of trusting the writer's own success flag. ``get_by_source``
-    could not serve that role: it matches on a metadata substring and caps at
-    n_results, so a partial hit reads like a full one.
-
-    Args:
-        collection_name: Name of the ChromaDB collection
-        ids: Exact vector IDs to fetch
-        db_path: Optional path to Chroma database
-
-    Returns:
-        Dict with success and a documents map {id: document}. Missing IDs are
-        simply absent from the map -- the caller decides what that means.
+    ``get_by_source`` cannot verify: it matches a substring and caps at n_results.
     """
     client = _get_client(db_path)
 
@@ -403,25 +306,14 @@ def _get_by_ids(collection_name, ids, db_path=None):
     return {"success": True, "documents": documents, "count": len(documents)}
 
 
-# Every archive that rolls over owns a "<name>_local" or "<name>_observations"
-# collection, so these two suffixes name the owners the store itself knows about.
+# Every archive that rolls over owns a "<name>_local" or "<name>_observations" collection.
 _OWNER_SUFFIXES = ("_local", "_observations")
 
 
 def _branch_collections(collection_names, branch):
     """The collections a --branch filter owns, bounded by the owners in the store.
 
-    Collections are named "<branch>_<type>" and either half may hold an
-    underscore (ai_mail_email_sent, aipass_site_local), so "<branch>_" is not a
-    boundary: aipass_site_local starts with "aipass_". A name is dropped when a
-    longer owner that extends the branch (aipass_site) also prefixes it.
-
-    Args:
-        collection_names: Every collection name in the store
-        branch: The branch to scope to, any case
-
-    Returns:
-        The names owned by the branch, in store order
+    "<branch>_" is not a boundary (aipass_site_local starts with "aipass_"): a longer owner's names are dropped.
     """
     prefix = f"{branch.lower()}_"
     owners = {name[: -len(suffix)] for name in collection_names for suffix in _OWNER_SUFFIXES if name.endswith(suffix)}
@@ -437,7 +329,6 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
     """Search for similar vectors."""
     client = _get_client(db_path)
 
-    # Determine which collections to search
     if branch and memory_type:
         collection_names = [f"{branch.lower()}_{memory_type.lower()}"]
     else:
@@ -481,20 +372,8 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
     }
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
-
 def main(stdin: TextIO | None = None):
-    """Process ChromaDB operation from stdin JSON.
-
-    Args:
-        stdin: The stream the request is read from; None reads sys.stdin, as
-            every product caller does. The parameter exists for the tests,
-            which send a request through this entry without patching sys.stdin
-            for the whole process.
-    """
+    """Process ChromaDB operation from stdin JSON (``stdin`` is a test seam; products pass None)."""
     try:
         input_data = json.load(sys.stdin if stdin is None else stdin)
         operation = input_data.get("operation")

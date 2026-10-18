@@ -3,17 +3,11 @@
 # Description: Central File Push Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Central File Push Module
-
-Thin router for the push-central command. Delegates to
-handlers/central/central_writer.py to aggregate commons stats
-and write COMMONS.central.json.
-
-Handles: push-central command.
 """
 
 from typing import List
@@ -48,22 +42,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle central file push commands.
-
-    Args:
-        command: Command name (push-central)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle the push-central command."""
     if command != "push-central":
         return False
 

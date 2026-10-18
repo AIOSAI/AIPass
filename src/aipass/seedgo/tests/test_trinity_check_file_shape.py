@@ -3,7 +3,7 @@
 # Description: trinity_check file shape: metadata, guidelines, file set, receipt (split from test_trinity_check.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -32,22 +32,8 @@ from aipass.seedgo.tests.support_trinity_check import (
 pytestmark = pytest.mark.usefixtures("_mock_infrastructure")
 
 
-# ===========================================================================
-# D17. document_metadata is a CLOSED set (ruling 4, due after the fleet reset)
-# ===========================================================================
-
-
 class TestDocumentMetadataIsAClosedSet:
-    """Ruling 4: ``document_metadata`` is a closed set, and the push executed
-    it fleet-wide. The build deliberately deferred this -- the contract named
-    the required fields and deleted ``status`` but did not declare the block
-    closed, so extras were unflagged. The ruling closed it.
-
-    Live population today is ZERO: the push cured every branch, so nothing on
-    disk proves this rule can see. The real deviant corpus is the PRE-PUSH
-    state still sitting in ``*.pre_v3_backup`` -- 34 files carrying ``limits``
-    and ``status``. ``limits`` is the field this rule newly catches.
-    """
+    """``document_metadata`` is a closed set: an extra field such as ``limits`` is flagged."""
 
     @pytest.mark.parametrize("file_key", ["local", "observations"])
     def test_an_extra_metadata_field_is_flagged(self, trinity, tmp_path, file_key):
@@ -70,9 +56,7 @@ class TestDocumentMetadataIsAClosedSet:
         assert "limits" in message and "owner" in message
 
     def test_status_keeps_its_own_diagnostic_rather_than_folding_into_extras(self, trinity, tmp_path):
-        """``status`` was already deleted by name and says WHY -- health is
-        computed, never stored. A generic 'unexpected field' would lose that.
-        """
+        """``status`` keeps its own diagnostic (health is computed, never stored), not a generic unexpected-field one."""
         local = _canonical_local()
         local["document_metadata"]["status"] = {"health": "green"}
         branch = _write_branch(tmp_path, local=local)
@@ -98,19 +82,8 @@ class TestDocumentMetadataIsAClosedSet:
         _assert_failed(_group(trinity.check_branch(str(branch)), "Top-level keys"), "limits")
 
 
-# ===========================================================================
-# D18. guidelines content is scored (ruling 3, template-verbatim)
-# ===========================================================================
-
-
 class TestGuidelinesContentIsScored:
-    """Ruling 3 landed template-verbatim and the push rewrote every branch to
-    it, so the contract ambiguity the build flagged is resolved: the
-    ``guidelines`` block's CONTENT is now scored, not just its presence.
-
-    Pre-push corpus: 17 branches carried the right two KEYS with different
-    VALUES -- which is precisely why presence-only scoring saw nothing.
-    """
+    """The ``guidelines`` block's content is scored against the template, not just the presence of its keys."""
 
     def test_a_divergent_purpose_value_is_flagged(self, trinity, tmp_path):
         """The real pre-push shape: right keys, wrong text."""
@@ -152,9 +125,7 @@ class TestGuidelinesContentIsScored:
         assert _group(trinity.check_branch(str(branch)), "Meta lines & _usage")["passed"] is True
 
     def test_unreadable_templates_refuse_rather_than_score_guidelines_zero(self, trinity, tmp_path, monkeypatch):
-        """THE ONE LAW: a field that cannot be measured is refused, never
-        scored. Same rule the meta lines already follow.
-        """
+        """Unreadable templates refuse the guidelines group rather than score it zero: unmeasurable is refused, never scored."""
         monkeypatch.setattr(trinity, "_load_templates", lambda: None)
         branch = _write_branch(tmp_path)
 
@@ -162,13 +133,7 @@ class TestGuidelinesContentIsScored:
 
     @pytest.mark.parametrize("bad", [None, "a string", 42])
     def test_a_gold_template_missing_its_guidelines_block_refuses(self, trinity, tmp_path, monkeypatch, bad):
-        """The refusal path that the all-templates-None case cannot reach.
-
-        When every template is unreadable the prose/usage guard fires one line
-        earlier, so nulling _load_templates never exercises THIS guard. A
-        template that parses but carries no usable guidelines block does --
-        and mutation testing is what surfaced the difference.
-        """
+        """The refusal path that the all-templates-None case cannot reach."""
         templates = copy.deepcopy(_TEMPLATES)
         if bad is None:
             del templates["observations"]["guidelines"]
@@ -180,28 +145,8 @@ class TestGuidelinesContentIsScored:
         _assert_failed(_group(trinity.check_branch(str(branch)), "Meta lines & _usage"), "guidelines", "never assumed")
 
 
-# ===========================================================================
-# D14b. Versioned backups are LEGAL residents (the owner's File set ruling)
-# ===========================================================================
-
-
 class TestVersionedBackupsAreLegalResidents:
-    """The ruling: renaming the current file as a version left in place while
-    the new file is created IS the house convention, so those old versions are
-    expected residents of .trinity/ -- not strays.
-
-    The rule is a SHAPE, deliberately not a list of today's two suffixes: a
-    canonical filename, then ``.pre``, then a separator, then a version token.
-    The next migration mints its own token and passes without a code change.
-
-    The opposite error is the one that matters for a checker: a rule loose
-    enough to admit ``local.json.tmp`` would make torn-write staging files
-    invisible in the one directory whose whole job is durable memory. Every
-    guard below is a live species -- seedgo found a 4.3MB truncated .tmp
-    staging file in a json dir in session 90.
-    """
-
-    # -- the ruling: these must STOP flagging ------------------------------
+    """Versioned backups (canonical name, ``.pre``, separator, version token) are legal residents; ``.tmp`` staging files are not."""
 
     @pytest.mark.parametrize(
         "name",
@@ -251,8 +196,6 @@ class TestVersionedBackupsAreLegalResidents:
 
         assert _group(trinity.check_branch(str(branch)), "File set")["score"] == 100
 
-    # -- over-refusal guards: these must STILL flag ------------------------
-
     @pytest.mark.parametrize(
         "name",
         [
@@ -274,14 +217,7 @@ class TestVersionedBackupsAreLegalResidents:
         ],
     )
     def test_machine_artifacts_are_still_strays(self, trinity, tmp_path, name):
-        """A backup rule that swallows temp files hides torn writes.
-
-        The same body held two more claims, folded in here with every case
-        (compass 443; seedgo, fleet green leg 8): the deliberately flagged
-        operational files still flag, because the ruling kept them on purpose
-        and their owners relocate; and the near misses of the backup pattern
-        are still strays.
-        """
+        """A backup rule that swallows temp files hides torn writes."""
         branch = _write_branch(tmp_path)
         (branch / ".trinity" / name).write_text("x\n", encoding="utf-8")
 
@@ -301,13 +237,8 @@ class TestVersionedBackupsAreLegalResidents:
 
         _assert_failed(_group(trinity.check_branch(str(branch)), "File set"), "stray local.json.pre_v3_backup/")
 
-    # -- the two lanes must agree -----------------------------------------
-
     def test_both_lanes_agree_on_what_a_stray_is(self, trinity, tmp_path):
-        """seedgo S88/S90 lesson: a shared rule fixed in one lane and not the
-        other is this branch's own recurring defect. The scored group and the
-        info channel read the same helper -- pinned so they cannot diverge.
-        """
+        """The scored group and the info channel read the same helper, so they cannot diverge on what a stray is."""
         branch = _write_branch(tmp_path)
         (branch / ".trinity" / "local.json.pre_v3_backup").write_text("{}\n", encoding="utf-8")
         (branch / ".trinity" / "STATUS.local.md").write_text("x\n", encoding="utf-8")
@@ -318,8 +249,6 @@ class TestVersionedBackupsAreLegalResidents:
         assert info == ["trinity: stray .trinity/STATUS.local.md"]
         _assert_failed(_group(result, "File set"), "stray STATUS.local.md")
         assert "pre_v3_backup" not in _group(result, "File set")["message"]
-
-    # -- the predicate itself, directly ------------------------------------
 
     @pytest.mark.parametrize(
         ("name", "expected"),
@@ -341,16 +270,11 @@ class TestVersionedBackupsAreLegalResidents:
         ],
     )
     def test_the_predicate_reads_names_only(self, trinity, name, expected):
-        """Pure name predicate -- no filesystem, so the caller owns the
-        directory rule. Called directly because it is public API and seedgo's
-        own test_map scores public functions on having a direct test.
-        """
+        """The predicate reads names only, with no filesystem: the caller owns the directory rule."""
         assert trinity.is_versioned_backup(name) is expected
 
     def test_d14_check_branch_info_is_empty_when_trinity_is_absent(self, trinity, tmp_path):
-        # Registry present: a LIVE installation whose branch has no .trinity.
-        # On a fresh clone the same shape announces itself instead of staying
-        # silent -- see TestACleanCheckoutIsNotAViolatingFleet.
+        # Registry present: a live installation. On a fresh clone the same shape announces itself instead.
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}\n", encoding="utf-8")
         branch = tmp_path / "nobody"
         branch.mkdir()
@@ -432,11 +356,6 @@ class TestVersionedBackupsAreLegalResidents:
         result = trinity.check_branch(str(branch))
 
         _assert_failed(_group(result, "Entry shapes"), "missing required field 'task'")
-
-
-# ===========================================================================
-# C. Contract rules that are 100% compliant today -- regression guards
-# ===========================================================================
 
 
 class TestCompliantRulesStayCompliant:
@@ -624,41 +543,14 @@ class TestCompliantRulesStayCompliant:
         _assert_failed(_group(result, "Meta lines & _usage"), "observations_meta must be str", "dict")
 
 
-# ===========================================================================
-# TDPLAN-0017. citizenship.seed -- the mint stamp is not a violation here
-# ===========================================================================
-
-
 class TestTheMintStampIsNotAViolation:
-    """Passport seeds (TDPLAN-0017) add one optional field to LIVE passports:
-    ``citizenship.seed = {"version", "sha256"}``, written by spawn's mint so a
-    later update can tell "changed by the agent" from "changed by the shipped
-    seed" -- dpkg's MD5 pattern. Schema stays 2.0.0; the field is additive and
-    canonical.
-
-    MEASURED BEFORE WRITING, the marker-7 way: nothing here flags it, and not
-    because citizenship happens to be spelled outside a closed set -- there is
-    no rule over passport CONTENT at all. The closed set ruling 4 executes over
-    ``document_metadata`` in local.json and observations.json; the passport is
-    reached only as a NAME in ``_CANONICAL_FILES``, counted present or missing
-    by the File set group, never opened. So nothing was changed for this lane.
-
-    These three pin the tolerance and its cause separately, because they can be
-    lost separately: someone adding a real passport-content rule later would
-    keep the docstring true and still break the stamp, and someone deleting the
-    contract sentence would leave the behaviour undefended.
-    """
+    """Passport seeds (TDPLAN-0017) add one optional field to LIVE passports:"""
 
     _SEED_STAMP = {"version": "1.0.0", "sha256": "0" * 64}
 
     @staticmethod
     def _write_passport(branch: Path, *, stamp: bool) -> None:
-        """Replace the fixture's placeholder passport with a real 2.0 one.
-
-        ``_write_branch`` writes ``{}`` because existence is all trinity has
-        ever asked of this file -- these tests need the live shape to make the
-        comparison mean something.
-        """
+        """Replace the fixture's placeholder passport with a real 2.0 one."""
         citizenship = {
             "registered": True,
             "residency": "core",
@@ -704,10 +596,7 @@ class TestTheMintStampIsNotAViolation:
         _write_doc(branch / ".trinity" / "passport.json", payload)
 
     def test_a_stamped_passport_scores_exactly_what_an_unstamped_one_scores(self, trinity, tmp_path):
-        """Not just "still 100" -- the whole result, group by group, identical.
-        A future rule that scored the stamp anywhere would move one subscore and
-        this comparison would see it even if the weighted mean rounded back.
-        """
+        """Not just "still 100" -- the whole result, group by group, identical."""
         plain_branch = _write_branch(tmp_path / "plain")
         self._write_passport(plain_branch, stamp=False)
         stamped_branch = _write_branch(tmp_path / "stamped")
@@ -720,11 +609,7 @@ class TestTheMintStampIsNotAViolation:
         assert stamped["score"] == 100, stamped["checks"]
 
     def test_the_tolerance_is_structural_the_passport_is_never_opened(self, trinity, tmp_path):
-        """WHY the stamp is free: not JSON this checker parses. A passport that
-        is not even valid JSON still scores 100, because the File set group asks
-        the directory for the name and stops there. Pinning the cause means a
-        future reader can tell an intended tolerance from a lucky one.
-        """
+        """The passport is never opened: invalid JSON still scores 100, because File set only asks the directory for the name."""
         branch = _write_branch(tmp_path)
         _write_doc(branch / ".trinity" / "passport.json", "not json at all {{")
 
@@ -734,9 +619,6 @@ class TestTheMintStampIsNotAViolation:
         assert _group(result, "File set")["passed"] is True
 
     def test_the_contract_still_says_passports_are_existence_only(self, trinity):
-        """The sentence that makes the tolerance deliberate. If a passport rule
-        is ever added here, this fails first and whoever adds it has to decide
-        about the stamp on purpose.
-        """
+        """The checker's docstring says passports are existence-only, so a new passport rule fails here first."""
         assert "EXISTENCE only" in trinity.__doc__
         assert "nothing inside a passport is read or judged" in trinity.__doc__

@@ -3,22 +3,14 @@
 # Description: JSON Structure Standards Checker Handler
 # Version: 3.4.0
 # Created: 2026-03-05
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 JSON Structure Standards Checker Handler
 
-Validates three-JSON code wiring in modules and handlers.
-
-For every .py file in apps/modules/ and apps/handlers/:
-  1. Must import json_handler from the branch's handlers/json package
-  2. Must call json_handler.log_operation() at least once
-
-For json_handler.py itself (in a json/ directory):
-  - Validates handler config (relative paths, no hardcoded absolutes)
-
-Entry points and other files outside modules/handlers are skipped.
+Validates three-JSON code wiring in modules and handlers: every .py in apps/modules/ and apps/handlers/
+imports json_handler and calls log_operation(); json_handler.py itself is checked for relative paths.
 """
 
 import ast
@@ -31,7 +23,6 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: scan every .py file, not just entry point
 # APPLIES_TO: a test does not log_operation and should not.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
@@ -47,22 +38,7 @@ CUSTOM_CONFIG_GUIDE = "Guide: drone @seedgo standard json_structure"
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows JSON structure standards.
-
-    Routing:
-      a. json_handler.py in a json/ dir  -> validate handler config
-      b. File in apps/modules/           -> check code wiring
-      c. File in apps/handlers/          -> check code wiring
-      d. Everything else (entry points)  -> skip (not applicable)
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional bypass rules
-
-    Returns:
-        dict with passed, checks, score, standard keys
-    """
+    """Check if module follows JSON structure standards."""
     path = Path(module_path)
 
     if is_bypassed(module_path, "json_structure", bypass_rules=bypass_rules):
@@ -81,7 +57,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "JSON STRUCTURE",
         }
 
-    # Skip __init__.py files
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -110,7 +85,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     path_str = str(path)
 
-    # --- Case (a): json_handler.py in a json/ directory ---
     if "json_handler" in path.name and path.parent.name == "json":
         checks = _check_json_handler_config(path, content, bypass_rules)
         passed_count = sum(1 for c in checks if c["passed"])
@@ -118,7 +92,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         score = int((passed_count / total * 100)) if total > 0 else 0
         return {"passed": score >= 75, "checks": checks, "score": score, "standard": "JSON STRUCTURE"}
 
-    # --- Determine if the file is in modules/ or handlers/ ---
     in_modules = "apps/modules" in path_str or "apps\\modules" in path_str
     in_handlers = "apps/handlers" in path_str or "apps\\handlers" in path_str
 
@@ -178,7 +151,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "JSON STRUCTURE",
         }
 
-    # --- Cases (b) and (c): code wiring check ---
     if in_modules or in_handlers:
         checks = _check_code_wiring(path, content)
         passed_count = sum(1 for c in checks if c["passed"])
@@ -186,7 +158,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         score = int((passed_count / total * 100)) if total > 0 else 0
         return {"passed": passed_count == total, "checks": checks, "score": score, "standard": "JSON STRUCTURE"}
 
-    # --- Case (d): file outside modules/ and handlers/ (entry point, etc.) ---
     return {
         "passed": True,
         "checks": [
@@ -202,31 +173,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     }
 
 
-# ------------------------------------------------------------------
-# Internal helpers
-# ------------------------------------------------------------------
-
-
 def _declares_no_callable_code(content: str) -> bool:
     """True when a module defines no function or method ANYWHERE.
 
-    "Every module/handler must log operations" is a rule about modules that
-    PERFORM operations. A file of pure exception or dataclass declarations
-    performs none, so the check was asking a question the file cannot answer —
-    and the only two ways to answer it were both worse than the violation
-    (@drone, 2026-08-31): restore a module-level log_operation, which is the
-    import-time-write defect that fires during pytest COLLECTION where no
-    fixture can intercept it; or add a function to a file of class definitions
-    solely so there is somewhere to call log_operation from.
-
-    Deliberately keyed on callable code and nothing else. ONE method anywhere —
-    including in a class body — puts the module back in scope, because a method
-    is somewhere an operation can happen. Constants and dataclass fields do not
-    buy the exemption back; data is still declarations.
-
-    An unparseable file is NOT exempt: a syntax error is not evidence of purity,
-    and answering "no callable code" for a file we could not read would hand out
-    the exemption on ignorance.
+    "Every module must log operations" is about modules that PERFORM operations; pure declarations perform
+    none, and both cures (a module-level log_operation, which writes at pytest COLLECTION, or a function added
+    only to call it) are worse. ONE method anywhere puts the module back in scope; an unparseable file is not exempt.
     """
     try:
         tree = ast.parse(content)
@@ -244,21 +196,7 @@ _BOOTSTRAP_WALK_CAP = 2000
 def resolve_relative(module_name: str | None, level: int, package: str | None) -> str | None:
     """Absolute dotted name for a relative import, given the importer's package.
 
-    Public (10-08): the resolver is pure name arithmetic and its own unit, so
-    its tests reach it by this name rather than through a whole src/aipass tree.
-
-    ``from ..paths import module_file`` inside
-    ``aipass.canary.apps.handlers.json.json_handler`` is
-    ``aipass.canary.apps.handlers.paths`` — a perfectly static fact the walk was
-    throwing away.
-
-    Args:
-        module_name: The ``module`` of an ImportFrom, or None for ``from . import x``.
-        level: Number of leading dots.
-        package: Dotted package the importing file lives in, or None if unknown.
-
-    Returns:
-        The absolute dotted name, or None when it cannot be resolved.
+    Public: the resolver is pure name arithmetic and its own unit, so its tests reach it by this name.
     """
     if not package or level <= 0:
         return None
@@ -274,28 +212,9 @@ def resolve_relative(module_name: str | None, level: int, package: str | None) -
 def _aipass_imports(content: str, package: str | None = None) -> list[str]:
     """Every ``aipass.*`` module name this source imports, at any nesting depth.
 
-    Function-level imports count. A module that reaches aipass only from inside
-    a function has still taken the dependency, and could take json_handler the
-    same way.
-
-    RELATIVE IMPORTS COUNT TOO, when the caller supplies ``package``. They did
-    not until 2026-08-31, and the hole was exactly where it hurt: @canary's
-    json_handler reaches its stdlib-only bootstrap helper by
-    ``from ..paths import module_file``, so ``paths.py`` never entered the
-    bootstrap chain, clause 2 of the exemption failed, and a module that IS
-    beneath the logging system was told to import it. A relative import is a
-    STATIC fact — unlike the importlib hops this walk deliberately cannot see —
-    so resolving it moves the set toward correct in the direction the walk's own
-    docstring already asks for.
-
-    Args:
-        content: File source.
-        package: Dotted package of the importing file, for relative resolution.
-            None keeps the old absolute-only behaviour, which is what the
-            "holds no aipass import" clause wants for a file it cannot place.
-
-    Returns:
-        Dotted ``aipass.*`` names, absolute.
+    Function-level imports count: a module reaching aipass only from inside a function has still taken the
+    dependency. Relative imports count when ``package`` is supplied; None keeps the absolute-only behaviour
+    the "holds no aipass import" clause wants for a file it cannot place.
     """
     try:
         tree = ast.parse(content)
@@ -356,39 +275,16 @@ def _module_name(path: Path, source_root: Path) -> str | None:
 def _bootstrap_chain(source_root_str: str) -> frozenset:
     """Every module the logging substrate imports, transitively.
 
-    Seeded from the system logger and from every branch's json_handler, because
-    those are the two things this standard tells a module to import. Anything
-    they reach is BENEATH them in the import order and cannot import them back
-    without a cycle.
-
-    ANCESTOR PACKAGES ARE DELIBERATELY ABSENT, and the reason is measured rather
-    than assumed. Importing aipass.flow.apps.handlers.json.json_handler runs
-    aipass/flow/apps/handlers/__init__.py first — Python imports every parent
-    package before the leaf, and no import statement says so, so the AST cannot
-    see it (@flow's fence, 2026-08-31). Adding them is therefore FACTUALLY
-    right about execution order and still wrong for this exemption: the wide
-    form (walking each ancestor's own imports) carried the exemption out across
-    every branch's public API via drone's re-exporting __init__ and exempted 4
-    stdlib-only helpers that have a working logger; the narrow form (record the
-    ancestor, do not walk it) changed 0 verdicts in 1040 files. A clause that
-    grants exemptions nobody needs today is a waiver waiting for a file to drift
-    into it. Execution order is not the property this exemption is for — being
-    unable to reach the logger is — and every fence in the fleet already passes
-    on its own.
-
-    Statically walked, so a dynamic (importlib) hop inside the chain is invisible
-    and the set comes out SHORT. That direction is deliberate: a missed member is
-    measured by the ordinary rule and stays red, which is the state it is in
-    today. An over-long set would hand out exemptions.
+    Seeded from the system logger and every branch's json_handler, the two things this standard tells a
+    module to import: anything they reach cannot import them back without a cycle. Ancestor packages are
+    deliberately absent (walking them exempted helpers that have a working logger). Statically walked, so a
+    dynamic importlib hop leaves the set SHORT, the safe direction: an over-long set would hand out exemptions.
     """
     source_root = Path(source_root_str)
     branches = [d.name for d in source_root.iterdir() if (d / "apps").is_dir()]
     queue = ["aipass.prax.apps.modules.logger"]
     queue += [f"aipass.{name}.apps.handlers.json.json_handler" for name in branches]
-    # Branch-owned operation-logging seams are substrate too (DPLAN-0325): what
-    # a seam imports is beneath it in the import order, for the same reason. Left
-    # out, a stdlib-only path helper that only the seam reaches stays red for an
-    # import it must not carry — measured on @backup's module_paths.py.
+    # Branch-owned operation-logging seams are substrate too: what a seam imports is beneath it.
     for name in branches:
         for seam_file in _seam_files(source_root / name):
             seam_module = _module_name(seam_file, source_root)
@@ -404,9 +300,7 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
         if module_file is None:
             continue
         seen.add(module_name)
-        # The importing module's PACKAGE, so its relative imports resolve. A
-        # package __init__ is its own package; a plain module's package is its
-        # parent.
+        # The importing module's PACKAGE, so its relative imports resolve (a package __init__ is its own).
         package = module_name if module_file.name == "__init__.py" else module_name.rsplit(".", 1)[0]
         try:
             queue.extend(_aipass_imports(module_file.read_text(encoding="utf-8", errors="ignore"), package))
@@ -418,28 +312,14 @@ def _bootstrap_chain(source_root_str: str) -> frozenset:
 def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
     """True for a module that sits BENEATH the logging system it would have to call.
 
-    Two clauses, both measured here and neither declared by the branch:
-
-    1. The module holds no aipass import of any kind. @prax pins exactly this
-       property with an AST test, because a diagnostic that needs the logger it
-       is being emitted from is a second crash wearing a diagnostic's clothes.
-    2. The logging substrate's own imports reach it. This is what keeps the
-       exemption from being free: 79 modules in the fleet import nothing from
-       aipass, and 9 of them are in the chain.
-
-    Clause 1 alone would exempt every stdlib-only helper in the fleet; clause 2
-    alone would exempt ai_mail's whole dispatch stack, which the chain reaches
-    THROUGH json_handler and which logs perfectly well. Only the pair names the
-    class @prax reported (2026-08-31): log_operation() writes, so wiring it into
-    a module the logger imports puts a file write on the import path of every
-    branch — the ungateable write that fires during pytest COLLECTION.
+    Two clauses, both measured: (1) the module holds no aipass import of any kind, and (2) the logging
+    substrate's own imports reach it. Either alone exempts too much; the pair names modules where wiring
+    log_operation() would put a file write on every branch's import path, firing during pytest COLLECTION.
     """
     try:
         ast.parse(content)
     except SyntaxError as exc:
-        # An unreadable file is not a bootstrap module; it is a file we could not
-        # read. _aipass_imports() answers [] for it, which would otherwise read as
-        # "holds no aipass import" and buy the exemption on ignorance.
+        # An unreadable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
         logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
         return False
     if _aipass_imports(content):
@@ -467,25 +347,9 @@ def _branch_root(path: Path) -> Path | None:
 def _operation_log_seams(branch_root: str) -> frozenset[str]:
     """Modules in this branch that ARE a branch-owned operation-logging seam.
 
-    DPLAN-0325 gave the fleet ONE json service and a byte-identical shim, and
-    nothing branch-specific may go into that shim. A branch whose audit trail
-    has a different record shape therefore has to own it in a module of its
-    own — @backup's ``apps/handlers/audit/trail.py`` is the first, a JSONL
-    stream built on ``aipass.prax.append_jsonl``. Check 2 below asked for the
-    literal spelling ``json_handler.log_operation`` and so convicted 41 of
-    backup's 43 files for following the spec.
-
-    A seam is recognised, not bypassed, and the shape is narrow on purpose:
-    the file must DEFINE ``log_operation`` itself AND build it on a logging
-    primitive imported from ``aipass.prax``. A module that merely defines a
-    function by that name buys nothing; the branch's own shim is excluded,
-    since it is the default path check 2 already accepts.
-
-    Args:
-        branch_root: Branch directory, as a string so the cache can key on it.
-
-    Returns:
-        The seam module stems, e.g. ``frozenset({"trail"})``.
+    The json shim is byte-identical fleet-wide, so a branch with a different audit-trail shape owns it in a
+    module of its own. Recognised, narrowly: the file DEFINES ``log_operation`` AND builds it on a logging
+    primitive imported from ``aipass.prax``; the branch's own shim is excluded (check 2 already accepts it).
     """
     return frozenset(f.stem for f in _seam_files(Path(branch_root)))
 
@@ -512,11 +376,8 @@ def _seam_files(branch_root: Path) -> list[Path]:
 def _is_operation_log_seam(content: str) -> bool:
     """True when this file IS a branch-owned operation-logging seam.
 
-    The seam is the substrate, not a consumer of it: asking ``trail.py`` to
-    call ``log_operation`` is asking it to log through itself. Same treatment
-    the shim already gets, resting on the same two conditions
-    ``_operation_log_seams`` uses, so a file cannot be a seam for one check
-    and not for the other.
+    The seam is the substrate, not a consumer: asking it to call ``log_operation`` is asking it to log through
+    itself. Same two conditions as ``_operation_log_seams``, so a file cannot be a seam for one check only.
     """
     if "def log_operation(" not in content:
         return False
@@ -537,13 +398,7 @@ def _seam_logging(path: Path, content: str) -> str | None:
 
 
 def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
-    """
-    Check that a module/handler file has the three-JSON wiring:
-      1. Imports json_handler
-      2. Calls json_handler.log_operation()
-
-    Returns a list of two check dicts.
-    """
+    """Check that a module/handler file imports json_handler and calls log_operation(); two check dicts."""
     if _is_operation_log_seam(content):
         return [
             {
@@ -560,15 +415,8 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
 
     checks: List[Dict] = []
 
-    # Check 1: imports json_handler
-    # Matches patterns like:
-    #   from aipass.seedgo.apps.handlers.json import json_handler
-    #   from aipass.flow.apps.handlers.json import json_handler
-    #   from ...handlers.json import json_handler
-    # A module that logs through a branch-owned seam imports the SEAM, not the
-    # shim — the two checks are one requirement (this module's operations reach
-    # a log), so they answer together or the seam would satisfy check 2 and
-    # still fail check 1 for an import it has no reason to carry.
+    # A module that logs through a branch-owned seam imports the SEAM, not the shim: the two checks are one
+    # requirement (this module's operations reach a log), so they answer together.
     seam = _seam_logging(_path, content)
     has_import = seam is not None or bool(
         re.search(r"from\s+\S*\.json\s+import\s+json_handler", content)
@@ -591,10 +439,7 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
         }
     )
 
-    # Check 2: the module logs its operations — by the fleet default, or
-    # through a branch-owned seam that is itself built on aipass.prax.
-    # The requirement is that operations ARE logged, never that they are
-    # logged in one spelling.
+    # The requirement is that operations ARE logged, never that they are logged in one spelling.
     has_log_operation = "json_handler.log_operation" in content or seam is not None
     seam = None if "json_handler.log_operation" in content else seam
     if seam is not None:
@@ -615,21 +460,11 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
 
 
 def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules: list | None = None) -> List[Dict]:
-    """
-    Check json_handler.py for correct wiring per the json_structure standard.
-
-    Validates:
-    1. No hardcoded absolute paths (Path.home())
-    2. Uses relative path resolution (Path(__file__))
-    3. No template directory references (json_templates)
-    4. Uses inline code defaults, not file-based templates (load_template)
-    """
+    """Check json_handler.py: no Path.home(), relative resolution, no json_templates, no load_template()."""
     checks: List[Dict] = []
 
-    # Check 1: No hardcoded absolute paths
     has_path_home = bool(re.search(r"Path\.home\(\)", content))
-    # Only flag _ROOT constants that use Path.home() (legacy pattern)
-    # Allow _ROOT = Path(__file__).resolve()... (relative, pip-safe)
+    # Only a _ROOT built on Path.home() is flagged; _ROOT = Path(__file__).resolve()... is pip-safe.
     has_branch_root = False
     for line in content.split("\n"):
         stripped = line.strip()
@@ -661,19 +496,8 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
             }
         )
 
-    # Check 2: Uses relative path resolution
-    # A shim that binds the fleet json service (DPLAN-0325) resolves nothing
-    # itself — the service derives this branch's root from the shim's own
-    # __file__, deliberately WITHOUT resolve(), so a dead cwd on Windows
-    # cannot poison it. Demanding the spelling here convicts the endpoint of
-    # the migration: measured 2026-09-03, prax's shim, spawn's shim and the
-    # citizen template each scored 75 on this check alone.
-    # THE TEST MOVED WITH PART B, it was not deleted (2026-09-04, finding (a)).
-    # This line used to read `SERVICE_IMPORT_MARKER in content`. Measured before
-    # the change: removing the marker without substituting the hash test costs
-    # EVERY migrated branch 25 points on its handler file — all eighteen, plus
-    # the citizen template, 100 -> 75 on "Missing relative path resolution".
-    # That is the endpoint of the migration convicted for being the endpoint.
+    # A shim that binds the fleet json service resolves nothing itself: the service derives the branch root
+    # from the shim's own __file__ (deliberately WITHOUT resolve()), so the canonical shim passes by hash.
     binds_the_json_service = _is_canonical_shim(content)
     resolves_here = bool(
         re.search(r"Path\(__file__\)", content)
@@ -697,9 +521,7 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
         }
     )
 
-    # Check 3: No template directory references
-    # The standard says: "The CODE PATTERN is the template -- no json_templates/ directory"
-    # Check for path constants or strings referencing json_templates
+    # The standard: "The CODE PATTERN is the template -- no json_templates/ directory".
     has_template_dir = False
     for line in content.split("\n"):
         stripped = line.strip()
@@ -719,8 +541,6 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
         }
     )
 
-    # Check 4: No load_template() function
-    # The correct pattern uses inline defaults (_create_default or similar).
     # A load_template() that reads from files violates the auto-create principle.
     has_load_template = bool(re.search(r"def\s+load_template\s*\(", content))
 
@@ -735,11 +555,6 @@ def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules:
     )
 
     return checks
-
-
-# ------------------------------------------------------------------
-# Branch-level post-check: {branch}_json/ directory structure
-# ------------------------------------------------------------------
 
 
 def _find_json_dir(branch_path: str) -> Path | None:
@@ -793,11 +608,6 @@ def check_branch_post(branch_path: str, bypass_rules: list | None = None) -> tup
     return violations, scores
 
 
-# ------------------------------------------------------------------
-# Branch-level info channel: custom_config/ signpost (never scored)
-# ------------------------------------------------------------------
-
-
 def _custom_config_files(branch_path: str) -> list[str]:
     """Filenames the operator put in {branch}_json/custom_config/ (README excluded)."""
     json_dir = _find_json_dir(branch_path)
@@ -812,10 +622,8 @@ def _custom_config_files(branch_path: str) -> list[str]:
 def check_branch_info(branch_path: str) -> list[str]:
     """Non-scored signpost lines for the json_structure standard.
 
-    custom_config/ is operator-owned: seedgo never reads or judges its
-    contents. This lists the filenames only, so a live operator override is
-    visible in the audit instead of invisible. Returns plain strings on the
-    audit's info channel — it can never reach a score by construction.
+    custom_config/ is operator-owned: seedgo never reads its contents, only lists filenames on the info
+    channel, so a live override is visible and can never reach a score.
     """
     files = _custom_config_files(branch_path)
     if not files:

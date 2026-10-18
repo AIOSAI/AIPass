@@ -3,14 +3,13 @@
 # Description: Activity Report Generator Handler
 # Version: 1.0.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Activity Report Generator Handler
 
-Generates formatted CLI-ready activity reports from monitoring data.
-Produces human-readable string reports - no display dependencies.
+Returns plain strings: no display dependencies.
 """
 
 from datetime import datetime, timedelta
@@ -18,18 +17,12 @@ from typing import Dict, Any, List, Optional
 
 from aipass.prax import logger
 
-# logger imported from aipass.prax
 from aipass.daemon.apps.handlers.json import json_handler
 
-# Import sibling monitoring handlers
 from aipass.daemon.apps.handlers.monitoring import activity_collector
 from aipass.daemon.apps.handlers.monitoring import memory_health
 from aipass.daemon.apps.handlers.monitoring import red_flag_detector
 
-
-# =============================================
-# CONSTANTS
-# =============================================
 
 SYMBOL_OK = "[OK]"
 SYMBOL_WARNING = "[!]"
@@ -37,21 +30,8 @@ SYMBOL_RED = "[X]"
 SYMBOL_INACTIVE = "[-]"
 
 
-# =============================================
-# HELPER FUNCTIONS
-# =============================================
-
-
 def _format_time_ago(iso_timestamp: Optional[str]) -> str:
-    """
-    Format an ISO timestamp as human-readable time ago.
-
-    Args:
-        iso_timestamp: ISO format timestamp string or None.
-
-    Returns:
-        Human-readable string like "2h ago" or "3d ago".
-    """
+    """Format an ISO timestamp as "2h ago"; "never" for None, "unknown" if unparseable."""
     if not iso_timestamp:
         return "never"
 
@@ -74,15 +54,7 @@ def _format_time_ago(iso_timestamp: Optional[str]) -> str:
 
 
 def _get_status_symbol(status: str) -> str:
-    """
-    Get CLI symbol for a status code.
-
-    Args:
-        status: Status string (OK, WARNING, RED, NO_ACTIVITY, RED_FLAG, ERROR).
-
-    Returns:
-        ASCII symbol for display.
-    """
+    """Get CLI symbol for a status code."""
     status_upper = status.upper()
     if status_upper in ("OK",):
         return SYMBOL_OK
@@ -102,11 +74,6 @@ def _box_header(title: str, width: int = 50) -> str:
 def _section_header(title: str) -> str:
     """Generate a section header line."""
     return f"\n{title}\n" + "-" * len(title)
-
-
-# =============================================
-# DATA AGGREGATION
-# =============================================
 
 
 def _format_branch_status_lines(
@@ -160,24 +127,13 @@ def _format_branch_detail_lines(branch_status: Dict[str, Any], lines: List[str])
 
 
 def _aggregate_data(since_hours: float = 24) -> Dict[str, Any]:
-    """
-    Aggregate data from all monitoring handlers.
-
-    Args:
-        since_hours: Time window in hours to analyze.
-
-    Returns:
-        Dict with combined data from all handlers.
-    """
+    """Aggregate data from all monitoring handlers."""
     since_timestamp = datetime.now() - timedelta(hours=since_hours)
 
-    # Get red flag summary (includes all branch statuses)
     red_flag_summary = red_flag_detector.get_red_flag_summary(since_timestamp)
 
-    # Get activity data
     activity_data = activity_collector.get_all_branch_activity(since_timestamp)
 
-    # Get memory health for each branch
     branch_paths = activity_collector.get_branch_paths()
     memory_health_data = {}
 
@@ -197,25 +153,8 @@ def _aggregate_data(since_hours: float = 24) -> Dict[str, Any]:
     }
 
 
-# =============================================
-# REPORT GENERATION
-# =============================================
-
-
 def generate_activity_report(since_hours: float = 24, verbosity: str = "normal") -> str:
-    """
-    Generate a formatted CLI-ready activity report.
-
-    Aggregates data from all monitoring handlers and produces a
-    human-readable report with branch status, red flags, and recommendations.
-
-    Args:
-        since_hours: Time window in hours to analyze (default: 24).
-        verbosity: Report detail level - "brief", "normal", or "detailed".
-
-    Returns:
-        Formatted string report suitable for CLI display.
-    """
+    """Generate a formatted CLI-ready activity report; verbosity is "brief", "normal" or "detailed"."""
     json_handler.log_operation("report_generated")
     data = _aggregate_data(since_hours)
 
@@ -224,17 +163,14 @@ def generate_activity_report(since_hours: float = 24, verbosity: str = "normal")
 
     lines: List[str] = []
 
-    # Header
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines.append(_box_header(f"BRANCH ACTIVITY REPORT - {timestamp}\nTime window: Last {since_hours:.0f} hours"))
 
-    # Summary section
     total_branches = red_flags.get("total_branches", 0)
     active_branches = red_flags.get("ok", 0)
     red_flag_count = red_flags.get("red_flags", 0)
     error_count = red_flags.get("errors", 0)
 
-    # Count memory health statuses
     health_ok = sum(1 for h in health_data.values() if h.get("overall_status") == "OK")
     health_warning = sum(1 for h in health_data.values() if h.get("overall_status") == "WARNING")
     health_red = sum(1 for h in health_data.values() if h.get("overall_status") == "RED")
@@ -246,7 +182,6 @@ def generate_activity_report(since_hours: float = 24, verbosity: str = "normal")
     if error_count > 0:
         lines.append(f"Scan errors: {error_count}")
 
-    # Red Flags section
     lines.append(_section_header("RED FLAGS (requires attention)"))
     violations = red_flags.get("violations", [])
     if violations:
@@ -260,7 +195,6 @@ def generate_activity_report(since_hours: float = 24, verbosity: str = "normal")
     else:
         lines.append("  [None - all active branches updated memories]")
 
-    # Branch Status section
     lines.append(_section_header("BRANCH STATUS"))
 
     all_branches = red_flags.get("all_branches", [])
@@ -269,16 +203,13 @@ def generate_activity_report(since_hours: float = 24, verbosity: str = "normal")
         for branch_status in all_branches:
             _format_branch_status_lines(branch_status, health_data, verbosity, lines)
 
-    # Recommendations section
     lines.append(_section_header("RECOMMENDATIONS"))
     recommendations: List[str] = []
 
-    # Add recommendations for red flags
     for v in violations:
         branch = v.get("branch_name", "UNKNOWN")
         recommendations.append(f"- {branch}: Update memory files to reflect code changes")
 
-    # Add recommendations for warning health status
     for name, health in health_data.items():
         if health.get("overall_status") == "WARNING":
             issues = health.get("issues", [])
@@ -303,22 +234,9 @@ def generate_activity_report(since_hours: float = 24, verbosity: str = "normal")
 
 
 def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
-    """
-    Generate a detailed report for a single branch.
-
-    Provides a deep dive on one branch including all file changes,
-    memory status, and specific recommendations.
-
-    Args:
-        branch_name: Name of the branch (uppercase, e.g., "DRONE").
-        since_hours: Time window in hours to analyze.
-
-    Returns:
-        Formatted string report for the specified branch.
-    """
+    """Generate a detailed report for a single branch (name matched case-insensitively)."""
     since_timestamp = datetime.now() - timedelta(hours=since_hours)
 
-    # Find the branch path
     branch_paths = activity_collector.get_branch_paths()
     branch_path = None
     for bp in branch_paths:
@@ -332,16 +250,13 @@ def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
 
     lines: List[str] = []
 
-    # Header
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines.append(_box_header(f"BRANCH REPORT: {branch_name}\n{timestamp} | Last {since_hours:.0f} hours"))
 
-    # Get branch data
     red_flag_status = red_flag_detector.get_branch_status(branch_name, branch_path, since_timestamp)
     health_status = memory_health.get_memory_health_status(branch_path, branch_name)
     activity_data = activity_collector.scan_branch_activity(branch_name, branch_path, since_timestamp)
 
-    # Status Overview
     lines.append(_section_header("STATUS OVERVIEW"))
 
     rf_status = red_flag_status.get("status", "UNKNOWN")
@@ -357,7 +272,6 @@ def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
 
     lines.append(f"Path: {branch_path}")
 
-    # File Changes
     lines.append(_section_header("FILE CHANGES"))
 
     code_files = activity_data.get("code_files", [])
@@ -376,7 +290,6 @@ def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
     if not code_files and not memory_files:
         lines.append("  [No files modified in time window]")
 
-    # Memory Health Details
     lines.append(_section_header("MEMORY HEALTH DETAILS"))
 
     file_check = health_status.get("file_check", {})
@@ -390,7 +303,6 @@ def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
         symbol = SYMBOL_OK if exists else SYMBOL_WARNING
         lines.append(f"  {symbol} {fname}")
 
-    # Freshness
     freshness = health_status.get("freshness_checks", {})
     if freshness:
         lines.append("\nFreshness:")
@@ -400,14 +312,12 @@ def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
             symbol = _get_status_symbol(status)
             lines.append(f"  {symbol} {fname}: {message}")
 
-    # Issues
     issues = health_status.get("issues", [])
     if issues:
         lines.append(_section_header("ISSUES"))
         for issue in issues:
             lines.append(f"  - {issue}")
 
-    # Recommendations
     lines.append(_section_header("RECOMMENDATIONS"))
     recommendations: List[str] = []
 
@@ -432,24 +342,13 @@ def generate_branch_report(branch_name: str, since_hours: float = 24) -> str:
 
 
 def get_json_report(since_hours: float = 24) -> Dict[str, Any]:
-    """
-    Get raw report data as a dictionary for programmatic access.
-
-    Useful for storing report snapshots, API responses, or further processing.
-
-    Args:
-        since_hours: Time window in hours to analyze.
-
-    Returns:
-        Dict containing all aggregated data from handlers.
-    """
+    """Get raw report data as a dictionary for programmatic access."""
     data = _aggregate_data(since_hours)
 
     red_flags = data["red_flag_summary"]
     health_data = data["memory_health"]
     activity = data["activity_data"]
 
-    # Build summary
     health_ok = sum(1 for h in health_data.values() if h.get("overall_status") == "OK")
     health_warning = sum(1 for h in health_data.values() if h.get("overall_status") == "WARNING")
     health_red = sum(1 for h in health_data.values() if h.get("overall_status") == "RED")
@@ -465,7 +364,6 @@ def get_json_report(since_hours: float = 24) -> Dict[str, Any]:
         "health_red": health_red,
     }
 
-    # Build per-branch data
     branches_data: Dict[str, Any] = {}
     all_branches = red_flags.get("all_branches", [])
 

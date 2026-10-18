@@ -3,16 +3,10 @@
 # Description: BACKUP Branch — main orchestrator with auto-discovery
 # Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""BACKUP Branch - Main Orchestrator
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Routes commands to discovered modules automatically
-- Accepts project paths or registered project names
-"""
+"""BACKUP Branch - Main Orchestrator"""
 
 import importlib
 import os
@@ -165,23 +159,8 @@ def discover_modules() -> list[Any]:
 def route_command(command: str, args: list[str], modules: list[Any]) -> tuple[bool, str | None]:
     """Route command to appropriate module.
 
-    Every module is asked in turn, so one module raising must not deny the
-    command to a module further down the list -- that is why the exception is
-    caught rather than propagated.
-
-    But a caught exception is NOT the same answer as "nobody claimed this",
-    and folding the two together is what made a corrupt ``.backup/config.json``
-    print ``Unknown command: snapshot`` (measured live, 2026-09-03): the
-    command was known, it failed, and the operator was sent hunting for a typo.
-
-    Args:
-        command: The verb to route.
-        args: Remaining CLI arguments.
-        modules: Discovered modules exposing handle_command.
-
-    Returns:
-        (handled, failure). ``failure`` is the first module error seen, as
-        text for the operator, and is only meaningful when handled is False.
+    A raising module must not deny the command to the next one, but a caught exception is not
+    "nobody claimed this": the failure comes back so the caller names it, not "Unknown command".
     """
     failure: str | None = None
     for module in modules:
@@ -198,18 +177,9 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> tuple[bo
 def main():
     """Main entry point - routes commands or shows help.
 
-    The exit seam (fleet rule, refusal sweep 2026-09-07): cli's ``error()``
-    marks the process failed, but that flag only reaches an exit code if
-    somebody reads it. ``reset_command_state()`` clears the flag on entry so a
-    long-lived process cannot inherit a previous command's failure, and a
-    routed command returns ``resolve_exit(True)`` -- 0 when nothing errored,
-    2 when a handled command reported an error and used to exit 0 anyway.
-
-    A lane stopped by request (DPLAN-0412) returns normally after saving what
-    it must and printing its stopped line; this function turns the stop mark
-    into STOPPED_EXIT (130), ahead of resolve_exit. A return, not a raised
-    SystemExit: drone's executor passes the child's exit code through as is,
-    and a return keeps every finally on the way out in play.
+    reset_command_state() clears a previous command's failure mark; a handled command returns
+    resolve_exit(True) (0 or 2), or STOPPED_EXIT (130) after a stop. A return, never SystemExit,
+    so drone gets the child's code as is and every finally runs.
     """
     from aipass.backup.apps.modules.stop import STOPPED_EXIT, reset_stop_state, run_was_stopped
 
@@ -234,9 +204,7 @@ def main():
     command = args[0]
     remaining = args[1:]
 
-    # A help flag ANYWHERE after the command is a help request, never a run.
-    # Checking only remaining[0] let 'snapshot <project> --help' fall through
-    # and execute a real backup.
+    # A help flag anywhere after the command is a help request, never a run.
     if any(arg in ("--help", "-h") for arg in remaining):
         for module in modules:
             if module.handle_command(command, ["--help"]):
@@ -292,8 +260,6 @@ def main():
     error(f"Unknown command: {command}")
     return 1
 
-
-# =============================================
 
 if __name__ == "__main__":
     sys.exit(main())

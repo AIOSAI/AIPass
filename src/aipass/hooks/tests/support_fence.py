@@ -3,16 +3,10 @@
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
-
-One source, run from a kin seat (this file) and from foreign seats (copies the
-test writes under tmp). Each import shape is one small function; the table
-SHAPES maps the shape name on argv to it (aipass, DPLAN-0404 leg 8: the
-template's single if/elif ran nine deep against the nesting row).
-"""
+"""Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports

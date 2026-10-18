@@ -3,16 +3,12 @@
 # Description: DAEMON Status Digest Module
 # Version: 1.0.1
 # Created: 2026-01-29
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Returns digest of DAEMON activity for check-ins.
 """
-
-# =============================================
-# IMPORTS
-# =============================================
 
 import os
 import sys
@@ -45,16 +41,7 @@ def _header(text):
     console.print(f"[bold cyan]{'=' * 70}[/bold cyan]")
 
 
-# =============================================
-# CONSTANTS
-# =============================================
-
 MODULE_NAME = "update"
-
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -73,11 +60,6 @@ def print_introspection():
         " get_escalations — inbox and session data)[/dim]"
     )
     console.print()
-
-
-# =============================================
-# OUTPUT FORMATTING
-# =============================================
 
 
 def _print_digest(inbox_data: Dict[str, Any], local_data: Dict[str, Any]) -> None:
@@ -118,10 +100,7 @@ def _print_digest(inbox_data: Dict[str, Any], local_data: Dict[str, Any]) -> Non
         console.print("  Recently completed:  [dim]None[/dim]")
     console.print()
 
-    # Warn only when there is something to escalate. This header used to fire
-    # unconditionally, so every quiet digest wrote "ESCALATIONS NEEDED" to stderr
-    # above a stdout body reading "None - all clear" — a standing false alarm for
-    # anything capturing stderr.
+    # Warn only when there is something to escalate: an unconditional warning is a false alarm on stderr.
     escalations = get_escalations(messages)
     if escalations:
         warning("ESCALATIONS NEEDED")
@@ -155,21 +134,9 @@ def print_help() -> None:
     console.print()
 
 
-# =============================================
-# ORCHESTRATION
-# =============================================
-
-
 def handle_command(command: str, args: list) -> bool:
     """
     Handle 'update' command.
-
-    Args:
-        command: Command name (should be 'update')
-        args: Command arguments
-
-    Returns:
-        True if handled, False otherwise
     """
     if command != "update":
         return False
@@ -178,15 +145,10 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    # OUTSIDE the try, and that placement is the point. The digest's catch-all
-    # exists so a broken data file reports one error instead of cascading — but
-    # it would also swallow the refusal below, log it as "Error generating update
-    # digest" and return True, handing the caller exit 0 for a command that was
-    # rejected. A refusal is not a digest failure and must not be caught as one.
+    # OUTSIDE the try: the digest's catch-all would swallow this refusal and report it as a digest failure.
     gate("update", args, usage="drone @daemon update")
 
     try:
-        # No args = run the digest (this is the primary use case)
         json_handler.log_operation("update_digest")
         inbox_data = load_inbox()
         local_data = load_local()
@@ -203,21 +165,10 @@ def handle_command(command: str, args: list) -> bool:
         raise SystemExit(1) from e
 
 
-# =============================================
-# MAIN ENTRY
-# =============================================
-
-
 def main() -> None:
     """Main entry point for direct execution.
 
-    Help is screened ANYWHERE in the argument list, not just in the first slot.
-    The branch router already normalises this, so `drone @daemon update x --help`
-    prints help — but this entry point handed raw sys.argv straight to
-    handle_command(), which only inspected args[0]. Since wave 2b added the
-    unknown-argument gate, the difference stopped being cosmetic: `python
-    update.py x --help` used to run the digest, and would now REFUSE a help
-    request. A help flag must never exit non-zero.
+    Help is screened ANYWHERE in the args: handle_command checks only args[0], and the gate would refuse the rest.
     """
     args = sys.argv[1:]
 

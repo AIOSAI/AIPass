@@ -3,25 +3,18 @@
 # Description: Retired Token Docstring Standards Content Handler
 # Version: 1.1.0
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 Retired Token Docstring Standards Content Handler
-
-Provides formatted Retired Token Docstring standards content.
-Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
 def get_retired_token_docstring_standards() -> str:
-    """Return formatted retired_token_docstring standards content with Rich markup
-
-    Returns:
-        str: Formatted standards text with Rich styling
-    """
+    """Return formatted retired_token_docstring standards content with Rich markup"""
     lines = [
         "[bold cyan]CORE PRINCIPLE (tests only, docstrings only):[/bold cyan]",
         "  The v4 keyword auditor (test_quality, removed in c1e0eeed) scored a test",

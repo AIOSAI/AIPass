@@ -3,7 +3,7 @@
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
 # Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/audit_tests/spine.py, refusal.py, laws.py and runner.py."""
@@ -37,11 +37,6 @@ import pytest
 
 from aipass.seedgo.apps.handlers.audit_tests import laws, m10, refusal, runner, spine
 from aipass.seedgo.apps.handlers.audit_tests import target as target_module
-
-
-# =============================================================================
-# HELPERS
-# =============================================================================
 
 
 def _lawful_document(**overrides) -> dict:
@@ -84,11 +79,6 @@ def _lawful_document(**overrides) -> dict:
     }
     document.update(overrides)
     return document
-
-
-# =============================================================================
-# THE SPINE - composition, not a constant
-# =============================================================================
 
 
 class TestComposition:
@@ -152,14 +142,7 @@ class TestRev4Contracts:
     """The contracts bind groups that do not exist yet. That is the point."""
 
     def test_kill_cause_contract_is_attached_to_every_bound_group(self):
-        """Every group that executes a mutant carries the split, however many there are.
-
-        Pinned by NAME and not by COUNT. A bare `== 3` here made the contract
-        list unable to grow: adding `pseudo_tested`, the per-function probe
-        contract 2 promised, reddened this test for doing exactly what the
-        contract asks. That is the equality S3/S4 was revised to stop, in the
-        lane's own suite.
-        """
+        """Every group that executes a mutant carries the split, however many there are."""
         assert {"oracle_execution", "scoped_survival", "targeted_mutation"} <= set(spine.KILL_CAUSE_BOUND)
 
         for name in spine.KILL_CAUSE_BOUND:
@@ -185,11 +168,6 @@ class TestRev4Contracts:
 
     def test_an_unbound_group_has_no_contract(self):
         assert spine.contract_for("hygiene") == ""
-
-
-# =============================================================================
-# REFUSAL - a refusal is never a score
-# =============================================================================
 
 
 class TestRefusalVocabulary:
@@ -238,11 +216,6 @@ class TestRefusalVocabulary:
         assert built.law == "T-BUDGET"
         assert any("930.4" in line for line in built.detail)
         assert any("no partial measurement" in line for line in built.detail)
-
-
-# =============================================================================
-# LAWS - every one of them bites
-# =============================================================================
 
 
 class TestLawsAcceptTheLawful:
@@ -350,13 +323,7 @@ class TestS6S7:
 
     @pytest.mark.parametrize("verdict", sorted(laws.DELETE_FAMILY))
     def test_every_delete_family_verdict_is_caught(self, verdict):
-        """Asserts the DELETE-FAMILY branch specifically, not merely 'some S7b'.
-
-        A survivor found this on day one: deleting the delete-family check let
-        the generic unknown-verdict branch catch the same input, so a prefix
-        assertion still passed while the rule that answers TAXONOMY section 7
-        Q1 - USELESS is not a verdict any tier may emit - was gone.
-        """
+        """Asserts the DELETE-FAMILY branch specifically, not merely 'some S7b'."""
         document = _lawful_document()
         document["groups"]["ai_advisory"]["nominations"] = [{"nodeid": "t::a", "verdict": verdict}]
 
@@ -440,11 +407,7 @@ class TestBudget:
         assert any("still carries a score" in p for p in laws.validate(document))
 
     def test_an_unbuilt_execution_group_needs_no_budget(self):
-        """Unbuilt exec groups carry no budget and pass.
-
-        not_applicable groups never ran, so a budget would be theatre.
-        Mutant: spine budget stamp / laws skip dropped — killed.
-        """
+        """Unbuilt exec groups carry no budget and pass."""
         document = _lawful_document()
         unbuilt = {
             name: group
@@ -527,11 +490,6 @@ class TestSpineIsLawfulByConstruction:
         }
 
         assert laws.validate(document) == []
-
-
-# =============================================================================
-# M10 - THE CARRIER'S OWN WRITES
-# =============================================================================
 
 
 def _target(tmp_path) -> target_module.Target:
@@ -627,14 +585,7 @@ class TestCarrierRecorder:
         assert m10.stop_carrier_recording()[0] == {}
 
     def test_the_recorded_path_is_the_fingerprinter_s_own_form(self, tmp_path, carrier_window):
-        """THE CANONICALISATION PIN. A mismatch subtracts nothing, silently.
-
-        The fingerprint keys are `os.walk` joins onto the root it was given, so
-        a recorded path is comparable with a diff entry only if it normalises
-        the same way. Written through a `..` component precisely because a
-        recorder that stored the raw string would still look correct on every
-        tidy path and match nothing at all here.
-        """
+        """THE CANONICALISATION PIN. A mismatch subtracts nothing, silently."""
         (tmp_path / "sub").mkdir()
         carrier_window(tmp_path)
         (tmp_path / "sub" / ".." / "state.json").write_text("{}", encoding="utf-8")
@@ -644,12 +595,7 @@ class TestCarrierRecorder:
         assert set(writes) <= set(m10.snapshot_tree(tmp_path))
 
     def test_a_malformed_event_is_swallowed_and_counted(self, carrier_window, tmp_path):
-        """A hook that raises fires inside somebody else's write. It must not.
-
-        And a swallowed error is PUBLISHED: an exception nobody sees shortens
-        the observed list without shortening the diff, which is a fail-open
-        subtraction wearing a clean face.
-        """
+        """A hook that raises fires inside somebody else's write. It must not."""
         carrier_window(tmp_path)
         # 42 is not a tuple, and that is the input under test: the audit hook
         # receives whatever the interpreter hands it, so the malformed case is
@@ -690,16 +636,7 @@ class TestCarrierSubtraction:
         ]
 
     def test_an_added_source_file_is_not_absorbed_by_the_logs_beside_it(self, tmp_path, carrier_window):
-        """THE CASE THE WHOLE DESIGN TURNS ON.
-
-        A fleet run subtracted 29 `*_log.json` files under `seedgo_json/` and,
-        in the same run, an ADDED `entry_point_diff_check.py` - a source file a
-        human wrote while the audit was running. Any classification keyed on
-        the path (under the branch, ends `_log.json`, sits in this directory)
-        swallows the second along with the first, and with it every real
-        escape. Provenance keeps them apart: the logs were OBSERVED being
-        written by this process and the source file was not.
-        """
+        """THE CASE THE WHOLE DESIGN TURNS ON."""
         directory = tmp_path / "seedgo_json"
         directory.mkdir()
         log = directory / "adapter_log.json"
@@ -764,12 +701,7 @@ class TestCarrierSubtraction:
         assert runner._m10_proof(_target(tmp_path), before, {})["attribution"] == "partly declared"
 
     def test_a_path_the_gate_saw_the_suite_write_is_never_subtracted(self, tmp_path, carrier_window):
-        """Both can be true at once on a cross-branch log. The suite convicts.
-
-        The carrier's evidence may EXPLAIN a path; it may never acquit one, or
-        a suite forging the very log this process also writes would be filed as
-        the instrument's own noise.
-        """
+        """Both can be true at once on a cross-branch log. The suite convicts."""
         probe = tmp_path / "operations.jsonl"
         probe.write_text("{}", encoding="utf-8")
         before = m10.snapshot_tree(tmp_path)

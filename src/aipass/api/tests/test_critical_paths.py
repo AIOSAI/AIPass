@@ -3,21 +3,10 @@
 # Description: Critical path tests for API branch core functions
 # Version: 1.0.0
 # Created: 2026-03-31
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
-
-# Critical path tests for the API branch.
-#
-# Covers the 4 core functions that form the API request pipeline:
-#
-# 1. get_api_key() - Key retrieval from secrets file
-# 2. validate_key() - Key format validation per provider rules
-# 3. get_response() - Main API call orchestrator
-# 4. extract_response() - Response content extraction
-#
-# All external dependencies are mocked. File-based tests use tmp_path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — the real OpenRouter request; make_api_request is mocked, no network in tests
@@ -37,11 +26,6 @@ def _home_at(monkeypatch, home):
     monkeypatch.setenv("USERPROFILE", str(home))
 
 
-# =============================================
-# 1. get_api_key() tests
-# =============================================
-
-
 class TestGetApiKey:
     """Tests for fetch_api_key() — key retrieval from secrets file (single source)."""
 
@@ -56,8 +40,6 @@ class TestGetApiKey:
             encoding="utf-8",
         )
 
-        # api, fleet green leg 3: home is redirected through the environment
-        # (the edge Path.home() reads), not by replacing pathlib.Path in keys.
         _home_at(monkeypatch, tmp_path)
         result = api_key.fetch_api_key("openrouter")
 
@@ -90,12 +72,8 @@ class TestGetApiKey:
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
     def test_an_unreadable_secrets_file_raises_naming_only_the_error(self, mock_jh, tmp_path, monkeypatch):
-        """A secrets file that does not read raises KeyUnavailable, with no byte of the file in it.
-
-        It used to answer None, which read the same as "no key set". The
-        reason is what the interpreter itself raises on the same read, asked
-        here with the test's own hands (api, fleet green leg 11).
-        """
+        """A secrets file that does not read raises KeyUnavailable, with no byte of the file in it."""
+        # None would read the same as "no key set"; the expected reason is the interpreter's own on the same read.
         secrets_dir = tmp_path / ".secrets" / "aipass"
         secrets_dir.mkdir(parents=True)
         env_file = secrets_dir / ".env"
@@ -115,11 +93,6 @@ class TestGetApiKey:
         assert caught.value.__cause__ is None
         assert caught.value.__suppress_context__ is True
         mock_jh.log_operation.assert_not_called()
-
-
-# =============================================
-# 2. validate_key() tests
-# =============================================
 
 
 class TestValidateKey:
@@ -157,11 +130,6 @@ class TestValidateKey:
     def test_generic_provider_too_short(self):
         """Generic provider rejects keys shorter than 10 chars."""
         assert api_key.fetch_validate_key("short", "unknown_provider") is False
-
-
-# =============================================
-# 3. get_response() tests
-# =============================================
 
 
 MODULE = "aipass.api.apps.handlers.openrouter.client"
@@ -230,11 +198,6 @@ class TestGetResponse:
         assert result is None
 
 
-# =============================================
-# 4. extract_response() tests
-# =============================================
-
-
 class TestExtractResponse:
     """Tests for extract_response() — response content extraction from OpenAI objects."""
 
@@ -280,10 +243,8 @@ class TestExtractResponse:
         assert openrouter_client.extract_response(response) is None
 
     def test_unreadable_response_raises_with_the_reason(self):
-        """A response object that fails to read raises OpenRouterUnavailable naming why.
-
-        It used to answer None, which read the same as an empty reply (api, fleet green leg 10).
-        """
+        """A response object that fails to read raises OpenRouterUnavailable naming why."""
+        # None would read the same as an empty reply.
         response = MagicMock()
         response.choices.__getitem__.side_effect = RuntimeError("bad shape")
 

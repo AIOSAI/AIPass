@@ -3,87 +3,12 @@
 # Description: v5 - does a test that fakes a platform build its fake data out of the real host
 # Version: 1.0.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """Does this test's fake world leak the real host into it?
 
-THE ROW THIS RULE WAS WRITTEN FOR. @ai_mail's `tests/test_wake.py::
-test_get_pid_cwd_darwin` forced `sys.platform` to `darwin`, and then built the
-fake `lsof` output it hands the parser out of `tmp_path`:
-
-    monkeypatch.setattr("sys.platform", "darwin")
-    target = str(tmp_path / "project")
-
-    class FakeResult:
-        returncode = 0
-        stdout = f"p100\\nn{target}\\n"          # flagged
-
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-    assert _get_pid_cwd("100") == target
-
-The parser under test accepts one grammar - `line.startswith("n/")` - and on the
-Windows runner `tmp_path` renders `C:\\Users\\...`, so the `n/` prefix the parser
-requires never appeared. The unit could not parse the line the unit itself had
-written, `_get_pid_cwd` answered None, and the assertion read None == a path
-(Windows run 35058244702). Nothing was wrong with `_get_pid_cwd`. The test
-declared it was on macOS and then asked the real machine for half of its fixture.
-
-THE CLASS, STATED ONCE: A TEST THAT PRETENDS TO BE SOMEWHERE ELSE MUST
-MANUFACTURE THE WHOLE OF THAT ELSEWHERE. The moment a faked world takes one
-value from the host it is actually running on, the fake is half real, and the
-half that is real is the half that differs between runners.
-
-THE ACQUITTAL IS THE REASON THIS RULE IS NARROW, AND IT SITS THREE LINES ABOVE
-THE DEFECT IN THE SAME FILE. `test_get_pid_cwd_linux` fakes `sys.platform` and
-binds the same `str(tmp_path / "project")`, and it is perfectly portable:
-
-    target = str(tmp_path / "project")
-    monkeypatch.setattr(os, "readlink", lambda p: target)
-    assert _get_pid_cwd("100") == target        # NOT flagged
-
-The two units differ in one thing. The linux row hands the host path to the
-subject as a VALUE and gets it back unchanged - what goes in comes out, in
-whatever spelling the host uses. The darwin row wove it into TEXT beside a
-literal, and the literal was a POSIX grammar. So this rule does not ask "does
-this unit use tmp_path while faking a platform" - measured, that question
-returns 23 rows fleet-wide and every one of them is fine. It asks the narrower
-question: was a host path woven into composed text.
-
-WHAT IT MEASURED. Over 18 branches and 18,997 test units, on the tree as it
-stood when this rule shipped: ZERO rows. The one row it exists for had been
-cured hours earlier. The two looser arms that were measured first and rejected:
-faking a platform beside any host value at all is 23 rows, all correct code;
-weaving a host path into text with no platform fake is 223 rows, all correct
-code, because a unit that never claims to be elsewhere is entitled to describe
-the machine it is on. The platform fake and the text weaving are each harmless;
-only the pair is the species.
-
-THIS IS A REGRESSION GUARD, NOT A FINDER, AND THAT IS WHY `SCORED` IS FALSE. A
-rule with zero rows has never been observed against a live positive, so its
-precision on real hits is unmeasured - one reconstructed unit is a proof that
-the arm fires, not a calibration. Moving a branch's number on a shape that has
-never been seen convicting would be exactly the thing `platform_oracle` refuses
-when it says an arm that would convict correct tests must not move a number.
-
-WHAT IT CANNOT SEE, AND EVERY LIMIT RUNS TOWARD FEWER FLAGS.
-- **It cannot see the parser.** Whether a woven host path is a defect depends on
-  production: `_get_pid_cwd`'s darwin arm parses the text and went red, its linux
-  arm passes the value through and is green. This reader walks test units and
-  does not follow calls, so it nominates the site where the host got into the
-  fake world and leaves the parser to a human.
-- **It reads the unit, not its helpers.** Composition inside a fixture, a module
-  helper or another file is invisible, and so is the platform fake that would
-  have paired with it.
-- **It never asks the running machine.** A finding means the same thing from
-  either leg of the matrix, which is the property the thing it hunts destroys.
-
-STDLIB ONLY, like the rest of the pack: `ast`, `pathlib`, `typing`, the pack's
-corpus reader, and one PUBLIC helper from `platform_oracle_check`. That import
-is deliberate. `sandbox_names` is already this pack's single answer to "which
-names in this unit hold a path under a temporary directory", and a second,
-independently drifting copy of that answer in a sibling rule is the duplication
-this campaign exists to kill.
+Reference: host_leak.md
 """
 
 import ast
@@ -92,26 +17,18 @@ from typing import Dict, Iterator, List, Set, Tuple
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import corpus, platform_oracle_check
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
 
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "host_leak"
 
-#: NOMINATES, NEVER SCORES - see the module docstring. The rule publishes its
-#: full finding list and the measured number, and reports 100.
+#: Nominates, never scores: zero live positives, so precision is unmeasured (host_leak.md).
 SCORED: bool = False
 
-#: Directories a project keeps tests in. Tried in order; a project matching
-#: none of them gets a whole-tree walk, which is what an unknown target needs.
 TEST_DIRS: tuple = corpus.TEST_DIRS
 
-#: The oracles a unit can overwrite to claim it is somewhere else. Read as
-#: SUFFIXES, because the real spellings reach them through the module under
-#: test - @aipass writes `...provider_wire.os.name` and @devpulse writes
-#: `wire.sys.platform`, and a reader keyed on the bare dotted name sees neither.
+#: Matched as SUFFIXES: real spellings reach them through the module under test
+#: (`...provider_wire.os.name`, `wire.sys.platform`).
 PLATFORM_ORACLES: tuple = (
     "sys.platform",
     "platform.system",
@@ -122,19 +39,12 @@ PLATFORM_ORACLES: tuple = (
     "os.name",
 )
 
-#: Call tails that WRITE an attribute rather than read one. `setitem` is here for
-#: `monkeypatch.setitem(sys.modules, ...)`-shaped fakes; `object` for
-#: `patch.object(sys, "platform", ...)`.
 FAKING_CALLS: frozenset = frozenset({"setattr", "patch", "object", "dict", "setitem"})
 
-#: Keyword spellings of a patch target, so `patch(target="sys.platform")` is not
-#: a hole the positional reader walks past.
 TARGET_KEYWORDS: frozenset = frozenset({"target", "attribute"})
 
-#: Calls that answer with a path belonging to the machine rather than to the
-#: test. The sandbox half is NOT here - it is delegated to
-#: `platform_oracle_check.sandbox_names`, which is this pack's single definition
-#: of "derived from a temporary directory".
+#: The sandbox half is NOT here: `platform_oracle_check.sandbox_names` is the pack's
+#: single definition of "derived from a temporary directory"; do not copy it.
 HOST_PROBES: frozenset = frozenset(
     {
         "cwd",
@@ -151,14 +61,7 @@ HOST_PROBES: frozenset = frozenset(
     }
 )
 
-#: How many flagged units to name in the result. The full list lives in the
-#: report artifact; a check message that prints hundreds of lines is unreadable.
 MAX_REPORTED: int = 12
-
-
-# =============================================================================
-# THE PLATFORM FAKE
-# =============================================================================
 
 
 def _names_an_oracle(text: str) -> bool:
@@ -167,12 +70,7 @@ def _names_an_oracle(text: str) -> bool:
 
 
 def _faked_by_string_target(node: ast.Call) -> str:
-    """The oracle a one-string patch target names, or "".
-
-    `monkeypatch.setattr("sys.platform", "darwin")` and `patch("sys.platform")`
-    are the same shape to this reader, and they are the two commonest spellings
-    in the corpus.
-    """
+    """The oracle a one-string patch target names, or ""."""
     if not node.args:
         return ""
     first = node.args[0]
@@ -184,10 +82,7 @@ def _faked_by_string_target(node: ast.Call) -> str:
 def _faked_by_split_target(node: ast.Call) -> str:
     """The oracle an (object, "attr") patch target names, or "".
 
-    `monkeypatch.setattr(sys, "platform", "linux")` and
-    `monkeypatch.setattr(wire.sys, "platform", "darwin")` both land here. Only
-    the object's LAST segment is used, because the module under test is reached
-    by any number of prefixes and none of them change which attribute is written.
+    Only the object's LAST segment counts: the module under test is reached by any prefix.
     """
     if len(node.args) < 2:
         return ""
@@ -212,17 +107,7 @@ def _faked_by_keyword(node: ast.Call) -> str:
 def _faking_calls(unit_node: ast.AST) -> Iterator[ast.Call]:
     """Every call in a unit that could write an attribute.
 
-    NO SEPARATE DECORATOR WALK, AND THAT IS A MEASUREMENT RATHER THAN AN
-    OVERSIGHT. `decorator_list` is a field of the FunctionDef node, so
-    `ast.walk` already descends into `@patch("sys.platform", "darwin")` - the
-    first version of this function carried an explicit second pass over the
-    decorators, and deleting it left every behavioural pin green, which is the
-    definition of code that is not running the show. It is gone rather than
-    pinned, so nobody later "fixes" a bug by editing a dead branch.
-
-    What stays invisible is a fake applied by a CLASS-level or MODULE-level
-    mark, which belongs to no unit's node. That is a finding that does not
-    happen, so the bias runs toward clean.
+    No separate decorator walk: `ast.walk` already descends into `decorator_list`.
     """
     for node in ast.walk(unit_node):
         if not isinstance(node, ast.Call):
@@ -234,22 +119,13 @@ def _faking_calls(unit_node: ast.AST) -> Iterator[ast.Call]:
 
 
 def platform_fakes(unit: corpus.TestUnit) -> List[Tuple[int, str]]:
-    """Every site where the unit claims to be on a platform it may not be on.
-
-    The public entry point for this half of the rule - the pins ask the question
-    here rather than re-deriving it.
-    """
+    """Every site where the unit claims to be on a platform it may not be on."""
     found: List[Tuple[int, str]] = []
     for node in _faking_calls(unit.node):
         oracle = _faked_by_string_target(node) or _faked_by_split_target(node) or _faked_by_keyword(node)
         if oracle:
             found.append((node.lineno, oracle))
     return found
-
-
-# =============================================================================
-# THE HOST-DERIVED NAMES
-# =============================================================================
 
 
 def _is_probe_call(node: ast.AST) -> bool:
@@ -272,13 +148,7 @@ def _mentions(node: ast.expr, bound: Set[str]) -> bool:
 def host_names(unit: corpus.TestUnit) -> Set[str]:
     """Every name in a unit that holds a path belonging to the machine.
 
-    THE SANDBOX HALF IS NOT RE-DERIVED HERE. `platform_oracle_check.sandbox_names`
-    already answers "which names hold a path under a temporary directory" for
-    three arms of that rule, and a second copy would be one more chance for two
-    rules in one pack to disagree about what "derived from" means. This function
-    adds only what that one does not model - the profile and the working
-    directory - and grows the union to a fixed point, so `root = Path.home() /
-    "x"` then `text = str(root)` carries through both hops.
+    Seeds from `platform_oracle_check.sandbox_names` and adds only home/cwd probes.
     """
     bound = set(platform_oracle_check.sandbox_names(unit.node))
     changed = True
@@ -296,14 +166,7 @@ def host_names(unit: corpus.TestUnit) -> Set[str]:
 def _bindings(unit_node: ast.AST) -> Iterator[Tuple[ast.expr, ast.expr]]:
     """Every assignment (target, value) pair in a unit.
 
-    THE `with ... as name` HEADER IS DELIBERATELY ABSENT, AND IT IS NOT A HOLE.
-    The shape that binds a host path through a context manager is
-    `with tempfile.TemporaryDirectory() as td`, and that is the SANDBOX half -
-    already resolved, context headers included, by
-    `platform_oracle_check.sandbox_names`, whose answer seeds the loop below.
-    What this walk adds is the profile and the working directory, and nobody
-    writes `with Path.home() as h`. Reading the header here too would be a
-    second, independently drifting copy of a walk this pack already owns.
+    `with ... as name` is deliberately absent: `sandbox_names` already reads those headers.
     """
     for node in ast.walk(unit_node):
         if isinstance(node, ast.AnnAssign) and node.value is not None:
@@ -315,25 +178,10 @@ def _bindings(unit_node: ast.AST) -> Iterator[Tuple[ast.expr, ast.expr]]:
             yield target, node.value
 
 
-# =============================================================================
-# THE WEAVE
-# =============================================================================
-
-
 def _has_text_literal(parts: List[ast.expr]) -> bool:
     """True when any part is a NON-EMPTY string literal.
 
-    THE LITERAL IS THE GRAMMAR, AND IT IS WHY THE EMPTY ONE DOES NOT COUNT.
-    `f"n{target}"` is a POSIX line format with a host path dropped into it;
-    `f"{target}"` is `str(target)` spelled with more characters and carries no
-    claim about shape at all. Requiring a literal is what separates a fake
-    protocol line from a stringification.
-
-    THE NON-EMPTY TEST EARNS ITS KEEP ON `BinOp`, NOT ON f-STRINGS. CPython
-    gives `f"{target}"` a `JoinedStr` holding ONE `FormattedValue` and no
-    `Constant` at all, so the f-string arm is already clean without it. It is
-    `"" + target` - a concatenation whose literal half claims nothing - that
-    needs the guard, which is where its pin lives.
+    The literal is the grammar; the non-empty test guards `"" + target`, not f-strings.
     """
     return any(isinstance(part, ast.Constant) and isinstance(part.value, str) and part.value for part in parts)
 
@@ -369,10 +217,7 @@ def _join_weave(node: ast.Call, bound: Set[str]) -> str:
 
 
 def weave_sites(unit: corpus.TestUnit, bound: Set[str]) -> List[Tuple[int, str]]:
-    """Every site where the unit weaves a host path into composed text.
-
-    The public entry point for this half of the rule.
-    """
+    """Every site where the unit weaves a host path into composed text."""
     sites: List[Tuple[int, str]] = []
     for node in ast.walk(unit.node):
         spelling = ""
@@ -387,11 +232,6 @@ def weave_sites(unit: corpus.TestUnit, bound: Set[str]) -> List[Tuple[int, str]]
         if spelling:
             sites.append((node.lineno, spelling))
     return sites
-
-
-# =============================================================================
-# THE ROWS
-# =============================================================================
 
 
 def _row(unit: corpus.TestUnit, fake: Tuple[int, str], site: Tuple[int, str]) -> Dict:
@@ -425,11 +265,7 @@ def unit_rows(unit: corpus.TestUnit) -> List[Dict]:
     sites = weave_sites(unit, bound)
     if not sites:
         return []
-    # ONE ROW PER UNIT, NOT ONE PER SITE. A unit weaving the host into three
-    # strings is one place a reader has to go and look, not three, and the
-    # alternative spelling is exactly one edit away - `[_row(unit, fakes[0],
-    # site) for site in sites]` - which is why the choice is made here, in the
-    # open, rather than left to whichever loop a later edit reaches for.
+    # One row per unit, not per site: a unit is one place a reader has to look.
     return [_row(unit, fakes[0], sites[0])]
 
 
@@ -441,39 +277,16 @@ def find_host_leaks(scanned: corpus.Corpus) -> List[Dict]:
     return rows
 
 
-# =============================================================================
-# BRANCH-LEVEL CHECK
-# =============================================================================
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     """Score a project on whether its faked platforms are faked all the way.
 
-    Args:
-        branch_path: Path to the project root.
-        bypass_rules: Accepted for the scoring-API contract; this pack does not
-            read them yet - shadow mode gates nothing, so there is nothing to
-            be excused from. Wiring a bypass before the standard can fail would
-            be granting exceptions to a rule with no teeth.
-
-    Returns:
-        dict with passed (always True in shadow mode), score, checks, standard,
-        advisory, violations, and measured_score. While `SCORED` is False the
-        reported score is 100 and the measured number travels in
-        `measured_score` and in a check line naming the fallback. A project with
-        no tests reports not_applicable rather than a number, because zero tests
-        measured is not zero quality found.
+    `bypass_rules` is accepted for the scoring-API contract and not read: shadow mode gates nothing.
     """
     root = Path(branch_path)
     scanned = corpus.build(root, test_dirs=TEST_DIRS)
     total = scanned.unit_count()
 
-    # THE UNREADABLE-FILE LINE IS BUILT FIRST, BECAUSE THE EMPTY PATH NEEDS IT
-    # MOST. A project whose ONLY test file has a syntax error must not report
-    # what a project with no tests at all reports. That contract is the whole
-    # reason `unparseable` carries a reason, and the one path where nothing else
-    # can catch it is the early return below. The ordering here is the fix,
-    # inherited from the reference check.
+    # Built before the early return: an all-unparseable project must not read as "no tests".
     unreadable: List[Dict] = []
     if scanned.unparseable:
         unreadable.append(
@@ -524,12 +337,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
         }
     ]
 
-    # THE NOMINATION REPORTS, IT DOES NOT SCORE - AND IT SAYS SO IN THE OUTPUT.
-    # This arm measured zero rows on the fleet it shipped against, so its
-    # precision against a live positive has never been observed. Reporting 100
-    # with the findings still attached is what lets that measurement happen;
-    # reporting 100 and dropping the measured number would make the fallback
-    # indistinguishable from a rule that found nothing.
+    # Keep the measured number in the output, or the fallback reads like a rule that found nothing.
     if not SCORED:
         checks.append(
             {

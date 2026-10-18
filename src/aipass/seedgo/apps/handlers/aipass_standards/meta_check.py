@@ -3,27 +3,13 @@
 # Description: META Block Standards Checker Handler
 # Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
 """
 META Block Standards Checker Handler
 
-Validates library-profile META blocks in Python files.
-Library META is lighter than full META - focuses on identity
-and traceability without branch-specific fields.
-
-META block MUST be the very first thing in the file (line 1).
-All code, docstrings, and imports go below.
-
-Required META format:
-    # =================== AIPass ====================
-    # Name: filename.py
-    # Description: Brief description of the file
-    # Version: X.Y.Z
-    # Created: YYYY-MM-DD
-    # Modified: YYYY-MM-DD
-    # =============================================
+Reference: meta.md
 """
 
 import re
@@ -34,18 +20,14 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 AUDIT_SCOPE = "all_files"
-# Applies to production source only: the AIPass header block identifies a shipped
-# module. Tests do not carry it by convention -- 112 of 456 fleet test files failed
-# (25%, 14 branches) against a convention that was never asked of them.
+# Production source only: the AIPass header identifies a shipped module; tests do not carry it.
 APPLIES_TO = "production"
 
-# Header/footer markers for library META
 # Accept both AIPass (canonical) and META (legacy) header markers
 META_HEADER = "# =================== AIPass ===================="
 META_HEADER_LEGACY = "# =================== META ===================="
 META_FOOTER = "# ============================================="
 
-# Required fields with validation patterns
 REQUIRED_FIELDS = {
     "Name": r"# Name:\s+\S+\.py",
     "Description": r"# Description:\s+\S+",
@@ -56,16 +38,7 @@ REQUIRED_FIELDS = {
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module has a valid library-profile META block.
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional bypass rules
-
-    Returns:
-        dict with passed, checks, score, standard keys
-    """
+    """Check if module has a valid library-profile META block."""
     path = Path(module_path)
 
     if is_bypassed(module_path, "meta", bypass_rules=bypass_rules):
@@ -84,7 +57,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "META",
         }
 
-    # Skip __init__.py files
     if path.name == "__init__.py":
         return {
             "passed": True,
@@ -108,16 +80,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     checks = []
 
-    # Check 1: META block presence
     presence = check_meta_presence(content)
     checks.append(presence)
 
-    # Check 2: META placement (must be line 1)
     if presence["passed"]:
         placement = check_meta_placement(content)
         checks.append(placement)
 
-    # Check 3: Required fields (only if block exists)
     if presence["passed"]:
         fields = check_required_fields(content, path.name)
         checks.extend(fields)
@@ -176,7 +145,6 @@ def check_required_fields(content: str, filename: str) -> List[Dict]:
         match = re.search(pattern, content)
 
         if field_name == "Name" and match:
-            # Extra validation: Name field should reference the actual filename
             name_match = re.search(r"# Name:\s+(\S+\.py)", content)
             if name_match and name_match.group(1) != filename:
                 results.append(

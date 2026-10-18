@@ -8,7 +8,7 @@ Every skills module imports without a readable current directory.
 
 `ntpath.realpath` calls `os.getcwd()` on its first lines **unconditionally** —
 before it checks whether the path is even relative. `posixpath.realpath` reads
-the cwd only for relative paths, which is why this stayed invisible on Linux.
+the cwd only for relative paths, so Linux never shows it.
 `Path.resolve()` routes through realpath, so on Windows any
 `Path(__file__).resolve()` *reached at import* is an import-time crash for a
 process whose directory was deleted or whose network share dropped. Not
@@ -49,10 +49,9 @@ The worlds themselves are defined once, in `tests/dead_cwd_world.py`. They
 patch pathlib's pre-3.11 `_NormalAccessor` as well as the module name: that
 accessor **captured** its copies of `os.getcwd` and `os.path.realpath` when
 pathlib was first imported, so on Python 3.10 a bare module rebind patches a
-name nothing reads again and the world never arms. Two of these pins were
-vacuously green on the 3.10 CI leg for exactly that reason. There is no 3.10 on
-this machine, so the capture is rebuilt locally on whatever interpreter is
-running and the discrimination is falsifiable here rather than derived.
+name nothing reads again and the world never arms. The capture is rebuilt on
+whatever interpreter is running, so the discrimination is falsifiable on any
+machine rather than derived.
 
 That rebuilt accessor captures a **sentinel** for realpath, not the host's.
 An instrument must not import behaviour it is not testing: the question it

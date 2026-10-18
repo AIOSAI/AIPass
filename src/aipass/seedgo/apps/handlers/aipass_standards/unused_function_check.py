@@ -3,24 +3,13 @@
 # Description: Unused Function Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unused Function Standards Checker Handler
 
-Branch-level checker that detects functions defined but never referenced
-elsewhere in the branch. Uses AST parsing to extract function definitions
-and corpus-level text search to count references.
-
-A function is flagged as unused when its name appears only in its own
-definition line (i.e., it is never called or imported elsewhere in the
-branch source).
-
-Excluded from flagging:
-    - Dunder methods (__init__, __str__, __repr__, etc.)
-    - main(), handle_command() -- framework/entry-point conventions
-    - Any function with a decorator (@property, @staticmethod, etc.)
+Reference: unused_function.md
 """
 
 import ast
@@ -40,30 +29,19 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_di
 APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
-# -- Directories to skip when collecting source files -------------------------
 # Skipped beside SOURCE_SKIP_DIRS (read through in_skipped_dir, which spares a
 # live package such as commons' apps/handlers/artifacts/), whatever they hold.
 SKIP_DIRS = frozenset({"tests", "json_templates"})
 
-# -- Function names excluded from analysis ------------------------------------
 EXCLUDED_NAMES = {
     "main",
     "handle_command",
 }
 
-# -- Regex helpers for corpus stripping ---------------------------------------
-
-# Matches `if __name__ == "__main__":` through end of file.
 _MAIN_BLOCK_RE = re.compile(
     r"""^if\s+__name__\s*==\s*["']__main__["']\s*:.*""",
     re.MULTILINE | re.DOTALL,
 )
-
-
-# -- Bypass helper ------------------------------------------------------------
-
-
-# -- File collection ----------------------------------------------------------
 
 
 #: A string literal that is a whole dotted path: names or f-string fields, two or more, a name last.
@@ -74,15 +52,10 @@ DOTTED_PATH = re.compile(
 
 
 def _should_skip(path: Path, branch_root: Path, ignore_entries: list) -> bool:
-    """Return True if any path component is in the skip set, the top-level
-    directory's name opens with a dot, the file is disabled, or the path is
-    excluded via .seedgoignore / the global default.
+    """True for a skipped dir, a top-level dot dir, a disabled file, or a .seedgoignore match.
 
-    Parts are read relative to ``branch_root``, never the whole path, so a branch
-    that itself stands under a directory named ``tests`` or ``.live-x`` is still
-    read. The dot rule (seedgo, fleet green leg 16): hooks keeps promoted engine
-    copies under ``.live-<stamp>/`` at its root, and a row charged to a copy can
-    never be cured; no branch keeps its own code in a dot directory.
+    Parts are relative to ``branch_root`` so a branch under ``tests/`` is still read; hooks
+    keeps promoted engine copies under ``.live-<stamp>/``, and a row charged to a copy cannot be cured.
     """
     parts = path.relative_to(branch_root).parts
     return (
@@ -106,26 +79,15 @@ def _collect_python_files(branch_path: Path, ignore_entries: list) -> list[Path]
     return sorted(files)
 
 
-# -- Corpus preparation ------------------------------------------------------
-
-
 def _strip_non_code(source: str) -> str:
-    """
-    Remove string literals, comments, and __main__ blocks from source.
+    """Remove string literals, comments, and __main__ blocks from source.
 
-    Uses Python's tokenizer for accurate string/comment detection.
-    The old regex approach misidentified triple-quote characters inside
-    code (e.g. ``line.count('\"\"\"')``) as string delimiters, eating
-    surrounding code and causing false-positive unused-function reports.
+    The tokenizer, not a regex: a regex reads ``'\"\"\"'`` in code as a delimiter.
     """
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(source).readline))
     except (tokenize.TokenError, SyntaxError) as exc:
-        # SyntaxError matters as much as TokenError: IndentationError is a SyntaxError
-        # subclass, NOT a TokenError, and a file caught mid-save raises it. Uncaught it
-        # escaped check_branch(), which the audit scores as a flat 0 for the whole
-        # branch -- a CI false-red that vanishes on the next run once the file is saved.
-        # _extract_functions already skips such files; this path must degrade the same way.
+        # IndentationError (mid-save) is a SyntaxError, not a TokenError; escaping scores the branch 0.
         logger.info("Tokenizer failed, falling back to raw corpus: %s", exc)
         return _MAIN_BLOCK_RE.sub("", source)
 
@@ -142,12 +104,7 @@ def _strip_non_code(source: str) -> str:
 def _non_code_spans(tokens: list, lines: list[str]):
     """Yield (start, end, kept names) for every string and comment, an f-string whole.
 
-    One verdict on every interpreter (seedgo, fleet green leg 9). 3.12+ splits an
-    f-string into FSTRING_START/MIDDLE/END with its replacement fields as real
-    tokens, so the literal text read as code; 3.10/3.11 hand it over as one
-    STRING, so the fields were blanked with the text. The rule both now say: a
-    replacement field is code and its names are references, the literal text is
-    not. The tokenizer module is read at call time, so either shape is measured.
+    3.12+ tokenizes an f-string in parts, 3.10/3.11 as one STRING; both yield its field names only.
     """
     fstring_start = getattr(tokenize, "FSTRING_START", None)
     fstring_end = getattr(tokenize, "FSTRING_END", None)
@@ -170,9 +127,7 @@ def _non_code_spans(tokens: list, lines: list[str]):
 def _path_target(literal: str) -> list[str]:
     """The last segment of a string that is a dotted import path and nothing else.
 
-    A registry names a handler by its path and a loader calls it by that name:
-    hooks config/gates.py holds f"{_SECURITY}.edit_gate.tripwire" (seedgo,
-    fleet green leg 11). Prose that mentions a path is not one.
+    A registry names a handler by its path and a loader calls it by that name.
     """
     match = DOTTED_PATH.fullmatch(literal)
     return [match.group("name")] if match else []
@@ -193,11 +148,7 @@ def _segment(lines: list[str], start: tuple[int, int], end: tuple[int, int]) -> 
 
 
 def _field_names(literal: str) -> list[str] | None:
-    """Every identifier an f-string's replacement fields name; its text names none.
-
-    None when the literal does not parse (a file caught mid-save): the caller
-    then blanks the span whole, as every string was blanked before leg 9.
-    """
+    """Every identifier an f-string's replacement fields name; None when it does not parse."""
     try:
         tree = ast.parse(literal, mode="eval")
     except SyntaxError as exc:
@@ -230,9 +181,6 @@ def _blank_span(chars: list[list[str]], start: tuple[int, int], end: tuple[int, 
                 row[sc + offset] = char
             else:
                 row.append(char)
-
-
-# -- AST function extraction --------------------------------------------------
 
 
 def _is_excluded(name: str) -> bool:
@@ -324,9 +272,7 @@ def _base_methods(dotted: str) -> set[str]:
 def _overrides(tree: ast.AST) -> set[int]:
     """ids of methods that override a method their imported base class defines.
 
-    A base class calls its own method by name, so the override is used though
-    nothing in the branch names it (seedgo, fleet green leg 10: prax's watchdog
-    on_created handlers).
+    The base calls its own method by name, so the override is used though nothing here names it.
     """
     imports = _imported_names(tree)
     found: set[int] = set()
@@ -345,14 +291,9 @@ def _overrides(tree: ast.AST) -> set[int]:
 
 
 def _extract_functions(py_file: Path) -> list[tuple[str, int]] | None:
-    """
-    Parse a .py file with AST and return (function_name, line_number) for each
-    FunctionDef / AsyncFunctionDef that is not excluded, has no decorators and
-    does not override a method of an imported base class.
+    """(name, line) of each judged function; None when the file does not parse.
 
-    None when Python cannot parse the file (a file caught mid-save): nothing in
-    it was judged, which is not the same answer as a file with no functions, so
-    check_branch names it under ``unparsed`` (seedgo, fleet green leg 12).
+    None is not "no functions": check_branch names the file under ``unparsed``.
     """
     try:
         source = py_file.read_text(encoding="utf-8", errors="ignore")
@@ -375,24 +316,14 @@ def _extract_functions(py_file: Path) -> list[tuple[str, int]] | None:
     return results
 
 
-# -- Reference counting -------------------------------------------------------
-
-
 def _count_references_in_corpus(func_name: str, corpus: str) -> int:
-    """
-    Count how many times func_name appears as a word-bounded identifier
-    in the corpus (docstrings and comments already stripped).
-
-    Counts ALL occurrences including `def func_name(` lines.
-    """
+    """Count word-bounded occurrences of func_name, def lines included."""
     pattern = re.compile(rf"\b{re.escape(func_name)}\b")
     return len(pattern.findall(corpus))
 
 
 def _count_def_lines(func_name: str, corpus: str) -> int:
-    """
-    Count definition lines (def func_name / async def func_name) in corpus.
-    """
+    """Count definition lines (def func_name / async def func_name) in corpus."""
     pattern = re.compile(
         rf"\basync\s+def\s+{re.escape(func_name)}\b"
         rf"|\bdef\s+{re.escape(func_name)}\b"
@@ -400,23 +331,17 @@ def _count_def_lines(func_name: str, corpus: str) -> int:
     return len(pattern.findall(corpus))
 
 
-# A maximal run of word characters. For a name made only of them, `\bNAME\b`
-# matches exactly the runs equal to NAME, so one pass counts every name.
+# For a name of word characters only, `\bNAME\b` matches exactly the runs equal to NAME.
 _WORD = re.compile(r"\w+")
 
-# Every place a definition line starts, overlapping allowed: the zero-width
-# lookahead reads `def NAME` inside `async def NAME` once, as the per-name
-# alternation did.
+# Zero-width lookahead: `async def NAME` counts once, as the per-name alternation does.
 _DEF = re.compile(r"(?=\bdef\s+(\w+))")
 
 
 def _corpus_counts(corpus: str) -> tuple[dict[str, int], dict[str, int]]:
     """(word counts, definition-line counts) for the corpus, in one pass each.
 
-    The per-name scans re-read the whole corpus twice per function: 398 of
-    1033 profiled seconds of seedgo's own audit (fleet green leg 18). A name
-    holding a character ``\\w`` does not match is not answered here; the
-    caller scans for it by name.
+    A name with a non-``\\w`` character is not answered here; the caller scans for it by name.
     """
     words: dict[str, int] = {}
     for word in _WORD.findall(corpus):
@@ -427,27 +352,10 @@ def _corpus_counts(corpus: str) -> tuple[dict[str, int], dict[str, int]]:
     return words, defs
 
 
-# -- Branch-level check (audit pipeline entry) --------------------------------
-
-
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
-    """
-    Check a branch for unused function definitions.
-
-    Scans all .py files, builds a text corpus, extracts function definitions
-    via AST, and flags any function whose name appears only in its own
-    definition (no call references elsewhere).
-
-    Args:
-        branch_path: Path to branch root directory.
-        bypass_rules: Optional list of bypass rules from .seedgo/bypass.json.
-
-    Returns:
-        dict with keys: passed, score, checks, standard.
-    """
+    """Check a branch for unused function definitions."""
     branch = Path(branch_path)
 
-    # Check if entire standard is bypassed
     if is_bypassed(branch_path, "unused_function", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -462,7 +370,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "UNUSED_FUNCTION",
         }
 
-    # Phase 1: Collect all .py files
     ignore_entries = load_ignore_entries(branch)
     py_files = _collect_python_files(branch, ignore_entries)
     if not py_files:
@@ -483,7 +390,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "standard": "UNUSED_FUNCTION",
         }
 
-    # Phase 2: Build cleaned text corpus from all files
     file_sources: dict[Path, str] = {}
     for py_file in py_files:
         try:
@@ -495,7 +401,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     corpus = "\n".join(file_sources.values())
 
-    # Phase 3: Extract function definitions from all files
     all_functions: list[tuple[str, int, Path]] = []
     unparsed: list[str] = []
     for py_file in py_files:
@@ -527,7 +432,6 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
             "unparsed": unparsed,
         }
 
-    # Phase 4: For each function, check if it has references beyond its definition
     unused_functions: list[dict] = []
     word_counts, def_counts = _corpus_counts(corpus)
 
@@ -557,27 +461,17 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
                 }
             )
 
-    # Score: clean_functions / total_functions * 100
     clean_count = total_functions - len(unused_functions)
     score = int(clean_count / total_functions * 100) if total_functions > 0 else 100
     passed = score >= 75
 
-    # Build check entry
     if unused_functions:
-        # Build a summary of unused functions (cap at 15 for readability)
         details = [f"  {uf['name']} ({uf['file']}:{uf['line']})" for uf in unused_functions[:15]]
         if len(unused_functions) > 15:
             details.append(f"  ... and {len(unused_functions) - 15} more")
         detail_text = "\n".join(details)
 
-        # SAYS WHAT IT MEASURED, and no more. This scan is per-branch and
-        # static; it cannot see a cross-branch consumer, least of all one that
-        # arrives through importlib. It said "unused" and nominated
-        # entry_limits.changed_entries() — called by @hooks at
-        # security/edit_gate.py:496, the entry-cap half of the fleet's write
-        # gate (@memory, 2026-08-31). The measurement was right; the word was
-        # not, and the danger is that this check is USEFUL enough to be trusted
-        # into deleting a real entry point for a green score.
+        # Says "no caller in this branch", never "unused": cross-branch and importlib callers are invisible.
         checks = [
             {
                 "name": "Unused functions",

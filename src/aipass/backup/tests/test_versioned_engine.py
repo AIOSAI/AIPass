@@ -3,7 +3,7 @@
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
 # Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
@@ -28,15 +28,10 @@ from aipass.backup.apps.handlers.path.builder import build_versioned_file_path, 
 from aipass.backup.apps.modules import restore as restore_module
 from aipass.cli.apps.modules import command_failed
 
-# Inert path input for the path builder — never touched on disk, so it only
-# needs to be a valid absolute path on the running OS.
+# Inert path input for the path builder: never touched on disk, only needs to be absolute on this OS.
 FAKE_PROJECT_ROOT = str(Path(tempfile.gettempdir()) / "project")
 
-# The audit trail is deliberately NOT mocked here. conftest's autouse
-# mock_infrastructure points AIPASS_TEST_LOG_DIR at a per-test directory beside
-# tmp_path and trail.log_path() recomputes on every call, so the audit write is
-# already redirected for real. Template v1 item 15: mock at the edge, and only
-# where no real redirect exists.
+# The audit trail is NOT mocked: conftest's AIPASS_TEST_LOG_DIR seam already redirects it for real.
 
 
 class TestVersionedBaseline:
@@ -56,7 +51,6 @@ class TestVersionedBaseline:
         target = Path(build_versioned_file_path(str(project), "hello.py"))
         assert target.exists()
 
-        # Check baseline exists in same folder
         baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
         assert len(baselines) == 1
         assert baselines[0].name.startswith("hello-baseline-")
@@ -84,21 +78,16 @@ class TestVersionedDiff:
         src = project / "code.py"
         src.write_text("v1", encoding="utf-8")
 
-        # First run
         copy_versioned([(str(src), "code.py")], str(project))
 
         target = Path(build_versioned_file_path(str(project), "code.py"))
 
-        # Modify the source and stamp it ten seconds past the copy the store
-        # already holds. copy_versioned decides on src_mtime != tgt_mtime, so
-        # the relationship the diff depends on is stated here instead of hoped
-        # for: a sleep moves nothing at all where mtimes have one-second
-        # granularity, and costs the suite real time where they do not.
+        # Stamped ten seconds past the stored copy: copy_versioned compares mtimes, and a sleep
+        # moves nothing where mtimes have one-second granularity.
         src.write_text("v2", encoding="utf-8")
         newer = target.stat().st_mtime + 10
         os.utime(src, (newer, newer))
 
-        # Second run
         copy_versioned([(str(src), "code.py")], str(project))
 
         diff_dir = target.parent / f"{target.name}_diffs"
@@ -117,7 +106,6 @@ class TestVersionedDiff:
 
         target = Path(build_versioned_file_path(str(project), "file.txt"))
 
-        # Ten seconds past the store's copy, stated rather than slept for.
         src.write_text("new", encoding="utf-8")
         newer = target.stat().st_mtime + 10
         os.utime(src, (newer, newer))
@@ -137,7 +125,6 @@ class TestVersionedDiff:
 
         target = Path(build_versioned_file_path(str(project), "config.py"))
 
-        # Ten seconds past the store's copy, stated rather than slept for.
         src.write_text("modified", encoding="utf-8")
         newer = target.stat().st_mtime + 10
         os.utime(src, (newer, newer))
@@ -161,9 +148,7 @@ class TestVersionedSkip:
 
         copy_versioned([(str(src), "stable.txt")], str(project))
 
-        # Green only because shutil.copy2 gave the stored copy the source's mtime
-        # (versioned.py:52) and the engine skips on src_mtime == tgt_mtime (129-131).
-        # Run again without modifying
+        # Green only because shutil.copy2 keeps the source mtime and the engine skips on equal mtimes.
         result = copy_versioned([(str(src), "stable.txt")], str(project))
         assert result["files_unchanged"] == 1
         assert result["files_copied"] == 0
@@ -181,13 +166,10 @@ class TestVersionedNeverDelete:
 
         copy_versioned([(str(src), "temp.py")], str(project))
 
-        # Delete source
         src.unlink()
 
-        # Run versioned again WITHOUT the deleted file
         copy_versioned([], str(project))
 
-        # Store still has the file
         target = Path(build_versioned_file_path(str(project), "temp.py"))
         assert target.exists()
         assert target.read_text(encoding="utf-8") == "temp data"
@@ -257,9 +239,7 @@ class TestRestore:
 
         target = Path(build_versioned_file_path(str(project), "mod.py"))
 
-        # Ten seconds past the store's copy, stated rather than slept for. The
-        # diff's own name is built from the OLD copy's mtime (versioned.py:68),
-        # which this leaves untouched, so the stored timestamp stays real.
+        # The diff's name is built from the OLD copy's mtime, which this leaves untouched.
         src.write_text("v2", encoding="utf-8")
         newer = target.stat().st_mtime + 10
         os.utime(src, (newer, newer))
@@ -279,8 +259,7 @@ class TestVersionedFilePath:
     def test_a_root_level_file_is_stored_under_root_in_a_folder_of_its_own_name(self):
         """Root-level file -> root/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
-        # Segments below the store, not a substring of the whole path: the prefix
-        # comes from tempfile.gettempdir(), which may itself contain "root".
+        # Segments below the store, not a substring: tempfile.gettempdir() may itself contain "root".
         store = build_versioned_store(FAKE_PROJECT_ROOT)
         assert result.relative_to(store).parts == ("root", "README.md", "README.md")
 
@@ -302,9 +281,6 @@ class TestVersionedFilePath:
 class TestRestoreModule:
     """The `restore` command — version discovery and file restore, the way a user reaches them."""
 
-    # The private lookup `_find_file_folder` is reached only through what a user
-    # types: `restore <project> list <file>` and `restore <project> file <file> <out>`.
-
     def test_restore_list_names_the_stored_versions_of_a_file(self, tmp_path: Path, capsys):
         project = tmp_path / "project"
         project.mkdir()
@@ -318,7 +294,6 @@ class TestRestoreModule:
         out, err = capsys.readouterr()
         assert "Versions of config.py:" in out
         assert "config-baseline-" in out
-        # A row whose last column is the current copy's name — the heading ends "config.py:".
         assert any(row.split()[-1] == "config.py" for row in out.splitlines() if row.strip())
         assert err == ""
 
@@ -330,9 +305,6 @@ class TestRestoreModule:
         src.write_text("v1", encoding="utf-8")
         copy_versioned([(str(src), "mod.py")], str(project))
 
-        # Ten seconds past the store's copy, stated rather than slept for: one
-        # diff row is what this test reads, and it only exists if the engine
-        # sees the second write as a change.
         stored = Path(build_versioned_file_path(str(project), "mod.py"))
         src.write_text("v2", encoding="utf-8")
         newer = stored.stat().st_mtime + 10
@@ -342,8 +314,7 @@ class TestRestoreModule:
 
         assert restore_module.handle_command("restore", [str(project), "list", "mod.py"]) is True
 
-        # The diff row is the one that cannot survive the loss: baseline and
-        # current repeat their type in the timestamp column, a diff row does not.
+        # Only the diff row loses its type to markup: baseline and current repeat it in the timestamp.
         out, err = capsys.readouterr()
         assert err == ""
         diff_rows = [line for line in out.splitlines() if ".diff" in line]
@@ -352,16 +323,11 @@ class TestRestoreModule:
         assert "[baseline]" in out
         assert "[current]" in out
 
-        # The heading two lines above still renders as markup, not as literal tags.
         assert "Versions of mod.py:" in out
         assert "[bold]" not in out
 
     def test_a_relative_path_restores_the_right_one_of_two_same_named_files(self, tmp_path: Path, capsys):
         """The documented form is `restore <project> file src/main.py out`; a basename cannot tell two main.py apart."""
-        # The lookup used to join the WHOLE argument onto the matched folder,
-        # so it looked for <store>/src/main.py/src/main.py and never found
-        # anything — only a bare basename worked, and a basename is ambiguous
-        # the moment two directories hold the same name.
         project = tmp_path / "project"
         for sub in ("src", "tools"):
             (project / sub).mkdir(parents=True)
@@ -383,10 +349,7 @@ class TestRestoreModule:
 
         assert restore_module.run_restore_file(str(tmp_path), "nonexistent.py", str(out_path)) is False
 
-        # Same claim as before — the user is told which file was not found —
-        # restated on the channel that now carries it. The line moved from
-        # console.print (stdout) to error() (stderr) so a pipe can tell a
-        # failure from a restored file; nothing about the text changed.
+        # On stderr so a pipe can tell a failure from a restored file.
         out, err = capsys.readouterr()
         assert "No versioned file found for: nonexistent.py" in err
         assert out == ""
@@ -417,14 +380,8 @@ class TestRestoreModule:
         src.write_text("payload", encoding="utf-8")
         copy_versioned([(str(src), "data.txt")], str(project))
 
-        # The handler is the edge: once the module has found a stored file the
-        # copy succeeds, so the only route to the failure line is to make the
-        # handler refuse (template v1 item 15 — mock at the edge, and only there).
-        # The stand-in answers FROM its argument — it refuses this file's folder
-        # and would succeed for any other — and records what it was handed, so a
-        # module that stopped consulting restore_file, or consulted it with the
-        # wrong folder or the wrong output path, cannot reach the line below.
-        # A `lambda folder, out: False` could not tell those apart.
+        # The stand-in refuses only this file's folder and records its arguments, so a module that
+        # passed the wrong folder or output path cannot reach the failure line; a bare lambda could.
         asked: list[tuple[Path, Path]] = []
 
         def refuse_only_this_files_folder(file_folder: Path, output_path: Path) -> bool:
@@ -462,8 +419,6 @@ class TestRestoreModule:
 
         assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
 
-        # The bytes are on disk under a folder named nothing like the file, and
-        # the command reaches them anyway — both the lookup and the handler.
         out, err = capsys.readouterr()
         assert f"Versions of {long_name}:" in out
         assert "[current]" in out
@@ -483,9 +438,6 @@ class TestRestoreModule:
         src.write_text("v1", encoding="utf-8")
         copy_versioned([(str(src), long_name)], str(project))
 
-        # Ten seconds past the store's copy, stated rather than slept for: the
-        # [diff] row this test demands exists only if the engine reads the
-        # second write as a change.
         stored = Path(build_versioned_file_path(str(project), long_name))
         src.write_text("v2", encoding="utf-8")
         newer = stored.stat().st_mtime + 10
@@ -522,8 +474,7 @@ class TestRestoreModule:
         self, tmp_path: Path, capsys
     ):
         """A malformed `restore <project> list` used to print help and report success — same answer as `--help`."""
-        # True: the command is ours and was handled; the failure travels as
-        # command_failed() (exit 2), never as "Unknown command: restore".
+        # True: the command is ours; the failure travels as command_failed(), not "Unknown command".
         assert restore_module.handle_command("restore", [str(tmp_path), "list"]) is True
 
         out, err = capsys.readouterr()
@@ -537,17 +488,8 @@ class TestRestoreModule:
         self, tmp_path: Path, capsys
     ):
         """The "No versions found" line printed on stdout and left the run at exit 0, reporting success."""
-        # Reaching the line is the work. `_find_file_folder` only answers with a
-        # folder that HOLDS the file, and for a short name the folder is named
-        # after the file, so `_stored_file` always recognises a current version
-        # and the list is never empty. The one route left open is a hashed
-        # folder (>50 chars: the folder is name[:30]_md5, the file keeps its
-        # full name), where the current version is identified by being the only
-        # non-baseline file in there. A store pruned down to its current file
-        # plus one leftover has two of those, so no version is readable at all
-        # while the file the user named is sitting right there -- which is why
-        # the earlier `No versioned file found` guard does NOT cover this and
-        # the message is the only thing the user gets.
+        # Only a hashed long-name folder can reach this line: its current version is the lone
+        # non-baseline file, so a leftover beside it leaves no readable version while the file exists.
         project = tmp_path / "project"
         project.mkdir()
         long_name = "c" * 60 + ".py"
@@ -566,12 +508,8 @@ class TestRestoreModule:
         out, err = capsys.readouterr()
         assert f"No versions found for: {long_name}" in err
         assert "No versions found" not in out
-        # The file the user asked about was found -- this is the OTHER failure,
-        # and answering it with the lookup's line would send them hunting for a
-        # backup that exists.
+        # The file was found: the lookup's line would send the user hunting for a backup that exists.
         assert "No versioned file found" not in err
-        # error() marks the process failed, which resolve_exit turns into 2. On
-        # console.print the same run reported success for a listing it refused.
         assert command_failed() is True
 
     def test_no_arguments_at_all_still_answers_with_the_module_introspection(self, capsys):

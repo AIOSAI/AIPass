@@ -3,15 +3,10 @@
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
 # Version: 1.1.7
 # Created: 2026-07-02
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/cross_os/gap_registry.py and the handlers it drives."""
-
-# Tests the cross-OS gap registry (TDPLAN-0011 slice 1).
-# Covers: parser happy path, platform filtering (win32/darwin/linux),
-# fail-to-error (missing/malformed doc), the doctor --cross-os row shape, the
-# doctor --cross-os subcommand, and the init stage-2 heads-up wiring.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/cross_os/ parses and imports
@@ -58,15 +53,14 @@ _HANDLER_MOD = "aipass.aipass.apps.handlers.cross_os.gap_registry"
 _PREFLIGHT_MOD = "aipass.aipass.apps.handlers.cross_os.preflight"
 _RECORD_MOD = "aipass.aipass.apps.handlers.cross_os.run_record"
 _DOCTOR_MOD = "aipass.aipass.apps.modules.doctor"
-_ROWS_MOD = "aipass.aipass.apps.handlers.cross_os.doctor_rows"  # builds the rows doctor prints (leg 5 split)
+_ROWS_MOD = "aipass.aipass.apps.handlers.cross_os.doctor_rows"  # builds the rows doctor prints
 _INIT_MOD = "aipass.aipass.apps.modules.init_flow"
 
 
 def _cross_os_rows(run_e2e: bool = False) -> list[CheckResult]:
     """The rows `aipass doctor --cross-os` prints, in order, read through run_cross_os.
 
-    run_cross_os is the public runner the command calls; format_check is wrapped (it
-    still formats) so each printed row comes back whole (fleet green leg 3).
+    format_check is wrapped (it still formats) so each printed row comes back whole.
     """
     with patch(f"{_DOCTOR_MOD}.format_check", wraps=format_check) as printed:
         run_cross_os(run_e2e=run_e2e)
@@ -119,11 +113,6 @@ def _write_doc(root: Path, text: str = SAMPLE_DOC) -> Path:
     return doc
 
 
-# =============================================================================
-# Parser
-# =============================================================================
-
-
 class TestParseGapRegistry:
     def test_happy_path_row_count_and_fields(self) -> None:
         gaps = parse_gap_registry(SAMPLE_DOC)
@@ -155,11 +144,6 @@ class TestParseGapRegistry:
             parse_gap_registry(text)
 
 
-# =============================================================================
-# os_matches — platform mapping
-# =============================================================================
-
-
 class TestOsMatches:
     def test_all_matches_every_platform(self) -> None:
         for plat in ("win32", "darwin", "linux", "freebsd"):
@@ -178,11 +162,6 @@ class TestOsMatches:
     def test_case_insensitive(self) -> None:
         assert os_matches("WIN", "win32") is True
         assert os_matches("ALL", "linux") is True
-
-
-# =============================================================================
-# find_gap_doc + load/filter (end-to-end via a temp doc)
-# =============================================================================
 
 
 class TestFindAndFilter:
@@ -224,22 +203,15 @@ class TestFindAndFilter:
 
         The interpreter is asked inside the test, so each CI lane pins its own
         platform with nothing patched. The doc holds a distinct answer for each
-        family (linux 9; darwin 7, 9; win32 1, 7, 9), asserted below, so the
-        comparison is never vacuous on any lane.
-        Mutant: the default made "win32" -> red here, at the first assert.
-        Mutant: the default made "linux" -> red on the Windows and macOS lanes;
-        it survives on Linux, where test_filter_win32_gets_win_and_all covers the filter.
+        family, asserted below, so the comparison is never vacuous on any lane.
+        Mutant: the default made "linux" survives on Linux only; the Windows and
+        macOS lanes and test_filter_win32_gets_win_and_all catch it.
         """
         _write_doc(tmp_path)
         own = [g.number for g in gaps_for_platform(sys.platform, start=tmp_path)]
         assert [g.number for g in gaps_for_platform(start=tmp_path)] == own
         answers = {tuple(g.number for g in gaps_for_platform(p, start=tmp_path)) for p in ("linux", "darwin", "win32")}
         assert answers == {("9",), ("7", "9"), ("1", "7", "9")}
-
-
-# =============================================================================
-# Fail-to-error (never silently empty)
-# =============================================================================
 
 
 class TestFailToError:
@@ -251,11 +223,6 @@ class TestFailToError:
         _write_doc(tmp_path, text="# no registry section at all\n")
         with pytest.raises(CrossOsGapError):
             load_gaps(start=tmp_path)
-
-
-# =============================================================================
-# OS-gap cross-reference row shape (doctor_rows.cross_os_gap_rows), read through run_cross_os
-# =============================================================================
 
 
 class TestCrossOsGapRows:
@@ -273,7 +240,7 @@ class TestCrossOsGapRows:
         return [row for row in rows if row.label.startswith("cross-os")]
 
     def test_gaps_become_warn_preflight_rows(self) -> None:
-        """Mutant (fleet green leg 3): the gap row's `GLYPH_WARN,` -> `GLYPH_PASS,` -> red."""
+        """Mutant: the gap row's `GLYPH_WARN,` -> `GLYPH_PASS,` -> red."""
         fake = [
             CrossOsGap("2", ".venv symlink", "Win", "WinError 1314", "aipass", "untested"),
         ]
@@ -290,12 +257,9 @@ class TestCrossOsGapRows:
     def test_bracketed_registry_text_reaches_the_screen_as_written(self, capsys: pytest.CaptureFixture[str]) -> None:
         """What the gap registry holds is printed as written, brackets included.
 
-        The row wraps the status in brackets and a symptom may hold its own; Rich read
-        both as markup and dropped them (red first on HEAD, fleet green leg 4).
-        Mutant: doctor.py run_cross_os's escape of the row dropped (the shape of HEAD) -> red.
-        Mutant (fleet green leg 5): the label's escape alone dropped -> red at the label assert
-        (the registry number cell holds a bracket Rich would read as a tag; `[9]` alone
-        is not one, and survived).
+        The row wraps the status in brackets and a symptom may hold its own; unescaped,
+        Rich reads both as markup and drops them. The number cell holds `[new]`, a real
+        tag to Rich (`[9]` alone is not), so the label's escape is pinned too.
         """
         fake = [CrossOsGap("[new] 9", "route masks", "all", "printed as [unknown command]", "aipass", "recommended")]
         self._gap_rows(fake)
@@ -305,23 +269,18 @@ class TestCrossOsGapRows:
         assert "tracked gap [recommended] — owner aipass" in out
 
     def test_no_gaps_emits_single_pass(self) -> None:
-        """Mutant (fleet green leg 3): `if not gaps:` -> `if False:` -> red."""
+        """Mutant: `if not gaps:` -> `if False:` -> red."""
         results = self._gap_rows([])
         assert len(results) == 1
         assert results[0].glyph == GLYPH_PASS
         assert "no tracked cross-OS gaps" in results[0].detail
 
     def test_registry_error_emits_warn_not_silent(self) -> None:
-        """Mutant (fleet green leg 3): the registry-error `return [` -> `return [] and [` (no row) -> red."""
+        """Mutant: the registry-error `return [` -> `return [] and [` (no row) -> red."""
         results = self._gap_rows(raises=CrossOsGapError("doc gone"))
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "unavailable" in results[0].detail
-
-
-# =============================================================================
-# Pre-flight runners — routing / versions / hookstatus (mocked subprocess)
-# =============================================================================
 
 
 class TestPreflightRunners:
@@ -377,11 +336,6 @@ class TestPreflightRunners:
         assert "timed out" in result.detail
 
 
-# =============================================================================
-# run_e2e — heavy suite runner (mocked subprocess); dir/pytest resolution
-# =============================================================================
-
-
 @pytest.fixture()
 def _stub_preflight_json():
     """Suppress json_handler.log_operation side effects in the preflight module."""
@@ -427,12 +381,6 @@ class TestRunE2e:
         assert "failed" in result.detail
 
 
-# =============================================================================
-# Composed group (doctor_rows.check_cross_os: gap rows + pre-flight rows + optional e2e),
-# read through run_cross_os
-# =============================================================================
-
-
 class TestCheckCrossOsComposed:
     def _patch_preflight(self, routing=None, versions=None, hookstatus=None):
         """Patch the three light pre-flight runners with given PreflightResults."""
@@ -447,7 +395,7 @@ class TestCheckCrossOsComposed:
         )
 
     def test_preflight_rows_pass_when_ok(self) -> None:
-        """Mutant (fleet green leg 3): `glyph = GLYPH_PASS if result.ok else GLYPH_FAIL` -> always GLYPH_FAIL -> red."""
+        """Mutant: `glyph = GLYPH_PASS if result.ok else GLYPH_FAIL` -> always GLYPH_FAIL -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
@@ -461,7 +409,7 @@ class TestCheckCrossOsComposed:
         assert labels["routing (pre-flight)"].detail.startswith("pre-flight:")
 
     def test_preflight_fail_maps_to_fail_glyph(self) -> None:
-        """Mutant (fleet green leg 3): the fail row's remediation `"" if result.ok else remediation` -> `""` -> red."""
+        """Mutant: the fail row's remediation `"" if result.ok else remediation` -> `""` -> red."""
         bad = PreflightResult("routing", False, "drone systems -> 1")
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight(routing=bad):
@@ -472,7 +420,7 @@ class TestCheckCrossOsComposed:
         assert row.remediation  # fail rows carry remediation
 
     def test_e2e_not_run_by_default(self) -> None:
-        """Mutant (fleet green leg 3): `if run_e2e:` -> `if True:` -> red."""
+        """Mutant: `if run_e2e:` -> `if True:` -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
@@ -482,7 +430,7 @@ class TestCheckCrossOsComposed:
         assert not any("e2e" in r.label for r in results)
 
     def test_e2e_runs_when_flag_set_and_pass_maps_pass(self) -> None:
-        """Mutant (fleet green leg 3): e2e ok `GLYPH_PASS, ""` -> `GLYPH_WARN, ""` -> red."""
+        """Mutant: e2e ok `GLYPH_PASS, ""` -> `GLYPH_WARN, ""` -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
@@ -495,7 +443,7 @@ class TestCheckCrossOsComposed:
         assert row.glyph == GLYPH_PASS
 
     def test_e2e_real_failure_maps_fail(self) -> None:
-        """Mutant (fleet green leg 3): real-failure `GLYPH_FAIL, "Run ...` -> `GLYPH_WARN, "Run ...` -> red."""
+        """Mutant: real-failure `GLYPH_FAIL, "Run ...` -> `GLYPH_WARN, "Run ...` -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
@@ -510,7 +458,7 @@ class TestCheckCrossOsComposed:
         assert row.glyph == GLYPH_FAIL
 
     def test_e2e_unrunnable_maps_warn(self) -> None:
-        """Mutant (fleet green leg 3): unrunnable `glyph = GLYPH_WARN` -> `glyph = GLYPH_FAIL` -> red."""
+        """Mutant: unrunnable `glyph = GLYPH_WARN` -> `glyph = GLYPH_FAIL` -> red."""
         unrunnable = PreflightResult("e2e", False, f"{E2E_UNRUNNABLE_PREFIX}: e2e dir not found")
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
@@ -530,11 +478,6 @@ class TestCheckCrossOsComposed:
         out, _err = capsys.readouterr()
         assert "aipass doctor --cross-os" in out
         assert "errors: 0" in out
-
-
-# =============================================================================
-# doctor --cross-os subcommand routing
-# =============================================================================
 
 
 class TestDoctorCrossOsCommand:
@@ -576,18 +519,11 @@ class TestDoctorCrossOsCommand:
         mock_run.assert_called_once_with(run_e2e=True)
 
 
-# =============================================================================
-# init stage-2 heads-up wiring
-# =============================================================================
-
-
 class TestInitStage2HeadsUp:
-    """The heads-up read through stage_2_system_detect, its one caller (fleet green leg 3).
+    """The heads-up read through stage_2_system_detect, its one caller.
 
-    The detectors are stubbed as TestStages in test_init_flow.py stubs them, so no
-    detector runs and no git process starts. dry_run=True skips _save_stage, so no
-    setup progress is written. The oracle is the whole output: each call is compared
-    with the same call where the heads-up is replaced by nothing.
+    Detectors are stubbed and dry_run=True skips _save_stage, so no git runs and no
+    progress is written. Each call is compared with the heads-up replaced by nothing.
     """
 
     @staticmethod
@@ -616,10 +552,8 @@ class TestInitStage2HeadsUp:
     def test_heads_up_prints_gaps(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The output is the heads-up-free output followed by the heads-up, and nothing else.
 
-        The registry's text is printed as written: the status in its brackets and a
-        symptom that holds a bracket of its own (Rich ate both on HEAD, fleet green leg 4).
-        Mutant: per-gap line not printed -> red.
-        Mutant: init_flow.py's escape of the gap line dropped (the shape of HEAD) -> red.
+        Brackets in the status and symptom print as written; Rich eats them unescaped.
+        Mutant: init_flow.py's escape of the gap line dropped -> red.
         """
         fake = [CrossOsGap("9", "route masks", "all", "printed as [unknown command]", "aipass", "rec")]
         without, _ = self._stage_2(capsys, heads_up=False)
@@ -660,11 +594,6 @@ class TestInitStage2HeadsUp:
         assert "cross-OS gap registry unavailable" in err
 
 
-# =============================================================================
-# Run Record generator (slice 3) — build_run_record
-# =============================================================================
-
-
 def _line_starting(text: str, prefix: str) -> str:
     """Return the first line in ``text`` starting with ``prefix`` (or "")."""
     for line in text.splitlines():
@@ -689,7 +618,6 @@ class TestBuildRunRecord:
             text = build_run_record(platform_name="linux")
         for label in ("Machine/VM", "OS + version", "Arch", "Python", "Shell / term", "AIPASS_HOME", "Date :"):
             assert label in text
-        # A real, machine-knowable fact is actually filled in (not left blank).
         assert platform.python_version() in text
         assert (platform.machine() or "unknown") in text
 
@@ -745,7 +673,6 @@ class TestBuildRunRecord:
             self._patch(stack)
             text = build_run_record(platform_name="linux")
         commit = _line_starting(text, "Commit")
-        # No value filled — just the hint on how a human fills it.
         assert "drone @git log -1" in commit
         tester = _line_starting(text, "Tester")
         # Tester side is blank; the Date side is machine-filled.
@@ -820,11 +747,6 @@ class TestBuildRunRecord:
         assert "registry unavailable" in text
 
 
-# =============================================================================
-# Run Record generator (slice 3) — generate_run_record (file writing)
-# =============================================================================
-
-
 class TestGenerateRunRecord:
     def _patch(self, stack):
         """Patch live inputs + json_handler side effect for the writing path."""
@@ -867,18 +789,12 @@ class TestGenerateRunRecord:
         assert path.name.startswith("aipass-crossos-record-")
 
     def test_write_error_raises_run_record_error(self, tmp_path) -> None:
-        # Target an existing directory → write_text raises OSError → RunRecordError.
         target = tmp_path / "adir"
         target.mkdir()
         with contextlib.ExitStack() as stack:
             self._patch(stack)
             with pytest.raises(RunRecordError):
                 generate_run_record(str(target))
-
-
-# =============================================================================
-# doctor --cross-os --record subcommand routing + thin wrapper
-# =============================================================================
 
 
 class TestDoctorCrossOsRecordCommand:

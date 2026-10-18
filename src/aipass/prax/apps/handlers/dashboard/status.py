@@ -3,14 +3,13 @@
 # Description: Dashboard Status Calculation Handler
 # Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """
 Dashboard Status Handler
 
-Handles status calculations and branch path resolution.
-All business logic for dashboard status operations.
+Reference: docs/dashboard.md
 """
 
 import json
@@ -26,15 +25,7 @@ logger = get_direct_logger()
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root, never reading the cwd.
-
-    Delegates to ``handlers/repo_root.py``. Prax carried eight private copies of
-    this walk, every one ending ``return Path.cwd()`` — @memory reported the
-    consequence with a traceback on 2026-08-31: the walk runs at IMPORT time in
-    most of the fleet, so a deleted working directory crashed the import, and a
-    registry-less checkout (every clean CI clone) resolved against wherever the
-    shell stood.
-    """
+    """Walk up from this file to find the repo root, never reading the cwd."""
     return find_repo_root(Path(__file__))
 
 
@@ -42,11 +33,8 @@ AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
 
 def _read_todo_count(branch_path: Path) -> Optional[int]:
-    """Read todos[] length from .trinity/local.json.
-
-    0 means no local.json or no todos. None means the file exists but cannot be
-    read: a 0 there was written into the dashboard as an empty list (prax, leg 15).
-    """
+    """Read todos[] length from .trinity/local.json."""
+    # None, not 0, for an unreadable file: 0 would publish a false empty count.
     local_path = branch_path / ".trinity" / "local.json"
     if not local_path.exists():
         return 0
@@ -80,17 +68,8 @@ def _read_mail_counts(branch_path: Path) -> tuple:
 
 
 def count_active_plans(flow_section: Dict) -> int:
-    """Read a plan count out of the flow section, whichever shape it arrived in.
-
-    Both writers now publish ``active_plans`` as an INT — @flow's module 2.0.0
-    (2026-08-16, the owner's ruling) dropped the full open-plan list from the
-    section, and ``active_count`` no longer ships at all.
-
-    The list branch stays for the dashboards written before that date: they carry
-    the old shape on disk until their next write, and comparing a list against 0
-    raises TypeError, which `update_section` swallows into a silent no-op
-    (reported by @flow 2026-08-12).
-    """
+    """Read a plan count out of the flow section, whichever shape it arrived in."""
+    # Writers publish an int; old dashboards on disk still carry a list until rewritten.
     raw = flow_section.get("active_plans", 0)
     if isinstance(raw, list):
         return len(raw)
@@ -106,29 +85,16 @@ def count_active_plans(flow_section: Dict) -> int:
 
 
 def merge_quick_status(existing: "Dict | None", computed: Dict) -> Dict:
-    """Overlay freshly computed keys onto the existing block, keeping the rest.
-
-    quick_status has several writers (prax refresh, @flow's push, write_section).
-    Each used to assign a fresh dict over the whole block, so every writer
-    silently deleted the keys it did not know about — the owner saw a devpulse card
-    reporting 0 todos against a local.json holding 9. The invariant, agreed with
-    @flow: no writer deletes a key it did not write.
-    """
+    """Overlay freshly computed keys onto the existing block, keeping the rest."""
+    # Several writers share quick_status; the invariant with @flow: no writer deletes a key it did not write.
     merged = dict(existing or {})
     merged.update(computed)
     return merged
 
 
 def read_existing_quick_status(branch_path: "Path | None") -> "Dict | None":
-    """Read the quick_status block already on disk, for merging into a fresh build.
-
-    The refresh path builds each dashboard from the template, so the previous
-    block is gone before the merge can see it. This fetches it back.
-
-    Returns {} when there is no dashboard or no block, and None when the file
-    exists but cannot be read: the keys other services wrote are lost then,
-    and refresh says so in the file (prax, leg 16).
-    """
+    """Read the quick_status block already on disk, for merging into a fresh build."""
+    # {} is no block; None is an unreadable file, which refresh records as previous_unreadable.
     if not branch_path:
         return {}
     dashboard_path = Path(branch_path) / "DASHBOARD.local.json"
@@ -150,22 +116,8 @@ def read_existing_quick_status(branch_path: "Path | None") -> "Dict | None":
 
 
 def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) -> Dict:
-    """
-    Calculate quick status from branch data sources.
-
-    Sources counts directly from local files (inbox.json, local.json).
-
-    This is the single implementation — `refresh.py` and `operations.py` delegate
-    here. It used to exist as three near-identical copies, and only one of them
-    grew the list-shape guard, which is exactly how the other two kept the bug.
-
-    Args:
-        sections: All dashboard sections
-        branch_path: Optional path to branch root (for sourcing counts)
-
-    Returns:
-        Quick status dict with summary data
-    """
+    """Calculate quick status from branch data sources."""
+    # The single implementation: refresh.py, operations.py and template_pusher.py delegate here.
     flow = sections.get("flow", {})
 
     if branch_path:
@@ -174,15 +126,11 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
     else:
         new_mail, opened_mail, todo_count = 0, 0, 0
     active_plans = count_active_plans(flow)
-    # None is an unreadable local.json: the flag and summary count it as 0 and
-    # say so, and todo_count is left out so the merge keeps the last count written.
+    # Unreadable local.json: todo_count is left out so the merge keeps the last count written.
     todos_unknown = todo_count is None
     todo_count = todo_count or 0
 
-    # Every counter this function renders in `summary` also raises the flag.
-    # It used to skip todo_count, so a branch with pending todos published
-    # "1 todos" and action_required: False in the same block — @flow measured
-    # the disagreement against their own writer, which does count them.
+    # Every counter rendered in `summary` raises the flag; @flow's writer counts todos the same way.
     action_required = new_mail > 0 or active_plans > 0 or todo_count > 0
 
     summary_parts = []
@@ -222,16 +170,7 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
 
 
 def get_branch_paths() -> List[Path]:
-    """
-    Get all branch paths from registry
-
-    Returns:
-        List of branch paths
-
-    Raises:
-        FileNotFoundError: If AIPASS_REGISTRY.json doesn't exist
-        json.JSONDecodeError: If registry is corrupted
-    """
+    """Get all branch paths from registry"""
     if not AIPASS_REGISTRY.exists():
         raise FileNotFoundError(f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}")
 
@@ -245,13 +184,7 @@ def get_branch_paths() -> List[Path]:
 
 
 def _nearest_registries(start: Path) -> List[Path]:
-    """The ``*_REGISTRY.json`` files in the nearest directory at or above ``start`` that holds any.
-
-    Nearest wins, the way ``aipass init`` stamps one registry at a project root:
-    a caller in ``Vera-Studio/src/vera_studio/verify`` gets
-    ``Vera-Studio/VERA-STUDIO_REGISTRY.json``, and a caller anywhere in the
-    AIPass tree gets ``AIPASS_REGISTRY.json`` itself.
-    """
+    """The ``*_REGISTRY.json`` files in the nearest directory at or above ``start`` that holds any."""
     for directory in (start, *start.parents):
         registries = _exact_case_registries(directory)
         if registries:
@@ -260,11 +193,8 @@ def _nearest_registries(start: Path) -> List[Path]:
 
 
 def _declared_path(registry_file: Path, name: str) -> Optional[Path]:
-    """The path ``registry_file`` declares for ``name``, or None.
-
-    A relative path resolves against the registry's OWN directory, never the
-    process cwd or AIPass's root: that is where the project that wrote it lives.
-    """
+    """The path ``registry_file`` declares for ``name``, or None."""
+    # Relative paths resolve against the registry's own directory, not the cwd or AIPass's root.
     try:
         data = json.loads(registry_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -283,11 +213,7 @@ def _declared_path(registry_file: Path, name: str) -> Optional[Path]:
 
 
 def _caller_project_match(name: str, caller: Optional[Path]) -> Optional[Tuple[Path, Path]]:
-    """``(registry file, branch path)`` for ``name`` in the caller's project registry, or None.
-
-    The core registry is skipped here: it was already asked, and a caller
-    inside AIPass finds it as its nearest.
-    """
+    """``(registry file, branch path)`` for ``name`` in the caller's project registry, or None."""
     if caller is None:
         return None
 
@@ -302,34 +228,9 @@ def _caller_project_match(name: str, caller: Optional[Path]) -> Optional[Tuple[P
 
 
 def resolve_branch_path(branch_ref: str, caller: Optional[Path] = None) -> Path:
-    """
-    Resolve @branch reference to filesystem path.
-
-    AIPASS_REGISTRY.json first, unchanged. On a miss, the caller's own project
-    registry: the nearest ``*_REGISTRY.json`` at or above ``caller``
-    (devpulse's ruling 2026-09-11, Vera Studio 77f3335d). Before that second
-    step, ``drone @prax dashboard refresh @verify`` run from inside Vera-Studio
-    answered "not found" and the branch's dashboard stayed stale. A name in
-    both registries resolves to core, and the log says so.
-
-    ``caller`` is an argument, never read here: a handler does not read the
-    working directory (tests/test_repo_root.py sweeps for it). The dashboard
-    module answers where the caller stands. With no caller this is core only,
-    exactly what it was before.
-
-    Handler-layer function: performs file I/O to read registry and
-    resolve branch name to its directory path.
-
-    Args:
-        branch_ref: Branch reference like "@flow" or "@vera"
-        caller: The directory the caller stands in, or None for core only
-
-    Returns:
-        Path to the branch directory
-
-    Raises:
-        FileNotFoundError: If registry missing or branch not found
-    """
+    """Resolve @branch reference to filesystem path."""
+    # Core registry first, then the caller's nearest project registry. caller is passed in:
+    # handlers never read the cwd (tests/test_repo_root.py sweeps for it).
     name = branch_ref.lstrip("@").upper()
 
     if not AIPASS_REGISTRY.exists():

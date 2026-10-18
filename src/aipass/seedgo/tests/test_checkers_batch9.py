@@ -3,7 +3,7 @@
 # Description: Unit tests for readme_check and trigger_check
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and apps/handlers/aipass_standards/trigger_check.py."""
@@ -34,19 +34,9 @@ from aipass.seedgo.apps.handlers.aipass_standards.trigger_check import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
-
-
-# ===========================================================================
-# 1. readme_check -- check_readme_exists
-# ===========================================================================
 
 
 def test_readme_exists_present(tmp_path):
@@ -64,11 +54,6 @@ def test_readme_exists_missing(tmp_path):
 
     result = check_readme_exists(readme)
     assert result["passed"] is False
-
-
-# ===========================================================================
-# 2. readme_check -- check_required_sections
-# ===========================================================================
 
 
 def test_required_sections_all_present(tmp_path):
@@ -124,11 +109,6 @@ def test_required_sections_alternate_names(tmp_path):
 
     result = check_required_sections(lines, (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
-
-
-# ===========================================================================
-# 3. readme_check -- check_last_updated_freshness
-# ===========================================================================
 
 
 def test_last_updated_freshness_date_present(tmp_path):
@@ -201,11 +181,6 @@ def test_last_updated_freshness_bypassed(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# 4. readme_check -- check_directory_tree
-# ===========================================================================
-
-
 def test_directory_tree_accurate(tmp_path):
     """Directory tree listing valid directories passes."""
     branch_root = tmp_path / "mybranch"
@@ -241,11 +216,6 @@ def test_directory_tree_no_tree_section(tmp_path):
     result = check_directory_tree(lines, tmp_path / "missing", (tmp_path / "fake" / "apps" / "entry.py").as_posix())
     assert result["passed"] is True
     assert result["message"] == "No directory tree block found (optional check)"
-
-
-# ===========================================================================
-# 5. readme_check -- check_module_list
-# ===========================================================================
 
 
 def test_module_list_all_mentioned(tmp_path):
@@ -294,11 +264,6 @@ def test_module_list_no_modules_dir(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# 6. readme_check -- check_command_list
-# ===========================================================================
-
-
 def test_command_list_present(tmp_path):
     """Commands section with content passes."""
     lines: List[str] = [
@@ -345,11 +310,6 @@ def test_command_list_missing(tmp_path):
     assert "No Commands" in result["message"]
 
 
-# ===========================================================================
-# 7. trigger_check -- is_handler_layer
-# ===========================================================================
-
-
 def test_is_handler_layer_true(tmp_path):
     """File in handlers/ directory is handler layer."""
     assert (
@@ -365,11 +325,6 @@ def test_is_handler_layer_false(tmp_path):
     )
 
 
-# ===========================================================================
-# 8. trigger_check -- is_trigger_handler
-# ===========================================================================
-
-
 def test_is_trigger_handler_true(tmp_path):
     """File in trigger handlers/events/ is a trigger handler."""
     assert is_trigger_handler((tmp_path / "apps" / "handlers" / "events" / "trigger_on_audit.py").as_posix()) is True
@@ -378,11 +333,6 @@ def test_is_trigger_handler_true(tmp_path):
 def test_is_trigger_handler_false(tmp_path):
     """File not in trigger handlers/events/ is not a trigger handler."""
     assert is_trigger_handler((tmp_path / "apps" / "modules" / "audit.py").as_posix()) is False
-
-
-# ===========================================================================
-# 9. trigger_check -- check_no_logger_imports
-# ===========================================================================
 
 
 def test_no_logger_imports_clean(tmp_path):
@@ -402,11 +352,6 @@ def test_no_logger_imports_violation(tmp_path):
     result = check_no_logger_imports(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is False
     assert "recursion" in result["message"]
-
-
-# ===========================================================================
-# 10. trigger_check -- check_no_print_statements
-# ===========================================================================
 
 
 def test_no_print_statements_clean(tmp_path):
@@ -435,11 +380,6 @@ def test_no_print_in_main_block_ok(tmp_path):
 
     result = check_no_print_statements(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result["passed"] is True
-
-
-# ===========================================================================
-# 11. trigger_check -- check_trigger_import_pattern
-# ===========================================================================
 
 
 def test_trigger_import_pattern_correct(tmp_path):
@@ -484,11 +424,6 @@ def test_trigger_import_pattern_trigger_branch(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# 12. trigger_check -- check_handler_naming
-# ===========================================================================
-
-
 def test_handler_naming_correct(tmp_path):
     """Handler function with handle_ prefix passes."""
     content = "def handle_audit_complete(**kwargs):\n    pass\n"
@@ -516,11 +451,6 @@ def test_handler_naming_no_handlers(tmp_path):
 
     result = check_handler_naming(content, lines, (tmp_path / "fake" / "handler.py").as_posix())
     assert result is None
-
-
-# ===========================================================================
-# 13. trigger_check -- check_missing_trigger_events
-# ===========================================================================
 
 
 def test_missing_trigger_events_lifecycle(tmp_path):
@@ -552,11 +482,6 @@ def test_missing_trigger_events_no_patterns(tmp_path):
     assert result is None
 
 
-# ===========================================================================
-# 14. trigger_check -- find_pattern_lines (via check_missing_trigger_events)
-# ===========================================================================
-
-
 def test_find_pattern_lines_detects_unlink(tmp_path):
     """Inline .unlink() without trigger.fire() is flagged."""
     content = "def cleanup():\n    path.unlink()\n"
@@ -579,19 +504,8 @@ def test_find_pattern_lines_detects_rename(tmp_path):
     assert ".rename()" in result["message"]
 
 
-# ===========================================================================
-# 15. trigger_check -- the exemption is PER FUNCTION BODY (DPLAN-0339)
-# ===========================================================================
-#
-# The flag used to be file-level: one `trigger.fire(` anywhere exempted every
-# pattern in the file. Prax's initialize_logging_system/shutdown_logging_system
-# fired nothing for months and still passed, because an unrelated hot-path
-# `trigger.fire("startup")` lived in the same module. These pins hold the two
-# halves of that proof plus the scoping rules around it.
-
-# The live precedent, reduced: src/aipass/prax/apps/modules/logger.py. Same
-# function names, same event names, same unrelated hot-path fire in
-# _ensure_watcher that used to carry the whole file.
+# The exemption is per pattern, not per file: one unrelated `trigger.fire(` must not exempt the rest.
+# The live precedent, reduced: src/aipass/prax/apps/modules/logger.py's shape.
 _PRAX_LOGGER_SHAPE = '''
 class SystemLogger:
     def _ensure_watcher(self):

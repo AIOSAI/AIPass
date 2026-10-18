@@ -3,29 +3,12 @@
 # Description: quick_status has many writers — none may delete another's key
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
 
-# Regression cover for the 2026-08-12 quick_status clobber (@flow, DPLAN-0290 item 4).
-#
-# DASHBOARD.local.json's quick_status block has several writers. Each one used to
-# build a fresh dict and assign it over the whole block, so every writer silently
-# deleted the keys it did not know about. The owner saw the symptom on his devpulse
-# card: 0 todos while local.json held 9. @flow fixed their push and found the
-# mirror here — prax refresh drops their ``commons_mentions`` on every run.
-#
-# The invariant both sides now hold: **no writer deletes a key it did not write.**
-#
-# Second defect, same file: the calculator existed in THREE near-identical copies
-# (status.py, refresh.py, operations.py) and only one had grown a guard for a
-# list-shaped ``active_plans``. flow's section writes a list, so the two unguarded
-# copies raise TypeError on it. The copies are the reason one guard was missing,
-# so the drift is pinned shut here too.
-#
-# The handlers are bound at the top by import statement. The reload this file
-# used to do was for conftest's sys.modules stubs, which are gone (prax, leg 14).
+# Invariant: no quick_status writer deletes a key it did not write. The calculator's copies are pinned to agree.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — load_dashboard and save_dashboard, covered by tests/test_operations.py
@@ -84,13 +67,7 @@ def _seed_branch(tmp_path: Path, quick_status: dict, todos: int = 2) -> Path:
 
 
 def _push_world(tmp_path: Path, monkeypatch, module, template: dict, branch: "Path | None"):
-    """Point the pusher or the differ at a world under tmp_path and return it.
-
-    The template file, the registry (naming ``branch``, or nothing when None),
-    the repo root and the pusher's version file all live under tmp_path, so
-    push_dashboard_template and diff_dashboard_template, the public doors, run
-    for real on it (prax, leg 14: these tests used to call the private step).
-    """
+    """Point the pusher or the differ at a world under tmp_path (registry naming ``branch``) and return it."""
     template_file = tmp_path / "DASHBOARD.template.json"
     template_file.write_text(json.dumps(template), encoding="utf-8")
     registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -106,11 +83,6 @@ def _push_world(tmp_path: Path, monkeypatch, module, template: dict, branch: "Pa
 
 def _read_quick_status(branch: Path) -> dict:
     return json.loads((branch / "DASHBOARD.local.json").read_text(encoding="utf-8"))["quick_status"]
-
-
-# ---------------------------------------------------------------------------
-# Finding 1 — no writer deletes a key it did not write
-# ---------------------------------------------------------------------------
 
 
 class TestForeignKeysSurviveEveryWriter:
@@ -157,11 +129,7 @@ class TestForeignKeysSurviveEveryWriter:
         assert quick["new_mail"] == 1
 
     def test_an_unreadable_todo_list_keeps_the_last_count_and_says_so(self, tmp_path):
-        """A local.json that cannot be read is not zero todos (prax, leg 15).
-
-        The count was written as 0 into the dashboard as if the list were empty;
-        now the last count written stays and the summary says it is unreadable.
-        """
+        """A local.json that cannot be read is not zero todos: the last count stays, the summary says so."""
         branch = _seed_branch(tmp_path, {"new_mail": 0, "todo_count": 7})
         (branch / ".trinity" / "local.json").write_text("<<<not json>>>", encoding="utf-8")
 
@@ -178,7 +146,7 @@ class TestForeignKeysSurviveEveryWriter:
         return _read_quick_status(branch)
 
     def test_an_unreadable_dashboard_says_its_keys_were_lost(self, tmp_path):
-        """An unreadable dashboard merged as {}: the foreign keys went with only a log line (prax, leg 16)."""
+        """An unreadable dashboard merged as {}: the foreign keys went with only a log line."""
         branch = _seed_branch(tmp_path, {})
         (branch / "DASHBOARD.local.json").write_text("<<<not json>>>", encoding="utf-8")
 
@@ -216,10 +184,7 @@ class TestForeignKeysSurviveEveryWriter:
 # Finding 2 — a flow-shaped section must not raise
 # ---------------------------------------------------------------------------
 
-# The LEGACY flow shape: active_plans as a list of plan dicts, active_count as
-# the int. Retired by @flow's module 2.0.0 (2026-08-16) — both writers now publish
-# an int — but dashboards written before that date carry this on disk until their
-# next write, so the tolerance must survive.
+# The legacy flow shape (active_plans a list); old dashboards carry it on disk until their next write.
 FLOW_LIST_SECTION = {
     "flow": {
         "managed_by": "flow",
@@ -239,13 +204,7 @@ def _calculators():
     ]
 
 
-#: The parametrize table, built once at the moment the decorators below read it.
-#: A table computed at collection time can come back EMPTY, and pytest reports an
-#: empty parametrize as SKIPPED — five lines that ran nothing while the summary
-#: stayed green. This is the whole point of the file: FOUR near-identical copies
-#: of one calculator, and the drift between them is what lost the list guard. The
-#: names are spelled out so a copy that is renamed, moved or deleted fails
-#: collection loudly instead of quietly shrinking the table it is tested through.
+# Names spelled out: an empty parametrize reports SKIPPED, so a lost copy must fail collection loudly.
 CALCULATOR_NAMES = (
     "status.calculate_quick_status",
     "refresh._calculate_quick_status",
@@ -287,29 +246,14 @@ class TestListShapedActivePlans:
         assert all(r == results[0] for r in results[1:])
 
 
-# ---------------------------------------------------------------------------
-# Finding 3 — push-template is a fourth writer, and it deletes on purpose
-# ---------------------------------------------------------------------------
-
-
 class TestPushTemplateIsNotAWreckingBall:
-    """`dashboard push-template` writes every branch's dashboard, fleet-wide.
-
-    It carried its own self-contained calculator (no todo_count, no merge) and a
-    deprecation list naming ``commons_mentions`` — a key @flow OWNS and writes
-    (``flow/apps/handlers/dashboard/push_branch_dashboard.py``). prax used to own
-    that key and retired it; the list outlived the ownership change, so one push
-    would have deleted flow's key from every branch by declared policy.
-    """
+    """`dashboard push-template` writes every branch's dashboard; it must not delete flow's commons_mentions."""
 
     def test_commons_mentions_is_not_deprecated(self):
         assert "commons_mentions" not in pusher.DEPRECATED_QUICK_STATUS_KEYS
 
     def test_the_differ_reads_the_pushers_list_not_its_own_copy(self):
-        """The adviser carried a second copy of the policy and kept recommending
-        the deletion of flow's live key for weeks after the writer was fixed
-        (docs/dashboard.md, 2026-08-25). One list, the pusher's, or the advice
-        and the write disagree again."""
+        """One deprecation list, the pusher's, or the differ's advice and the write disagree."""
         assert differ.DEPRECATED_QUICK_STATUS_KEYS is pusher.DEPRECATED_QUICK_STATUS_KEYS
         assert "commons_mentions" not in differ.DEPRECATED_QUICK_STATUS_KEYS
 
@@ -344,15 +288,7 @@ class TestPushTemplateIsNotAWreckingBall:
         assert quick["new_mail"] == 0
 
     def test_a_template_section_the_constant_never_heard_of_is_advised(self, tmp_path, monkeypatch):
-        """The adviser's third copy of the policy.
-
-        _diff_branch accepted the loaded template and compared against
-        module-level REQUIRED_SECTIONS instead (seedgo's
-        accepted_and_never_used_parameter rule, 2026-09-24). That copy happens to
-        agree with templates/DASHBOARD.template.json today, so the drift would be
-        silent both ways: a section added to the template would never be advised,
-        and the advice would keep naming one the template had dropped.
-        """
+        """The differ advises from the loaded template, not a module-level copy of its sections."""
         branch = _seed_branch(tmp_path, {"new_mail": 0})
         template = {"sections": {"a_brand_new_section": {}}, "quick_status": {"new_mail": 0}}
 
@@ -368,18 +304,8 @@ class TestPushTemplateIsNotAWreckingBall:
         assert qs == {}
 
 
-# ---------------------------------------------------------------------------
-# Finding 4 — action_required must agree with the summary beside it
-# ---------------------------------------------------------------------------
-
-
 class TestActionRequiredMatchesItsOwnSummary:
-    """@flow measured prax writing ``action_required: False`` next to ``1 todos``.
-
-    Identical counts, opposite flag from the two writers — the same clobber
-    species as Finding 1, moved out of a key and into a boolean, and it is the
-    field the owner's card reads for 'needs attention'.
-    """
+    """action_required must agree with the summary beside it: the owner's card reads it for 'needs attention'."""
 
     @pytest.mark.parametrize("name,calc", CALCULATORS)
     def test_todos_alone_require_action(self, name, calc, tmp_path):

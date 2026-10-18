@@ -3,15 +3,12 @@
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected).
 
-One source, run from a kin seat (this file) and from foreign seats (copies the
-test writes under tmp). Each import shape is one small function; the table
-SHAPES maps the shape name on argv to it (aipass's pair, DPLAN-0404, rendered
-for prax).
+Run from a kin seat (this file) and from foreign seats (copies under tmp); SHAPES maps argv to each shape.
 """
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -53,18 +50,15 @@ def _dyn() -> None:
 
 
 def _chain() -> None:
-    """The line below names the handlers and reaches the fence through a kin frame
-    (import_named): the shape of an import that comes in through a package
-    __init__ chain. Refused on the line's spelling alone."""
+    """A line naming the handlers, through a kin frame (a package __init__ chain): refused on its spelling alone."""
     kin = importlib.import_module(KIN_PROBE)
     kin.import_named("aipass.prax.apps.handlers.json.json_handler")
 
 
 def _sibling() -> None:
-    """A frame whose file sits under the fleet root beside this branch, as a sibling
-    branch's would - in an installed wheel that is under site-packages, which the
-    fence must still read as foreign, not as a third-party library. Compiled under
-    that filename; no file is written."""
+    """A frame filed under the fleet root as a sibling branch's: foreign even under site-packages.
+
+    Compiled under that filename; no file is written."""
     seat = str(Path(aipass.__file__).resolve().parent / "sibling" / "probe.py")
     exec(compile(f"importlib.import_module({HANDLERS!r})", seat, "exec"), {"importlib": importlib})
 

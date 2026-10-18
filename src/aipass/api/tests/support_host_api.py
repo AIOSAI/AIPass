@@ -3,20 +3,10 @@
 # Description: Shared helpers for the host API's test files (test_host_api*.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
-"""Helpers shared by test_host_api.py and test_host_api_config.py.
-
-No test_ prefix and no Test class, so pytest never collects it. Moved here
-whole from test_host_api.py when the file split along the unit under test
-(api, the oversize split leg, 2026-10-08): the two addresses the bind gate is
-asked about, the built face bundle and the stand-in baud binary, each used by
-the config tests and the command tests alike. The patch-target strings stay
-each file's own constants: seedgo's discarded_patch rule judges a target
-imported from this branch's package, and those patches silence loggers on
-purpose.
-"""
+"""Helpers shared by test_host_api.py and test_host_api_config.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
@@ -27,7 +17,6 @@ from aipass.api.apps.handlers.host import config as host_config
 
 # An address in TEST-NET-3 (RFC 5737). Guaranteed not to be a real interface.
 UNHELD_ADDRESS = "203.0.113.7"
-# Shaped like the tailnet address Stage 0 is ultimately aimed at.
 TAILNET_SHAPED = "100.64.0.1"
 
 

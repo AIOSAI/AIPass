@@ -5,7 +5,7 @@
 # Date: 2026-03-24
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -43,11 +43,6 @@ from aipass.commons.apps.handlers.rooms.room_state_ops import (
 )
 
 
-# =============================================================================
-# MOOD HELPERS — pure functions, no DB needed
-# =============================================================================
-
-
 def test_mood_styles_contains_expected_moods():
     """Verify MOOD_STYLES contains all six documented moods."""
     expected = {"welcoming", "relaxed", "focused", "neutral", "tense", "celebratory"}
@@ -57,9 +52,7 @@ def test_mood_styles_contains_expected_moods():
 def test_mood_styles_values_are_color_icon_tuples():
     """Each MOOD_STYLES entry should be a (color_str, icon_str) tuple.
 
-    The count assert is the loop's floor: an empty MOOD_STYLES would enter no
-    iteration and pass this test with nothing checked.
-    """
+    The count assert is the floor: an empty MOOD_STYLES would pass the loop unchecked."""
     assert len(MOOD_STYLES) == 6, f"Expected 6 moods, found {sorted(MOOD_STYLES)}"
 
     for mood, value in MOOD_STYLES.items():
@@ -150,11 +143,6 @@ def test_mood_icon_unknown_mood_returns_dash(space_db: sqlite3.Connection, capsy
     assert _look_mood_line(space_db, capsys, "") == "Mood: neutral -"
 
 
-# =============================================================================
-# ROOM OPS — require initialized_db fixture
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.rooms.room_ops.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.rooms.room_ops.get_db")
 @patch("aipass.commons.apps.handlers.rooms.room_ops.close_db")
@@ -185,7 +173,6 @@ def test_create_room_success(
     assert result["description"] == "A test laboratory"
     assert result["created_by"] == "TEST_BRANCH"
 
-    # Verify the room was actually persisted in the database
     row = conn.execute("SELECT * FROM rooms WHERE name = ?", ("test-lab",)).fetchone()
     assert row is not None
 
@@ -244,17 +231,12 @@ def test_room_create_help_prints_usage_without_creating(mock_create_room: MagicM
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
 def test_a_bare_room_help_flag_explains_instead_of_refusing(flag: str, capsys: pytest.CaptureFixture[str]) -> None:
-    """Until 2026-10-05 'room --help' was refused as an unknown subcommand."""
+    """A bare 'room --help' explains instead of being refused as an unknown subcommand."""
     assert room_module.handle_command("room", [flag]) is True
 
     out = capsys.readouterr()
     assert "Thin router for room management" in out.out
     assert "Unknown room subcommand" not in out.out + out.err
-
-
-# =============================================================================
-# ROOM STATE OPS — require initialized_db fixture
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
@@ -289,12 +271,7 @@ def test_get_room_state_missing_key(initialized_db: sqlite3.Connection) -> None:
 
 
 def test_create_room_refuses_naming_a_failed_caller_lookup():
-    """A broken caller lookup is refused by name, not as "run from a branch directory".
-
-    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None,
-    so the user was told to run from a branch directory. The lookup raises before
-    any database is opened.
-    """
+    """A broken caller lookup is refused by name, not as "run from a branch directory", before any DB opens."""
     with (
         patch(
             "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",

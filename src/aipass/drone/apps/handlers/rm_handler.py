@@ -3,24 +3,12 @@
 # Description: Contained safe-delete handler
 # Version: 1.4.4
 # Created: 2026-06-02
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Contained safe-delete handler.
 
-Deletes paths using shutil.rmtree (directories) or Path.unlink (files),
-constrained to project root and system temp directories. Provider-agnostic
-alternative to shell ``rm``.
-
-Matches Codex sandbox boundaries: writable = {project, /tmp, $TMPDIR}.
-Hard carve-outs protect .git, .trinity, .aipass, .codex, .agents, sibling
-branch worktrees, and any project directory that CONTAINS another citizen,
-even inside allowed roots.
-
-Stale mode (``--stale AGE``, DPLAN-0338) is a second, narrower lane: it walks
-directories and unlinks only staging temps — ``*.tmp`` regular files directly
-inside a ``*_json`` folder, older than AGE. It keeps the carve-outs and crosses
-the sibling-branch fence; see :func:`stale_sweep` for why.
+Roots match Codex sandbox boundaries: writable = {project, /tmp, $TMPDIR}.
 """
 
 from __future__ import annotations
@@ -46,11 +34,7 @@ _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
 def _find_project_root() -> Path | None:
     """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
 
-    THE LIVE ONE. @trigger reproduced this: delete the directory you are standing
-    in, then run a second ``drone rm`` to clean up — the recovery command is the
-    one that crashed here, exit 1, before any of the delete lane's own guards ran.
-    The walk is skipped when there is nowhere to walk from; AIPASS_HOME answers
-    without a location and always could have.
+    With no cwd (the caller deleted it) the walk is skipped and AIPASS_HOME answers.
     """
     cwd = caller_cwd()
     if cwd is not None:
@@ -66,11 +50,7 @@ def _find_project_root() -> Path | None:
 
 
 def get_allowed_roots() -> list[Path]:
-    """Return resolved roots under which deletion is permitted.
-
-    Union of: project root, system temp dir, and (on POSIX) the canonical
-    temp path.  Deduplicated by resolved path.
-    """
+    """Return resolved roots under which deletion is permitted."""
     seen: set[Path] = set()
     roots: list[Path] = []
 
@@ -96,28 +76,9 @@ def get_allowed_roots() -> list[Path]:
 def _find_branch_root(path: Path, project_root: Path) -> Path | None:
     """Walk up from *path* to the OUTERMOST .trinity/ ancestor within the project.
 
-    Outermost, not innermost, because a ``.trinity/`` is not proof of a citizen.
-    @spawn ships a complete branch skeleton under ``templates/`` — passport and
-    all — so the innermost hit for
-    ``spawn/templates/aipass_framework/.pytest_cache`` was the skeleton, and the
-    guard refused with "sibling branch aipass_framework/", naming something that
-    is not a citizen and has no mailbox to appeal to. It also locked @spawn out
-    of its own templates: the skeleton's name never matches the branch you are
-    standing in, so every path in there read as somebody else's home.
-
-    Outermost-wins is the same mapping @devpulse used to fix the commit gate
-    (e934099f) when the identical mimicry made it run pytest inside the
-    template. One rule for one bug, not two rules for two symptoms.
-
-    Safe because no ``.trinity/`` exists above a branch: not at the project
-    root, not at ``src/``, not at ``src/aipass/``. The outermost hit inside the
-    project IS the citizen. The walk stops at the project boundary, so a
-    ``.trinity`` outside it can never claim a path inside.
-
-    A symlink is never a citizen: ``scratch/api_link`` pointing at @api has a
-    ``.trinity`` through the link, and read as one it named the link a sibling
-    branch. Only a symlink can be met here as the path itself; every ancestor
-    of a judged path is already resolved.
+    Outermost, because a ``.trinity/`` is not proof of a citizen: @spawn's templates hold
+    branch skeletons. No ``.trinity/`` exists above a branch, so the outermost hit is the citizen.
+    A symlink is never a citizen (its ``.trinity`` is the target's).
     """
     root = project_root.resolve()
     outermost: Path | None = None
@@ -130,11 +91,7 @@ def _find_branch_root(path: Path, project_root: Path) -> Path | None:
 
 
 def _current_branch_root(project_root: Path | None) -> Path | None:
-    """Return the root of the branch the CWD lives in, or None.
-
-    Already Optional, and "no CWD" is one more way the answer is unknown — the
-    branch is inferred from where the caller stands, not from who they are.
-    """
+    """Return the root of the branch the CWD lives in, or None (also when there is no CWD)."""
     if project_root is None:
         return None
     cwd = caller_cwd()
@@ -162,11 +119,7 @@ def _resolve_git_dir(path: Path) -> Path | None:
 
 
 def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
-    """The carve-out half of the fence: .git, .trinity, .aipass, .codex, .agents.
-
-    Split out of :func:`check_carveouts` so stale mode can keep this half while
-    crossing the sibling-branch half. Returns ``(blocked, reason)``.
-    """
+    """The carve-out half of the fence, apart so stale mode can keep it. Returns ``(blocked, reason)``."""
     parts = resolved.parts
     for i, part in enumerate(parts):
         if part in _CARVEOUT_DIRS:
@@ -182,11 +135,7 @@ def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
 
 
 def check_carveouts(resolved: Path, project_root: Path | None) -> tuple[bool, str]:
-    """Refuse deletion of protected paths even inside allowed roots.
-
-    Returns ``(blocked, reason)``.  ``blocked=True`` means the path must
-    NOT be deleted.
-    """
+    """Refuse deletion of protected paths even inside allowed roots. Returns ``(blocked, reason)``."""
     blocked, reason = check_protected_dirs(resolved)
     if blocked:
         return blocked, reason
@@ -204,31 +153,13 @@ def check_carveouts(resolved: Path, project_root: Path | None) -> tuple[bool, st
 def check_contained_citizens(resolved: Path, project_root: Path | None) -> tuple[bool, str]:
     """Refuse a project directory that CONTAINS a citizen other than the caller.
 
-    The sibling fence walks UP from the target, so it only sees a citizen the
-    target sits inside. A target ABOVE the branches — ``drone rm ..`` from a
-    branch is ``src/aipass/``, ``../..`` is ``src/`` — has no ``.trinity``
-    above it, passed every guard, and rmtree would have taken the fleet
-    (DPLAN-0338 follow-up). This walks DOWN and stops at the first foreign
-    citizen, which the refusal names.
-
-    Scope, so nothing that worked before changes:
-      - only directories under the project root; the system temp dir is not
-        a place citizens live and keeps its old behaviour;
-      - a target already inside a branch returns at once. Everything below it
-        shares that branch's owner (outermost wins), the sibling fence has
-        answered for it, and a template skeleton under @spawn stays @spawn's;
-      - the caller's own branch is pruned whole, for the same reason;
-      - a symlink is not a citizen: rmtree unlinks the link, never what it
-        points at, and the walk does not follow one.
-
-    A folder the walk cannot list refuses the delete: a guard that could not
-    look must not report clear. Returns ``(blocked, reason)``.
+    The sibling fence walks UP, so a target ABOVE the branches (``drone rm ..`` = ``src/aipass/``)
+    passes it; this walks DOWN. A target inside a branch, the caller's own branch and symlinks
+    are skipped. A folder the walk cannot list refuses. Returns ``(blocked, reason)``.
     """
     if project_root is None or not resolved.is_relative_to(project_root) or not resolved.is_dir():
         return False, ""
     if resolved.is_symlink():
-        # The target itself is a link, judged where it lives: rm unlinks it and
-        # the tree it points at stays, so there is nothing below it to walk.
         return False, ""
     if _find_branch_root(resolved, project_root) is not None:
         return False, ""
@@ -260,9 +191,7 @@ def check_contained_citizens(resolved: Path, project_root: Path | None) -> tuple
 def check_containment(path: Path, roots: list[Path]) -> tuple[bool, str]:
     """Check if *path* (already resolved) is a strict child of any allowed root.
 
-    Returns ``(allowed, reason)``.  Refuses the root directories themselves.
-    When multiple roots are nested (e.g. temp dir and a subdirectory of it),
-    the path must not equal ANY root — checked upfront before containment.
+    Returns ``(allowed, reason)``. Roots may nest, so equality to ANY root is checked first.
     """
     root_set = frozenset(roots)
     if path in root_set:
@@ -277,24 +206,14 @@ def check_containment(path: Path, roots: list[Path]) -> tuple[bool, str]:
 
 
 def safe_delete(paths: list[str]) -> list[tuple[str, bool, str]]:
-    """Delete *paths* with containment checks.
-
-    Returns a list of ``(original_path, success, message)`` tuples.
-    Every path is checked independently; a refused path does not block others.
-    """
+    """Delete *paths* with containment checks; a refused path does not block others."""
     return _safe_delete_direct(paths)
 
 
 def _standing_inside(resolved: Path, cwd: Path | None) -> str:
     """Name the caller's own position when that is what blocked the delete.
 
-    Windows holds a process's current directory open without delete sharing, so
-    removing a tree you are standing in fails with WinError 32 — and the fleet's
-    normal spelling puts you there, because the target is an argument and nobody
-    cds first: ``drone rm ..`` from a branch deletes the parent of your own cwd.
-    POSIX permits that delete, so this only ever appends on the host that
-    refused, and it says the one thing that gets the caller unstuck. Added to
-    the message only; whose refusal it was does not change.
+    Windows refuses to remove a tree the process stands in (WinError 32); ``drone rm ..`` does that.
     """
     if cwd is None or not cwd.is_relative_to(resolved):
         return ""
@@ -304,15 +223,7 @@ def _standing_inside(resolved: Path, cwd: Path | None) -> str:
 def _remove_tree(path: Path) -> None:
     """Remove a directory tree in rm's direct lane — where the host answers.
 
-    Every guard before this in _safe_delete_direct is drone's own verdict; this
-    is where the operating system answers, and it can refuse on its own terms
-    (Windows' WinError 32 on a tree the process stands in). It is the direct
-    lane's only tree removal, not every one: the broker daemon removes trees
-    with its own shutil.rmtree call in apps/handlers/broker/daemon.py.
-
-    Why this is its own function is the test, said plainly: tests/test_rm.py
-    stands Windows' refusal in for it on a POSIX host, to pin the message
-    _safe_delete_direct adds when the caller stands in the tree.
+    Its own function so tests/test_rm.py can stand Windows' refusal in for it on POSIX.
     """
     shutil.rmtree(path)
 
@@ -335,9 +246,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
         elif cwd is not None:
             absolute = cwd / original
         else:
-            # A relative path names a place RELATIVE TO somewhere, and there is
-            # no somewhere. Refused per path rather than for the whole call, so
-            # `drone rm ./scratch /tmp/victim` still deletes what it can name.
+            # Refused per path, so absolute paths in the same call still delete.
             message = f"Cannot resolve relative path '{path_str}' — this process has no current directory"
             results.append((path_str, False, message))
             logger.info("rm: %s", message)
@@ -364,11 +273,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
             continue
 
-        # A symlink is judged and reported by where the LINK lives: its parent
-        # resolved, its own name not followed. Judged by its target, a link to
-        # @devpulse printed "Deleted: .../src/aipass/devpulse", and a link
-        # inside canary/ was deleted from the devpulse seat (2026-09-30). Only
-        # the link is removed, so only the link's place is asked about.
+        # A symlink is judged by where the LINK lives, not its target: only the link is removed.
         target: Path | None = None
         if absolute.is_symlink():
             target = absolute.resolve()
@@ -414,16 +319,10 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             )
             continue
 
-        # Measured here and not a line later: after rmtree there is nothing
-        # left to ask how big it was.
         measurement = deletion_log.measure(absolute)
 
         try:
-            # A link is removed as the link. Anything else is deleted at the
-            # RESOLVED path, the one every guard above judged: `drone rm ..`
-            # handed rmtree "spawn/..", which emptied the tree and then failed
-            # its last rmdir, because spawn was gone by then. The ledger said
-            # "failed" for a delete that had happened.
+            # Delete the RESOLVED path the guards judged: rmtree("spawn/..") fails its last rmdir.
             if target is not None:
                 absolute.unlink()
             elif resolved.is_dir():
@@ -459,10 +358,6 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     return results
 
 
-# ---------------------------------------------------------------------------
-# Stale mode — drone rm --stale AGE [--dry-run] DIR [DIR...]  (DPLAN-0338)
-# ---------------------------------------------------------------------------
-
 MODE_STALE = "stale"
 STALE_FLAG = "--stale"
 DRY_RUN_FLAG = "--dry-run"
@@ -472,8 +367,7 @@ _STALE_FOLDER_SUFFIX = "_json"
 
 _AGE_UNITS = {"d": 86_400, "h": 3_600, "m": 60}
 _AGE_FORMS = "10d (days), 36h (hours) or 90m (minutes)"
-# [0-9], not \d: \d matches every Unicode digit and int() reads them all, so
-# "٣d" would have parsed as three days.
+# [0-9], not \d: \d matches every Unicode digit and int() reads them all.
 _AGE_PATTERN = re.compile(r"([0-9]+)([dhm])")
 
 
@@ -503,11 +397,7 @@ class StaleReport:
 def is_stale_request(tokens: list[str]) -> bool:
     """True when any token asks for stale mode — in ANY slot, in any spelling.
 
-    Any slot, because the plain lane reads every token as a path to delete:
-    ``drone rm api_json --stale 10d`` left to it removes the whole folder, and
-    ``--stale=10d`` left to it is a not-found beside a real delete of every
-    DIR. So every token starting ``--stale`` comes here, where it is parsed or
-    refused before anything is touched.
+    The plain lane reads every token as a path: ``drone rm api_json --stale 10d`` there removes the folder.
     """
     return any(token.startswith(STALE_FLAG) for token in tokens)
 
@@ -515,9 +405,7 @@ def is_stale_request(tokens: list[str]) -> bool:
 def parse_age(text: str) -> int:
     """Seconds in a stale-mode AGE: ``10d``, ``36h`` or ``90m``.
 
-    Raises ValueError naming the three forms. Zero is refused as well: an age
-    of zero matches a staged write that is in flight right now, and unlinking
-    its temp fails that write's rename.
+    Zero is refused: it matches a staged write in flight, and unlinking its temp fails the rename.
     """
     match = _AGE_PATTERN.fullmatch(text)
     if match is None:
@@ -531,10 +419,8 @@ def parse_age(text: str) -> int:
 def parse_stale_args(tokens: list[str]) -> StaleRequest:
     """Parse ``--stale AGE [--dry-run] DIR [DIR...]``, flags in any slot.
 
-    ``--stale=AGE`` is read too. Raises ValueError — before any walk or delete —
-    on a missing or malformed AGE, a repeated ``--stale``, no DIR, or any other
-    token starting with ``-``: an unknown option is most likely a mistyped
-    ``--dry-run``, and reading it as a DIR would turn a rehearsal into a sweep.
+    Raises ValueError before any walk on an unknown ``-`` token: a mistyped ``--dry-run`` read as
+    a DIR would turn a rehearsal into a sweep.
     """
     flags = [i for i, token in enumerate(tokens) if token.startswith(STALE_FLAG)]
     if len(flags) != 1:
@@ -588,26 +474,10 @@ def format_stale_summary(request: StaleRequest, report: StaleReport) -> str:
 def stale_sweep(request: StaleRequest) -> StaleReport:
     """Walk each DIR and unlink the staging temps older than the request's age.
 
-    A candidate is a regular file — never a symlink, never a directory — whose
-    name ends ``.tmp``, whose PARENT folder's name ends ``_json``, and whose
-    mtime is older than now minus the age. Nothing else is ever touched.
-
-    Each DIR must resolve under the project root (the temp roots the plain lane
-    also allows are not swept here) and outside the carve-outs. The walk never
-    enters a carve-out directory, a dropbox or an .archive, and never follows a
-    symlink. A DIR the user names that itself lies inside a sandbox is swept all
-    the same: a path a user names is the user's word, as drone rm of a file in a
-    dropbox is (drone's decision, DPLAN-0354 fleet green leg 3 ruling 11).
-
-    The sibling-branch fence is crossed here and only here, by design
-    (DPLAN-0338, the owner's go 2026-09-11): a stale staging temp is no citizen's
-    work — the real json beside it is intact whatever happens to the temp — and
-    one weekly job must sweep every branch's json folder in one call. The name,
-    folder and age restriction is the fence instead.
-
-    Every delete and every refusal is recorded with ``mode: stale`` and the
-    age. A dry run deletes nothing, so it records nothing; its refusals still
-    count and still print.
+    A candidate is a regular ``*.tmp`` file directly in a ``*_json`` folder, older than the age.
+    The walk skips carve-outs, dropbox and .archive, but a DIR the user names inside one is swept.
+    The sibling-branch fence is crossed here only: a stale temp is no citizen's work, and one
+    weekly job sweeps every branch. A dry run records nothing; its refusals still count.
     """
     report = StaleReport()
     json_handler.log_operation(
@@ -699,14 +569,12 @@ def _find_stale(
 ) -> list[tuple[Path, float, int]]:
     """Every candidate under *root* as ``(path, age in seconds, size in bytes)``.
 
-    *visited* is shared across the DIRs of one run, so overlapping DIRs walk a
-    folder once and never match — or try to delete — the same file twice.
+    *visited* is shared across one run's DIRs, so overlapping DIRs never match a file twice.
     """
     found: list[tuple[Path, float, int]] = []
 
     def _unreadable(exc: OSError) -> None:
-        # os.walk's default skips what it cannot list, in silence. A sweep that
-        # did not look somewhere must not report clean.
+        # os.walk's default skips what it cannot list in silence; a sweep that did not look is not clean.
         message = f"Cannot scan {exc.filename}: {exc.strerror or exc}"
         report.refusals.append(message)
         logger.warning("rm --stale: %s", message)
@@ -718,7 +586,6 @@ def _find_stale(
             continue
         visited.add(here)
         report.folders_scanned += 1
-        # A dropbox or an .archive is a sandbox nothing looks into (owner ruling).
         dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (".archive", "dropbox")]
         if not here.name.endswith(_STALE_FOLDER_SUFFIX):
             continue
@@ -729,7 +596,6 @@ def _find_stale(
             try:
                 info = path.lstat()
             except FileNotFoundError:
-                # Gone between the listing and the look: nothing left to sweep.
                 logger.debug("rm --stale: %s vanished before it could be read", path)
                 continue
             except OSError as exc:

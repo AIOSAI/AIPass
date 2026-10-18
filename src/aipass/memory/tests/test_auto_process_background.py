@@ -3,27 +3,13 @@
 # Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/handlers/intake/auto_process.py."""
 
-# Tests for moving auto_process off the prompt lane (DPLAN-0295 item 1).
-#
-# auto_process ran SYNCHRONOUSLY on the first UserPromptSubmit of every session —
-# measured 78.5s to 120.5s with a backlog, and the cause of the 30s-timeout losses
-# The owner hit live. Its stdout is always empty, so by the owner's test (compass #272)
-# it never belonged on the prompt lane at all.
-#
-# Covers:
-#   - spawn_background() returns immediately and does NOT do the work inline
-#   - a spawn failure is reported, never raised into the hook and never silent
-#   - single-flight: a fresh lock skips the spawn with a stated reason
-#   - a stale lock is reclaimed rather than deadlocking the lane forever
-#   - run_once() (the child) acquires, works, and always releases — even on error
-#   - the child is detached, so it outlives the session that kicked it
-#   - run_once() announces memory_pool_auto_processed on BOTH outcomes (1.1.0)
+# auto_process runs detached, never on the prompt lane: its stdout is empty and it took 78-120s.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — run_pool_processing and auto_process() work, in tests/test_auto_process.py
@@ -53,18 +39,8 @@ def isolated_lock(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_live_operation_log(monkeypatch):
-    """Keep test runs out of the branch's real operation log.
-
-    Without this, spawn/run tests append fabricated entries ('chroma exploded',
-    pid 8) to memory_json/auto_process_log.json — test fiction in a production
-    record that a future reader would have to disprove.
-    """
+    """Keep test runs out of the branch's real operation log: no fabricated entries in a production record."""
     monkeypatch.setattr(ap.json_handler, "log_operation", MagicMock(return_value=True))
-
-
-# ---------------------------------------------------------------------------
-# spawn_background
-# ---------------------------------------------------------------------------
 
 
 class TestSpawnBackground:
@@ -93,12 +69,7 @@ class TestSpawnBackground:
             assert kwargs.get("start_new_session") is True
 
     def test_child_never_inherits_the_hook_pipes(self, isolated_lock):
-        """Inherited pipes can block the hook when the buffer fills.
-
-        Each stream is pinned to what it is handed, not merely to "something":
-        stdin to DEVNULL, stderr folded into stdout, stdout to the child log file.
-        Mutant: ``"stdin": subprocess.DEVNULL`` -> ``subprocess.PIPE`` — killed.
-        """
+        """Inherited pipes can block the hook when the buffer fills: each stream pinned to what it is handed."""
         with patch("subprocess.Popen") as popen:
             popen.return_value = MagicMock(pid=1)
             ap.spawn_background()
@@ -124,11 +95,6 @@ class TestSpawnBackground:
         argv = popen.call_args.args[0]
         assert argv[0] == sys.executable
         assert argv[1].endswith("auto_process.py")
-
-
-# ---------------------------------------------------------------------------
-# Single-flight
-# ---------------------------------------------------------------------------
 
 
 class TestSingleFlight:
@@ -166,11 +132,6 @@ class TestSingleFlight:
 
         popen.assert_called_once()
         assert result["success"] is True
-
-
-# ---------------------------------------------------------------------------
-# run_once — the child's entry point
-# ---------------------------------------------------------------------------
 
 
 class TestRunOnce:
@@ -215,46 +176,18 @@ class TestRunOnce:
         assert seen["lock"]["started"] > 0
 
 
-# ---------------------------------------------------------------------------
-# Completion event
-# ---------------------------------------------------------------------------
-
-
 class TestCompletionIsAnnounced:
     """The child announces its own completion, because nothing else can.
 
-    THE DEFECT, found by @trigger 2026-09-05 and confirmed by @hooks: before
-    DPLAN-0294 phase 1b the hook called auto_process() inline and fired
-    `memory_pool_auto_processed` when it returned. Phase 1b detached the work
-    for latency and the fire went with the inline call — @trigger's handler
-    stayed registered and became unreachable, measured at ZERO fire sites
-    fleet-wide. The handler's failure leg is what turns a bad run into
-    `error_detected`, the medic dispatch path, so for that whole window a
-    vectorize or rollover failure inside the child was visible only as counters
-    in auto_process_log.json that nothing reads for failure.
-
-    The spawn site cannot cure it: @hooks returns as soon as a PID exists, and a
-    PID is not a completion. These pin that the announcement happens HERE, where
-    the result is actually known, on both outcomes.
+    The spawn site cannot: a PID is not a completion. Without the fire, @trigger's failure leg never reaches medic.
     """
 
     @staticmethod
     def _bus():
         """The exact bus object ``_fire_completion`` will reach, resolved NOW.
 
-        The production code does ``from aipass.trigger.apps.modules.core import
-        trigger`` at call time, which resolves through ``sys.modules``. A dotted
-        ``patch("aipass.trigger.apps.modules.core.trigger.fire")`` does not
-        always land on that object: Python 3.10's ``mock`` walks the attribute
-        chain from the top package, 3.11+ resolves through ``sys.modules``. The
-        two routes agree only while the parent-package attribute and the
-        ``sys.modules`` entry name the same module; something earlier on one
-        xdist worker split them, and on 3.10 the patch landed on a ``Trigger``
-        the code never calls. CI run 34088947108, the 3.10 leg alone: "expected
-        exactly one completion fire, got 0", green on 3.11-3.13. The splitter is
-        not named: that worker's file order replayed on 3.12 in one process
-        shows both routes on one object. Patching through the import route pins
-        the object the code reaches on every interpreter, whatever split it.
+        A dotted patch() walks the package attributes on 3.10 and sys.modules on 3.11+; when the two
+        split, the patch misses. Patching through the import route pins the object the code reaches.
         """
         import importlib
 
@@ -298,12 +231,7 @@ class TestCompletionIsAnnounced:
         assert payload["rollover"]["status"] == "unknown"
 
     def test_a_declined_run_announces_nothing(self, isolated_lock):
-        """A run that never held the lock did not complete anything.
-
-        Announcing here would report a completion that has not happened — the
-        same untruth that makes the spawn site the wrong place to fire from.
-        The holder announces its own.
-        """
+        """A run that never held the lock did not complete anything; the holder announces its own."""
         isolated_lock.write_text(json.dumps({"pid": os.getpid(), "started": time.time()}), encoding="utf-8")
 
         with patch.object(self._bus(), "fire") as fire:
@@ -320,11 +248,6 @@ class TestCompletionIsAnnounced:
 
         assert result["success"] is True
         assert not isolated_lock.exists(), "a failed fire must still release the lock"
-
-
-# ---------------------------------------------------------------------------
-# Script contract
-# ---------------------------------------------------------------------------
 
 
 class TestScriptContract:

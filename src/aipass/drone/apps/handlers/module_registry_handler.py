@@ -3,18 +3,10 @@
 # Description: Handler for internal module registry operations
 # Version: 2.0.2
 # Created: 2026-03-09
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""Handler for internal module registry operations.
-
-Handles dynamic module loading, adapter introspection, and command
-delegation for drone's internal module system.
-
-Internal modules (e.g. git) use their own adapter files inside drone.
-External modules (e.g. seedgo, cli) are declared in routing_config.json
-and routed through the generic_adapter capture mechanism.
-"""
+"""Handler for internal module registry operations."""
 
 from __future__ import annotations
 
@@ -29,17 +21,12 @@ from aipass.drone.apps.handlers.generic_adapter import capture_main
 from aipass.drone.apps.handlers.module_root import module_file
 
 
-# ---------------------------------------------------------------------------
-# Internal modules — live inside drone, act as their own adapter
-# ---------------------------------------------------------------------------
+# Internal modules live inside drone and act as their own adapter.
 _INTERNAL_MODULES: dict[str, str] = {
     "git": "aipass.drone.apps.modules.git_module",
 }
 
 
-# ---------------------------------------------------------------------------
-# External modules — loaded from routing_config.json
-# ---------------------------------------------------------------------------
 _ROUTING_CONFIG_PATH: Path = module_file(__file__).parent / "routing_config.json"
 
 
@@ -111,12 +98,7 @@ def is_module(name: str) -> bool:
 
 
 def get_module_info(name: str) -> ModuleInfo | None:
-    """Get module metadata.
-
-    For internal modules: dynamically imports the adapter and reads DRONE_MODULE.
-    For external modules: returns metadata from routing_config.json.
-    """
-    # External module — config-driven
+    """Get module metadata: routing_config.json for external, the adapter's DRONE_MODULE for internal."""
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
         return ModuleInfo(
@@ -126,7 +108,6 @@ def get_module_info(name: str) -> ModuleInfo | None:
             adapter_path=ext.entry_point,
         )
 
-    # Internal module — import-driven
     adapter_path = _INTERNAL_MODULES.get(name)
     if adapter_path is None:
         return None
@@ -149,13 +130,7 @@ def get_module_info(name: str) -> ModuleInfo | None:
 
 
 def route_module_command(name: str, command: str, args: list[str] | None = None) -> dict:
-    """Route a command to a module.
-
-    For external modules: uses generic_adapter.capture_main().
-    For internal modules: imports and calls handle_command() directly.
-
-    Returns dict with keys: stdout, stderr, exit_code.
-    """
+    """Route a command to a module."""
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
         result = capture_main(ext.entry_point, ext.name, command, args)
@@ -176,12 +151,7 @@ def route_module_command(name: str, command: str, args: list[str] | None = None)
 def get_module_help(name: str, command: str | None = None) -> str | None:
     """Get help text from a module.
 
-    For external modules: captures branch's own --help output via
-    generic_adapter. For internal modules: calls get_help() directly.
-
-    Returns "" when the module has no help to give, and None when an internal
-    module's adapter cannot be imported or read, so a caller can tell a broken
-    module from a quiet one.
+    Returns "" for no help, None when an internal adapter cannot be read (broken, not quiet).
     """
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
@@ -208,13 +178,7 @@ def get_module_help(name: str, command: str | None = None) -> str | None:
 def get_module_introspective(name: str) -> str | None:
     """Get introspective view from a module.
 
-    For external modules: captures branch's own no-args output via
-    generic_adapter.  For internal modules: calls get_introspective()
-    or falls back to get_help().
-
-    Returns "" when the module has nothing to show, and None when an internal
-    module's adapter cannot be imported or read, so a caller can tell a broken
-    module from a quiet one.
+    Returns "" for nothing to show, None when an internal adapter cannot be read (broken, not quiet).
     """
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:

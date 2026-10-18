@@ -3,33 +3,14 @@
 # Description: Unit tests for all 37 content handler functions
 # Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_content.py and 36 sibling content functions."""
 
-# One test per content function (standards + proof). Each asserts the function's
-# own subject matter AND, through ``_assert_content_str``, that the answer is a
-# non-empty multi-line string.
-#
-# Was 74 tests in 37 pairs until 2026-09-07 (FPLAN-0491). Every pair was a
-# ``_returns_str`` row and a ``_has_expected_content`` row calling the SAME
-# function and asserting over the SAME value; the substring assertion already
-# fails on None (TypeError) and on an empty string, so the only claim unique to
-# the first row was "contains a newline". The pairs are merged, not dropped:
-# ``_assert_content_str`` now runs inside the surviving row, on the same result.
-# Mutation-checked at the merge: a content function returning a single line
-# reds its test.
-#
-# 29 of the 37 rows carried an ``or``-joined substring assertion until 2026-09-07
-# (FPLAN-0509, assertion_shape OR-ESCAPE): ``assert "X" in result or "y" in
-# result.lower()`` passes on either clause, so it pinned neither. Each was
-# replaced by the substrings the function ACTUALLY returns, measured by calling
-# it and reading the string, one assert per claim. Two of the discarded clauses
-# were already dead and the ``or`` had been hiding it: ``"meta" in result.lower()``
-# is FALSE for get_introspection_standards, and ``"snake_case" in result.lower()``
-# is FALSE for get_naming_standards. All 66 replacement substrings were
-# mutation-checked one at a time against their own content module.
+# One test per content function (standards + proof): each asserts the function's own subject matter AND,
+# through ``_assert_content_str``, a non-empty multi-line string. One assert per claim, never an ``or``-joined
+# substring, which passes on either clause and pins neither.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that all 37 content modules under aipass_standards/ and aipass_proof/ parse and import
@@ -77,26 +58,11 @@ from aipass.seedgo.apps.handlers.aipass_standards.unused_function_content import
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_content
 
 
-# ===========================================================================
-# Helper
-# ===========================================================================
-
-
 def _assert_content_str(result: str, label: str) -> None:
     """Validate that a content function returned a non-empty string."""
     assert isinstance(result, str), f"{label} should return str, got {type(result)}"
     assert len(result) > 0, f"{label} should return non-empty string"
     assert "\n" in result, f"{label} should be multi-line content"
-
-
-# ===========================================================================
-# PROOF CONTENT FUNCTIONS (5)
-# ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# 1. content_naming_proof
-# ---------------------------------------------------------------------------
 
 
 def test_get_content_naming_proof_has_expected_content():
@@ -106,11 +72,6 @@ def test_get_content_naming_proof_has_expected_content():
     _assert_content_str(result, "content_naming_proof")
     assert "CONTENT NAMING PROOF" in result
     assert "get_{name}_standards()" in result
-
-
-# ---------------------------------------------------------------------------
-# 2. interface_proof
-# ---------------------------------------------------------------------------
 
 
 def test_get_interface_proof_has_expected_content():
@@ -123,11 +84,6 @@ def test_get_interface_proof_has_expected_content():
     assert "def check_branch(branch_path, module_name)" in result
 
 
-# ---------------------------------------------------------------------------
-# 3. plugin_integrity_proof
-# ---------------------------------------------------------------------------
-
-
 def test_get_plugin_integrity_proof_has_expected_content():
     """get_plugin_integrity_proof demands dynamic discovery and names standards_audit.py."""
 
@@ -138,11 +94,6 @@ def test_get_plugin_integrity_proof_has_expected_content():
     assert "standards_audit.py" in result
 
 
-# ---------------------------------------------------------------------------
-# 4. readme_currency_proof
-# ---------------------------------------------------------------------------
-
-
 def test_get_readme_currency_proof_has_expected_content():
     """get_readme_currency_proof states that the README checker count must match reality."""
 
@@ -150,11 +101,6 @@ def test_get_readme_currency_proof_has_expected_content():
     _assert_content_str(result, "readme_currency_proof")
     assert "README CURRENCY PROOF" in result
     assert "Checker count in README matches actual" in result
-
-
-# ---------------------------------------------------------------------------
-# 5. triplet_proof
-# ---------------------------------------------------------------------------
 
 
 def test_get_triplet_proof_has_expected_content():
@@ -168,16 +114,6 @@ def test_get_triplet_proof_has_expected_content():
     assert "{name}.md" in result
 
 
-# ===========================================================================
-# STANDARDS CONTENT FUNCTIONS (28)
-# ===========================================================================
-
-
-# ---------------------------------------------------------------------------
-# 6. architecture_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_architecture_standards_has_expected_content():
     """get_architecture_standards states the 3-layer pattern and the handler import ban."""
 
@@ -185,11 +121,6 @@ def test_get_architecture_standards_has_expected_content():
     _assert_content_str(result, "architecture_standards")
     assert "THE 3-LAYER PATTERN:" in result
     assert "Handlers CANNOT import modules" in result
-
-
-# ---------------------------------------------------------------------------
-# 7. cli_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_docs_page_standards_has_expected_content():
@@ -215,11 +146,6 @@ def test_get_cli_standards_has_expected_content():
     assert "from aipass.cli.apps.modules import console" in result
 
 
-# ---------------------------------------------------------------------------
-# 8. cli_flags_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_cli_flags_standards_has_expected_content():
     """get_cli_flags_standards lists the tier 1 required flags, --help and --version among them."""
 
@@ -231,11 +157,6 @@ def test_get_cli_flags_standards_has_expected_content():
     assert "--version" in result
 
 
-# ---------------------------------------------------------------------------
-# 9. commented_logger_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_commented_logger_standards_has_expected_content():
     """get_commented_logger_standards calls commented-out logger calls dead logging and lists the detected levels."""
 
@@ -243,11 +164,6 @@ def test_get_commented_logger_standards_has_expected_content():
     _assert_content_str(result, "commented_logger_standards")
     assert "Commented-out logger calls are dead logging" in result
     assert "error, warning, warn, info, exception, critical, debug." in result
-
-
-# ---------------------------------------------------------------------------
-# 10. dead_code_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_dead_code_standards_has_expected_content():
@@ -259,11 +175,6 @@ def test_get_dead_code_standards_has_expected_content():
     assert "branch_level" in result
 
 
-# ---------------------------------------------------------------------------
-# 11. debug_print_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_debug_print_standards_has_expected_content():
     """get_debug_print_standards bans bare print() and points at the Prax logger instead."""
 
@@ -271,11 +182,6 @@ def test_get_debug_print_standards_has_expected_content():
     _assert_content_str(result, "debug_print_standards")
     assert "have no place in production code" in result
     assert "Use structured logging (Prax logger)" in result
-
-
-# ---------------------------------------------------------------------------
-# 12. deep_nesting_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_deep_nesting_standards_has_expected_content():
@@ -287,11 +193,6 @@ def test_get_deep_nesting_standards_has_expected_content():
     assert "If, For, While, Try, With, ExceptHandler" in result
 
 
-# ---------------------------------------------------------------------------
-# 13. documentation_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_documentation_standards_has_expected_content():
     """get_documentation_standards requires a module docstring and Google-style function docstrings."""
 
@@ -299,11 +200,6 @@ def test_get_documentation_standards_has_expected_content():
     _assert_content_str(result, "documentation_standards")
     assert "REQUIRED: MODULE DOCSTRING" in result
     assert "FUNCTION DOCSTRINGS (Google-style)" in result
-
-
-# ---------------------------------------------------------------------------
-# 14. encapsulation_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_encapsulation_standards_has_expected_content():
@@ -315,11 +211,6 @@ def test_get_encapsulation_standards_has_expected_content():
     assert "RULE 1: No Cross-Branch Handler Imports" in result
 
 
-# ---------------------------------------------------------------------------
-# 15. error_handling_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_error_handling_standards_has_expected_content():
     """get_error_handling_standards demands truthful errors and names the except: pass failure."""
 
@@ -329,22 +220,12 @@ def test_get_error_handling_standards_has_expected_content():
     assert "except: pass" in result
 
 
-# ---------------------------------------------------------------------------
-# 16. handlers_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_handlers_standards_has_expected_content():
     """get_handlers_standards mentions handler concepts."""
 
     result = get_handlers_standards()
     _assert_content_str(result, "handlers_standards")
     assert "handler" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 17. hardcoded_key_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_hardcoded_key_standards_has_expected_content():
@@ -356,11 +237,6 @@ def test_get_hardcoded_key_standards_has_expected_content():
     assert "Provider prefixes:" in result
 
 
-# ---------------------------------------------------------------------------
-# 18. help_text_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_help_text_standards_has_expected_content():
     """get_help_text_standards mentions help text concepts."""
 
@@ -369,22 +245,12 @@ def test_get_help_text_standards_has_expected_content():
     assert "help" in result.lower()
 
 
-# ---------------------------------------------------------------------------
-# 19. imports_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_imports_standards_has_expected_content():
     """get_imports_standards mentions import concepts."""
 
     result = get_imports_standards()
     _assert_content_str(result, "imports_standards")
     assert "import" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 20. introspection_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_introspection_standards_has_expected_content():
@@ -396,22 +262,12 @@ def test_get_introspection_standards_has_expected_content():
     assert "print_introspection()" in result
 
 
-# ---------------------------------------------------------------------------
-# 21. json_structure_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_json_structure_standards_has_expected_content():
     """get_json_structure_standards mentions JSON structure concepts."""
 
     result = get_json_structure_standards()
     _assert_content_str(result, "json_structure_standards")
     assert "json" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 22. log_handler_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_log_handler_standards_has_expected_content():
@@ -423,11 +279,6 @@ def test_get_log_handler_standards_has_expected_content():
     assert "RotatingFileHandler" in result
 
 
-# ---------------------------------------------------------------------------
-# 23. log_level_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_log_level_standards_has_expected_content():
     """get_log_level_standards reserves ERROR for real system failures."""
 
@@ -437,11 +288,6 @@ def test_get_log_level_standards_has_expected_content():
     assert "Ensure ERROR level is reserved for real system failures." in result
 
 
-# ---------------------------------------------------------------------------
-# 24. log_structure_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_log_structure_standards_has_expected_content():
     """get_log_structure_standards states the two-tier model with system_logs/ at repo root."""
 
@@ -449,11 +295,6 @@ def test_get_log_structure_standards_has_expected_content():
     _assert_content_str(result, "log_structure_standards")
     assert "TWO-TIER LOG STRUCTURE" in result
     assert "system_logs/" in result
-
-
-# ---------------------------------------------------------------------------
-# 25. log_visibility_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_log_visibility_standards_has_expected_content():
@@ -466,11 +307,6 @@ def test_get_log_visibility_standards_has_expected_content():
     assert "prax system_logger" in result
 
 
-# ---------------------------------------------------------------------------
-# 26. meta_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_meta_standards_has_expected_content():
     """get_meta_standards requires a META block on line 1 of every Python file."""
 
@@ -480,22 +316,12 @@ def test_get_meta_standards_has_expected_content():
     assert "Every Python file starts with a META block on line 1" in result
 
 
-# ---------------------------------------------------------------------------
-# 27. modules_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_modules_standards_has_expected_content():
     """get_modules_standards mentions module concepts."""
 
     result = get_modules_standards()
     _assert_content_str(result, "modules_standards")
     assert "module" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 28. naming_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_naming_standards_has_expected_content():
@@ -507,11 +333,6 @@ def test_get_naming_standards_has_expected_content():
     assert "STANDARD VERBS:" in result
 
 
-# ---------------------------------------------------------------------------
-# 29. permission_flags_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_permission_flags_standards_has_expected_content():
     """get_permission_flags_standards names the one approved permission bypass flag."""
 
@@ -521,22 +342,12 @@ def test_get_permission_flags_standards_has_expected_content():
     assert "--permission-mode bypassPermissions" in result
 
 
-# ---------------------------------------------------------------------------
-# 30. readme_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_readme_standards_has_expected_content():
     """get_readme_standards mentions README concepts."""
 
     result = get_readme_standards()
     _assert_content_str(result, "readme_standards")
     assert "readme" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 31. ruff_check_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_ruff_check_standards_has_expected_content():
@@ -548,11 +359,6 @@ def test_get_ruff_check_standards_has_expected_content():
     assert "--output-format=json" in result
 
 
-# ---------------------------------------------------------------------------
-# 32. shebang_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_shebang_standards_has_expected_content():
     """get_shebang_standards bans shebangs in pip-installable packages."""
 
@@ -560,11 +366,6 @@ def test_get_shebang_standards_has_expected_content():
     _assert_content_str(result, "shebang_standards")
     assert "SHEBANG STANDARD" in result
     assert "No shebangs in pip-installable packages" in result
-
-
-# ---------------------------------------------------------------------------
-# 33. silent_catch_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_silent_catch_standards_has_expected_content():
@@ -576,22 +377,12 @@ def test_get_silent_catch_standards_has_expected_content():
     assert "ExceptHandler" in result
 
 
-# ---------------------------------------------------------------------------
-# 34. stderr_routing_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_stderr_routing_standards_has_expected_content():
     """get_stderr_routing_standards mentions stderr routing concepts."""
 
     result = get_stderr_routing_standards()
     _assert_content_str(result, "stderr_routing_standards")
     assert "stderr" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 35. todo_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_todo_standards_has_expected_content():
@@ -604,22 +395,12 @@ def test_get_todo_standards_has_expected_content():
     assert "FIXME" in result
 
 
-# ---------------------------------------------------------------------------
-# 36. trigger_standards
-# ---------------------------------------------------------------------------
-
-
 def test_get_trigger_standards_has_expected_content():
     """get_trigger_standards mentions trigger concepts."""
 
     result = get_trigger_standards()
     _assert_content_str(result, "trigger_standards")
     assert "trigger" in result.lower()
-
-
-# ---------------------------------------------------------------------------
-# 37. unused_function_standards
-# ---------------------------------------------------------------------------
 
 
 def test_get_unused_function_standards_has_expected_content():
@@ -631,14 +412,8 @@ def test_get_unused_function_standards_has_expected_content():
     assert "Phase 1 -- Collect files:" in result
 
 
-# ---------------------------------------------------------------------------
-# 38. startup_budget_standards (context pack)
-# ---------------------------------------------------------------------------
-
-
 def test_get_startup_budget_standards_records_the_query(monkeypatch):
-    """The page is returned and its query recorded like every sibling page (fleet green leg 14).
-    Red first: the content module logged no operation, and json_structure convicted it."""
+    """The page is returned and its query recorded like every sibling page (fleet green leg 14)."""
     recorded = []
     monkeypatch.setattr(
         startup_budget_content.json_handler, "log_operation", lambda name, payload: recorded.append((name, payload))

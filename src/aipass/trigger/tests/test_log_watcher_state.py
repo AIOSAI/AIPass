@@ -3,16 +3,11 @@
 # Description: Tests for the branch log watcher's state: positions, seen hashes, start/stop and the debounced writer
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's persisted state and lifecycle (trigger_data.json, start/stop)."""
 
-# Split from test_log_watcher.py (oversize_test_file, 2026-10-08): that file
-# keeps parsing and detection; this one holds what the watcher remembers and how
-# it starts and stops: the event callback and seen hashes, start/stop/status,
-# initialize_positions, the positions and inodes persisted in trigger_data.json,
-# and the debounced writer that flushes them.
 # The watcher's live-state doors are closed by conftest's log_watcher_infrastructure.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -31,11 +26,6 @@ import aipass.trigger.apps.handlers.log_watcher as lw
 from aipass.trigger.tests.support_log_watcher import _BRANCH_LOG_PATH
 
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
-
-
-# ---------------------------------------------------------------------------
-# Tests -- set_event_callback / clear_seen_hashes
-# ---------------------------------------------------------------------------
 
 
 class TestCallbackAndState:
@@ -59,11 +49,6 @@ class TestCallbackAndState:
         lw.clear_seen_hashes()
         assert lw.get_watcher_status()["seen_hashes_count"] == 0
         assert json.loads(lw.TRIGGER_DATA_FILE.read_text(encoding="utf-8"))["seen_error_hashes"] == []
-
-
-# ---------------------------------------------------------------------------
-# Tests -- start / stop / is_active / get_status
-# ---------------------------------------------------------------------------
 
 
 class TestStartStopStatus:
@@ -102,11 +87,6 @@ class TestStartStopStatus:
         assert status["stale_threshold_seconds"] == 300
         assert isinstance(status["excluded_files"], list)
         assert len(status["excluded_files"]) > 0
-
-
-# ---------------------------------------------------------------------------
-# Tests -- initialize_positions
-# ---------------------------------------------------------------------------
 
 
 class TestInitializePositions:
@@ -177,11 +157,6 @@ class TestInitializePositions:
         assert watcher.log_positions[str(log_file)] == log_file.stat().st_size
 
 
-# ---------------------------------------------------------------------------
-# Tests -- _load_seen_hashes
-# ---------------------------------------------------------------------------
-
-
 class TestLoadSeenHashes:
     """Tests for _load_seen_hashes persistence."""
 
@@ -242,11 +217,6 @@ def _restarted() -> Any:
     return watcher
 
 
-# ---------------------------------------------------------------------------
-# Tests -- _load_log_positions
-# ---------------------------------------------------------------------------
-
-
 class TestLoadLogPositions:
     """Tests for _load_log_positions persistence."""
 
@@ -289,21 +259,13 @@ class TestLoadLogPositions:
         assert isinstance(position, int)
 
 
-# ---------------------------------------------------------------------------
-# Tests -- log_inodes persistence (parallel key, backward compatible)
-# ---------------------------------------------------------------------------
-
-
 class TestLogInodesPersistence:
     """Tests for the 'log_inodes' key alongside 'log_positions'."""
 
     def test_flush_and_load_round_trip(self, tmp_path, monkeypatch):
         """Positions and inodes round-trip through trigger_data.json.
 
-        Read back by a restarted watcher since leg 7 (it called _load_log_positions
-        directly): a position the restart did not restore would snap to the
-        log's end, 200. Mutant run (leg 7): _load_log_positions answering {}
-        reddens this at the position assert.
+        Read back by a restarted watcher: an unrestored position would snap to the log's end.
         """
         data_file = tmp_path / "trigger_data.json"
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
@@ -337,9 +299,7 @@ class TestLogInodesPersistence:
     def test_old_format_state_loads_without_error(self, tmp_path, monkeypatch):
         """State written before this change (no log_inodes) still loads.
 
-        Read back by a restarted watcher since leg 7 (it called _load_log_positions
-        directly); the only inode it holds is the live stat of the one real log.
-        Mutant run (leg 7): _load_log_positions answering {} reddens the position assert.
+        Read back by a restarted watcher; the only inode it holds is the live stat of the one real log.
         """
         log = _a_branch_log()
         data_file = tmp_path / "trigger_data.json"
@@ -356,9 +316,7 @@ class TestLogInodesPersistence:
     def test_flush_without_watcher_leaves_position_state_untouched(self, tmp_path, monkeypatch):
         """clear_seen_hashes with no active watcher does not wipe on-disk position state.
 
-        With no watcher there is no in-memory position state to write, so
-        log_positions/log_inodes already on disk must survive the hash-only
-        flush rather than being clobbered with empty dicts.
+        log_positions/log_inodes on disk must survive the hash-only flush, not become empty dicts.
         """
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(
@@ -447,11 +405,6 @@ class TestLogInodesPersistence:
         assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
 
 
-# ---------------------------------------------------------------------------
-# Tests -- debounced trigger_data.json writer
-# ---------------------------------------------------------------------------
-
-
 class TestDebouncedWriter:
     """Tests for time-based debounced coalesced writes to trigger_data.json."""
 
@@ -538,12 +491,7 @@ class TestDebouncedWriter:
         assert any("Failed to flush trigger_data.json" in warning for warning in warnings)
 
     def test_restart_survival(self, tmp_path, monkeypatch):
-        """Flushed data survives reload — positions and hashes intact.
-
-        Positions read back by a restarted watcher since leg 7 (it called
-        _load_log_positions directly). Mutant run (leg 7): _load_log_positions
-        answering {} reddens the position assert.
-        """
+        """Flushed data survives reload — positions and hashes intact."""
         data_file = tmp_path / "trigger_data.json"
         monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
         log = _a_branch_log()
@@ -577,13 +525,7 @@ class TestDebouncedWriter:
         assert data["log_positions"] == {"/f.log": 10}
 
     def test_dirty_flag_cleared_after_flush(self, monkeypatch):
-        """pending_flush reads False after a successful flush.
-
-        Flushed through stop_branch_log_watcher, which forces the same flush,
-        since leg 7 (it called _flush_trigger_data directly). Read through the
-        status answer since leg 10, which added pending_flush. Mutant run: the
-        flush leaving the flag set reddens this.
-        """
+        """pending_flush reads False after a successful flush."""
         monkeypatch.setattr(lw, "_data_dirty", True)
         monkeypatch.setattr(lw, "_active_watcher", SimpleNamespace(log_positions={}, log_inodes={}))
         lw.stop_branch_log_watcher()

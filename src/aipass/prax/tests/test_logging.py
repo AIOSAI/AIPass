@@ -3,14 +3,10 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
-
-# Tests for prax logging subsystem — covers introspection, config helpers,
-# and template placeholder replacement. lines_to_bytes is pinned in
-# tests/test_config.py; the copy here called no product code (prax, leg 8).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
@@ -40,23 +36,15 @@ from aipass.prax.apps.handlers.logging.introspection import (
 from aipass.prax.apps.handlers.repo_root import resolved_file
 
 
-# =============================================
-# _is_prax_internal
-# =============================================
-
-
 def _ask_for_the_caller(ask):
     """The frame the stack walk judges: its module is whatever its globals' __file__ says."""
     return ask()
 
 
 def _caller_seen_from(module_file: str):
-    """get_calling_module_path(), asked from a frame whose module is ``module_file`` (prax, leg 5).
+    """get_calling_module_path(), asked from a frame whose module is ``module_file`` .
 
-    The walk passes over a prax-internal path and stops at the next frame out,
-    this test file; any other path is the answer. So _is_prax_internal's verdict
-    is read through its one public reader, on a real stack, with nothing replaced.
-    """
+    The walk passes over a prax-internal path and stops at this file; any other path is the answer."""
     globals_of_the_frame = {"__file__": module_file, "__builtins__": __builtins__}
     caller = types.FunctionType(_ask_for_the_caller.__code__, globals_of_the_frame)
     return caller(introspection.get_calling_module_path)
@@ -79,10 +67,7 @@ class TestIsPraxInternal:
         assert _caller_seen_from(str(path)) == __file__
 
     def test_prax_paths_windows_form(self, mock_prax_infrastructure):
-        """Windows-form logger and handler paths are detected as prax internal.
-
-        Mutant: dropping the backslash-to-slash normalisation in _is_prax_internal reddens this.
-        """
+        """Windows-form logger and handler paths are detected as prax internal (backslash normalisation)."""
         handler = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\handlers\\logging\\setup.py"
         logger_module = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\modules\\logger.py"
         assert _caller_seen_from(handler) == __file__
@@ -116,17 +101,8 @@ class TestIsPraxInternal:
         assert _caller_seen_from("") == __file__
 
 
-# =============================================
-# detect_branch_from_path
-# =============================================
-
-
 def _aipass_package_root() -> Path:
-    """src/aipass, found from introspection's own file with the resolver it uses (prax, leg 5).
-
-    An input to the branch tests below, not their subject: the package the
-    product lives in, so a path under it is a path inside the fleet.
-    """
+    """src/aipass, found from introspection's own file with the resolver it uses."""
     return resolved_file(Path(introspection.__file__)).parents[4]
 
 
@@ -165,11 +141,6 @@ class TestDetectBranchFromPath:
         """Deeply nested module path still resolves to the branch."""
         deep_path = str(_aipass_package_root() / "flow" / "apps" / "handlers" / "deep" / "module.py")
         assert detect_branch_from_path(deep_path) == "flow"
-
-
-# =============================================
-# detect_external_project
-# =============================================
 
 
 class TestDetectExternalProject:
@@ -248,11 +219,6 @@ class TestDetectExternalProject:
         assert detect_external_project(str(module_file)) is None
 
 
-# =============================================
-# setup_individual_logger external routing
-# =============================================
-
-
 class TestSetupExternalRouting:
     """Tests for external project log routing in setup_individual_logger."""
 
@@ -296,7 +262,7 @@ class TestSetupExternalRouting:
     def test_a_project_system_logs_that_cannot_be_made_mutes_that_tier_and_never_raises(
         self, mock_prax_infrastructure, monkeypatch, tmp_path, caplog
     ):
-        """DPLAN-0409 C4: the external branch mkdir'd <project>/system_logs bare, so it raised."""
+        """An unmakeable <project>/system_logs mutes that tier; the logger call never raises."""
         project_dir = tmp_path / "Compass"
         project_dir.mkdir()
         # A file where the directory belongs: mkdir fails on every OS, no permission bit needed.
@@ -364,8 +330,7 @@ class TestConcurrentFirstCallsBuildOneLogger:
 
         assert local.count("a later line") == 1
         assert central.count("a later line") == 1
-        # The message ends each line whatever the configured separator: the line
-        # format is the config's, pinned in test_config.py (prax, PR #774).
+        # The line format is the config's (pinned in test_config.py); the message ends each line.
         assert sorted(line.rsplit("root ", 1)[-1] for line in local.splitlines() if "timed out" in line) == sorted(
             f"{i} timed out" for i in range(self.THREADS)
         )
@@ -427,11 +392,6 @@ class TestAnUnwritableLogHome:
         assert list(locked.iterdir()) == []
 
 
-# =============================================
-# get_caller_info
-# =============================================
-
-
 class TestGetCallerInfo:
     """Tests for get_caller_info() — returns (module_name, path, branch) tuple."""
 
@@ -444,12 +404,7 @@ class TestGetCallerInfo:
         assert result == ("test_logging", __file__, "prax")
 
     def test_module_name_is_string(self, mock_prax_infrastructure, monkeypatch):
-        """The caller is this file, so the name is this file's stem — not merely a str.
-
-        The two env overrides are cleared first: with AIPASS_LOG_NAME set, every
-        answer here would be that variable and the stack walk would prove
-        nothing.
-        """
+        """The caller is this file, so the name is this file's stem; env overrides cleared first."""
         monkeypatch.delenv("AIPASS_LOG_NAME", raising=False)
         monkeypatch.delenv("AIPASS_BOT_ID", raising=False)
 
@@ -462,8 +417,6 @@ class TestGetCallerInfo:
     def test_called_from_test_file(self, mock_prax_infrastructure):
         """When called from a test file, path should reference this file."""
         module_name, caller_path, branch = get_caller_info()
-        # Called from this test file, so module_name should be "test_logging"
-        # or the stack walk may land on pytest internals; either way it is a string
         assert isinstance(module_name, str)
         assert module_name != ""
 
@@ -474,22 +427,12 @@ class TestGetCallerInfo:
             assert result == ("unknown_module", None, None)
 
 
-# =============================================
-# _replace_placeholders
-# =============================================
-
-
 class TestReplacePlaceholders:
     """Tests for _replace_placeholders() — template placeholder substitution."""
 
     @staticmethod
     def _make_replace_fn():
-        """Create a standalone _replace_placeholders matching template_pusher logic.
-
-        We replicate the function here to avoid importing from template_pusher,
-        which has dependencies that need extensive mocking. The logic under test
-        is the recursive walk + placeholder replacement algorithm.
-        """
+        """Create a standalone _replace_placeholders matching template_pusher logic."""
 
         def _replace_placeholders(template: dict, branch_name: str) -> dict:
             def _walk(val):
@@ -581,20 +524,8 @@ class TestReplacePlaceholders:
         assert result["a"]["d"] == 99
 
 
-# =============================================
-# Debug level gating (end-to-end, real files)
-# =============================================
-
-
 def _external_logger(setup, tmp_path, module_name, env=None, config=None):
-    """Build a real logger whose two tiers both land inside tmp_path.
-
-    Reuses the external-project routing path so both the system tier and the
-    local tier write to files under tmp_path that the test can read back.
-
-    Returns:
-        Tuple of (logger, system_tier_log_path, local_tier_log_path).
-    """
+    """Build a real logger whose two tiers land inside tmp_path: (logger, system_log, local_log)."""
     project_dir = tmp_path / "Proj"
     project_dir.mkdir(exist_ok=True)
     (project_dir / ".git").mkdir(exist_ok=True)
@@ -638,10 +569,7 @@ def _tiered_config(system_level, local_level):
 class TestDebugLevelGating:
     """End-to-end tests for debug() — asserts on real log file contents.
 
-    Every test logs an INFO line alongside the DEBUG line. Without that
-    control, an absent debug marker proves nothing: a broken logger and a
-    correctly-gated one produce the same empty file.
-    """
+    Each test logs an INFO control line, or an absent debug marker would prove nothing."""
 
     def test_debug_is_silent_at_default_level(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Default INFO: debug() reaches no file, while info() reaches both."""
@@ -698,9 +626,7 @@ class TestDebugLevelGating:
     def test_logger_gate_opens_for_the_most_permissive_tier(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """The logger's own level must not be stricter than either handler.
 
-        The logger gate runs before any handler gate, so a logger left at INFO
-        would drop DEBUG records before the DEBUG-level handler ever saw them.
-        """
+        A logger left at INFO drops DEBUG before the DEBUG-level handler sees it."""
         monkeypatch.delenv("AIPASS_LOG_LEVEL", raising=False)
         logger, _sys_log, _local_log = _external_logger(
             setup_handler, tmp_path, "gate_mod", config=_tiered_config("ERROR", "DEBUG")

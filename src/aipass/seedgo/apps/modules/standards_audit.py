@@ -3,7 +3,7 @@
 # Description: Standards Audit Module
 # Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -18,17 +18,13 @@ import time
 from pathlib import Path
 from typing import List, NoReturn
 
-# IMPORTS — prax logger first, system-wide
 from aipass.prax import logger
 
-# CLI services (display/output formatting)
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
-# JSON handler for tracking
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# Audit handlers (implementation)
 from aipass.seedgo.apps.handlers.audit import argv as audit_argv
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
@@ -40,39 +36,23 @@ from aipass.seedgo.apps.handlers.audit.audit_display import (
 )
 from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
-# Bypass system
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules, registry_notes
 
-# The audit-tests lane's refusal vocabulary, reused rather than re-invented:
-# Law ARGV, its exit code and its did-you-mean live in one place so the two
-# verbs that share the typo cannot drift into refusing it two different ways.
+# Law ARGV's exit code and did-you-mean are reused so the two verbs sharing the typo refuse it alike.
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 
-# The execution lane `audit tests <target>` hands off to, unchanged.
 from aipass.seedgo.apps.modules import CommandRefused
 from aipass.seedgo.apps.modules import audit_tests as lane_verb
 
-# Drone services for @ resolution
 from aipass.drone.apps.modules import normalize_branch_arg
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-#: Every flag this verb accepts — the list a mistyped token is offered against.
-#: Read from the parser that owns the grammar, and re-bound here because this
-#: is the name the refusal tests reach for.
+#: Re-bound from the parser that owns the grammar: the refusal tests reach for this name.
 AUDIT_FLAGS: tuple = audit_argv.AUDIT_FLAGS
 
-#: The sibling surfaces one keystroke away. `audit -tests @backup` is
-#: `audit tests @backup` with a stray hyphen, and that typo used to run this
-#: audit instead. The canonical two-word form is offered first; the hyphenated
-#: alias stays a valid spelling and still routes.
+#: `audit -tests @backup` is `audit tests @backup` with a stray hyphen; the two-word form is offered first.
 SIBLING_VERBS: tuple = ("audit tests", "audit-tests")
 
-#: The first positional that means "not a pack, the execution lane". Recognised
-#: here and forwarded whole; `audit-tests <target>` remains the same lane.
 LANE_WORD = "tests"
 
 
@@ -82,11 +62,7 @@ def _handlers_dir() -> Path:
 
 
 def _discover_packs() -> dict:
-    """Scoring packs available to the audit, name -> path.
-
-    Discovery and the `kind` refusal live in the discovery HANDLER: reading a
-    manifest off disk is not a module's job.
-    """
+    """Scoring packs available to the audit, name -> path."""
     return discovery.discover_packs(_handlers_dir())
 
 
@@ -98,8 +74,7 @@ def non_scoring_packs() -> dict:
 def _print_non_scoring_packs() -> None:
     """Name the packs this audit will NOT score, and say who owns them.
 
-    A pack directory that simply vanished from every listing is
-    indistinguishable from one that was never installed.
+    A pack that vanished from every listing is indistinguishable from one never installed.
     """
     other = non_scoring_packs()
     if not other:
@@ -195,14 +170,8 @@ def _emit_artifact(
 ):
     """Write the complete-violation-set artifact and announce its path.
 
-    The display truncates by design; this file does not. The line names the
-    SCOPE as well as the path: naming only the path invites a consumer to read
-    a single-branch document as if it covered the fleet, which is the same
-    silent-and-plausible failure the artifact exists to end.
-
-    A write failure is reported loudly and never re-raised: the artifact is a
-    side channel, so a full-disk or bad --artifact path must not swallow the
-    audit the user actually asked for. Returns the Path, or None on failure.
+    The line names the scope as well as the path, so a single-branch document is never read as the fleet.
+    A write failure is reported and never re-raised: the artifact is a side channel and must not swallow the audit.
     """
     try:
         written = write_audit_artifact(
@@ -230,14 +199,8 @@ def _emit_artifact(
 def _print_refusal(refused) -> NoReturn:
     """Print a refusal, then RAISE it so the shell gets the code it just read.
 
-    Printing lives here, not beside the rule: a handler that displays is one
-    nobody can reuse without its console (the cli standard).
-
-    The raise is the second half of the same sentence. This function printed
-    "exit code: 7" and then returned, its callers returned True, and
-    `seedgo.py` turned that into exit 0 - so the line above was a claim the
-    process contradicted one line later. The owner's standing ruling (fleet
-    sweep 2026-09-07): an unknown command or argument FAILS.
+    Printing lives here: a handler that displays cannot be reused without its console (the cli standard).
+    The raise makes the shell's exit code match the printed one, so an unknown argument fails.
     """
     error(refused.stdout_line())
     console.print(f"[dim]law: {refused.law}   exit code: {refused.code}[/dim]")
@@ -255,10 +218,8 @@ def _refuse_unknown_argument(token: str, args: List[str]) -> NoReturn:
 def _dispatch_lane(args: List[str]) -> bool:
     """Hand `audit tests <target>` to the execution lane, arguments verbatim.
 
-    PARSING ONLY: everything after the word is forwarded untouched and the lane
-    never touches this file's scoring engine. A pack really named `tests` would
-    give the word two meanings, and a silently preferred meaning is the species
-    the dropped `-tests` was, so that collision REFUSES and names both.
+    Parsing only: the rest is forwarded untouched. A pack really named `tests` would give the word two
+    meanings, so that collision refuses and names both.
     """
     if LANE_WORD in _discover_packs():
         _print_refusal(refusal.refusal_for_ambiguous_lane_word(LANE_WORD, "audit"))
@@ -268,41 +229,25 @@ def _dispatch_lane(args: List[str]) -> bool:
 def handle_command(command: str, args: List[str]) -> bool:
     """
     Handle 'audit' command with pack-aware routing.
-
-    Args:
-        command: Command name
-        args: [] introspects, ["aipass"] audits every branch, ["aipass",
-            "@flow"] audits one, ["tests", ...] is the lane, ["--help"] explains.
-
-    Returns:
-        True if handled, False if not this module's command
     """
     if command not in ("audit", "standards_audit"):
         return False
 
-    # No args → show audit introspection (available packs)
     if not args:
         _show_audit_introspection()
         return True
 
-    # --help → general help
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         return True
 
-    # `audit tests <target>` IS the execution lane, forwarded whole.
     if args[0] == LANE_WORD:
         return _dispatch_lane(args)
 
-    # The grammar is read in one place (handlers/audit/argv.py) and decided
-    # here. Help wins over every other reading, including a refusal.
+    # Help wins over every other reading, including a refusal.
     parsed = audit_argv.parse(args)
-    # The whole list, not args[0]: a question anywhere in the line is answered
-    # before anything executes (help_flag_safety, Law "a question must never
-    # execute"). The parser reports the same thing in `wants_help` and reads a
-    # wider vocabulary; the scan is spelled out HERE as well because this
-    # module is the layer that standard measures, and a gate visible only
-    # inside a handler is a gate the next reader of this file cannot see.
+    # The whole list, not args[0]: a question anywhere must never execute. Spelled out here as well as in
+    # the parser because help_flag_safety measures this layer.
     if parsed.wants_help or any(arg in ("--help", "-h", "help") for arg in args):
         print_help()
         return True
@@ -317,10 +262,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     positional = parsed.positional
 
     if parsed.unrecognized:
-        # Raises: the refusal carries its own exit code out to seedgo.py. A
-        # plain `return True` here meant the shell saw 0 (the owner's ruling,
-        # fleet sweep 2026-09-07); a `return False` would have had seedgo.py
-        # report 'Unknown command: audit' over a verb that is very much ours.
+        # Raises so the exit code reaches seedgo.py: `return True` exits 0, `return False` reports 'Unknown command'.
         _refuse_unknown_argument(parsed.unrecognized[0], args)
 
     if parsed.artifact_path_missing:
@@ -348,7 +290,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, branch_arg)
         specific_branch = normalize_branch_arg(branch_arg)
 
-    # Validate pack name
     packs = _discover_packs()
     if pack_name is None or pack_name not in packs:
         available = ", ".join(packs.keys())
@@ -360,13 +301,11 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     pack_path = packs[pack_name]
 
-    # Handle --show-bypasses mode (placeholder — bypass audit merged into audit per D11)
     if show_bypasses:
         warning("--show-bypasses not yet implemented in seedgo")
         return True
 
-    # PRIVATE BRANCH ACCESS CONTROL — a private branch is auditable only from
-    # inside its own directory. Isolation per DPLAN-035.
+    # A private branch is auditable only from inside its own directory.
     if specific_branch and _is_branch_private(specific_branch):
         if not check_internal_access(specific_branch):
             console.print(
@@ -376,7 +315,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             # "the harness could not prove it was entitled to publish".
             raise CommandRefused(refusal.EXIT_UNPROVEN, specific_branch)
 
-    # Log audit start
     json_handler.log_operation("standards_audit_started", {"pack": pack_name, "specific_branch": specific_branch})
 
     # A private branch targeted from inside its own CWD must be discoverable.
@@ -385,9 +323,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     header(f"{pack_name.upper()} BRANCH STANDARDS AUDIT")
     console.print()
 
-    # Any suppression announces itself, and this one inverts the meaning of every
-    # number below it — an unlabelled --no-bypass run reads as a branch that got
-    # worse. Said here, in the summary, and in the artifact: each is copied alone.
+    # Any suppression announces itself: an unlabelled --no-bypass run reads as a branch that got worse.
+    # Said here, in the summary and in the artifact, because each is copied alone.
     if no_bypass:
         console.print("[bold yellow]BYPASSES DISABLED[/bold yellow] [dim](--no-bypass) — every rule ignored[/dim]")
         console.print("[dim]Raw scores. Not comparable with a normal audit; expect them to read lower.[/dim]")
@@ -409,7 +346,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"[dim]Discovered {total_branches} branch{'es' if total_branches != 1 else ''} to audit...[/dim]")
     console.print()
 
-    # Audit all branches with live progress
     audit_results = []
     audit_start = time.monotonic()
 
@@ -418,8 +354,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TextColumn("{task.completed}/{task.total}"),
-        # Elapsed ticks continuously; remaining-time estimates froze on the
-        # bimodal cache workload (12 branches at 0.2s, then a 40s fresh one).
+        # Elapsed, not remaining: estimates freeze on the bimodal cache workload (cached fast, fresh slow).
         TimeElapsedColumn(),
         console=console,
         transient=True,
@@ -430,8 +365,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             branch_name = branch["name"]
             progress.update(task, description=f"[cyan]{branch_name}[/cyan]")
 
-            # Load bypass rules for this branch — unless --no-bypass, where the
-            # whole point is to score the branch as if it had none.
+            # --no-bypass scores the branch as if it had none.
             bypass_rules = [] if no_bypass else load_bypass_rules(branch["path"])
 
             branch_start = time.monotonic()
@@ -443,7 +377,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             result["elapsed"] = branch_elapsed
             audit_results.append(result)
 
-            # Print completed branch result (persists above progress bar)
             avg = result.get("average", 0)
             style = "green" if avg >= 90 else "yellow" if avg >= 75 else "red"
             cached_tag = cache_tag(result)
@@ -458,27 +391,20 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"[dim]Audit complete — {total_branches} branches in {total_elapsed:.1f}s[/dim]")
     console.print()
 
-    # Print results — detailed for single branch, skip for full audit. The
-    # system averages computed here fed two parameters print_branch_summary
-    # never read; both went (seedgo, fleet green leg 8).
     if not is_compact:
         for result in audit_results:
             print_branch_summary(result, no_bypass=no_bypass)
 
-    # Print system summary (full audit only)
     if is_compact:
         print_system_summary(audit_results, no_bypass=no_bypass)
 
-    # A registry nobody could read changes no verdict; it is said once, here
-    # (devpulse's ruling, seedgo fleet green leg 15).
+    # A registry nobody could read changes no verdict; it is said once, here.
     for note in registry_notes():
         warning(note)
 
-    # Machine-readable complete result set (no display budget)
     if write_artifact:
         _emit_artifact(audit_results, artifact_path, pack_name, specific_branch, no_bypass)
 
-    # Log completion
     json_handler.log_operation(
         "standards_audit_completed",
         {
@@ -562,16 +488,12 @@ if __name__ == "__main__":
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
-    # Handle help flag
     if len(sys.argv) > 1 and sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Confirm Prax logger connection
     logger.info("Prax logger connected to standards_audit")
 
-    # Log standalone execution
     json_handler.log_operation("audit_run", {"command": "standalone", "args": sys.argv[1:]})
 
-    # Run audit
     handle_command("audit", sys.argv[1:])

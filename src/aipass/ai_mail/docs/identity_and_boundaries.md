@@ -16,24 +16,19 @@ alternatives, not neighbours.
 refused outright, *unless* `AIPASS_CALLER_IDENTITY_SOURCE` is `assigned` or `passport`.
 @drone stamps which kind of evidence named the caller, and a credential travels where a
 location does not. `project` — a registry-derived *project* name — answers "which project
-am I in", never "who am I", and stays refused: that is the $1.41 wake, where drone
-standing at the repo root stamped `aipass` the directory, which spells the same as
-`@aipass` the citizen. An **absent** `AIPASS_CALLER_CWD` is not contradicting evidence and
+am I in", never "who am I", and stays refused: drone standing at the repo root stamps
+`aipass` the directory, which spells the same as `@aipass` the citizen. An **absent** `AIPASS_CALLER_CWD` is not contradicting evidence and
 leaves everything below untouched — in-process callers depend on that.
 
 **1. `AIPASS_CALLER_BRANCH` is set** → registry lookup by name, **then** contacts, then an
 identity synthesized from the env vars alone (recorded `unverified` — no passport, no
 registry row).
 
-> **The registry is asked before contacts, and the order is the whole fix.**
-> `AIPASS_REGISTRY.json` is the authoritative catalog; `contacts.json` is a learned,
-> writable cache. Asking the cache first let one poisoned row outrank the catalog for a
-> citizen the catalog knew perfectly well — found live 2026-08-23, when
-> `drone @ai_mail inbox` served @flow's mailbox from inside @ai_mail's own directory,
-> logged as name AI_MAIL / email @ai_mail / path `.../flow`, confidence **verified**.
-> The `is_dir()` staleness guard could never have caught it: the wrong root was a live
-> branch with a real mailbox in it. Contacts keep their real job — resolving external
-> callers the registry has never heard of.
+> **The registry is asked before contacts.** `AIPASS_REGISTRY.json` is the authoritative
+> catalog; `contacts.json` is a learned, writable cache, and a poisoned cache row must not
+> outrank the catalog for a citizen the catalog knows. An `is_dir()` staleness check
+> cannot catch that case: the wrong root is a live branch with a real mailbox. Contacts
+> resolve external callers the registry has never heard of.
 
 **2. No `AIPASS_CALLER_BRANCH` at all** → walk up `AIPASS_CALLER_CWD` (or, with no caller
 env, this process's `Path.cwd()`) for `.trinity/passport.json`, then registry lookup by
@@ -60,14 +55,9 @@ absolute pass through untouched. It lives at the reader rather than at the call 
 that join a registry path, because a consumer cannot re-derive a root it was never given —
 and copies of that join is how they drift.
 
-**It fabricated rather than failing, which is why this is a rule and not a footnote.**
-Found live 2026-08-24: a `projects/*` citizen read *"Inbox is empty"* against a file
-holding four unread messages, and `reply <id>` answered *"Message not found"* for an id
-read out of that same file. `projects/baud` + row `src/baud/baud` had resolved to
-`<aipass>/src/baud/baud`. That path sits **inside** the AIPass tree, so the mail lane
-created it — a phantom `.ai_mail.local/` holding a reply its author believed he had sent,
-in a directory belonging to no citizen. A refusal would have been loud; a confident wrong
-address was not.
+A row joined to the wrong root does not fail: `projects/baud` + row `src/baud/baud`
+joined to the AIPass root names `<aipass>/src/baud/baud`, a path inside the AIPass tree,
+and the mail lane would create a mailbox there that belongs to no citizen.
 
 The caller-registry fallback in `_lookup_branch_by_name()` is **not** admin-gated, and is
 a different question from the admin-only cross-project sweep above: it resolves a citizen
@@ -79,9 +69,8 @@ list him.
 
 `--from` and `--sender` are **claims, not credentials**. Both land on
 `wake_branch(sender=...)`, and that value is not only a bounce address — a
-sender in `PRIVILEGED_SENDERS` unlocks a wake lane. Until this rail, any citizen
-could run `dispatch @manager --from @daemon` and wake a manager (found by a
-@devpulse scout, DPLAN-0288; traced, not executed).
+sender in `PRIVILEGED_SENDERS` unlocks a wake lane, so an unchecked claim would let any
+citizen run `dispatch @manager --from @daemon` and wake a manager.
 
 `handlers/users/verified_caller.py` draws the line:
 
@@ -118,16 +107,14 @@ It logs that at **debug** when the env var carries a credential provenance
 
 A credential travels and a location does not: an agent that cds into another
 branch is still itself. So `assigned` naming one branch while the cwd sits in
-another is the designed precedence working, not a conflict. Lifetime
-warnings said AMBIGUOUS about correctly-resolved sweeps — every one
-`CALLER_BRANCH='ai_mail'` with the cwd walking the whole fleet — and a warning
-that fires on the known-good case buries the one it exists for.
+another is the designed precedence working, not a conflict, and a warning that fires on
+the known-good case buries the one it exists for.
 
 Three cases deliberately keep the warning, because none is proven good:
 
 | Case | Why it stays loud |
 |---|---|
-| provenance `project` | a registry-derived **directory** name — @aipass the directory and @aipass the citizen spell the same. This is the $1.41 wake |
+| provenance `project` | a registry-derived **directory** name — @aipass the directory and @aipass the citizen spell the same |
 | provenance missing / `unknown` | unprovable is not proven; this lane fails toward noise, not silence |
 | resolved via `caller_branch:synthesized` | the name resolved against nothing — provenance says who *stamped* it, never that anything vouched for it |
 
@@ -167,11 +154,11 @@ The contacts system (`contacts.py`) maintains an address book at `.ai_mail.local
 | 3 | The `projects/*` sweep — the cross-project bridge | verified admin only |
 | 4 | The declared-roots **external tier** | — (declaration is the credential) |
 
-Step 4 consumes @memory's public gateway, `aipass.memory.apps.modules.fleet.external_branches()`, which reads the machine anchor `AIPASS_ROOTS.json` at AIPass home. Nothing here re-reads that file — one anchor, one reader. No anchor means no external roots, which is the ordinary state of a fresh clone, and resolution is then byte-identical to what it was before the tier existed.
+Step 4 consumes @memory's public gateway, `aipass.memory.apps.modules.fleet.external_branches()`, which reads the machine anchor `AIPASS_ROOTS.json` at AIPass home. Nothing here re-reads that file — one anchor, one reader. No anchor means no external roots, which is the ordinary state of a fresh clone, and resolution then uses the first three sources only.
 
 There is no admin gate on step 4: @daemon fires scheduled wakes unverified, and the anchor is a machine-managed file the owner blessed, so an external root is already an authorised destination. The admin sweep keeps its position *above* the tier — moving it below would let a sibling repo shadow a citizen living in our own `projects/`.
 
-**Collisions break by declaration order, and are logged anyway.** When two declared roots claim one address, the first-*declared* root wins — the fleet ruling's own tie-break — and an error line names every losing claimant. This was a known gap for one day: `declared_roots()` returned `sorted(found)`, so the winner was alphabetical-by-resolved-path and the tie-break the ruling names could not reach this door. Re-reading the anchor here to recover it would have been a second reader of the file the gateway exists to own, so the collision was made loud and the disagreement raised with @memory instead — who dropped the sort (`registry_scope` 4.1.0, 2026-08-30). The error line stays: a tie-break being correct does not make a collision expected.
+**Collisions break by declaration order, and are logged anyway.** When two declared roots claim one address, the first-*declared* root wins and an error line names every losing claimant. The order is @memory's gateway's; this branch never re-reads the anchor to derive it. A correct tie-break does not make a collision expected, so the error line stays.
 
 ### Mailing a citizen outside this repo — the last wall (#754)
 
@@ -179,53 +166,43 @@ Delivery reads the same external tier, last. Once it answers, the address map re
 
 A sender that cannot be placed in a project — no `AIPASS_CALLER_CWD` (drone omits it when it cannot read the cwd; @trigger's in-process sends never carry one), or a cwd with no registry above it — is **refused** for an external-tier recipient, and the reason names the wall. The same sender to a fleet branch still lands, so @trigger's mail to owners is untouched. The verified-admin grant still crosses, checked last. A reply stamp does not: a reply's proof only counts inside the sender's own project, and with none a stamped `reply_path` could name any mailbox on disk.
 
-Until 2026-09-10 the check returned ALLOW the moment the caller cwd was missing — measured on 09-02: cwd set, refused; cwd unset, allowed.
+## The Handlers Fence
 
-## The Import Guard Needs No Filesystem
+`apps/handlers/__init__.py` is an import-time fence: code outside this branch reaches
+the handlers through `apps/modules`, and a foreign importer gets an `ImportError` naming
+the caller, the file and the line. It reads the stack once, at the first import of the
+package, and sorts each frame into one of three kinds:
 
-`apps/handlers/__init__.py` runs a branch-access check at import time. It used to
-open with `inspect.stack()`, which builds a FrameInfo per frame and reaches
-`getsourcefile() -> getmodule() -> os.path.realpath()`. On Windows
-`ntpath.realpath` calls `os.getcwd()` unconditionally in its opening lines —
-before checking whether the path is even absolute — at a call site inside
-`getmodule` that is **not** wrapped in a try. So importing any handler in this
-package needed a readable cwd on Windows, and a disconnected share killed the
-import of a package whose only job at that moment was to compare a name.
-(@spawn's find, 2026-08-31; branches carried it.)
+| Kind | Frames |
+|---|---|
+| kin | a file under this branch's root |
+| transport | importlib and the frozen bootstrap, the standard library (`unittest.mock`, `pkgutil`, `runpy`), third-party code under `site-packages` |
+| foreign | everything else — another branch, a project, a script |
 
-It walks frames with `sys._getframe` now — `co_filename` is already a string in
-memory — and uses `linecache` for the import line. Every `Path.resolve()` is
-guarded with a raw-spelling fallback.
+The first foreign frame decides. It is refused when no kin frame stands between it and
+the fence, or when its own source line names these handlers; it is allowed when kin code
+asked for the import on its behalf. `apps/__init__.py` imports nothing, so the importer
+the fence sees is the real one.
 
-**Why it hid on Linux, and what the pins deny.** `posixpath.realpath` does not
-call `getcwd` for an absolute path, so the POSIX equivalent raises earlier inside
-`getabsfile()` where `inspect` catches it. Denying `os.getcwd` on Linux proves
-nothing here — measured both ways. `test_handlers_guard_import.py` denies
-`os.path.realpath`, the call the defect actually makes, and was red against the
-pre-fix guard on this machine.
+**No filesystem at import.** The walk uses `sys._getframe` (`co_filename` is already a
+string) and `linecache` for the import line, never `inspect.stack()`: on Windows
+`inspect` reaches `ntpath.realpath`, which calls `os.getcwd()` unconditionally, so a
+handler import would need a readable cwd. A pseudo filename (`<frozen ...>`, `<string>`)
+is never resolved — relative, it would resolve against the cwd and read as kin — and
+every `Path.resolve()` falls back to the raw spelling on `OSError`.
+`tests/test_handlers_fence.py` pins the fence.
 
-**A second `inspect.stack()` was deleted outright.** It looked for
-`<string>`/`<stdin>` and then returned either way — a second copy of the cwd
-dependency in service of a branch that could not change the answer. A discarded
-result does not stop being a crash site for being discarded.
-
-**Known, pre-existing, not fixed here.** `apps/__init__.py` does
-`from . import handlers`, so importing `aipass.ai_mail.apps.handlers` imports the
-parent package first, which imports handlers itself — the guard therefore sees an
-ai_mail file as the caller and allows, and the module is cached before any
-external importer is ever seen. Verified identical before and after this change,
-so it is not a regression from it. Reported rather than swept: closing it is a
-security-behaviour change that deserves its own round.
+**A limit.** The fence fires on the first import in a process. Once kin code has
+imported the package, a later foreign import is served from `sys.modules`. The write-time
+rule (`drone @seedgo audit`: handlers and encapsulation) is the wall.
 
 ## Registry Globs Are Re-Checked in Python
 
 `pathlib` delegates glob matching to the filesystem, so on Windows and default
 macOS `*_REGISTRY.json` **also matches** `*_registry.json`. This repo is full of
-bait — lowercase files on this machine when the sweep ran:
-`drone_command_registry.json` sits directly beside drone's tree, every branch
+bait: `drone_command_registry.json` sits directly beside drone's tree, every branch
 carries `.spawn/.template_registry.json` (pathlib `*` matches dotfiles, unlike the
 `glob` module), and @flow keeps `flow_json/*_registry.json` plan counters.
-Found on `ef029782`'s windows-setup leg, root-caused by @drone, swept fleet-wide.
 
 **Every registry walk in this branch goes through `paths.registries_in()`.** The
 glob still does the walking — only the filesystem knows where files are — but it
@@ -236,7 +213,7 @@ pattern never asked for.
 
 **Suffix, never the stem.** External projects name registries after themselves —
 `Vera-Studio_REGISTRY.json`, `vera_studio_REGISTRY.json`, `feel_good_app_REGISTRY.json`.
-A filter keyed on the stem would delete real citizens in order to fix this bug, so
+A filter keyed on the stem would refuse real citizens along with the counter files, so
 all three spellings are pinned as must-survive.
 
 | Site | What it decides | Reached via |
@@ -247,25 +224,16 @@ all three spellings are pinned as must-survive.
 | `registry/read.resident_registry_paths` | the resident roster | `projects/*/` |
 | `registry/read.get_project_tree_branches` | the verified-admin bridge roster | `projects/*/` |
 | `registry/read.get_caller_project_branches` | the caller's citizens | walk up |
+| `email/delivery._project_name` | the project a delivered mail's feed event names | the project root |
 
-The last three were **not** on the sweep's list of four — found by sweeping the
-tree rather than working the list, and all three decide *which citizens exist*.
-
-**What the defect actually did here, measured rather than assumed.** The brief
-said mail would land as the wrong citizen. That needs a decoy carrying a
-`branches` key, and **zero of the lowercase files on this machine have one** —
-so the identity swap is reachable but not currently armed. What *was* live: the
-walk-up sites return the **first** registry they meet and stop, so a counter file
-ends the walk and a genuine external caller resolves to nothing; and
-`find_project_root` returned `src/aipass/drone` as a "project root", which changes
-the cross-project fence's answer with no `branches` key needed at all. Both
-reproduced against the real tree before the fix and dead after it.
+Unfiltered, a counter file would end a walk-up (the walk-up sites stop at the first
+registry they meet, so a genuine external caller resolves to nothing), would make
+`find_project_root` answer a branch directory as a project root and change the
+cross-project fence's answer, and, given a `branches` key, would name citizens.
 
 **The ban is structural.** `test_registry_case_sweep.py` AST-walks `apps/` and
 fails on any `.glob()`/`.rglob()` reaching for a registry pattern outside the one
-reader — catching a **named constant** as well as a literal, because the
-literal-only version reported my own `resident_registry_paths` site clean while it
-still held the defect.
+reader — a **named constant** as well as a literal.
 
 
 ## Related

@@ -3,7 +3,7 @@
 # Description: Tests for monitor_ops handler and registry_monitor module
 # Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/registry/monitor_ops.py and apps/modules/registry_monitor.py."""
@@ -33,12 +33,7 @@ def _make_plan_file(directory: Path, number: str) -> Path:
 
 class TestEveryPlanCreateWritesIsAPlan:
     """Every template create renders must read as a plan, in both header forms (leg 8).
-
-    Leg 7 checked the colon form only and claimed every template used it;
-    flow_plans (FPLAN, the default type) and playbook_plans open with
-    ``# {plan_number} - {subject}``, and six live open plans carry the dash.
-    devpulse widened is_plan_file in d1a1100d. Red first against the
-    colon-only line; mutant leg8 D1 (dash form dropped) reddens both tests.
+    flow_plans and playbook_plans open with ``# {plan_number} - {subject}``, not the colon form.
     """
 
     def test_the_dash_form_is_a_plan(self, tmp_path):
@@ -67,22 +62,12 @@ class TestEveryPlanCreateWritesIsAPlan:
         assert not_plans == []
 
 
-# ═══════════════════════════════════════════════════════════
-# 1. handle_walk_error
-# ═══════════════════════════════════════════════════════════
-
-
 class TestHandleWalkError:
     """Tests for the handle_walk_error inner function in scan_plan_files_impl."""
 
     def test_permission_error_is_silenced(self, tmp_path, mock_logger):
         """PermissionError should not trigger a warning log.
-
         Mutant: if not isinstance(error, PermissionError): -> if isinstance(error, OSError): reddens this.
-
-        Windows ignores permission bits and root reads through them, so on
-        either host chmod 000 refuses nothing and this world cannot be built:
-        the test skips there (TEST_TEMPLATE rule 23).
         """
         if os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0):
             pytest.skip("chmod 000 refuses no directory on Windows or to root")
@@ -99,8 +84,6 @@ class TestHandleWalkError:
                         ecosystem_root=tmp_path,
                         load_registry=lambda: {"plans": {}},
                     )
-                    # The scan still finds the readable plan, and says nothing
-                    # about the directory it was refused.
                     assert result["added"] == ["0001"]
                     warned = [str(c) for c in mock_logger.warning.call_args_list]
                     assert not any("Error during scan" in w for w in warned), warned
@@ -118,11 +101,6 @@ class TestHandleWalkError:
             )
             assert result["total_plans"] == 0
             assert result["added"] == []
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. scan_plan_files_impl
-# ═══════════════════════════════════════════════════════════
 
 
 class TestScanPlanFilesImpl:
@@ -382,11 +360,6 @@ class TestScanPlanFilesImpl:
         assert result["added"] == []
 
 
-# ═══════════════════════════════════════════════════════════
-# 3. get_status_impl
-# ═══════════════════════════════════════════════════════════
-
-
 class TestGetStatusImpl:
     """Tests for get_status_impl in monitor_ops."""
 
@@ -417,11 +390,6 @@ class TestGetStatusImpl:
         assert result["open_plans"] == 0
 
 
-# ═══════════════════════════════════════════════════════════
-# 4. registry_monitor module wrappers
-# ═══════════════════════════════════════════════════════════
-
-
 class TestRegistryMonitorGetStatus:
     """Tests for registry_monitor.get_status wrapper."""
 
@@ -448,11 +416,7 @@ class TestRegistryMonitorGetStatus:
 
 class TestAnUnreadableRegistryIsRefusedByName:
     """`registry status` / `registry scan` over a registry load_registry refuses.
-
-    Before leg 6 the load answered an empty registry; now it raises, and
-    uncaught the raise reached flow.py's router, which logged it and said
-    "unknown command". Red first without the catch; mutant: the handler's
-    `except RegistryUnreadableError` narrowed to `except KeyError`.
+    Uncaught, the raise reaches flow.py's router, which answers "unknown command".
     """
 
     def _refuse(self, subcommand, impl):
@@ -477,11 +441,6 @@ class TestAnUnreadableRegistryIsRefusedByName:
         assert handled is True
         error_stand_in.assert_called_once_with(f"Registry scan refused: {refusal}")
         assert "Scan complete" not in capsys.readouterr().out
-
-
-# ═══════════════════════════════════════════════════════════
-# 5. _fire_event helper
-# ═══════════════════════════════════════════════════════════
 
 
 class TestFireEvent:
@@ -510,19 +469,8 @@ class TestFireEvent:
         assert result is False
 
 
-# ═══════════════════════════════════════════════════════════
-# Cross-type numbers are NOT duplicates
-#
-# Ruling 2026-08-22 (the owner): "numbers are separated by plan names. the plan
-# name is the separation. aplan0002 fplan0001 dplan0001 pplan0001." The on-disk
-# index used to key on the bare number, so APLAN-0007 and FPLAN-0007 read as one
-# plan filed twice — and the scan RENAMES the loser on the filesystem, dropping
-# its topic slug and orphaning its registry row. heal_registry's own index has
-# always keyed on (prefix, number); this brings the scan in line.
-#
-# Every test here asserts the walk REACHED the files before asserting on the
-# outcome: a scan that found nothing would satisfy "nothing was renamed".
-# ═══════════════════════════════════════════════════════════
+# Cross-type numbers are not duplicates. Each test asserts the walk REACHED the files first:
+# a scan that found nothing would satisfy "nothing was renamed".
 
 
 def _write_plan(directory: Path, name: str) -> Path:
@@ -545,8 +493,7 @@ class TestCrossTypeNumbersAreNotDuplicates:
         with patch.object(mod, "_fire_event", MagicMock(return_value=True)) as fire:
             result = mod.scan_plan_files_impl(tmp_path, load_registry=lambda: {"plans": {}})
 
-        # REACHED: both files were walked. Without this the assertions below
-        # would also pass on an empty scan.
+        # REACHED: both files were walked.
         assert fire.call_count == 2, "scan did not reach both plan files"
 
         assert result["duplicates"] == []
@@ -571,10 +518,7 @@ class TestCrossTypeNumbersAreNotDuplicates:
 
 class TestGenuineDuplicatesAreReportedNotRenamed:
     """Same prefix AND same number: reported, never renamed (flow's decision, leg 7).
-
-    The scan renamed every file after the first until leg 7, and most of the
-    46 files it renamed in flow's logs were reports named after a plan.
-    Mutant: the report's paths emptied reddens this (leg7 M5).
+    Mutant: the report's paths emptied reddens this.
     """
 
     def test_two_fplans_with_one_number_both_keep_their_names(self, tmp_path):
@@ -594,12 +538,7 @@ class TestGenuineDuplicatesAreReportedNotRenamed:
 
 class TestALookAlikeIsNotAPlan:
     """A report named like a plan is not one (leg 7: hooks' DPLAN-0356_ph2_report.md).
-
-    Live on 2026-10-04 02:31 the scan renamed hooks/docs.local/
-    DPLAN-0356_ph2_report.md to DPLAN-0358.md and heal registered it as a plan.
-    Proof is the mutants, not a first red: the scan's gate off, the header
-    check off, the number dropped from it, and unreadable -> True each redden
-    a test here (leg7/mutants.txt M1 to M4).
+    Mutants: scan gate off, header check off, number dropped from it, unreadable -> True.
     """
 
     @staticmethod
@@ -631,8 +570,7 @@ class TestALookAlikeIsNotAPlan:
 
     def test_a_heading_that_only_starts_with_the_id_is_not_a_plan(self, tmp_path):
         """'# DPLAN-0356 phase 2 notes' is a report's heading: only ':' or ' - ' follow a plan's id.
-
-        Mutant leg8 D2 (' - ' widened to ' ') survived without this test.
+        Mutant: ' - ' widened to ' '.
         """
         notes = tmp_path / "DPLAN-0356_ph2_notes.md"
         notes.write_text("# DPLAN-0356 phase 2 notes\n", encoding="utf-8")

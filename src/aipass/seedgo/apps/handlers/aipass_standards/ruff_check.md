@@ -23,7 +23,7 @@ This standard **gates** (since 2026-09-25, owner ruling 00:33): its score counts
 ## What the Checker Does
 
 1. Checks for ruff binary via `shutil.which("ruff")` — skips gracefully if not installed
-2. Runs `ruff check <branch>/apps/ --output-format=json`
+2. Runs `ruff check <branch>/apps/ <branch>/tests/ --output-format=json` (the whole branch when neither directory exists), the same corpus CI's `ruff check src/ tests/` reaches
 3. Parses JSON output — a list of violation objects with `{code, filename, location, message}`
 4. Filters violations against `.seedgo/ruff_bypass.json` (ruff-specific bypass)
 5. Scores based on non-bypassed violation count
@@ -61,7 +61,9 @@ The row covers `ruff format --check` too: on a machine where format finds unform
 
 ## Audit Scope
 
-`AUDIT_SCOPE = "branch_level"` — runs once per branch, not per file. Ruff walks the `apps/` directory itself. Respects the branch's own `pyproject.toml` or `ruff.toml` if present.
+`AUDIT_SCOPE = "branch_level"` — the audit runs `check_branch()` once per branch, not per file. Ruff walks `apps/` and `tests/` itself. Respects the branch's own `pyproject.toml` or `ruff.toml` if present.
+
+`check_module()` runs the same lint and format check on one file for the checklist and per-file hooks; it returns `passed=False` on any finding so `subagent_stop_gate` can block.
 
 ---
 

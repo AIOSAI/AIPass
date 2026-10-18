@@ -10,7 +10,7 @@ Public, tracked documentation for the skills branch — the depth behind
 | [skill_contract.md](skill_contract.md) | The three tiers, the `SKILL.md` format, the search paths, creating a skill |
 | [runner_notes.md](runner_notes.md) | How a skill is executed, and the doors that bypass the runner |
 | [off_switch.md](off_switch.md) | What OFF means, what it stops, how it fails closed |
-| [system_status.md](system_status.md) | The system_status skill and `machine_vitals()` |
+| [system_status.md](system_status.md) | The system_status skill, `machine_vitals()` and `machine_processes()` |
 | [telegram.md](telegram.md) | The retired Telegram bridge |
 | [dead_cwd.md](dead_cwd.md) | Importing without a readable working directory |
 | [json_handler.md](json_handler.md) | Why the JSON handler is a shim |

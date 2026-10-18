@@ -3,16 +3,13 @@
 # Description: Tests for apps/modules/drive_stats.py's Drive account quota lines, through a stub Drive service
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/drive_stats.py's Drive account quota lines."""
 
-# A new file, not a class in test_drive_pipeline.py: that file is held by another
-# worker tonight (DPLAN-0411); the gate is open for new test files on this build.
-# The Drive edge is the conftest seal's: each test that needs an answer replaces the
-# two sealed doors with a stub service, never the live account.
-#
+# Tests that need a Drive answer replace conftest's two sealed doors with a stub service.
+
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — _human_bytes' unit arithmetic, which show_drive_quota only prints through
 

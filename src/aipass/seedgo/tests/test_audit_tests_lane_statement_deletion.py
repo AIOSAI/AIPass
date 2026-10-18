@@ -3,7 +3,7 @@
 # Description: audit-tests statement deletion operator and its diff scope (split from test_audit_tests_lane.py)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/statement_deletion.py and diff_scope.py."""
@@ -24,13 +24,8 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
 from aipass.seedgo.apps.modules import audit_tests
 from aipass.seedgo.tests.support_audit_tests_lane import _spec_for
 
-# =============================================================================
-# STATEMENT DELETION — the operator commissioned by DPLAN-0352 round 2
-#
-# The species is three-instanced: a statement that executes, is documented as
-# doing something, and that no test observes. Whole-body gutting cannot
-# isolate it because the body has other work in it.
-# =============================================================================
+# Statement deletion's species: a statement that executes, is documented as doing something, and that no
+# test observes. Whole-body gutting cannot isolate it because the body has other work in it.
 
 
 class TestStatementDeletionStaysAtStatementLevel:
@@ -92,8 +87,7 @@ class TestStatementDeletionAridList:
             assert SD.ARID_REASONS.get(name), f"{name} is suppressed with no reason"
 
     def test_a_logging_call_is_never_arid(self, tmp_path):
-        """Trail and telemetry calls LOOK arid and are the species itself.
-        Suppressing them would have suppressed all three sightings."""
+        """Trail and telemetry calls LOOK arid and are the species itself."""
         sites = self._sites(tmp_path, "def f():\n    logger.info('did the thing')\n    return 1\n")
         trail = [s for s in sites if "logger.info" in s.source_line]
         assert trail and trail[0].arid_reason is None
@@ -112,11 +106,7 @@ class TestStatementDeletionAridList:
 
     def test_a_guard_return_is_never_arid(self, tmp_path):
         """THE ROUND-5 DEFECT (devpulse, canary a36f500a). `is_last` was
-        computed per BLOCK, so the `return` closing an `if` was declared arid.
-        That is the definition of a guard clause and the species this operator
-        exists to probe: canary's `kv.py:238` was filtered out before it was
-        ever run, and deleting it leaves 91 tests green while
-        `kv --json FILE set K V` prints its refusal, exits 2, AND writes."""
+        computed per BLOCK, so the `return` closing an `if` was declared arid."""
         source = "def f(a):\n    if a:\n        log('refused')\n        return\n    write(a)\n"
         assert self._return_arid(tmp_path, source) == [None]
 
@@ -165,10 +155,7 @@ class TestStatementDeletionDiscoveryIsUnique:
 
     def test_a_nested_def_is_walked_once_not_twice(self, tmp_path):
         """Found here, not in the round-5 report. `discover_statements` finds
-        functions with `ast.walk`, which already reaches every nested `def`,
-        and `_walk_block` descended into them as well — so each nested
-        statement was emitted twice, once under each qualname. It inflates any
-        denominator built on the site count and pays to run one mutant twice."""
+        functions with `ast.walk`, which already reaches every nested `def`, so `_walk_block` must not descend too."""
         apps = tmp_path / "apps"
         apps.mkdir()
         (apps / "mod.py").write_text(
@@ -295,11 +282,7 @@ class TestStatementDeletionHangTimeout:
 
     def test_the_ceiling_leaves_room_above_the_baseline(self, tmp_path):
         """ROUND-5 DEFECT TWO. The ceiling was `int(baseline)` exactly, argued
-        from 'a run over a SUBSET cannot outlast the whole suite'. When
-        selection has no coverage entry it falls back to the WHOLE suite, so
-        the honest cost IS the baseline and the ceiling loses a coin toss:
-        canary's only two `not_run / mutant_timeout` of 153 were its only two
-        `unmapped_test_context` mutants, both at 19.03s against a 19s wall."""
+        from 'a run over a SUBSET cannot outlast the whole suite', but unmapped selection runs the WHOLE suite."""
         assert SD.hang_timeout(19.0) > 19, "a whole-suite fallback must fit under its own ceiling"
         assert SD.hang_timeout(19.0) == 38
 
@@ -363,7 +346,7 @@ class TestEnvcopySourcesSiblingsForABankedFixture:
 
     def test_the_host_root_is_found_by_marker_not_by_counting_parents(self):
         """A parent count is a silent liar the day the file moves one level,
-        and the first cut of this was off by exactly one."""
+        so the host root is found by its marker."""
         root = envcopy.host_repo_root()
         assert root is not None, "the running checkout always holds src/aipass"
         assert (root / "src" / "aipass").is_dir()
@@ -407,11 +390,7 @@ class TestStatementDeletionRefusesAnUncompilableMutant:
 
     def test_a_semicolon_line_is_reported_not_written(self, tmp_path):
         """Two statements on one line are one LINE RANGE, so deleting either
-        deletes both and can empty a block. The mutant is compiled before it
-        is written, so this comes back `mutation_failed` - which is not
-        evidence about the suite - rather than as a green run against a file
-        that never imported. It is also this operator's honest limit: a
-        semicolon line is mutated as a unit."""
+        deletes both and can empty a block; the mutant is compiled first and comes back `mutation_failed`."""
         apps = tmp_path / "apps"
         apps.mkdir()
         source = "def f(x):\n    if x:\n        a = 1; trail('x')\n    return x\n"
@@ -438,13 +417,7 @@ class TestStatementDeletionRefusesAnUncompilableMutant:
 
 
 class TestStatementDeletionSurvivorRollup:
-    """A survivor list nobody can triage is worse than no operator (the brief).
-
-    Measured on canary's round-4 tree: 230 survivors, 188 of them inside
-    `print_help` and `print_introspection` - two functions `pseudo_tested`
-    already convicts whole. The statement-level list this operator exists for
-    was the other 42, buried under 82% noise from one cause.
-    """
+    """A survivor list nobody can triage is worse than no operator (the brief)."""
 
     def _campaign(self, rows):
         """rows: (file, qualname, lineno, outcome) -> a campaign to roll up."""
@@ -516,9 +489,7 @@ class TestStatementDeletionSurvivorRollup:
         assert any("never a suppression" in limit for limit in document["limits"])
 
     def test_a_partly_observed_function_is_the_species_and_keeps_its_rows(self):
-        """canary.py's print_help: 41 of 43 statements deleted green, 2 killed.
-        Gutting cannot report it - those 2 assertions protect the whole body -
-        so the 41 must stay statement-level and the row must say 41 of 43."""
+        """canary.py's print_help: 41 of 43 statements deleted green, 2 killed."""
         rows = [("apps/canary.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in range(10, 51)]
         rows += [("apps/canary.py", "print_help", n, SD.OUTCOME_KILLED) for n in (51, 52)]
         campaign = self._campaign(rows)

@@ -3,13 +3,12 @@
 # Description: Room Log Export Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Room Log Export Handler
 
-Exports a plaintext log of a room's posts and threaded comments.
 Used by the search module's 'log' command.
 """
 
@@ -25,17 +24,7 @@ def export_room_log(
     room_name: str,
     limit: int = 100,
 ) -> str:
-    """
-    Export a plaintext log of a room's posts and comments.
-
-    Args:
-        conn: Database connection.
-        room_name: Room to export.
-        limit: Maximum number of posts to include.
-
-    Returns:
-        Formatted plaintext string of the room log.
-    """
+    """Export a plaintext log of a room's newest `limit` posts and their comments."""
     json_handler.log_operation("log_export", {"room": room_name, "limit": limit})
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -80,15 +69,7 @@ def export_room_log(
 
 
 def _format_comment_tree(comments: List[Dict]) -> List[str]:
-    """
-    Format comments into an indented tree structure.
-
-    Args:
-        comments: List of comment dicts with id, parent_id, author, content, vote_score.
-
-    Returns:
-        List of formatted lines.
-    """
+    """Format comments into an indented tree structure (by parent_id)."""
     children_map: Dict[int, List[Dict]] = {}
     top_level: List[Dict] = []
 

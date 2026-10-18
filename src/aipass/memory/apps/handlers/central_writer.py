@@ -3,18 +3,13 @@
 # Description: Central File Writer Handler
 # Version: 0.3.0
 # Created: 2025-11-27
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Central File Writer Handler
 
-Updates memory.central.json with current statistics.
-This file is memory's "API output" - used to populate dashboards.
-
-Purpose:
-    Update central registry when vectors/archives change
-    Provide current stats to dashboard
+MEMORY.central.json is memory's API output; dashboards read it.
 """
 
 from json import load as json_load, dump as json_dump
@@ -29,26 +24,13 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
-# No service imports - handlers are pure workers (3-tier architecture)
-
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
 _MEMORY_ROOT = module_file(__file__).parents[2]
 
 
 def _find_repo_root() -> Path:
     """Repo root for this lane — resolved by ``handlers/repo_root.py``.
 
-    Kept as a local name because callers and tests patch it here. The body is a
-    delegation on purpose: this function used to be one of ten byte-identical
-    copies, so the first cure landed on one file and CI went red on the next.
-
-    Returns:
-        The directory holding AIPASS_REGISTRY.json, or the source tree. Never
-        the process working directory.
+    Kept as a local name because callers and tests patch it here.
     """
     return repo_root.find_repo_root(caller="central_writer")
 
@@ -58,27 +40,15 @@ CHROMA_DB_PATH = _MEMORY_ROOT / ".chroma"
 ARCHIVE_DIR = _MEMORY_ROOT / ".archive"
 
 
-# =============================================================================
-# STATS COLLECTION
-# =============================================================================
-
-
 def count_chroma_vectors() -> int:
     """
     Count total vectors across all ChromaDB collections
 
-    Returns:
-        Total number of vectors stored (estimated from SQLite)
-
-    Raises:
-        sqlite3.Error if the store exists and cannot be counted. It used to
-        answer 0, the count of an empty store, and update_central published
-        that as a success (DPLAN-0354 leg 3); update_central now fails instead.
+    Raises sqlite3.Error rather than answer 0: an empty count would publish as success.
     """
     if not CHROMA_DB_PATH.exists():
         return 0
 
-    # Read ChromaDB SQLite database directly to avoid dependency issues
     import sqlite3
 
     db_file = CHROMA_DB_PATH / "chroma.sqlite3"
@@ -87,8 +57,6 @@ def count_chroma_vectors() -> int:
 
     conn = sqlite3.connect(str(db_file))
     try:
-        # Query embeddings table for total count
-        # ChromaDB stores embeddings in the 'embeddings' table
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM embeddings")
         return cursor.fetchone()[0]
@@ -97,20 +65,11 @@ def count_chroma_vectors() -> int:
 
 
 def count_archive_files() -> int:
-    """
-    Count total archive files in .archive directory
-
-    Returns:
-        Number of archived files
-
-    Raises:
-        Exception if directory access fails
-    """
+    """Count total archive files in .archive directory"""
     try:
         if not ARCHIVE_DIR.exists():
             return 0
 
-        # Count markdown files (archived memory files)
         archive_files = list(ARCHIVE_DIR.glob("*.md"))
         return len(archive_files)
 
@@ -120,17 +79,8 @@ def count_archive_files() -> int:
 
 
 def get_last_rollover_timestamp() -> str:
-    """
-    Get timestamp of last rollover operation
-
-    Returns:
-        ISO timestamp string, or empty string if no rollover data
-
-    Raises:
-        Exception if unable to determine timestamp
-    """
+    """Get timestamp of last rollover operation"""
     try:
-        # Check for most recent archive file
         if not ARCHIVE_DIR.exists():
             return ""
 
@@ -138,7 +88,6 @@ def get_last_rollover_timestamp() -> str:
         if not archive_files:
             return ""
 
-        # Get most recent file by modification time
         latest = max(archive_files, key=lambda f: f.stat().st_mtime)
         mtime = datetime.fromtimestamp(latest.stat().st_mtime)
 
@@ -150,18 +99,7 @@ def get_last_rollover_timestamp() -> str:
 
 
 def collect_stats() -> Dict[str, Any]:
-    """
-    Collect all memory statistics
-
-    Returns:
-        Dict with stats:
-            - total_vectors: int
-            - total_archives: int
-            - last_rollover: ISO timestamp string
-
-    Raises:
-        Exception if any stat collection fails
-    """
+    """Collect all memory statistics"""
     return {
         "total_vectors": count_chroma_vectors(),
         "total_archives": count_archive_files(),
@@ -169,24 +107,10 @@ def collect_stats() -> Dict[str, Any]:
     }
 
 
-# =============================================================================
-# CENTRAL FILE OPERATIONS
-# =============================================================================
-
-
 def read_central_file() -> Dict[str, Any]:
-    """
-    Read current central file contents
-
-    Returns:
-        Dict with central file data
-
-    Raises:
-        Exception if file read fails
-    """
+    """Read current central file contents"""
     try:
         if not CENTRAL_FILE.exists():
-            # Return default structure
             return {
                 "service": "memory",
                 "last_updated": "",
@@ -202,17 +126,8 @@ def read_central_file() -> Dict[str, Any]:
 
 
 def write_central_file(data: Dict[str, Any]) -> None:
-    """
-    Write data to central file
-
-    Args:
-        data: Dict with central file structure
-
-    Raises:
-        Exception if file write fails
-    """
+    """Write data to central file"""
     try:
-        # Ensure directory exists
         CENTRAL_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
@@ -223,49 +138,20 @@ def write_central_file(data: Dict[str, Any]) -> None:
         raise Exception(f"Failed to write central file: {e}")
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def update_central(verbose: bool = False) -> Dict[str, Any]:
-    """
-    Update memory central.json with current statistics
-
-    Main function called by memory modules to update central registry.
-    Called after vector storage, rollover, or archive operations.
-
-    Args:
-        verbose: If True, include detailed stats in return dict
-
-    Returns:
-        Dict with update result:
-            success: bool
-            stats: dict (if verbose=True)
-            error: str (if failed)
-
-    Example:
-        # Update central file after rollover
-        result = update_central(verbose=True)
-        if result['success']:
-            print(f"Updated with {result['stats']['total_vectors']} vectors")
-    """
+    """Update memory central.json with current statistics"""
     try:
-        # Collect current stats
         stats = collect_stats()
 
-        # Read existing file (preserves any extra fields)
+        # Read-modify-write: extra fields others put in the file survive.
         central_data = read_central_file()
 
-        # Update stats and timestamp
         central_data["last_updated"] = datetime.now().isoformat()
         central_data["stats"] = stats
 
-        # Remove placeholder note if present
         if "_note" in central_data:
             del central_data["_note"]
 
-        # Write updated file
         write_central_file(central_data)
 
         result = {"success": True, "updated": CENTRAL_FILE.as_posix()}
@@ -283,18 +169,7 @@ def update_central(verbose: bool = False) -> Dict[str, Any]:
 
 
 def get_current_stats() -> Dict[str, Any]:
-    """
-    Get current memory statistics without writing to file
-
-    Returns:
-        Dict with stats or error
-
-    Example:
-        # Check stats without updating file
-        stats = get_current_stats()
-        if stats['success']:
-            print(f"Vectors: {stats['total_vectors']}")
-    """
+    """Get current memory statistics without writing to file"""
     try:
         stats = collect_stats()
         return {"success": True, **stats}
@@ -304,14 +179,9 @@ def get_current_stats() -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# CLI ENTRY POINT (for testing)
-# =============================================================================
-
 if __name__ == "__main__":
     print("\n=== Memory Central Writer ===\n")
 
-    # Get current stats
     print("Collecting statistics...")
     stats_result = get_current_stats()
 
@@ -324,7 +194,6 @@ if __name__ == "__main__":
 
     print()
 
-    # Update central file
     print("Updating central file...")
     result = update_central(verbose=True)
 

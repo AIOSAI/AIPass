@@ -3,107 +3,13 @@
 # Description: Weak Oracle Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
 Weak Oracle Standards Checker Handler
 
-Crack class D from the 2026-09-22 eyes-on review of @backup's tests, and the
-largest verdict class the reviewers found: 51 WEAK rows out of 285 tests. A
-test whose ENTIRE oracle cannot exclude the failure its name claims to
-exclude.
-
-SCORED ONLY WHEN IT IS THE WHOLE ORACLE. A test that asserts the effect and
-also checks ``isinstance`` is a good test with a redundant line; charging it
-would be charging the thoroughness. Every form below is judged against the
-test's complete set of assertions -- ``assert`` statements plus ``mock.assert_*``
-calls -- and one real assertion anywhere in the test acquits all of them.
-
-THE SIX SCORED FORMS, each one a thing a test cannot satisfy by accident:
-
-  D1 ``assert <constant>``           -- ``assert True`` cannot fail.
-  D2 ``assert <name>`` alone         -- a bare local's truthiness. NOT
-                                        ``assert is_ignored(p, spec)``: a
-                                        predicate CALL's truthiness is the
-                                        claim, and scoring it cost 1,356
-                                        false hits in the first cut.
-  D3 ``is not None`` alone           -- every object is not None.
-  D4 ``isinstance(...)`` alone       -- the type, never the value.
-  D5 ``assert_called`` / ``assert_called_once`` with NO arguments and no
-     other assertion -- proves the call happened, pins nothing it was given.
-  D6 ``assert f(...) is None`` where ``f`` is annotated ``-> None`` -- a
-     tautology. The function CANNOT return anything else.
-
-REPORTED WITH A COUNT, NEVER SCORED, because each of these can legitimately
-be the right oracle and a rule cannot tell which:
-
-  ``is None`` alone (not a ``-> None`` function) · ``len`` and ``count``
-  compares · ``>=`` / ``<=`` / ``>`` / ``<`` bounds · ``in`` and ``not in``
-  (substring of output, key of a dict) · ``== {}`` on a loader.
-
-A ``pytest.raises`` anywhere in the test acquits it outright. "It raised the
-right exception" is a real oracle, and it is often the only one a refusal
-test needs.
-
-NOT CHARGED TWICE: ``router_assert`` already owns
-``assert handle_command(...) is True``. That form is a ``Compare`` against a
-constant, which this rule reads as strong, so the two never meet.
-
-CHECK FIRST, measured 2026-09-22 over the fleet's 561 test files:
-
-  * SCORED: 177 files, 468 hits, 8.3s. Top three: @memory 20 files,
-    @trigger 18, @ai_mail 17. By form -- D5 162, D3 143, D2 113, D4 48,
-    D6 2, D1 0. There is not one ``assert True`` in the fleet.
-  * REPORTED, not scored: 430 files, 4,667 soft oracles in the tests whose
-    WHOLE oracle is soft. ``in`` / ``not in`` 3,346 · plain ``is None`` 632 ·
-    ``len``/``count`` 428 · ``== {}`` 132 · bound compares 129.
-  * THE FIRST CUT SAID 369 files and 2,000 hits, and 1,356 of those were
-    ``assert <call>`` read as bare truthiness. ``assert spec.match_file(p)``
-    is the claim, not a weak stand-in for one. Curing that also took the
-    model file from red to 100: its second assertion is
-    ``assert hasattr(generator, "update_readme_auto_sections")``.
-
-A SOFT COMPANION DOES NOT ACQUIT; only a STRONG one does. This is the one
-place the rule bites harder than it reads, so it is named here. A test whose
-oracle is ``assert breach is not None`` plus two ``"text" in output`` checks
-is scored D3, because nothing in it pins a value the product computed --
-``test_ceiling_guard.py`` 153 and 162 are exactly that shape. The dispatch
-asked for it directly with ``test_module_isolation.py:48``, whose companion
-is a ``not in sys.modules``.
-
-WHICH OF THE DISPATCH'S EVIDENCE LINES IT CONVICTS:
-
-  * ``test_cli_routing.py:328`` -- ``spy.assert_called()`` with 11 params
-    unpinned. CONVICTED, D5.
-  * ``test_error_resilience.py:372`` -- ``trail.log_operation(...) is None``
-    where ``log_operation`` is ``-> None``. CONVICTED, D6, and it is one of
-    only TWO in the fleet -- the rarest form that exists at all.
-  * ``test_module_isolation.py:48`` -- ``twin is not None`` beside a
-    ``not in sys.modules``. CONVICTED, D3: the second assertion is a
-    containment check, which is reported-not-scored, so nothing in that test
-    is a real oracle.
-  * ``test_ceiling_guard.py:107`` -- ``is None`` alone. **DECLINED, reported
-    only.** ``check_ceiling`` returns a breach OR None, so asserting None is
-    a real claim about a real return. The reviewer's own break for it
-    (``continue``->``break`` survives because the ghost is last) is a
-    coverage gap, not a tautology. Its count rides in the passing message.
-  * ``test_handlers_filesystem.py`` 119, 136, 192, 205, 212 -- ``isinstance``
-    beside a real assert. **DECLINED, and the dispatch said so in advance.**
-    Each of those tests has a live oracle next to the type check.
-    ``test_build_snapshot_path`` at line 207 is NOT one of them and IS
-    convicted D4: its companion is ``"snapshots" in str(result)``, a
-    substring, where ``test_backup_root`` one test above asserts
-    ``result.name == ".backup"`` and is acquitted. Two tests, four lines
-    apart, and the rule separates them.
-
-THE JUDGEMENT CALL THE DISPATCH ASKED FOR: an assertion on a value the test
-itself set up (class E's shape) does NOT count as a real oracle here either
--- but this checker does not detect it, because doing so is class E's whole
-job and building half of E inside D would put the same finding in two places
-under two names. D therefore reads a self-set assert as strong and lets E
-convict it. If E never ships, that is a known hole and this is where it is
-written down.
+Reference: weak_oracle.md
 """
 
 import ast
@@ -178,9 +84,7 @@ def _module_file(dotted: str) -> Path | None:
 def none_returning_functions(dotted: str) -> frozenset[str]:
     """Every ``-> None`` function in a product module, cached per module.
 
-    D6 is the only form that needs to leave the file, and it needs to: the
-    annotation that makes ``assert f(...) is None`` a tautology lives on the
-    product's ``def``, not at the call site.
+    D6 leaves the file: the ``-> None`` annotation lives on the product's ``def``.
     """
     source = _module_file(dotted)
     if source is None:
@@ -202,10 +106,7 @@ def none_returning_functions(dotted: str) -> frozenset[str]:
 def _none_returning(tree: ast.Module) -> Tuple[Set[str], Dict[str, str]]:
     """(bare names that return None, module alias -> its dotted path).
 
-    Both spellings reach the same annotation: ``from x import f`` then
-    ``f(...)``, and ``from x import mod`` then ``mod.f(...)``. @backup's
-    ``test_error_resilience.py:372`` is the second, and reading only the
-    first found zero instances in the whole fleet.
+    Both spellings matter: ``from x import f`` and ``from x import mod`` then ``mod.f(...)``.
     """
     bare: Set[str] = set()
     modules: Dict[str, str] = {}
@@ -258,10 +159,7 @@ _CONTAINERS = (ast.List, ast.ListComp, ast.Set, ast.SetComp, ast.Dict, ast.DictC
 def _built(function_nodes: List[ast.AST]) -> Set[str]:
     """Names the test bound only to a container it built itself, a display or a comprehension.
 
-    Such a name cannot be None, 0 or "", so ``assert not offenders`` is exactly
-    ``assert offenders == []``: one oracle, not a weak one (seedgo, fleet green
-    leg 9; skills, memory, prax and seedgo reported it). A name bound any other
-    way, or also bound by a loop, a ``with`` or a parameter, is not in the set.
+    Such a name cannot be None, so ``assert not offenders`` is ``assert offenders == []``.
     """
     built: Set[str] = set()
     other: Set[str] = set()
@@ -289,11 +187,7 @@ def _binding(node: ast.AST) -> Tuple[ast.AST | None, ast.AST | None]:
 
 
 def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[str] | None = None) -> Tuple[str, str]:
-    """(strength, form) for one oracle: an assert statement or a mock assertion.
-
-    ``built`` names the containers the test made itself (see ``_built``); a
-    bare truthiness test of one of them is the emptiness claim, not D2.
-    """
+    """(strength, form) for one oracle: an assert statement or a mock assertion."""
     if isinstance(node, ast.Call):
         blind = _tail_name(node.func) in _BLIND_CALLS and not node.args and not node.keywords
         return (_SCORED, D5) if blind else (_STRONG, "")
@@ -302,17 +196,12 @@ def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[
     if isinstance(test, ast.Constant):
         return _SCORED, D1
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not) and isinstance(test.operand, ast.Name):
-        # Only the NOT form is the emptiness claim (seedgo, fleet green leg 10):
-        # `assert found` on a built list says "at least one", which is D2's weakness.
+        # Only `not` is the emptiness claim: `assert found` on a built list stays D2.
         return (_STRONG, "") if test.operand.id in (built or set()) else (_SCORED, D2)
     if isinstance(test, ast.Name):
         return _SCORED, D2
     if isinstance(test, ast.Call):
-        # A CALL's truthiness is the claim: `assert is_ignored(p, spec)` and
-        # `assert hasattr(generator, "update_readme_auto_sections")` both ask
-        # the product a specific question and assert its answer. Only a bare
-        # local name's truthiness (D2) is weak. isinstance is the exception,
-        # because it answers about the TYPE and never about the value.
+        # A call's truthiness is the claim; isinstance alone answers only the type.
         return (_SCORED, D4) if _tail_name(test.func) == "isinstance" else (_STRONG, "")
     if isinstance(test, ast.Compare) and len(test.ops) == 1:
         return _compare_verdict(test, bare, modules)
@@ -320,20 +209,13 @@ def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[
 
 
 def _tests(tree: ast.Module) -> List[Tuple[Union[ast.FunctionDef, ast.AsyncFunctionDef], List[ast.AST]]]:
-    """Each test and its own nodes, in ONE descent.
-
-    Walking the tree to find the tests and then walking each test again to
-    collect its oracles re-walks every node twice; one stack descent carrying
-    the enclosing test down took the fleet from 9.0s with identical findings.
-    """
+    """Each test and its own nodes, in ONE descent."""
     nodes: Dict[int, List[ast.AST]] = {}
     owners: Dict[int, Union[ast.FunctionDef, ast.AsyncFunctionDef]] = {}
     stack: List[Tuple[ast.AST, Union[ast.FunctionDef, ast.AsyncFunctionDef, None]]] = [(tree, None)]
     while stack:
         node, enclosing = stack.pop()
-        # isinstance INLINE, not through an `is_test` flag: pyright narrows a
-        # type test, never a bool that holds its answer, and `owners` needs the
-        # narrowed type to give `.lineno` and `.name` to the finding.
+        # isinstance inline, not an `is_test` flag: pyright narrows only a type test.
         if (
             enclosing is None
             and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -362,17 +244,12 @@ def _oracles(function_nodes: List[ast.AST]) -> Tuple[List[Union[ast.Assert, ast.
         if name.startswith("assert_"):
             found.append(node)
         raises = raises or name == "raises"
-    # SOURCE order, not traversal order: the reported form is the first weak
-    # oracle a reader meets, and _tests descends a stack (children reversed).
+    # Source order: _tests descends a stack (children reversed); the report names the first weak oracle.
     return sorted(found, key=lambda node: (node.lineno, node.col_offset)), raises
 
 
 def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
-    """
+    """The file's tree, or None when Python cannot read it (ruff convicts the syntax error)."""
     try:
         return ast.parse(source)
     except SyntaxError as exc:
@@ -381,12 +258,7 @@ def _parse(source: str) -> ast.Module | None:
 
 
 def scan(source: str) -> Tuple[List[Tuple[int, str, str]], List[str]]:
-    """(scored findings, soft forms counted).
-
-    Returns the tests whose WHOLE oracle is one of the six scored forms, and
-    separately the soft forms of every test whose whole oracle is soft -- a
-    count for the owner, riding in the passing message, never a verdict.
-    """
+    """(scored findings, soft forms counted)."""
     tree = _parse(source)
     if tree is None:
         return [], []
@@ -430,12 +302,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def _clean_message(counted: List[str]) -> str:
-    """The passing message, carrying the soft count without making it a verdict.
-
-    The device ``named_encoding`` uses for latin-1 and ``state_leak`` for the
-    import-time write: a number the owner asked for rides along, and nobody
-    is charged for it.
-    """
+    """The passing message, carrying the soft count without making it a verdict."""
     if not counted:
         return "Every test here asserts something that can fail"
     kinds = len(set(counted))
@@ -447,15 +314,7 @@ def _clean_message(counted: List[str]) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for tests whose whole oracle cannot fail.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for tests whose whole oracle cannot fail."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -471,9 +330,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not scored:
         return _result(True, _one_check(True, _clean_message(counted)), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per test would show the first
-    # and hide the rest behind a count.
+    # One check: checklist._format_failure shows only the first failed check plus "(+N more)".
     detail = "\n".join(f"{path.name}:{line} {name} — {form} - {CURE}" for line, name, form in scored)
 
     json_handler.log_operation(

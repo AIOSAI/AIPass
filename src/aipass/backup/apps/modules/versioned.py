@@ -3,7 +3,7 @@
 # Description: Versioned module — per-file baseline + diff backup
 # Version: 3.1.0
 # Created: 2026-04-17
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Versioned Module — per-file baseline + diff backup of a project directory."""
@@ -71,18 +71,7 @@ def run_versioned(
     pre_scanned: list[tuple[str, str]] | None = None,
     verb: str = PRIMARY_COMMAND,
 ) -> BackupResult:
-    """Run a versioned backup into the persistent per-file store.
-
-    The run announces itself in ``.backup/running/versioned.json`` and turns
-    SIGTERM into a stop between files (DPLAN-0412); the file goes on every
-    exit path.
-
-    Args:
-        project_root: Absolute path to the project.
-        show_panels: Whether to show rich CLI output.
-        pre_scanned: Pre-scanned file list from 'all' (shared scan).
-        verb: What was invoked, for the running file: versioned, or all.
-    """
+    """Run a versioned backup into the persistent per-file store."""
     start = time.time()
 
     # create_backup_dir returns None for a non-directory — stop there rather
@@ -154,8 +143,7 @@ def _versioned_run(
     result.duration_seconds = duration
     result.errors = copy_result.get("errors", [])
 
-    # Stopped by request: no changelog entry (lanes.versioned.last means a run
-    # that completed). The stopped line is the last word.
+    # Stopped: no changelog entry (lanes.versioned.last means a completed run).
     if copy_result.get("stopped"):
         result.add_warning("stopped by request")
         report_stopped(
@@ -203,11 +191,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
         return True
@@ -216,8 +201,6 @@ def handle_command(command: str, args: list) -> bool:
     run_versioned(project_root)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

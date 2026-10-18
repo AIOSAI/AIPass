@@ -3,34 +3,16 @@
 # Description: the shadow-cycle document - three passes reduced to one screen, and published
 # Version: 1.0.0
 # Created: 2026-09-02
-# Modified: 2026-09-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 ONE DOCUMENT AND ONE SCREEN, BUILT FROM THE SAME NUMBERS.
 
-Three passes run in a cycle - the v5 shadow score, the ranked test inventory,
-the cross-branch twin census - and each already publishes its own artifact.
-What did not exist was the joining document: the small file that says which
-three runs belong to the same week, and where each one's evidence is.
-
-THE MAIL CARRIES PATHS, NEVER THE REPORT. The twin report alone is half a
-megabyte and the inventory's row file is twenty-eight; the whole point of the
-cycle is that a reader can decide from one screen whether this week is worth
-opening. `one_screen` renders exactly what is mailed and exactly what the verb
-prints, from the document, so the console and the inbox can never disagree
-about a number - a second renderer is a second answer.
-
-WHY THE SUMMARY IS PUBLISHED AS WELL AS SENT. Mail is delivered once and read
-by one recipient. `.seedgo/shadow_cycle.json` is the record the NEXT cycle is
-compared against, and it holds the machine-readable form of every headline
-count, so a later reader can diff two weeks without parsing prose.
-
-REFUSES TO PUBLISH WITHOUT ITS CAVEATS, the same rule its two sibling reports
-carry: a limitation a reader has to go looking for will not be found, and the
-loudest thing this document must say is that the score in its first block gates
-nothing at all.
-"""
+Joins the week's shadow score, test inventory and twin census by evidence path;
+the mail carries paths, never the reports (the twin report is half a megabyte).
+`one_screen` is the only renderer, so console and inbox cannot disagree, and
+`.seedgo/shadow_cycle.json` is what the next cycle diffs against."""
 
 import json
 import time
@@ -43,24 +25,19 @@ from aipass.seedgo.apps.handlers.module_root import module_file
 
 MODULE_NAME = "shadow_cycle.cycle"
 
-#: Seedgo's own state directory - never the measured tree's. `.seedgo` is
-#: seedgo-owned storage under the gateway_boundary standard.
+#: Seedgo's own state directory, never the measured tree's (gateway_boundary).
 SEEDGO_ROOT = module_file(__file__).parents[3]
 ARTIFACT_DIR = SEEDGO_ROOT / ".seedgo"
 
-#: The joining document one cycle publishes.
 DOCUMENT_NAME = "shadow_cycle.json"
 
-#: The shadow score's complete result set. The PACK is in the name so a cycle
-#: run against a second pack can never overwrite the first one's evidence -
-#: the same rule `last_audit_{branch}.json` follows for scope.
+#: The pack is in the name so a second pack's run never overwrites the first's.
 SCORE_NAME = "shadow_cycle_score_{pack}.json"
 
 ARTIFACT_VERSION = "shadow-cycle/1"
 TOOL_VERSION = "1.0.0"
 
-#: What this document is not, published beside the numbers. The writer refuses
-#: an empty list, so no cycle can ever be quoted without them.
+#: The writer refuses an empty list, so no cycle is ever quoted without them.
 CAVEATS: tuple = (
     "THE SCORE IN BLOCK 1 GATES NOTHING. The pytest_quality pack declares itself a SHADOW "
     "pack: it is measured weekly so its numbers can be diffed against the calibrated v4 "
@@ -78,11 +55,6 @@ CAVEATS: tuple = (
 )
 
 
-# =============================================================================
-# PATHS
-# =============================================================================
-
-
 def document_path(directory: Optional[Path] = None) -> Path:
     """Where the joining document is written."""
     return (Path(directory) if directory else ARTIFACT_DIR) / DOCUMENT_NAME
@@ -91,11 +63,6 @@ def document_path(directory: Optional[Path] = None) -> Path:
 def score_artifact_path(pack: str, directory: Optional[Path] = None) -> Path:
     """Where one pack's complete shadow result set is written."""
     return (Path(directory) if directory else ARTIFACT_DIR) / SCORE_NAME.format(pack=pack)
-
-
-# =============================================================================
-# THE BLOCKS
-# =============================================================================
 
 
 def inventory_block(summary: dict, paths: Dict[str, Path]) -> dict:
@@ -145,11 +112,6 @@ def build(score: dict, inventory: dict, twins: dict, elapsed: float, now: Option
     }
 
 
-# =============================================================================
-# PUBLICATION
-# =============================================================================
-
-
 def publish(document: dict, directory: Optional[Path] = None) -> Path:
     """Write the joining document and return the path it landed on."""
     assert_publishable(document)
@@ -176,21 +138,12 @@ def publish(document: dict, directory: Optional[Path] = None) -> Path:
 def assert_publishable(document: dict) -> None:
     """Refuse a cycle that declares no caveats, or one whose score claims to gate.
 
-    Both refusals are about the same sentence. The first block of this document
-    is a fleet-wide compliance percentage, and a percentage published without
-    the word SHADOW beside it will be read as a gate by the next person who
-    quotes it.
-    """
+    A compliance percentage published without SHADOW beside it gets read as a gate."""
     if not document.get("caveats"):
         raise ValueError("refusing to publish a shadow cycle that declares no caveats")
 
     if document.get("shadow_score", {}).get("gating") is not False:
         raise ValueError("refusing to publish a shadow cycle whose score does not declare itself non-gating")
-
-
-# =============================================================================
-# THE ONE SCREEN
-# =============================================================================
 
 
 def subject(document: dict) -> str:
@@ -206,10 +159,7 @@ def subject(document: dict) -> str:
 def one_screen(document: dict) -> str:
     """The whole cycle as plain text: headline counts and artifact paths only.
 
-    Plain text with no Rich markup, because the same string is printed to a
-    console AND handed to ai_mail, and a body that renders in one and shows its
-    tags in the other is two outputs pretending to be one.
-    """
+    No Rich markup: the same string goes to the console and to ai_mail."""
     lines: List[str] = [
         f"SHADOW CYCLE - {document['generated_at']} - {document['elapsed_seconds']:.0f}s",
         "",

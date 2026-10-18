@@ -3,56 +3,15 @@
 # Description: Entry-limits gateway — the public door to the shape, the caps and the budgets
 # Version: 1.0.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 Entry Limits Module — Public API
 
-The caps, the closed entry shape and the whole-file budgets the fleet writes
-against, answered from one door. The rules themselves live in
-``apps/handlers/json/entry_limits.py`` and stay there; this module is the DOOR
-to them.
-
-WHY IT EXISTS. ``apps/handlers/`` is private implementation, and @seedgo's
-``check_handler_independence`` sends cross-branch callers to a branch's
-``modules`` package instead. Today @hooks and @seedgo both reach past that rule
-into ``handlers/json/entry_limits.py`` — @hooks by ``importlib.import_module``
-on the dotted handler path, @seedgo by a guarded import of ``draft_target`` —
-because no door existed to reach for. This is that door. Their files are theirs
-to change on their own pass; nothing here breaks the old path.
-
-``apps/modules/fleet.py`` is the same pattern, built for the same reason.
-
-WHAT THIS IS NOT. Not a wrapper, not a copy, not a compatibility layer. Every
-name below is re-exported by IDENTITY, so a caller here and the write gate
-inside this branch run the same function object. A gateway that computed
-anything would be the second source of truth it exists to prevent — which is
-the precise defect FPLAN-0593 Phase 5 closed when ``draft_percent`` stopped
-being a module constant here and a mirrored ``_DRAFT_PERCENT`` over in @seedgo.
-
-WHAT IS DELIBERATELY BEHIND THE DOOR. The reason-shape internals
-(``_field_violation``, ``_check_list_field``, the private type names) and
-``config_loader`` itself. A consumer that pinned those would make a routine
-change to how a violation is assembled into a breaking one; the published
-reason KEYS are here instead, because @hooks matches on those strings and a
-typo in a refusal reason is a refusal nobody renders.
-
-THE COMMAND SURFACE IS INTROSPECTION ONLY. ``drone @memory limits`` describes
-the contract and reads the live numbers. Nothing here writes: changing a cap is
-``drone @memory config set``, which is @memory's own verb and refuses out of
-bounds.
-
-USAGE (cross-branch)::
-
-    from aipass.memory.apps.modules import limits
-
-    shape = limits.fields_for("sessions", limits.load_entry_limits())
-    target = limits.draft_target(shape["summary"]["max_chars"])
-
-Import the MODULE, not the symbols: it keeps refusals and logging attributable
-to @memory, and a signature change then surfaces as an ``AttributeError`` at the
-call site instead of a wrong answer downstream.
+The cross-branch door to ``handlers/json/entry_limits.py``. Every name is
+re-exported by identity: computing anything here would be a second source of truth.
+Import the module, not the symbols, so a signature change fails at the call site.
 """
 
 from aipass.prax import logger

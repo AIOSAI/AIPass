@@ -3,25 +3,15 @@
 # Description: Memory Processing Handler
 # Version: 1.7.0
 # Created: 2025-11-25
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """
 Memory Processing Handler
-
-Handles archival of closed PLAN files to flow/processed_plans/.
-AI summarization removed — plans vectorized directly from flow/processed_plans/.
-
-Key Functions:
-- process_closed_plans() - Main entry point: archive plan → update registry
-- archive_plan() - Move to flow/processed_plans/
-- is_template_content() - Template detection
-- verify_and_heal_orphaned_plans() - Orphan healing logic
 """
 
 from pathlib import Path
 
-# Standard imports
 import json
 import os
 import shutil
@@ -35,13 +25,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 _PKG_ROOT = module_file(__file__).parents[4]
 
-# AI summarization removed — OpenRouter API no longer needed here
-# from aipass.api.apps.modules.openrouter_client import get_response
-
-# =============================================
-# CONSTANTS
-# =============================================
-
 FLOW_ROOT = _PKG_ROOT / "flow"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
 
@@ -53,8 +36,7 @@ _LOCK_BACKOFF_BASE = 0.05
 def _sleep(seconds: float) -> None:
     """time.sleep(seconds), the lock backoff's wait.
 
-    The reason is the tests alone: they patch this name so the backoff neither
-    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    Tests patch this name so the backoff skips waiting without patching time.sleep globally.
     """
     time.sleep(seconds)
 
@@ -62,12 +44,7 @@ def _sleep(seconds: float) -> None:
 def _create_exclusive(lock_path: Path) -> int:
     """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
 
-    It stands alone because this create is where platforms answer differently:
-    Windows answers a lock another writer is still removing (delete pending)
-    with PermissionError, which a retry wins, and Linux cannot produce that.
-    The tests (test_process, the registry-lock denial tests) hand the denial
-    in through this name rather than replacing os.open for the whole process
-    (flow's decision, leg 11).
+    Tests inject Windows' delete-pending PermissionError here instead of patching os.open.
     """
     return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
@@ -75,16 +52,8 @@ def _create_exclusive(lock_path: Path) -> int:
 def _acquire_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
 
-    A Windows delete-pending PermissionError (another writer mid-release) is
-    a held lock: it is retried on the same budget as FileExistsError.
-
-    Returns:
-        True once acquired; False only when the budget runs out on contention.
-
-    Raises:
-        PermissionError: The budget ran out and the last attempt was denied.
-            Chained from that denial, so a real permissions problem surfaces.
-        OSError: The create failed with any other OSError, raised at once.
+    Returns: True once acquired; False only when the budget runs out on contention.
+    Raises: PermissionError (chained) if the last attempt was denied; any other OSError at once.
     """
     denial: PermissionError | None = None
     waited = 0.0
@@ -103,8 +72,7 @@ def _acquire_lock(lock_path: Path) -> bool:
                 "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
             )
         except OSError as exc:
-            # Neither contention nor denial: False would read as a spent retry
-            # budget, so it propagates to the caller (flow's decision, leg 3).
+            # False would read as a spent retry budget, so other OSErrors propagate.
             logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
             raise
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
@@ -126,15 +94,7 @@ def _release_lock(lock_path: Path) -> None:
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="mbank_process")
 
 
@@ -142,10 +102,6 @@ _REPO_ROOT = _find_repo_root()
 MEMORY_PATH = _REPO_ROOT / "src" / "aipass" / "memory"
 PROCESSED_PLANS_DIR = _REPO_ROOT / ".backup" / "processed_plans"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
-
-# =============================================
-# PLAN TYPE HELPERS
-# =============================================
 
 
 def _get_all_registry_files() -> List[str]:
@@ -163,11 +119,6 @@ def _get_all_registry_files() -> List[str]:
     except Exception as exc:
         logger.warning("[mbank] Failed to discover plan types, falling back to default registry: %s", exc)
     return [REGISTRY_FILE.name]
-
-
-# =============================================
-# REGISTRY OPERATIONS
-# =============================================
 
 
 def load_flow_registry(registry_file: str | None = None) -> Dict[str, Any]:
@@ -204,11 +155,7 @@ def save_flow_registry(registry: Dict[str, Any], registry_file: str | None = Non
 
 
 def get_closed_plans() -> List[Dict[str, Any]]:
-    """Get closed PLANs from ALL per-type registries.
-
-    Returns:
-        List of dicts with keys: number, path, info, registry_file
-    """
+    """Get closed PLANs from ALL per-type registries."""
     verify_and_heal_orphaned_plans()
     closed_plans: List[Dict[str, Any]] = []
     for reg_file in _get_all_registry_files():
@@ -232,31 +179,13 @@ def get_closed_plans() -> List[Dict[str, Any]]:
     return closed_plans
 
 
-# =============================================
-# TEMPLATE DETECTION
-# =============================================
-
-
 def is_template_content(content: str) -> bool:
     """Check if plan content is still unedited template (v5.0)
 
-    Priority order:
-    1. User-content signals (checked checkboxes) — strongest evidence of
-       real work, overrides everything.
-    2. Real content in Notes section — overrides bracket markers.
-    3. Non-boilerplate Execution Log entries — user-written entries
-       override bracket markers; template boilerplate is ignored.
-    4. Bracket-marker check — 3+ template placeholders = template.
-
-    Args:
-        content: Plan file content
-
-    Returns:
-        True if plan is essentially an untouched template
+    Real-work signals (checked boxes, Notes, a non-boilerplate Execution Log) override bracket markers.
     """
     import re
 
-    # --- 1. User content signals override everything ---
     user_content_signals = [
         "- [x] Agent deployed",
         "- [x] Agent completed",
@@ -267,14 +196,12 @@ def is_template_content(content: str) -> bool:
         if signal in content:
             return False
 
-    # --- 2. Real Notes content → not template ---
     notes_match = re.search(r"## Notes\s*\n(.*?)(?=\n---|\n## |\Z)", content, re.DOTALL)
     if notes_match:
         notes_content = notes_match.group(1).strip()
         if notes_content and notes_content != "[Working notes, issues encountered, decisions made]":
             return False
 
-    # --- 3. Non-boilerplate Exec Log entries → not template ---
     _exec_boilerplate = ["**Log Pattern:**", "[task]", "[outcome]", "[file]"]
     exec_match = re.search(r"## Execution Log\s*\n(.*?)(?=\n---|\n## |\Z)", content, re.DOTALL)
     if exec_match:
@@ -285,7 +212,6 @@ def is_template_content(content: str) -> bool:
             if len(lines) > 8:
                 return False
 
-    # --- 4. Bracket markers: 3+ from any type = template ---
     default_markers = [
         "[What do you want to achieve? Specific end state.]",
         "[How will agents tackle this? What instructions will they need?]",
@@ -317,231 +243,27 @@ def is_template_content(content: str) -> bool:
     return False
 
 
-# =============================================
-# CONTENT ANALYSIS (DISABLED)
-# AI summarization removed — plans vectorized directly from flow/processed_plans/
-# =============================================
-
-# def analyze_plan_content(plan_path: Path) -> Dict[str, str]:
-#     """Use OpenRouter to analyze plan content and determine TRL tags
-#
-#     Args:
-#         plan_path: Path to PLAN file
-#
-#     Returns:
-#         Dict with keys: type, category, action, summary
-#
-#     Raises:
-#         Exception: If API call fails or response is invalid
-#     """
-#     trl_registry = load_trl_registry()
-#
-#     # Read plan content
-#     with open(plan_path, 'r', encoding='utf-8') as f:
-#         content = f.read()
-#
-#     # Prepare analysis prompt
-#     try:
-#         relative_path = str(plan_path.relative_to(_PKG_ROOT))
-#         folder_context = str(plan_path.parent.relative_to(_PKG_ROOT))
-#     except ValueError:
-#         relative_path = str(plan_path)
-#         folder_context = str(plan_path.parent)
-#
-#     trl_mapping = trl_registry["trl_mapping"]
-#
-#     types_desc = "\n".join([f"{k}: {v}" for k, v in trl_mapping["types"].items()])
-#     categories_desc = "\n".join([f"{k}: {v}" for k, v in trl_mapping["categories"].items()])
-#     actions_desc = "\n".join([f"{k}: {v}" for k, v in trl_mapping["actions"].items()])
-#
-#     type_codes = "|".join(trl_mapping["types"].keys())
-#     category_codes = "|".join(trl_mapping["categories"].keys())
-#     action_codes = "|".join(trl_mapping["actions"].keys())
-#
-#     prompt = f"""Analyze this completed plan file:
-#
-# Content: {content}
-# Folder: {folder_context}
-# File: {plan_path.name}
-#
-# Determine the primary classification using these options:
-#
-# TYPE options:
-# {types_desc}
-#
-# CATEGORY options:
-# {categories_desc}
-#
-# ACTION options:
-# {actions_desc}
-#
-# Return ONLY a JSON object:
-# {{
-#   "type": "{type_codes}",
-#   "category": "{category_codes}",
-#   "action": "{action_codes}",
-#   "summary": "brief description"
-# }}"""
-#
-#     ai_model = get_ai_model()
-#     response = get_response(prompt, model=ai_model, caller="flow_mbank")
-#
-#     if response:
-#         try:
-#             response_str = response.get('content', '').strip()
-#
-#             if response_str.startswith("```json"):
-#                 start = response_str.find("```json") + 7
-#                 end = response_str.rfind("```")
-#                 if end > start:
-#                     response_str = response_str[start:end].strip()
-#             elif response_str.startswith("```"):
-#                 start = response_str.find("```") + 3
-#                 end = response_str.rfind("```")
-#                 if end > start:
-#                     response_str = response_str[start:end].strip()
-#
-#             try:
-#                 analysis = json.loads(response_str)
-#             except json.JSONDecodeError as e:
-#                 first_brace = response_str.find('{')
-#                 last_brace = response_str.rfind('}')
-#
-#                 if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-#                     json_only = response_str[first_brace:last_brace + 1]
-#                     try:
-#                         analysis = json.loads(json_only)
-#                     except json.JSONDecodeError:
-#                         raise Exception(f"API returned invalid JSON: {e}")
-#                 else:
-#                     raise Exception(f"API returned invalid JSON: {e}")
-#
-#             required_fields = ['type', 'category', 'action', 'summary']
-#             for field in required_fields:
-#                 if field not in analysis:
-#                     raise Exception(f"API response missing required field: {field}")
-#
-#             return analysis
-#         except json.JSONDecodeError as e:
-#             raise Exception(f"API returned invalid JSON: {e}")
-#     else:
-#         raise Exception("No response from OpenRouter API - check API key and connection")
-
-# =============================================
-# MEMORY ENTRY CREATION (DISABLED)
-# AI summarization removed — plans vectorized directly from flow/processed_plans/
-# =============================================
-
-# def create_memory_entry(plan_path: Path, analysis: Dict[str, str]) -> Optional[Path]:
-#     """Create @memory entry from analyzed plan
-#
-#     Args:
-#         plan_path: Path to source PLAN file
-#         analysis: Dict with type, category, action, summary
-#
-#     Returns:
-#         Path to created memory file, or None on failure
-#     """
-#     try:
-#         with open(plan_path, 'r', encoding='utf-8') as f:
-#             content = f.read()
-#
-#         is_template = is_template_content(content)
-#
-#         try:
-#             relative_path = plan_path.relative_to(_PKG_ROOT)
-#             folder_context = str(relative_path.parent).replace("\\", "-").replace("/", "-")
-#         except ValueError:
-#             relative_path = plan_path
-#             folder_context = str(plan_path.parent).replace("\\", "-").replace("/", "-")
-#
-#         if folder_context == "." or folder_context == "":
-#             folder_context = "root"
-#
-#         today = datetime.now().strftime("%Y%m%d")
-#         plan_num = plan_path.stem.replace("FPLAN-", "")
-#         template_suffix = "-TEMP" if is_template else ""
-#         filename = (
-#             f"{folder_context}-{analysis['type']}-{analysis['category']}"
-#             f"-{analysis['action']}-FPLAN-{plan_num}{template_suffix}-{today}.md"
-#         )
-#
-#         filename = re.sub(r'[<>:"|?*]', '-', filename)
-#         filename = re.sub(r'-+', '-', filename)
-#
-#         private_branch = _get_private_branch_for_path(plan_path)
-#         if private_branch:
-#             archive_dir = Path(private_branch["path"]) / ".archive" / "plans"
-#             _private_archive_log = f"[mbank] Archiving plan locally for private branch: {private_branch['name']}"
-#         else:
-#             archive_dir = MEMORY_PATH
-#             _private_archive_log = None
-#
-#         memory_file = archive_dir / filename
-#         memory_file.parent.mkdir(parents=True, exist_ok=True)
-#
-#         if memory_file.exists():
-#             return None
-#
-#         memory_content = f"""# {analysis['summary']}
-#
-# **Source**: {relative_path}
-# **TRL Tags**: {analysis['type']}-{analysis['category']}-{analysis['action']}
-# **Created**: {datetime.now().strftime('%Y-%m-%d')}
-# **Location**: {relative_path.parent}
-#
-# ## Summary
-# {analysis['summary']}
-#
-# ## Original Content
-# {content}
-# """
-#
-#         with open(memory_file, 'w', encoding='utf-8') as f:
-#             f.write(memory_content)
-#
-#         return memory_file
-#
-#     except Exception as e:
-#         raise Exception(f"Failed to create memory entry: {e}")
-
-# =============================================
-# PLAN ARCHIVAL
-# =============================================
-
-
 def archive_plan(plan_path: Path) -> bool:
     """Move processed plan file to flow/processed_plans/
 
-    VERIFICATION: Returns True ONLY if file successfully moved AND verified
-
-    Args:
-        plan_path: Path to PLAN file to archive
-
-    Returns:
-        True if successfully archived and verified, False otherwise
+    Returns True only when the destination exists and the source is gone.
     """
     try:
-        # Create processed_plans directory if it doesn't exist
         PROCESSED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Move plan to processed_plans directory
         destination = PROCESSED_PLANS_DIR / plan_path.name
 
-        # Handle duplicate names by adding timestamp
         if destination.exists():
             timestamp = datetime.now().strftime("%H%M%S")
             stem = destination.stem
             suffix = destination.suffix
             destination = PROCESSED_PLANS_DIR / f"{stem}_{timestamp}{suffix}"
 
-        # Store source path for verification
         source_path = Path(plan_path)
 
-        # Attempt move (shutil.move handles cross-filesystem moves)
+        # shutil.move, not rename: the archive may sit on another filesystem.
         shutil.move(str(plan_path), str(destination))
 
-        # VERIFICATION LAYER: Confirm move actually happened
         if not destination.exists():
             return False
 
@@ -555,40 +277,21 @@ def archive_plan(plan_path: Path) -> bool:
         return False
 
 
-# =============================================
-# TEMP FILE CLEANUP
-# =============================================
-
-
 def cleanup_temp_files() -> Dict[str, Any]:
-    """Remove old -TEMP files from @memory (empty template plans)
-
-    These files are created when empty template plans are closed and processed.
-    They have no value and should be auto-cleaned.
-
-    Returns:
-        Dict with keys:
-            - files_found: int
-            - files_deleted: int
-            - failed_deletes: int
-            - details: list of file operations
-    """
+    """Remove old -TEMP files from @memory (empty template plans)"""
     files_found = 0
     files_deleted = 0
     failed_deletes = 0
     details = []
 
     try:
-        # Scan @memory for files with -TEMP in name
         if MEMORY_PATH.exists():
             for temp_file in MEMORY_PATH.glob("*-TEMP-*.md"):
                 files_found += 1
 
                 try:
-                    # Delete the TEMP file
                     temp_file.unlink()
 
-                    # Verify deletion
                     if not temp_file.exists():
                         files_deleted += 1
                         details.append({"file": temp_file.name, "status": "deleted"})
@@ -608,7 +311,6 @@ def cleanup_temp_files() -> Dict[str, Any]:
                     details.append({"file": temp_file.name, "status": "delete_failed", "error": str(e)})
 
     except Exception as e:
-        # Failed to scan directory
         logger.error("[mbank] Failed to scan @memory for temp files: %s", e)
         return {"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": [], "scan_error": str(e)}
 
@@ -618,11 +320,6 @@ def cleanup_temp_files() -> Dict[str, Any]:
         "failed_deletes": failed_deletes,
         "details": details,
     }
-
-
-# =============================================
-# ORPHAN HEALING
-# =============================================
 
 
 def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
@@ -639,9 +336,7 @@ def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
             logger.warning("[mbank] Failed to load registry '%s' during orphan healing: %s", reg_file, exc)
             continue
         for plan_num, plan_info in registry.get("plans", {}).items():
-            # Heal ANY closed plan whose file still sits at its original location.
-            # Covers both fully-processed plans and auto-closed orphans that
-            # never entered the post-close pipeline.
+            # Any closed plan, processed or not: auto-closed orphans never entered the post-close pipeline.
             if plan_info.get("status") == "closed":
                 original_path = Path(plan_info.get("file_path", ""))
                 if original_path.exists():
@@ -689,11 +384,6 @@ def verify_and_heal_orphaned_plans() -> Dict[str, Any]:
     }
 
 
-# =============================================
-# MAIN PROCESSING
-# =============================================
-
-
 def process_closed_plans() -> Dict[str, Any]:
     """Process all closed plans across all plan types.
 
@@ -730,7 +420,7 @@ def process_closed_plans() -> Dict[str, Any]:
 
                 if archive_success:
                     processed_count += 1
-                    # Vector intake triggered by post_close_runner via direct import
+                    # Vector intake happens in post_close_runner, not here.
                     results.append({"plan": plan_label, "status": "archived", "correlation_id": correlation_id})
                 else:
                     error_count += 1

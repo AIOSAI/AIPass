@@ -9,9 +9,6 @@ git's index, so anything written here ships to the public repo and strangers rea
 write accordingly. The other three (`docs.local/`, `dropbox/`, `artifacts/`) are
 gitignored by design (`.gitignore` lines 55–58) and never leave this machine.
 
-*Measured 2026-09-07 (FPLAN-0492 wave 6): `git ls-files` puts this README in the index
-and the other three outside it.*
-
 ## The pages
 
 One page per command group. The branch [README](../README.md) is the face; this is

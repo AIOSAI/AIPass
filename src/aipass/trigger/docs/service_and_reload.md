@@ -27,7 +27,7 @@ because the host has no systemd, not that it is stopped.
 
 ## The reload sentinel
 
-**The service reloads itself when handler code changes** (`handlers/reload_sentinel.py`). It is a long-running process that imports trigger's handlers once and holds them for its whole life, so a fix shipped to disk does nothing until it restarts. That gap cost this branch 25 hours of a signature fix reported live while the old code was still running, twice mistaken for the fix being incomplete. Remembering to restart after shipping is a human remembering something — the mechanism that already failed — so the process now notices for itself.
+**The service reloads itself when handler code changes** (`handlers/reload_sentinel.py`). It is a long-running process that imports trigger's handlers once and holds them for its whole life, so a fix shipped to disk does nothing until it restarts. Remembering to restart after shipping depends on a human remembering, so the process notices for itself.
 
 Every 30s it compares the mtimes of `apps/handlers/**.py` and `apps/modules/**.py` against the snapshot taken when it started. On a change it exits `75` (`EX_TEMPFAIL`) and systemd's `Restart=on-failure` brings up a fresh interpreter that imports everything from disk. Deliberately a restart, not `importlib.reload()`: handlers register callbacks on the event bus, and reloading in place leaves the bus holding the old function objects.
 

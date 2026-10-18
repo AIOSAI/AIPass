@@ -3,7 +3,7 @@
 # Description: The registry-path configuration commands
 # Version: 1.0.0
 # Created: 2026-04-05
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/config.py: the registry-path configuration commands."""
@@ -20,11 +20,6 @@ from aipass.drone.apps.modules.config import handle_command
 
 
 MODULE = "aipass.drone.apps.modules.config"
-
-
-# ===========================================================================
-# Fixtures
-# ===========================================================================
 
 
 @pytest.fixture(autouse=True)
@@ -51,11 +46,6 @@ def _isolate_config():
 def mocks(_isolate_config):
     """Expose the patched mocks dict for tests that inspect calls."""
     return _isolate_config
-
-
-# ===========================================================================
-# 1. handle_command — None / introspection
-# ===========================================================================
 
 
 class TestIntrospection:
@@ -85,11 +75,6 @@ class TestIntrospection:
         result = handle_command(command=None, args=[])
         assert result is True
         assert "config Module" in capsys.readouterr().out
-
-
-# ===========================================================================
-# 2. handle_command — help
-# ===========================================================================
 
 
 class TestHelp:
@@ -125,11 +110,6 @@ class TestHelp:
         mocks["json_handler"].log_operation.assert_not_called()
 
 
-# ===========================================================================
-# 3. handle_command — path
-# ===========================================================================
-
-
 class TestPathCommand:
     """'path' command shows the current registry path."""
 
@@ -141,11 +121,6 @@ class TestPathCommand:
 
     def test_path_prints_registry_location(self, mocks, capsys):
         """Mutant killed: the registry path read twice for one 'path'."""
-        # The once-ness was a test of its own until FPLAN-0492. Printing the
-        # handler's value already proves the handler was asked; only "exactly
-        # once" was extra, and reading the registry path twice per 'path' is
-        # still a defect worth catching. So it stays — as a second assertion
-        # about this call, not as a second test claiming a second behaviour.
 
         handle_command(command="path")
         assert "/fake/registry.json" in capsys.readouterr().out
@@ -157,11 +132,6 @@ class TestPathCommand:
         mocks["json_handler"].log_operation.assert_called_once_with(
             "handle_command", {"module": "config", "command": "path"}
         )
-
-
-# ===========================================================================
-# 4. handle_command — set
-# ===========================================================================
 
 
 class TestSetCommand:
@@ -199,11 +169,6 @@ class TestSetCommand:
         mocks["set_registry_path"].assert_not_called()
 
 
-# ===========================================================================
-# 5. handle_command — reset
-# ===========================================================================
-
-
 class TestResetCommand:
     """'reset' command restores the default registry path."""
 
@@ -222,15 +187,7 @@ class TestResetCommand:
 
         handle_command(command="reset")
         printed = capsys.readouterr().out.strip()
-        # The one string the module prints, measured by running it. The two
-        # `or` clauses this replaces both held, so neither was load-bearing:
-        # any confirmation mentioning either word passed.
         assert printed == "Registry path reset to default"
-
-
-# ===========================================================================
-# 6. handle_command — unknown command
-# ===========================================================================
 
 
 class TestUnknownCommand:
@@ -245,8 +202,6 @@ class TestUnknownCommand:
 
         handle_command(command="destroy")
         mocks["logger"].warning.assert_called()
-        # The format string and the lazy argument, separately. Both clauses of
-        # the `or` this replaces held — the second one read the repr of the whole
-        # call, so it passed on the format string alone.
+        # Format string and lazy argument checked separately: the call repr alone passes on the format.
         assert mocks["logger"].warning.call_args[0][0] == "config: unknown command '%s'"
         assert mocks["logger"].warning.call_args[0][1] == "destroy"

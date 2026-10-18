@@ -3,61 +3,13 @@
 # Description: Unused Conftest Fixture Standards Checker Handler
 # Version: 1.2.0
 # Created: 2026-09-22
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unused Conftest Fixture Standards Checker Handler
 
-Crack class G from the 2026-09-22 eyes-on review of @backup's tests: a fixture
-defined in a branch's ``conftest.py``, not ``autouse``, that no test and no
-other fixture in the branch ever requests. It is apparatus nothing uses --
-dead weight that reads as shared infrastructure, so the next author extends it
-instead of deleting it.
-
-@backup's ``tests/conftest.py`` carries three: ``temp_dir``, ``sample_data``
-and ``mock_logger``. Cited by name: the line numbers first written here had
-already drifted by the next edit of that conftest.
-
-THREE WAYS TO REQUEST A FIXTURE, and all three count as use:
-
-  * by PARAMETER NAME on a test or on another fixture -- the ordinary way;
-  * by ``@pytest.mark.usefixtures("name")`` -- a string, which is why every
-    string literal in the branch's tests is read as a possible request;
-  * by ``request.getfixturevalue("name")`` -- also a string, same reading.
-
-``autouse=True`` is never convicted. Nothing requests it by design; that is
-what autouse means.
-
-A RETIRED TEST REQUESTS NOTHING. ``tests/.archive`` and the other
-SOURCE_SKIP_DIRS are not read: .archive is git-ignored, so CI never sees it.
-seedgo's own ``sample_test_data`` passed locally on a request from
-``.archive/test_scaffold.py`` and failed on every CI runner (PR #774).
-
-BUILT ALONE, NOT INSIDE ``conftest_fixtures``, and the dispatch asked me to say
-which and why. ``conftest_fixtures`` is ``all_files`` and judges one
-``conftest.py`` in isolation -- its two rules are about what that file itself
-contains. This question cannot be answered from that file at all: whether a
-fixture is requested is a fact about the WHOLE branch's ``tests/`` tree, so the
-rule is ``branch_level`` and its entry point is ``check_branch``. Folding it
-into a file-level checker would have meant a file-level rule secretly reading
-its siblings, which is exactly the coupling the two scopes exist to keep apart.
-
-CHECK FIRST, measured 2026-09-22 over the fleet:
-
-  * 13 conftest files, 22 fixtures. @backup 3, @drone 3, then @commons,
-    @daemon, @memory, @skills, @spawn at 2 each and six branches at 1.
-  * The dispatch's first cut said 17 files and 51. The gap is the three
-    request forms above: a rule that reads only parameter names convicts every
-    fixture used through ``usefixtures`` or ``getfixturevalue``.
-  * @backup's three are the same fixtures the review named. The review cited
-    the ``@pytest.fixture`` decorator line and this rule cites the ``def``, so
-    the two line numbers differ by one -- the finding carries the live line.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: if no parameter, no ``usefixtures``
-string and no ``getfixturevalue`` string in the entire branch names the
-fixture, pytest can never construct it. Deleting it cannot turn the suite red.
-There is no threshold and nothing to tune.
+Reference: unused_conftest_fixture.md
 """
 
 import ast
@@ -75,14 +27,10 @@ AUDIT_SCOPE = "branch_level"
 STANDARD = "UNUSED_CONFTEST_FIXTURE"
 STANDARD_KEY = "unused_conftest_fixture"
 
-#: The file whose fixtures this rule judges. A fixture in a test file is local
-#: to it and its neighbours already see it or do not; conftest is the shared one.
 CONFTEST = "conftest.py"
 
-#: The decorator that makes a function a fixture.
 FIXTURE = "fixture"
 
-#: The keyword that means "nothing needs to request this".
 AUTOUSE = "autouse"
 
 CURE = "request it in a test, or delete it"
@@ -102,8 +50,7 @@ def _tail_name(node: ast.AST) -> str:
 def _parse(path: Path) -> ast.Module | None:
     """A file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ``ruff`` already convicts a syntax error; a second verdict misdirects the author.
     """
     try:
         return ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
@@ -129,9 +76,8 @@ def _is_fixture(function: ast.AST) -> bool:
 def _read_branch(tests_dir: Path) -> Tuple[Dict[str, Tuple[Path, int]], Set[str]]:
     """(conftest fixtures that are not autouse, every name the branch requests).
 
-    Requests are parameter names plus EVERY string literal in the tree, because
-    ``usefixtures`` and ``getfixturevalue`` both name a fixture with a string
-    and reading only the two call shapes would miss a table of them.
+    Every string literal counts as a request: ``usefixtures`` and ``getfixturevalue``
+    name fixtures by string, and reading only those two call shapes misses a table of them.
     """
     fixtures: Dict[str, Tuple[Path, int]] = {}
     requested: Set[str] = set()
@@ -177,15 +123,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for conftest fixtures no test ever requests.
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/seedgo).
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a branch for conftest fixtures no test ever requests."""
     if is_bypassed(branch_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -194,9 +132,8 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     if not findings:
         return _result(True, _one_check(True, "Every conftest fixture here is requested by something"), 100)
 
-    # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per fixture would show the
-    # first and hide the rest behind a count.
+    # Every hit on ONE check: checklist._format_failure prints only the first
+    # failed check plus "(+N more)", so one check per fixture would hide the rest.
     detail = "\n".join(
         f"{reported_path(path, branch_root)}:{line} {name} is defined and never requested - {CURE}"
         for path, line, name in findings

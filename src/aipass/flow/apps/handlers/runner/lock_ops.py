@@ -3,24 +3,11 @@
 # Description: Process lock file operations handler
 # Version: 1.2.0
 # Created: 2026-04-22
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
 """
 Lock File Operations Handler
-
-Provides atomic lock file management for background runners.
-Uses O_CREAT | O_EXCL to avoid TOCTOU races between existence check and write.
-
-On Windows a create against a lock the previous runner is still removing
-(delete-pending) raises PermissionError, not FileExistsError. That is a lock
-being released, so try_create_lock retries it on a short bounded budget and
-raises only when the denial outlasts it.
-
-Usage:
-    from aipass.flow.apps.handlers.runner.lock_ops import (
-        acquire_lock, release_lock
-    )
 """
 
 import os
@@ -32,21 +19,15 @@ from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
 
-# A delete-pending lock clears in milliseconds; a detached runner should not
-# sit out a long budget before reporting a real permissions problem.
+# Delete-pending clears in milliseconds; a real permissions problem should surface fast.
 _CREATE_RETRIES = 5
 _CREATE_BACKOFF_BASE = 0.05
-# A lock with no pid in it is a writer between its exclusive create and its pid
-# write (microseconds) or a writer that died there. Past this age it is the latter.
+# A pidless lock is a writer between create and pid write, or one that died there; past this, dead.
 _UNREADABLE_LOCK_GRACE = 10.0
 
 
 def _sleep(seconds: float) -> None:
-    """time.sleep(seconds), the create backoff's wait.
-
-    The reason is the tests alone: they patch this name so the backoff neither
-    waits nor replaces time.sleep for the whole process.
-    """
+    """time.sleep(seconds), the create backoff's wait; a seam so tests never patch time.sleep."""
     time.sleep(seconds)
 
 
@@ -104,12 +85,7 @@ def _pid_alive(pid: int) -> bool:
 def _create_exclusive(lock_file: Path) -> int:
     """os.open(lock_file, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
 
-    It stands alone because this create is where platforms answer differently:
-    Windows answers a lock another writer is still removing (delete pending)
-    with PermissionError, which a retry wins, and Linux cannot produce that.
-    The tests (test_lock_ops, the delete-pending tests) hand the denial in
-    through this name rather than replacing os.open for the whole process
-    (flow's decision, leg 11).
+    A seam: tests hand in Windows' delete-pending PermissionError here, which Linux cannot produce.
     """
     return os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
 
@@ -117,13 +93,7 @@ def _create_exclusive(lock_file: Path) -> int:
 def try_create_lock(lock_file: Path) -> bool:
     """Atomically create lock file with current PID. Returns True on success.
 
-    FileExistsError returns False at once: acquire_lock's stale check reads
-    the holder next. A Windows delete-pending PermissionError means the
-    previous holder is mid-release, so it is retried with backoff.
-
-    Raises:
-        PermissionError: Still denied after the retry budget. Chained from
-            the last denial, so a real permissions problem surfaces.
+    FileExistsError: False at once. Delete-pending PermissionError: retried, then raised chained.
     """
     denial: PermissionError | None = None
     waited = 0.0
@@ -148,11 +118,7 @@ def try_create_lock(lock_file: Path) -> bool:
 
 
 def _pidless_lock_is_stale(lock_file: Path) -> bool:
-    """Age a lock that holds no pid: held inside _UNREADABLE_LOCK_GRACE, stale past it.
-
-    Raises:
-        OSError: The stat fails for any reason but the lock being gone.
-    """
+    """Age a lock that holds no pid: held inside _UNREADABLE_LOCK_GRACE, stale past it."""
     try:
         age = time.time() - lock_file.stat().st_mtime
     except FileNotFoundError:
@@ -168,16 +134,7 @@ def _pidless_lock_is_stale(lock_file: Path) -> bool:
 def is_lock_stale(lock_file: Path) -> bool:
     """Check if existing lock file belongs to a dead process.
 
-    A lock gone before it is read was released: stale, take over. A lock
-    without a pid (empty, or not an integer) is held while younger than
-    _UNREADABLE_LOCK_GRACE: try_create_lock creates the file before it writes
-    the pid, and a reader in that gap must not unlink a live holder's lock.
-    Older than the grace, its writer died mid-create: stale.
-
-    Raises:
-        OSError: The lock exists but cannot be read or stat'ed (not
-            FileNotFoundError). That is no proof the holder is dead, so it is
-            not reported as stale (flow's decision, leg 3).
+    Raises OSError when the lock exists but cannot be read: no proof the holder is dead.
     """
     try:
         text = lock_file.read_text(encoding="utf-8").strip()
@@ -202,16 +159,7 @@ def is_lock_stale(lock_file: Path) -> bool:
 def acquire_lock(lock_file: Path) -> bool:
     """Try to acquire lock file. Returns True if acquired.
 
-    Uses atomic O_CREAT | O_EXCL to avoid TOCTOU race. False means another
-    live process holds the lock (or a lock without a pid, inside its grace).
-
-    Raises:
-        PermissionError: From try_create_lock, when the create is still denied
-            after its retry budget. Not contention, so never reported as False.
-        OSError: From is_lock_stale, when the lock exists but cannot be read;
-            or from removing a stale lock, when the unlink is refused. Neither
-            is a live holder, so neither is reported as False (flow's decision,
-            leg 3).
+    False only for a live holder; denied, unreadable or unremovable locks raise OSError instead.
     """
     if try_create_lock(lock_file):
         json_handler.log_operation("lock_acquired", {"lock_file": str(lock_file)})

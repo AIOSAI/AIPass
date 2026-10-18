@@ -3,14 +3,10 @@
 # Description: Project structure repair — thin CLI layer for move, cleanup, scan
 # Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
-"""Repair orchestrator for project structure fixes.
-
-Thin CLI module that parses arguments and delegates to the repair handler.
-All implementation logic lives in apps/handlers/repair_ops.py.
-"""
+"""Repair orchestrator for project structure fixes."""
 
 from pathlib import Path
 
@@ -38,11 +34,6 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# DRONE ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: list) -> bool:
     """Handle commands routed by the entry point."""
     if command != "repair":
@@ -59,22 +50,8 @@ def handle_command(command: str, args: list) -> bool:
     return handle_repair(args) == 0
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def handle_repair(args: list[str]) -> int:
-    """Parse args and execute repair.
-
-    Args patterns:
-        ["<project_path>"]                          -> scan and report
-        ["<project_path>", "--dry-run"]              -> scan only
-        ["--relocate", "@branch", "new/path"]        -> move branch
-        ["<project_path>", "--clean-pollution"]       -> archive duplicates
-
-    Returns exit code (0=success, 1=failure).
-    """
+    """Parse args and execute repair; preview-only unless --apply. Returns exit code (0=success, 1=failure)."""
     if "--help" in args or "-h" in args:
         _print_help()
         return 0
@@ -93,11 +70,6 @@ def handle_repair(args: list[str]) -> int:
         return _handle_clean_pollution(args, dry_run)
 
     return _handle_scan(args, dry_run)
-
-
-# =============================================================================
-# SUBCOMMAND HANDLERS
-# =============================================================================
 
 
 def _handle_relocate(args, dry_run):
@@ -178,11 +150,6 @@ def _handle_scan(args, dry_run):
 
     _print_scan_result(result)
     return 0 if result.get("success") else 1
-
-
-# =============================================================================
-# OUTPUT HELPERS
-# =============================================================================
 
 
 def _print_help():

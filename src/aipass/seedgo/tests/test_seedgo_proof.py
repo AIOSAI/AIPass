@@ -3,7 +3,7 @@
 # Description: Unit tests for the seedgo_proof module
 # Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/seedgo_proof.py."""
@@ -18,11 +18,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.seedgo.apps.modules import seedgo_proof
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -53,11 +48,6 @@ def _run_json(capsys, pack: str = "code") -> dict:
     capsys.readouterr()
     assert seedgo_proof.handle_command("proof", [pack, "--json"]) is True
     return json.loads(capsys.readouterr().out)
-
-
-# ---------------------------------------------------------------------------
-# Tests — handle_command
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -91,12 +81,7 @@ def test_handle_command_help_flag():
 
 
 def test_handle_command_h_flag():
-    """A help flag AFTER a pack name describes the run instead of performing it.
-
-    The cured defect this pins, stated in handle_command itself: `proof aipass
-    --help` used to run the pack. Running it and describing it both return
-    True, so only the effect separates them — and one of the two is slow.
-    """
+    """A help flag AFTER a pack name describes the run instead of performing it."""
     with (
         patch.object(seedgo_proof, "print_help") as helped,
         patch.object(seedgo_proof, "_run_proof_pack") as ran,
@@ -118,12 +103,7 @@ def test_handle_command_help_word():
 
 
 def test_handle_command_unknown_pack():
-    """An unknown pack is named back with the available ones, and nothing runs.
-
-    Was `assert result is True` under a docstring promising an error was
-    displayed — and this module returns True on every path, so the test
-    passed with _validate_pack's whole error arm deleted.
-    """
+    """An unknown pack is named back with the available ones, and nothing runs."""
     with patch.object(seedgo_proof, "_run_proof_pack") as ran:
         assert seedgo_proof.handle_command("proof", ["nonexistent_pack_xyz"]) is True
 
@@ -134,21 +114,8 @@ def test_handle_command_unknown_pack():
     assert "Available packs:" in reported[0].kwargs["suggestion"]
 
 
-# ---------------------------------------------------------------------------
-# Tests — introspection / help
-# ---------------------------------------------------------------------------
-
-
 def test_print_introspection_runs(capsys, _mock_infrastructure):
-    """print_introspection headers SEEDGO PROOF and lists the proof packs.
-
-    "console.print OR header was called" is not an oracle — it holds for a
-    function that prints one blank line and nothing else, and it is what stood
-    here while nothing was measured. Both strings were read off a real run
-    (2026-09-07): the header is unconditional, and the pack heading is the line
-    that only appears when discovery actually found something to list.
-    Mutant: the pack heading's markup unclosed in apps/modules/seedgo_proof.py — killed.
-    """
+    """print_introspection headers SEEDGO PROOF and lists the proof packs."""
     _mock_infrastructure.reset_mock()
     result = seedgo_proof.print_introspection()
     printed = capsys.readouterr().out
@@ -159,14 +126,7 @@ def test_print_introspection_runs(capsys, _mock_infrastructure):
 
 
 def test_print_help_runs(capsys):
-    """print_help prints its banner and the handler interface it demands.
-
-    Same reason as the introspection test above. The second string is the one
-    piece of help a handler author cannot work without — the signature every
-    proof handler must define — so an edit that drops the interface section
-    turns this red instead of passing on "something was printed".
-    Mutant: the signature line's markup unclosed in apps/modules/seedgo_proof.py — killed.
-    """
+    """print_help prints its banner and the handler interface it demands."""
     result = seedgo_proof.print_help()
     printed = capsys.readouterr().out
     assert result is None
@@ -174,14 +134,8 @@ def test_print_help_runs(capsys):
     assert "scan(pack_dir: Path) -> dict" in printed, f"help never showed the handler signature: {printed!r}"
 
 
-# ---------------------------------------------------------------------------
-# Tests — discovery helpers
-# ---------------------------------------------------------------------------
-
-
 def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
     """Mutant: a *_proof dir with no handler listed anyway in apps/modules/seedgo_proof.py — killed."""
-    # Build: tmp_path/handlers/ with pack subdirectories
     handlers_dir = _handlers(tmp_path, monkeypatch)
 
     valid_pack = handlers_dir / "code_proof"
@@ -214,10 +168,7 @@ def test_discover_proof_handlers_empty_dir(tmp_path, monkeypatch, capsys):
 
 
 def test_discover_proof_handlers_skips_init(tmp_path, monkeypatch, capsys):
-    """__init__.py and _prefixed files are not proof handlers.
-
-    Mutant: _prefixed files run as handlers in apps/modules/seedgo_proof.py — killed.
-    """
+    """__init__.py and _prefixed files are not proof handlers."""
     pack = _handlers(tmp_path, monkeypatch) / "code_proof"
     pack.mkdir()
     (pack / "__init__.py").write_text("", encoding="utf-8")
@@ -238,11 +189,6 @@ def test_discover_proof_handlers_skips_content_files(tmp_path, monkeypatch, caps
     names = list(_run_json(capsys)["results"])
     assert "architecture_content" not in names
     assert "real_proof" in names
-
-
-# ---------------------------------------------------------------------------
-# Tests — proof execution helpers
-# ---------------------------------------------------------------------------
 
 
 def test_run_proof_pack_missing_target(tmp_path, monkeypatch, capsys):
@@ -278,11 +224,6 @@ def test_load_and_run_proof_working_scan(tmp_path, monkeypatch, capsys):
     result = _run_json(capsys)["results"]["good_proof"]
     assert result["passed"] is True
     assert result["summary"] == "All good"
-
-
-# ---------------------------------------------------------------------------
-# Tests — help-flag safety (help_flag_safety: a flag ANYWHERE explains)
-# ---------------------------------------------------------------------------
 
 
 def test_help_after_the_pack_name_does_not_run_the_pack(monkeypatch, tmp_path):
@@ -325,10 +266,7 @@ def test_proof_still_runs_without_a_help_flag(monkeypatch, tmp_path):
 
 
 def test_proof_does_not_answer_for_another_command(monkeypatch):
-    """Ownership first: a help flag never makes a module claim a command it does not own.
-
-    Mutant: help answered before ownership in apps/modules/seedgo_proof.py — killed.
-    """
+    """Ownership first: a help flag never makes a module claim a command it does not own."""
     helped = MagicMock()
     monkeypatch.setattr(seedgo_proof, "print_help", helped)
 

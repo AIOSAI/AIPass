@@ -3,41 +3,15 @@
 # Description: audit-tests artifact gatekeeper - S1-S9 + T-BUDGET
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 The artifact gatekeeper. Every law is mechanical or it is decoration.
 
-An artifact that fails any law is REFUSED, not published with a warning. The
-lane's whole argument is that a confident wrong number is worse than a missing
-one, so the validator's default on doubt is refuse.
-
-The laws (design section 4.3):
-
-    S1   not-run is `not_applicable` with a reason, NEVER 0
-    S2   every group carries its tier
-    S3   no group present in the previous artifact may be absent from this one
-         without a `retired_groups` entry naming a ruling
-    S4   `group_list` is the published order; `groups` matches it exactly
-    S5   a cache-served artifact is stamped, and names what it cannot see
-    S6   any `tier == "ai"` group must be `nominate_only`
-    S7   (a) an unscored group may not carry a score
-         (b) no nomination may carry a delete-family verdict
-    S8   any group carrying a score must carry `gate_coverage`
-    S9   no mutant record without a `kill_cause` split           (rev 4)
-    M10  a published `m10_proof` carries the diff BEFORE the carrier
-         subtraction and a carrier block naming what was taken out, with the
-         evidence for each - a subtraction a reader cannot check is just a
-         smaller number
-    T-BUDGET  every execution group carries budget + elapsed; exhausted is
-              `refused`, never `measured`, never scored
-
-S3/S4 is a NO-VANISHING PROPERTY, not an equality. Revision 1 made it equality
-with a core constant, which caught a vanishing group but also blocked every
-legitimate addition — the one true rebuild trigger the design review found.
-A group may be added freely, may become `not_applicable` freely, and may only
-vanish by a recorded ruling.
+A failing artifact is refused, never published with a warning. LAW_STATEMENTS
+carries each law's one line. S3 is a no-vanishing property, not equality: groups
+may be added or go `not_applicable` freely, and vanish only by a recorded ruling.
 """
 
 from typing import Dict, List, Optional
@@ -45,30 +19,16 @@ from typing import Dict, List, Optional
 from aipass.seedgo.apps.handlers.audit_tests import spine
 from aipass.seedgo.apps.handlers.json import json_handler
 
-# =============================================================================
-# VOCABULARY
-# =============================================================================
-
-#: Closed verdict vocabulary for nominations (Law S7b). A nomination says a
-#: test is suspect; it never says a test is worthless. TAXONOMY section 7 Q1
-#: asked where the KEEP/IMPROVE/USELESS verdict lives, and the answer this
-#: design gives is that USELESS is not a verdict any tier may emit.
+#: Closed verdict vocabulary for nominations (Law S7b): no tier may call a test useless.
 ALLOWED_VERDICTS: frozenset = frozenset({"suspect", "nominated", "improve", "fix"})
 
-#: Verdicts that may never appear anywhere in the document.
 DELETE_FAMILY: frozenset = frozenset({"useless", "delete", "remove", "worthless", "dead"})
 
-#: Statuses a group document may carry.
 VALID_STATUSES: frozenset = frozenset({"measured", "not_applicable", "refused"})
 
-#: How an `m10_proof` reached its carrier subtraction. `measured` means every
-#: subtracted path was OBSERVED being written by this process; `partly
-#: declared` means at least one rested on a declaration instead, which is a
-#: weaker claim and must be readable as one.
+#: `measured`: every subtracted path was observed; `partly declared`: one rests on a declaration.
 CARRIER_ATTRIBUTION: frozenset = frozenset({"measured", "partly declared"})
 
-#: One-line statements stamped into every artifact, so a reader never has to
-#: hold the design open beside it.
 LAW_STATEMENTS: Dict[str, str] = {
     "L0": "a test proves something when there EXISTS a change to production code that makes it fail",
     "M1": "static NOMINATES, execution CONVICTS",
@@ -101,19 +61,8 @@ class LawViolation(Exception):
         super().__init__(f"[{law}] {detail}")
 
 
-# =============================================================================
-# INDIVIDUAL LAWS
-# =============================================================================
-
-
 def check_s1_s2(groups: Dict[str, dict]) -> List[str]:
-    """S1 + S2 — status, reason and tier discipline.
-
-    The heart of S1: a group that did not run reports `not_applicable` WITH A
-    REASON. A `not_applicable` with no reason is indistinguishable from a
-    silent skip, and a 0 for a group that never ran is the exact lie this lane
-    was built to stop telling.
-    """
+    """S1 + S2 — status, reason and tier discipline."""
     problems: List[str] = []
 
     for name, document in groups.items():
@@ -142,10 +91,7 @@ def check_s3_s4(
 ) -> List[str]:
     """S3 + S4 — the no-vanishing property, and list/document agreement.
 
-    `previous_group_list is None` means first run for this (target, adapter)
-    pair: the diff cannot run, and the caller stamps `group_baseline` to say
-    so. A check that silently did not run is exactly what section 10 exists to
-    prevent, so its absence is recorded rather than assumed harmless.
+    `previous_group_list is None` is a first run; the caller stamps `group_baseline`.
     """
     problems: List[str] = []
 
@@ -199,13 +145,7 @@ def check_s6_s7(groups: Dict[str, dict]) -> List[str]:
 
 
 def check_s8(groups: Dict[str, dict]) -> List[str]:
-    """S8 — a score without a declared blind spot is a refusal.
-
-    A hard 100/0 gate that cannot state what it is blind to is precisely the
-    species this lane exists to catch. `blind` must be non-empty: every real
-    instrument is blind to something, and an empty list is a claim of
-    omniscience nobody has earned.
-    """
+    """S8 — a score without a declared blind spot is a refusal."""
     problems: List[str] = []
 
     for name, document in groups.items():
@@ -228,13 +168,7 @@ def check_s8(groups: Dict[str, dict]) -> List[str]:
 
 
 def check_s9(groups: Dict[str, dict]) -> List[str]:
-    """S9 — no mutant record without a kill_cause split (rev 4 contract).
-
-    Binding on `oracle_execution` and the adapter's mutation groups. While
-    they report `not_applicable: "not built"` there is nothing to check, which
-    is the point: the requirement is written before the capability so it
-    cannot be skipped under delivery pressure later.
-    """
+    """S9 — no mutant record without a kill_cause split."""
     problems: List[str] = []
 
     for name, document in groups.items():
@@ -250,11 +184,7 @@ def check_s9(groups: Dict[str, dict]) -> List[str]:
 
 
 def check_budget(groups: Dict[str, dict]) -> List[str]:
-    """T-BUDGET — execution groups carry a budget, and exhaustion refuses.
-
-    An exhausted group may never be `measured` and may never carry a score: a
-    partial suite that reports a number is forgery by omission.
-    """
+    """T-BUDGET — execution groups carry a budget, and exhaustion refuses."""
     problems: List[str] = []
 
     for name, document in groups.items():
@@ -282,16 +212,7 @@ def check_budget(groups: Dict[str, dict]) -> List[str]:
 def check_m10(proof: Optional[dict]) -> List[str]:
     """M10 — a carrier subtraction is auditable, or the artifact is refused.
 
-    A refusal publishes no proof at all, so an ABSENT block is nothing to
-    check; a PRESENT one must carry the full unsubtracted diff and a
-    well-formed carrier block. Subtracting paths from the diff that decides
-    `real_tree_unchanged` and publishing neither the evidence nor what the
-    diff looked like first is the same species as a score with no
-    `gate_coverage`: a smaller number nobody can check.
-
-    THE TOTAL IS CROSS-CHECKED against the two lists rather than trusted,
-    because `total` is the one field a reader skimming the block will believe
-    without counting.
+    An absent block (a refusal) is nothing to check; `total` is cross-checked, never trusted.
     """
     if not proof:
         return []
@@ -365,19 +286,8 @@ def check_s5(cache: dict) -> List[str]:
     return problems
 
 
-# =============================================================================
-# THE GATE
-# =============================================================================
-
-
 def validate(document: dict, previous_group_list: Optional[List[str]] = None) -> List[str]:
-    """Run every law against an assembled artifact. Returns problems found.
-
-    An empty list means publishable. This function never raises on a law
-    violation — the caller decides between refusing and reporting — but it
-    also never returns a partial verdict: every law runs on every call, so a
-    reader sees all the reasons at once rather than one per attempt.
-    """
+    """Run every law against an assembled artifact. Returns problems found; empty is publishable."""
     groups = document.get("groups", {})
     group_list = document.get("group_list", [])
     retired = document.get("retired_groups", [])
@@ -399,17 +309,10 @@ def validate(document: dict, previous_group_list: Optional[List[str]] = None) ->
 
 
 def enforce(document: dict, previous_group_list: Optional[List[str]] = None) -> None:
-    """Validate and raise LawViolation on the first problem found.
-
-    Used where publication is the next statement and a partial artifact must
-    not reach disk.
-    """
+    """Validate and raise LawViolation on the first problem found."""
     problems = validate(document, previous_group_list)
     if problems:
         law = problems[0].split(":", 1)[0]
-        # An artifact refused for a law violation is an operational event, not
-        # a detail: it is the record that the lane declined to publish a number
-        # rather than publishing a wrong one.
         json_handler.log_operation(
             "artifact_refused",
             {

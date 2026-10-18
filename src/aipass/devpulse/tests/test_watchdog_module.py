@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog module router
 # Version: 1.1.2
 # Created: 2026-04-14
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -31,22 +31,13 @@ from aipass.devpulse.apps.modules import watchdog as wd_mod
 
 @pytest.fixture
 def real_owner_gate():
-    """Opt OUT of the autouse bypass below — for tests whose subject IS the gate.
-
-    Requested as a fixture rather than declared as a marker so no pytest.ini
-    registration is needed and the opt-out is visible in the test signature.
-    """
+    """Opt OUT of the autouse bypass below — for tests whose subject IS the gate."""
     return True
 
 
 @pytest.fixture(autouse=True)
 def _bypass_caller_guard(request):
-    """Force _guard_caller to always pass so tests don't depend on cwd.
-
-    Skipped for tests that request ``real_owner_gate``: bypassing the guard
-    everywhere is exactly why the gate's own defects (help refused, refusal
-    exiting 0) had no test to fail.
-    """
+    """Force _guard_caller to always pass so tests don't depend on cwd, unless ``real_owner_gate`` is asked for."""
     if "real_owner_gate" in request.fixturenames:
         yield
         return
@@ -56,11 +47,7 @@ def _bypass_caller_guard(request):
 
 @pytest.fixture(autouse=True)
 def _pin_watch_registry(monkeypatch, tmp_path):
-    """Pin the watch registry's default store to tmp_path for every test.
-
-    The arm is recorded where it is exercised, but a route a mutant opens past
-    the recorder must still land here and never in the live .watchdog/.
-    """
+    """Pin the watch registry's default store to tmp_path, so a route past the recorder never hits the live one."""
     monkeypatch.setattr(wd_registry, "default_storage_path", lambda: tmp_path / "watchdog_active.json")
 
 
@@ -96,26 +83,13 @@ def test_handle_command_unknown_subcommand(capsys):
     assert "unknown watchdog subcommand: bogus" in combined.lower()
 
 
-# --------------------------------------------------------------------------
-# The owner gate — @canary's three findings from a non-owner seat, 2026-08-22
-#
-# These deliberately do NOT use the autouse bypass: the gate is the subject.
-# --------------------------------------------------------------------------
-
-
 def _deny_owner(monkeypatch):
     """Make the shared owner guard refuse the watchdog tool, as it does for a non-owner seat."""
     monkeypatch.setattr(owner_guard, "guard_owner_caller", lambda name: name != "watchdog")
 
 
 def test_help_survives_the_owner_gate(capsys, monkeypatch, real_owner_gate):
-    """--help must work from a seat that owns nothing.
-
-    The gate used to run first, so a non-owner asking for help got
-    'refusing non-owner call' — the module refused to explain itself to exactly
-    the person who did not know whose it was. That is how a gate teaches people
-    to route around it.
-    """
+    """--help must work from a seat that owns nothing: a gate that won't explain itself gets routed around."""
     _deny_owner(monkeypatch)
     assert wd_mod.handle_command("watchdog", ["--help"]) is True
     text = capsys.readouterr()
@@ -133,10 +107,7 @@ def test_introspection_survives_the_owner_gate(capsys, monkeypatch, real_owner_g
 
 
 def test_a_privileged_subcommand_is_still_refused(capsys, monkeypatch, real_owner_gate):
-    """Letting help through must not let anything else through with it.
-
-    Mutant: the gate asks the guard about another tool name — the wire arms.
-    """
+    """Letting help through must not let anything else through with it."""
     _deny_owner(monkeypatch)
     armed = _record_arm_wire(monkeypatch)
     assert wd_mod.handle_command("watchdog", ["baseline"]) is True
@@ -146,18 +117,7 @@ def test_a_privileged_subcommand_is_still_refused(capsys, monkeypatch, real_owne
 
 
 def test_the_owner_refusal_flips_the_exit_code(monkeypatch, real_owner_gate):
-    """A refusal that exits 0 is a lie to every non-human caller.
-
-    This used ``warning``, which does not call ``mark_command_failed``, so
-    ``watchdog baseline && <next step>`` ran the next step believing the wire
-    was armed. @canary proved it specific, not drone-wide: unknown subcommand
-    exits 2, this exited 0. The human-facing text was a legibility problem;
-    this one was silent.
-
-    Asserts the FAILURE MARK, not the wording — wording is cosmetic and this
-    is the half that talks to scripts. Mutant: _guard_caller returns True after
-    its error() — the wire arms and ``armed`` is no longer empty.
-    """
+    """A refusal that exits 0 is a lie to every non-human caller: the FAILURE MARK is asserted, not the wording."""
     _deny_owner(monkeypatch)
     armed = _record_arm_wire(monkeypatch)
     marks: list[int] = []
@@ -170,9 +130,7 @@ def test_the_owner_refusal_flips_the_exit_code(monkeypatch, real_owner_gate):
 
 
 def test_the_owner_refusal_names_the_owner(capsys, monkeypatch, real_owner_gate):
-    """'Owner-only' tells a stranger they are in the wrong place, not where the
-    right place is. A refusal with no next step dead-ends. Mutant: the gate
-    passes after refusing — the wire arms and ``armed`` is no longer empty."""
+    """The refusal names the owner: a refusal with no next step dead-ends."""
     _deny_owner(monkeypatch)
     armed = _record_arm_wire(monkeypatch)
     monkeypatch.setattr(wd_mod, "_owner_address", lambda: "@vera")
@@ -185,14 +143,7 @@ def test_the_owner_refusal_names_the_owner(capsys, monkeypatch, real_owner_gate)
 
 
 def test_the_refusal_still_refuses_when_the_owner_cannot_be_named(capsys, monkeypatch, real_owner_gate):
-    """Building a nicer message must never be able to break the refusal itself.
-
-    The owner lookup reads a registry, and a registry read can fail. If that
-    failure escaped, an unreadable registry would turn a refusal into a
-    traceback — and a traceback is not a refusal, it is a crash someone
-    retries. Mutant: the gate passes after refusing — the wire arms and
-    ``armed`` is no longer empty.
-    """
+    """An owner lookup that raises must not turn the refusal into a traceback someone retries."""
     _deny_owner(monkeypatch)
     armed = _record_arm_wire(monkeypatch)
 
@@ -254,10 +205,7 @@ def _serve_registry(monkeypatch, fake_registry, fake_timer=None):
     monkeypatch.setattr(wd_mod, "_load_registry_module", lambda: fake_registry)
     monkeypatch.setattr(wd_mod, "_load_timer_module_for_format", lambda: timer)
 
-    # status prints the dispatch line off the REGISTER now (r4 deleted the
-    # events-file lag line with the daemon). Reporting an unavailable register
-    # keeps the line quiet without reaching the real one — and asserts nothing
-    # about a machine's live state.
+    # An unavailable register keeps status's dispatch line off this machine's live state.
     def _unavailable(*_a, **_kw):
         raise wd_dispatches.RegisterUnavailable("no register in this test")
 
@@ -362,13 +310,7 @@ def test_status_prints_active_watches(capsys, monkeypatch):
 
 
 def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys, monkeypatch):
-    """r4 has no daemon, so the wire row must not print ``daemon_pid``.
-
-    The field survived the daemon by two hours. It rendered as a permanent
-    ``daemon_pid=?`` on the one row an operator checks when they suspect the
-    watchdog is broken — a phantom fault on the health display of the thing
-    whose whole job is not to lie about its own health.
-    """
+    """There is no daemon, so the wire row must not print ``daemon_pid``: a phantom fault on the health row."""
     active = [
         {
             "handle": "wire-001",
@@ -388,14 +330,7 @@ def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys, monkeyp
 
 
 def test_the_wire_row_says_which_wrapper_is_carrying_it(capsys, monkeypatch):
-    """``via`` must show a real value on the HEALTHY path, not a permanent ?.
-
-    This row replaced two fields that read ``?`` whenever the watchdog was
-    working — first ``daemon_pid``, then ``tasks_dir`` (a Monitor child's
-    stdout is a socket and has no tasks dir). A field that says ``?`` on the
-    happy path trains the operator to skip the row, which is the opposite of
-    what a health display is for.
-    """
+    """``via`` must show a real value on the HEALTHY path: a ``?`` there trains the operator to skip the row."""
     active = [
         {
             "handle": "wire-003",
@@ -415,11 +350,7 @@ def test_the_wire_row_says_which_wrapper_is_carrying_it(capsys, monkeypatch):
 
 
 def test_a_foreground_wire_is_named_as_having_no_listener(capsys, monkeypatch):
-    """No session means nothing is reading stdout — the 2026-08-19 12:34 failure.
-
-    It must read as NONE and not as a blank field, because a blank column looks
-    like a rendering gap and a rendering gap gets scrolled past.
-    """
+    """No session means nothing reads stdout: NONE, never a blank that reads as a rendering gap."""
     active = [
         {
             "handle": "wire-002",
@@ -437,11 +368,7 @@ def test_a_foreground_wire_is_named_as_having_no_listener(capsys, monkeypatch):
 
 
 def test_an_unknown_watch_type_still_renders_its_row(capsys, monkeypatch):
-    """A watch nobody can see is a watch nobody retires.
-
-    The tail table replaced an if/elif chain; a table lookup that misses must
-    fall back to raw metadata rather than dropping or crashing the row.
-    """
+    """A watch nobody can see is a watch nobody retires: a missed lookup falls back to raw metadata."""
     active = [
         {
             "handle": "mystery-01",
@@ -586,8 +513,7 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys, monkeypatch):
 
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    # Normalize whitespace: Rich console output may wrap differently across
-    # terminal widths (especially on Windows CI where width is narrower).
+    # Rich wraps differently across terminal widths (narrower on Windows CI).
     normalized = " ".join(combined.split())
     assert "Next: drone @ai_mail dispatch @drone" in normalized
     assert "state=completed" in normalized
@@ -615,11 +541,7 @@ def _fake_agent_module():
 
 
 def test_agent_subcommand_says_no_sign_in_wire_when_none_is_registered(capsys, monkeypatch, tmp_path):
-    """With no live baseline wire for this session the arm line says completions will queue.
-
-    2026-09-25: a day of `watchdog agent` wires, no sign-in, 27 completions queued as
-    MISSED while the statusline read idle. The old line said "invoke via Monitor tool".
-    """
+    """With no live baseline wire for this session the arm line says completions will queue."""
     monkeypatch.setattr(wd_registry, "default_storage_path", lambda: _registry_holding(tmp_path, []))
     monkeypatch.setattr(wd_mod, "_agent_handler", _fake_agent_module)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-a")
@@ -654,16 +576,8 @@ def test_agent_subcommand_names_the_live_sign_in_wire_of_this_session(capsys, mo
     assert "no sign-in wire" not in err
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# baseline subcommand (DPLAN-0308)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def _record_arm_wire(monkeypatch, result=None):
-    """Replace wire.arm_wire, the door the router lazily imports, with a recorder.
-
-    Returns the recorder: empty until the router arms the wire, then ``{"once": <flag>}``.
-    """
+    """Replace wire.arm_wire with a recorder: empty until the router arms, then ``{"once": <flag>}``."""
     recorder = {}
 
     def arm_wire(once=False):
@@ -676,10 +590,7 @@ def _record_arm_wire(monkeypatch, result=None):
 
 
 def test_baseline_is_a_known_subcommand(capsys, monkeypatch):
-    """`baseline` routes instead of falling through to the unknown-subcommand error.
-
-    Mutant: "baseline" dropped from _VALID_SUBCOMMANDS — the router errors and never arms.
-    """
+    """`baseline` routes instead of falling through to the unknown-subcommand error."""
     _record_arm_wire(monkeypatch)
 
     wd_mod.handle_command("watchdog", ["baseline"])
@@ -717,10 +628,7 @@ def test_baseline_once_flag_is_parsed(monkeypatch):
 
 
 def test_baseline_rejects_unknown_flag(capsys, monkeypatch):
-    """An unknown flag is a clean error — and never starts a watch.
-
-    Mutant: the unknown-flag branch falls through instead of returning — the wire arms.
-    """
+    """An unknown flag is a clean error — and never starts a watch."""
     recorder = _record_arm_wire(monkeypatch)
 
     result = wd_mod.handle_command("watchdog", ["baseline", "--forever"])
@@ -733,13 +641,7 @@ def test_baseline_rejects_unknown_flag(capsys, monkeypatch):
 
 
 def test_baseline_daemon_flag_is_refused_by_name(capsys, monkeypatch):
-    """r4 deleted the detection daemon. --daemon must say THAT, not "unknown flag".
-
-    An operator or a stale script passing it deserves to be told the lane
-    changed rather than that they made a typo — and the refusal happens before
-    arm_wire is reached, so nothing is armed on the way to the error.
-    Mutant: the --daemon branch falls through instead of returning — the wire arms.
-    """
+    """The detection daemon is gone: --daemon says THAT, not "unknown flag", and arms nothing."""
     recorder = _record_arm_wire(monkeypatch)
 
     result = wd_mod.handle_command("watchdog", ["baseline", "--daemon"])
@@ -753,10 +655,7 @@ def test_baseline_daemon_flag_is_refused_by_name(capsys, monkeypatch):
 
 
 def test_baseline_daemon_is_still_refused_alongside_once(capsys, monkeypatch):
-    """The flag is dead in every combination, not just alone.
-
-    Mutant: the --daemon branch falls through instead of returning — the wire arms.
-    """
+    """The flag is dead in every combination, not just alone."""
     recorder = _record_arm_wire(monkeypatch)
 
     result = wd_mod.handle_command("watchdog", ["baseline", "--once", "--daemon"])

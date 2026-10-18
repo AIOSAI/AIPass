@@ -3,16 +3,12 @@
 # Description: Tests for the branch log watcher's file reading, rotation drain and inode detection
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's file reading and rotation (_read_new_lines, on_modified)."""
 
-# Split from test_log_watcher.py (oversize_test_file, 2026-10-08): that file
-# keeps parsing and detection; this one holds how the watcher reads a log file:
-# new lines from the recorded position, the rotated-out tail drained across the
-# backup chain, rotation found by inode, and the on_modified event that drives it.
-# The watcher's live-state doors are closed by conftest's log_watcher_infrastructure.
+# How the watcher reads a log: position, rotated-tail drain across backups, inode detection.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's
@@ -29,11 +25,6 @@ import aipass.trigger.apps.handlers.log_watcher as lw
 pytestmark = pytest.mark.usefixtures("log_watcher_infrastructure")
 
 
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher._read_new_lines
-# ---------------------------------------------------------------------------
-
-
 class TestReadNewLines:
     """Tests for BranchLogWatcher._read_new_lines with tmp_path."""
 
@@ -45,18 +36,14 @@ class TestReadNewLines:
         log_file.write_text("line1\n", encoding="utf-8")
         file_path = str(log_file)
 
-        # Set position to end of initial content
         watcher.log_positions[file_path] = log_file.stat().st_size
 
-        # Append new content with a fresh ERROR line
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(f"{now} | mod | ERROR | New failure\n")
 
-        # Patch _mark_data_dirty to avoid touching the real file
         watcher._read_new_lines(file_path)
 
-        # Position should have advanced
         assert watcher.log_positions[file_path] > 6  # beyond "line1\n"
 
     def test_handles_log_rotation(self, tmp_path):
@@ -67,35 +54,19 @@ class TestReadNewLines:
         log_file.write_text("lots of old content here\n", encoding="utf-8")
         file_path = str(log_file)
 
-        # Set position beyond current size to simulate rotation
         watcher.log_positions[file_path] = 9999
 
-        # Write new small content
         log_file.write_text("short\n", encoding="utf-8")
 
         watcher._read_new_lines(file_path)
 
-        # Position should be at the end of the new content
         assert watcher.log_positions[file_path] == log_file.stat().st_size
-
-
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher rotation tail drain
-# ---------------------------------------------------------------------------
 
 
 def _rotate_log(log_file: Path) -> Path:
     """
     Perform a real RotatingFileHandler-style rotation.
-
-    Renames the live log to '<name>.log.1' (inode travels with the rename)
-    and creates a fresh empty '<name>.log'.
-
-    Args:
-        log_file: Path to the live log file
-
-    Returns:
-        Path to the rotated-out backup file
+    Renames the live log to '<name>.log.1' (inode travels) and creates a fresh empty log.
     """
     backup = Path(f"{log_file}.1")
     if backup.exists():
@@ -108,17 +79,7 @@ def _rotate_log(log_file: Path) -> Path:
 def _rotate_chain(log_file: Path, backup_count: int = 3) -> Path:
     """
     Perform a real RotatingFileHandler rotation including backup shifting.
-
-    Shifts '<name>.log.N' -> '<name>.log.N+1' (dropping the oldest), renames
-    the live log to '<name>.log.1', then creates a fresh empty '<name>.log'.
-    Inodes travel with the renames exactly as they do in production.
-
-    Args:
-        log_file: Path to the live log file
-        backup_count: Number of backups kept (prax uses 3)
-
-    Returns:
-        Path to the newest backup file ('<name>.log.1')
+    Shifts '.log.N' -> '.log.N+1', then renames the live log to '.log.1'; inodes travel as in production.
     """
     for index in range(backup_count - 1, 0, -1):
         source = Path(f"{log_file}.{index}")
@@ -249,9 +210,7 @@ class TestRotationDrain:
 
     def test_normal_append_never_drains(self, tmp_path):
         """No-overreach guard: an ordinary append never touches the drain path.
-
-        This test passes with and without the fix - it exists to prove the
-        drain does not run on the normal (non-shrink) path.
+        Passes with and without the fix: it proves the drain stays off the normal path.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -297,9 +256,7 @@ class TestRotationDrain:
 
     def test_unknown_inode_skips_drain(self, tmp_path):
         """Position recorded without an inode (old state) disables the drain.
-
-        No-overreach guard: passes with and without the fix - it proves an
-        unknown inode degrades to exactly the pre-fix behaviour.
+        Passes with and without the fix: an unknown inode degrades to the pre-fix behaviour.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -373,11 +330,6 @@ class TestRotationDrain:
         assert watcher.log_inodes[file_path] == log_file.stat().st_ino
 
 
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher inode-based rotation detection
-# ---------------------------------------------------------------------------
-
-
 def _fresh_lines(count: int) -> list:
     """Build a list of distinct full ERROR lines for the post-rotation file."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -389,9 +341,7 @@ class TestInodeRotationDetection:
 
     def test_rotation_detected_when_new_file_already_grew(self, tmp_path):
         """A fresh log already past the old offset is still detected as rotated.
-
-        The size-only check missed this entirely and seeked into the middle of
-        the brand new file, yielding a partial line.
+        A size-only check seeks into the middle of the new file and yields a partial line.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -482,9 +432,7 @@ class TestInodeRotationDetection:
 
     def test_in_place_truncation_with_backup_chain_no_drain(self, tmp_path):
         """No-overreach guard: same inode plus a full backup chain never drains.
-
-        Passes with and without the fix - it proves walking the chain did not
-        turn an in-place truncation into a false rotation.
+        Passes with and without the fix: walking the chain must not make truncation a rotation.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -511,9 +459,7 @@ class TestInodeRotationDetection:
 
     def test_normal_append_with_backup_chain_never_drains(self, tmp_path):
         """No-overreach guard: an append with backups present stays on the normal path.
-
-        Passes with and without the fix - it proves the chain walk only runs
-        when the inode actually changed.
+        Passes with and without the fix: the chain walk runs only when the inode changed.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -538,9 +484,7 @@ class TestInodeRotationDetection:
 
     def test_zero_inode_falls_back_to_size_check(self, tmp_path):
         """No-overreach guard: a recorded inode of 0 is treated as unknown.
-
-        Passes with and without the fix - some Windows filesystems report
-        st_ino 0, which must never be trusted as a rotation signal.
+        Passes with and without the fix: some Windows filesystems report st_ino 0.
         """
         watcher = lw.BranchLogWatcher()
 
@@ -560,11 +504,6 @@ class TestInodeRotationDetection:
         assert len(lines) == 1
         assert "new" in lines[0]
         assert watcher.log_positions[file_path] == log_file.stat().st_size
-
-
-# ---------------------------------------------------------------------------
-# Tests -- on_modified
-# ---------------------------------------------------------------------------
 
 
 class TestOnModified:
@@ -604,12 +543,8 @@ class TestOnModified:
 
     def test_a_read_failure_is_reported_and_costs_only_that_event(self):
         """IOError is swallowed — but it is named, and the watcher keeps watching.
-
-        Not raising was the whole assertion, and a bare `except: pass` passes
-        it. Two things make the swallow legitimate instead of a black hole: the
-        failure reaches the log with the file that caused it, and the next
-        event on the same watcher is still processed. A watcher that silently
-        stopped reading after one bad event would look identical otherwise.
+        A bare `except: pass` would pass "not raising"; the failure must name its file
+        and the next event on the same watcher must still be processed.
         """
         watcher = lw.BranchLogWatcher()
         watcher._should_process = MagicMock(return_value=True)
@@ -622,9 +557,7 @@ class TestOnModified:
 
         warned: MagicMock = lw.logger.warning  # type: ignore[assignment]
         warned.assert_called_once()
-        # Assert on the call's own arguments, not a repr of the call — repr
-        # doubles backslashes in a Windows path, so a path search through it
-        # can never match even a correctly-built expected string.
+        # Not a repr of the call: repr doubles Windows backslashes, so a path search never matches.
         reported_args = warned.call_args.args
         assert "/some/core.log" == reported_args[1], f"the failing file must be named, got: {reported_args}"
         assert "disk error" in str(reported_args[2]), f"the cause must be named, got: {reported_args}"
@@ -632,11 +565,6 @@ class TestOnModified:
         watcher._read_new_lines.side_effect = None
         watcher.on_modified(event)
         assert watcher._read_new_lines.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# Tests -- BranchLogWatcher._read_new_lines (deeper coverage)
-# ---------------------------------------------------------------------------
 
 
 class TestReadNewLinesDeeper:
@@ -659,7 +587,6 @@ class TestReadNewLinesDeeper:
 
     def test_debounce_flushes_when_interval_elapsed(self, tmp_path, monkeypatch):
         """The read position reaches trigger_data.json once the interval has elapsed.
-
         Mutant: positions left out of the flush.
         """
         watcher = lw.BranchLogWatcher()

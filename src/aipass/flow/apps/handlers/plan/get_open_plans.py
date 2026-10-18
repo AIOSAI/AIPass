@@ -3,37 +3,25 @@
 # Description: Get Open Plans Handler
 # Version: 1.0.0
 # Created: 2025-11-21
-# Modified: 2025-11-21
+# Modified: 2026-10-17
 # =============================================
 
 """
 Get Open Plans Handler
-
-Returns list of open plans from registry.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.get_open_plans import get_open_plans
-    open_plans = get_open_plans()
 """
 
 from typing import List, Tuple, Dict, Any
 
 from aipass.prax import logger
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
 
 MODULE_NAME = "get_open_plans"
 
-# Internal: Registry handler
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.json import json_handler
-
-# =============================================
-# HANDLER FUNCTION
-# =============================================
 
 
 def _get_all_registry_files() -> List[str]:
@@ -56,10 +44,6 @@ def _get_all_registry_files() -> List[str]:
 def get_open_plans() -> List[Tuple[str, Dict[str, Any]]]:
     """
     Get all open plans from ALL per-type registries.
-
-    Returns:
-        List of tuples: [(plan_num, plan_info), ...]
-        Empty list if no open plans found
     """
     open_plans: List[Tuple[str, Dict[str, Any]]] = []
     reg_files = _get_all_registry_files()
@@ -77,7 +61,7 @@ def get_open_plans() -> List[Tuple[str, Dict[str, Any]]]:
                 logger.warning(f"[{MODULE_NAME}] Failed to load registry '{reg_file}' for open plan scan: {e}")
                 continue
     else:
-        # Fallback: load default registry
+        # Plan-type discovery found nothing: fall back to the default registry.
         registry = load_registry()
         open_plans = [
             (plan_num, plan_info)

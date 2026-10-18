@@ -3,7 +3,7 @@
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -29,23 +29,9 @@ from aipass.trigger.apps.modules import core as trigger_core
 from .conftest import make_capture_console
 
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
-
 def _make_capture_console():
-    """Return (console, get_output) for capturing Rich output.
-
-    Console pinned against FORCE_COLOR/NO_COLOR/TERM; get_output() returns only
-    the VISIBLE characters, so assertions never depend on the calling shell.
-    """
+    """Return (console, get_output) for capturing Rich output."""
     return make_capture_console(highlight=False)
-
-
-# =============================================================================
-# handle_command routing tests
-# =============================================================================
 
 
 class TestHandleCommandRouting:
@@ -103,8 +89,7 @@ class TestHandleCommandRouting:
         result = display.handle_command("foobar", [])
         assert result is False
 
-    # help_flag_safety — a help flag ANYWHERE means explain, never execute.
-    # run_demo is patched out in every case: a question must not reach a doing path.
+    # help_flag_safety: a help flag ANYWHERE means explain; run_demo must never be reached.
 
     @patch.object(display, "run_demo")
     @patch.object(display, "print_help")
@@ -149,11 +134,6 @@ class TestHandleCommandRouting:
         assert result is True
 
 
-# =============================================================================
-# header() output tests
-# =============================================================================
-
-
 class TestHeader:
     """Verify header() renders title and optional details."""
 
@@ -192,9 +172,7 @@ class TestHeader:
             display.header("Solo Title")
         output = get_output()
         assert "Solo Title" in output
-        # The OMISSION half — the behaviour this test is named for. Without it
-        # the name promised something no assertion checked. header() renders a
-        # detail as "  <key>: <value>", so with no details no such line exists.
+        # header() renders a detail as "  <key>: <value>"; with no details no such line exists.
         detail_lines = [line for line in output.splitlines() if line.startswith("  ") and ":" in line]
         assert detail_lines == [], f"header rendered detail rows with no details: {detail_lines}"
 
@@ -225,11 +203,6 @@ class TestHeader:
         mock_trigger.fire.assert_called_once_with("cli_header_displayed", title="Triggered Title")
 
 
-# =============================================================================
-# success() output tests
-# =============================================================================
-
-
 class TestSuccess:
     """Verify success() renders message and kwargs."""
 
@@ -247,11 +220,6 @@ class TestSuccess:
         output = get_output()
         assert "items: 5" in output
         assert "time: 1.2s" in output
-
-
-# =============================================================================
-# error() output tests
-# =============================================================================
 
 
 class TestError:
@@ -280,11 +248,6 @@ class TestError:
         assert "Try:" not in output
 
 
-# =============================================================================
-# warning() output tests
-# =============================================================================
-
-
 class TestWarning:
     """Verify warning() renders to stderr console with optional details."""
 
@@ -303,11 +266,6 @@ class TestWarning:
         assert "Expected v2, got v1" in output
 
 
-# =============================================================================
-# section() output tests
-# =============================================================================
-
-
 class TestSection:
     """Verify section() renders title and separator."""
 
@@ -324,11 +282,6 @@ class TestSection:
             display.section("Results")
         output = get_output()
         assert "\u2500" * 50 in output
-
-
-# =============================================================================
-# run_demo() integration test
-# =============================================================================
 
 
 class TestRunDemo:
@@ -363,11 +316,6 @@ class TestRunDemo:
         assert "Rich library" in output
 
 
-# =============================================================================
-# fatal() output tests
-# =============================================================================
-
-
 class TestFatal:
     """Verify fatal() renders error to stderr console and exits with code 1."""
 
@@ -398,11 +346,6 @@ class TestFatal:
                 display.fatal("Crash")
         output = get_output()
         assert "Try:" not in output
-
-
-# =============================================================================
-# Infrastructure mocking tests
-# =============================================================================
 
 
 class TestPrintIntrospectionOutput:
@@ -593,11 +536,6 @@ class TestInfrastructureMocking:
         assert sys.modules[module_key] is display
 
 
-# =============================================================================
-# Exit-code failure-flag tests
-# =============================================================================
-
-
 class TestCommandState:
     """Verify the process-level failure flag and resolve_exit truth table."""
 
@@ -652,11 +590,6 @@ class TestCommandState:
         assert display.command_failed() is False
 
 
-# =============================================================================
-# escape — published on the surface, and which render functions need it
-# =============================================================================
-
-
 def _render(fn, value):
     """Call fn(value) with every console the surface prints through captured."""
     cons, get_output = _make_capture_console()
@@ -672,10 +605,8 @@ def _render(fn, value):
 class TestEscapeExport:
     """escape is Rich's own, bound on this surface so no branch imports Rich to print safely.
 
-    The surface is split, measured 2026-09-17. header, success, section and the
-    templates parse markup in their values: a bare [count] is eaten. error, warning
-    and fatal build Text: a bare [count] survives, and an escaped one prints its
-    backslash. Both halves are pinned so docs/rich_markup.md cannot drift from the code.
+    header, success, section and templates parse markup; error, warning and fatal build
+    Text and print an escape's backslash. Both halves pin docs/rich_markup.md to the code.
     """
 
     PLACEHOLDER = "log [count]"
@@ -727,11 +658,6 @@ class TestEscapeExport:
         assert "\\[count]" in _render(fn, modules.escape(self.PLACEHOLDER))
 
 
-# =============================================================================
-# COLOUR IS DECIDED PER PRINT
-# =============================================================================
-
-
 class _TerminalStream(io.StringIO):
     """A stream that answers isatty() True, as a terminal does."""
 
@@ -742,11 +668,8 @@ class _TerminalStream(io.StringIO):
 class TestColourFollowsTheLiveStream:
     """Both consoles decide colour at each print, against the stream as it is then.
 
-    CI on PR #774, 2026-10-10: the consoles were built once, at import, with the
-    stream's isatty() as it was then. A conftest imported while pytest's capture
-    was suspended read an xdist worker's NUL, which Windows calls a terminal, and
-    every later capture in the run carried escape codes. Rich fixes its colour
-    system in __init__ too, so leaving force_terminal unset alone does not cure it.
+    Rich fixes its colour system in __init__, so a console built at import keeps the
+    import-time stream's answer (an xdist worker's NUL is a terminal on Windows).
     """
 
     @pytest.fixture(autouse=True)

@@ -5,16 +5,12 @@
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-09-15
+# Modified: 2026-10-17
 # =============================================
 
 """Injects advisory banners for active alerts from .aipass/alerts.json.
 
-An alert announces on the turn it arrives, then repeats on the cadence beat
-(loader "alert", default period 5) for as long as it stays active. The guard
-file was only ever silencing the SOUND: the banner itself re-injected in full on
-every single turn, up to ten alerts with uncapped bodies (DPLAN-0347, measured
-2026-09-15). A standing condition is worth a reminder, not a tax on every prompt.
+An alert announces on the turn it arrives, then repeats on the cadence beat while it stays active.
 """
 
 import importlib
@@ -29,12 +25,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 _MAX_ALERTS_SHOWN = 10
-#: Cadence loader name for the repeat beat. Unknown names inherit the global
-#: period, but it is spelled in cadence.DEFAULTS so the beat is a contract a
-#: clone runs on rather than a fallback (cadence_config.json is gitignored).
+#: Spelled in cadence.DEFAULTS too, so the beat is a contract a clone runs on, not a fallback.
 _CADENCE_LOADER = "alert"
-#: Per-alert body ceiling. The title, severity, source and id always render;
-#: only the body is cut, because the body is the part that grows.
+#: Only the body is cut: it is the part that grows.
 _BODY_CHAR_CAP = 300
 
 
@@ -118,9 +111,7 @@ def _mark_announced(session_id: str, alert_id: str) -> None:
 def _repeat_allowed(hook_data: dict) -> bool:
     """True when an already-announced banner may re-inject this turn.
 
-    Arrival is not gated — an alert that waits four turns to be seen is not a
-    notification. Every turn after that runs on the cadence beat, the same one
-    the kernel, navmap, branch prompt and identity land on.
+    Arrival is not gated; every turn after it runs on the cadence beat.
     """
     try:
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
@@ -136,12 +127,7 @@ def _repeat_allowed(hook_data: dict) -> bool:
 
 
 def _cap_body(body: str, alert_id: str) -> str:
-    """Cut an alert body to _BODY_CHAR_CAP, saying where the rest is.
-
-    The dismiss command is already on the banner; the pointer here names the id
-    so a long alert can be read in full where it lives instead of costing the
-    prompt every beat.
-    """
+    """Cut an alert body to _BODY_CHAR_CAP, saying where the rest is."""
     if len(body) <= _BODY_CHAR_CAP:
         return body
     logger.info("[HOOKS] persistent_alert: body of %s is %d chars, cut to %d", alert_id, len(body), _BODY_CHAR_CAP)
@@ -172,14 +158,7 @@ def _format_banner(alerts: list[dict]) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """Inject advisory banners for active alerts.
-
-    Args:
-        hook_data: Parsed hook event dict from engine.
-
-    Returns:
-        Result dict with stdout (banner or empty) and exit_code.
-    """
+    """Inject advisory banners for active alerts."""
     aipass_dir = _find_aipass_dir()
     if not aipass_dir:
         return {"stdout": "", "exit_code": 0}

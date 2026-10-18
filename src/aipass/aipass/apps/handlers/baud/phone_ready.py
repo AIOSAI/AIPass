@@ -3,23 +3,13 @@
 # Description: Read what the phone needs after the face lands: the tailnet address, @api's bind, a live server
 # Version: 1.2.0
 # Created: 2026-10-12
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 What stands between an installed phone face and a phone that can open it (FPLAN-0642 slice B).
 
-After the face and baud-cli land, ``aipass install`` ends on one print: the URL,
-the server, the guide and the pairing QR. This handler gathers the facts that print states:
-
-    - the tailnet address, read from ``tailscale ip -4``;
-    - @api's configured bind, read through the module door the caller hands in
-      as ``host_config`` (the same edge point.py uses; this file never imports @api);
-    - whether a server answers on that bind: one GET to ``/``, the face entry,
-      which @api serves without a token.
-
-It changes nothing. Moving the bind and installing the boot unit go through the
-same door from phone_setup.py (FPLAN-0642 slice D).
+Read-only. It never imports @api: the caller hands in ``host_config``, the edge point.py uses.
 """
 
 from __future__ import annotations
@@ -42,12 +32,10 @@ _PROBE_TIMEOUT = 3
 # A wildcard bind listens everywhere, loopback included, so the probe asks loopback.
 _WILDCARDS = ("0.0.0.0", "::", "")
 
-# tailscale states
 TAILSCALE_ABSENT = "absent"  # no tailscale on PATH
 TAILSCALE_DOWN = "down"  # it answered, with no tailnet address
 TAILSCALE_UNREADABLE = "unreadable"  # it did not answer (timed out, or could not run)
 
-# server states
 SERVER_SERVING = "serving"  # / answered 2xx: the face is served
 SERVER_ANSWERING = "answering"  # / answered an error status: up, but not serving the face
 SERVER_SILENT = "silent"  # nothing answered on the bind
@@ -58,9 +46,7 @@ SERVER_UNPROBED = "unprobed"  # a dry run, or no @api
 class PhoneReady:
     """The facts the install's last print states. ``api`` False: @api is not importable here.
 
-    ``tailnet`` is this host's tailnet IPv4, or one of the TAILSCALE_* words;
-    ``server`` is one of the SERVER_* words.
-    """
+    ``tailnet``: this host's tailnet IPv4 or a TAILSCALE_* word; ``server``: a SERVER_* word."""
 
     api: bool
     host: str
@@ -78,12 +64,7 @@ def is_tailnet(host: str) -> bool:
 
 
 def tailnet_ipv4() -> str:
-    """This host's tailnet IPv4 from ``tailscale ip -4``.
-
-    Returns:
-        The address; else TAILSCALE_ABSENT (no binary), TAILSCALE_DOWN (no tailnet
-        address in its answer) or TAILSCALE_UNREADABLE (it timed out or could not run).
-    """
+    """This host's tailnet IPv4 from ``tailscale ip -4``, else a TAILSCALE_* word."""
     tailscale = shutil.which("tailscale")
     if tailscale is None:
         return TAILSCALE_ABSENT

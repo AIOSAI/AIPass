@@ -3,17 +3,12 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.2.1
 # Created: 2026-05-04
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
 
-# Covers init_project() (and the name sanitizing inside it), AIPASS_HOME,
-# scaffold_content generators, and throwaway paths — all file operations use
-# tmp_path to stay fully isolated from the live filesystem. Split 2026-10-08
-# (fleet green, oversize_test_file): update_project's conffile/retrofit/seed/
-# cleanup/.updateignore tests live in test_bootstrap_update.py, hooks.json and
-# the tier files in test_bootstrap_hooks.py.
+# update_project lives in test_bootstrap_update.py; hooks.json and tier files in test_bootstrap_hooks.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
@@ -36,11 +31,7 @@ from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
 
 
-# ---------------------------------------------------------------------------
-# Project-name sanitizing (_sanitize_name), read through init_project, its one
-# caller, off the registry file it names (fleet green leg 4). The old bare-""
-# case is gone: init_project reads an empty name as "use the directory's name".
-# ---------------------------------------------------------------------------
+# _sanitize_name is read through init_project, its one caller; an empty name means the directory's.
 
 
 @pytest.mark.parametrize(
@@ -83,11 +74,6 @@ def test_a_name_that_sanitizes_to_nothing_is_refused(tmp_path, raw: str):
     assert registries_in(target) == []
 
 
-# ---------------------------------------------------------------------------
-# init_project tests
-# ---------------------------------------------------------------------------
-
-
 def test_init_project_creates_all_expected_files(tmp_path):
     """init_project produces all expected files and directories."""
     target = tmp_path / "proj"
@@ -105,7 +91,6 @@ def test_init_project_creates_all_expected_files(tmp_path):
         target / ".claude" / "commands" / "prep.md",
         target / "src" / "demo" / "__init__.py",
     ]
-    # Tier files are env-dependent (need AIPASS_HOME)
     if result["aipass_home"]:
         expected_files.append(target / ".aipass" / "tier0_kernel.md")
         expected_files.append(target / ".aipass" / "tier1_navmap.md")
@@ -113,26 +98,17 @@ def test_init_project_creates_all_expected_files(tmp_path):
         assert f.exists(), f"Expected file not created: {f}"
     assert not (target / ".aipass" / "aipass_global_prompt.md").exists(), "Retired global prompt should NOT be seeded"
 
-    # src/<package>/ is a directory with __init__.py
     assert (target / "src" / "demo").is_dir(), "Expected src/demo/ package directory"
 
     # No .trinity/ should be created (projects are not citizens)
     assert not (target / ".trinity").exists(), ".trinity/ should NOT be created"
 
-    # No local prompt at project level (belongs in agent dirs only)
     assert not (target / ".aipass" / "aipass_local_prompt.md").exists()
 
-    # No project-level mailbox (agents have their own)
     assert not (target / ".ai_mail.local").exists(), ".ai_mail.local/ should NOT be at project level"
 
-    # Every expected file must appear in created_files (extras like .venv are env-dependent)
     created_basenames = [Path(f).name for f in result["created_files"]]
-    # THE `or f.exists()` ESCAPE IS GONE (v5 assertion_shape, 2026-09-08). Both
-    # clauses were about the result, so either alone carried the whole
-    # assertion: a file minted but left out of created_files passed on the
-    # second clause, and the report is the thing under test here. Measured the
-    # same day: every expected file is named in created_files AND on disk, so
-    # both claims are now made separately and each can fail on its own.
+    # created_files and the disk are asserted separately: never `or`, the report is under test.
     for f in expected_files:
         assert f.name in created_basenames, f"Expected {f.name} in created_files"
         assert f.exists(), f"Expected {f.name} on disk"
@@ -357,7 +333,6 @@ def test_init_project_skips_existing_optional_files(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
 
-    # Pre-create optional files
     aipass_dir = target / ".aipass"
     aipass_dir.mkdir()
     (target / "CLAUDE.md").write_text("# Custom CLAUDE\n", encoding="utf-8")
@@ -374,10 +349,8 @@ def test_init_project_skips_existing_optional_files(tmp_path):
 
     result = init_project(target, project_name="eta")
 
-    # Only non-pre-existing files should be created (registry, package dir, etc.)
     assert len(result["created_files"]) >= 5
 
-    # Verify pre-existing files were NOT overwritten
     md_content = (target / "CLAUDE.md").read_text(encoding="utf-8")
     assert md_content == "# Custom CLAUDE\n"
 
@@ -387,15 +360,12 @@ def test_init_project_no_overwrite(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
 
-    # First run creates files
     result1 = init_project(target, project_name="safe")
     assert len(result1["created_files"]) > 0
 
-    # Second run is blocked by _guard_init
     with pytest.raises(RuntimeError, match="already an AIPass project"):
         init_project(target, project_name="safe")
 
-    # Content from first run is preserved
     claude_md = (target / "CLAUDE.md").read_text(encoding="utf-8")
     assert "# SAFE" in claude_md
 
@@ -407,8 +377,7 @@ def test_init_project_returns_dict(tmp_path):
 
     result = init_project(target, project_name="rtype")
 
-    # Value pins added 2026-09-08 (v5 assertion_shape): a dict was true of the
-    # empty dict an init that created nothing would also return.
+    # Values pinned: a bare dict check passes on the empty dict a do-nothing init returns.
     assert isinstance(result, dict)
     assert result["created_files"], "init_project reported no created files"
     assert set(result) >= {"created_files", "aipass_home"}
@@ -426,11 +395,6 @@ def test_init_project_agents_md_no_trinity(tmp_path):
     assert ".trinity/" in content
 
 
-# ---------------------------------------------------------------------------
-# DPLAN-0121: AIPASS_HOME tests
-# ---------------------------------------------------------------------------
-
-
 def test_init_project_returns_aipass_home(tmp_path):
     """init_project return dict includes aipass_home key."""
     target = tmp_path / "proj"
@@ -439,13 +403,8 @@ def test_init_project_returns_aipass_home(tmp_path):
     result = init_project(target, project_name="home")
 
     assert "aipass_home" in result
-    # THE `is None or isinstance(..., str)` ESCAPE IS GONE (v5
-    # assertion_shape, 2026-09-08). Both clauses were about the result and
-    # between them they admitted every possible value. The None arm is not
-    # even reachable under this suite: detection returns None only when
-    # find_spec("aipass") fails, and the suite has already imported the
-    # package. The expected value is derived here from the installed package
-    # location - the same fact the detector reads, spelled independently.
+    # Expected value derived independently from the installed package location; None is
+    # unreachable here, since the suite has already imported aipass.
     assert result["aipass_home"] == _expected_aipass_home()
 
 
@@ -500,19 +459,11 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
 
     result = update_project(target)
 
-    # THE GUARD IS NOW A FLOOR (v5 unentered_assert, 2026-09-08). `if
-    # result["aipass_home"] is not None:` had no else, so a detector that
-    # started returning None turned this whole test into a silent pass -
-    # which is the exact regression it exists to catch.
+    # A floor, not an `if`: a detector returning None must fail, never pass silently.
     assert result["aipass_home"] == _expected_aipass_home()
     new_data = json.loads(local_settings_path.read_text(encoding="utf-8"))
     assert new_data.get("env", {}).get("AIPASS_HOME") == result["aipass_home"]
     assert str(local_settings_path) in result["updated_files"]
-
-
-# ---------------------------------------------------------------------------
-# scaffold_content — global_prompt_md tests
-# ---------------------------------------------------------------------------
 
 
 def test_global_prompt_md_returns_string():
@@ -540,11 +491,6 @@ def test_global_prompt_md_contains_aipass_context():
     assert "drone" in result
 
 
-# ---------------------------------------------------------------------------
-# scaffold_content — prep_md tests
-# ---------------------------------------------------------------------------
-
-
 def test_prep_md_returns_string():
     """Mutant: prep_md returns a stub string -> red."""
     result = sc.prep_md()
@@ -558,29 +504,16 @@ def test_prep_md_contains_session_wrap_up():
 
 
 def test_prep_md_contains_memory_instructions():
-    """prep_md() names the memory directory AND the file inside it.
-
-    The `or` is gone (v5 assertion_shape, 2026-09-08): both clauses were about
-    the same string, so either alone carried the assertion. Measured the same
-    day by calling prep_md() from the shell - both substrings are present, so
-    both are now pinned and each can fail on its own.
-    """
+    """prep_md() names the memory directory AND the file inside it."""
     result = sc.prep_md()
     assert ".trinity/" in result
     assert "local.json" in result
 
 
-# ---------------------------------------------------------------------------
-# scaffold_content — inbox_json tests
-# ---------------------------------------------------------------------------
-
-
 def test_inbox_json_returns_valid_json():
     """inbox_json() parses, and its key set is exactly the mailbox contract.
 
-    The key SET is this unit's claim; the sibling below pins the values. A dict
-    on its own (v5 assertion_shape) was true of every possible document,
-    including an empty one.
+    The key set is this unit's claim; the sibling below pins the values.
     """
     result = sc.inbox_json()
     parsed = json.loads(result)
@@ -595,11 +528,6 @@ def test_inbox_json_has_mailbox_structure():
     assert parsed["total_messages"] == 0
     assert parsed["unread_count"] == 0
     assert parsed["messages"] == []
-
-
-# ---------------------------------------------------------------------------
-# scaffold_content — with_source tests
-# ---------------------------------------------------------------------------
 
 
 def test_with_source_prepends_header(tmp_path):
@@ -624,11 +552,6 @@ def test_with_source_header_is_first_line(tmp_path):
     lines = result.split("\n")
     assert lines[0] == f"<!-- Source: {path.as_posix()} -->"
     assert lines[1] == "content"
-
-
-# ---------------------------------------------------------------------------
-# is_throwaway_path tests
-# ---------------------------------------------------------------------------
 
 
 def test_throwaway_path_detects_tmp(tmp_path):
@@ -670,10 +593,7 @@ _GITIGNORED_PARTS = (".trinity", ".ai_mail.local", "logs", ".venv", "venv", ".gi
 def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
     """No file init_project writes into a TRACKED path may contain the machine-local AIPASS_HOME.
 
-    Regression guard for the settings.json bug: AIPASS_HOME is an absolute,
-    machine-local path and must only ever land in gitignored *.local.json
-    files. This walks every minted file that would actually be committed
-    and greps it for the (fake) AIPASS_HOME value.
+    AIPASS_HOME is machine-local and may only land in gitignored *.local.json files.
     """
     fake_home = str(tmp_path / f"fake_aipass_home_{uuid.uuid4().hex}")
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: fake_home)
@@ -683,10 +603,7 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
     target.mkdir()
     bootstrap.init_project(target, project_name="pathcheck")
 
-    # THE FLOOR (v5 unentered_assert, 2026-09-08). The scan is built first and
-    # its size asserted before anything is read: an init_project that minted
-    # nothing, or a filter that excluded every file, made this regression guard
-    # a silent pass and the run said so nowhere.
+    # The scan's size is asserted first: an empty scan would make this guard a silent pass.
     tracked = [
         path
         for path in target.rglob("*")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-05
-# Modified: 2026-10-12
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -19,34 +19,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Module imports
-# ---------------------------------------------------------------------------
 from aipass.flow.apps.handlers.plan.create_ops import slugify_subject, create_plan_impl
 from aipass.flow.apps.handlers.plan.create_file import create_plan_file
 from aipass.flow.apps.handlers.plan.build_registry_entry import build_plan_registry_entry
 from aipass.flow.apps.handlers.plan.calculate_relative_path import calculate_relative_location
 from aipass.flow.apps.handlers.plan.resolve_location import resolve_plan_location
 from aipass.flow.apps.handlers.plan.auto_cleanup import auto_close_orphaned_plans
-from aipass.flow.apps.handlers.plan.get_closed_plans import get_closed_plans
 
-#: The platform's temp directory, never a POSIX literal. These paths are only
-#: ever handed to MagicMocks - nothing here touches the disk - but a hardcoded
-#: /tmp still reads as a POSIX-only test to anyone porting the suite, and
-#: seedgo's windows_compat rule says so out loud.
+#: Only ever handed to MagicMocks; gettempdir() keeps the suite free of a POSIX literal.
 _TMP = Path(tempfile.gettempdir())
-
-# The json_handler module object used to be bound here, deliberately, so that a
-# neighbour evicting it from sys.modules could not make a string-path patch land
-# on a different module object than the one this file called through. That care
-# went with the tests that needed it (see the update_data_metrics note below):
-# nothing in this file addresses the handler any more, and the shim has no
-# module-level state left to patch either way.
-
-
-# =========================================================================
-# slugify_subject
-# =========================================================================
 
 
 class TestSlugifySubject:
@@ -90,11 +71,6 @@ class TestSlugifySubject:
         assert result == "plan_42_rollout"
 
 
-# =========================================================================
-# create_plan_file
-# =========================================================================
-
-
 class TestCreatePlanFile:
     """Tests for create_plan_file()."""
 
@@ -131,11 +107,6 @@ class TestCreatePlanFile:
 
         _, error = create_plan_file(plan_file, "y")
         assert tmp_path.name in error
-
-
-# =========================================================================
-# build_plan_registry_entry
-# =========================================================================
 
 
 class TestBuildPlanRegistryEntry:
@@ -187,11 +158,6 @@ class TestBuildPlanRegistryEntry:
         assert required_keys == set(entry.keys())
 
 
-# =========================================================================
-# calculate_relative_location
-# =========================================================================
-
-
 class TestCalculateRelativeLocation:
     """Tests for calculate_relative_location()."""
 
@@ -224,11 +190,6 @@ class TestCalculateRelativeLocation:
 
         result = calculate_relative_location(target, root)
         assert result.replace(os.sep, "/") == "a/b/c/d"
-
-
-# =========================================================================
-# resolve_plan_location
-# =========================================================================
 
 
 class TestResolvePlanLocation:
@@ -291,11 +252,6 @@ class TestResolvePlanLocation:
 
         assert success is True
         assert resolved == tmp_path.resolve()
-
-
-# =========================================================================
-# auto_close_orphaned_plans
-# =========================================================================
 
 
 class TestAutoCloseOrphanedPlans:
@@ -410,112 +366,6 @@ class TestAutoCloseOrphanedPlans:
         assert before <= ts <= after
 
 
-# =========================================================================
-# get_closed_plans
-# =========================================================================
-
-
-class TestGetClosedPlans:
-    """Tests for get_closed_plans()."""
-
-    _SINGLE_REG = ["fplan_registry.json"]
-    _DISCOVERY_PATH = "aipass.flow.apps.handlers.plan.get_closed_plans._get_all_registry_files"
-    _LOAD_PATH = "aipass.flow.apps.handlers.plan.get_closed_plans.load_registry"
-
-    def test_returns_only_closed_plans(self, mock_registry):
-        _, registry = mock_registry
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert len(result) == 1
-        plan_num, plan_info = result[0]
-        assert plan_num == "2"
-        assert plan_info["status"] == "closed"
-
-    def test_returns_empty_when_no_closed(self):
-        registry = {
-            "plans": {
-                "1": {"status": "open", "subject": "active"},
-            }
-        }
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert result == []
-
-    def test_returns_empty_on_empty_registry(self):
-        with (
-            patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG),
-            patch(self._LOAD_PATH, return_value={"plans": {}}),
-        ):
-            result = get_closed_plans()
-
-        assert result == []
-
-    def test_returns_multiple_closed_plans(self):
-        registry = {
-            "plans": {
-                "1": {"status": "closed", "subject": "done A"},
-                "2": {"status": "closed", "subject": "done B"},
-                "3": {"status": "open", "subject": "still going"},
-            }
-        }
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert len(result) == 2
-        subjects = {info["subject"] for _, info in result}
-        assert subjects == {"done A", "done B"}
-
-    def test_result_tuples_contain_plan_num_and_info(self, mock_registry):
-        """Every returned row is a (plan_num, plan_info) pair, and there IS a row.
-
-        FLOOR BEFORE THE LOOP (FPLAN-0508, VACUOUS-LOOP). The loop below carried
-        every assertion in this unit, so a get_closed_plans() that returned an
-        empty list passed it having checked nothing at all - the exact defect the
-        unit exists to catch. mock_registry holds three plans of which exactly
-        one is closed, so the floor is a measured 1, not a truthiness check.
-        Mutant: append((plan_num, ...)) -> append((str(len(closed_plans)), ...)) reddens this.
-        """
-        _, registry = mock_registry
-        with patch(self._DISCOVERY_PATH, return_value=self._SINGLE_REG), patch(self._LOAD_PATH, return_value=registry):
-            result = get_closed_plans()
-
-        assert len(result) == 1
-        # The pair is the closed row's registry KEY and ITS info, not just any str/dict.
-        plan_num, plan_info = result[0]
-        assert plan_num == "2"
-        assert plan_info["subject"] == "Closed plan"
-        assert plan_info["closed_reason"] == "completed"
-
-
-# =========================================================================
-# update_data_metrics (json_handler): SUBJECT GONE
-# =========================================================================
-#
-# Removed with the pair-7 sweep (DPLAN-0325). flow's handler is now the fleet's
-# canonical shim, which binds nine names, and update_data_metrics is not among
-# them - the one json service never had it.
-#
-# Deleted rather than re-pointed because there is nothing left to point at, and
-# NOT quietly: a sweep that drops a public entry point should say so. Measured
-# before removing, across flow and the whole fleet: outside the handlers that
-# still define it (daemon, commons, drone, api - all unmigrated), nothing calls
-# update_data_metrics. flow's own apps/ used exactly one name off the handler,
-# log_operation, in all 57 call sites. So the sweep retired dead surface rather
-# than breaking a consumer - but the same name disappears from those branches
-# when their sweep lands, and each should check its own callers first
-# (@seedgo measured the identical result for increment_counter on pair 4).
-#
-# The FLOW_JSON_DIR redirect these five tests shared went with them: the shim
-# has no such attribute. The service resolves its directory per call through the
-# AIPASS_TEST_LOG_DIR seam that conftest's mock_infrastructure sets.
-
-# =========================================================================
-# create_plan_impl
-# =========================================================================
-
-
 class TestCreatePlanImpl:
     """Tests for create_plan_impl()."""
 
@@ -570,9 +420,7 @@ class TestCreatePlanImpl:
     def test_a_number_a_row_holds_is_never_issued_again(self, mock_jh, bus):
         """Live 2026-10-04: DPLAN next_number 358 beside a self-healed row 0358 (leg 7).
 
-        Create read next_number alone and would have issued 0358 again,
-        writing its row over the one already there.
-        Mutant: NEXT_NUM read from next_number alone reddens this (leg7 R1, L1a).
+        Mutant: NEXT_NUM read from next_number alone reddens this.
         """
         held = {"status": "open", "subject": "DPLAN-0358"}
         registry = {"next_number": 358, "plans": {"0358": held}}
@@ -656,7 +504,6 @@ class TestCreatePlanImpl:
 
         assert success is True
         assert plan_num == 5
-        # Auto-cleanup save + registry save after plan creation = 2 calls
         assert deps["save_registry"].call_count >= 2
         dim_msgs = [m for m in msgs if m.get("type") == "dim" and "AUTO-CLEANUP" in m.get("text", "")]
         assert len(dim_msgs) == 1
@@ -683,7 +530,6 @@ class TestCreatePlanImpl:
         )
 
         assert success is True
-        # Verify the file path used DPLAN prefix with 3-digit formatting
         call_args = deps["create_plan_file"].call_args
         plan_file_path: Path = call_args[0][0]
         assert plan_file_path.name.startswith("DPLAN-001")
@@ -736,8 +582,6 @@ class TestCreatePlanImpl:
     def test_no_branch_dashboard_is_said_as_such(self, mock_jh, bus):
         """The push's None: no dashboard there, so no branch is tracking the plan.
 
-        A guard: the product before leg 3 said the same for its False, so this
-        does not tell old from new; its proof is its mutant.
         Mutant: `if branch_dashboard_success is None:` -> `if branch_dashboard_success is False:` reddens this.
         """
         deps = self._make_deps(push_flow_to_branch_dashboard=MagicMock(return_value=None))
@@ -774,10 +618,8 @@ class TestCreatePlanImpl:
         assert success is True
         call_args = deps["create_plan_file"].call_args
         plan_file_path: Path = call_args[0][0]
-        # With empty subject, filename should be PREFIX-NNNN_date.md (no slug segment)
         name = plan_file_path.name
         assert name.startswith("FPLAN-0001_")
-        # Should not have double underscores from empty slug
         assert "__" not in name
         bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="")
 

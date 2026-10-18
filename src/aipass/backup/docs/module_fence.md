@@ -6,7 +6,7 @@ The access guard on `apps/handlers/__init__.py`, the door other branches use ins
 
 ### What the fence decides
 
-The fence is the fleet's v2.1 template (DPLAN-0404), rendered for backup. It
+The fence is the fleet's handlers-fence template, rendered for backup. It
 reads the stack once, when the handlers package is first imported, and sorts
 every frame into kin (a file under this branch), transport (importlib, the
 frozen bootstrap, the standard library, site-packages) or foreign (everything
@@ -14,10 +14,10 @@ else). The first foreign frame decides: refused when no kin frame stood between
 it and the fence, or when its own source line names `aipass.backup.apps.handlers`;
 allowed when kin code imported on its behalf.
 
-`apps/__init__.py` no longer carries `from . import handlers`. That line, added
-fleet-wide on 2026-04-25 for a Python 3.10 `mock.patch` failure, made the apps
-package the first frame every import showed the fence, so the fence never
-refused anything. The transport rule replaces it.
+`apps/__init__.py` does not import the handlers package. Such an import would
+make the apps package the first frame every import showed the fence, so the
+fence would never refuse anything. A `mock.patch` on a handlers path, which
+imports from `unittest/mock.py`'s frame, passes as transport instead.
 
 A pseudo filename such as `<string>` is never resolved: resolved, it would read
 against the process cwd, and a cwd inside this branch would make every bootstrap
@@ -40,9 +40,8 @@ not a command: it has no `handle_command`, so the router never offers it.
   branch at all, the kin seat in five shapes, and the door from a foreign seat.
 - `tests/test_dead_cwd_imports.py` runs the kin probe from a child whose cwd was
   removed under it, and expects ALLOWED.
-
-The mutants run against both on 2026-10-08 are listed in the fleet's DPLAN-0404
-reply from backup.
+- `test_the_apps_package_does_not_import_its_handlers` in
+  `tests/test_handlers_fence.py` pins the `apps/__init__.py` rule above.
 
 ---
 

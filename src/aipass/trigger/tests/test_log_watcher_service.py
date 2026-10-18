@@ -3,7 +3,7 @@
 # Description: Tests for the log watcher service entry point
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/log_watcher_service.py — the persistent service entry point."""
@@ -22,19 +22,11 @@ import pytest
 import aipass.trigger.apps.log_watcher_service as log_watcher_service
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch every door main() opens onto the live watchers and the catch-up.
-
-    The service binds its five collaborators by name at import, so they are
-    replaced on the service module itself. monkeypatch records the real
-    binding first, which also undoes the tests below that assign
-    ``mod.start_branch_watcher = MagicMock(...)`` directly on the shared module.
+    Collaborators are bound by name at import, so they are replaced on the service module;
+    monkeypatch also undoes tests that assign ``mod.start_branch_watcher`` directly.
     """
     # The real watchers arm watchdog observers over the LIVE log tree.
     monkeypatch.setattr(log_watcher_service, "start_branch_watcher", MagicMock(return_value=True))
@@ -42,12 +34,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(log_watcher_service, "start_system_watcher", MagicMock(return_value=True))
     monkeypatch.setattr(log_watcher_service, "stop_system_watcher", MagicMock())
 
-    # Stub the catch-up. main() now calls it for real (DPLAN-0339 step 2), and
-    # the real one walks the LIVE system_logs and fires error_detected for
-    # anything it finds — every main() test below would scan the tree and
-    # dispatch other branches' errors through medic. The tests that care about
-    # the call assert on this mock; trigger.fire is only handed to it, never
-    # called.
+    # The real catch-up walks the live system_logs and fires error_detected; tests assert on this mock.
     monkeypatch.setattr(log_watcher_service, "run_error_catchup", MagicMock())
 
     # The shell may be systemd-supervised: main() starts reload_sentinel,
@@ -58,11 +45,6 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
 def _import_module():
     """Hand each test the service module, its doors already patched."""
     return log_watcher_service
-
-
-# ---------------------------------------------------------------------------
-# Tests -- print_introspection
-# ---------------------------------------------------------------------------
 
 
 class TestPrintIntrospection:
@@ -83,18 +65,9 @@ class TestPrintIntrospection:
         assert "systemd" in captured.out and "service" in captured.out
 
 
-# ---------------------------------------------------------------------------
-# Tests -- the help flag
-# ---------------------------------------------------------------------------
-
-
 class TestHelpFlag:
-    """A help flag explains the service and starts nothing (leg 10).
-
-    Until leg 10 main() read no arguments, so `python -m ... --help` started
-    both watchers and the catch-up. The event is pre-set in each test, so a
-    guard that lets the start through still returns, and the start stubs count
-    what ran.
+    """A help flag explains the service and starts nothing.
+    The event is pre-set, so a guard that lets the start through still returns; the start stubs count what ran.
     """
 
     @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -136,11 +109,6 @@ class TestHelpFlag:
         system.assert_called_once_with()
 
 
-# ---------------------------------------------------------------------------
-# Tests -- main
-# ---------------------------------------------------------------------------
-
-
 class TestMain:
     """Tests for main() entry point."""
 
@@ -148,12 +116,10 @@ class TestMain:
         """When both watchers start successfully, prints both names."""
         mod = _import_module()
 
-        # Make stop_event.wait() return immediately
         pre_set = threading.Event()
         pre_set.set()
         monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
 
-        # Both start functions return True (already the default from fixture)
         mod.start_branch_watcher = MagicMock(return_value=True)
         mod.start_system_watcher = MagicMock(return_value=True)
 
@@ -248,15 +214,12 @@ class TestMain:
         """The shutdown closure sets the stop_event when invoked (mutant: shutdown() no longer sets the event)."""
         mod = _import_module()
 
-        # Use a real Event but do NOT pre-set it; we will trigger it via
-        # the signal handler that main() installs.
+        # Not pre-set: only the signal handler main() installs may set it.
         real_event = threading.Event()
         monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: real_event))
 
-        # main() runs on this thread and installs the real handlers. The
-        # sentinel start is the product's own hook between installing them and
-        # wait(): the handler main() installed is invoked there, so wait()
-        # returns only if that handler set the event (else --timeout fails it).
+        # The sentinel start hook runs between installing the handlers and wait(), so wait()
+        # returns only if the handler main() installed set the event (else --timeout fails it).
         def deliver_sigterm(_stop: object):
             """Deliver SIGTERM through the handler main() installed."""
             handler = signal.getsignal(signal.SIGTERM)
@@ -301,12 +264,7 @@ class TestMain:
 
     def test_both_fail_is_reported_at_error_level(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When both watchers fail, the reason is reported at ERROR level.
-
-        This used to assert on stderr. The five lifecycle print() calls became
-        prax logger calls on 2026-08-31 (unstructured output invisible to the
-        monitoring surface this process feeds), so the claim moved with the
-        transport — and the LEVEL is now part of it, which stderr could not
-        express: a failed startup is the one message here that is not INFO.
+        A failed startup is the one lifecycle message here that is not INFO.
         """
         mod = _import_module()
 
@@ -335,10 +293,7 @@ class TestMain:
 
 class TestReloadExit:
     """How the process leaves decides whether it comes back.
-
-    The systemd unit ships `Restart=on-failure`. A reload that exited 0 would
-    be read as a completed job and the watcher would simply stay down — the
-    stale-code problem replaced by a missing-watcher problem.
+    The unit ships `Restart=on-failure`: a reload that exited 0 reads as done and the watcher stays down.
     """
 
     def test_a_requested_reload_exits_non_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -399,15 +354,9 @@ class TestReloadExit:
 
 
 class TestStartupCatchup:
-    """The service runs its own error catch-up (DPLAN-0339 step 2, part a).
-
-    Before this, recovery reached this process only because prax's logger
-    fires `startup` on the first log line of every process (logger.py:132).
-    The one long-lived process that owns recovery got it as a side effect,
-    exactly like a two-second drone command did — and since
-    last_scan_timestamp is a single shared value, whichever short-lived
-    process fired last had usually already consumed this service's window.
-    Measured 2026-09-11: 0 of the last 100 catch-up runs found anything.
+    """The service runs its own error catch-up.
+    Recovery must not ride prax's per-process startup event: any short-lived process could
+    consume the shared last_scan_timestamp window first.
     """
 
     @staticmethod
@@ -442,10 +391,7 @@ class TestStartupCatchup:
 
     def test_catchup_runs_after_the_watchers_are_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Order is deliberate: overlap is safe, a gap is not.
-
-        An error arriving between the scan and the first watch would fall
-        through if the scan ran first. Scanning after means the watcher may
-        also see the line, which the registry dedupes on fingerprint.
+        Scanning first leaves a gap before the first watch; overlap is deduped on fingerprint.
         """
         mod = _import_module()
         order: list[str] = []
@@ -463,10 +409,7 @@ class TestStartupCatchup:
 
     def test_a_failed_catchup_does_not_stop_the_watchers(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The watchers are the service's job; recovery is best-effort.
-
-        A raising catch-up used to be impossible here because there was no
-        call. Now there is one, and it must not be able to take the process
-        down on start — that would trade a missed scan for no watching at all.
+        A raising catch-up must not trade a missed scan for no watching at all.
         """
         mod = _import_module()
 

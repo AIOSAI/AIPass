@@ -3,7 +3,7 @@
 # Description: Event handler registry for startup registration
 # Version: 0.4.0
 # Created: 2025-12-04
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
@@ -11,10 +11,7 @@
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
 
-# Deliberately NOT prax: this wiring runs on the event path the log watchers
-# read, so a prax line here would be detected, fired back as an event, and
-# re-enter the handlers it just registered. The sidecar is `.jsonl`, which the
-# watchers skip because they only read `*.log`.
+# Not prax: a prax line would be watched and fired back here; watchers skip `.jsonl`.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "registry_handler.jsonl")
 
 
@@ -26,7 +23,6 @@ def setup_handlers():
     from .runaway_handler import handle_runaway_log_detected, set_send_email_callback as set_runaway_email_callback
     from aipass.trigger.apps.handlers.escalation import set_send_email_callback as set_escalation_email_callback
 
-    # Wire up email send callback for error_detected handler (avoids handler importing from modules)
     try:
         from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
         from datetime import datetime
@@ -44,15 +40,7 @@ def setup_handlers():
         ):
             """Adapt error_detected handler's call signature to deliver_email_to_branch.
 
-            `upsert_key` is named EXPLICITLY, never left to **kwargs: a key that
-            falls into kwargs is dropped silently — no error, no upsert, and the
-            recipient's inbox keeps stacking. Callers that pass no key (medic,
-            runaway) get the untouched one-message-per-send path.
-
-            `upsert_result`, when a dict is passed, receives the delivery outcome
-            ("created" | "updated") that ai_mail writes back onto email_data. The
-            callback contract is `-> bool`, so this sink is the only way a caller
-            can log what actually happened to the message.
+            `upsert_key` stays explicit (in **kwargs it drops silently); `upsert_result` returns the upsert action.
             """
             email_data = {
                 "from": from_branch,
@@ -71,34 +59,20 @@ def setup_handlers():
 
         set_send_email_callback(_send_email_adapter)
         set_runaway_email_callback(_send_email_adapter)
-        # Escalation digests go out through the same adapter with
-        # auto_execute=False — an email to a manager, never a wake.
+        # Escalation digests keep auto_execute=False: an email to a manager, never a wake.
         set_escalation_email_callback(_send_email_adapter)
-    # OSError too: an uncured peer's import guard raises FileNotFoundError (@prax's rule, 2026-08-31).
+    # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.warning("ai_mail not available — error notifications won't send")
     from .warning_logged import handle_warning_logged
     from .memory_template_updated import handle_memory_template_updated
-
-    # from .pr_status_sync import handle_pr_created, handle_pr_merged  # TDPLAN-0007: status-sync decommissioned
     from .memory_pool import handle_memory_pool_auto_processed
 
     trigger.on("startup", handle_startup)
-    # cli_header_displayed is NOT wired. Its handler was retired 2026-09-29 in
-    # fleet green leg 4 — see .archive/cli.py: it wrote a 'cli_event' line with
-    # no title to the live operation log for every header in every process,
-    # and nothing read it. cli fires the event from display.py and needs
-    # nothing back, so the event stays in the vocabulary and runs no handler.
-    # plan_file_created / _deleted / _moved are NOT wired. The handler was
-    # retired 2026-08-31 as measured inert — see .archive/plan_file.py for the
-    # evidence (its regex matched 1 of 366 real plan filenames). @flow fires
-    # these events from their own registry scan and needs nothing back, so the
-    # events stay in the vocabulary and simply run no handler.
+    # Unwired on purpose: cli_header_displayed, plan_file_* and pr_* (handlers archived).
     trigger.on("error_detected", handle_error_detected)
     trigger.on("warning_logged", handle_warning_logged)
     trigger.on("memory_template_updated", handle_memory_template_updated)
-    # trigger.on("pr_created", handle_pr_created)  # TDPLAN-0007: status-sync decommissioned
-    # trigger.on("pr_merged", handle_pr_merged)  # TDPLAN-0007: status-sync decommissioned
     trigger.on("memory_pool_auto_processed", handle_memory_pool_auto_processed)
     trigger.on("runaway_log_detected", handle_runaway_log_detected)
 

@@ -3,14 +3,13 @@
 # Description: Project structure validation for aipass doctor
 # Version: 1.1.3
 # Created: 2026-05-14
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 Structure Scanner — detect misplaced agents, init pollution, registry mismatches.
 
-Pure scanning logic. Returns plain dicts/lists — no Rich markup.
-Display concerns belong to the doctor module.
+Plain data out, no Rich markup: display belongs to the doctor module.
 """
 
 from __future__ import annotations
@@ -74,17 +73,8 @@ class RegistryIssue(NamedTuple):
     problem: str  # "missing" or "mismatch"
 
 
-# =============================================================================
-# PROJECT ROOT DETECTION
-# =============================================================================
-
-
 def find_project_root(start: Path) -> Optional[Path]:
-    """Walk up from *start* looking for a registry file or pyproject.toml with src/.
-
-    Returns:
-        Project root Path, or None if not found.
-    """
+    """Walk up from *start* looking for a registry file or pyproject.toml with src/."""
     p = start.resolve()
     for parent in (p, *p.parents):
         if registries_in(parent):
@@ -96,13 +86,7 @@ def find_project_root(start: Path) -> Optional[Path]:
     return None
 
 
-# =============================================================================
-# AGENT DETECTION
-# =============================================================================
-
-
-# dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
-# 09-27, 20:42) -- a branch copied into a dropbox is not an agent.
+# dropbox and .archive are sandboxes nothing looks into: a branch copied there is not an agent.
 _SCAN_SKIP_DIRS = {
     "dropbox",
     ".archive",
@@ -117,11 +101,7 @@ _SCAN_SKIP_DIRS = {
 
 
 def scan_agents(project_root: Path) -> List[AgentInfo]:
-    """Find all agents by scanning for .trinity/passport.json under project_root.
-
-    Returns:
-        List of AgentInfo for each valid passport found.
-    """
+    """Find all agents by scanning for .trinity/passport.json under project_root."""
     agents: List[AgentInfo] = []
     for passport_path in sorted(project_root.rglob(".trinity/passport.json")):
         # Parts relative to the project: a parent of the project named dropbox is not a sandbox.
@@ -156,24 +136,11 @@ def scan_agents(project_root: Path) -> List[AgentInfo]:
     return agents
 
 
-# =============================================================================
-# PACKAGE DETECTION
-# =============================================================================
-
-
 def _detect_package_names(project_root: Path, why: List[str]) -> Optional[set]:
     """Read pyproject.toml to find declared package directory names.
 
-    Args:
-        project_root: The root whose pyproject.toml is read.
-        why: Receives the reason when the answer is None.
-
-    Returns:
-        Set of package names (e.g. {'aipass', 'aipl'}), empty when pyproject.toml
-        is absent or declares none. None when the file is there but could not be
-        read: no TOML parser (Python 3.10 has no tomllib, and tomli is only there
-        if another package brought it) or the parse failed. Unknown is not "no
-        packages", so the caller must not measure placement against it.
+    None (reason in *why*) when the file exists but cannot be read, e.g. Python 3.10
+    without tomli. Unknown is not "no packages": never measure placement against it.
     """
     pyproject = project_root / "pyproject.toml"
     if not pyproject.exists():
@@ -219,11 +186,6 @@ def _detect_package_names(project_root: Path, why: List[str]) -> Optional[set]:
     return names
 
 
-# =============================================================================
-# RESIDENCY — which project root an agent answers to
-# =============================================================================
-
-
 def _registry_residents(registry: Path) -> "tuple[set[str], set[Path]]":
     """The names (lowercased) and directories a registry lists as its citizens."""
     data = json_handler.read_json(registry)
@@ -246,21 +208,8 @@ def _registry_residents(registry: Path) -> "tuple[set[str], set[Path]]":
 def resident_root(agent: AgentInfo, project_root: Path) -> Optional[Path]:
     """The project root whose registry lists this agent, walking up from the agent.
 
-    A citizen of a project under ``projects/<name>/`` legitimately lives outside the
-    framework's ``src/`` — its home is its OWN project root, and the proof is
-    residency: the ``*_REGISTRY.json`` beside that root names it (spawn writes the
-    row when it seats the citizen). Measuring such an agent against the framework's
-    src/ produced a WARNING per scan for a correctly placed citizen — 28 of them
-    since 2026-08-28 for aipass_site, which is what this reads instead of muting.
-
-    Args:
-        agent: The discovered agent.
-        project_root: The framework project root the scan started from.
-
-    Returns:
-        The nearest ancestor directory holding a registry that lists this agent,
-        or None when no registry claims it (the caller then measures against
-        project_root, which is the unchanged behaviour for framework citizens).
+    A citizen of a project under ``projects/<name>/`` lives outside the framework's
+    ``src/``; measured against it, it would warn on every scan. None: no registry claims it.
     """
     here = agent.path.resolve()
     name = agent.name.strip().lower()
@@ -274,11 +223,6 @@ def resident_root(agent: AgentInfo, project_root: Path) -> Optional[Path]:
     return None
 
 
-# =============================================================================
-# PLACEMENT VALIDATION
-# =============================================================================
-
-
 def check_placement(
     agents: List[AgentInfo],
     project_root: Path,
@@ -286,25 +230,8 @@ def check_placement(
 ) -> List[PlacementIssue]:
     """Check whether each agent is in src/<package>/<agent>/ or src/<agent>/.
 
-    When pyproject.toml defines packages, agents at src/<name>/ where name
-    is not a declared package are flagged as misplaced siblings. When a root's
-    package names are unknown (None), nothing is measured against them: the
-    root goes into ``unknown`` once, for doctor to show, never as a placement
-    issue.
-
-    Each agent is measured against the root that CLAIMS it (resident_root) and
-    only then against the scan's own project_root, so a registered citizen of a
-    project under projects/ is read at its own src/ instead of being reported as
-    misplaced forever.
-
-    Args:
-        agents: The discovered agents.
-        project_root: The framework project root the scan started from.
-        unknown: Receives one PackagesUnknown per root whose package names
-            could not be read; the default discards them (_doctor_fix).
-
-    Returns:
-        List of PlacementIssue for agents in unexpected locations.
+    Each agent is measured at the root that claims it (resident_root). A root whose
+    package names are unknown goes into *unknown* once, never as a placement issue.
     """
     issues: List[PlacementIssue] = []
     packages_by_root: Dict[Path, Optional[set]] = {}
@@ -348,7 +275,6 @@ def check_placement(
                 )
             continue
         elif len(parts) == 2:
-            # src/<package>/<agent>/ — valid multi-agent package layout
             continue
         else:
             issues.append(
@@ -363,22 +289,10 @@ def check_placement(
     return issues
 
 
-# =============================================================================
-# POLLUTION DETECTION
-# =============================================================================
-
-
 def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
     """Find duplicate branch names — same agent found at multiple locations.
 
-    Keys on branch_name, not citizenship.registry_id: registry_id is
-    intentionally shared by every citizen in a healthy install (the
-    shared-project-credential model in spawn's fix_owner_identity), so
-    grouping by it flags every healthy multi-branch project as "polluted".
-    branch_name is the field that's actually meant to be unique per agent.
-
-    Returns:
-        List of PollutionHit for each branch name found at >1 path.
+    Keys on branch_name, never registry_id: every citizen of a healthy install shares that.
     """
     name_to_locations: Dict[str, List[AgentInfo]] = {}
     for agent in agents:
@@ -398,21 +312,12 @@ def detect_pollution(agents: List[AgentInfo]) -> List[PollutionHit]:
     return hits
 
 
-# =============================================================================
-# REGISTRY CONSISTENCY
-# =============================================================================
-
-
 def check_registry_consistency(
     registry_path: Path,
     agents: List[AgentInfo],
     project_root: Optional[Path] = None,
 ) -> List[RegistryIssue]:
-    """Validate that registry branches[].path entries match actual filesystem.
-
-    Returns:
-        List of RegistryIssue for each problem found.
-    """
+    """Validate that registry branches[].path entries match actual filesystem."""
     anchor = (project_root or registry_path.parent).resolve()
 
     try:
@@ -444,10 +349,6 @@ def check_registry_consistency(
     return issues
 
 
-# =============================================================================
-# ROOT ARTIFACT DETECTION
-# =============================================================================
-
 _ROOT_ARTIFACTS = {
     ".chroma": ("chroma", "warn", "Memory vector store belongs inside branch directory"),
     ".ai_mail.local": ("mailbox", "warn", "Branch mailbox belongs inside branch directory"),
@@ -463,15 +364,7 @@ _ROOT_ARTIFACTS = {
 def check_root_artifacts(project_root: Path, aipass_home: Path | str | None = None) -> List[RootArtifact]:
     """Detect branch-level files/dirs sitting at project root instead of inside branches.
 
-    Args:
-        project_root: Project root being scanned.
-        aipass_home: AIPass installation root, if known. setup.sh creates a real
-            (non-symlink) .venv at the AIPASS_HOME repo root as the standard
-            install layout — when project_root IS the AIPASS_HOME root, that
-            .venv is expected and should not be flagged as a redundant venv.
-
-    Returns:
-        List of RootArtifact for each misplaced item found.
+    setup.sh puts a real .venv at the AIPASS_HOME root, so *aipass_home* exempts it there.
     """
     hits: List[RootArtifact] = []
 
@@ -509,17 +402,8 @@ def check_root_artifacts(project_root: Path, aipass_home: Path | str | None = No
     return hits
 
 
-# =============================================================================
-# PYPROJECT CHECK
-# =============================================================================
-
-
 def check_pyproject(project_root: Path) -> Dict[str, Any]:
-    """Check for pyproject.toml presence at project root.
-
-    Returns:
-        Dict with 'found' bool and optional 'path' string.
-    """
+    """Check for pyproject.toml presence at project root."""
     pyproject = project_root / "pyproject.toml"
     return {
         "found": pyproject.exists(),

@@ -5,16 +5,11 @@
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-16
-# Modified: 2026-09-14
+# Modified: 2026-10-17
 # =============================================
 
 """Queries compass FTS against the user's prompt and injects matching decisions
-under governance rules. Never blocks the prompt on error.
-
-The governance knobs come from this handler's block in the project hooks.json,
-and the surfacing budget is per context window: PreCompact stamps a new window
-(compact.py -> cadence.reset_counter), the counts restart, the surfaced ids stay.
-"""
+under governance rules. Never blocks the prompt on error."""
 
 import importlib
 import json
@@ -28,8 +23,7 @@ from aipass.hooks.apps.handlers.json import json_handler
 
 _STATE_DIR = Path(tempfile.gettempdir())
 
-# hooks.json knob -> memory governance config key. The rest of the block
-# (enabled, handler, timeout) is the engine's, not governance's.
+# hooks.json knob -> memory governance config key; enabled, handler, timeout are the engine's.
 _GOVERNANCE_KNOBS = {
     "max_per_session": "max_surfaces_per_session",
     "threshold": "threshold",
@@ -37,8 +31,7 @@ _GOVERNANCE_KNOBS = {
     "cooldown_seconds": "cooldown_seconds",
 }
 
-# The refusals that silenced recall with nothing in any log (FPLAN-0588).
-# Below-threshold and already-surfaced are recall working, not the budget.
+# Refusals logged so a silenced recall shows; below-threshold and already-surfaced are not budget.
 _LOGGED_REFUSALS = ("Session budget exhausted", "Spacing not met", "Cooldown active")
 
 
@@ -87,8 +80,6 @@ def _save_state(state: dict, hook_data: dict | None = None) -> None:
 def _governance_config() -> dict:
     """This handler's hooks.json knobs, renamed for memory's governance engine.
 
-    The bridge hands the block to the engine's budget and never to the handler,
-    so max_per_session reached the engine and governance's default of 5 decided.
     Missing, unknown or non-numeric knobs fall to governance's defaults.
     """
     block = ((find_project_config() or {}).get("UserPromptSubmit") or {}).get("compass_recall") or {}
@@ -103,10 +94,8 @@ def _governance_config() -> dict:
 def _open_window(state: dict, hook_data: dict) -> dict:
     """Restart the counts when a new context window has opened; keep the surfaced ids.
 
-    The state file is keyed by session id, which survives every compaction, so
-    a budget spent by lunch held recall silent all day. last_surface_time goes
-    with the counts: kept, it would hold the new window's first
-    min_messages_between prompts silent on spacing.
+    The state file is keyed by session id, which survives compaction. last_surface_time resets
+    with the counts, or the new window's first min_messages_between prompts stay silent.
     """
     cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
     window = cadence.window_opened_at(hook_data)
@@ -153,8 +142,7 @@ def handle(hook_data: dict) -> dict:
             surface, reason, new_st = should_surface(item_id, relevance, state, config)
             if surface:
                 approved.append(c)
-                # Governance answers its own four keys. Merged, the window stamp
-                # rides along; replaced, the next prompt reads a new window.
+                # Merge, not replace: a replaced state drops the window stamp and reads as a new window.
                 state = {**state, **new_st}
             elif reason.startswith(_LOGGED_REFUSALS):
                 logger.info("[HOOKS] compass_recall: refused #%s: %s", item_id, reason)

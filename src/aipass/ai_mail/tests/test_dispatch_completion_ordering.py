@@ -3,23 +3,13 @@
 # Description: The terminal moment's ordering, FPLAN-0452 P0's second fix
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- the terminal moment's ordering."""
 
-# The whole of FPLAN-0452 P0's second fix. These assert positions in source rather
-# than behaviour, deliberately. The defect was never that a function did the wrong
-# thing — every function here worked. The defect was the ORDER they ran in, and an
-# ordering is not observable from any single call. ``main()`` is a 200-line
-# process-lifetime function ending in ``sys.exit``; invoking it to observe the
-# order would mean mocking the spawn, the retry loop, the bounce and the
-# wake-back, and the mocks would then be what the test actually pinned.
-#
-# Every anchor below uses ``.index()``, which RAISES when the anchor is gone. A
-# rename must break these loudly rather than let them pass on an empty search —
-# that is the canary lesson from 6be0da57, where a test asserting exit code 2 was
-# green from the repo root for two months without ever reaching its module.
+# These assert source order, not behaviour: the defect was the ORDER of calls, which no
+# single call shows. Anchors use .index(), which raises when an anchor is gone, so a rename fails loudly.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — STARTUP_TIMEOUT and HARD_TIMEOUT's numeric values
@@ -44,11 +34,7 @@ class TestTheReportOutlivesTheLock:
     def test_the_report_is_written_before_the_lock_is_released(self, tail):
         """The P0 fix, and the reason it stopped being cosmetic.
 
-        Releasing the lock first meant a death in that window left the lock
-        GONE and the report UNWRITTEN — "looks complete, reports nothing",
-        the worst failure shape available once the report carries the event.
-        With the release last, the same death leaves a held lock: visible, and
-        already recoverable by the stale-lock path in wake.py.
+        Release first, and a death in the window leaves no lock and no report; release last leaves a recoverable held lock.
         """
         assert tail.index("write_report(") < tail.index("_cleanup_own_lock(lock_file)")
 
@@ -67,14 +53,7 @@ class TestTheReportOutlivesTheLock:
         assert "close_dispatch(" not in after_release
 
     def test_the_wake_back_precedes_the_report_so_wake_result_is_a_known_fact(self, tail):
-        """wake_result is IN the report, so the wake-back cannot follow it.
-
-        The alternative — report first, wake after — would either omit the
-        field or write the report twice. Holding the lock across the wake-back
-        is the accepted cost, and it is small: for the widened window to matter
-        the woken sender would have to re-dispatch this branch within the
-        milliseconds it takes to write one JSON file, while booting a CLI.
-        """
+        """wake_result is IN the report, so the wake-back cannot follow it."""
         assert tail.index("wake_sender(") < tail.index("build_report(")
 
 
@@ -82,12 +61,7 @@ class TestAFailedReportIsNotRoutine:
     """A lost dispatch record must not look healthy in the log."""
 
     def test_the_swallowed_info_line_is_gone(self, tail):
-        """Red-first anchor: this exact string was the defect.
-
-        ``logger.info("[monitor] Notification feed unavailable")`` sat at the
-        quietest level in the file, behind a bare ``except Exception`` — so the
-        monitor read as healthy while the record never landed.
-        """
+        """Red-first anchor: this exact string was the defect (a lost record logged at info level)."""
         assert 'logger.info("[monitor] Notification feed unavailable")' not in tail
 
     def test_a_failed_feed_write_warns_and_carries_the_record(self, tail):
@@ -109,12 +83,7 @@ class TestTheDispatchIdDoesNotLeakToChildren:
     """A dispatched agent dispatching another must not lend it its own id."""
 
     def test_the_inherited_id_is_stripped_before_a_new_one_is_set(self):
-        """Otherwise every mail the child sent would count as the parent's work.
-
-        ``spawn_env`` is a copy of this process's environment, so a dispatched
-        caller carries a live AIPASS_DISPATCH_ID into it. Same class of leak as
-        the AIPASS_CALLER_* strip directly above it in the file.
-        """
+        """Otherwise every mail the child sent would count as the parent's work."""
         source = (MONITOR.parent / "wake.py").read_text(encoding="utf-8")
 
         strip = source.index('spawn_env.pop("AIPASS_DISPATCH_ID", None)')

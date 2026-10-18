@@ -3,14 +3,10 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
-
-# Tests:
-# - create_env_template: openrouter provider, custom provider, no-overwrite,
-#   file permissions, directory permissions, write failure
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — the 0o600 / 0o700 modes on Windows, which has no Unix permission bits
@@ -28,11 +24,6 @@ import pytest
 
 from aipass.api.apps.handlers.auth import keys
 from aipass.api.apps.handlers.auth.env import create_env_template
-
-
-# =============================================
-# create_env_template
-# =============================================
 
 
 class TestCreateEnvTemplate:
@@ -87,13 +78,7 @@ class TestCreateEnvTemplate:
         assert dir_mode == 0o700
 
     def test_handles_a_parent_directory_that_cannot_be_made(self, tmp_path: Path) -> None:
-        """A mkdir the platform refuses returns False.
-
-        api, fleet green leg 3: the failure is real, not a patched builtins.open -
-        the parent of the target is a regular file, so the platform itself
-        refuses to build the directory the template would land in. This is the
-        mkdir step; the open step has its own case below (api, fleet green leg 4).
-        """
+        """A mkdir the platform refuses returns False."""
         blocker = tmp_path / "secrets"
         blocker.write_text("not a directory\n", encoding="utf-8")
         target = blocker / ".env"
@@ -106,9 +91,7 @@ class TestCreateEnvTemplate:
     def test_handles_a_file_that_cannot_be_opened(self, tmp_path: Path) -> None:
         """An open that fails after the directory is made returns False and writes nothing.
 
-        The name holds a NUL byte, which Python itself refuses to open on every
-        platform before the disk is touched: the error is Python's, not the file
-        system's (api, fleet green leg 4).
+        A NUL byte in the name: Python refuses the open on every platform.
         """
         secrets_dir = tmp_path / "secrets"
         target = secrets_dir / ".env\x00"
@@ -120,11 +103,7 @@ class TestCreateEnvTemplate:
 
 
 class TestDiagnoseKeySuggestsRealCommand:
-    """The no-key diagnosis is the most-seen error text — it must not dead-end.
-
-    It previously told users to run `drone @api setup`, which has never been a
-    command; the real one is `init`.
-    """
+    """The no-key diagnosis is the most-seen error text — it must not dead-end."""
 
     def test_missing_key_message_names_init(self) -> None:
         """The suggestion points at a command api.py actually routes."""

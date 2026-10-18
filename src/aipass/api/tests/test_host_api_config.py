@@ -3,15 +3,10 @@
 # Description: Tests for the host API's config, face dir, baud binary and tokens — the bind gate and the store
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/config.py (bind gate, face dir, baud binary) and apps/handlers/host/tokens.py."""
-
-# Split out of test_host_api.py along the unit under test (api, the oversize
-# split leg, 2026-10-08): the config the server binds and serves from, and the
-# token store it authenticates against. The live app and its routes live in
-# test_host_api_routes.py; the host-api commands in test_host_api.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
@@ -31,15 +26,9 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _baud_binary, _face_bundle
 
-# The patch target stays this file's own constant rather than the support
-# module's: seedgo's discarded_patch rule reads a target imported from this
-# branch's package as one it judges, and this silences a logger on purpose.
+# Kept local, not imported from the support module: seedgo's discarded_patch
+# rule judges a target imported from this package, and this silences on purpose.
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
-
-
-# =============================================
-# BIND GATE — handlers/host/config.py
-# =============================================
 
 
 class TestValidateBind:
@@ -78,12 +67,7 @@ class TestValidateBind:
         assert "not available" in str(exc.value).lower()
 
     def test_the_loopback_gate_is_open(self) -> None:
-        """
-        Opened 2026-08-14 by the owner's ruling on the Phase 5 security review.
-
-        Pinned as a fact rather than left implicit: whoever reads this next
-        should see that the gate was OPENED by a decision, not eroded.
-        """
+        """Opened 2026-08-14 by the owner's ruling on the Phase 5 security review."""
         assert host_config.LOOPBACK_ONLY is False
 
     def test_closing_the_gate_still_refuses_non_loopback(self) -> None:
@@ -104,10 +88,7 @@ class TestValidateBind:
         """
         THE test that matters after the flip, and the ratified NO-GO in code.
 
-        LOOPBACK_ONLY governs exactly one refusal. The wildcard check is separate
-        and unconditional: widening to a real address must never widen to every
-        address. If this ever goes green-by-deletion, the server can answer on
-        interfaces nobody chose.
+        LOOPBACK_ONLY governs one refusal; the wildcard check is unconditional.
         """
         for wildcard in ("0.0.0.0", "::"):
             with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BindRefused) as exc:
@@ -133,15 +114,7 @@ class TestValidateBind:
         """
         127.0.0.1 is the Phase 1 target and must pass cleanly.
 
-        The call used to stand alone: an implicit "did not raise", which the
-        checker is right to call no oracle at all.
-
-        The gate returns None by design — acceptance is the ABSENCE of a
-        refusal — so there is no value to read back. The oracle is the
-        contrast: the same call under the same LOOPBACK_ONLY setting accepts
-        loopback and refuses the tailnet-shaped address, which is a claim
-        about the gate and not merely about this one call not raising. A gate
-        emptied to `pass` now fails the second half.
+        The gate returns None, so the oracle is the contrast with a refused address.
         """
         with patch(PATCH_CONFIG_LOGGER):
             assert host_config.validate_bind("127.0.0.1", 8787) is None
@@ -155,7 +128,6 @@ class TestValidateBind:
             with pytest.raises(host_config.BindRefused) as exc:
                 host_config.validate_bind(TAILNET_SHAPED, 8787)
 
-        # Refused for absence now, not for the phase gate.
         assert "not available" in str(exc.value).lower()
 
     @pytest.mark.parametrize("port", [0, -1, 65536, 99999])
@@ -219,8 +191,7 @@ class TestFaceDir:
     """
     FPLAN-0587 row 1: where the phone face is served from, stored beside the bind.
 
-    The bind rule's doctrine: a value that would not serve is refused at write
-    time, where whoever supplied it is still there, and nothing is stored.
+    A value that would not serve is refused at write time, and nothing is stored.
     """
 
     def test_unset_by_default(self, store: Path) -> None:
@@ -319,12 +290,7 @@ posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.acces
 
 
 class TestBaudBin:
-    """
-    FPLAN-0589 row 2: the baud binary the host lanes exec, stored beside face_dir.
-
-    Four legs, validated before any write, each refusal naming its own:
-    absolute, exists, a regular file, executable.
-    """
+    """FPLAN-0589 row 2: the baud binary the host lanes exec, stored beside face_dir."""
 
     def test_unset_by_default(self, store: Path) -> None:
         """No baud_bin stored is None — the automatic lookup is fleet.py's call."""
@@ -416,11 +382,6 @@ class TestBaudBin:
 
         assert config["face_dir"] == str(bundle)
         assert "baud_bin" not in config
-
-
-# =============================================
-# TOKENS — handlers/host/tokens.py
-# =============================================
 
 
 class TestIssueToken:

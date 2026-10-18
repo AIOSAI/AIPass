@@ -3,22 +3,12 @@
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
 # Version: 1.2.3
 # Created: 2026-08-25
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
 
-# Trinity standard machinery — the pins that were red before the build.
-#
-# Every class here corresponds to one item in the DPLAN-0318 machinery
-# dispatch, and every test in it FAILED against the code as it stood on
-# 2026-08-25 before this file landed.
-#
-# The four measurement defects (B1, B2, B4) share one sin: *measurement that
-# cannot fail loud*.  A field the gate cannot measure was silently treated as
-# zero characters, and an off-by-one archived an entry the standard says to
-# keep.  The pins below assert the opposite property in each case: an
-# unmeasurable field is a VIOLATION, and keep-N keeps N.
+# The property throughout: an unmeasurable field is a VIOLATION, never zero characters, and keep-N keeps N.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — render_tab() caps numbers and todo_context(): tests/test_tab_renderer.py
@@ -38,10 +28,7 @@ from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import receipt
 from aipass.memory.apps.handlers.tracking import tab_renderer
 
-# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
-# whole path: a checkout that lives under a directory named dropbox must not hide itself.
-# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
-# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+# Judged by the parts BELOW the walk's root: a checkout under a directory named dropbox must not hide itself.
 _SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -92,21 +79,11 @@ def _lint(monkeypatch, path: str, limits: dict) -> list:
     return lint_handler.run_lint([{"name": "b", "path": path}])["violations"]
 
 
-# =============================================================================
-# B1 — entry_limits: a field the gate cannot measure is a VIOLATION
-# =============================================================================
-
-
 class TestUnmeasurableFieldIsAViolation:
     """B1: _extract_text() returned "" for a non-string — len 0, always passes."""
 
     def test_extract_text_says_unmeasurable_rather_than_empty(self):
-        """A list-shaped note is UNMEASURABLE, not a zero-length string.
-
-        Returning "" conflated 'no text' with 'cannot read the text'. The
-        first is compliant, the second is a violation — one sentinel cannot
-        mean both.
-        """
+        """A list-shaped note is UNMEASURABLE, not a zero-length string: 'no text' is not 'cannot read it'."""
         entry = {"note": [{"title": "a", "detail": "b"}], "number": 1}
         [hit] = _authored(entry)
         assert hit["reason"] == "unmeasurable"
@@ -132,14 +109,9 @@ class TestUnmeasurableFieldIsAViolation:
         assert hits[0]["found_type"] == "list"
 
     def test_a_legacy_unchanged_list_entry_is_carried_not_refused(self):
-        """Rewritten twice: refused 2026-08-27, carried again 2026-08-30.
+        """An unchanged legacy list entry is carried debt, not refused: refusing would only stop rollover.
 
-        The 08-27 reasoning was that the push had cured the list-shaped-note
-        fleet, so the exemption protected nothing. What it missed is that this
-        gate never sees the writes that CAUSE drift — Bash lanes bypass @hooks
-        entirely — so refusing the next write cannot catch the drift, it can
-        only stop rollover, whose write is always the smaller document. The
-        entry is reported as carried debt instead; `lint` reads disk.
+        The gate never sees the Bash writes that cause drift; `lint` reads disk.
         """
         legacy = {"number": 1, "note": [{"title": "x" * 500}]}
         before = {"observations": [legacy]}
@@ -160,13 +132,7 @@ class TestUnmeasurableFieldIsAViolation:
         assert el.changed_entries(before, after, limits) == []
 
     def test_a_second_list_shaped_note_is_refused_beside_a_carried_one(self):
-        """The exemption must not license a NEW entry of the same broken shape.
-
-        Identity is the raw value, never the sentinel: were every unmeasurable
-        entry to collapse to one None, a branch with a single legacy
-        list-shaped note could add ten more and each would read as "already on
-        disk". The new one is authored and refused; the legacy one is carried.
-        """
+        """The exemption must not license a NEW entry of the same broken shape; identity is the raw value."""
         legacy = {"number": 1, "note": [{"title": "old"}]}
         before = {"observations": [legacy]}
         after = {"observations": [{"number": 2, "note": [{"title": "new"}]}, dict(legacy)]}
@@ -175,14 +141,7 @@ class TestUnmeasurableFieldIsAViolation:
         assert {hit["key"] for hit in el.classify_entries(before, after, _limits())["carried"]} == {"1"}
 
     def test_a_second_list_shaped_todo_beside_a_legacy_one_is_still_refused(self):
-        """The hole a text-identity dedup would leave, in the container that kept the exemption.
-
-        If unmeasurable entries all collapse to one sentinel, a branch with a
-        single legacy list-shaped todo could add ten more and every one would
-        read as 'already on disk'. Identity must be the raw value, not the
-        sentinel. Moved here from observations when the clause was narrowed —
-        `todos` is now the only place the exemption can be exploited at all.
-        """
+        """The hole a text-identity dedup would leave, in todos, the one container that kept the exemption."""
         limits = _limits(max_chars=150, field="task", container="todos")
         legacy = {"number": 1, "task": [{"title": "old"}]}
         before = {"todos": [legacy]}
@@ -224,11 +183,6 @@ class TestUnmeasurableFieldIsAViolation:
         }
 
 
-# =============================================================================
-# B2 — lint: len() on a list counts elements, not characters
-# =============================================================================
-
-
 class TestLintRefusesWhatItCannotMeasure:
     """B2: the second independent silent pass over the same corruption."""
 
@@ -254,20 +208,12 @@ class TestLintRefusesWhatItCannotMeasure:
         assert len(hits) == 1
         assert hits[0]["length"] == 400
         assert hits[0]["over_by"] == 100
-        # A MEASURABLE note carries no `reason` at all -- that key is how the
-        # unmeasurable species is told apart, so its absence is the pin. The
-        # `or` this replaced passed whenever the key was missing OR held any
-        # other word, which is every hit this handler can emit.
+        # A MEASURABLE note carries no `reason` at all: its absence is the pin.
         assert "reason" not in hits[0], hits[0]
 
     def test_a_string_note_within_cap_is_clean(self, monkeypatch, tmp_path):
         path = self._branch(tmp_path, "short")
         assert _lint(monkeypatch, path, _limits()) == []
-
-
-# =============================================================================
-# Item 4 + 5 — the templates are the only source of prose
-# =============================================================================
 
 
 class TestRendererReadsTheTemplate:
@@ -276,9 +222,7 @@ class TestRendererReadsTheTemplate:
     def test_the_module_holds_no_usage_prose_of_its_own(self):
         """Guard against reintroducing the constants this build retired."""
         source = (_MEMORY_ROOT / "apps" / "handlers" / "tracking" / "tab_renderer.py").read_text(encoding="utf-8")
-        # The ASSIGNMENT, not the name: the comment recording why the constants
-        # were retired is worth keeping, and a scan that forbids naming them
-        # would delete its own explanation.
+        # The ASSIGNMENT, not the name: a scan forbidding the name would forbid explaining it.
         assert "_CORRECTED_USAGE_LOCAL =" not in source
         assert "_CORRECTED_USAGE_OBS =" not in source
         assert "Automated file — add entries" not in source
@@ -298,11 +242,7 @@ class TestRendererReadsTheTemplate:
         assert tab_renderer.template_semantics("sessions") == raw.replace("{{SESSIONS_META}}", "").strip()
 
     def test_the_todos_tab_carries_numbers_only_not_prose(self):
-        """render_tab() baked a RULE sentence into the todos tab.
-
-        Prose is template-owned now; a second copy in the renderer is exactly
-        the drift the one-source rule exists to end.
-        """
+        """Prose is template-owned: a RULE sentence baked into the todos tab is a second copy."""
 
         tab = tab_renderer.render_tab("todos", {}, {"entry_types": {"todos": {"max_chars": 150}}}, "memory")
         assert tab.startswith("⟦")
@@ -311,7 +251,7 @@ class TestRendererReadsTheTemplate:
         assert "BAU" not in tab
 
     def test_the_local_template_teaches_the_pad_not_the_log(self):
-        """DPLAN-0345: todos roll to a backlog, carry no status, and are one line of what to do."""
+        """Todos roll to a backlog, carry no status, and are one line of what to do."""
         template = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         usage = template["document_metadata"]["_usage"]
         prose = template["todos_meta"]
@@ -382,11 +322,6 @@ class TestRefreshPreservesTheSemantics:
             assert written[key].rstrip().endswith(".") and "⟧ " in written[key], key
 
 
-# =============================================================================
-# Item 6 — health is computed, never stamped
-# =============================================================================
-
-
 class TestNoHealthStamping:
     """The owner's ruling: status.health is deleted from the standard."""
 
@@ -399,13 +334,7 @@ class TestNoHealthStamping:
 
     @staticmethod
     def _stamps_health(source: str) -> bool:
-        """True when the source WRITES the field, not merely names it.
-
-        Prose about a removed field is how the next reader learns why it went;
-        a scan that forbade the name outright would delete its own explanation.
-        The write forms are what matter: a quoted dict key, or a keyword
-        argument.
-        """
+        """True when the source WRITES the field (a quoted key or keyword argument), not merely names it."""
         return '"last_health_check"' in source or "'last_health_check'" in source or "last_health_check=" in source
 
     def test_line_counter_stamps_no_health_date(self):
@@ -428,9 +357,7 @@ class TestNoHealthStamping:
     def test_the_generic_status_writer_is_gone(self):
         """update_metadata() existed only to write the forbidden block.
 
-        Asserted against the source, not `hasattr`: sibling tests swap this
-        package for a MagicMock, and a MagicMock answers hasattr True for
-        anything you ask it — including a function you just deleted.
+        Asserted against the source, not `hasattr`: sibling tests swap this package for a MagicMock.
         """
         source = (_MEMORY_ROOT / "apps" / "handlers" / "json" / "memory_files.py").read_text(encoding="utf-8")
         assert "def update_metadata(" not in source
@@ -439,19 +366,9 @@ class TestNoHealthStamping:
         assert "update_metadata" not in exports
 
     def test_the_real_module_has_no_status_writer_after_a_clean_reimport(self, monkeypatch):
-        """The same claim against the LOADED module, not just the file on disk.
+        """The same claim against the LOADED module, forced fresh past any stand-in package.
 
-        Sibling tests in this suite swap `handlers.json` for a stand-in, and a
-        MagicMock answers `hasattr` True for a function that no longer exists —
-        so the import has to be forced fresh before the question means anything.
-        This is the assertion the retired TestUpdateMetadata class used to carry.
-
-        The eviction is `monkeypatch.delitem`, not a bare `del`. As a bare del
-        it was one-way, and it warmed the cache for the receipt tests LOWER IN
-        THIS FILE by re-importing memory_files on its way out — which is why
-        this file passed standalone and why the receipt tests could still go
-        red when xdist packed them into a worker without this test. A test that
-        silently supplies another test's precondition is worse than no test.
+        Evicted with `monkeypatch.delitem`: a bare `del` warmed the cache for later tests and hid their xdist failures.
         """
         import importlib
 
@@ -466,21 +383,8 @@ class TestNoHealthStamping:
         assert hasattr(memory_files, "read_memory_file_data"), "reload loaded the wrong module"
 
 
-# =============================================================================
-# B4 — keep-N keeps N, and the detector agrees with the extractor
-# =============================================================================
-
-
 class TestKeepNKeepsN:
-    """B4: max(len - limit, 1) archived one entry at exactly the limit.
-
-    Every branch that reached keep-15 settled permanently at 14 — the
-    fleet-wide "exactly 14" oddity. Fixing the extractor alone is not enough:
-    the detector fired at `>=`, so a file resting at the limit would make it
-    re-fire forever while the extractor drained nothing. That is the
-    NOTHING DRAINED skip loop this branch has already been bitten by twice
-    (DPLAN-0290 item 3, and the 2026-08-16 runaway). The two must agree.
-    """
+    """B4: keep-N keeps N, and the detector fires exactly when the extractor drains, or it re-fires forever."""
 
     def _entries(self, n: int) -> list:
         return [
@@ -545,13 +449,7 @@ class TestKeepNKeepsN:
         assert "16/15 sessions" in result["trigger"].v2_reason
 
     def test_detector_and_extractor_never_disagree(self, tmp_path, monkeypatch):
-        """The property, swept across the boundary rather than sampled at it.
-
-        Honest note: this one was GREEN before the fix too — both sides used
-        `>=`, so they agreed while both were wrong. It is a guard against
-        moving one threshold and forgetting the other, not a red-first pin;
-        the red-first pins for B4 are the two "at exactly the limit" tests.
-        """
+        """The property, swept across the boundary: a guard against moving one threshold and not the other."""
 
         # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
         from .test_handlers import _import_extractor
@@ -576,11 +474,6 @@ class TestKeepNKeepsN:
             compared += 1
 
         assert compared == 9, "the sweep must cross the cap of 5 from both sides, not sample one point"
-
-
-# =============================================================================
-# The receipt — .template_version.json
-# =============================================================================
 
 
 class TestTemplateVersionReceipt:
@@ -617,12 +510,7 @@ class TestTemplateVersionReceipt:
         assert result["success"] is False
 
     def test_a_skipped_branch_keeps_its_old_stamp(self, tmp_path, monkeypatch):
-        """Honest: the receipt reports THIS branch, never the fleet's intent.
-
-        The clock is pinned rather than raced — at the spec's one-second
-        resolution a real bump inside the same second is indistinguishable
-        from no bump at all, and a test that passes on timing is not a test.
-        """
+        """Honest: the receipt reports THIS branch, never the fleet's intent (clock pinned: one-second resolution)."""
 
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
@@ -653,12 +541,7 @@ class TestTemplateVersionReceipt:
         assert receipt.read_receipt(trinity) is None
 
     def test_an_unreadable_receipt_is_named_never_reported_absent(self, tmp_path):
-        """The renderer's bump names a broken receipt as broken, and leaves its bytes.
-
-        Until leg 3 of DPLAN-0354 read_receipt answered None here, the answer
-        for no receipt, so the bump said "No receipt ... only a push, birth, or
-        reset may create one" over a file that was there.
-        """
+        """The renderer's bump names a broken receipt as broken, never absent, and leaves its bytes."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / receipt.RECEIPT_NAME).write_text("NOT JSON {{{", encoding="utf-8")
@@ -671,11 +554,7 @@ class TestTemplateVersionReceipt:
         assert (trinity / receipt.RECEIPT_NAME).read_bytes() == before
 
     def test_a_receipt_that_is_json_but_not_an_object_raises_and_says_so(self, tmp_path):
-        """Valid JSON with a list at the root is broken, never "no receipt".
-
-        Green on the tree from its first run; its proof is the mutant of leg 4
-        of DPLAN-0354 that answers None in place of the raise, and dies here.
-        """
+        """Valid JSON with a list at the root is broken, never "no receipt"."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         path = trinity / receipt.RECEIPT_NAME
@@ -687,11 +566,7 @@ class TestTemplateVersionReceipt:
         assert str(caught.value) == f"Unreadable receipt at {path}: root is list, not an object"
 
     def test_a_stamp_over_a_broken_receipt_replaces_it_and_names_it(self, tmp_path, monkeypatch):
-        """The lane that delivered the templates writes the fact over a broken receipt, and warns.
-
-        Green on the tree from its first run; its proof is the mutant of leg 4
-        of DPLAN-0354 that raises again in place of the catch, and dies here.
-        """
+        """The lane that delivered the templates writes the fact over a broken receipt, and warns."""
         log = MagicMock()
         monkeypatch.setattr(receipt, "logger", log)
         trinity = tmp_path / ".trinity"
@@ -711,11 +586,7 @@ class TestTemplateVersionReceipt:
         assert warned[0].endswith(f" — replaced by the {receipt.STAMPED_BY_PUSH} stamp")
 
     def test_a_receipt_outside_the_aipass_root_is_neither_stamped_nor_bumped(self, tmp_path, monkeypatch):
-        """The receipt lives in ``.trinity/`` — a branch memory file like its neighbours.
-
-        Both lanes go through one writer, so both are pinned: the push's stamp
-        and the renderer's bump.
-        """
+        """The write fence holds for the receipt in both lanes: the push's stamp and the renderer's bump."""
 
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         trinity = tmp_path / "other_root" / "src" / "x" / ".trinity"
@@ -731,23 +602,10 @@ class TestTemplateVersionReceipt:
         assert sorted(path.name for path in trinity.iterdir()) == [receipt.RECEIPT_NAME]
 
 
-# =============================================================================
-# The receipt is wired into the lanes that may write it
-# =============================================================================
-
-
 def _assert_the_lazy_import_path_is_a_package() -> None:
-    """Name sys.modules poisoning instead of letting it read as a wrong count.
+    """Name sys.modules poisoning instead of letting it read as a wrong count from the lazy import.
 
-    ``tab_renderer._refresh_one_file`` reaches ``memory_files`` through a LAZY
-    import, and it reports an import failure the same way it reports a bad
-    file: as a per-file error. So a poisoned process surfaces here as
-    ``(0, [...]) == (1, [])`` — a COUNT that points at the receipt renderer,
-    which is not where the defect is. This says so out loud.
-
-    Checked WITHOUT importing anything. An ``import_module`` probe would repair
-    the very state it was measuring, and a pin that fixes its own precondition
-    proves nothing.
+    Checked WITHOUT importing anything: an ``import_module`` probe would repair the state it measures.
     """
     package = sys.modules.get("aipass.memory.apps.handlers.json")
     assert package is None or hasattr(package, "__path__"), (
@@ -794,16 +652,7 @@ class TestReceiptWiring:
         assert receipt.read_receipt(trinity) is None
 
     def test_the_push_lane_stamps_only_branches_it_changed(self):
-        """Source-level pin: the stamp sits inside the `if written:` arm.
-
-        Stamping every scanned branch would make the receipt report the run's
-        INTENT rather than the branch's reality — the one thing the standard
-        says it must never do.
-
-        Repointed 2026-08-27: the stamping lane moved from the retired
-        pre-.trinity `pusher.py` (archived) to `trinity_push.apply_plan`, which
-        is what actually stamped all 22 receipts in the fleet push.
-        """
+        """Source-level pin: the stamp sits inside the `if written:` arm, so it reports reality, not intent."""
         source = (_MEMORY_ROOT / "apps" / "handlers" / "templates" / "trinity_push.py").read_text(encoding="utf-8")
         arm = source[source.index("    if written:") :]
         assert "receipt.write_receipt(" in arm
@@ -819,30 +668,14 @@ class TestLintNamesWhatItCannotMeasure:
         assert 'v.get("reason") == "unmeasurable"' in source
 
     def test_the_display_names_a_missing_field_separately(self):
-        """ "UNMEASURABLE — missing, expected str" would be true and unactionable.
-
-        The agent can only fix what it is told: the missing-field line names the
-        canonical key to rename, which is the whole repair.
-        """
+        """The missing-field line names the canonical key to rename; "UNMEASURABLE" alone is unactionable."""
         source = (_MEMORY_ROOT / "apps" / "modules" / "lint.py").read_text(encoding="utf-8")
         assert 'v.get("reason") == "missing_field"' in source
         assert "FIELD" in source
 
 
-# =============================================================================
-# B3 (second half) — a field the gate cannot FIND is also a violation
-# =============================================================================
-
-
 class TestMissingFieldIsAViolation:
-    """The other half of B1, reported by @hooks 2026-08-25 after 1.3.0 shipped.
-
-    1.3.0 fixed the WRONG-TYPE case and left the MISSING-FIELD case answering
-    ``""`` — so a ``key_learning`` whose text sits under ``learning`` where the
-    config says ``value`` measured as zero characters and cleared its cap. Same
-    species, same silence: a renamed field is not an absent text, it is a text
-    the reader cannot find.
-    """
+    """The other half of B1: a renamed field is not an absent text, it is a text the reader cannot find."""
 
     def test_a_missing_field_says_it_cannot_be_read(self):
         [hit] = _authored({"key": "k", "learning": "x" * 500}, field="value")
@@ -863,12 +696,7 @@ class TestMissingFieldIsAViolation:
         assert hits[0]["entry_type"] == "key_learnings"
 
     def test_the_refusal_names_the_canonical_field(self):
-        """@hooks' formatter prints "no 'value' field — rename it"; it needs the name.
-
-        Reason is ``missing_field``, not ``unmeasurable``: the consumer renders
-        the two differently and "expected a string, found missing" tells the
-        agent nothing it can act on.
-        """
+        """@hooks' formatter prints "no 'value' field — rename it": reason missing_field, and the name."""
         before = {"observations": []}
         after = {"observations": [{"number": 1, "observation": "x" * 500}]}
         hits = el.changed_entries(before, after, _limits())
@@ -878,15 +706,7 @@ class TestMissingFieldIsAViolation:
         assert hits[0]["field"] == "note"
 
     def test_the_six_published_keys_are_still_ints(self):
-        """@hooks' edit_gate formats length/cap/over_by with %d — a str would raise.
-
-        CURED 2026-09-08. The entry named its text field `observation`, which is
-        not the schema's name, so this unit was measuring a MISSING-FIELD hit —
-        length 0, cap 300, over_by 0 — and never the over-cap hit it says it
-        publishes. Six isinstance calls were true of that hit too, which is
-        exactly how a wrong fixture reads green for months. It now builds the
-        over-cap hit and pins the numbers.
-        """
+        """@hooks' edit_gate formats length/cap/over_by with %d — a str would raise; the numbers are pinned."""
         before = {"observations": []}
         after = {"observations": [{"number": 1, "note": "x" * 500}]}
         hit = el.changed_entries(before, after, _limits())[0]
@@ -895,13 +715,7 @@ class TestMissingFieldIsAViolation:
         assert "%d/%d (+%d)" % (hit["length"], hit["cap"], hit["over_by"]) == "500/300 (+200)"
 
     def test_untouched_renamed_field_drift_is_carried_not_refused(self):
-        """A renamed field deadlocks rollover exactly like an over-cap one.
-
-        @ai_mail and @api carried `learning` where the config says `value`.
-        Refusing every write to those files would have bricked their rollover
-        for a shape only their own agent can rename — the same trade the
-        archiver always loses.
-        """
+        """Untouched renamed-field drift is carried: refusing it would deadlock rollover like an over-cap entry."""
         legacy = {"number": 1, "observation": "x" * 500}
         before = {"observations": [legacy]}
         after = {"observations": [dict(legacy)]}
@@ -930,11 +744,7 @@ class TestMissingFieldIsAViolation:
         assert hits[0]["field"] == "value"
 
     def test_lint_reports_the_entry_it_cannot_find_a_field_in(self, monkeypatch, tmp_path):
-        """Read-only lint stayed silent while the write gate refused — the audit lied.
-
-        A branch could ask "am I compliant?", be told yes, and then be blocked
-        on its next write for a shape lint had already seen.
-        """
+        """Read-only lint must report what the write gate refuses, or the audit lies."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "observations.json").write_text(
@@ -947,11 +757,7 @@ class TestMissingFieldIsAViolation:
         assert hits[0]["field"] == "note"
 
     def test_lint_reports_a_dict_container_missing_its_field(self, monkeypatch, tmp_path):
-        """Both container kinds, or the audit is only half honest.
-
-        key_learnings is dict-shaped on several branches; a scanner that catches
-        the list shape and not the dict one still tells those branches nothing.
-        """
+        """Both container kinds, or the audit is only half honest (key_learnings is dict-shaped on several branches)."""
         limits = _limits(max_chars=200, field="value", container="key_learnings")
         limits["entry_types"]["observations"]["kind"] = "dict"
         limits["entry_types"]["observations"]["file"] = "local.json"
@@ -971,16 +777,7 @@ class TestMissingFieldIsAViolation:
 class TestTheTabHonoursPerBranchCharCaps:
     """One source, or the tab instructs an agent to break the rule it enforces.
 
-    Reported by @seedgo 2026-08-26 from the other side of the contract: their
-    ``expected_meta_line()`` resolves ``entry_limits.per_branch``; ``render_tab``
-    read ``entry_types`` straight off the config and never consulted it. Latent
-    only because that map is empty today — the day anyone sets one override, the
-    rendered line names the default cap, the gate enforces the override, and the
-    branch fails the Meta-lines rule permanently because the renderer keeps
-    rewriting the line the checker keeps rejecting.
-
-    Note the asymmetry that made it an oversight rather than a decision:
-    ``rollover.per_branch`` was already honoured here, ``entry_limits`` was not.
+    @seedgo's ``expected_meta_line()`` resolves ``entry_limits.per_branch``; the tab must too.
     """
 
     @staticmethod
@@ -996,11 +793,7 @@ class TestTheTabHonoursPerBranchCharCaps:
 
     @pytest.fixture(autouse=True)
     def _real_resolver(self, monkeypatch):
-        """conftest mocks the whole `handlers.json` package, so the renderer's
-        `entry_limits` binds a MagicMock whose every attribute answers another
-        MagicMock — a cap assertion would then pass or fail for reasons that have
-        nothing to do with the resolver. Hand it the real module.
-        """
+        """conftest mocks `handlers.json`, so hand the renderer the real entry_limits, not a MagicMock."""
 
         monkeypatch.setattr(tab_renderer, "entry_limits", el)
 
@@ -1035,11 +828,7 @@ class TestTheTabHonoursPerBranchCharCaps:
         assert "≤80 chars" in tab_renderer.render_tab("todos", self._rollover(), cfg, "baud")
 
     def test_the_renderer_and_the_enforcer_resolve_identically(self):
-        """The two must never disagree — that divergence IS the drift.
-
-        load_entry_limits() is what the write gate measures against; whatever it
-        calls the cap is what the tab must print.
-        """
+        """The renderer prints the cap the write gate measures against; divergence IS the drift."""
 
         section = self._cfg()
         merged = el.resolve_entry_types(section, "baud")
@@ -1053,11 +842,7 @@ class TestTheReceiptsGoldVersionIsSchemaVersion:
     """@seedgo inferred it and asked to be pinned by the owner, not by itself."""
 
     def test_the_receipt_reads_schema_version_not_document_version(self):
-        """The two templates disagree on `version` (2.0.0 / 1.0.0) and agree on
-        schema_version (3.0.0). The contract's example shows two EQUAL values, so
-        only schema_version reproduces it — and the receipt reports the STRUCTURE
-        a branch was stamped with, which is what schema_version names.
-        """
+        """The receipt reports schema_version (the STRUCTURE stamped), never the templates' differing `version`."""
 
         local = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         obs = json.loads((_TEMPLATES / "OBSERVATIONS.template.json").read_text(encoding="utf-8"))

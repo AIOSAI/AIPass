@@ -3,7 +3,7 @@
 # Description: Tests for the steward rotation handler and module
 # Version: 1.4.1
 # Created:2026-08-12
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -49,9 +49,6 @@ MODULE = "aipass.daemon.apps.modules.rotation"
 RUN = "aipass.daemon.apps.modules.run"
 WAKE_SEAM = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
 SCHEDULE_FILE = Path(__file__).resolve().parents[1] / ".daemon" / "schedule.json"
-
-
-# ── Fixtures ──────────────────────────────────────────
 
 
 FRAMEWORK = framework_root()
@@ -154,9 +151,6 @@ def rotation_json(capsys, roster, jobs=(), runstate=None, lane: bool | None = Tr
     return json.loads(capsys.readouterr().out)
 
 
-# ── build_roster ──────────────────────────────────────
-
-
 class TestBuildRoster:
     def test_devpulse_is_never_on_the_roster(self, roster):
         assert "@devpulse" not in [c["email"] for c in roster]
@@ -218,9 +212,6 @@ class TestBuildRoster:
             assert build_roster() == []
 
 
-# ── next_target ───────────────────────────────────────
-
-
 def whose_turn(roster: list, last_target) -> str:
     """Email of the citizen next_target picks — fails loudly on an empty pick."""
     entry = next_target(roster, last_target)
@@ -254,9 +245,6 @@ class TestNextTarget:
         assert whose_turn(roster, "@c") == "@d", "a last target still on the roster keeps its answer"
 
 
-# ── rotation state ────────────────────────────────────
-
-
 class TestRecordRotation:
     def test_pointer_advances_to_target(self):
         runstate = {}
@@ -288,9 +276,6 @@ class TestRecordRotation:
         assert get_rotation_state({}, "nope") == {}
 
 
-# ── render_prompt ─────────────────────────────────────
-
-
 class TestRenderPrompt:
     def test_branch_is_substituted(self):
         assert render_prompt("ROUNDS for {branch}.", "@flow") == "ROUNDS for @flow."
@@ -302,9 +287,6 @@ class TestRenderPrompt:
 
     def test_prompt_without_placeholder_passes_through(self):
         assert render_prompt("Just do the audit.", "@flow") == "Just do the audit."
-
-
-# ── fire_rotation ─────────────────────────────────────
 
 
 class TestFireRotation:
@@ -413,9 +395,6 @@ class TestFireRotation:
         assert mock_wake.call_args[0][0]["email"] == "@backup"
 
 
-# ── the manager lane contract ─────────────────────────
-
-
 class TestManagerLane:
     @staticmethod
     def _fire(target, runstate, **wake):
@@ -457,12 +436,8 @@ class TestManagerLane:
     def test_lane_probe_reads_the_live_signature(self, capsys):
         """The probe answers True because ai_mail's wake_branch really takes `scheduled`.
 
-        Was `in (True, False)` — true of every bool, so it survived any
-        implementation that returns one. The probe exists to notice the day
-        ai_mail's lane appears or disappears, so it pins the live answer and the
-        parameter that produces it. If wake_branch loses `scheduled`, rotation
-        starts skipping every manager steward by name (rotation.py line 203) and
-        both halves of this go red together. Read through `rotation --json`.
+        If wake_branch loses `scheduled`, rotation skips every manager steward by name and both halves
+        of this go red together. Read through `rotation --json`.
         Mutant killed: _scheduled_lane_available probes a parameter name wake_branch lacks.
         """
         assert "scheduled" in inspect.signature(wake_branch).parameters
@@ -471,16 +446,12 @@ class TestManagerLane:
     def test_wake_back_is_a_live_keyword_of_wake_branch(self):
         """Our wake_back=False is only safe while ai_mail's wake_branch takes it.
 
-        Dropped or renamed there, every rounds night becomes a TypeError caught in
-        _wake_steward and recorded as a failed turn at 05:00. This pin makes the
-        suite say so first. Keyword-only with a True default is FPLAN-0541's shape.
+        Dropped or renamed there, every rounds night becomes a TypeError caught in _wake_steward and
+        recorded as a failed turn. Keyword-only with a True default is the shape pinned.
         """
         param = inspect.signature(wake_branch).parameters["wake_back"]
         assert param.kind is inspect.Parameter.KEYWORD_ONLY
         assert param.default is True
-
-
-# ── CLI surface ───────────────────────────────────────
 
 
 class TestRotationCommand:
@@ -541,9 +512,6 @@ class TestRotationCommand:
         assert [j["id"] for j in found] == ["rounds"]
 
 
-# ── the shipped rounds job (DPLAN-0337 R2) ────────────
-
-
 def shipped_rounds_job() -> dict:
     """The rounds stanza as daemon ships it — read, never written — owner stamped as discovery does."""
     data = json.loads(SCHEDULE_FILE.read_text(encoding="utf-8"))
@@ -602,9 +570,7 @@ class TestShippedRoundsJob:
     def test_the_prompt_asks_for_nothing_that_cannot_happen(self, source):
         """A rounds wake is a session prompt, not a mail: there is no dispatch to reply to.
 
-        Same seam as the false wake-backs of 2026-09-10 08:50-08:57, when @daemon was
-        told five times to read a reply that a nudge never owes. The APLAN step is
-        gone by ruling — the @devpulse mail is the night's one artefact.
+        A nudge never owes @daemon a reply, and the APLAN step is gone: the @devpulse mail is the night's artefact.
         """
         prompt = (shipped_rounds_job()["prompt"] if source == "shipped stanza" else ROUNDS_PROMPT_TEMPLATE).lower()
         assert "reply to this dispatch" not in prompt
@@ -614,12 +580,9 @@ class TestShippedRoundsJob:
 class TestRoundsNight:
     """One night end to end through the real tick, nobody woken.
 
-    The shipped stanza, a runstate copy that has never seen the job but still
-    carries the deleted inbox-sweep row, the clock moved to 05:01, and the wake
-    caught at ai_mail's wake_branch seam — so the kwargs pinned are the ones a
-    real 05:00 fire hands ai_mail. Nights are dated from tomorrow: last_run is
-    stamped by the real clock, and a fixed date would go red once the wall
-    clock passed it.
+    The shipped stanza, the clock moved to 05:01, and the wake caught at ai_mail's wake_branch seam,
+    so the kwargs pinned are the ones a real fire hands ai_mail. Nights are dated from tomorrow:
+    last_run is stamped by the real clock, and a fixed date would go red once the wall clock passed it.
     """
 
     # Registry order on purpose, and two outsiders that sort AHEAD of @ai_mail:
@@ -723,17 +686,11 @@ class TestRoundsNight:
         mock_wake.assert_not_called()
 
 
-# ── the scope ruling (The owner, 2026-09-10 21:47) ──────
-
-
 class TestRoundsScope:
-    """The rounds serve src/aipass/* only — marked very important.
+    """The rounds serve src/aipass/* only.
 
-    Driven through discovery's real active_citizens() on a temp install, with
-    @memory's fleet stubbed at its seam as the sweep's scope pins do: one
-    framework branch, one projects/* resident, one citizen under an external
-    root. All three declare the same trusted class, so only the path can tell
-    them apart — which is the rule.
+    Driven through discovery's real active_citizens() with @memory's fleet stubbed: a framework branch,
+    a projects/* resident and an external-root citizen, all declaring the same class, so only the path decides.
     """
 
     FLEET = "aipass.daemon.apps.handlers.schedule.discovery.fleet"

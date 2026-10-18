@@ -3,44 +3,13 @@
 # Description: Oversize Test File Standards Checker Handler
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-21
+# Modified: 2026-10-17
 # =============================================
 
 """
 Oversize Test File Standards Checker Handler
 
-Convicts a test file carrying more than ``CODE_LINE_CAP`` lines of CODE.
-
-Fixture payload does not count. A test file that holds 1,500 lines of sample
-JSON, a rendered README or a captured log is doing exactly what a test file
-should — the payload is data the assertions read, and charging for it would
-push authors to move fixtures out of sight rather than to split anything. So
-every line inside a multi-line string literal is subtracted before the cap is
-applied, docstrings included: the gold standard asks for a docstring naming
-the bug a test pins, and a size rule must never be a reason to delete one.
-
-The cap is not tuned to land a number. Measured across the fleet 2026-09-20:
-538 test files, median 378 code lines, 90th percentile 1,161. A cap of 1,500
-therefore sits above nine files in ten and convicts 34 — the tail, not the
-body — and it is the same figure the product side already uses.
-
-Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
-
-  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
-    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
-    real row with a percentage and it moves the branch score.
-  * ``check_module`` in the per-file checklist lane -- the same function, fired
-    by the PostToolUse hook, so the rule also meets an author on the write.
-
-The ``check_branch_info`` backlog line retired with that ruling: an unscored
-grey line was the workaround for a corpus that handed this checker no files,
-and the scored row is the record now.
-
-One honest limit, stated because it is the whole reason this rule is a
-prohibition and not a requirement: the cure for an oversize file is a split,
-and a split needs new test files, which the hooks test-write gate refuses by
-policy. The message therefore tells an author what the split looks like and
-never implies they can perform it unasked.
+Reference: oversize_test_file.md
 """
 
 import ast
@@ -70,10 +39,7 @@ def _payload_lines(tree: ast.AST) -> int:
     """How many source lines sit inside a multi-line string literal.
 
     A SET of line numbers rather than a running sum: an f-string holds its own
-    nested constants, and adding each span independently double-counts the
-    lines they share. Measured 2026-09-20 that gap was 26 lines on this
-    branch's largest file — small, but it makes the number irreproducible,
-    which is worse than wrong for a threshold nobody can re-derive.
+    nested constants, and adding each span independently double-counts shared lines.
     """
     lines: set[int] = set()
     for node in ast.walk(tree):
@@ -87,9 +53,7 @@ def _payload_lines(tree: ast.AST) -> int:
 def measure(source: str) -> Tuple[int, int, int]:
     """(code_lines, total_lines, payload_lines) for one test file's source.
 
-    A file that does not parse is measured at its full length rather than
-    skipped: ruff already convicts the syntax error, and silently exempting
-    an unparseable file would make "delete one bracket" a way past the cap.
+    An unparseable file is measured at full length: exempting it would make "delete one bracket" a way past the cap.
     """
     total = len(source.splitlines())
     try:
@@ -121,15 +85,7 @@ def _result(passed: bool, message: str, score: int) -> Dict:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check one test file against the code-line cap.
-
-    Args:
-        module_path: Path to the test file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check one test file against the code-line cap."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, "Standard bypassed via .seedgo/bypass.json", 100)
 
@@ -142,9 +98,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if code <= CODE_LINE_CAP:
         return _result(True, f"{code} code lines, cap {CODE_LINE_CAP}", 100)
 
-    # Payload is named in the conviction on purpose: an author looking at a
-    # 10,524-line file needs to know the rule already gave them credit for
-    # 5,933 of those lines, or the number reads as unreachable.
+    # Payload is named in the conviction: without the credit already given, the code-line count reads as unreachable.
     message = (
         f"{code} code lines, cap {CODE_LINE_CAP} "
         f"({total} total, {payload} of string payload already excluded) - {MESSAGE}"

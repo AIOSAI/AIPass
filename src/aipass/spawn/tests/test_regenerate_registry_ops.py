@@ -3,7 +3,7 @@
 # Description: Tests for regenerate_registry_ops handler
 # Version: 1.0.4
 # Created: 2026-04-03
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
@@ -26,22 +26,8 @@ from aipass.spawn.apps.modules import regenerate_registry as regenerate_registry
 from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
-
 def _make_template(tmp_path: Path, files: dict[str, str] | None = None, dirs: list[str] | None = None) -> Path:
-    """Create a minimal template directory with given files and sub-directories.
-
-    Args:
-        tmp_path: Pytest tmp_path root.
-        files: Mapping of relative path -> file content.
-        dirs: List of relative directory paths to create (empty dirs).
-
-    Returns:
-        Path to the template directory.
-    """
+    """Create a minimal template directory with given files and sub-directories."""
     tpl = tmp_path / "my_template"
     tpl.mkdir(parents=True, exist_ok=True)
 
@@ -61,11 +47,6 @@ def _hash_for(_content: str) -> str:
     import hashlib
 
     return hashlib.sha256(_content.encode()).hexdigest()[:12]
-
-
-# =============================================================================
-# regenerate_template_registry — fresh generation
-# =============================================================================
 
 
 class TestRegenerateFreshTemplate:
@@ -90,7 +71,6 @@ class TestRegenerateFreshTemplate:
         assert "stats" in result
         assert "metadata" in result
 
-        # Verify the registry JSON was written to disk
         registry_path = tpl / ".spawn" / ".template_registry.json"
         assert registry_path.exists()
 
@@ -100,18 +80,12 @@ class TestRegenerateFreshTemplate:
         assert "metadata" in persisted
 
 
-# =============================================================================
-# ID preservation — hash match
-# =============================================================================
-
-
 class TestPreservesIdsByHash:
     """Test 2 — existing registry with hash->ID, same content at different path."""
 
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.load_template_registry")
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.compute_file_hash")
     def test_regenerate_preserves_ids_by_hash(self, mock_hash, mock_load, tmp_path):
-        # Existing registry: f001 lives at "old/main.py" with hash "aabbccdd1122"
         mock_load.return_value = {
             "files": {
                 "f001": {
@@ -122,21 +96,14 @@ class TestPreservesIdsByHash:
             },
             "directories": {},
         }
-        # New file produces the same hash but at a different path
         mock_hash.return_value = "aabbccdd1122"
 
         tpl = _make_template(tmp_path, files={"new_location/main.py": "print('hi')"})
 
         result = regenerate_template_registry(tpl)
 
-        # The existing ID f001 should be preserved via hash match
         assert "f001" in result["files"]
         assert result["files"]["f001"]["path"] == "new_location/main.py"
-
-
-# =============================================================================
-# ID preservation — path match
-# =============================================================================
 
 
 class TestPreservesIdsByPath:
@@ -155,7 +122,6 @@ class TestPreservesIdsByPath:
             },
             "directories": {},
         }
-        # New content -> different hash, but same path
         mock_hash.return_value = "newnewnew123"
 
         tpl = _make_template(tmp_path, files={"config.yaml": "new content here"})
@@ -164,11 +130,6 @@ class TestPreservesIdsByPath:
 
         assert "f005" in result["files"]
         assert result["files"]["f005"]["content_hash"] == "newnewnew123"
-
-
-# =============================================================================
-# New ID assignment
-# =============================================================================
 
 
 class TestAssignsNewIds:
@@ -187,25 +148,16 @@ class TestAssignsNewIds:
             },
             "directories": {},
         }
-        # Completely new file — different hash and different path
         mock_hash.return_value = "brandnew1234"
 
         tpl = _make_template(tmp_path, files={"totally_new.py": "new stuff"})
 
         result = regenerate_template_registry(tpl)
 
-        # f001 is already in the existing registry (not matched), so the new
-        # file should get f001 since f001 was not claimed by hash or path match
-        # Actually f001 won't be claimed because the existing file is gone.
-        # The new file gets f001 as first available.
+        # An unmatched old entry claims nothing, so f001 is the first free id.
         file_ids = list(result["files"].keys())
         assert len(file_ids) == 1
         assert file_ids[0] == "f001"
-
-
-# =============================================================================
-# Skip __pycache__
-# =============================================================================
 
 
 class TestSkipsPycache:
@@ -234,19 +186,13 @@ class TestSkipsPycache:
         assert not any("__pycache__" in p for p in all_dir_paths)
 
 
-# =============================================================================
-# Skip spawn tracking files
-# =============================================================================
-
-
 class TestSkipsSpawnTrackingFiles:
     """Test 6 — .template_registry.json and .branch_meta.json inside .spawn/ are skipped."""
 
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.load_template_registry")
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.compute_file_hash")
     def test_regenerate_skips_spawn_tracking_files(self, mock_hash, mock_load, tmp_path):
-        # The manifest on disk is "{}", which the real load answers as {} (leg 6:
-        # a None beside a manifest that exists now means unreadable and refuses).
+        # {} not None: None beside an existing manifest means unreadable, which refuses.
         mock_load.return_value = {}
         mock_hash.return_value = "aabb11223344"
 
@@ -264,11 +210,6 @@ class TestSkipsSpawnTrackingFiles:
         all_paths = [f["path"] for f in result["files"].values()]
         assert ".spawn/.template_registry.json" not in all_paths
         assert ".spawn/.branch_meta.json" not in all_paths
-
-
-# =============================================================================
-# Allow .spawn/README.md
-# =============================================================================
 
 
 class TestAllowsSpawnReadme:
@@ -293,11 +234,6 @@ class TestAllowsSpawnReadme:
         assert ".spawn/README.md" in all_paths
 
 
-# =============================================================================
-# Non-existent directory
-# =============================================================================
-
-
 class TestNonexistentDir:
     """Test 8 — pass nonexistent path, verify returns error dict."""
 
@@ -312,12 +248,7 @@ class TestNonexistentDir:
 
 
 class TestUnreadableManifestIsRefused:
-    """A manifest that is there but cannot be read is named and refused.
-
-    Before leg 6 it read as absent, every file got a fresh id, and those ids were
-    written over the manifest: a wrong identity for a template whose manifest
-    exists (spawn's finding in leg 5 of DPLAN-0354, cured in leg 6).
-    """
+    """A manifest that is there but cannot be read is named and refused (never read as absent)."""
 
     def test_an_unreadable_manifest_refuses_and_writes_nothing(self, tmp_path):
         tpl = _make_template(tmp_path, files={"README.md": "# hi", "apps/a.py": "x"})
@@ -331,11 +262,6 @@ class TestUnreadableManifestIsRefused:
         assert list(result) == ["error"]
         assert str(manifest) in result["error"]
         assert {p.relative_to(tpl): (p.read_bytes() if p.is_file() else None) for p in tpl.rglob("*")} == before
-
-
-# =============================================================================
-# Placeholder filename detection
-# =============================================================================
 
 
 class TestDetectsPlaceholderFilenames:
@@ -357,7 +283,6 @@ class TestDetectsPlaceholderFilenames:
 
         result = regenerate_template_registry(tpl)
 
-        # Find the placeholder file
         placeholder_entry = None
         normal_entry = None
         for entry in result["files"].values():
@@ -371,11 +296,6 @@ class TestDetectsPlaceholderFilenames:
 
         assert normal_entry is not None
         assert normal_entry["has_branch_placeholder"] is False
-
-
-# =============================================================================
-# Directory ID preservation by path
-# =============================================================================
 
 
 class TestDirectoryIdPreservation:
@@ -404,14 +324,8 @@ class TestDirectoryIdPreservation:
 
         result = regenerate_template_registry(tpl)
 
-        # d010 should be preserved for "apps/handlers" via path match
         assert "d010" in result["directories"]
         assert result["directories"]["d010"]["path"] == "apps/handlers"
-
-
-# =============================================================================
-# Directory name fallback
-# =============================================================================
 
 
 class TestDirectoryNameFallback:
@@ -432,7 +346,6 @@ class TestDirectoryNameFallback:
         }
         mock_hash.return_value = "filehash1234"
 
-        # "utils" now at a different path — should still match by name
         tpl = _make_template(
             tmp_path,
             files={"new_location/utils/helper.py": "code"},
@@ -443,11 +356,6 @@ class TestDirectoryNameFallback:
 
         assert "d007" in result["directories"]
         assert result["directories"]["d007"]["name"] == "utils"
-
-
-# =============================================================================
-# Stats accuracy
-# =============================================================================
 
 
 class TestStatsAccuracy:
@@ -487,18 +395,12 @@ class TestStatsAccuracy:
         assert stats["template_name"] == "my_template"
 
 
-# =============================================================================
-# Hash length compatibility (16-char -> 12-char)
-# =============================================================================
-
-
 class TestHashLengthCompat:
     """Test 13 — existing 16-char hashes match against new 12-char hashes by prefix."""
 
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.load_template_registry")
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.compute_file_hash")
     def test_regenerate_hash_length_compat(self, mock_hash, mock_load, tmp_path):
-        # Existing registry has a 16-char hash
         mock_load.return_value = {
             "files": {
                 "f042": {
@@ -509,21 +411,14 @@ class TestHashLengthCompat:
             },
             "directories": {},
         }
-        # New hash is the 12-char prefix of the old one
         mock_hash.return_value = "aabbccdd1122"  # 12 chars
 
         tpl = _make_template(tmp_path, files={"moved/legacy.py": "content"})
 
         result = regenerate_template_registry(tpl)
 
-        # ID should be preserved because the 12-char prefix is indexed
         assert "f042" in result["files"]
         assert result["files"]["f042"]["path"] == "moved/legacy.py"
-
-
-# =============================================================================
-# _next_id tests
-# =============================================================================
 
 
 def _seed_registry(tpl: Path, files: dict | None = None, directories: dict | None = None) -> None:
@@ -548,8 +443,7 @@ class TestNextId:
     def test_next_id_basic(self, tmp_path):
         """Test 14 — nothing claimed yet: the first file gets prefix + 001.
 
-        Mutant: new IDs numbered from 0 -> red.
-        """
+        Mutant: new IDs numbered from 0 -> red."""
         tpl = _make_template(tmp_path, files={"only.py": "x"})
 
         result = regenerate_template_registry(tpl)
@@ -568,8 +462,7 @@ class TestNextId:
     def test_next_id_fills_gaps(self, tmp_path):
         """Test 16 — fills gaps in the sequence.
 
-        Mutant: the next ID counts past the highest claimed instead of filling the first gap -> red.
-        """
+        Mutant: the next ID counts past the highest claimed instead of filling the first gap -> red."""
         tpl = _make_template(tmp_path, files={"a.py": "a", "c.py": "c", "new.py": "n"})
         _seed_registry(tpl, files={"f001": _file_entry("a.py"), "f003": _file_entry("c.py")})
 
@@ -591,17 +484,11 @@ class TestNextId:
         assert _id_of(result["directories"], ".spawn") == "d001"
 
 
-# =============================================================================
-# Scan ordering consistency
-# =============================================================================
-
-
 class TestScanTemplateDirectoryOrdering:
     """Test 17 — files and dirs come from sorted rglob, verify consistent output."""
 
     @patch("aipass.spawn.apps.handlers.regenerate_registry_ops.compute_file_hash")
     def test_scan_template_directory_ordering(self, mock_hash, tmp_path):
-        # Return different hashes per file so we can verify ordering
         call_count = 0
 
         def _sequential_hash(_path):
@@ -624,30 +511,21 @@ class TestScanTemplateDirectoryOrdering:
         result = regenerate_template_registry(tpl)
         files, directories = result["files"], result["directories"]
 
-        # Files should have been scanned in sorted order (a_, m_, z_)
         file_paths = [entry["path"] for entry in files.values()]
         assert file_paths == sorted(file_paths)
 
-        # Directories should also be in sorted order
         dir_paths = [entry["path"] for entry in directories.values()]
         assert dir_paths == sorted(dir_paths)
 
 
 SPAWN_BRANCH_ROOT = Path(__file__).resolve().parents[1]
 
-# Every template-directory lookup regenerate_registry.py binds at import time.
-# The fixture below must redirect all of them; the pin that enforces it is
-# TestHandleRegenerateRegistry.test_every_template_lookup_is_redirected.
+# Every template lookup regenerate_registry.py binds at import; the fixture must redirect all.
 _TEMPLATE_LOOKUPS = {"get_template_dir", "get_template_dirs"}
 
 
 def _shipped_registry_path() -> Path:
-    """Path to the real citizen template registry that spawn ships.
-
-    One template dir for both classes since DPLAN-0319 R3 — the class-named dirs
-    are archived, so this reads the live one through the class registry rather
-    than hardcoding a name that a rename would point at nothing.
-    """
+    """Path to the real citizen template registry that spawn ships (via the class registry, not a name)."""
     return get_template_dir() / ".spawn" / ".template_registry.json"
 
 
@@ -657,11 +535,8 @@ class TestRegistryDateSeam:
     def test_the_seam_answers_an_iso_day(self, tmp_path):
         """The real clock stamps a ten-character day that date.fromisoformat takes.
 
-        Reached through regenerate_template_registry on a fresh template, which
-        stamps last_updated from the seam with nothing patched. Compares against
-        no second clock, so midnight cannot redden it.
-        Mutant: the body formats day/month/year with slashes -> red.
-        """
+        No second clock is compared, so midnight cannot redden it.
+        Mutant: the body formats day/month/year with slashes -> red."""
         tpl = _make_template(tmp_path, files={"main.py": "print('hi')"}, dirs=["apps"])
 
         answer = regenerate_template_registry(tpl)["metadata"]["last_updated"]
@@ -671,25 +546,13 @@ class TestRegistryDateSeam:
 
 
 class TestLastUpdatedTracksContentNotTheCalendar:
-    """metadata.last_updated moves when the TEMPLATE moves, not when the day does.
-
-    A no-change regenerate used to stamp today's date into a tracked file, so
-    running the command on a new day produced a one-line diff describing nothing.
-    That daily churn is also what masked the shipped-tree rewrite for months: the
-    only field that moved was the one that moved for free.
-    """
+    """metadata.last_updated moves when the TEMPLATE moves, not when the day does."""
 
     _FIXED_DAY = "2031-06-15"
 
     @pytest.fixture(autouse=True)
     def _fixed_clock(self, monkeypatch):
-        """Pin "today" at the product's clock seam, never at the stdlib.
-
-        These asserts used to compare the product's datetime.now() against the
-        test's own date.today(): a run that crossed midnight between the two read
-        two different days and went red. The seam (_registry_date, added by
-        spawn's decision, DPLAN-0354 leg 3) makes "today" one value both sides see.
-        """
+        """Pin "today" at the product's clock seam, never at the stdlib (two clocks split at midnight)."""
         monkeypatch.setattr(regenerate_registry_ops, "_registry_date", lambda: self._FIXED_DAY)
 
     @staticmethod
@@ -707,14 +570,8 @@ class TestLastUpdatedTracksContentNotTheCalendar:
     def _settled(self, tmp_path: Path, date: str = "2026-01-01", newline: str = "\n") -> Path:
         """A template whose registry is already stable, stamped on a day that is not today.
 
-        The FIRST regenerate creates .spawn/, which the scanner then tracks as a
-        directory — so run #2 legitimately sees new content. Settling twice makes
-        the run under test a genuine no-change run rather than a disguised one.
-        The stamp is then backdated ON DISK, in the product's own serialisation,
-        so the run under test happens on a different calendar day than the stamp.
-        The newline is explicit: write_text without one writes os.linesep, so this
-        fixture was CRLF on Windows and LF here, and only Windows saw a CRLF file.
-        """
+        Settled twice: the first run creates .spawn/, which the second then tracks.
+        newline is explicit: without it write_text writes os.linesep (CRLF on Windows)."""
         template = _make_template(tmp_path, files={"README.md": "hello"})
         self._regenerate(template)
         self._regenerate(template)
@@ -738,8 +595,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         """A no-op keeps every byte, line endings included (CRLF: a Windows checkout).
 
         Mutant: a no-change regenerate stamps today's date -> red, both endings.
-        Mutant: the writer always writes LF -> red on crlf.
-        """
+        Mutant: the writer always writes LF -> red on crlf."""
         template = self._settled(tmp_path, newline=newline)
         registry_path = template / ".spawn" / ".template_registry.json"
         before = registry_path.read_bytes()
@@ -752,8 +608,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         """The other half — preserving must never become freezing.
 
         Mutant: the existing date kept even when the content changed -> red.
-        Mutant: the date read from datetime.now() past the _registry_date seam -> red.
-        """
+        Mutant: the date read from datetime.now() past the _registry_date seam -> red."""
         template = self._settled(tmp_path)
 
         (template / "README.md").write_text("hello, world", encoding="utf-8")
@@ -798,27 +653,13 @@ class TestLastUpdatedTracksContentNotTheCalendar:
 class TestHandleRegenerateRegistry:
     """Tests for handle_regenerate_registry() CLI handler.
 
-    These drive the real CLI handler, so every template directory it can reach is
-    redirected into tmp_path. Before the fixture existed the class regenerated the
-    SHIPPED template registry on every run, bumping metadata.last_updated to the
-    current date — invisible for months because the bump is idempotent within a day
-    and template commits legitimately move that field (DPLAN-0291 audit).
-    """
+    The real handler runs, so every template directory it can reach is redirected into tmp_path."""
 
     @pytest.fixture(autouse=True)
     def _isolate_templates(self, tmp_path):
         """Redirect EVERY template lookup the handler makes into tmp_path.
 
-        The handler binds its class-registry helpers at import time, so each one
-        has to be patched on THIS module by name — patching class_registry does
-        nothing here. That is also how the gap happened: get_template_dirs()
-        arrived with the DPLAN-0319 --all rework and was never added below, so
-        --all walked to the shipped tree while everything else was sandboxed.
-
-        _TEMPLATE_LOOKUPS is the closed list, and
-        test_every_template_lookup_is_redirected fails if the module grows a new
-        one — the next lookup cannot silently escape the way this one did.
-        """
+        Bound at import, so patched on THIS module by name; patching class_registry reaches nothing."""
         import shutil
 
         sandbox = tmp_path / "templates"
@@ -845,11 +686,7 @@ class TestHandleRegenerateRegistry:
     def test_every_template_lookup_is_redirected(self):
         """Guard the guard: a NEW template lookup on the module must be patched.
 
-        This is the pin that would have caught the original gap the day
-        get_template_dirs() was added, instead of five weeks later at a merge
-        gate. If this fails, add the new name to the fixture above — do not
-        widen the list without redirecting it.
-        """
+        On failure, redirect the new name in the fixture; never widen the list alone."""
         found = {
             name
             for name in dir(regenerate_registry_module)
@@ -875,13 +712,7 @@ class TestHandleRegenerateRegistry:
     def test_shipped_registry_not_even_reopened_for_writing(self):
         """The canary, made date-proof: bytes are the wrong instrument alone.
 
-        A byte compare only catches a rewrite whose CONTENT differs, and
-        metadata.last_updated is the only field that moves on a no-change
-        regenerate. Every run before 2026-08-29 happened on the same UTC day as
-        the committed date, so the rewrite was byte-identical and the canary
-        stayed green while the shipped file was being rewritten every run.
-        mtime sees the write itself, whatever the calendar says.
-        """
+        A same-day rewrite is byte-identical; mtime sees the write itself."""
         shipped = _shipped_registry_path()
         before_mtime = shipped.stat().st_mtime_ns
 
@@ -894,12 +725,7 @@ class TestHandleRegenerateRegistry:
         )
 
     def test_shipped_registry_untouched_on_a_different_calendar_day(self):
-        """Reproduce the CI red locally: force the clock past the committed date.
-
-        This is the merge-gate failure (PR #745, windows-setup + Linux coverage,
-        both jobs crossing midnight UTC) turned into a pin that does not need a
-        calendar to fire.
-        """
+        """Reproduce the CI red locally: force the clock past the committed date."""
         shipped = _shipped_registry_path()
         before = shipped.read_bytes()
 
@@ -910,14 +736,7 @@ class TestHandleRegenerateRegistry:
         assert shipped.read_bytes() == before
 
     def test_all_flag_writes_only_inside_the_sandbox(self):
-        """Name the escape point directly: --all resolves dirs, not classes.
-
-        DPLAN-0319 R3 made both classes share one template dir, so the --all
-        branch switched from iterating CLASSES to iterating TEMPLATE DIRS via
-        get_template_dirs(). The fixture redirected the class lookups and was
-        never widened to the new one, so --all walked straight to the shipped
-        tree while the single-class path stayed correctly sandboxed.
-        """
+        """Name the escape point directly: --all resolves dirs, not classes."""
         resolved = regenerate_registry_module.get_template_dirs()
 
         assert resolved, "get_template_dirs() returned nothing — the --all branch would be a silent no-op"

@@ -3,21 +3,15 @@
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
-"""
-PRAX Branch - Main Orchestrator
-
-Auto-discovers command modules and routes commands to them.
-Entry point contains no business logic - modules implement functionality.
-"""
+"""PRAX Branch - Main Orchestrator"""
 
 import os
 import sys
 from pathlib import Path
 
-# Standard library imports
 import argparse
 import importlib
 from typing import Callable, List
@@ -29,14 +23,10 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# CLI services
 from aipass.cli.apps.modules import console, error, warning, reset_command_state, resolve_exit
 
-# Unknown-argument gate (decides; this file renders and sets the exit code).
-# Imported from the modules layer — an entry point never reaches into handlers.
 from aipass.prax.apps.modules import (
     UnknownArgument,
     did_you_mean,
@@ -44,44 +34,25 @@ from aipass.prax.apps.modules import (
     unknown_option,
 )
 
-# Options prax itself defines. Anything else dashed in the top-level slot is a
-# typo or a flag meant for a command that was never named — either way it is
-# refused by name rather than dropped on the floor.
 TOP_LEVEL_OPTIONS = ("--help", "-h", "--version", "-V")
-
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
 
 
 def discover_command_modules() -> List[Callable]:
-    """
-    Auto-discover command modules from modules/ directory
-
-    Each module must implement:
-        handle_command(command: str, args: List[str]) -> bool
-
-    Returns:
-        List of handle_command functions from discovered modules
-    """
+    """Auto-discover handle_command(command, args) -> bool from each module in modules/."""
     command_handlers = []
     modules_dir = Path(__file__).parent / "modules"
 
     if not modules_dir.exists():
         return command_handlers
 
-    # Scan for Python files in modules directory
     for module_file in modules_dir.glob("*.py"):
-        # Skip __init__.py and non-command modules
         if module_file.name.startswith("_") or module_file.name == "logger.py":
             continue
 
         try:
-            # Import module dynamically
             module_name = f"aipass.prax.apps.modules.{module_file.stem}"
             module = importlib.import_module(module_name)
 
-            # Check for handle_command interface
             if hasattr(module, "handle_command"):
                 command_handlers.append(module.handle_command)
 
@@ -92,11 +63,6 @@ def discover_command_modules() -> List[Callable]:
     return command_handlers
 
 
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
-
-
 def print_introspection():
     """Display discovered modules (main entry point - modules only, no handlers)"""
     console.print()
@@ -105,7 +71,6 @@ def print_introspection():
     console.print("[dim]Unified logging system for AIPass ecosystem[/dim]")
     console.print()
 
-    # Discover modules
     modules_dir = Path(__file__).parent / "modules"
     discovered_modules = []
 
@@ -161,37 +126,20 @@ def print_help():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def route_command(command: str, args: List[str], handlers: List[Callable]) -> bool:
-    """
-    Route command to appropriate module handler
+    """Route command to a module handler.
 
-    Args:
-        command: Command name
-        args: Command arguments
-        handlers: List of command handler functions
-
-    Returns:
-        True if a module owned the command, including one that failed (the
-        failure is reported through error()); False only if no module owns it
+    True if a module owned the command, including one that failed (reported through error()); False if none owns it.
     """
     for handler in handlers:
         try:
             if handler(command, args):
                 return True
         except UnknownArgument:
-            # A refusal is an answer, not a handler failure — main renders it
-            # and exits 1. Swallowing it here is the exit-0 bug it exists to fix.
+            # A refusal is an answer: main renders it and exits 1.
             raise
         except Exception as e:
-            # The command WAS handled: it failed. error() sets the failure flag,
-            # and main's resolve_exit turns that into exit 2. Returning False
-            # here told main no module owned the command, so a crash was also
-            # reported as "Unknown command" and exited 1.
+            # Handled and failed: error() sets the flag resolve_exit turns into exit 2.
             logger.error("Handler failed: %s", e)
             error(f"Handler failed: {e}")
             return True
@@ -199,20 +147,10 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
     return False
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
-
 def main() -> int:
     """Main entry point — renders any unknown-argument refusal and exits 1.
 
-    THE EXIT SEAM. `error()` sets a process-level failure flag in cli, but the
-    flag only reaches an exit code where someone calls `resolve_exit()`. Prax
-    used to return a bare 0 on any routed command, so a refusal printed in red
-    and still exited 0 — indistinguishable from success to a caller reading
-    `$?`. The state is reset here, at the one entry point, so a flag left set by
-    an earlier in-process run cannot leak into this one.
+    The exit seam: state is reset here so a failure flag from an earlier in-process run cannot leak in.
     """
     reset_command_state()
     try:
@@ -244,10 +182,8 @@ Examples:
         """,
     )
 
-    # Add command argument (optional)
     parser.add_argument("command", nargs="?", help="Command to execute")
 
-    # Add remaining arguments for command handlers
     parser.add_argument("args", nargs="*", help="Arguments for the command")
 
     parser.add_argument("--help", "-h", action="store_true", dest="show_help", help="Show help information")
@@ -255,10 +191,7 @@ Examples:
 
     parsed_args, remaining = parser.parse_known_args()
 
-    # If no command provided, show introspection or top-level help.
-    # The stray-flag check comes FIRST: argparse hands unrecognised flags back
-    # instead of erroring, so `drone @prax --not-a-flag` used to print the
-    # self-map and exit 0 — output byte-identical to a clean run.
+    # Stray-flag check first: argparse hands unrecognised flags back instead of erroring.
     if not parsed_args.command:
         stray = unknown_option(remaining, TOP_LEVEL_OPTIONS)
         if stray is not None:
@@ -270,24 +203,17 @@ Examples:
             print_introspection()
         return 0
 
-    # Discover command modules
     handlers = discover_command_modules()
 
     if not handlers:
         error("No command modules discovered")
         return 1
 
-    # Merge positional args with any flags argparse didn't consume
-    # so subcommand handlers like dashboard can receive --all, --branch, etc.
     all_args = parsed_args.args + remaining
 
-    # Pass --help through to module handler (e.g. drone @prax monitor --help)
     if parsed_args.show_help:
         all_args = ["--help"] + all_args
 
-    # Route command to appropriate handler. A routed command is not the same as
-    # a successful one: `resolve_exit` reads the failure flag `error()` set, so a
-    # handler that printed a refusal exits 2 rather than 0.
     if route_command(parsed_args.command, all_args, handlers):
         return resolve_exit(True)
     else:

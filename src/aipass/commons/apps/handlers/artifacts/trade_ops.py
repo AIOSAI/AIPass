@@ -3,15 +3,11 @@
 # Description: Trading & Ephemeral Item Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Trading & Ephemeral Item Operations Handler
-
-Implementation logic for artifact trading, gifting, ephemeral item drops,
-item finding, expired item sweeping, and event artifact minting.
-Returns dicts for module display layer.
 """
 
 import json
@@ -25,7 +21,6 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# Constants
 def _find_registry_path() -> str:
     """Walk up from __file__ to find AIPASS_REGISTRY.json in the project root."""
     current = os.path.dirname(os.path.abspath(__file__))
@@ -48,17 +43,10 @@ RARITY_COLORS = {
 }
 
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
-
 def _resolve_branch_name(mention: str) -> Optional[str]:
     """Resolve a @mention to a branch name (lowercase-normalized).
 
-    Returns None when no registered branch has that name. An unreadable
-    registry raises instead, so "not found" never stands in for "could not look".
-    """
+    None means not registered; an unreadable registry raises, so "not found" never means "could not look"."""
     name = mention.lstrip("@").lower()
 
     if not os.path.exists(BRANCH_REGISTRY_PATH):
@@ -81,19 +69,10 @@ def _now_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# =============================================================================
-# SWEEP EXPIRED ITEMS
-# =============================================================================
-
-
 def sweep_expired() -> int:
-    """
-    Sweep-on-access: delete artifacts where expires_at < now.
+    """Sweep-on-access: delete artifacts where expires_at < now.
 
-    Returns:
-        Number of artifacts swept, or -1 if the sweep failed (a count is
-        never negative, so -1 cannot be read as "nothing expired")
-    """
+    Returns the count swept, or -1 on failure (never readable as "nothing expired")."""
     try:
         conn = get_db()
         now = _now_utc()
@@ -126,20 +105,8 @@ def sweep_expired() -> int:
         return -1
 
 
-# =============================================================================
-# GIFT ARTIFACT
-# =============================================================================
-
-
 def gift_artifact(args: List[str]) -> dict:
-    """
-    Gift an artifact to another branch.
-
-    Usage: commons gift <artifact_id> @branch
-
-    Returns:
-        Dict with success, artifact info, sender, recipient
-    """
+    """Gift an artifact to another branch."""
     if len(args) < 2:
         return {"success": False, "error": "Usage: commons gift <artifact_id> @branch"}
 
@@ -212,20 +179,8 @@ def gift_artifact(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# TRADE ARTIFACTS
-# =============================================================================
-
-
 def trade_artifact(args: List[str]) -> dict:
-    """
-    Trade artifacts between two branches (mutual exchange).
-
-    Usage: commons trade <your_artifact_id> <their_artifact_id> @branch
-
-    Returns:
-        Dict with success, both artifact details, sender, partner
-    """
+    """Trade artifacts between two branches (mutual exchange)."""
     if len(args) < 3:
         return {"success": False, "error": "Usage: commons trade <your_artifact_id> <their_artifact_id> @branch"}
 
@@ -319,20 +274,8 @@ def trade_artifact(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# DROP EPHEMERAL ITEM
-# =============================================================================
-
-
 def drop_item(args: List[str]) -> dict:
-    """
-    Drop an ephemeral item in a room for anyone to find.
-
-    Usage: commons drop "name" "description" <room> [--expires 5]
-
-    Returns:
-        Dict with success, artifact_id, name, room, expires info
-    """
+    """Drop an ephemeral item in a room for anyone to find."""
     if len(args) < 3:
         return {"success": False, "error": 'Usage: commons drop "name" "description" <room> [--expires 5]'}
 
@@ -409,26 +352,10 @@ def drop_item(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# FIND (PICK UP) EPHEMERAL ITEM
-# =============================================================================
-
-
 def find_item(args: List[str]) -> dict:
-    """
-    Pick up an ephemeral item before it expires.
+    """Pick up an ephemeral item before it expires.
 
-    Usage: commons find <artifact_id>
-
-    The expired-item sweep runs first. When it fails (sweep_expired answers -1) the find still runs,
-    because the find checks the item's own expires_at, and the success answer carries
-    sweep_failed True so the command can say so (commons' decision, DPLAN-0354 leg 3: the sweep's
-    failure used to be dropped here, so expired drops piled up with nobody told). A refusal
-    answer does not carry it: the refusal is already the loud line, and the sweep failure is logged.
-
-    Returns:
-        Dict with success, artifact details, finder, sweep_failed
-    """
+    A failed sweep does not stop the find (it checks expires_at itself); success carries sweep_failed."""
     if not args:
         return {"success": False, "error": "Usage: commons find <artifact_id>"}
 
@@ -514,20 +441,8 @@ def find_item(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# MINT EVENT ARTIFACT
-# =============================================================================
-
-
 def mint_event_artifact(args: List[str]) -> dict:
-    """
-    Mint proof-of-attendance artifacts for an event.
-
-    Usage: commons mint "Event Name" @branch1 @branch2 @branch3
-
-    Returns:
-        Dict with success, event_name, minted list of (branch, artifact_id)
-    """
+    """Mint proof-of-attendance artifacts for an event."""
     if len(args) < 2:
         return {"success": False, "error": 'Usage: commons mint "Event Name" @branch1 @branch2 ...'}
 

@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/project_scope.py — project root resolution and register discrimination
 # Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/plan/project_scope.py."""
@@ -30,10 +30,6 @@ from aipass.flow.apps.handlers.plan.project_scope import (
 REGISTER_SUFFIX = "_REGISTRY" + ".json"  # assembled: the literal name is a sealed-write trigger
 
 
-# The owner's ruling of 2026-08-22: a directory is a project root iff it holds
-# a ``<NAME>_REGISTRY.json`` carrying a ``branches`` key. Neither half is
-# decoration — the live tree has files that match the name and are not
-# registers, and projects that hold a register and nothing else.
 def _register(directory: Path, name: str = "PROJ", **payload) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}{REGISTER_SUFFIX}"
@@ -42,12 +38,7 @@ def _register(directory: Path, name: str = "PROJ", **payload) -> Path:
 
 
 class TestTheCacheIsTheCallersNotTheModules:
-    """The memo is a parameter, not module state -- see find_project_root.
-
-    A module-level cache would answer from before a register existed, and
-    nothing in a long-lived process could invalidate it. These pin that a
-    resolver with no cache always re-reads the tree.
-    """
+    """The memo is a parameter, not module state -- see find_project_root."""
 
     def test_a_register_created_after_a_miss_is_found_on_the_next_call(self, tmp_path):
         deep = tmp_path / "a" / "b"
@@ -113,7 +104,6 @@ class TestFindProjectRoot:
     def test_no_register_anywhere_returns_none(self, tmp_path):
         loose = tmp_path / "loose" / "dir"
         loose.mkdir(parents=True)
-        # tmp_path has no register; the walk reaches / and gives up.
         assert find_project_root(loose) is None
 
 
@@ -124,12 +114,10 @@ class TestRegisterDiscrimination:
         _register(tmp_path, "OUTER")
         inventory = tmp_path / "inventory"
         inventory.mkdir()
-        # Real file on this machine: marketstand/inventory/LISTINGS_REGISTRY.json
         (inventory / f"LISTINGS{REGISTER_SUFFIX}").write_text(
             json.dumps({"registry_meta": {}, "listings": []}), encoding="utf-8"
         )
 
-        # inventory/ must NOT become a project of its own.
         assert find_project_root(inventory) == tmp_path.resolve()
 
     def test_plan_registry_is_not_a_project_register(self, tmp_path):
@@ -143,9 +131,7 @@ class TestRegisterDiscrimination:
     def test_corrupt_register_is_neither_yes_nor_the_outer_project(self, tmp_path):
         """Unreadable tells us nothing, so the walk refuses.
 
-        "Yes" would split a project. "No" was the answer until leg 6 and it
-        handed sub's rows to OUTER, a namesake. Red first on that code;
-        mutant `raise UnreadableRegisterError(...)` -> `continue`.
+        Mutant: `raise UnreadableRegisterError(...)` -> `continue` reddens this.
         """
         _register(tmp_path, "OUTER")
         sub = tmp_path / "sub"
@@ -256,12 +242,7 @@ class TestCallerProjectRoot:
 
 
 class TestCallerCwd:
-    """caller_cwd is the evidence every scope decision rests on.
-
-    Exercised through caller_project_root everywhere else; pinned directly here
-    because "which location did we read" is the question a wrong sweep starts
-    from, and an indirect assertion cannot answer it.
-    """
+    """caller_cwd is the evidence every scope decision rests on."""
 
     def test_returns_the_env_location_verbatim(self, tmp_path, monkeypatch):
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
@@ -292,23 +273,7 @@ class TestDescribeProject:
 class TestTheRegisterGlobIsNotCaseFolded:
     """The round-3 case-fold species, in the two flow lanes that carry it.
 
-    ``pathlib``'s glob is case-INSENSITIVE on Windows and default macOS, so
-    ``*_REGISTRY.json`` also matches ``*_registry.json`` there — and flow's own
-    ``flow_json/`` holds eight lowercase plan registries. Flow was not in
-    round 3's nine-branch sweep, so both sites below were still uncured.
-
-    MEASURED before fixing, on the live tree 2026-08-31: 237 files match the
-    folded pattern and are not exact-case, and **0 of 237** carry a top-level
-    ``branches`` key. So this was reachable-not-armed — the second clause of
-    the two-clause discriminator is what was holding, not the glob. That is a
-    property of today's disk, not of the code, which is why it is pinned rather
-    than left to luck: a register-shaped file arriving under a lowercase name
-    would make a subdirectory read as its own project and drop its rows out of
-    the real project's scope.
-
-    These run on every OS. The bait is emulated by widening the LISTING, which
-    is exactly what a folding filesystem does — so the pin is red on Linux
-    against the uncured code rather than only on the platform that finds it.
+    Glob folds case on Windows/macOS; the listing is widened here so the pin also runs on Linux.
     """
 
     def _project_dir(self, tmp_path: Path) -> Path:
@@ -322,20 +287,17 @@ class TestTheRegisterGlobIsNotCaseFolded:
         sub = tmp_path / "proj" / "sub"
         self._project_dir(tmp_path)
         sub.mkdir()
-        # The decoy: register-SHAPED, but named in lowercase.
         (sub / "other_registry.json").write_text(json.dumps({"branches": [{"name": "nobody"}]}), encoding="utf-8")
 
         real_glob = Path.glob
 
         def folded_glob(self, pattern):
-            # What Windows/macOS actually do: the pattern matches case-blind.
             if pattern == project_scope.REGISTER_GLOB:
                 return iter(sorted(p for p in real_glob(self, "*.json") if p.name.lower().endswith("_registry.json")))
             return real_glob(self, pattern)
 
         monkeypatch.setattr(Path, "glob", folded_glob)
 
-        # Through the public resolver: sub must resolve to the real project above it.
         assert project_scope.find_project_root(sub) == (tmp_path / "proj").resolve(), (
             "a lowercase *_registry.json was accepted as a project register — "
             "on Windows this makes any directory holding one its own project root"

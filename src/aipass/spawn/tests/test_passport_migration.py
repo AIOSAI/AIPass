@@ -3,7 +3,7 @@
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/passport_migration.py's fleet-wide passport 2.0 migration (DPLAN-0319 deliverable 3)."""
@@ -37,36 +37,15 @@ from aipass.spawn.apps.handlers.passport_migration import (
 from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 
-# Two fixture families, on purpose:
-#
-# * ``synthetic_fleet`` — hand-built passports reproducing every shape MEASURED
-#   on the live fleet on 2026-08-28 (uppercase casing, the ``AIPASS_REGISTRY.json``
-#   registry_path outlier, skills' stale path, a resident's hardcoded absolute
-#   ``/home/...`` path, string traits, top-level principles, the three R8 drops).
-#   These always run — including in a clean checkout — so they carry the
-#   mutation-detection weight.
-# * ``live_fleet_copy`` — real copies of the actual live passports, copied into
-#   tmp_path at their real relative locations. ``.trinity/`` is gitignored
-#   (.gitignore:27), so these SKIP on a clone and are the ground-truth pins on a
-#   machine that has the fleet.
-#
-# Nothing in this file writes to the live tree. Every write lands in tmp_path.
+# synthetic_fleet always runs and carries the mutation weight; live_fleet_copy skips on a
+# clone (passports are gitignored). Every write lands in tmp_path, never the live tree.
 
 RUN_DATE = "2026-08-28"
 
-# The four residents carry an ABSOLUTE hardcoded path today (a real
-# ``/home/<user>/...`` string on the live fleet). The synthetic fixture
-# reproduces the SHAPE with a neutral prefix rather than a real home path — a
-# checked-in test that hardcodes somebody's home directory is the very thing
-# the public-repo house rule forbids. The live ``/home/`` case is pinned for
-# real by TestNoHardcodedHomePaths against live_fleet_copy.
+# A neutral prefix, never a real home path: the public-repo rule forbids one in a checked-in test.
 ABSOLUTE_FOSSIL_PREFIX = "/opt/checkout/AIPass"
 
-# The 2.0 contract, written out LITERALLY here on purpose. Asserting against the
-# handler's own BLOCK_ORDER/KEY_ORDER constants would make every order pin
-# self-fulfilling — edit the constant and the test follows it. These come off
-# the gold reference (devpulse dropbox passport_v2_draft.devpulse.json) and the
-# test below proves the handler's constants still agree with them.
+# Written out literally: asserting against the handler's own constants would be self-fulfilling.
 CONTRACT_BLOCK_ORDER = ("document_metadata", "branch_info", "citizenship", "identity")
 CONTRACT_KEY_ORDER = {
     "document_metadata": (
@@ -100,11 +79,6 @@ CONTRACT_KEY_ORDER = {
         "principles",
     ),
 }
-
-
-# =============================================================================
-# FIXTURES
-# =============================================================================
 
 
 def _write_passport(root: Path, relative_dir: str, document: dict) -> Path:
@@ -190,12 +164,7 @@ def _legacy_passport(
     return document
 
 
-#: The floor every loop over ``discover_passports(synthetic_fleet)`` asserts before
-#: it iterates. The fixture writes TEN passports and two of them are decoys that must
-#: never be discovered — a ``.backup/`` snapshot and the template — so a discovery that
-#: started following either would read 9 or 10 here, and a discovery that found nothing
-#: would turn every one of those loops into a silent pass. Measured 2026-09-08:
-#: 6 core + 2 resident.
+#: Ten written, two decoys; an empty discovery would turn every loop into a silent pass.
 SYNTHETIC_FLEET_SIZE = 8
 
 
@@ -348,11 +317,6 @@ def _migrated(root: Path, relative_dir: str) -> dict:
     return _read(_passport(root, relative_dir))
 
 
-# =============================================================================
-# DISCOVERY
-# =============================================================================
-
-
 class TestDiscovery:
     """The input set is globbed, never hardcoded — and it excludes the decoys."""
 
@@ -380,19 +344,7 @@ class TestDiscovery:
         assert baud.relative_path == "src/baud/baud"
 
     def test_live_fleet_matches_the_measured_baseline(self):
-        """Pins THIS machine's fleet — and skips honestly on any world that is not it.
-
-        The guard used to ask ``GITHUB_ACTIONS`` and "is the result empty".
-        Both are the wrong question: the first asks where the PROCESS is rather
-        than what the WORLD contains, and the second only catches the fully-bare
-        case. MEASURED against a core-only stand-in (@memory, 2026-08-31), and
-        reproduced here before the fix: 18 targets, neither skip fires, and the
-        (22, 18, 4) baseline reds on a machine that has done nothing wrong.
-
-        ``_fleet_baseline_verdict`` reads the rows and says what it needs. Its
-        own behaviour is pinned in TestLiveBaselineGuardsOnTheWorld, including
-        the anti-vacuity case — a two-tier world must still be measured.
-        """
+        """Pins THIS machine's fleet — and skips honestly on any world that is not it."""
         shape, reason = _fleet_baseline_verdict(repo_root())
         if reason:
             pytest.skip(reason)
@@ -402,11 +354,6 @@ class TestDiscovery:
             EXPECTED_FLEET["core"],
             EXPECTED_FLEET["resident"],
         ), "Fleet size drifted from the 2026-08-28 measurement — report it, do not silently migrate a new shape"
-
-
-# =============================================================================
-# ORDER — block order and per-block key order ARE the contract (R1)
-# =============================================================================
 
 
 class TestBlockAndKeyOrder:
@@ -454,11 +401,6 @@ class TestBlockAndKeyOrder:
             assert list(migrated[section]) == list(gold[section]), section
 
 
-# =============================================================================
-# DROPS — R8, by name, and nothing else
-# =============================================================================
-
-
 class TestDrops:
     """owner / family / note go. Everything else the tool doesn't know is kept."""
 
@@ -495,11 +437,6 @@ class TestDrops:
         assert migrated["mystery_block"] == {"who": "unknown"}
         assert list(migrated["branch_info"])[-1] == "favourite_colour"
         assert set(receipt["unknown_fields"]) == {"branch_info.favourite_colour", "mystery_block"}
-
-
-# =============================================================================
-# VALUE LANES
-# =============================================================================
 
 
 class TestValueLanes:
@@ -605,11 +542,6 @@ class TestValueLanes:
         assert _migrated(synthetic_fleet, "src/aipass/spawn")["document_metadata"]["last_updated"] == RUN_DATE
 
 
-# =============================================================================
-# IDENTITY CONTENT — the one thing a structure migration must never touch
-# =============================================================================
-
-
 def _expected_traits(original: object) -> object:
     """The only traits change allowed: a string becomes a one-element list."""
     if isinstance(original, list):
@@ -620,11 +552,7 @@ def _expected_traits(original: object) -> object:
 def _assert_identity_content_preserved(name: str, old: dict, new: dict) -> None:
     """Every identity-content field survives; traits keeps its text, list-wrapped.
 
-    Reads the OLD principles from wherever that passport kept them — top level
-    (1.x) or inside identity (2.0) — so this holds against a live fleet copy on
-    either side of the 2026-08-28 migration (post-flip, the run is a no-op and
-    before == after, which is the idempotency contract restated as content).
-    """
+    Old principles are read from top level (1.x) or identity (2.0), so a live copy holds either side."""
     for key in IDENTITY_CONTENT_KEYS:
         if key == "principles":
             old_principles = old.get("principles", old.get("identity", {}).get("principles"))
@@ -660,11 +588,6 @@ class TestIdentityContentPreserved:
         for target in discover_passports(live_fleet_copy):
             name = target.branch_dir.name
             _assert_identity_content_preserved(name, before[name], _read(target.path))
-
-
-# =============================================================================
-# DRY RUN / BACKUP / IDEMPOTENCY
-# =============================================================================
 
 
 class TestDryRun:
@@ -761,11 +684,6 @@ class TestIdempotency:
         assert meta["last_updated"] == RUN_DATE
 
 
-# =============================================================================
-# PUBLIC-REPO HOUSE RULE
-# =============================================================================
-
-
 class TestNoHardcodedHomePaths:
     """No /home/... may survive anywhere in any migrated passport."""
 
@@ -789,11 +707,6 @@ class TestNoHardcodedHomePaths:
         assert sorted(t.path for t in targets) == planted
         for target in targets:
             assert "/home/" not in target.path.read_text(encoding="utf-8"), target.path
-
-
-# =============================================================================
-# REFUSALS — never guess, never half-write
-# =============================================================================
 
 
 class TestRefusals:
@@ -849,11 +762,6 @@ class TestRefusals:
         assert "unreadable" in receipt["errors"][0]["error"]
 
 
-# =============================================================================
-# CLI
-# =============================================================================
-
-
 class TestCli:
     """The command shape: dry-run default, --confirm, --root, --only, --help."""
 
@@ -889,11 +797,6 @@ class TestCli:
     def test_entry_point_routes_the_command(self, synthetic_fleet, monkeypatch):
         monkeypatch.setattr("sys.argv", ["spawn", "migrate-passports", "--root", str(synthetic_fleet)])
         assert spawn_entry.main() == 0
-
-
-# =============================================================================
-# SAFETY WIRING — sync-registry --fix is the SECOND fleet-write path
-# =============================================================================
 
 
 class TestSyncRegistryBacksUpBeforeItsWrite:
@@ -939,48 +842,25 @@ class TestSyncRegistryBacksUpBeforeItsWrite:
 
 
 def _unwrapped(text: str) -> str:
-    """Strip ALL whitespace so an assertion cannot depend on terminal width.
-
-    Rich hard-wraps at the console width and inserts a bare newline mid-token,
-    so a tmp_path long enough to cross the boundary arrives as
-    "..._other_rep\no". The first version of the pin below asserted on the raw
-    text and passed only because that run's tmp_path happened to be short —
-    a test that passes by luck about its own fixture is worse than no test.
-    """
+    """Strip ALL whitespace so an assertion cannot depend on terminal width (Rich wraps mid-token)."""
     return "".join(text.split())
 
 
 class TestEmptyScanIsNotAnAllClear:
     """A root with nothing findable must not read as a clean bill of health.
 
-    MEASURED 2026-08-30 against a real sibling repository:
-
-        drone @spawn migrate-passports --dry-run --root /home/someone/Projects/wren
-        Scanned: 0  (core 0 / resident 0)
-        Nothing to migrate — every scanned passport is already 2.0.
-
-    @wren's passport is schema 1.0 and was never touched. The sentence is
-    technically true of the empty set and false about the world: discover_passports
-    globs `src/aipass/*/` and `projects/*/src/*/*/`, both shaped like THIS
-    repository, so any external repo yields zero targets and the report calls that
-    success. @memory's fleet ruling depends on this command reaching six external
-    citizens, and a green summary is exactly what would have hidden that it cannot.
-    """
+    Discovery only matches this repo's layout, so an external root scans zero."""
 
     def test_zero_scanned_says_zero_scanned(self, tmp_path, capsys):
 
         empty_root = tmp_path / "some_other_repo"
         (empty_root / "src").mkdir(parents=True)
 
-        # A REFUSAL EXITS NON-ZERO. This pinned the 0 until 2026-09-08, which made the
-        # command say "I searched the wrong root" in words and "all clear" in the one
-        # channel a caller can branch on. Rewritten in place rather than added beside:
-        # the old expectation was the defect, so leaving it would pin both answers.
+        # A refusal exits non-zero: the exit code is the channel a caller branches on.
         assert handle_migrate_passports(["--root", str(empty_root)]) == 1
 
         captured = capsys.readouterr()
-        # The zero-scan line is an error() — stderr by seedgo's routing rule — while
-        # the layout hint stays on stdout, so read both streams.
+        # The zero-scan line is an error() on stderr; the layout hint is on stdout.
         both = _unwrapped(captured.out + captured.err)
         assert _unwrapped("already 2.0") not in both, "an empty scan must not report the fleet as migrated"
         assert _unwrapped("No passports found") in _unwrapped(captured.err), "the zero-scan notice belongs on stderr"
@@ -1013,24 +893,7 @@ class TestEmptyScanIsNotAnAllClear:
 class TestRetiredAndHiddenDirectoriesAreNeverScanned:
     """The docstring's promise, made true by rule instead of by luck.
 
-    discover_passports has always claimed "backups, archives and the template
-    never match either glob". MEASURED 2026-08-31, that was true by accident of
-    layout, not by construction — pathlib's ``*`` matches dotted names, so a
-    passport at ``src/aipass/.archive/.trinity/passport.json`` IS returned by
-    CORE_GLOB. It has simply never existed here.
-
-    The hazard is not hypothetical elsewhere: Vera-Studio holds five archived
-    passports under ``src/.archive/`` (architect, creative, growth, quality,
-    strategy), and @memory measured the same five from the other direction — a
-    passport walk finds 9 branches there where the registry knows 4. If this
-    tool ever learns to scan a declared external root, an unruled glob offers to
-    write to five directories somebody deliberately retired.
-
-    The rule: a citizen directory never begins with a dot. Retiring is a
-    registry act, and a passport walk cannot tell a retired citizen from a live
-    one — so the walk must at minimum refuse the hidden directories that
-    retirement puts things in.
-    """
+    pathlib's ``*`` matches dotted names; the rule is that a citizen directory never begins with a dot."""
 
     def _plant(self, root, relative):
         passport = root / relative / ".trinity" / "passport.json"
@@ -1072,22 +935,8 @@ class TestRetiredAndHiddenDirectoriesAreNeverScanned:
         assert len(discover_passports(synthetic_fleet)) > 0
 
 
-# =============================================================================
-# THE LIVE BASELINE — guard on the WORLD, never on where you happen to be
-# =============================================================================
-
-
 def _fleet_baseline_verdict(root):
-    """Return ``(shape, skip_reason)`` for the live-baseline pin.
-
-    ``shape`` is ``(total, core, resident)``. ``skip_reason`` is None when the
-    world under ``root`` genuinely IS the machine the baseline measured, and a
-    sentence explaining why not otherwise.
-
-    Extracted from the test so the guard itself can be pinned against synthetic
-    worlds. A guard that only ever runs against this one machine is a guard
-    nobody can prove, which is how the previous one shipped a hole.
-    """
+    """Return ``(shape, skip_reason)``; reason is None only on the machine the baseline measured."""
     targets = discover_passports(root)
     core = sum(1 for t in targets if t.residency == "core")
     resident = sum(1 for t in targets if t.residency == "resident")
@@ -1109,20 +958,7 @@ def _fleet_baseline_verdict(root):
 class TestLiveBaselineGuardsOnTheWorld:
     """EXISTENCE IS NOT SUFFICIENCY — the hole that would have redded the train.
 
-    The previous guard skipped on ``GITHUB_ACTIONS`` and on a completely empty
-    result. Both are the wrong question. The first asks WHERE THE PROCESS IS
-    rather than what the world contains, so it protects one CI provider and
-    nobody else; the second only catches the fully-bare case. @memory ran this
-    pin against a CI-shaped stand-in and got (18, 18, 0) — a real fleet with no
-    residents, non-empty, env var unset, so both guards passed and the hardcoded
-    (22, 18, 4) assertion failed on a machine that had done nothing wrong.
-
-    A baseline that measures the live machine must READ THE ROWS and say what it
-    needs. These pins feed the guard synthetic worlds so the rule is proven
-    rather than asserted — including the one that matters most: on a world that
-    DOES carry both tiers, the guard must still engage, or the fix would have
-    silently switched the pin off everywhere.
-    """
+    The guard reads the rows, not the environment; a two-tier world must still be measured."""
 
     def _plant(self, root, relative):
         passport = root / relative / ".trinity" / "passport.json"
@@ -1172,13 +1008,7 @@ class TestLiveBaselineGuardsOnTheWorld:
     def test_the_live_machine_is_measured_or_says_why(self):
         """Whatever this machine is, the verdict must be self-describing.
 
-        The old pin read ``reason is None or isinstance(reason, str)`` — true of
-        every value the function can return, on either arm, so it could not fail
-        on any machine. The claim worth making is the RULE the verdict follows:
-        it measures exactly when a resident tier is present, and otherwise it
-        says which world it saw. Measured on this box 2026-09-08:
-        shape (22, 18, 4), reason None.
-        """
+        It measures exactly when a resident tier is present, and otherwise says which world it saw."""
         shape, reason = _fleet_baseline_verdict(repo_root())
         total, core, resident = shape
 

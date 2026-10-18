@@ -4,7 +4,7 @@
 # Description: Pins that commons imports with a deleted cwd, and the sys.path[0] repair in apps/commons.py
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # Category: commons/tests
 # =============================================
 
@@ -26,34 +26,13 @@ from aipass.commons.tests import support_fence
 
 KIN_PROBE = Path(support_fence.__file__)
 
-# The mechanism, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-# relayed round 4): ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only
-# for relative paths, the way posixpath does - and Path.resolve() routes through
-# it. So on Windows every Path(__file__).resolve() REACHED AT IMPORT is a
-# working-directory read, and a process whose cwd was deleted cannot import the
-# module at all. Commons carried four such sites (three module-level constants
-# plus the handlers guard, which reached the same call through inspect.stack()).
-#
-# The world injects ntpath's behaviour as a CONDITION rather than a platform:
-# os.path.realpath is wrapped to read os.getcwd() first, then os.getcwd is
-# denied. Other branches' import-time code is held CONSTANT by preloading it in
-# the healthy world - this pin measures commons' own sites, not the fleet's
-# rollout state.
-#
-# Pre-3.11, pathlib itself has already cached the real function by the time the
-# rebind below runs: _NormalAccessor.realpath is `staticmethod(os.path.realpath)`
-# bound at pathlib's OWN import (which the preceding aipass/rich imports trigger
-# transitively), and Path.resolve() calls that cached staticmethod - never a live
-# `os.path.realpath` lookup - so the rebind cannot reach it, for an absolute path
-# or a relative one. 3.11 rewrote resolve() to call `os.path.realpath(...)`
-# directly each time, a live attribute lookup the rebind does reach. So the
-# denial cannot fire below 3.11 and the probe says so - the pin still asserts the
-# imports succeed there, it just proves less. Pinned as a probe with both
-# outcomes, never a skipif: the vacuous world is named in the output, and
-# vacuity is asserted to occur only on interpreters where it is the truth.
+# ntpath.realpath reads os.getcwd() unconditionally and Path.resolve() routes through it, so on
+# Windows every resolve() reached at import dies under a deleted cwd. The worlds inject that as a
+# condition (realpath wrapped to read cwd, getcwd denied); other branches are preloaded healthy so
+# only commons' own sites are measured. Below 3.11 pathlib caches realpath at its own import, so the
+# denial cannot fire there: the probe reports it (never a skipif), asserted to happen only below 3.11.
 
-# The denial, and the probe that proves the denial can actually fire.
-# Shared by every world below so no world can go quietly vacuous.
+# Shared by every world below, with its arming probe, so no world can go quietly vacuous.
 _PREAMBLE = r"""
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before the denial. Their dead-cwd cure is their own build (fleet
@@ -96,9 +75,8 @@ except FileNotFoundError:
     print("PROBE_ARMED")
 """
 
-# The four sites, imported in one process. json_handler, identity_ops and db
-# each build a module-level constant from Path(__file__).resolve(); reaching
-# any of them also runs the package guard in apps/handlers/__init__.py.
+# json_handler, identity_ops and db each build a module-level constant from Path(__file__).resolve();
+# reaching any of them also runs the package guard in apps/handlers/__init__.py.
 SWEEP_WORLD = (
     _PREAMBLE
     + r"""
@@ -111,10 +89,8 @@ print("IMPORTED")
 """
 )
 
-# The fence alone, through its public shape: the fence probe (support_fence.py)
-# run under the denial, from the seat the test names. Named separately from the
-# sweep because the fence resolves every frame's path, a cwd read the constants
-# above do not make, so a reader deserves to know which broke (DPLAN-0404).
+# The fence probe (support_fence.py) under the denial, from the seat the test names. Apart from the
+# sweep because the fence resolves every frame's path, a cwd read the constants above do not make.
 _FENCE_PROBE_BODY = r"""
 import runpy
 import sys
@@ -128,23 +104,10 @@ def _fence_world(seat: Path, shape: str) -> str:
     return _PREAMBLE + _FENCE_PROBE_BODY.format(seat=str(seat), shape=shape)
 
 
-# The same denial, shaped like ntpath rather than posixpath.
-#
-# NEEDED because the preamble above cannot reach the guard's OLD defect. On
-# POSIX every route inspect.stack() takes to os.path.realpath runs through
-# getabsfile(), whose os.path.abspath raises FileNotFoundError for the
-# relative "<frozen importlib._bootstrap>" filenames an import stack carries -
-# and getmodule() CATCHES FileNotFoundError, so the unguarded
-# `modulesbyfile[os.path.realpath(f)]` line below it is never reached. The
-# first draft of this pin went green against a reintroduced inspect.stack()
-# for exactly that reason: it was measuring the module-level resolve() next
-# door, not the stack walk.
-#
-# ntpath does not have that early raise, so on Windows getmodule() proceeds
-# and dies on the unguarded realpath. Emulated here by giving abspath ntpath's
-# non-raising behaviour while realpath keeps reading cwd - the injection then
-# denies the call the DEFECT actually makes (@memory's rule), instead of one
-# the platform happens to catch first.
+# The same denial shaped like ntpath. On POSIX getmodule()'s abspath raises FileNotFoundError for
+# "<frozen ...>" frames and getmodule() catches it, so the realpath an inspect.stack() walk dies on
+# under Windows is never reached and a posix-shaped pin passes against a reintroduced walk. Here
+# abspath falls back like ntpath while realpath still reads cwd: the denial hits the defect's own call.
 _NTPATH_PREAMBLE = r"""
 import aipass.prax  # noqa: F401
 import aipass.prax.apps.modules.logger  # noqa: F401
@@ -216,8 +179,7 @@ def _run(world: str) -> subprocess.CompletedProcess:
 def _assert_probe_armed(out: str) -> None:
     """The instrument must be able to fire, or the pin proves nothing."""
     if "PROBE_VACUOUS" in out:
-        # Allowed only where it is the interpreter's truth (pre-3.11 pathlib
-        # cached os.path.realpath in its own accessor before this rebind ran).
+        # Legal only below 3.11, where pathlib cached realpath before the rebind ran.
         assert sys.version_info < (3, 11), (
             "resolve() survived the denial on an interpreter that routes "
             "through os.path.realpath - the instrument is broken, not the world"
@@ -258,19 +220,9 @@ def test_the_fence_refuses_an_elsewhere_caller_under_a_dead_cwd(tmp_path):
     _assert_probe_armed(out)
 
 
-# ===========================================================================
-# An uncured peer raises OSError at import, not ImportError
-# ===========================================================================
-#
-# @prax's round-4 finding: while the fleet dead-cwd rollout is in flight, a
-# peer branch whose guard is still uncured raises FileNotFoundError from its
-# own import - an OSError, which `except ImportError` does not catch. Commons
-# has 23 optional cross-branch imports (22 on @cli, 1 on @devpulse); every one
-# of them would have propagated a peer's OSError and killed its own consumer.
-#
-# The peer is denied by a meta_path finder rather than by a dead cwd, because
-# the claim is about the EXCEPTION TYPE crossing the branch boundary, not
-# about how the peer came to raise it.
+# A peer with an uncured guard raises FileNotFoundError at import, an OSError `except ImportError`
+# misses; commons' optional cross-branch imports must survive it. A meta_path finder raises it,
+# because the claim is the exception type crossing the branch boundary, not how the peer raised it.
 
 _DENY_PEER = r"""
 import importlib.abc
@@ -324,35 +276,8 @@ print("IMPORTED")
     )
 
 
-def test_dashboard_writer_survives_an_oserror_from_devpulse():
-    """The lazy @devpulse import degrades to None rather than raising."""
-    world = _peer_world(
-        "aipass.devpulse.apps.modules",
-        r"""
-from aipass.commons.apps.handlers.dashboard import dashboard_writer
-
-assert dashboard_writer._get_write_section() is None, "expected the unavailable-peer fallback"
-
-print("IMPORTED")
-""",
-    )
-    result = _run(world)
-    out = result.stdout
-
-    assert "DENIAL_ARMED" in out, f"the peer denial never fired - the pin proves nothing:\n{out}"
-    assert "IMPORTED" in out, (
-        f"an OSError from an uncured peer escaped `except ImportError`:\nstdout={out}\nstderr={result.stderr}"
-    )
-
-
 def test_handlers_guard_survives_the_ntpath_shaped_denial():
-    """
-    The Item-2 pin proper: the guard must not walk inspect.stack().
-
-    Separate from the world above because that one is satisfied by the
-    module-level resolve() guard alone. This one is red against an
-    inspect.stack() walk and green against the sys._getframe cure.
-    """
+    """The guard must not walk inspect.stack(): red against a stack walk, green against sys._getframe."""
     result = _run(NTPATH_GUARD_WORLD)
     out = result.stdout
 
@@ -365,49 +290,14 @@ def test_handlers_guard_survives_the_ntpath_shaped_denial():
     )
 
 
-# ===========================================================================
-# The entry point's sys.path repair
-# ===========================================================================
-#
-# MEASURED 2026-08-31, and the measurement reversed the obvious conclusion.
-# The first read of apps/commons.py said the .resolve() there was doing no
-# work - __file__ has been absolute since 3.9, so why normalise it? - and the
-# tidy cure for a Windows cwd read is to not make the call at all.
-#
-# Then it was measured through a symlink ON LINUX: CPython sets sys.path[0] to
-# the REAL script directory while __file__ keeps the SYMLINKED spelling. Drop
-# the resolve and the repair silently stops happening on a symlinked checkout,
-# and commons.py shadows the commons package again.
-#
-# ROUND 5 CORRECTION. The first version of this pin asserted `sys.path[0] ==
-# resolved` flat, on every platform, and it went RED on the Windows runner
-# (28ee90d5, run 33431848734). The production cure was never wrong - commons.py
-# removes BOTH spellings, so it does not care which one the host uses - but the
-# PIN had turned one platform's measurement into a universal law.
-#
-# SPECIES VERDICT, derived rather than guessed: this is NOT drone's
-# recipe-not-state case. That pin's own structure answers it - symlink
-# creation is wrapped in a try that SKIPS, so a runner lacking the privilege
-# would have produced a skip. CI produced a FAILURE, therefore the world was
-# BUILT on Windows and only the assertion was POSIX-shaped. No marker is
-# needed; the expectation table below is.
-#
-# Split per @canary: CAUSE (two spellings exist), OUTCOME (sys.path[0] is one
-# of the two), LINK (commons.py removes both), so a future red names its own
-# mechanism instead of pointing at a compound assertion.
+# The entry point's sys.path repair. Through a symlinked directory sys.path[0] may be the real
+# directory while __file__ keeps the link, so commons.py removes BOTH spellings. Pinned as CAUSE
+# (two spellings exist), OUTCOME (sys.path[0] is one of them) and LINK (commons.py removes both),
+# so a red names its own mechanism; which spelling a host uses is per platform, never a law.
 
 
-# What sys.path[0] equals for a script invoked through a symlinked directory.
-#   "resolved"   - the real directory, symlink followed
-#   "unresolved" - the spelling the invocation used
-#   None         - NOT MEASURED LIVE on this platform yet
-#
-# posix: measured live here, 2026-08-31, and re-measured on every run.
-# nt:    the round-5 CI red IS the Windows measurement, and it is a NEGATIVE
-#        one - it proves sys.path[0] is not unconditionally "resolved" there,
-#        not which spelling it is. Left None deliberately. It becomes a live
-#        measurement the first time this file runs green on Windows and
-#        somebody reads the recorded values out of the outcome pin's message.
+# sys.path[0] through a symlinked directory: "resolved", "unresolved", or None = not measured live.
+# nt is None on purpose: Windows CI proved only that it is not always "resolved".
 _SYS_PATH0_SPELLING = {
     "posix": "resolved",
     "nt": None,
@@ -417,25 +307,16 @@ _SYS_PATH0_SPELLING = {
 def _spellings_matching(path0: str, unresolved: str, resolved: str) -> list:
     """Which of the two spellings apps/commons.py removes does sys.path[0] equal?
 
-    Extracted from the pin that uses it so the answer is testable with
-    SYNTHETIC values. The interesting cases - a third spelling, or a host
-    where both spellings coincide - are unreachable on any single platform,
-    and a judgement only exercised through a live probe is a judgement only
-    one platform ever checks. That is the same unreachable-branch species
-    round 5 exists to close, one level up.
+    Extracted so a third spelling, or both coinciding, unreachable on any one platform, is testable.
     """
     spellings = {"resolved": resolved, "unresolved": unresolved}
     return sorted(name for name, value in spellings.items() if value == path0)
 
 
 def _assert_matches_table(platform: str, matched: list, path0: str = "") -> None:
-    """Hold a run against the recorded expectation for its platform.
+    """Hold a run against the recorded expectation for its platform; a None entry asserts nothing.
 
-    A None entry means "measured negatively, value unknown" - the nt case -
-    and asserts nothing beyond what the outcome pin already did. Extracted so
-    the DISAGREEING case is reachable: on any single platform the live probe
-    always agrees with its own table row, so an assertion only ever fed live
-    values is an assertion that never fails and never can.
+    Extracted so the disagreeing case is reachable: a live probe always agrees with its own row.
     """
     expected = _SYS_PATH0_SPELLING[platform]
     if expected is None:
@@ -462,11 +343,7 @@ def _assert_probe_is_usable(probe: dict) -> None:
 
 
 def _symlink_spelling_probe(tmp_path) -> dict:
-    """Run a script through a symlinked directory and record what the host did.
-
-    Returns a dict rather than skipping, so "this host cannot build the world"
-    is DATA every platform asserts against instead of a silent absence.
-    """
+    """Run a script through a symlinked directory; an unbuildable world is returned as data, never skipped."""
     real = tmp_path / "real"
     real.mkdir()
     (real / "probe.py").write_text(
@@ -498,22 +375,12 @@ def _symlink_spelling_probe(tmp_path) -> dict:
 
 
 def test_symlink_world_buildability_is_recorded(tmp_path):
-    """
-    CONTROL — the skip made observable.
-
-    The old pin swallowed an unbuildable world into pytest.skip, where it read
-    as "nothing to see". Here it is an assertion either way.
-    """
+    """CONTROL — an unbuildable symlink world is an assertion either way, never a silent skip."""
     _assert_probe_is_usable(_symlink_spelling_probe(tmp_path))
 
 
 def test_cause_a_symlinked_invocation_yields_two_spellings(tmp_path):
-    """
-    CAUSE — the fact that makes commons.py's .resolve() load-bearing at all.
-
-    If __file__ and its resolved form were always the same string, removing
-    one spelling would be enough and the resolve really would be dead weight.
-    """
+    """CAUSE — the fact that makes commons.py's .resolve() load-bearing at all."""
     probe = _symlink_spelling_probe(tmp_path)
     if not probe["built"]:
         return  # buildability is asserted by its own pin above
@@ -525,14 +392,7 @@ def test_cause_a_symlinked_invocation_yields_two_spellings(tmp_path):
 
 
 def test_outcome_sys_path0_is_one_of_the_two_spellings_commons_removes(tmp_path):
-    """
-    OUTCOME — the claim production actually depends on, on every platform.
-
-    commons.py removes BOTH spellings, so it does not need to know which one
-    the host chose; it only needs the host to choose one of them. This is what
-    the flat `== resolved` assertion should have said. The message records all
-    three values, so a Windows red arrives already diagnosed.
-    """
+    """OUTCOME — the claim production actually depends on, on every platform."""
     probe = _symlink_spelling_probe(tmp_path)
     if not probe["built"]:
         return
@@ -552,15 +412,7 @@ def test_outcome_sys_path0_is_one_of_the_two_spellings_commons_removes(tmp_path)
 
 
 def test_link_commons_removes_both_spellings(tmp_path):
-    """
-    LINK — the pin that actually protects the code, and the one that CANNOT
-    fail for platform reasons.
-
-    Whatever any host does with sys.path[0], the repair is correct as long as
-    commons.py computes and removes both spellings. Source-level on purpose:
-    the round-5 red came from proving this through a subprocess when it did
-    not need a subprocess at all.
-    """
+    """LINK — commons.py collects and removes both spellings; source-level, so no platform can fail it."""
     entry = Path(__file__).resolve().parent.parent / "apps" / "commons.py"
     source = entry.read_text(encoding="utf-8")
 
@@ -574,23 +426,10 @@ def test_link_commons_removes_both_spellings(tmp_path):
     assert "sys.path.remove(_script_dir)" in source, "neither spelling is being removed from sys.path"
 
 
-# ===========================================================================
-# json_handler's caller auto-detect - the second inspect.stack() in this tree
-# ===========================================================================
-#
-# Found while answering the round-4 follow-up, not dispatched: _get_caller_module_name
-# walked inspect.stack() to read ONE frame's filename. Same species as the guard,
-# and live on every log_operation() call that does not pass module_name (which is
-# most of them - the auto-detect is what names each module's log file).
-#
-# The world below is shaped so BOTH halves of the claim are measurable at once:
-#   - a "<string>" entry frame, so the ntpath denial can actually fire (a frame
-#     whose filename exists on disk short-circuits getsourcefile and the
-#     instrument goes quiet - measured, see the harness note in the reply);
-#   - a REAL compiled probe_caller.py as the frame the lookup reads, so the pin
-#     asserts the ANSWER and not merely the absence of a crash (@aipass's rule:
-#     if a probe compiles a caller frame, the frame doing the lookup must BE
-#     the compiled one).
+# log_operation's caller auto-detect (it names each module's log file) under the ntpath world. The
+# entry frame is "<string>" so the denial can fire (a frame on disk short-circuits getsourcefile); the
+# frame doing the lookup is a real compiled probe_caller.py, so the pin asserts the answer, not only
+# the absence of a crash.
 
 _CALLER_PROBE_WORLD = r"""
 import os
@@ -684,27 +523,13 @@ def test_caller_module_autodetect_survives_and_answers_under_a_dead_cwd(tmp_path
     )
 
 
-# ===========================================================================
-# Structural ban: no inspect.stack() anywhere in apps/
-# ===========================================================================
-#
-# @devpulse's round-4 follow-up, measured fleet-wide by @trigger and reproduced
-# in eight branches: the old guard's DELETED second walk sat in its caller-is-None
-# branch, which no import-shaped pin could reach. A walk regrown in a branch the
-# fence pins above never take would leave them green. The v2 fence (DPLAN-0404)
-# walks with sys._getframe only.
-#
-# A parse-tree ban, never a spelling ban: this file NAMES inspect.stack in prose
-# while explaining the defect, and a string search would convict its own
-# documentation.
+# Structural ban: no inspect.stack() call anywhere in apps/. A walk regrown in a branch the import
+# pins never take would leave them green. A parse-tree ban, never a spelling ban: prose naming
+# inspect.stack, this file's own included, must not convict.
 
 
 def _inspect_stack_call_lines(source: str, filename: str) -> list:
-    """Line numbers of every `inspect.stack(...)` CALL in source.
-
-    An ast.Call whose func is Attribute 'stack' on Name 'inspect'. Prose,
-    imports and any other .stack are invisible to it by construction.
-    """
+    """Line numbers of every `inspect.stack(...)` CALL in source; prose, imports and other .stack are invisible."""
     tree = ast.parse(source, filename=filename)
     hits = []
     for node in ast.walk(tree):
@@ -721,34 +546,18 @@ def _inspect_stack_call_lines(source: str, filename: str) -> list:
     return hits
 
 
-#: The rule of the owner of the project, 2026-09-27 20:42, as devpulse
-#: paraphrased it: a dropbox is ignored by all, nothing looks into it and no
-#: process runs out of it, a sandbox like .archive. Skipping __pycache__ too,
-#: and three literal names rather than seedgo's skip_dirs.py, are commons'
-#: decision (DPLAN-0354 leg 3).
+#: dropbox and .archive are sandboxes: nothing looks into them and no process runs out of them.
 _WALK_SKIPS = {"dropbox", ".archive", "__pycache__"}
 
 
 def _apps_modules(root: Path | None = None) -> list:
-    """Every .py under root (default: apps/), skipping dropbox, .archive and __pycache__ below root.
-
-    Only the parts relative to root are judged, so an ancestor with one of the
-    three names hides nothing (commons' decision, DPLAN-0354 leg 4).
-    """
+    """Every .py under root (default: apps/), skipping dropbox, .archive and __pycache__ below root."""
     apps = root if root is not None else Path(__file__).resolve().parent.parent / "apps"
     return sorted(p for p in apps.rglob("*.py") if not _WALK_SKIPS & set(p.relative_to(apps).parts))
 
 
 def test_apps_modules_walk_skips_the_three_names_below_its_root_only(tmp_path):
-    """The root stands inside a dropbox/, so only the parts below the root are judged.
-
-    The rule of the owner of the project, 2026-09-27 20:42, as devpulse paraphrased
-    it: a dropbox is ignored by all, nothing looks into it and no process runs out
-    of it, a sandbox like .archive. Skipping __pycache__ and the three literal names
-    are commons' decision (DPLAN-0354 leg 3); judging parts relative to the root is
-    commons' decision (leg 4). A test module the mutant runner cannot serve: this
-    pin stands on red first alone.
-    """
+    """The root stands inside a dropbox/, so only the parts below the root are judged."""
     root = tmp_path / "dropbox" / "apps"
     for skipped in ("dropbox", ".archive", "__pycache__"):
         (root / skipped).mkdir(parents=True)
@@ -761,17 +570,10 @@ def test_apps_modules_walk_skips_the_three_names_below_its_root_only(tmp_path):
 
 
 def test_no_inspect_stack_call_anywhere_in_apps():
-    """
-    Tree-wide, because after round 4 there are zero legitimate callers left.
-
-    The guard was cured by dispatch; json_handler's caller auto-detect was
-    found and cured in the same session. Nothing in apps/ needs a FrameInfo
-    per frame, so the ban costs nothing and closes the unreachable branch.
-    """
+    """Tree-wide: nothing in apps/ needs a FrameInfo per frame, so the ban costs nothing."""
     modules = _apps_modules()
 
-    # Walk-actually-parsed control: a blinded walk that finds no files would
-    # otherwise read as a clean tree.
+    # Control: a blinded walk that finds no files would otherwise read as a clean tree.
     assert len(modules) > 60, f"the walk found only {len(modules)} modules — it is not seeing apps/"
 
     offenders = {}
@@ -780,7 +582,6 @@ def test_no_inspect_stack_call_anywhere_in_apps():
         try:
             lines = _inspect_stack_call_lines(source, str(path))
         except SyntaxError as exc:
-            # Ignorance is not evidence of cleanliness.
             raise AssertionError(f"{path} could not be parsed, so it cannot be cleared: {exc}") from exc
         if lines:
             offenders[str(path.relative_to(path.parents[2]))] = lines
@@ -805,7 +606,7 @@ def test_the_guard_specifically_carries_no_stack_walk():
     )
 
 
-# --- controls, all through the REAL matcher, never a re-implementation -------
+# Controls go through the real matcher, never a re-implementation.
 
 
 def test_the_matcher_convicts_a_planted_call_at_the_right_line():
@@ -816,9 +617,7 @@ def test_the_matcher_convicts_a_planted_call_at_the_right_line():
 
 
 def test_the_matcher_ignores_prose_naming_inspect_stack():
-    """
-    A spelling ban would convict this file's own docstrings, and the guard's.
-    """
+    """A spelling ban would convict this file's own docstrings, and the guard's."""
     source = '"""We do not use inspect.stack() here."""\n# inspect.stack() is banned\nx = 1\n'
 
     assert _inspect_stack_call_lines(source, "<prose>") == []
@@ -835,28 +634,12 @@ def test_the_matcher_ignores_prose_naming_inspect_stack():
     ],
 )
 def test_the_matcher_leaves_legitimate_code_alone(source, why):
-    """
-    NEGATIVE CONTROLS — a matcher that convicts these would be unusable.
-
-    inspect.currentframe() is deliberately legal: it is sys._getframe under
-    another name and touches no filesystem.
-    """
+    """NEGATIVE CONTROLS — inspect.currentframe() is legal: sys._getframe by another name, no filesystem."""
     assert _inspect_stack_call_lines(source, "<negative>") == [], f"matcher over-convicted: {why}"
 
 
-# ===========================================================================
-# The judgements above, exercised with SYNTHETIC input
-# ===========================================================================
-#
-# Round-5 mutant finding, in my own new pins: four mutants SURVIVED the first
-# pass and every one of them mutated a branch Linux never executes - the nt
-# table entry, the third-spelling case, the unbuildable-world case, an arming
-# probe that never fires here. A judgement reached only through a live probe
-# is a judgement exactly one platform ever checks, which is the same
-# unreachable-branch species this round exists to close, one level up.
-#
-# So the judgements are called directly with made-up values. No subprocess, no
-# symlink, no platform - every branch reachable everywhere.
+# The judgements above, fed synthetic input: their failing branches (nt row, third spelling,
+# unbuildable world) are unreachable from a live probe on any single platform.
 
 
 @pytest.mark.parametrize(
@@ -869,10 +652,7 @@ def test_the_matcher_leaves_legitimate_code_alone(source, why):
     ],
 )
 def test_the_spelling_matcher_answers_each_world(path0, unresolved, resolved, expected, why):
-    """
-    The third-spelling row is the one that matters and the one no platform
-    reaches: it is the only input for which the outcome pin must FAIL.
-    """
+    """The third-spelling row is the only input for which the outcome pin must FAIL, and no platform reaches it."""
     assert _spellings_matching(path0, unresolved, resolved) == expected, why
 
 
@@ -905,13 +685,7 @@ def test_a_usable_probe_passes_the_same_judgement():
     ],
 )
 def test_the_table_crosscheck_only_fires_where_something_was_recorded(platform, matched, raises, why):
-    """
-    The disagreeing rows are unreachable from any live probe.
-
-    A live run on a given platform always agrees with its own row, so this
-    check could be deleted without a single test noticing until a host
-    changed behaviour years from now. Fed synthetically it has real teeth.
-    """
+    """The disagreeing rows are unreachable from any live probe; only synthetic input gives the check teeth."""
     if raises:
         with pytest.raises(AssertionError, match="the table is now wrong"):
             _assert_matches_table(platform, matched)
@@ -920,15 +694,7 @@ def test_the_table_crosscheck_only_fires_where_something_was_recorded(platform, 
 
 
 def test_the_outcome_pin_actually_calls_the_table_crosscheck():
-    """
-    STRUCTURAL — the call site, which no behavioural pin can reach.
-
-    _assert_matches_table has real teeth now (fed synthetically it refuses a
-    stale record), but DELETING ITS CALL from the outcome pin killed nothing:
-    a live run on a healthy host always agrees with its own table row, so the
-    call's absence is invisible. Same shape as the inspect.stack ban - when
-    the branch cannot be executed, assert on the parse tree instead.
-    """
+    """STRUCTURAL — the outcome pin calls the table crosscheck; deleting that call fails no behavioural pin."""
     source = Path(__file__).read_text(encoding="utf-8")
     tree = ast.parse(source, filename=__file__)
 

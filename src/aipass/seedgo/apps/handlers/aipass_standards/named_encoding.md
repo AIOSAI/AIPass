@@ -98,7 +98,7 @@ Fleet standing on arrival, 2026-09-21 — standard average **86%**:
 
 **A mode that is not a literal is skipped.** `p.open(mode)` cannot be read as text or binary from the statement alone. Two sites fleet-wide (`api/tests/test_settings_conformance.py`, `skills/tests/test_machine_vitals.py`).
 
-**Only the builtin `open` is convicted**, not every attribute named `open`. `ZipFile.open` is binary-only and `gzip.open` takes a different mode vocabulary, so convicting `x.open(...)` on an arbitrary receiver would charge two APIs with a rule that does not apply to them. Zero fleet test files have a bare `open()` or `path.open()` missing an encoding, so the limit costs nothing measured — the day it does, the checker's docstring says where it goes.
+**Only the builtin `open` is convicted**, not every attribute named `open`. `ZipFile.open` is binary-only and `gzip.open` takes a different mode vocabulary, so convicting `x.open(...)` on an arbitrary receiver would charge two APIs with a rule that does not apply to them. Zero fleet test files have a bare `open()` or `path.open()` missing an encoding, so the limit costs nothing measured — the day it does, this limit is where the rule widens.
 
 **A `*args` or `**kwargs` splat acquits the call.** Either can carry the encoding, so nothing about the call can be read with confidence.
 

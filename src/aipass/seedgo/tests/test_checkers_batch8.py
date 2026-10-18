@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
 # Version: 1.0.6
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -47,19 +47,10 @@ from aipass.seedgo.apps.handlers.aipass_standards.naming_check import (
 )
 from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_check import check_no_dangerous_flags
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
-
-
-# ===========================================================================
-# 1. handlers_check -- check_handler_independence
-# ===========================================================================
 
 
 def test_handler_independence_clean(tmp_path):
@@ -142,9 +133,7 @@ def test_handler_independence_same_package(tmp_path):
     assert result["passed"] is True
 
 
-# --- Same-branch imports are ALLOWED, even across packages (published standard) ---
-# The checker used to compare PACKAGES, which rejected the standard's own
-# documented example and made root-level handler files impossible to pass.
+# Same-branch imports are ALLOWED, even across packages: the standard's own documented example does it.
 
 
 def test_handler_independence_allows_the_standards_own_documented_example():
@@ -157,12 +146,7 @@ def test_handler_independence_allows_the_standards_own_documented_example():
 
 
 def test_handler_independence_root_level_file_can_pass():
-    """A handler at the handlers/ ROOT is judged by branch, not by its filename.
-
-    own_package used to become 'escalation.py', so the exemption tested for the
-    string 'handlers.escalation.py' - which no import can ever contain. Root-level
-    handler files could not pass whatever they imported.
-    """
+    """A handler at the handlers/ ROOT is judged by branch, not by its filename."""
     content = (
         "from aipass.trigger.apps.handlers.error_registry import normalize_message\n"
         "from aipass.trigger.apps.handlers import medic_state\n"
@@ -183,11 +167,7 @@ def test_handler_independence_same_branch_across_packages():
 
 
 def test_handler_independence_cross_branch_json_handler_is_not_exempt():
-    """The default-handler exemption must not smuggle a cross-branch import in.
-
-    json_handler is per-branch and dependency-free; reaching for another
-    branch's copy is exactly the coupling the standard blocks.
-    """
+    """The default-handler exemption must not smuggle a cross-branch import in."""
     content = "from aipass.memory.apps.handlers.json import json_handler\n"
     handler_path = "src/aipass/trigger/apps/handlers/escalation.py"
 
@@ -244,11 +224,6 @@ def test_handler_independence_flags_real_import_alongside_guard_text(tmp_path):
     assert "line 1" in result["message"]
 
 
-# ===========================================================================
-# 2. handlers_check -- check_auto_detection
-# ===========================================================================
-
-
 def test_auto_detection_not_needed():
     """No module_name parameter means auto-detection is not needed (returns None)."""
     content = "def do_work(file_path):\n    return True\n"
@@ -274,19 +249,14 @@ def test_auto_detection_missing():
     assert result is not None
     assert result["passed"] is False
     assert "never reads the caller frame" in result["message"]
-    # The message used to PRESCRIBE inspect.stack(), which is the Windows
-    # dead-cwd defect the fleet is removing (@prax, 2026-08-31). Pinned as a
-    # refusal so nobody restores the old wording as a "clearer" instruction.
+    # Pinned as a refusal: inspect.stack() is the Windows dead-cwd defect, never a "clearer" instruction.
     assert "use sys._getframe" in result["message"]
     assert "NOT inspect.stack()" in result["message"]
 
 
 def test_auto_detection_judges_an_unparseable_file_strictly():
     """An unparseable file that names module_name is CONVICTED, never acquitted (fleet green
-    leg 15), and the finding says it did not parse rather than that it reads no frame.
-    The two helpers answer None for an unparseable file (fleet green, 10-08: a False or
-    True there was a value the success path also returns); "required" would return None
-    from the check and acquit the file."""
+    leg 15), and the finding says it did not parse."""
     content = "def do_work(module_name=None:\n    return True\n"
 
     result = check_auto_detection(content)
@@ -302,11 +272,6 @@ def test_auto_detection_with_get_caller():
     result = check_auto_detection(content)
     assert result is not None
     assert result["passed"] is True
-
-
-# ===========================================================================
-# 3. handlers_check -- check_no_orchestration
-# ===========================================================================
 
 
 def test_no_orchestration_clean():
@@ -331,13 +296,7 @@ def test_no_orchestration_module_import():
 
 
 def test_branch_before_says_none_rather_than_guessing():
-    """A missing marker returns None, never the whole string.
-
-    str.split on an absent separator returns [whole], so the un-guarded version
-    answered 'modules' for 'aipass.spawn.apps.modules' when asked about
-    .apps.handlers -- a confident wrong branch name. Pinned directly because
-    both callers pre-filter on the marker, so no behavioural test reaches it.
-    """
+    """A missing marker returns None, never the whole string."""
 
     assert _branch_before("aipass.spawn.apps.modules", ".apps.handlers") is None
     assert _branch_before("aipass.spawn.apps.modules", ".apps.modules") == "spawn"
@@ -346,15 +305,7 @@ def test_branch_before_says_none_rather_than_guessing():
 
 
 def test_no_orchestration_allows_another_branchs_modules_gateway(tmp_path):
-    """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration.
-
-    The two handler rules used to contradict each other: check_handler_independence
-    refuses a cross-branch HANDLER import and tells the caller to "use that branch's
-    modules/ instead", while this check refused every apps.modules import outright --
-    so the door it pointed at was closed. The layering rule is about a handler
-    reaching back up to ITS OWN branch's orchestration, which is the shape that can
-    actually make a cycle; another branch's gateway cannot.
-    """
+    """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration."""
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
     result = check_no_orchestration(
@@ -377,13 +328,7 @@ def test_no_orchestration_still_flags_own_branch_modules(tmp_path):
 
 
 def test_no_orchestration_unknown_path_stays_strict():
-    """No path means the branch is unknown -- flag, never assume cross-branch.
-
-    Deliberately the OPPOSITE default to check_handler_independence, which says
-    "not evaluated" when it cannot find a branch. Widening here would fail toward
-    blindness: every own-branch orchestration import would pass whenever a caller
-    forgot the path.
-    """
+    """No path means the branch is unknown -- flag, never assume cross-branch."""
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
     result = check_no_orchestration(content, _lines(content))
@@ -403,12 +348,7 @@ def test_no_orchestration_in_docstring():
 
 
 def test_no_orchestration_fstring_guard_text_not_flagged():
-    """An import-guard error message built from an f-string is not a real import.
-
-    Regression test: apps/handlers/__init__.py raises ImportError with help text
-    like `f"    from {MY_BRANCH}.apps.modules.<module> import <function>\\n"` —
-    the old text-matching check flagged this guard text as orchestration.
-    """
+    """An import-guard error message built from an f-string is not a real import."""
     content = (
         "MY_BRANCH = 'aipass.seedgo'\n"
         "def guard():\n"
@@ -439,11 +379,6 @@ def test_no_orchestration_flags_real_import_alongside_guard_text():
     assert "line 1" in result["message"]
 
 
-# ===========================================================================
-# 4. log_handler_check -- check_no_raw_file_handler
-# ===========================================================================
-
-
 def test_no_raw_file_handler_clean(tmp_path):
     """File without logging.FileHandler passes."""
     lines: List[str] = [
@@ -469,11 +404,6 @@ def test_no_raw_file_handler_violation(tmp_path):
     result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "FileHandler" in result["message"]
-
-
-# ===========================================================================
-# 5. log_handler_check -- check_no_raw_stream_handler
-# ===========================================================================
 
 
 def test_no_raw_stream_handler_no_file_logging(tmp_path):
@@ -518,11 +448,6 @@ def test_no_raw_stream_handler_clean(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# 6. log_level_check -- check_error_not_user_input
-# ===========================================================================
-
-
 def test_error_not_user_input_clean(tmp_path):
     """ERROR used for system failures passes."""
     lines: List[str] = [
@@ -562,11 +487,6 @@ def test_error_not_user_input_in_docstring(tmp_path):
     assert result["passed"] is True
 
 
-# ===========================================================================
-# 7. log_level_check -- check_command_routing_level
-# ===========================================================================
-
-
 def test_command_routing_level_no_routing(tmp_path):
     """File without command routing returns None."""
     content = "def do_work():\n    pass\n"
@@ -594,30 +514,9 @@ def test_command_routing_level_violation(tmp_path):
     assert result["message"] == "Command routing failures logged as ERROR on lines [2] - should be WARNING"
 
 
-# ===========================================================================
-# 8. log_structure_check -- the system-log observation (non-scored info channel)
-# ===========================================================================
-#
-# This observation used to SCORE: a branch with local logs and no
-# system_logs/{branch}_*.log took a 50 through check_branch_post. Two things
-# were wrong with it, and the second is the serious one.
-#
-# 1. FALSE POSITIVE. @cli's modules cannot import prax at all (circular: prax
-#    depends on cli), so all four prax call sites live in cli.py and every one
-#    is a failure path -- 2x logger.error on module-load failure, 1x
-#    logger.warning on KeyboardInterrupt, 1x logger.error on unhandled
-#    exception. A HEALTHY @cli emits zero system logs BY CONSTRUCTION. The zero
-#    is the success case, not a symptom.
-#
-# 2. THE SCORE WAS NOT A FUNCTION OF THE CODE. Reading live log files meant a
-#    branch's number moved when logs rotated or were cleared, with no code
-#    change: @cli read 100% in the morning and 50% the same evening with the
-#    structural facts about their code identical on both days. A score that
-#    moves on its own is worse than a wrong score -- nobody can act on it.
-#
-# The information is still worth surfacing, so it moved to check_branch_info(),
-# the non-scored channel branch_audit renders dim (see architecture_check for
-# the established pattern). It can never reach a score by construction.
+# Local logs without system_logs are reported through check_branch_info(), never scored: @cli's healthy
+# zero is the success case (prax cannot be imported there), and a score read off live log files moves
+# with rotation, not with the code.
 
 
 def _branch_with_local_logs(tmp_path, name="mybranch", local_logs=1):
@@ -661,13 +560,7 @@ def test_error_path_only_branch_is_not_penalised(tmp_path):
 
 
 def test_observe_lane_accepts_the_kwarg_the_pipeline_passes(tmp_path):
-    """The exact defect that killed this observation must not recur.
-
-    branch_audit calls the branch-level hooks as
-    hook(str(branch_path), bypass_rules=bypass_rules). The old
-    check_branch_post took one positional argument, so every call raised
-    TypeError into a bare except and the standard silently stopped running.
-    """
+    """The exact defect that killed this observation must not recur."""
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
 
     observe = getattr(log_structure_check, "check_branch_observe")
@@ -677,12 +570,7 @@ def test_observe_lane_accepts_the_kwarg_the_pipeline_passes(tmp_path):
 
 
 def test_observe_records_would_be_score_and_when(tmp_path):
-    """The reading carries the score it WOULD have given, and the moment it was taken.
-
-    A count of live .log files is a snapshot of runtime state — undated, it
-    tells a reviewer nothing, because the next audit an hour later can read
-    something else with no code changed.
-    """
+    """The reading carries the score it WOULD have given, and the moment it was taken."""
     from datetime import datetime
 
     branch = _branch_with_local_logs(tmp_path, local_logs=3)
@@ -711,11 +599,7 @@ def test_observe_reads_100_when_system_logs_are_present(tmp_path):
 
 
 def test_observe_excludes_mail_lane_artifacts(tmp_path):
-    """dispatch_*.log is @ai_mail's delivery artifact, not the branch's log.
-
-    Counting them made the audit's own dispatch manufacture the observation:
-    @cli read '3 local logs' on the night it was dispatched and owns none.
-    """
+    """dispatch_*.log is @ai_mail's delivery artifact, not the branch's log."""
     branch = _branch_with_local_logs(tmp_path, local_logs=0)
     (branch / "logs" / "dispatch_20260814.log").write_text("delivery", encoding="utf-8")
 
@@ -769,13 +653,7 @@ def test_check_branch_info_reports_missing_system_logs(tmp_path):
 
 
 def test_dispatch_artifacts_are_not_the_branchs_logs(tmp_path):
-    """logs/dispatch_*.log belongs to @ai_mail's lane, not the branch's logging.
-
-    Measured by @devpulse: every branch dispatched tonight carries
-    dispatch_stderr/stdout/wake.log, written by the mail machinery. @cli was
-    reported as having "3 local logs" when it has none of its own -- the audit's
-    own delivery mechanism manufactured the observation.
-    """
+    """logs/dispatch_*.log belongs to @ai_mail's lane, not the branch's logging."""
     branch = _branch_with_local_logs(tmp_path, local_logs=0)
     logs = branch / "logs"
     logs.mkdir(parents=True, exist_ok=True)
@@ -822,11 +700,6 @@ def test_check_branch_info_silent_outside_a_repo(tmp_path):
     assert check_branch_info(str(branch)) == []
 
 
-# ===========================================================================
-# 9. meta_check -- check_meta_presence
-# ===========================================================================
-
-
 def test_meta_presence_valid():
     """Content with both header and footer markers passes."""
     content = (
@@ -864,11 +737,6 @@ def test_meta_presence_legacy_header():
     assert result["passed"] is True
 
 
-# ===========================================================================
-# 10. meta_check -- check_meta_placement
-# ===========================================================================
-
-
 def test_meta_placement_at_top():
     """META block at line 1 passes."""
     content = "# =================== AIPass ====================\nrest of file\n"
@@ -884,11 +752,6 @@ def test_meta_placement_not_at_top():
     result = check_meta_placement(content)
     assert result["passed"] is False
     assert "first line" in result["message"]
-
-
-# ===========================================================================
-# 11. meta_check -- check_required_fields
-# ===========================================================================
 
 
 def test_required_fields_all_present():
@@ -943,11 +806,6 @@ def test_required_fields_wrong_name():
     assert "wrong_name.py" in name_result[0]["message"]
 
 
-# ===========================================================================
-# 12. naming_check -- check_file_naming
-# ===========================================================================
-
-
 def test_file_naming_snake_case(tmp_path):
     """Snake_case filename passes."""
     f = tmp_path / "good_module.py"
@@ -986,11 +844,6 @@ def test_file_naming_init(tmp_path):
 
     result = check_file_naming(str(f), f)
     assert result["passed"] is True
-
-
-# ===========================================================================
-# 13. naming_check -- check_function_naming
-# ===========================================================================
 
 
 def test_function_naming_all_snake():
@@ -1032,10 +885,7 @@ def test_function_naming_dunder_skipped():
 
 @pytest.mark.parametrize("name", ["visit_Call", "visit_ImportFrom", "setUp", "tearDownClass", "asyncSetUp"])
 def test_function_naming_a_name_an_inherited_protocol_requires_passes(name):
-    """ast.NodeVisitor dispatches on visit_<Node>; unittest calls setUp by that spelling (seedgo, fleet green leg 9).
-
-    Red first: spawn's test_json_durability visit_Call was convicted as non-snake_case.
-    """
+    """ast.NodeVisitor dispatches on visit_<Node>; unittest calls setUp by that spelling (seedgo, fleet green leg 9)."""
     result = check_function_naming(f"class V(ast.NodeVisitor):\n    def {name}(self, node):\n        pass\n")
 
     assert result is not None
@@ -1051,11 +901,6 @@ def test_function_naming_a_lookalike_of_a_protocol_name_still_fails(name):
 
     assert result is not None
     assert result["message"] == f"Non-snake_case functions: {name}"
-
-
-# ===========================================================================
-# 14. naming_check -- check_constant_naming
-# ===========================================================================
 
 
 def test_constant_naming_upper():
@@ -1087,16 +932,7 @@ def test_constant_naming_function_call_ignored():
 
 
 def test_constant_naming_exempts_the_pytest_contract_globals():
-    """The names pytest reads by their exact spelling are not style.
-
-    @devpulse hit this live: the auto-fix lane offered to rename
-    collect_ignore_glob in src/aipass/conftest.py, and they refused it, because
-    pytest looks that name up at collection time and an UPPER_CASE version
-    would disable the ignore mechanism while reporting a tidier file. Measured
-    across the fleet before the exemption shipped: 7 verdicts change, every one
-    of them a conftest going from FAIL to no-verdict, and no file moves from
-    pass to fail.
-    """
+    """The names pytest reads by their exact spelling are not style."""
 
     # Floor: the set itself is the contract, so name it. An empty or shrunken
     # set would make the loop below a silent pass on the exemption it guards.
@@ -1115,13 +951,7 @@ def test_constant_naming_exempts_the_pytest_contract_globals():
 
 
 def test_the_exemption_is_a_named_set_and_not_a_lowercase_amnesty():
-    """The control that keeps the cure narrow.
-
-    An exemption that widened to "lowercase module globals in files that look
-    like conftests" would acquit the species this rule exists for. So a
-    lowercase global that is NOT in the set still fails, and it fails in the
-    same file as an exempt one - which is the arrangement a real conftest has.
-    """
+    """The control that keeps the cure narrow."""
 
     result = check_constant_naming('collect_ignore_glob = ["x"]\nmy_helper = 3\n')
     assert result is not None, "the non-contract name was swallowed with the exempt one"
@@ -1131,12 +961,7 @@ def test_the_exemption_is_a_named_set_and_not_a_lowercase_amnesty():
 
 
 def test_the_real_conftest_that_reported_it_is_no_longer_nominated():
-    """Reproduced against the actual file, not a synthetic string.
-
-    The report named src/aipass/conftest.py. This reads that file if it is
-    there and requires the verdict to be clean; if it has moved, the row says
-    so rather than passing quietly on a file it never opened.
-    """
+    """Reproduced against the actual file, not a synthetic string."""
     from pathlib import Path
 
     conftest = Path(__file__).resolve().parents[2] / "conftest.py"
@@ -1147,11 +972,6 @@ def test_the_real_conftest_that_reported_it_is_no_longer_nominated():
     # pytest-contract name, so nothing is nominated at all and the checker
     # returns no verdict -- not a verdict that happens to pass.
     assert result is None, f"the file that produced the counterexample still fails: {result}"
-
-
-# ===========================================================================
-# 15. naming_check -- check_class_naming
-# ===========================================================================
 
 
 def test_class_naming_pascal():
@@ -1198,11 +1018,6 @@ def test_class_naming_private_snake_still_fails():
     assert result is not None
     assert result["passed"] is False
     assert "_foo_bar" in result["message"]
-
-
-# ===========================================================================
-# 16. permission_flags_check -- check_no_dangerous_flags
-# ===========================================================================
 
 
 def test_no_dangerous_flags_clean(tmp_path):

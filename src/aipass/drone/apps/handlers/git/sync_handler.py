@@ -3,7 +3,7 @@
 # Description: Safe main branch synchronization
 # Version: 1.0.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -25,15 +25,7 @@ from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
 
 def sync_main(autostash: bool = False) -> dict:
-    """Sync current branch with origin/main. On dev: fast-forward (no checkout). On main/other: pull.
-
-    Args:
-        autostash: If True, stash local changes before sync and restore after.
-            Use when sync fails with 'unstaged changes' error.
-
-    Returns:
-        Dict with success (bool), message (str), and stdout (str).
-    """
+    """Sync current branch with origin/main. On dev: fast-forward (no checkout). On main/other: pull."""
     repo_root = find_repo_root()
     stashed = False
 
@@ -70,7 +62,6 @@ def sync_main(autostash: bool = False) -> dict:
             )
             stashed = "No local changes to save" not in stash.stdout
 
-        # Fetch first to get latest remote state
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
             capture_output=True,
@@ -89,7 +80,6 @@ def sync_main(autostash: bool = False) -> dict:
                 )
             return {"success": False, "message": msg, "stdout": ""}
 
-        # Check divergence to choose strategy
         rev_list = subprocess.run(
             ["git", "rev-list", "--left-right", "--count", "main...origin/main"],
             capture_output=True,
@@ -103,7 +93,7 @@ def sync_main(autostash: bool = False) -> dict:
             behind = int(parts[1]) if len(parts) >= 2 else 0
 
         if ahead > 0 and behind > 0:
-            # Diverged — merge instead of rebase
+            # Diverged: merge, so local commits are never rewritten.
             result = subprocess.run(
                 ["git", "merge", "origin/main", "--no-edit"],
                 capture_output=True,
@@ -124,7 +114,6 @@ def sync_main(autostash: bool = False) -> dict:
             stdout = result.stdout.strip()
             msg = f"Synced main via merge (was ahead={ahead}, behind={behind}): {stdout}"
         else:
-            # Normal — pull with rebase
             result = subprocess.run(
                 ["git", "pull", "--rebase"],
                 capture_output=True,
@@ -177,10 +166,7 @@ def sync_main(autostash: bool = False) -> dict:
 def _sync_dev(repo_root, autostash: bool = False) -> dict:
     """Fast-forward dev to origin/main after PR merge.
 
-    Uses ``git merge --ff-only origin/main`` instead of rebase so that
-    existing commits are never silently rewritten.  Since merges to main
-    are always merge-commits (not squash), dev is always fast-forwardable
-    after a merge.  If it is not, the command refuses loudly.
+    ``--ff-only``, never rebase: merges to main are merge-commits, so dev stays fast-forwardable.
     """
     stashed = False
 
@@ -233,7 +219,6 @@ def _sync_dev(repo_root, autostash: bool = False) -> dict:
 def sync_main_ref() -> dict:
     """Update local main ref to match origin without checkout.
 
-    Uses git fetch origin main:main — works from any branch.
     Fails if local main has commits not on origin (non-fast-forward).
     """
     repo_root = find_repo_root()

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_comment_budget.py
-# Version: 1.0.0
+# Version: 1.2.0
 # Description: Tests for the comment budget: counter, PostToolUse handler, comments verb
 # Branch: hooks
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/lifecycle/comment_budget.py, apps/modules/comment_scan.py and apps/modules/comments.py."""
@@ -14,6 +14,8 @@
 # seedgo: no-test-needed(stdlib) — tokenize's own token stream and append_jsonl's rotation
 
 import json
+import os
+import time
 
 import pytest
 
@@ -41,6 +43,10 @@ def _write(path) -> dict:
     return {"tool_name": "Write", "session_id": "seat-one", "tool_input": {"file_path": str(path)}}
 
 
+def _bash(command: str, cwd) -> dict:
+    return {"tool_name": "Bash", "session_id": "seat-one", "cwd": str(cwd), "tool_input": {"command": command}}
+
+
 def _answer(result: dict) -> dict:
     return json.loads(result["stdout"]) if result["stdout"] else {}
 
@@ -54,6 +60,19 @@ class TestPythonCounter:
         text = "# ==== AIPass ====\n# Name: x.py\n# =====\n\n" + _code(10)
         scan = comment_scan.scan(text, "python")
         assert (scan.body, scan.comments) == (10, 0)
+
+    def test_a_header_under_a_shebang_and_coding_line_is_free(self):
+        shebang = "#!/usr/bin/env python3\n# -*- coding: utf-8 -*-\n"
+        text = shebang + "# ==== AIPass ====\n# Name: x.py\n# =====\n" + _code(10)
+        assert (comment_scan.scan(text, "python").body, comment_scan.scan(text, "python").comments) == (12, 0)
+
+    def test_a_shell_file_header_is_free(self):
+        text = "#!/bin/bash\n# ==== AIPass ====\n# Name: x.sh\n# =====\necho a\n# why\necho b\n"
+        assert (comment_scan.scan(text, "shell").body, comment_scan.scan(text, "shell").comments) == (4, 1)
+
+    def test_a_seedgo_marker_is_a_directive(self):
+        text = "# seedgo: no-test-needed(stdlib) - covered elsewhere\n# a why\n" + _code(3)
+        assert comment_scan.scan(text, "python").runs == [(2, 2)]
 
     def test_a_header_lower_in_the_file_is_counted(self):
         scan = comment_scan.scan(_code(10) + "# ==== AIPass ====\n# Name: x.py\n", "python")
@@ -107,8 +126,12 @@ class TestBudgetBoundary:
         assert past.over() == 1
 
     def test_the_budget_floors_a_fractional_allowance(self):
-        assert comment_scan.scan(_code(18) + _hashes(1), "python").over() == 0
-        assert comment_scan.scan(_code(17) + _hashes(2), "python").over() == 1
+        assert comment_scan.scan(_code(36) + _hashes(3), "python").over() == 0
+        assert comment_scan.scan(_code(35) + _hashes(4), "python").over() == 1
+
+    def test_a_file_under_twenty_body_lines_is_never_over_and_twenty_is_judged(self):
+        assert comment_scan.scan(_code(1) + _hashes(18), "python").over() == 0
+        assert comment_scan.scan(_code(2) + _hashes(18), "python").over() == 16
 
     def test_runs_come_longest_first_and_three_at_most(self):
         text = _hashes(1) + "x = 1\n" + _hashes(3) + "x = 2\n" + _hashes(2) + "x = 3\n" + _hashes(4) + "x = 4\n"
@@ -117,6 +140,19 @@ class TestBudgetBoundary:
     def test_an_unjudged_suffix_has_no_kind(self):
         assert comment_scan.kind_of("notes.md") is None
         assert comment_scan.kind_of("App.TSX") == "c"
+
+    def test_the_fleet_json_shim_is_not_judged_anywhere_else_a_json_handler_is(self, tmp_path):
+        shim = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+        assert comment_scan.kind_of(shim) is None
+        assert comment_scan.kind_of(tmp_path / "apps" / "modules" / "json_handler.py") == "python"
+
+    def test_the_tree_scan_skips_the_shim(self, tmp_path, capsys):
+        shim = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
+        shim.parent.mkdir(parents=True)
+        shim.write_text(_hashes(9) + _code(11), encoding="utf-8")
+        (tmp_path / "kept.py").write_text(_code(3), encoding="utf-8")
+        comments.handle_command("comments", [str(tmp_path)])
+        assert capsys.readouterr()[0].strip().splitlines()[-1] == "files 1, over budget 0, share 0% (0 of 3 lines)"
 
 
 class TestHandler:
@@ -131,7 +167,7 @@ class TestHandler:
 
     def test_a_multiedit_that_removes_comments_says_removed(self, tmp_path):
         path = tmp_path / "mod.py"
-        path.write_text(_hashes(6) + _code(10), encoding="utf-8")
+        path.write_text(_hashes(6) + _code(30), encoding="utf-8")
         data = _edit(path, "", "", tool="MultiEdit")
         data["tool_input"]["edits"] = [
             {"old_string": _hashes(3), "new_string": ""},
@@ -171,6 +207,18 @@ class TestHandler:
         path.write_text(_hashes(2) + _code(18), encoding="utf-8")
         assert _answer(comment_budget.handle(_write(path))) == {"systemMessage": "[comments] mod.py 10% ok"}
 
+    def test_a_tiny_module_with_a_docstring_is_not_judged_and_still_logged(self, tmp_path):
+        path = tmp_path / "__init__.py"
+        path.write_text('"""Package.\n\nVersion bump.\n"""\n__version__ = "2.8.19"\n', encoding="utf-8")
+        answer = _answer(comment_budget.handle(_write(path)))
+        assert answer == {"systemMessage": "[comments] __init__.py 50%, not judged: under 20 lines"}
+        assert {key: _rows()[-1][key] for key in ("body", "comments", "share", "over")} == {
+            "body": 4,
+            "comments": 2,
+            "share": 0.5,
+            "over": 0,
+        }
+
     def test_a_scratch_path_answers_the_skip_and_writes_no_row(self, tmp_path):
         path = tmp_path / "docs.local" / "draft.py"
         path.parent.mkdir()
@@ -196,6 +244,71 @@ class TestHandler:
         assert row["file"] == str(path)
 
 
+class TestBashLane:
+    def test_a_python_heredoc_writing_an_over_budget_file_logs_one_bash_row_and_answers_over(self, tmp_path):
+        path = tmp_path / "x.py"
+        path.write_text(_hashes(9) + _code(20), encoding="utf-8")
+        command = f"python3 - <<'EOF'\nfrom pathlib import Path\nPath('{path}').write_text(TEXT)\nEOF"
+        answer = _answer(comment_budget.handle(_bash(command, tmp_path)))
+        assert [(row["tool"], row["added"], row["file"]) for row in _rows()] == [("Bash", None, str(path))]
+        assert answer["hookSpecificOutput"]["additionalContext"].startswith(
+            "[COMMENTS] x.py is over the comment budget: 9 of 29 lines are comments (31%, budget 10%, 7 over)."
+        )
+        assert answer["systemMessage"] == "[comments] x.py 31%, 7 over budget"
+
+    def test_sed_in_place_on_an_existing_file_logs_a_row_and_answers_ok(self, tmp_path):
+        (tmp_path / "x.py").write_text(_hashes(1) + _code(24), encoding="utf-8")
+        answer = _answer(comment_budget.handle(_bash("sed -i s/a/b/ x.py", tmp_path)))
+        assert [row["tool"] for row in _rows()] == ["Bash"]
+        assert answer == {"systemMessage": "[comments] x.py 4% ok"}
+
+    def test_a_cat_redirect_heredoc_logs_a_row(self, tmp_path):
+        (tmp_path / "x.py").write_text(_code(20), encoding="utf-8")
+        answer = _answer(comment_budget.handle(_bash("cat > x.py <<'EOF'\nx0 = 0\nEOF", tmp_path)))
+        assert [(row["tool"], row["body"]) for row in _rows()] == [("Bash", 20)]
+        assert answer == {"systemMessage": "[comments] x.py 0% ok"}
+
+    def test_a_read_only_command_on_a_judged_file_is_silent_and_logs_nothing(self, tmp_path):
+        (tmp_path / "x.py").write_text(_hashes(9) + _code(20), encoding="utf-8")
+        result = comment_budget.handle(_bash("cat x.py && grep def x.py", tmp_path))
+        assert result == {"stdout": "", "exit_code": 0}
+        assert _rows() == []
+
+    def test_sed_on_a_scratch_path_answers_the_skip_and_logs_nothing(self, tmp_path):
+        (tmp_path / "docs.local").mkdir()
+        (tmp_path / "docs.local" / "x.py").write_text(_hashes(9) + _code(20), encoding="utf-8")
+        answer = _answer(comment_budget.handle(_bash("sed -i s/a/b/ docs.local/x.py", tmp_path)))
+        assert answer == {"systemMessage": "[comments] skipped: docs.local is scratch"}
+        assert _rows() == []
+
+    def test_a_held_path_with_an_old_mtime_is_not_counted_as_written(self, tmp_path):
+        path = tmp_path / "x.py"
+        path.write_text(_hashes(9) + _code(20), encoding="utf-8")
+        hour_ago = time.time() - 3600
+        os.utime(path, (hour_ago, hour_ago))
+        result = comment_budget.handle(_bash(f"python3 -c \"print(open('{path}').read())\"", tmp_path))
+        assert result == {"stdout": "", "exit_code": 0}
+        assert _rows() == []
+
+    def test_several_over_files_log_a_row_each_and_answer_worst_first_with_the_rule(self, tmp_path):
+        (tmp_path / "light.py").write_text(_hashes(4) + _code(20), encoding="utf-8")
+        (tmp_path / "heavy.py").write_text(_hashes(12) + _code(20), encoding="utf-8")
+        (tmp_path / "fine.py").write_text(_code(20), encoding="utf-8")
+        command = "sed -i s/a/b/ light.py heavy.py fine.py"
+        answer = _answer(comment_budget.handle(_bash(command, tmp_path)))
+        context = answer["hookSpecificOutput"]["additionalContext"]
+        assert [row["file"] for row in _rows()] == [
+            str(tmp_path / name) for name in ("light.py", "heavy.py", "fine.py")
+        ]
+        assert context.index("heavy.py") < context.index("light.py")
+        assert "A comment says why when the code cannot." in context
+        assert len(context) < 700
+        assert (
+            answer["systemMessage"]
+            == "[comments] light.py 17%, 2 over budget; heavy.py 38%, 9 over budget; fine.py 0% ok"
+        )
+
+
 class TestCommentsVerb:
     def test_the_trend_ends_with_first_and_latest_share(self, tmp_path, capsys):
         path = tmp_path / "mod.py"
@@ -209,7 +322,7 @@ class TestCommentsVerb:
     def test_over_lists_only_files_whose_latest_row_is_over(self, tmp_path, capsys):
         cured, heavy = tmp_path / "cured.py", tmp_path / "heavy.py"
         for path, hashes in ((cured, 9), (heavy, 9), (cured, 0)):
-            path.write_text(_hashes(hashes) + _code(10), encoding="utf-8")
+            path.write_text(_hashes(hashes) + _code(20), encoding="utf-8")
             comment_budget.handle(_write(path))
         comments.handle_command("comments", ["--over"])
         out, _ = capsys.readouterr()
@@ -218,14 +331,14 @@ class TestCommentsVerb:
 
     def test_a_tree_scan_sorts_worst_first_and_totals(self, tmp_path, capsys):
         (tmp_path / "light.py").write_text(_code(10), encoding="utf-8")
-        (tmp_path / "heavy.ts").write_text("// c\n" * 5 + "x();\n" * 5, encoding="utf-8")
+        (tmp_path / "heavy.ts").write_text("// c\n" * 15 + "x();\n" * 15, encoding="utf-8")
         (tmp_path / "node_modules").mkdir()
         (tmp_path / "node_modules" / "dep.js").write_text("// c\n", encoding="utf-8")
         comments.handle_command("comments", [str(tmp_path)])
         lines = capsys.readouterr()[0].strip().splitlines()
         assert lines[0].endswith("heavy.ts")
         assert lines[1].endswith("light.py")
-        assert lines[-1] == "files 2, over budget 1, share 25% (5 of 20 lines)"
+        assert lines[-1] == "files 2, over budget 1, share 38% (15 of 40 lines)"
 
     def test_a_relative_path_resolves_from_the_caller_not_the_branch(self, tmp_path, monkeypatch, capsys):
         (tmp_path / "mine.py").write_text(_hashes(1) + _code(9), encoding="utf-8")

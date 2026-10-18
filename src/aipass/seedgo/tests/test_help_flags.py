@@ -3,21 +3,14 @@
 # Description: Tests for the wants_help predicate and the call sites without a module test file
 # Version: 1.1.2
 # Created: 2026-08-13
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the gates in apps/modules/test_map.py and apps/seedgo.py."""
 
 # A help flag ANYWHERE means explain.
-#
-# Red-first: every assertion below was written and run before the predicate
-# existed (ModuleNotFoundError), and every module regression here was run
-# against the args[0]-only gate and watched execute the command it was being
-# asked to describe.
-#
-# The module regressions assert against MOCKS of the doing paths — test_map's
-# branch scan and seedgo's router. A test that proves "--help does not execute
-# the scan" must never let the real scan run to find out.
+# The module regressions assert against MOCKS of the doing paths (test_map's branch scan,
+# seedgo's router): a test proving --help does not run the scan must never let the real scan run.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that help_flags.py parses and imports
@@ -33,20 +26,10 @@ from aipass.seedgo.apps.modules import test_map
 from aipass.seedgo.apps.handlers.test_map import function_scanner
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _silence_side_effects(monkeypatch, module):
     """Mock a module's operation log so a test writes nothing real; capsys holds the console."""
     monkeypatch.setattr(module, "json_handler", MagicMock(), raising=False)
     monkeypatch.setattr(module, "logger", MagicMock(), raising=False)
-
-
-# ---------------------------------------------------------------------------
-# The predicate — dashed forms count ANYWHERE
-# ---------------------------------------------------------------------------
 
 
 def test_dashed_help_in_the_command_slot():
@@ -69,11 +52,6 @@ def test_dashed_help_at_the_end_of_a_long_line():
     assert wants_help("audit", ["aipass", "@flow", "--full", "--no-bypass", "--help"]) is True
 
 
-# ---------------------------------------------------------------------------
-# The predicate — the bare word counts at position 0 only
-# ---------------------------------------------------------------------------
-
-
 def test_bare_help_at_position_zero():
     assert wants_help("help") is True
     assert wants_help(None, ["help"]) is True
@@ -94,11 +72,6 @@ def test_bare_help_can_be_turned_off():
 def test_dashed_forms_still_catch_with_bare_help_off():
     assert wants_help(None, ["help", "--help"], bare_help=False) is True
     assert wants_help("help", ["-h"], bare_help=False) is True
-
-
-# ---------------------------------------------------------------------------
-# The predicate — no tokens, and no near misses
-# ---------------------------------------------------------------------------
 
 
 def test_nothing_typed_is_not_a_help_request():
@@ -128,11 +101,6 @@ def test_the_predicate_does_not_mutate_its_arguments():
 def test_tokens_are_published_as_constants():
     assert set(help_flags.DASHED_HELP_TOKENS) == {"--help", "-h"}
     assert help_flags.BARE_HELP_TOKEN == "help"
-
-
-# ---------------------------------------------------------------------------
-# test_map — `test_map @branch --help` must not scan the branch
-# ---------------------------------------------------------------------------
 
 
 def test_test_map_help_after_branch_does_not_scan(monkeypatch):
@@ -174,11 +142,7 @@ def test_test_map_still_scans_without_a_help_flag(monkeypatch):
 
 
 def test_test_map_names_a_source_file_that_does_not_parse(tmp_path, monkeypatch, capsys):
-    """Red first: a file with a syntax error read as a file with no functions, unsaid.
-
-    The real scan runs over a branch on disk; only the operation logs are
-    silenced (seedgo fleet green leg 15).
-    """
+    """Red first: a file with a syntax error read as a file with no functions, unsaid."""
     _silence_side_effects(monkeypatch, test_map)
     _silence_side_effects(monkeypatch, function_scanner)
     handlers = tmp_path / "flow" / "apps" / "handlers"
@@ -203,11 +167,6 @@ def test_test_map_does_not_answer_for_another_command(monkeypatch):
     _silence_side_effects(monkeypatch, test_map)
 
     assert test_map.handle_command("checklist", ["--help"]) is False
-
-
-# ---------------------------------------------------------------------------
-# seedgo.py — the entry router
-# ---------------------------------------------------------------------------
 
 
 def test_entry_router_intercepts_a_trailing_help_flag(monkeypatch):

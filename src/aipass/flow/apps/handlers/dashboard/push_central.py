@@ -3,27 +3,10 @@
 # Description: Push to Plans Central Handler
 # Version: 1.2.0
 # Created: 2025-11-21
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Push to Plans Central Handler
-
-Pushes plan data for ALL branches to the central PLANS.central.json file at .ai_central.
-This handler follows the 3-tier logging standard (no Prax imports, no logging).
-
-Features:
-- Reads all per-type plan registries
-- Groups plans by branch (derived from location path)
-- Updates per-branch sections in PLANS.central.json
-- Calls aggregate_central_impl to rebuild top-level active_plans
-- Calculates global statistics across all branches
-- Pure handler - returns boolean for success/failure
-
-Usage:
-    from aipass.flow.apps.handlers.dashboard.push_central import push_to_plans_central
-    success = push_to_plans_central()
-"""
+"""Push to Plans Central Handler"""
 
 import json
 import re
@@ -34,18 +17,14 @@ from typing import Dict, Any, List
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
-# Handler imports (aggregate_ops is a sibling handler — avoids handler→module layer violation)
+# The sibling handler, never the module: a handler must not import a module.
 from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
 
-# =============================================
-# CONFIGURATION
-# =============================================
 
 MODULE_NAME = "push_central"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
@@ -53,25 +32,13 @@ REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 
 
 def _find_repo_root() -> Path:
-    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json).
-
-    Delegates to ``handlers/repo_root.find_repo_root`` — the one
-    implementation. This used to be a private copy ending
-    ``return Path.cwd()``; there were seven such copies in flow and six of
-    them are called at MODULE level, so on a registry-less checkout every
-    import guessed its root from the process directory, and with the cwd
-    deleted the import died outright. See that module's docstring.
-    """
+    """Walk up to the repo root (the directory holding AIPASS_REGISTRY.json)."""
     return find_repo_root(caller="push_central")
 
 
 _REPO_ROOT = _find_repo_root()
 AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
 CENTRAL_FILE = AI_CENTRAL_DIR / "PLANS.central.json"
-
-# =============================================
-# PLAN TYPE HELPERS
-# =============================================
 
 
 def _get_all_registry_files() -> List[str]:
@@ -91,19 +58,9 @@ def _get_all_registry_files() -> List[str]:
     return [REGISTRY_FILE.name]
 
 
-# =============================================
-# HELPER FUNCTIONS
-# =============================================
-
-
 def _load_registry() -> Dict[str, Any]:
     """Load all per-type plan registries and merge into a single dict.
-
-    Uses PREFIX-NNNN composite keys to avoid collisions between registries
-    that share the same plan number (e.g. FPLAN-0013 vs DPLAN-0013).
-
-    Returns:
-        Merged registry dict or empty structure if no files found
+    Keys are PREFIX-NNNN so registries sharing a plan number (FPLAN-0013, DPLAN-0013) do not collide.
     """
     merged: Dict[str, Any] = {"plans": {}, "next_number": 1}
     for registry_file in _get_all_registry_files():
@@ -130,15 +87,7 @@ def _load_registry() -> Dict[str, Any]:
 
 
 def _extract_plans_by_branch(registry: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Extract plans from registry grouped by branch.
-
-    Args:
-        registry: Merged registry data (all plan types)
-
-    Returns:
-        Dict mapping branch_name -> branch section with active_plans,
-        recently_closed, and statistics.
-    """
+    """Extract plans from registry grouped by branch."""
     plans = registry.get("plans", {})
     branch_buckets: Dict[str, Dict[str, List]] = {}
 
@@ -191,11 +140,7 @@ def _extract_plans_by_branch(registry: Dict[str, Any]) -> Dict[str, Dict[str, An
 
 
 def _load_central() -> Dict[str, Any]:
-    """Load existing PLANS.central.json
-
-    Returns:
-        Central file data or empty structure if file doesn't exist
-    """
+    """Load existing PLANS.central.json"""
     if not CENTRAL_FILE.exists():
         return {
             "generated_at": "",
@@ -216,14 +161,7 @@ def _load_central() -> Dict[str, Any]:
 
 
 def _calculate_global_statistics(central_data: Dict[str, Any]) -> Dict[str, int]:
-    """Calculate global statistics by summing all branches
-
-    Args:
-        central_data: The full central file data
-
-    Returns:
-        Dict with total_active, total_closed, branches_reporting
-    """
+    """Calculate global statistics by summing all branches"""
     branches = central_data.get("branches", {})
     total_active = 0
     total_closed = 0
@@ -236,25 +174,8 @@ def _calculate_global_statistics(central_data: Dict[str, Any]) -> Dict[str, int]
     return {"total_active": total_active, "total_closed": total_closed, "branches_reporting": len(branches)}
 
 
-# =============================================
-# MAIN HANDLER FUNCTION
-# =============================================
-
-
 def push_to_plans_central() -> bool:
-    """Push plan data for ALL branches to .ai_central/PLANS.central.json
-
-    Algorithm:
-    1. Read all per-type plan registries
-    2. Group plans by branch (derived from location path)
-    3. Build per-branch sections with active/closed/stats
-    4. Write all branch sections to PLANS.central.json
-    5. Update global_statistics (total counts across all branches)
-    6. Call aggregate_central_impl to rebuild top-level active_plans with validation
-
-    Returns:
-        True on success, False on failure
-    """
+    """Push plan data for ALL branches to .ai_central/PLANS.central.json"""
     try:
         AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -273,9 +194,7 @@ def push_to_plans_central() -> bool:
         with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
             json.dump(central_data, f, indent=2, ensure_ascii=False)
 
-        # aggregate_central_impl answers False when it could not aggregate or
-        # save: the branch sections landed, the top-level lists did not, so the
-        # push is not done and the except below says so (flow's decision, leg 10).
+        # Branch sections without the top-level aggregation are not a finished push.
         if not aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR):
             raise OSError("the branch sections landed, but the aggregation did not")
 

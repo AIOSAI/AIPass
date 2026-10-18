@@ -3,7 +3,7 @@
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
 # Version: 1.0.3
 # Created: 2026-08-10
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py's upsert_key handling."""
@@ -129,7 +129,7 @@ def _upsert_onto(tmp_path, seeded: list, **email) -> list:
     """Deliver an upsert_key="disk" send onto an inbox holding `seeded`; the messages as they land.
 
     The match, the rewrite and the counter are reached through the delivery,
-    not called (ai_mail, leg 14).
+    not called.
     """
     branches = _setup_branch(tmp_path)
     inbox_file = Path(branches[0]["path"]) / ".ai_mail.local" / "inbox.json"

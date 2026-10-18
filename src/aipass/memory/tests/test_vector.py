@@ -3,32 +3,12 @@
 # Description: EmbeddingService and the embedder public API — PARKED with the symbolic tier, kept for revival
 # Version: 2.0.1
 # Created: 2026-04-05
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/vector/embedder.py."""
 
-# Tests for vector embedding handler.
-#
-# Covers:
-#   - vector/embedder.py  EmbeddingService class (init, encode_batch with
-#     pre-sort by length and order restoration)
-#   - vector/embedder.py  Public API functions (encode_batch, encode_memories,
-#     get_model_info)
-#   - vector/embedder.py  Singleton management (_get_service, global reset)
-#
-# All tests use mocks/tmp_path -- no live fastembed or ONNX access.
-#
-# ---------------------------------------------------------------------------
-# PARKED 2026-08-14 — @devpulse's ruling, following the owner's symbolic-tier park.
-# vector/embedder.py had exactly two importers, symbolic/storage.py and
-# symbolic/retriever.py, and both went into tests/parked/symbolic_20260814/.
-# The live lane runs vector/embed_subprocess.py by path instead — it is
-# self-contained and imports nothing from the package. These tests are KEPT, not
-# deleted: they document the utility for revival.
-# Active curated-truth piece: Compass — drone @devpulse compass.
-# Revive: tests/parked/symbolic_20260814/README.md
-# ---------------------------------------------------------------------------
+# Parked with the symbolic tier: embedder.py's only importers were parked; kept to document it for revival.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — vector/embed_subprocess.py, the live lane: fastembed runs out of process
@@ -52,23 +32,13 @@ np = pytest.importorskip("numpy")
 pytest.importorskip("chromadb")
 
 
-# ---------------------------------------------------------------------------
-# Import helper -- fastembed must be mocked
-# ---------------------------------------------------------------------------
-
-
 def _import_embedder(monkeypatch):
-    """Import embedder module with mocked ML dependencies.
-
-    Returns:
-        Tuple of (embedder module, dict of mock objects)
-    """
+    """Import embedder with fastembed mocked, so no model loads."""
     mock_fastembed = MagicMock()
     mock_model = MagicMock()
     mock_fastembed.TextEmbedding.return_value = mock_model
     monkeypatch.setitem(sys.modules, "fastembed", mock_fastembed)
 
-    # Clear cached module for fresh import
     sys.modules.pop("aipass.memory.apps.handlers.vector.embedder", None)
     parent = sys.modules.get("aipass.memory.apps.handlers.vector")
     if parent is not None and hasattr(parent, "embedder"):
@@ -85,11 +55,6 @@ def _import_embedder(monkeypatch):
 def _reset_globals(embedder, monkeypatch) -> None:
     """Reset module-level singleton between tests."""
     monkeypatch.setattr(embedder, "_embedding_service", None)
-
-
-# ===========================================================================
-# Tests: Public API -- encode_batch
-# ===========================================================================
 
 
 class TestPublicEncodeBatch:
@@ -139,11 +104,6 @@ class TestPublicEncodeBatch:
 
         assert result["success"] is False
         assert "failed" in result["error"].lower()
-
-
-# ===========================================================================
-# Tests: Public API -- encode_memories
-# ===========================================================================
 
 
 class TestPublicEncodeMemories:
@@ -245,11 +205,6 @@ class TestPublicEncodeMemories:
         assert "third" in texts_passed[2]
 
 
-# ===========================================================================
-# Tests: Public API -- get_model_info
-# ===========================================================================
-
-
 class TestPublicGetModelInfo:
     """Test public get_model_info function."""
 
@@ -273,11 +228,6 @@ class TestPublicGetModelInfo:
 
         assert result["success"] is False
         assert "error" in result
-
-
-# ===========================================================================
-# Tests: EmbeddingService class -- encode_batch internals
-# ===========================================================================
 
 
 class TestEmbeddingServiceEncodeBatch:

@@ -3,27 +3,12 @@
 # Description: Plan-type Registry Routing Helpers
 # Version: 1.2.0
 # Created: 2026-07-28
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Plan-Type Registry Routing
+"""Plan-Type Registry Routing
 
-Shared helpers for resolving a raw plan number (which may carry a type
-prefix, e.g. "PPLAN-0011") to the correct per-type registry file.
-
-Extracted from close_helpers.py so restore (and any future number-keyed
-op) shares the same type-aware routing instead of reimplementing it.
-Any op that resolves a *specific* plan by number must use these -- a
-bare `load_registry()` silently defaults to fplan_registry.json and
-will resolve the wrong plan whenever two types share a number.
-
-Usage:
-    from aipass.flow.apps.handlers.plan.registry_routing import (
-        _extract_prefix,
-        _resolve_registry_file,
-        _find_plan_across_registries,
-    )
+Any op resolving a specific plan by number must route here: a bare load_registry() defaults to fplan.
 """
 
 import json
@@ -51,36 +36,13 @@ def _extract_prefix(plan_num_raw: str) -> str | None:
 
 def canonical_plan_id(plan_num: str, plan_info: Dict[str, Any]) -> str | None:
     """Build the typed plan ID (e.g. ``"DPLAN-0300"``) for a registry row.
-
-    Public (flow's leg 3 decision): close_ops.close_all_plans_impl calls it from
-    outside this module, and shared type routing is what this module exists for.
-
-    A bare registry key is NOT an identity. Every per-type registry numbers
-    from 0001, so "0300" names one row in each of them; handing that key to
-    anything that re-resolves it lands on ``fplan_registry.json`` by default
-    (see this module's docstring). ``file_path`` is the only field on a row
-    that carries the plan's type, so the prefix is derived from there.
-
-    Returns None when the row offers no type evidence -- an absent or
-    prefix-less ``file_path``. Callers must refuse such a row rather than
-    guess a prefix: guessing is what closed the wrong plan.
-
-    Args:
-        plan_num: Registry key for the row (e.g. "0300")
-        plan_info: The registry row itself
-
-    Returns:
-        Typed plan ID, or None if the row's type cannot be established.
-    """
+    None when file_path (the only typed field) has no prefix: callers must refuse, never guess."""
     prefix = _extract_prefix(Path(plan_info.get("file_path", "") or "").stem)
     return f"{prefix}-{plan_num}" if prefix else None
 
 
 def _resolve_registry_file(plan_num_raw: str) -> str | None:
-    """Resolve registry_file from a raw plan number with prefix.
-
-    Returns registry filename or None if no prefix detected.
-    """
+    """Resolve registry_file from a raw plan number with prefix."""
     prefix = _extract_prefix(plan_num_raw)
     reg_file = f"{prefix.lower()}_registry.json" if prefix else None
     json_handler.log_operation("registry_file_resolved", {"plan_num_raw": plan_num_raw, "registry_file": reg_file})
@@ -100,17 +62,7 @@ def _load_template_registry() -> Dict[str, Any]:
 
 def _find_plan_across_registries(plan_key: str, load_registry_fn: Any) -> str | None:
     """Search all registries for a plan number when no prefix given.
-
-    Returns registry filename where the plan was found, or None.
-
-    Raises:
-        Exception: Whatever load_registry_fn raises for a registry it cannot
-            read (RegistryUnreadableError for the real one). A registry
-            skipped is a registry whose plan cannot be told from another
-            type's same number, so the search stops rather than answering
-            for a namesake; it skipped and went on until leg 6 of fleet
-            green (flow's decision, leg 6).
-    """
+    Re-raises a registry load failure: a skipped registry could hide the real plan behind a namesake."""
     template_reg = _load_template_registry()
     for _type_key, config in template_reg.get("types", {}).items():
         prefix = config.get("prefix", "")

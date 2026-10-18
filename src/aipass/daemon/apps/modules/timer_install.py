@@ -3,15 +3,13 @@
 # Description: Idempotent systemd user timer installer for daemon scheduler
 # Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Timer installer — idempotent install/uninstall of daemon-tick systemd user units.
 
 Handles 'drone @daemon install-timer' and 'drone @daemon uninstall-timer'.
-Copies daemon-tick.service + daemon-tick.timer to ~/.config/systemd/user/,
-reloads systemd, and enables/starts the timer.
 """
 
 import shutil
@@ -29,11 +27,8 @@ from aipass.daemon.apps.handlers.module_root import module_file
 _DAEMON_ROOT = module_file(__file__).parents[2]
 _UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
-# The shared AIPass state directory. A MODULE CONSTANT rather than a
-# Path.home() call inside _install(), because a path computed at call time
-# has no seam: the test could patch _DAEMON_ROOT and _UNIT_DIR and still
-# watch the suite mkdir the real ~/.aipass, which holds admin_grant.key and
-# commons.db. Found by the audit-tests lane, red-first before this line moved.
+# A module constant, not a Path.home() call in _install(): a call-time path has no test seam,
+# and the suite would mkdir the real ~/.aipass (admin_grant.key, commons.db).
 _STATE_DIR = Path.home() / ".aipass"
 _SERVICE_NAME = "daemon-tick.service"
 _TIMER_NAME = "daemon-tick.timer"
@@ -77,15 +72,11 @@ _EXIT_NOT_LOADED = 5
 def _run_systemctl(*args: str, not_loaded_ok: bool = False, not_found_ok: bool = False) -> Optional[bool]:
     """Run a systemctl --user command. Returns True on success.
 
-    Every failure, a non-zero exit, a missing systemctl or a timeout, answers False
-    after printing error(), and True is returned only by a zero exit - or, when the
-    caller passes not_loaded_ok, by exit 5, systemctl's answer for a unit it does
-    not know: for a stop, not loaded is nothing to stop.
+    Every failure (non-zero exit, missing systemctl, timeout) answers False after printing error(); True is
+    a zero exit, or exit 5 (unit not loaded) when the caller passes not_loaded_ok.
 
-    None, only when the caller passes not_found_ok: systemctl is not found on
-    this host, logged and not printed as an error, so the caller can tell not
-    found apart from every other failure (daemon, DPLAN-0354 leg 4b). A timeout
-    is a failure, never not found.
+    None, only when the caller passes not_found_ok: systemctl is not found on this host (logged, not
+    printed), so the caller can tell not found from every other failure. A timeout is never not found.
     """
     cmd = ["systemctl", "--user", *args]
     try:
@@ -174,20 +165,11 @@ def _uninstall_step_failed(*args: str) -> int:
 def _uninstall() -> int:
     """Stop, disable, and remove the daemon-tick timer.
 
-    daemon's decision (DPLAN-0354 leg 4): installed is a unit file that stands in
-    _UNIT_DIR or a unit systemd knows. So the stop is always asked, and a stop
-    answered not loaded (exit 5) is nothing to stop: a timer still loaded after
-    its files were deleted by hand is stopped, and a half install systemd does
-    not know is removed. Disable is asked only while the timer unit file stands,
-    because it works from that file. Then the files that stand go, and
-    daemon-reload closes. Each step must answer True: the first that fails is
-    named with error() and the answer is 1. A failed stop or disable leaves the
-    files.
+    Installed means a unit file in _UNIT_DIR or a unit systemd knows, so the stop is always asked.
+    Each step must answer True: the first failure is named with error(), the answer is 1, and the files stay.
 
-    daemon's decision (leg 4b): where systemctl is not found, systemd knows no
-    timer. With no unit file standing nothing is installed: said so, exit 0,
-    nothing more asked. With a unit file standing the stop is the failed step,
-    exit 1, and the files stay. A timeout of the stop is a failure.
+    Where systemctl is not found: no unit file standing means nothing installed (exit 0); a standing
+    unit file makes the stop the failed step (exit 1, files stay). A stop timeout is a failure.
     """
     console.print("[bold cyan]Uninstalling daemon-tick units...[/bold cyan]")
     console.print()
@@ -196,8 +178,6 @@ def _uninstall() -> int:
 
     stopped = _run_systemctl("stop", _TIMER_NAME, not_loaded_ok=True, not_found_ok=True)
     if stopped is None and not installed:
-        # No systemctl, so systemd knows no timer, and no unit file stands:
-        # nothing is installed and nothing more is asked (daemon, leg 4b).
         console.print(f"  [dim]Not installed:[/dim] no systemctl on this host and no daemon-tick unit in {_UNIT_DIR}")
         console.print()
         logger.info("[timer_install] uninstall: no systemctl and no unit file, nothing installed")

@@ -3,7 +3,7 @@
 # Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/update/data_loader.py, and apps/daemon_wakeup.py's shared inbox path and --help guard."""
@@ -29,11 +29,6 @@ load_local = _dl_mod.load_local
 categorize_messages = _dl_mod.categorize_messages
 get_session_summary = _dl_mod.get_session_summary
 get_escalations = _dl_mod.get_escalations
-
-
-# =============================================
-# FIXTURES
-# =============================================
 
 
 @pytest.fixture(autouse=True)
@@ -76,11 +71,6 @@ def _write_json(path: Path, data: object) -> None:
     """Helper to write JSON to a path."""
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
-
-
-# =============================================
-# LOAD INBOX TESTS
-# =============================================
 
 
 class TestLoadInbox:
@@ -128,11 +118,6 @@ class TestInboxPathIsTheRealMailbox:
         assert _wakeup_mod.INBOX_PATH == _BRANCH_MAILBOX
 
 
-# =============================================
-# LOAD LOCAL TESTS
-# =============================================
-
-
 class TestLoadLocal:
     def test_load_valid_local(self, isolate_paths, sample_local_data):
         """Loading a well-formed local.json returns its full contents."""
@@ -160,11 +145,6 @@ class TestLoadLocal:
         result = load_local()
         assert result["sessions"] == []
         assert result["active_tasks"] == {}
-
-
-# =============================================
-# CATEGORIZE MESSAGES TESTS
-# =============================================
 
 
 class TestCategorizeMessages:
@@ -232,11 +212,6 @@ class TestCategorizeMessages:
         assert len(cats["opened"]) == 0
 
 
-# =============================================
-# GET SESSION SUMMARY TESTS
-# =============================================
-
-
 class TestGetSessionSummary:
     def test_summary_with_sessions(self, sample_local_data):
         """Session summary extracts totals and latest session."""
@@ -273,11 +248,6 @@ class TestGetSessionSummary:
         data = {"sessions": [], "active_tasks": {}}
         result = get_session_summary(data)
         assert result["recently_completed"] == []
-
-
-# =============================================
-# GET ESCALATIONS TESTS
-# =============================================
 
 
 class TestGetEscalations:
@@ -333,10 +303,8 @@ class TestWakeupHelpAfterAnArgument:
     """daemon_wakeup <arg> --help shows the help and runs nothing (daemon, fleet green leg 5)."""
 
     def test_help_after_an_argument_prints_help_and_runs_nothing(self, tmp_path, monkeypatch, capsys):
-        """Red first: main read only args[0], so `daemon_wakeup run --help` ran the wake-up job.
+        """`daemon_wakeup run --help` must not run the wake-up job (main once read only args[0]).
 
-        The lock file is moved under tmp_path and the job is a recorder, so the old
-        code's run touches nothing live.
         Mutant killed: the --help guard on the arguments after the first removed.
         """
         from unittest.mock import patch

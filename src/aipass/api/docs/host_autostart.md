@@ -6,25 +6,19 @@
 
 ---
 
-## Autostart — the server comes back on its own (2026-08-27)
+## The boot unit
 
-@baud's phone face went dark this morning. `host_api_serve.log` showed normal
-traffic and then silence — no traceback, no shutdown line, which is exactly what
-a reboot looks like from inside a log. A detached server dies with the machine
-and nothing brought it back; the owner ruled that a face which waits for a human
-after every reboot is wrong.
+A detached server dies with the machine. A face that waits for a human after every
+reboot is wrong, so a systemd user unit brings the server back.
 
-**It is a systemd user unit, not a loop in this tree, and the reason is the scar
-already written into `lifetime.py`.** That module refuses on principle to
-restart anything — because the fourteen death-and-restart cycles @baud read out
-of a pane on 2026-08-19 came FROM a supervisor, a shell loop somebody typed.
-Answering a missing supervisor with a second home-grown one repeats the mistake
-with better manners. The alternative on the table was a `@daemon` check-and-start
-entry, which keeps everything inside AIPass conventions and is exactly that
-second supervisor: it can only notice a crash at poll granularity, it has no
-concept of boot ordering, and it would have to reimplement "do not restart what
-an operator deliberately stopped" — the one rule this lane cannot get wrong.
-systemd is already running here, already owns boot, and already knows that rule.
+**It is a systemd user unit, not a loop in this tree, because `lifetime.py` refuses
+on principle to restart anything.** A restart loop is a supervisor, and answering a
+missing supervisor with a home-grown one is the failure that refusal exists to
+prevent. A `@daemon` check-and-start entry would be exactly that second supervisor:
+it can only notice a crash at poll granularity, it has no concept of boot ordering,
+and it would have to reimplement "do not restart what an operator deliberately
+stopped" — the one rule this lane cannot get wrong. systemd is already running here,
+already owns boot, and already knows that rule.
 
 So `autostart.py` supervises nothing. It **renders** a unit, **answers** whether
 the supervisor is holding the server, and **asks** it to stop. Every decision
@@ -40,69 +34,55 @@ outside this tree and stays the operator's to run — from the CLI. An installer
 that calls the module's doors by name runs them instead (see the installer's
 doors below).
 
-**Two things make this safe rather than merely automatic, and both used to fail
-silently.**
+**Two things make this safe rather than merely automatic.**
 
-`status` was lying by construction. A unit-managed server writes no record file,
-and `running()` only ever read that record — so a perfectly healthy server was
-reported as *"No detached server is running"*, at exactly the moment an operator
-needs the opposite. It asks the supervisor FIRST now, and a reboot's stale record
-can no longer outrank the live process. Every record carries an `owner`, because
-the two cases need different commands from whoever reads it.
+`status` asks the supervisor FIRST. A unit-managed server writes no record file, so
+a status that read only the record would report a healthy server as *"No detached
+server is running"*, and a reboot's stale record cannot outrank the live process.
+Every record carries an `owner`, because the two cases need different commands from
+whoever reads it.
 
-`stop` would have been a trap. Signalling a supervised pid directly leaves the
-restart policy free to start it again, so the command prints success and the
-server is back before anyone finishes reading. A supervised stop goes through
+`stop` goes through the supervisor. Signalling a supervised pid directly leaves the
+restart policy free to start it again, so the command would print success and the
+server would be back before anyone finished reading. A supervised stop goes through
 `systemctl --user stop`, which outranks `Restart=` by definition. The pid is then
 re-checked rather than trusted — the supervisor *accepting* a stop and the
-process *being gone* are two facts, and this branch has already been caught once
-believing the first implies the second.
+process *being gone* are two facts.
 
 **The unit's own details are each a silent failure avoided.** `StandardOutput=`
 and `StandardError=` are `append:`, not `file:` — `file:` truncates on every
 start, so the first restart after an outage would destroy the evidence of the
-outage, and appending to the same `host_api_serve.log` is what made this morning
-diagnosable at all. `Restart=on-failure`, never `always`, so a cleanly refused
-bind stays refused instead of spinning. `StartLimitIntervalSec`/`Burst` sit under
-`[Unit]`: systemd moved them there in v230 and **ignores** the old `[Service]`
-spelling rather than erroring, so a rate limit in the wrong section is an absence
-wearing a config's clothes. The window is deliberately generous — 60 attempts,
-5s apart, inside 10 minutes — because at boot this server can come up before
-tailscaled has assigned the address it binds, and that failure is indistinguishable
-from a fatal misconfiguration. Generous enough to outlast a slow network, still
-finite, so an impossible bind ends as a unit in `failed` that says so rather than
-retrying forever into a growing log.
+outage; both append to the same `host_api_serve.log`. `Restart=on-failure`, never
+`always`. `StartLimitIntervalSec`/`Burst` sit under `[Unit]`: systemd moved them
+there in v230 and **ignores** the old `[Service]` spelling rather than erroring, so
+a rate limit in the wrong section is an absence wearing a config's clothes. The
+window is deliberately generous — 60 attempts, 5s apart, inside 10 minutes — because
+at boot this server can come up before tailscaled has assigned the address it binds,
+and that failure is indistinguishable from a fatal misconfiguration. Generous enough
+to outlast a slow network, still finite, so an impossible bind ends as a unit in
+`failed` that says so rather than retrying forever into a growing log.
 
-**That window has never once fired, and this paragraph used to say why it would.**
-It claimed a refused bind "exits non-zero immediately". It exits **`0`** — measured
-2026-09-07 by running `serve` against an address this machine does not hold. The
-unit is `Restart=on-failure`, so systemd sees `status=0/SUCCESS`, correctly declines
-to restart, and the boot race this whole window was built to absorb ends with the
-server quietly dead. The journal has it twice: `Started 12:19:10` → dead `12:19:16`,
-and tailscaled reached `Running` at **12:19:22**, six seconds after the unit gave up
-— one retry would have caught it. Same shape on 09-05 at 10:28. Two of the last six
-boots, so the face goes dark after roughly one reboot in three and waits for a human,
-which is the exact failure autostart exists to end. The cure is an exit code, not a
-wider window; it is the `Known issues` exit-`0` item, and this is that item's real
-cost. Reported to @devpulse 09-07, unfixed here because the exit-code lane is
-blocked on the owner's fleet-wide ruling.
+**A refused bind exits `1`, and that is what arms the window.** Under
+`Restart=on-failure` a zero exit reads as success and is never retried, so a bind
+refused because the address is not yet assigned must exit non-zero for the boot
+race to be absorbed.
 
 The unit and `serve --detach` build their argv from one function, `serve_argv()`.
 Two ways to start one server is how a fix lands in one of them and the other
 keeps the bug — and the unit's copy is the one nobody re-reads, because it lives
 in a file under somebody's home directory that this tree cannot see.
 
-**It names the home's server, not this process's** (DPLAN-0408, 2026-10-13). A
-stranger's machine holds aipass twice: the uv tool venv `aipass install` runs in,
-with no `[host]` extra, and the AIPass home with its own `.venv`. Spelled as
-itself, the install started a server on the tool venv's python that died on
-*No module named fastapi*. `server_home()` resolves the home as drone's
-`branch_interpreter` does (`resolve_aipass_home`). If this copy lives inside it,
-or no home resolves, the server is this interpreter and this branch. Otherwise it
-is `<home>/.venv`'s python and `<home>/src/aipass/api/apps/api.py`, and the
-spawn's `cwd` and the unit's `WorkingDirectory` are the home's api branch. A
-home missing either file refuses with `LifetimeError` naming it; there is no
-fall back, because a server that starts and dies is worse than a refusal.
+**It names the home's server, not this process's.** A stranger's machine holds
+aipass twice: the uv tool venv `aipass install` runs in, with no `[host]` extra,
+and the AIPass home with its own `.venv`. A server spelled as this process would
+run on the tool venv's python and die on *No module named fastapi*. `server_home()`
+resolves the home as drone's `branch_interpreter` does (`resolve_aipass_home`). If
+this copy lives inside it, or no home resolves, the server is this interpreter and
+this branch. Otherwise it is `<home>/.venv`'s python and
+`<home>/src/aipass/api/apps/api.py`, and the spawn's `cwd` and the unit's
+`WorkingDirectory` are the home's api branch. A home missing either file refuses
+with `LifetimeError` naming it; there is no fall back, because a server that starts
+and dies is worse than a refusal.
 
 Lingering is reported, not assumed: without it a user unit waits for a login,
 which on a headless reboot never comes — the exact failure this build exists to
@@ -111,30 +91,19 @@ this file.
 
 ---
 
-**A probe that cannot answer is not a probe that answered "nothing" (2026-08-27).**
-The Windows CI lane went red on this lane the day it shipped, and the failure was
-worth more than the fix. `_systemctl` asks `is_supported()` before it runs
-anything, so on a runner with no systemd the platform gate returned first and
-every test that scripted `subprocess.run` never reached its mock. Five failed —
-and **six more passed for the wrong reason**, because they assert `0` or
-`(None, None)`, which is exactly what the untouched gate returns. Those six were
-the real finding: a red test tells you it is broken, while a test that passes
-without running its subject tells you nothing forever and looks like coverage
-doing it.
+**A probe that cannot answer is not a probe that answered "nothing".**
+`_systemctl` separates two facts: *this platform has no systemd*, and *this machine
+has one and it did not answer*. No systemd on the platform answers zero — a machine
+that cannot have a unit has no uncertainty to report, so zero is the strongest
+available answer and `running()` correctly falls through to the detached record,
+the only kind of server that can exist there. A probe that FAILED on a capable
+machine raises `SupervisorUnreachable`, because the tailnet host runs under a unit
+that writes **no record file**: a swallowed probe would send `running()` down the
+record path and print "No server is running" about a server answering requests.
 
-Under it sat a live defect. `_systemctl` returned `None` for two different facts:
-*this platform has no systemd*, and *this machine has one and it did not answer*.
-Both became `supervised_pid() == 0`, "no unit is holding the server". **The
-ruling, split in two because the question has two answers.** No systemd on the
-platform still answers zero — a machine that cannot have a unit has no
-uncertainty to report, so zero is the strongest available answer and `running()`
-correctly falls through to the detached record, the only kind of server that can
-exist there. But a probe that FAILED on a capable machine now raises
-`SupervisorUnreachable`, because the tailnet host runs under a unit that writes
-**no record file**: a swallowed probe sends `running()` down the record path and
-prints "No server is running" about a server answering requests. Proven live
-rather than argued — with the unit genuinely holding pid 227641, forcing the
-probe to fail made the old path return `None`.
+The tests set the `is_supported()` platform gate themselves, so a scripted
+`subprocess.run` reaches its subject on a runner with no systemd; a test that passes without running
+its subject looks like coverage and is none.
 
 Each of the three callers wants that refusal: `status` says it cannot tell rather
 than inventing an absence, `stop` will not signal into the dark where a restart
@@ -145,12 +114,12 @@ address, not its truth.
 
 ---
 
-## The installer's doors (2026-10-12, FPLAN-0642)
+## The installer's doors
 
-**The CLI still prints the steps; the module now runs them for a caller that
-asks by name.** A stranger running `aipass install` has consented to the
-install, so asking them to paste two commands afterwards is a hand the phone
-does not need. `apps/modules/host_api.py` publishes:
+**The CLI prints the steps; the module runs them for a caller that asks by name.**
+A stranger running `aipass install` has consented to the install, so asking them to
+paste two commands afterwards is a hand the phone does not need.
+`apps/modules/host_api.py` publishes:
 
 | Door | Does |
 |---|---|
@@ -166,8 +135,6 @@ None and runs none. The enable refusal is `ok` False, empty `steps`, and a
 `refused` sentence naming the pid and the stop command. `AutostartUnsupported`,
 `SupervisorUnreachable`, `LifetimeError` and `TokenError` are exported beside
 `BindRefused`, so a caller catches the module's names.
-
----
 
 ---
 

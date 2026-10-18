@@ -3,7 +3,7 @@
 # Description: Stream-routing tests for spawn's user-facing output
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/spawn.py's and apps/modules/*.py's --help and report stream routing (stdout vs stderr)."""
@@ -25,22 +25,7 @@ from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import print_help
 
-# Two defects found by the DPLAN-0291 live audit, both caused by the same habit —
-# building one logical block out of ``warning()``/``error()`` (stderr) and
-# ``console.print()`` (stdout):
-#
-# 1. Every ``--help`` screen sent its ``Usage:`` line to stderr with a warning
-#    glyph while the body went to stdout. ``drone @spawn update --help > f``
-#    dropped the usage line; ``--help | grep`` missed it. @drone, @flow and
-#    @ai_mail all emit nothing on stderr for --help — spawn was the outlier.
-#
-# 2. The sync-registry report printed the "Stale"/"Unregistered" headers on
-#    stderr and their member names on stdout, so on stdout the stale branch
-#    names appeared directly under "Healthy (N)" — the report read a stale
-#    branch as healthy.
-#
-# Requested help is not a warning, and a report section must not be split
-# across two streams.
+# Requested help is not a warning, and a report section must not be split across stderr and stdout.
 
 HELP_HANDLERS = [
     ("update", handle_update),
@@ -51,8 +36,7 @@ HELP_HANDLERS = [
     ("grant-admin", handle_grant_admin),
 ]
 
-# Moving these lines onto console.print() put them through Rich's markup parser,
-# which silently eats any word-like [placeholder] that is not an escaped \[.
+# console.print() runs Rich markup, which silently eats any [placeholder] not escaped as \[.
 HELP_PLACEHOLDERS = [
     ("repair", handle_repair, "[options]"),
     ("sync-registry", handle_sync_registry, "[project-path]"),
@@ -78,7 +62,7 @@ class TestHelpGoesToStdout:
         assert placeholder in capsys.readouterr().out, f"{name} --help lost {placeholder} to the markup parser"
 
     def test_entry_point_help_is_stdout_only(self, capsys):
-        """The global help's OPTIONS block was the loudest case — 8 warning() calls."""
+        """The global help's OPTIONS block goes to stdout too."""
 
         print_help()
 
@@ -94,8 +78,6 @@ class TestReportSectionsStayWhole:
     def test_stale_names_never_land_under_healthy_on_stdout(self, tmp_path, capsys):
         """Driven through `sync-registry` against a tmp_path project: alpha is whole,
         ghost is registered with no directory, stranger has a passport but no entry.
-
-        Mutant: stale names printed to stdout instead of stderr -> red.
         """
         for name in ("alpha", "stranger"):
             (tmp_path / name / ".trinity").mkdir(parents=True)

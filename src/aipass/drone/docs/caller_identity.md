@@ -36,14 +36,14 @@ Why it exists: these two cases arrived byte-identical downstream, and they are n
 
 | Case | `CALLER_BRANCH` | Source | What it is |
 |---|---|---|---|
-| agent assigned `@commons`, standing in `/tmp` | `commons` | `assigned` | a **credential** — valid from any directory (S102) |
+| agent assigned `@commons`, standing in `/tmp` | `commons` | `assigned` | a **credential** — valid from any directory |
 | nobody assigned, standing at the repo root | `aipass` | `project` | a **directory name** that collides with the citizen `@aipass` |
 
-The second sent a dispatch out as `@aipass` on 2026-08-21; ai_mail's contact lookup found the real
-citizen row and stamped it "verified", and the wake-back woke the wrong branch — eleven turns of
-work and nothing warned (DPLAN-0315 item 3). A consumer cannot re-derive this: it is a different
-process with a different cwd. Unstamped, ai_mail's identity fence had to refuse **both**, which
-re-broke the very S102 case it protects.
+Read as a name, the second would send mail as `@aipass`: ai_mail's contact lookup would find the
+real citizen row and stamp it "verified", and the wake-back would wake the wrong branch. A consumer
+cannot re-derive the difference: it is a different process with a different cwd. Unstamped,
+ai_mail's identity fence would have to refuse **both**, breaking the assigned-credential case it
+protects.
 
 ---
 

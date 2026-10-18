@@ -1,20 +1,13 @@
 # =================== AIPass ====================
 # Name: creator_handler.py
 # Description: Skill creation handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Skill Creation Handler
-
-Contains the core logic for creating new skills from templates.
-Validates skill names, resolves templates, and orchestrates the copy.
-
-Purpose:
-    Implementation logic for skill creation, separated from CLI/display
-    layer to satisfy thin-module standard.
 """
 
 from pathlib import Path
@@ -22,39 +15,16 @@ from pathlib import Path
 from aipass.skills.apps.handlers.json import json_handler
 from aipass.skills.apps.handlers.template import copy_template, get_template
 
-# logger imported from aipass.prax
-
 
 def is_valid_name(name):
-    """Check if a skill name is valid.
-
-    Valid names contain only lowercase letters, numbers, and hyphens.
-    Must start with a letter.
-
-    Args:
-        name: The skill name to validate.
-
-    Returns:
-        bool: True if valid.
-    """
+    """Check if a skill name is valid."""
     if not name or not name[0].isalpha():
         return False
     return all(c.isalnum() or c in "-_" for c in name) and name == name.lower()
 
 
 def create_skill(name, template_type="markdown_only", target_dir=None):
-    """Create a new skill from a template.
-
-    Args:
-        name: Name for the new skill (used as directory name and placeholder).
-        template_type: Template tier - "markdown_only", "with_handler", or "full".
-        target_dir: Directory to create the skill in. Defaults to
-                    .aipass/skills/ in the current working directory.
-
-    Returns:
-        dict: {"success": bool, "path": str|None, "files": list[str], "error": str|None}
-    """
-    # Validate skill name
+    """Create a new skill from a template."""
     if not name:
         return {
             "success": False,
@@ -68,10 +38,12 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
             "success": False,
             "path": None,
             "files": [],
-            "error": f"Invalid skill name: '{name}'. Use lowercase letters, numbers, and hyphens only.",
+            "error": (
+                f"Invalid skill name: '{name}'. Use lowercase letters, numbers, hyphens and underscores, "
+                "starting with a letter."
+            ),
         }
 
-    # Resolve template
     template_result = get_template(template_type)
     if not template_result["success"]:
         return {
@@ -81,11 +53,8 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
             "error": template_result["error"],
         }
 
-    # Determine target directory
     if target_dir is None:
-        # Unlike discovery, this one WRITES. A default that cannot be computed
-        # must refuse, never fall back to some other directory - creating a
-        # skill in the wrong tree is worse than not creating one.
+        # Unlike discovery, this WRITES: a default that cannot be computed refuses, never falls back.
         try:
             target_dir = Path.cwd() / ".aipass" / "skills"
         except OSError as exc:
@@ -101,10 +70,8 @@ def create_skill(name, template_type="markdown_only", target_dir=None):
 
     target_path = Path(target_dir) / name
 
-    # Ensure parent directory exists
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Copy template
     result = copy_template(template_result["path"], target_path, name)
 
     json_handler.log_operation(

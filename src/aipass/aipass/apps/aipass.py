@@ -3,16 +3,11 @@
 # Description: AIPASS branch entry point — thin command router
 # Version: 0.5.2
 # Created: 2026-04-16
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 AIPASS Branch - Main Orchestrator
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Routes commands to discovered modules automatically
-- No manual imports or routing needed
 """
 
 import os
@@ -22,12 +17,8 @@ import importlib.metadata
 from pathlib import Path
 from typing import List, Any
 
-# Windows terminals/pipes default to cp1252, which can't encode the Unicode
-# Rich emits (✓/✗, box-drawing, arrows). PYTHONUTF8 only affects child
-# interpreters, not this process's already-open stdout/stderr — so we also
-# reconfigure the live streams to UTF-8 in place (Python 3.7+). Without this,
-# `aipass init` scaffolds correctly but crashes printing its success banner
-# with UnicodeEncodeError ('charmap') on Windows. Mirrors drone/cli.py.
+# Windows streams default to cp1252 and cannot encode Rich's glyphs; PYTHONUTF8 only
+# reaches child interpreters, so the live streams are reconfigured too (as drone/cli.py).
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")  # for child subprocesses
     for _stream in (sys.stdout, sys.stderr):
@@ -49,9 +40,6 @@ except ModuleNotFoundError:  # pragma: no cover — Python 3.10
         tomllib = None  # type: ignore[assignment]
         logger.info("[AIPASS] tomllib/tomli unavailable, pyproject version read disabled")
 
-# =============================================================================
-# COMMANDS — public-facing labels and descriptions
-# =============================================================================
 
 _PUBLIC_COMMANDS = {
     "adopt": "Turn an existing projects/ directory into a full project",
@@ -68,19 +56,11 @@ _PUBLIC_COMMANDS = {
     "feedback": "Toggle the feedback reminder on/off",
 }
 
-# =============================================================================
-# VERSION RESOLUTION
-# =============================================================================
-
 
 def _pyproject_version(start: Path) -> str | None:
     """Version from the repo's own pyproject.toml, walking up from `start`.
 
-    Editable installs freeze dist-info metadata at install time, so the
-    installed-metadata version goes stale the moment pyproject.toml bumps.
-    The repo tree is the live truth — read it directly. Returns None when
-    no `[project] name = "aipass"` pyproject exists above `start` (e.g. a
-    wheel install), so callers can fall back to metadata.
+    Editable installs freeze metadata at install time; the repo tree is the live version.
     """
     if tomllib is None:
         logger.info("[AIPASS] tomllib/tomli unavailable, skipping pyproject version read")
@@ -105,8 +85,7 @@ def _pyproject_version(start: Path) -> str | None:
 def _installed_version() -> str:
     """``importlib.metadata.version("aipass")``, unchanged.
 
-    A seam, and the reason is the test: it stands in here for an install with
-    no metadata instead of replacing importlib process-wide.
+    A seam: the test stands in an install with no metadata here, not process-wide.
     """
     return importlib.metadata.version("aipass")
 
@@ -123,10 +102,6 @@ def _resolve_version() -> str:
         return "unknown"
 
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
 MODULES_DIR = Path(__file__).parent / "modules"
 
 
@@ -136,8 +111,7 @@ _import_failures: dict[str, Exception] = {}
 def _import_module(name: str) -> Any:
     """``importlib.import_module(name)``, unchanged.
 
-    A seam, and the reason is the test: every real module here has
-    handle_command, so the skip branch is reached by standing one in here.
+    A seam: every real module has handle_command, so the test reaches the skip branch here.
     """
     return importlib.import_module(name)
 
@@ -165,11 +139,6 @@ def discover_modules() -> List[Any]:
             _import_failures[file_path.stem] = e
 
     return modules
-
-
-# =============================================================================
-# HELP OUTPUT — house pattern (cli_ux)
-# =============================================================================
 
 
 def print_introspection(modules: List[Any] | None = None) -> None:
@@ -259,11 +228,7 @@ def print_help(modules: List[Any] | None = None) -> None:
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """Route command to appropriate module.
 
-    Returns True on success. Raises on handler crash so callers can
-    distinguish 'not found' (False) from 'found but broken'. The crash is not
-    logged here: both callers in main() log it, traceback and all, through
-    _log_crash. A log call here ran first and, with an unwritable log home,
-    raised over the module's own error (container proof, 2026-10-13).
+    Raises on a crash (False means not found); main() logs it, a log call here could mask it.
     """
     for module in modules:
         if module.handle_command(command, args):
@@ -271,18 +236,10 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def _log_crash(message: str) -> None:
     """Log the crash being handled, with its traceback; never raise from the log itself.
 
-    A crash handler that raises from its own logging replaces the user's error
-    with a logging crash: from a uv tool install prax's log home resolved to
-    /system_logs, and the handler's logger.error raised [Errno 13] over the
-    clone error it was reporting (container proof, 2026-10-13).
+    A handler that raises from its own logging (an unwritable log home) hides the user's error.
     """
     try:
         logger.error(message, exc_info=True)
@@ -293,9 +250,8 @@ def _log_crash(message: str) -> None:
 def main():
     """Main entry point - routes commands or shows help.
 
-    Exit codes: 0 clean; 2 routed but a module reported through error();
-    1 not handled — unknown command, a module that crashed (named on
-    stderr by error()) or failed to load. No success path returns 1.
+    Exit codes: 0 clean; 2 a module reported through error(); 1 unknown command, crash
+    or load failure. No success path returns 1.
     """
     modules = discover_modules()
     args = sys.argv[1:]
@@ -315,12 +271,8 @@ def main():
     command = args[0]
     remaining = args[1:] if len(args) > 1 else []
 
-    # Subcommand --help guard: intercept before dispatch. --help wins from ANY
-    # position, not just the first argument. Inspecting only remaining[0] let a
-    # help probe execute the verb it was asking about: `aipass trust <dir>
-    # --help` enrolled the directory, `aipass init agent --help` created an
-    # agent literally named "--help", and `aipass init update --help` wrote a
-    # scaffold refresh into the cwd. Asking a question must never be an action.
+    # --help in ANY position answers before dispatch: a help probe must never run the
+    # verb (`aipass trust <dir> --help` would enroll the dir).
     if any(a in ("--help", "-h") for a in remaining):
         for module in modules:
             if module.handle_command(command, ["--help"]):
@@ -328,9 +280,7 @@ def main():
         console.print(f"Unknown command: {command}")
         return 1
 
-    # A module that reports through error() and returns True has failed:
-    # resolve_exit turns cli's command-failed flag into exit 2, so a shell
-    # reading `$?` sees the refusal (aipass's decision, fleet green leg 3).
+    # A module that reports through error() and returns True failed: resolve_exit makes it 2.
     try:
         if route_command(command, remaining, modules):
             return resolve_exit(True)
@@ -352,10 +302,7 @@ def main():
             error(f"'{command}' failed to load: {err}")
             return 1
 
-    # Free-text catch-all: multi-word plain input reads as a question, so
-    # `aipass what is drone` just works. Single tokens and anything carrying
-    # flags stay loud "Unknown command" errors — a mistyped command with
-    # options must not silently become a documentation search.
+    # Multi-word plain input reads as a question; anything with flags stays Unknown command.
     if remaining and not command.startswith("-") and all(not a.startswith("-") for a in remaining):
         question = [command, *remaining]
         console.print(f"[dim]No command '{command}' — answering as: aipass help {' '.join(question)}[/dim]")

@@ -3,7 +3,7 @@
 # Description: Background post-close processing
 # Version: 1.3.1
 # Created: 2026-02-14
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -49,19 +49,7 @@ LOCK_FILE = FLOW_ROOT / ".post_close_runner.lock"
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point.
-
-    This module is a background utility runner, not a user-facing command.
-    It responds to 'post_close' for drone routing compatibility
-    and supports --help / -h for introspection.
-
-    Args:
-        command: Command name
-        args: Command arguments
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Handle commands routed by the entry point."""
     if command not in ("post", "post_close_runner"):
         return False
 
@@ -69,31 +57,23 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Handle help flag ANYWHERE in the sequence -- post archives and
-    # vectorises closed plans, so a help probe must not reach it
+    # Help anywhere in args: post archives and vectorises, so a help probe must not reach it.
     if wants_help(args):
         print_help()
         return True
 
-    # `post` reads nothing after the verb. It used to run the archival and
-    # vectorisation pass regardless and report success, so a typo'd flag did
-    # real work under a name the caller never asked for (ruling 2026-09-07).
     try:
         refuse_extra(args, door="post")
     except UnknownArgument as exc:
         error(exc.message, suggestion=exc.usage)
         raise SystemExit(1) from exc
 
-    # Log the operation
     json_handler.log_operation("post_close_processed", {"command": command, "args": args})
 
-    # Run the post-close processing directly (foreground)
     try:
         acquired = acquire_lock(LOCK_FILE)
     except OSError as e:
-        # Denied past lock_ops' retry budget (PermissionError), or a lock that
-        # exists but cannot be read or removed: not a running instance, so it
-        # must not be reported as one.
+        # A lock that cannot be created, read or removed is not a running instance.
         logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
         error(f"Could not create lock: {e}")
         return True
@@ -163,19 +143,7 @@ def print_help():
 
 def main(argv: list[str]) -> int:
     """Run the pass close_plan starts as a detached program; answer its exit code.
-
-    The body of the ``__main__`` guard, moved here for the test: run as a
-    program, the module binds the real LOCK_FILE, which no test may touch, so a
-    test calls this with LOCK_FILE redirected instead (flow's decision, leg 3b).
-    The guard is this one call.
-
-    Args:
-        argv: The program's arguments (sys.argv).
-
-    Returns:
-        0 when done or when another instance holds the lock, 1 when the lock
-        cannot be created.
-    """
+    A function so tests can run it with LOCK_FILE redirected. 1 only when the lock cannot be created."""
     if "--help" in argv or "-h" in argv:
         print_help()
         return 0
@@ -183,8 +151,6 @@ def main(argv: list[str]) -> int:
     try:
         acquired = acquire_lock(LOCK_FILE)
     except OSError as e:
-        # The same catch as handle_command: denied past the retry budget, or a
-        # lock that exists but cannot be read or removed.
         logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
         return 1
     if not acquired:

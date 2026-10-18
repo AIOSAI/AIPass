@@ -3,16 +3,10 @@
 # Description: AST-based public function scanner for branch test coverage mapping
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
-"""
-AST-based public function scanner.
-
-Scans a branch's apps/modules/ and apps/handlers/ for public function
-definitions, cross-references against tests/, and builds a coverage map.
-Excludes standard infrastructure functions (json_handler, CLI routing).
-"""
+"""AST-based public function scanner."""
 
 import ast
 from pathlib import Path
@@ -21,12 +15,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
-# -- Standard functions to exclude (covered elsewhere, so an absence here is not a gap) --
-#
-# It read "already covered by test_quality checker" until 2026-09-07, when v4
-# test_quality retired to aipass_standards/.archive/ (DPLAN-0323 seal). The
-# exclusions did not change - the coverage moved - but a comment naming a
-# retired checker sends the next reader to a file that is no longer scored.
+# Standard functions are covered elsewhere, so their absence here is not a gap.
 
 # CLI routing — every branch has these, not custom logic
 CLI_ROUTING_FUNCTIONS = frozenset(
@@ -63,11 +52,6 @@ CHECKER_BOILERPLATE = frozenset(
 EXCLUDED_FUNCTIONS = CLI_ROUTING_FUNCTIONS | JSON_HANDLER_FUNCTIONS | CHECKER_BOILERPLATE
 
 
-# =============================================================================
-# AST SCANNING
-# =============================================================================
-
-
 def _read_file_safe(path: Path) -> str:
     """Read file contents, returning empty string on error."""
     try:
@@ -80,10 +64,7 @@ def _read_file_safe(path: Path) -> str:
 def _extract_public_functions(file_path: Path) -> list[dict] | None:
     """Extract public function definitions from a Python file via AST.
 
-    Returns list of dicts: {name, line, file}
-    Only top-level and class-level defs. Skips _private and excluded names.
-    None when the file does not parse: a file nobody could read is not a file
-    with no functions, and scan_branch names it (seedgo fleet green leg 15).
+    None when the file does not parse: an unreadable file is not a file with no functions.
     """
     source = _read_file_safe(file_path)
     if not source:
@@ -100,7 +81,6 @@ def _extract_public_functions(file_path: Path) -> list[dict] | None:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         name = node.name
-        # Skip private, dunder, and excluded standard functions
         if name.startswith("_"):
             continue
         if name in EXCLUDED_FUNCTIONS:
@@ -137,7 +117,6 @@ def _get_relative_path(file_path: Path, branch_path: Path) -> str:
 def _scan_source_files(branch_path: Path, unparsed: list[str] | None = None) -> list[dict]:
     """Scan apps/modules/ and apps/handlers/ for public functions.
 
-    Returns list of dicts: {name, line, file, relative_path}
     A file that does not parse adds its relative path to ``unparsed``.
     """
     all_functions = []
@@ -182,37 +161,19 @@ def _test_files_source(branch_path: Path) -> str:
     return "\n".join(sources)
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def scan_branch(branch_path: str) -> dict:
     """Scan a branch and build its custom function coverage map.
 
-    Args:
-        branch_path: Absolute path to branch root directory.
-
-    Returns:
-        dict with keys:
-            branch: branch name
-            total_functions: count of public custom functions
-            tested_functions: count of functions referenced in tests
-            coverage_pct: percentage
-            files: list of {relative_path, functions: [{name, line, tested, test_file}]}
-            unparsed: relative paths of source files that did not parse, so were not mapped
+    ``unparsed`` lists source files that did not parse, so were not mapped.
     """
     bp = Path(branch_path)
     branch_name = bp.name
 
-    # Scan source for public functions
     unparsed: list[str] = []
     all_functions = _scan_source_files(bp, unparsed)
 
-    # Get concatenated test source for matching
     test_source = _test_files_source(bp)
 
-    # Also build a set of test file names for reporting which test covers
     tests_dir = bp / "tests"
     test_files_map: dict[str, str] = {}  # function_name -> test_file_name
     if tests_dir.is_dir():
@@ -224,7 +185,6 @@ def scan_branch(branch_path: str) -> dict:
                 if func["name"] in source and func["name"] not in test_files_map:
                     test_files_map[func["name"]] = test_file.name
 
-    # Build per-file coverage map
     files_map: dict[str, list[dict]] = {}
     tested_count = 0
 

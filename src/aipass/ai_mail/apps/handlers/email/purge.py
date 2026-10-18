@@ -3,20 +3,11 @@
 # Description: Sent/Deleted Auto-Purge Handler
 # Version: 2.0.2
 # Created: 2026-02-04
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 Sent/Deleted Auto-Purge Handler
-
-Automatically purges oldest emails when folder exceeds threshold (10).
-Before removal:
-1. Vectorizes content to @memory (via subprocess)
-2. Archives originals to .archive/
-
-Triggered after send/delete operations.
-
-v2.0.0: deleted/ now uses directory structure (like sent/).
 """
 
 import json
@@ -38,11 +29,8 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Purge configuration
 MAX_EMAILS = 10
 
-# Memory branch paths for subprocess vectorization (optional external service)
-# These are resolved relative to repo root if available; vectorization is best-effort
 _REPO_ROOT = find_repo_root()
 _MEMORY_VENV_PYTHON = _REPO_ROOT / "src" / "aipass" / "memory" / ".venv" / "bin" / "python3"
 CHROMA_SUBPROCESS_SCRIPT = (
@@ -63,84 +51,46 @@ MEMORY_PYTHON = _get_memory_python()
 
 
 def purge_sent_folder(mailbox_path: Path) -> Dict[str, Any]:
-    """
-    Purge sent folder if count exceeds threshold.
-
-    Keeps 10 most recent emails, vectorizes and archives older ones.
-
-    Args:
-        mailbox_path: Path to .ai_mail.local directory
-
-    Returns:
-        Dict with success, purged_count, archived_paths
-    """
+    """Purge sent folder if count exceeds threshold."""
     sent_folder = mailbox_path / "sent"
 
     if not sent_folder.exists():
         return {"success": True, "purged_count": 0, "message": "Sent folder empty"}
 
-    # Get all email files sorted by modification time (newest first)
     email_files = sorted(sent_folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
 
     total_count = len(email_files)
     if total_count <= MAX_EMAILS:
         return {"success": True, "purged_count": 0, "message": f"Below threshold ({total_count}/{MAX_EMAILS})"}
 
-    # Files to purge (oldest, beyond threshold)
     files_to_purge = email_files[MAX_EMAILS:]
 
     return _purge_email_files(files_to_purge, "sent")
 
 
 def purge_deleted_folder(mailbox_path: Path) -> Dict[str, Any]:
-    """
-    Purge deleted/ folder if file count exceeds threshold.
-
-    Keeps 10 most recent emails, vectorizes and archives older ones.
-
-    Args:
-        mailbox_path: Path to .ai_mail.local directory
-
-    Returns:
-        Dict with success, purged_count, archived_count
-    """
+    """Purge deleted/ folder if file count exceeds threshold."""
     deleted_folder = mailbox_path / "deleted"
 
     if not deleted_folder.exists():
         return {"success": True, "purged_count": 0, "message": "Deleted folder empty"}
 
-    # Get all email files sorted by modification time (newest first)
     email_files = sorted(deleted_folder.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
 
     total_count = len(email_files)
     if total_count <= MAX_EMAILS:
         return {"success": True, "purged_count": 0, "message": f"Below threshold ({total_count}/{MAX_EMAILS})"}
 
-    # Files to purge (oldest, beyond threshold)
     files_to_purge = email_files[MAX_EMAILS:]
 
     return _purge_email_files(files_to_purge, "deleted")
 
 
 def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
-    """
-    Purge list of email files (vectorize, then delete originals).
-
-    Vectorizes email content to @memory for long-term retrieval,
-    then deletes originals. Only deletes if vectorization succeeds —
-    files are preserved on failure.
-
-    Args:
-        files: List of file paths to purge
-        folder_type: "sent" or "deleted" for logging
-
-    Returns:
-        Dict with results
-    """
+    """Purge list of email files (vectorize, then delete originals)."""
     if not files:
         return {"success": True, "purged_count": 0}
 
-    # Load email data from files
     emails_data = []
     load_errors = []
     for file_path in files:
@@ -153,14 +103,10 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
             logger.warning("[purge] Failed to load email file %s: %s", file_path.name, e)
             load_errors.append(f"{file_path.name}: {e}")
 
-    # Vectorize emails to @memory
     vectorize_result = _vectorize_emails(emails_data, folder_type)
 
-    # Only delete originals if vectorization succeeded — no data loss
     if not vectorize_result.get("success", False):
         logger.warning("[purge] Vectorization failed for %s — keeping %d files", folder_type, len(files))
-        # "error" carries @memory's own reason to whoever holds the dict; before
-        # 2026-10-02 it reached only the log warning (ai_mail, leg 8)
         return {
             "success": False,
             "purged_count": 0,
@@ -170,7 +116,6 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
             "error": vectorize_result.get("error"),
         }
 
-    # Delete original files (data is safely in @memory)
     deleted_count = 0
     delete_errors = []
     for file_path in files:
@@ -191,26 +136,15 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
 
 
 def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[str, Any]:
-    """
-    Vectorize email content and store in @memory.
-
-    Args:
-        emails: List of email data dicts
-        folder_type: "sent" or "deleted" for metadata
-
-    Returns:
-        Dict with success status
-    """
+    """Vectorize email content and store in @memory."""
     if not emails:
         return {"success": True, "count": 0}
 
     try:
-        # Extract text for vectorization
         texts = []
         metadatas = []
 
         for email in emails:
-            # Combine subject and message for richer semantic content
             subject = email.get("subject", "")
             message = email.get("message", "")
             text = f"{subject}\n\n{message}"
@@ -227,20 +161,8 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
                 }
             )
 
-        # Call @memory vectorization via subprocess (handler independence)
-        # THE GAP IS CLOSED — this operation is real now. It was NOT from March
-        # 2026 until the fix on 2026-08-24: @memory's handler had no `vectorize_and_store`, answered
-        # this call with success:false at exit 0, and purge read that refusal as
-        # a store and deleted the originals. @memory shipped the operation in
-        # chroma_subprocess 1.4.0 (2026-08-24) and the seam is verified live from
-        # this side: a probe returns {'success': True} and both
-        # ai_mail_email_sent and ai_mail_email_deleted now exist.
-        #
-        # Kept as a TEXT-IN call deliberately. `store_vectors` wants `embeddings`
-        # plus `documents`; sending raw `texts` and letting @memory encode them
-        # means the branch that OWNS the store picks the embedding model. If each
-        # caller encoded its own, two callers could put vectors from two models
-        # in one collection, which is silently unsearchable rather than an error.
+        # TEXT-IN on purpose: @memory owns the store, so it picks the embedding model;
+        # two callers' models in one collection would be silently unsearchable.
         input_data = {
             "operation": "vectorize_and_store",
             "branch": "AI_MAIL",
@@ -260,20 +182,12 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
         if result.returncode != 0:
             return {"success": False, "error": result.stderr or "Storage failed"}
 
-        # EXIT 0 MEANS THE PROCESS RAN, NOT THAT THE REQUEST SUCCEEDED. @memory's
-        # handler answers a bad request on stdout — {"success": false, "error":
-        # ...} — and exits 0, correctly: the subprocess did its job, it was the
-        # ASK that was wrong. Testing only returncode read that refusal as a
-        # store, and _purge_files then unlinked the originals under the comment
-        # "data is safely in @memory". It was not. Found by @memory (9da1ba52,
-        # 2026-08-23) from their side of the wire; the database agrees — not one
-        # email collection exists among 37.
+        # Exit 0 means the process ran, not that the store succeeded: @memory refuses on
+        # stdout with {"success": false} at exit 0, and a misread deletes the originals.
         try:
             reply = json.loads(result.stdout)
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            # Unreadable output is not evidence of success. Guessing "probably
-            # fine" here is the original defect wearing a different hat, and the
-            # cost of guessing wrong is deleted mail.
+            # Unreadable output is not success: guessing wrong deletes mail.
             logger.warning("[purge] Unreadable vectorization reply for %s: %s", folder_type, e)
             return {"success": False, "error": f"Unreadable reply from @memory: {result.stdout[:200]!r}"}
 
@@ -293,17 +207,7 @@ def _vectorize_emails(emails: List[Dict[str, Any]], folder_type: str) -> Dict[st
 
 
 def run_purge(mailbox_path: Path) -> Dict[str, Any]:
-    """
-    Run purge on both sent and deleted folders.
-
-    Convenience function to run both purges.
-
-    Args:
-        mailbox_path: Path to .ai_mail.local directory
-
-    Returns:
-        Dict with combined results
-    """
+    """Run purge on both sent and deleted folders."""
     json_handler.log_operation("run_purge", {"mailbox_path": str(mailbox_path)})
     sent_result = purge_sent_folder(mailbox_path)
     deleted_result = purge_deleted_folder(mailbox_path)

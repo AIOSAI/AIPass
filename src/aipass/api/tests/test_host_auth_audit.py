@@ -3,30 +3,13 @@
 # Description: Tests for failed-auth auditing with peer address (security C1)
 # Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-10-09
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
 
-# Tests for Failed-Auth Auditing
-#
-# Security review condition C1, granted 2026-08-14. Before this, a rejected request
-# produced a logger.warning and nothing else: no structured audit line and no peer
-# address anywhere, so the honest answer to "which device has been knocking, and
-# how often" was "I cannot tell you". On a loopback socket that was tolerable. On
-# the tailnet bind it is not.
-#
-# TWO PROPERTIES THIS FILE EXISTS TO HOLD TOGETHER, because they pull against each
-# other and it would be easy to fix one by breaking the other:
-#
-#   1. The AUDIT distinguishes why a request was refused — no credentials, an
-#      unrecognised token, or a scope refusal — so an operator can read the record.
-#   2. The RESPONSE does not. A caller cannot tell "no header" from "bad token"
-#      from "revoked", because that difference is a probing oracle. Same status,
-#      same code, same message.
-#
-# And the third, absolute one: the raw token never reaches the audit. Not the
-# value, not a prefix — a prefix leaks entropy for free.
+# Two properties pull against each other: the AUDIT tells refusal reasons apart,
+# the RESPONSE does not (that difference is a probing oracle). Neither carries the token.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(duplicate_test) — issue_token() and revoke_token() themselves, tests/test_host_api_config.py
@@ -100,12 +83,7 @@ class TestTheAuditRecordsWhoKnocked:
         assert len(_refusals(audit)) == 1
 
     def test_the_peer_address_is_recorded(self, audited: Any) -> None:
-        """
-        The whole point of C1.
-
-        Without this the audit says "someone failed", which does not answer the
-        question the review asked: which device.
-        """
+        """The whole point of C1."""
         client, audit = audited
 
         client.get("/v1/whoami", headers={"Authorization": "Bearer nope"})
@@ -152,12 +130,8 @@ class TestTheResponseStillTellsNothing:
         """
         Same status and same machine-readable code; the human message differs.
 
-        WRITTEN DELIBERATELY WEAKER THAN ITS NEIGHBOUR BELOW, and the asymmetry
-        is the point. 'You sent no header' versus 'your token was rejected' tells
-        a caller only what they already know about their own request — it carries
-        nothing about whether a credential was close — while it tells a legitimate
-        operator exactly what they got wrong. The distinction that WOULD be an
-        oracle is revoked-versus-invalid, and that one is byte-identical.
+        Deliberately weaker than its neighbour: no-header vs bad-token tells a caller
+        only what they sent. The oracle would be revoked-vs-invalid, held byte-identical.
         """
         client, _ = audited
 
@@ -248,11 +222,7 @@ class TestScopeRefusalIsAudited:
         assert len(_refusals(audit)) == 1
 
     def test_scope_refusal_names_the_token_id_not_its_value(self, operate_client: Any) -> None:
-        """
-        The id is safe and it is what revoke-token takes.
-
-        An audit line an operator cannot act on is a diary entry.
-        """
+        """The id is safe and it is what revoke-token takes."""
         client, audit = operate_client
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
 
@@ -279,16 +249,7 @@ class TestARevokedTokenIsDistinguishableInTheTrail:
     """
     The audit must tell 'this device WAS enrolled' from 'this is garbage'.
 
-    Written on 2026-08-16 after a real incident: the owner's phone was refused for
-    nine minutes with reason=token_unrecognised, and the log could not say
-    whether it had presented a revoked credential or a corrupted one. The store
-    was provably intact, so the log's inability to distinguish those two was the
-    thing standing between the evidence and an answer.
-
-    THE RESPONSE STILL TELLS NOTHING. A revoked device learns 'no', never 'you
-    were valid until 10:42' — the difference belongs in the trail and nowhere
-    else, which is what this branch's own comment promised before the code
-    delivered it.
+    The difference belongs in the trail only; the response still tells nothing.
     """
 
     def test_a_revoked_token_is_recorded_as_revoked(self, audited: Any) -> None:
@@ -302,12 +263,7 @@ class TestARevokedTokenIsDistinguishableInTheTrail:
         assert _refusals(audit)[-1]["reason"] == "token_revoked"
 
     def test_a_revoked_token_carries_its_id(self, audited: Any) -> None:
-        """
-        The id is the actionable half.
-
-        It is what revoke-token takes and what list-tokens prints, so a trail
-        line naming it identifies the device without touching the secret.
-        """
+        """The id is the actionable half."""
         client, audit = audited
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
         host_tokens.revoke_token(record["id"])
@@ -336,12 +292,7 @@ class TestARevokedTokenIsDistinguishableInTheTrail:
         assert raw not in str(_refusals(audit)[-1])
 
     def test_both_refusals_answer_identically_to_the_caller(self, audited: Any) -> None:
-        """
-        Byte-identical: same status, same code, same sentence.
-
-        A response that differed would turn the audit's knowledge into an
-        oracle — a prober could learn which of its guesses was once real.
-        """
+        """Byte-identical: same status, same code, same sentence."""
         client, audit = audited
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
         host_tokens.revoke_token(record["id"])

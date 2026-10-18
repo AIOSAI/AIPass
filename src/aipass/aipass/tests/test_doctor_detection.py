@@ -3,12 +3,10 @@
 # Description: Tests for doctor's system detection and progress helpers
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/system_detect/system_detector.py and apps/handlers/ui/progress.py."""
-# The detection rows and progress display `aipass doctor` draws on, split out
-# of test_doctor.py on 2026-10-08 (fleet green, oversize_test_file).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
@@ -50,11 +48,6 @@ def _on_path(directory, name: str):
     return stub
 
 
-# =============================================================================
-# TestDetectPython
-# =============================================================================
-
-
 class TestDetectPython:
     def test_current_python_ok(self) -> None:
         """Running Python is >=3.9 and reports ok=True."""
@@ -62,7 +55,6 @@ class TestDetectPython:
         assert result["major"] == sys.version_info.major
         assert result["minor"] == sys.version_info.minor
         assert "." in result["version"]
-        # Running tests on 3.9+ so ok must be True
         assert result["ok"] is True
         assert result["warning"] is False
 
@@ -82,11 +74,6 @@ class TestDetectPython:
         """Version string contains two dots (major.minor.micro)."""
         result = detect_python()
         assert result["version"].count(".") == 2
-
-
-# =============================================================================
-# TestDetectGit
-# =============================================================================
 
 
 class TestDetectGit:
@@ -115,11 +102,6 @@ class TestDetectGit:
             mock_run.return_value = MagicMock(stdout="weird\n", returncode=0)
             result = detect_git()
         assert result["found"] is True
-
-
-# =============================================================================
-# TestDetectRam
-# =============================================================================
 
 
 class TestDetectRam:
@@ -152,11 +134,6 @@ class TestDetectRam:
         assert result["ok"] is True
 
 
-# =============================================================================
-# TestDetectOS
-# =============================================================================
-
-
 class TestDetectOS:
     def test_returns_os_keys(self) -> None:
         """Result has os_name, release, machine keys."""
@@ -169,11 +146,6 @@ class TestDetectOS:
         """os_name is always non-empty."""
         result = detect_os()
         assert result["os_name"] != ""
-
-
-# =============================================================================
-# TestDetectShell
-# =============================================================================
 
 
 class TestDetectShell:
@@ -224,18 +196,11 @@ class TestDetectShell:
         assert result["path"] == ""
 
 
-# =============================================================================
-# TestShellFromParentProc
-# =============================================================================
-
-
 class TestShellFromParentProc:
     """The /proc fallback, reached the way doctor reaches it: detect_shell() with SHELL unset.
 
-    The platform and parent pid go in through detect_shell's os_name/getppid
-    seams (fleet green leg 5), so os is never replaced process-wide — which is
-    what once made these tests skip on Windows (pathlib dispatch followed the
-    forced os.name).
+    Platform and parent pid go in through detect_shell's os_name/getppid seams: replacing
+    os process-wide makes pathlib dispatch follow the forced os.name on Windows.
     """
 
     @pytest.fixture(autouse=True)
@@ -288,11 +253,6 @@ class TestShellFromParentProc:
         assert detect_shell(os_name="posix", getppid=lambda: 1)["name"] == "unknown"
 
 
-# =============================================================================
-# TestDetectCpu
-# =============================================================================
-
-
 class TestDetectCpu:
     def test_returns_positive_count(self) -> None:
         """CPU count is a positive integer.
@@ -300,11 +260,6 @@ class TestDetectCpu:
         result = detect_cpu()
         assert result["count"] == os.cpu_count()
         assert result["count"] >= 1
-
-
-# =============================================================================
-# TestDetectOptionalTools
-# =============================================================================
 
 
 class TestDetectOptionalTools:
@@ -329,11 +284,6 @@ class TestDetectOptionalTools:
         """False when wt.exe (Windows Terminal) is absent from PATH."""
         monkeypatch.setenv("PATH", str(tmp_path))
         assert detect_wt() is False
-
-
-# =============================================================================
-# TestProgressHelpers
-# =============================================================================
 
 
 class TestProgressHelpers:
@@ -362,9 +312,7 @@ class TestProgressHelpers:
     def test_make_doctor_progress_returns_progress(self) -> None:
         """The bar is a spinner plus the task description, and it is transient.
 
-        Value pins added 2026-09-08 (v5 assertion_shape): isinstance alone was
-        true of any Progress at all, including one with no spinner and one that
-        never clears itself off the terminal.
+        isinstance alone is true of any Progress, even one with no spinner that never clears.
         """
         from rich.progress import Progress, SpinnerColumn, TextColumn
 

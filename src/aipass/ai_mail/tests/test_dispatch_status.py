@@ -3,12 +3,10 @@
 # Description: Tests for dispatch status handler
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/status.py."""
-
-# Dispatch log I/O and age calculation.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — check_pid_status()'s subprocess.SubprocessError/OSError branch
@@ -27,18 +25,12 @@ from aipass.ai_mail.apps.handlers.dispatch.status import (
 )
 
 
-# --- Fixtures --------------------------------------------------------
-
-
 @pytest.fixture
 def dispatch_log_file(tmp_path, monkeypatch):
     """Redirect DISPATCH_LOG_FILE to an isolated tmp_path location."""
     log_file = tmp_path / ".ai_mail.local" / "dispatch_log.json"
     monkeypatch.setattr(status_mod, "DISPATCH_LOG_FILE", log_file)
     return log_file
-
-
-# --- load_dispatch_log tests -----------------------------------------
 
 
 def test_load_dispatch_log_no_file(dispatch_log_file):
@@ -64,13 +56,11 @@ def test_load_dispatch_log_valid(dispatch_log_file):
     result = load_dispatch_log()
     assert isinstance(result, list)
     assert len(result) == 2
-    # Verify ALL keys and values on first entry
     assert result[0]["branch"] == "@flow"
     assert result[0]["pid"] == 1234
     assert result[0]["status"] == "spawned"
     assert result[0]["timestamp"] == "2026-03-24 10:00:00"
     assert set(result[0].keys()) == {"branch", "pid", "status", "timestamp"}
-    # Verify ALL keys and values on second entry
     assert result[1]["branch"] == "@backup"
     assert result[1]["pid"] == 5678
     assert result[1]["status"] == "spawned"
@@ -79,11 +69,7 @@ def test_load_dispatch_log_valid(dispatch_log_file):
 
 
 def test_load_dispatch_log_invalid_json(dispatch_log_file):
-    """Corrupt JSON raises; it is not an empty log.
-
-    Before leg 10 this answered [], the same answer as a log with no entries,
-    and log_dispatch then saved one entry over the unreadable file (ai_mail, leg 10).
-    """
+    """Corrupt JSON raises; it is not an empty log, or log_dispatch would save over the unreadable file."""
     dispatch_log_file.parent.mkdir(parents=True, exist_ok=True)
     dispatch_log_file.write_text("{this is not valid json!!!", encoding="utf-8")
 
@@ -92,20 +78,13 @@ def test_load_dispatch_log_invalid_json(dispatch_log_file):
 
 
 def test_log_dispatch_never_writes_over_an_unreadable_log(dispatch_log_file):
-    """A log that cannot be read is left as it is, and log_dispatch answers False.
-
-    Its proof is the mutant that lets the load answer [] again: the save then
-    replaces the unreadable bytes with a one-entry log (ai_mail, leg 10).
-    """
+    """A log that cannot be read is left as it is, and log_dispatch answers False."""
     dispatch_log_file.parent.mkdir(parents=True, exist_ok=True)
     unreadable = "{this is not valid json!!!"
     dispatch_log_file.write_text(unreadable, encoding="utf-8")
 
     assert log_dispatch("@flow", 4242, "spawned") is False
     assert dispatch_log_file.read_text(encoding="utf-8") == unreadable
-
-
-# --- save_dispatch_log tests ------------------------------------------
 
 
 def test_save_dispatch_log(dispatch_log_file):
@@ -120,7 +99,6 @@ def test_save_dispatch_log(dispatch_log_file):
 
     data = json.loads(dispatch_log_file.read_text(encoding="utf-8"))
     assert set(data.keys()) == {"dispatches", "last_updated"}
-    # Verify last_updated is a valid parseable timestamp
     datetime.strptime(data["last_updated"], "%Y-%m-%d %H:%M:%S")
     assert isinstance(data["dispatches"], list)
     assert len(data["dispatches"]) == 1
@@ -142,17 +120,13 @@ def test_save_dispatch_log_truncates_to_50(dispatch_log_file):
 
     data = json.loads(dispatch_log_file.read_text(encoding="utf-8"))
     assert len(data["dispatches"]) == 50
-    # Should keep the LAST 50 (indices 10-59)
     assert data["dispatches"][0]["branch"] == "@branch_10"
     assert data["dispatches"][-1]["branch"] == "@branch_59"
 
 
-# --- log_dispatch tests -----------------------------------------------
-
-
 def test_log_dispatch_creates_entry(dispatch_log_file, monkeypatch):
     """log_dispatch creates an entry with correct fields."""
-    # log_operation writes the live prax log, so the patch stays and is asserted (ai_mail, leg 5)
+    # log_operation writes the live prax log, so the patch stays and is asserted
     log_op = MagicMock()
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.dispatch.status.json_handler.log_operation",
@@ -173,14 +147,13 @@ def test_log_dispatch_creates_entry(dispatch_log_file, monkeypatch):
     assert entry["status"] == "spawned"
     assert isinstance(entry["timestamp"], str)
     assert len(entry["timestamp"]) == 19  # "YYYY-MM-DD HH:MM:SS"
-    # Verify timestamp format is parseable and recent (within last 5 seconds)
     parsed_ts = datetime.strptime(entry["timestamp"], "%Y-%m-%d %H:%M:%S")
     assert (datetime.now() - parsed_ts).total_seconds() < 5
 
 
 def test_log_dispatch_with_error(dispatch_log_file, monkeypatch):
     """log_dispatch with error_msg includes an 'error' key in the entry."""
-    # log_operation writes the live prax log, so the patch stays and is asserted (ai_mail, leg 5)
+    # log_operation writes the live prax log, so the patch stays and is asserted
     log_op = MagicMock()
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.dispatch.status.json_handler.log_operation",
@@ -201,15 +174,11 @@ def test_log_dispatch_with_error(dispatch_log_file, monkeypatch):
     assert entry["error"] == "Connection timeout"
 
 
-# --- calculate_age tests ----------------------------------------------
-
-
 def test_calculate_age_seconds():
     """Timestamp from 30 seconds ago returns '30s ago'."""
     ts = (datetime.now() - timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S")
     result = calculate_age(ts)
     assert result.endswith("s ago")
-    # Extract numeric part and verify range (allow 1s drift for execution time)
     age_value = int(result.replace("s ago", ""))
     assert 29 <= age_value <= 32
 

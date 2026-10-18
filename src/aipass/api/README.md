@@ -41,7 +41,7 @@ drone @api host-api status                              # Is the phone's server 
 
   The installer calls the same door, `mint_pairing` and `render_qr`; depth is in
   [docs/host_api.md](docs/host_api.md).
-- **Refuses in the open.** A refusal exits non-zero and names the reason. A command that printed a red cross and exited 0 was the defect that started that rule.
+- **Refuses in the open.** A refusal exits non-zero and names the reason.
 
 Not business logic, not workflows, and never a default model or config — consumers bring their own.
 
@@ -90,7 +90,9 @@ concern: `auth/`, `config/`, `google/`, `openrouter/`, `usage/`, `integrations/`
 
 A module claims a command by returning `True` from `handle_command()`, which means "I
 recognised this", never "it worked" — the exit code carries that, resolved from whether
-anything printed an error.
+anything printed an error: `1` unrecognised, `2` recognised and refused, `0` only when
+nothing printed an error. `main()` clears cli's process-level error flag before routing, so
+an earlier command's error is never read as this one's.
 
 The directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) —
 one place, so it cannot disagree with itself.
@@ -110,7 +112,6 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 | [docs/git_surface.md](docs/git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
 | [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |
 | [docs/internals.md](docs/internals.md) | Import safety without a working directory, and the settings conformance corpus |
-| [docs/decisions.md](docs/decisions.md) | Why this branch is shaped the way it is — the incident record behind the code |
 | [docs/SECURITY.md](docs/SECURITY.md) | The security posture of the host API and the credential store |
 
 ---
@@ -135,7 +136,7 @@ Values are never printed; read them through the Python door.
 
 ---
 
-**Last Updated:** 2026-10-13
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)

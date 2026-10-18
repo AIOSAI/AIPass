@@ -3,20 +3,11 @@
 # Description: Dispatch Daemon Handler
 # Version: 1.10.2
 # Created: 2026-02-17
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Dispatch Daemon Handler
-
-Polls registered branch inboxes for --dispatch emails and spawns agents.
-The daemon IS the continuity - agents are ephemeral, wake-do-exit.
-
-Architecture:
-  - Polls every N seconds (configurable via safety_config.json)
-  - Spawns via dispatch_monitor wrapper (bounce emails + guaranteed lock cleanup)
-  - Enforces: kill switch, max turns, max dispatches/day, lock files
-  - Tracks daily dispatch counts per branch
 """
 
 import json
@@ -35,20 +26,14 @@ from aipass.ai_mail.apps.handlers.dispatch.status import log_dispatch
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch.test_token import scan_and_ack_test_emails
 
-# The occupancy check with its process readers (pgrep, /proc, lsof, ps), and
-# _read_json, were copied here from wake and have one body since leg 12, so
-# the daemon and the wake answer alike (ai_mail, leg 12; todo 39). The process
-# helpers moved on to pid_lock in leg 13, and the dispatch lock pair became
-# one there too, so a zombie holder is dead to both (ai_mail, leg 13).
+# One lock/occupancy body shared with wake via pid_lock, so both answer alike.
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import acquire_lock, check_lock, is_branch_occupied
 from aipass.ai_mail.apps.handlers.dispatch.wake import DEFAULT_MODEL, JsonUnreadable, _read_json
 
 
-# Infrastructure paths
 _REPO_ROOT = find_repo_root()
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
 
-# Paths
 CONFIG_FILE = _AI_MAIL_DIR / "safety_config.json"
 DAEMON_STATE_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "daemon_state.json"
 DAEMON_LOG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "dispatch_daemon.log"
@@ -57,7 +42,6 @@ PID_DENIED_WAIT_SECONDS = 5.0  # Windows delete-pending: how long a denied pid c
 PID_DENIED_POLL_SECONDS = 0.05
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
-# Graceful shutdown
 SHUTDOWN = False
 
 
@@ -162,7 +146,6 @@ def load_daemon_state() -> Dict[str, Any]:
     if state is None:
         return EMPTY_STATE
 
-    # Reset counts on new day
     if state.get("date") != str(date.today()):
         state["daily_counts"] = {}
         state["date"] = str(date.today())
@@ -186,19 +169,7 @@ def _create_pid_file() -> bool:
     """
     Exclusive-create daemon.pid holding this PID.
 
-    Windows answers a create against a pid file another process is still
-    releasing (delete pending) with ACCESS DENIED, not FILE EXISTS - the
-    name is on its way out, not held. That answer is polled inside
-    PID_DENIED_WAIT_SECONDS. A directory this process truly cannot write
-    answers the same way forever, so past the wait it surfaces as the denial
-    it is. POSIX unlinks the name at once and never gives this answer.
-
-    Returns:
-        True if the pid file was created, False if the name exists.
-
-    Raises:
-        PermissionError: Access stayed denied for the whole wait; the
-            original denial is the cause.
+    Windows answers a delete-pending name with ACCESS DENIED; polled for PID_DENIED_WAIT_SECONDS, then raised.
     """
     deadline = time.monotonic() + PID_DENIED_WAIT_SECONDS
     while True:
@@ -230,7 +201,6 @@ def _write_pid_file() -> bool:
         return True
     logger.info("[daemon] PID file already exists, checking owner")
 
-    # PID file exists — check if the owning process is alive
     try:
         old_pid = int(DAEMON_PID_FILE.read_text().strip())
         if _pid_alive(old_pid):
@@ -240,11 +210,7 @@ def _write_pid_file() -> bool:
     except (ValueError, OSError):
         logger.info("Corrupt PID file — removing")
 
-    # Stale or corrupt — remove and retry atomically. Unlink + exclusive
-    # create, never os.replace: replace is last-writer-wins, so two daemons
-    # that both found the stale file would both start. A denied unlink is the
-    # same Windows release in progress (or a reader holding it open); the
-    # create below waits it out or names it.
+    # Unlink + exclusive create, never os.replace: last-writer-wins would let two daemons start.
     try:
         DAEMON_PID_FILE.unlink(missing_ok=True)
     except PermissionError as e:
@@ -270,8 +236,7 @@ def _remove_pid_file() -> None:
 def get_registered_branches() -> list:
     """Load all registered branches from AIPASS_REGISTRY.json.
 
-    An unreadable registry answers [] like a missing one: no branch is polled,
-    so nothing is spawned, the safe side (ai_mail, leg 13).
+    An unreadable registry answers [] like a missing one: nothing spawns, the safe side.
     """
     try:
         data = _read_json(BRANCH_REGISTRY)
@@ -284,12 +249,9 @@ def get_registered_branches() -> list:
 
 
 def _is_registered_sender(sender: str) -> bool:
-    """Check if sender email exists in the branch registry (DPLAN-0159 S2).
+    """Check if sender email exists in the branch registry.
 
-    A missing registry still answers True (a fresh checkout lists nobody to
-    poll). One that exists and cannot be read answers False: it cannot vouch
-    for any sender, and before leg 12 it failed open and let spawn_agent run
-    an auto_execute dispatch from anyone (ai_mail, leg 12; todo 44).
+    Missing registry: True. Unreadable registry: False, it cannot vouch for any sender.
     """
     try:
         registry = _read_json(BRANCH_REGISTRY)
@@ -305,18 +267,12 @@ def _is_registered_sender(sender: str) -> bool:
 
 
 def check_inbox_for_dispatch(branch_path: Path) -> Optional[Dict[str, Any]]:
-    """
-    Check a branch's inbox for unprocessed --dispatch emails.
-
-    Returns the first eligible dispatch email, prioritizing new emails.
-    Also retries opened dispatch emails orphaned for >30 min (agent crashed
-    before completing).
-    """
+    """Check a branch's inbox for unprocessed --dispatch emails."""
     inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
     try:
         inbox_data = _read_json(inbox_file)
     except JsonUnreadable as e:
-        # No dispatch found is the safe side: nothing spawns (ai_mail, leg 13).
+        # No dispatch found is the safe side: nothing spawns.
         logger.warning("[daemon] %s — no dispatch read from it", e)
         return None
     if inbox_data is None:
@@ -324,12 +280,11 @@ def check_inbox_for_dispatch(branch_path: Path) -> Optional[Dict[str, Any]]:
 
     orphan_threshold_seconds = 1800  # 30 minutes
 
-    # Priority 1: new dispatch emails
     for msg in inbox_data.get("messages", []):
         if msg.get("auto_execute") and msg.get("status") == "new":
             return msg
 
-    # Priority 2: opened dispatch emails orphaned >30 min
+    # Opened but untouched for 30 min means the agent crashed: retry it.
     now = datetime.now()
     for msg in inbox_data.get("messages", []):
         if msg.get("auto_execute") and msg.get("status") == "opened":
@@ -353,24 +308,7 @@ def check_inbox_for_dispatch(branch_path: Path) -> Optional[Dict[str, Any]]:
 def spawn_agent(
     branch_path: Path, branch_email: str, message: Dict[str, Any], config: Dict[str, Any], state: Dict[str, Any]
 ) -> bool:
-    """
-    Spawn a Claude agent at the target branch via dispatch_monitor wrapper.
-
-    The monitor wraps the claude process, providing:
-    - Bounce emails on agent failure (return-to-sender)
-    - Guaranteed lock cleanup on exit (agent doesn't need to know about locks)
-    - Stderr capture for diagnostics
-
-    Args:
-        branch_path: Path to target branch
-        branch_email: Branch email (e.g., @flow)
-        message: The dispatch email message dict
-        config: Safety config
-        state: Daemon state (for cycle tracking)
-
-    Returns:
-        True if monitor was spawned successfully
-    """
+    """Spawn a Claude agent at the target branch via dispatch_monitor wrapper."""
     sender = message.get("from", "unknown")
     subject = message.get("subject", "")
     max_turns = config.get("max_turns_per_wake", 100)
@@ -381,8 +319,7 @@ def spawn_agent(
 
     lock_file_path = str(branch_path / ".ai_mail.local" / ".dispatch.lock")
 
-    # Prompt — only interpolate system-generated metadata (id, sender email).
-    # Free-form fields (subject, body) stay in inbox.json (DPLAN-0155 M1).
+    # Only system-generated metadata goes in the prompt; subject and body stay in inbox.json.
     msg_id = message.get("id", "")
     safe_id = msg_id if msg_id.isalnum() and len(msg_id) <= 12 else ""
     sender_addr = message.get("from", "")
@@ -401,17 +338,8 @@ def spawn_agent(
 
     prompt = "Hi. Check inbox, process new emails, update memories when done." + sender_note + reply_instr
 
-    # KNOWN DRIFT (FPLAN-0447, 2026-08-20): this still binds by `-c`, which continues the
-    # most recently MODIFIED transcript in the branch dir — a file mtime, not the agent's
-    # own session. wake.py no longer does this: it resolves a durable per-branch pointer
-    # (session_pointer.py) and resumes by session id, falling back to `-c` only when that
-    # pointer is missing or stale.
-    #
-    # Left as-is ON PURPOSE, not overlooked: this daemon is dormant — no systemd unit, not
-    # running — and it already duplicates wake.py's lock/occupancy logic byte-for-byte
-    # instead of calling it. Editing dead code widens the blast radius for no gain today.
-    # IF THIS DAEMON IS EVER REVIVED, wire it to session_pointer.resolve_resume_target()
-    # first, or dispatches through this path will silently chase mtime again.
+    # Still binds by `-c` (file mtime), unlike wake.py's session pointer; left as-is while dormant.
+    # If this daemon is revived, wire it to session_pointer.resolve_resume_target() first.
     claude_cmd = [
         "claude",
         "-c",
@@ -427,7 +355,6 @@ def spawn_agent(
         "json",
     ]
 
-    # Build monitor command (dispatch_monitor wraps claude, handles bounce + lock cleanup)
     MONITOR_SCRIPT = Path(__file__).resolve().parent / "dispatch_monitor.py"
     LOG_DIR = branch_path / "logs"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -447,13 +374,12 @@ def spawn_agent(
     spawn_env = os.environ.copy()
     spawn_env["AIPASS_SPAWNED"] = "1"
     spawn_env["AIPASS_SESSION_TYPE"] = "daemon"
-    # Strip CLAUDE* vars (prevent nested session) and AIPASS_BOT_ID (prevent log leak to parent chat)
+    # CLAUDE* would nest the session; AIPASS_BOT_ID would leak logs to the parent chat.
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
 
-    # Acquire lock BEFORE spawn to prevent TOCTOU race (DPLAN-0155 Phase 5).
-    # Use current PID as placeholder; overwrite with monitor PID after spawn.
+    # Lock BEFORE spawn (TOCTOU); our pid is a placeholder until the monitor's is known.
     acquired, lock_msg = acquire_lock(branch_path, os.getpid())
     if not acquired:
         logger.info(f"Lock acquisition failed for {branch_email}: {lock_msg}")
@@ -476,7 +402,6 @@ def spawn_agent(
 
         monitor_pid = process.pid
 
-        # Update lock with real monitor PID
         lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
         lock_data = {
             "pid": monitor_pid,
@@ -486,18 +411,15 @@ def spawn_agent(
         }
         _write_json(lock_file, lock_data)
 
-        # Track session cycles for rotation
         cycles = state.get("session_cycles", {})
         branch_key = str(branch_path)
         cycles[branch_key] = cycles.get(branch_key, 0) + 1
         state["session_cycles"] = cycles
 
-        # Increment daily count
         daily = state.get("daily_counts", {})
         daily[branch_email] = daily.get(branch_email, 0) + 1
         state["daily_counts"] = daily
 
-        # Notification feed event — show who woke and why
         notif_title = f"Daemon → {branch_email}"
         notif_body = f'Task from {sender}: "{subject[:80]}"' if subject else f"Dispatch from {sender}"
         try:
@@ -512,7 +434,6 @@ def spawn_agent(
         return True
 
     except Exception as e:
-        # Release lock on spawn failure so branch isn't stuck locked
         lock_file = branch_path / ".ai_mail.local" / ".dispatch.lock"
         lock_file.unlink(missing_ok=True)
         logger.info(f"SPAWN FAILED {branch_email}: {e}")
@@ -526,12 +447,7 @@ def is_protected_branch(branch_email: str) -> bool:
 
 
 def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
-    """
-    Run one poll cycle across all registered branches.
-
-    Returns:
-        Number of agents spawned this cycle
-    """
+    """Run one poll cycle across all registered branches."""
     branches = get_registered_branches()
     autonomous_list = config.get("autonomous_branches", [])
     max_daily = config.get("max_dispatches_per_branch_per_day", 10)
@@ -561,10 +477,8 @@ def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
             logger.info(f"SKIP {branch_email}: daily limit reached ({daily_count}/{max_daily})")
             continue
 
-        # Intercept AIPASS-TEST ping emails before dispatch scan
         scan_and_ack_test_emails(branch_path, branch_email)
 
-        # Always check/clean stale locks (even without dispatch emails)
         existing_lock = check_lock(branch_path)
         if existing_lock is not None:
             logger.info(f"SKIP {branch_email}: active lock (PID {existing_lock.get('pid', '?')})")
@@ -585,14 +499,8 @@ def poll_cycle(config: Dict[str, Any], state: Dict[str, Any]) -> int:
 
 
 def run_daemon() -> None:
-    """
-    Main daemon loop. Polls inboxes at configured interval, spawns agents.
-
-    Exits gracefully on SIGTERM/SIGINT or kill switch.
-    """
-    # The stop handlers belong to the daemon process, installed when it starts,
-    # never at import: importing this module must not take over an importer's
-    # signals (2026-10-11).
+    """Main daemon loop. Polls inboxes at configured interval, spawns agents."""
+    # Installed here, never at import: importing this module must not take an importer's signals.
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
     json_handler.log_operation("run_daemon", {"pid": os.getpid()})
@@ -604,8 +512,7 @@ def run_daemon() -> None:
     logger.info(f"DISPATCH DAEMON STARTING (PID {os.getpid()})")
     logger.info("=" * 60)
 
-    # An unreadable safety config stops the daemon: its defaults are the less
-    # safe side, every branch autonomous (ai_mail, leg 13).
+    # An unreadable safety config stops the daemon: its defaults make every branch autonomous.
     try:
         config = load_config()
     except JsonUnreadable as e:
@@ -643,9 +550,7 @@ def run_daemon() -> None:
             time.sleep(poll_interval)
             continue
 
-        # Unreadable config or state skips the cycle and spawns nothing: the
-        # defaults would make every branch autonomous and an empty state would
-        # reset today's dispatch counts (ai_mail, leg 13).
+        # Unreadable config or state skips the cycle: defaults are autonomous, empty state resets counts.
         try:
             config = load_config()
             state = load_daemon_state()

@@ -3,46 +3,13 @@
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
 # Version: 1.0.1
 # Created: 2026-09-11
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
 
-A job carries ``command`` where a wake job carries ``prompt``. The tick runs it as a
-subprocess in the owner's branch directory and records the answer exactly like a
-wake: no seat, no session, no tokens. The owner, 2026-09-11: "if it runs there's a
-log, if it passed or failed there's a log."
-
-THE RULES, and why each one exists:
-
-- **drone is the first token, always.** The schedule file is per-branch and
-  editable by its owner, so whatever it names runs with the tick's authority.
-  Holding it to drone verbs keeps drone's own gates (rm's fence, git's refusal,
-  the argument gates) as the whole story of what a scheduled command may do.
-- **No shell.** ``shlex.split`` then an argv list: no globs, no pipes, no ``;``,
-  no expansion — nothing in a JSON string can become a second command.
-- **cwd is the owner's branch.** Drone reads cwd as identity, so the command is
-  logged as the citizen whose schedule asked for it. Run from the tick's own cwd
-  (the repo root) it would be logged as the project, so a job with no branch
-  directory is refused rather than run from there.
-
-TWO MEASURED CHOICES the plain ``subprocess.run(capture_output=True)`` form gets
-wrong, which is why this runs ``Popen`` itself:
-
-- **Output goes to an anonymous temp file, not a pipe.** A pipe reaches EOF only
-  when every holder of its write end closes it. A drone verb that starts anything
-  in the background hands that process the pipe, and the read then waits on it —
-  a command that exited 0 in a second would be reported as a 600s timeout.
-  ``TemporaryFile`` is unlinked at creation, so it leaves no litter either.
-- **A timeout stops the whole process tree.** Drone runs every ``@branch`` verb in
-  a child of its own (``drone/apps/handlers/executor.py``), so killing drone alone
-  orphans exactly the work that overran. On POSIX the command runs in its own
-  session and the timeout signals the group. Windows has no group to signal: the
-  direct child is killed and a grandchild may outlive it — the known residual.
-
-Every subprocess this module starts — the command AND the notify mail — goes
-through :data:`LAUNCHER`, so one seam covers both. The test suite seals it
-session-wide (``tests/conftest.py``): no test can reach the real drone.
+Reference: docs/command_jobs.md
+Every subprocess here (command and notify mail) goes through LAUNCHER; tests/conftest.py seals it.
 """
 
 import os
@@ -57,24 +24,17 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
-#: The only executable a command job may name.
 COMMAND_EXECUTABLE = "drone"
 
-#: The argv prefix that stands for ``drone``. The job's own first token is
-#: replaced by this, never run as written. Patched by the test suite's seal.
+#: The job's own first token is replaced by this, never run as written.
 LAUNCHER = (COMMAND_EXECUTABLE,)
 
-#: Seconds a command may run before its tree is stopped. Matches drone's own
-#: executor default, so a command job is never cut shorter than drone would cut it.
+#: Matches drone's own executor default, so a command job is never cut shorter than drone would cut it.
 DEFAULT_TIMEOUT_SECONDS = 600
 
-#: Seconds the notify mail may take. A mail is one drone call; a minute is generous.
 MAIL_TIMEOUT_SECONDS = 60
 
-#: How much of the output survives into the log line, the mail and the runstate
-#: row. The end is kept, because that is where a command says how it ended. The
-#: character cap sits under runstate's 500-char last_error slice, so the whole
-#: detail fits in the row.
+#: The cap sits under runstate's 500-char last_error slice, so the whole detail fits in the row.
 TAIL_LINES = 5
 TAIL_MAX_CHARS = 400
 
@@ -105,8 +65,7 @@ class CommandResult:
 def command_argv(command) -> List[str]:
     """Split a job's command the way it will run, or raise ValueError naming why it cannot.
 
-    One definition for discovery's validation and the fire path, so a command
-    the validator accepted is exactly the argv the tick runs.
+    Shared by discovery's validation and the fire path, so an accepted command is exactly the argv run.
     """
     if not isinstance(command, str) or not command.strip():
         raise ValueError(f"command must be a non-empty string, got {command!r}")
@@ -133,11 +92,7 @@ def notify_email(job: dict) -> str:
 
 
 def command_job_problem(job: dict) -> str:
-    """'' when a command job is well-formed, else the reason discovery must refuse it.
-
-    command_argv's ValueError is the answer here, not a failure: its message is
-    never empty, so it always reads as a refusal and names why.
-    """
+    """'' when a command job is well-formed, else the reason discovery must refuse it."""
     try:
         command_argv(job.get("command"))
     except ValueError as e:
@@ -170,10 +125,7 @@ def output_tail(text: str, lines: int = TAIL_LINES, max_chars: int = TAIL_MAX_CH
 
 
 def signal_group(pid: int, sig) -> None:
-    """Signal a whole process group. A group that is already gone is the answer we wanted.
-
-    The one seam every group signal goes through, so a test can see where each one lands.
-    """
+    """Signal a whole process group. A group that is already gone is the answer we wanted."""
     try:
         os.killpg(pid, sig)
     except ProcessLookupError:
@@ -203,16 +155,13 @@ def _stop_tree(proc: "subprocess.Popen[bytes]") -> None:
     """Stop an overrunning command and everything it started, then reap it."""
     if _POSIX:
         signal_group(proc.pid, signal.SIGTERM)
-        # The pgid is ours only while the leader is unreaped: a reaped pid can be
-        # reissued, and a SIGKILL to its group would land on a stranger. So the
-        # grace is polled without reaping, the group killed, and only then reaped.
+        # The pgid is ours only while the leader is unreaped: a reaped pid can be reissued to a stranger.
         try:
             _await_leader_unreaped(proc.pid)
         except ChildProcessError:
             logger.warning("[command_job] pid %s was reaped before SIGKILL; its pgid is not ours to signal", proc.pid)
         else:
-            # Unconditional: the leader exiting on TERM says nothing about a
-            # grandchild that ignored it, and the group outlives its leader.
+            # Unconditional: a grandchild may have ignored TERM, and the group outlives its leader.
             signal_group(proc.pid, signal.SIGKILL)
     else:
         proc.kill()
@@ -237,7 +186,6 @@ def _execute(argv: List[str], cwd, timeout_seconds) -> CommandResult:
                 start_new_session=_POSIX,
             )
         except OSError as e:
-            # No drone on PATH, a branch directory that is gone: the command never started.
             logger.warning("[command_job] could not start %s in %s: %s", argv[:3], cwd, e)
             elapsed = time.monotonic() - start
             return CommandResult(None, elapsed, "", error=f"could not start: {e}", timeout_seconds=timeout_seconds)
@@ -260,8 +208,7 @@ def _execute(argv: List[str], cwd, timeout_seconds) -> CommandResult:
 def run_command(command: str, cwd, timeout_seconds=DEFAULT_TIMEOUT_SECONDS) -> CommandResult:
     """Run a command job's drone command in ``cwd`` and say how it ended. Never raises.
 
-    ``cwd`` is required: the owner's branch directory is the command's identity,
-    and falling back to the tick's own cwd would sign the work as the project.
+    ``cwd`` is required: falling back to the tick's own cwd would sign the work as the project.
     """
     try:
         argv = command_argv(command)
@@ -324,8 +271,7 @@ def finish_mail(job: dict, result: CommandResult) -> tuple:
 def send_mail(to: str, subject: str, body: str, sender_dir) -> str:
     """Send one ai_mail email (never a wake) through drone, signed by ``sender_dir``'s citizen.
 
-    Returns '' when it went, else the reason it did not. Fail-soft on purpose:
-    the mail reports a fire and must never change the fire's answer.
+    Returns '' when it went, else the reason; fail-soft so the mail never changes the fire's answer.
     """
     argv = list(LAUNCHER) + ["@ai_mail", "email", to, subject, body]
     result = _execute(argv, sender_dir, MAIL_TIMEOUT_SECONDS)

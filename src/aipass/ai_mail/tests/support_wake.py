@@ -3,7 +3,7 @@
 # Description: Shared helpers for test_wake.py and its split siblings - the wake fixtures and spawn recorder
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Helpers for the tests of apps/handlers/dispatch/wake.py (no test_ prefix: never collected)."""
@@ -41,9 +41,7 @@ def _make_wake_fixtures(tmp_path, monkeypatch):
 def _patch_wake_deps(monkeypatch, resolve_claude=False, **overrides):
     """Monkeypatch all wake_branch dependencies with sane defaults; override as needed.
 
-    The claude binary is stubbed to the bare name unless *resolve_claude*: the
-    wake resolves it per spawn, and a CI runner has no claude to find. The
-    rows about that resolution (TestFindClaudeBin) let the real one run.
+    The claude binary is stubbed unless *resolve_claude*: a CI runner has no claude to find.
     """
     defaults = {
         "check_lock": lambda p: None,
@@ -51,10 +49,7 @@ def _patch_wake_deps(monkeypatch, resolve_claude=False, **overrides):
         "is_branch_occupied": lambda p: False,
         "acquire_lock": lambda p, pid: (True, "ok"),
         "check_pid_alive": lambda pid: True,
-        # Stubbed by default: a unit test of the wake must not read the fleet's
-        # real .central.json files or write a dashboard into tmp_path. The pins
-        # that are ABOUT the refresh put the real hook back (see
-        # TestRecipientDashboardRefresh._real_refresh).
+        # Stubbed: a unit test must not read the fleet's real .central.json files.
         "_refresh_recipient_dashboard": lambda path, email, status: None,
     }
     if not resolve_claude:
@@ -75,11 +70,7 @@ class _FakeProc:
 
 
 def _make_scheduled_fixtures(tmp_path, monkeypatch, email="@testbranch", citizen_class="manager"):
-    """Branch + registry + passport for scheduled-lane tests.
-
-    `email` other than @testbranch is added as a second registry entry pointing
-    at the same directory — these tests care about the address, not the tree.
-    """
+    """Branch + registry + passport for scheduled-lane tests; a non-default `email` shares the directory."""
     branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
     if email != "@testbranch":
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
@@ -99,9 +90,7 @@ def _make_scheduled_fixtures(tmp_path, monkeypatch, email="@testbranch", citizen
 def _record_spawn_routes(monkeypatch):
     """Capture both spawn routes so a test can name which one a wake took.
 
-    tmux interactive goes through subprocess.run; the headless monitor pipeline
-    goes through subprocess.Popen. Recording both is what makes "it went the
-    other way" a readable failure instead of a missing-call one.
+    tmux goes through subprocess.run; the headless monitor through subprocess.Popen.
     """
     calls: dict = {"tmux": [], "popen": []}
 

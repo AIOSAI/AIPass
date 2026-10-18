@@ -3,7 +3,7 @@
 # Description: Unit tests for handlers/diagnostics/
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/diagnostics/diagnostics_check.py."""
@@ -19,11 +19,6 @@ from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
     format_summary,
     should_ignore_file,
 )
-
-
-# ---------------------------------------------------------------------------
-# Tests -- should_ignore_file
-# ---------------------------------------------------------------------------
 
 
 def test_should_ignore_file_removes_the_gitignored_driver_layer(tmp_path):
@@ -43,11 +38,6 @@ def test_should_ignore_file_leaves_a_file_outside_the_branch_alone(tmp_path):
     assert should_ignore_file(str(tmp_path.parent / "__pycache__" / "mod.py"), tmp_path / "branch") is False
 
 
-# ---------------------------------------------------------------------------
-# Tests -- check_file (non-existent / non-python)
-# ---------------------------------------------------------------------------
-
-
 def test_check_file_nonexistent(tmp_path):
     """check_file returns zero errors for a file that does not exist."""
     result = check_file(str(tmp_path / "missing" / "file.py"))
@@ -64,11 +54,6 @@ def test_check_file_not_python(tmp_path):
     assert "skipped" in result
 
 
-# ---------------------------------------------------------------------------
-# Tests -- check_branch (no apps dir)
-# ---------------------------------------------------------------------------
-
-
 def test_check_branch_no_apps_dir(tmp_path):
     """check_branch returns score=100 when no apps/ directory exists."""
     result = check_branch(str(tmp_path))
@@ -82,11 +67,6 @@ def test_check_branch_returns_expected_keys(tmp_path):
     result = check_branch(str(tmp_path))
     for key in ("passed", "score", "total_files", "total_errors", "checks", "standard"):
         assert key in result, f"Missing key: {key}"
-
-
-# ---------------------------------------------------------------------------
-# Tests -- format_summary
-# ---------------------------------------------------------------------------
 
 
 def test_format_summary_with_error():
@@ -111,11 +91,6 @@ def test_format_summary_clean_run():
     assert "Total errors: 0" in result
     assert "Total warnings: 2" in result
     assert "Files with errors: 0" in result
-
-
-# ---------------------------------------------------------------------------
-# Tests -- _get_enabled_runners_from_config
-# ---------------------------------------------------------------------------
 
 
 def _dispatched(tmp_path, monkeypatch, *configs):

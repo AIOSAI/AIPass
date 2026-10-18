@@ -3,13 +3,10 @@
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
 # Version: 1.2.2
 # Created: 2026-08-04
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/init/git_auth.py."""
-# Covers the repair set that makes drone's four owner-tier checks true for a
-# consuming project, the guardrail refusals that must never be repaired around,
-# and the independent post-repair verification.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that git_auth.py and the modules it imports parse and import
@@ -32,10 +29,6 @@ from aipass.aipass.apps.handlers.init.git_auth import (
 
 # The symlink-loop test logs which answer the platform gave, so a run says which branch it took.
 logger = logging.getLogger(__name__)
-
-# =============================================================================
-# Fixtures / builders
-# =============================================================================
 
 
 def _write(path: Path, data: Dict[str, Any]) -> None:
@@ -112,11 +105,6 @@ def owner_entry(registry_path: Path, name: str = "VERA") -> Dict[str, Any]:
     return next(b for b in branches if b.get("name") == name)
 
 
-# =============================================================================
-# Registry discovery
-# =============================================================================
-
-
 def test_find_registry_walks_up_from_a_subdirectory(tmp_path: Path) -> None:
     """A citizen standing in its own branch dir still finds the project registry."""
     registry_path = build_project(tmp_path)
@@ -134,11 +122,6 @@ def test_provision_refuses_when_no_registry_exists(tmp_path: Path) -> None:
     with pytest.raises(GitAuthRefusal) as exc:
         provision_git_auth(tmp_path)
     assert "aipass init" in str(exc.value)
-
-
-# =============================================================================
-# The repair set
-# =============================================================================
 
 
 def test_flips_owner_citizen_class_to_manager(tmp_path: Path) -> None:
@@ -301,11 +284,6 @@ def test_stale_branch_info_class_is_updated_too(tmp_path: Path) -> None:
     assert read_json(passport_path)["branch_info"]["citizen_class"] == "manager"
 
 
-# =============================================================================
-# Guardrail — the repo-root path refusal
-# =============================================================================
-
-
 @pytest.mark.parametrize(
     ("root_path", "phrase"),
     [(".", "project root"), ("./", "project root"), ("", "no directory under")],
@@ -313,12 +291,8 @@ def test_stale_branch_info_class_is_updated_too(tmp_path: Path) -> None:
 def test_refuses_a_repo_root_owner_path(tmp_path: Path, root_path: str, phrase: str) -> None:
     """Path-binding is at-or-under: a root path would let any directory hold git.
 
-    The expected phrase rides the parametrize (v5 assertion_shape, 2026-09-08).
-    The old body asserted one string OR the other, and both clauses were about
-    the same message, so either alone carried every case. Measured by running
-    the three cases: "." and "./" are refused as a project root, while the
-    empty path is refused for recording no path at all - two different
-    refusals the single `or` had been hiding behind each other.
+    The phrase rides the parametrize: "." and "./" refuse as a project root, the
+    empty path for recording no path at all, two different refusals.
     """
     registry_path = build_project(tmp_path, owner_path=root_path)
     _write(
@@ -377,11 +351,6 @@ def test_refuses_when_the_owner_directory_has_no_passport(tmp_path: Path) -> Non
 
     assert "no passport" in str(exc.value)
     assert "drone @spawn create" in str(exc.value)
-
-
-# =============================================================================
-# Owner selection — marked, never guessed
-# =============================================================================
 
 
 def test_refuses_when_no_citizen_is_marked_owner(tmp_path: Path) -> None:
@@ -454,11 +423,6 @@ def test_registry_flag_wins_over_a_contradicting_passport(tmp_path: Path) -> Non
     assert result["verified"] is True
 
 
-# =============================================================================
-# Dry run
-# =============================================================================
-
-
 def test_dry_run_plans_repairs_without_writing(tmp_path: Path) -> None:
     """Preview reports the full plan and leaves both files byte-identical."""
     registry_path = build_project(tmp_path, registry_id=None, passport_registry_id=None)
@@ -483,11 +447,6 @@ def test_dry_run_still_refuses_a_root_path(tmp_path: Path) -> None:
         provision_git_auth(tmp_path, dry_run=True)
 
 
-# =============================================================================
-# Independent verification
-# =============================================================================
-
-
 def test_verify_reports_every_failing_check(tmp_path: Path) -> None:
     """Verification names each failing check rather than a single pass/fail."""
     registry_path = build_project(
@@ -508,13 +467,8 @@ def test_verify_reports_every_failing_check(tmp_path: Path) -> None:
 def test_a_symlink_loop_owner_path_refuses_and_is_never_rebound(tmp_path: Path) -> None:
     """A recorded path that cannot resolve is a named refusal, never "records no path" or a traceback.
 
-    HEAD caught OSError only: on Python 3.12 and older the loop's RuntimeError
-    escaped provision as a traceback; on 3.13 resolve answers the loop without
-    raising and HEAD refused "does not exist". A real passport of VERA sits at
-    src/demo/vera, so an answer of None reaches the passport search, which
-    would rewrite the recorded path — the never-rebound assert can fail.
-    The test asks the platform itself: where the link is refused, the recorded
-    path simply does not exist; where it is made, resolve on the loop decides.
+    Python 3.12 and older raise RuntimeError resolving the loop, 3.13 does not, so the
+    test asks the platform. VERA's real passport makes a None answer rebind the path.
     Mutant: git_auth.py _resolved_path's catch narrowed to OSError -> red (RuntimeError escapes).
     Mutant: git_auth.py _resolved_path's raise turned into `return None` -> red (the refusal text).
     """
@@ -586,11 +540,6 @@ def test_verify_catches_a_registry_edited_after_repair(tmp_path: Path) -> None:
 
     failures = verify_git_auth(registry_path, "VERA")
     assert any("check 3" in f for f in failures)
-
-
-# =============================================================================
-# Corrupt input
-# =============================================================================
 
 
 def test_refuses_an_unreadable_registry(tmp_path: Path) -> None:

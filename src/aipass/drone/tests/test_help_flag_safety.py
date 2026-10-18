@@ -3,7 +3,7 @@
 # Description: Rule E canaries — a help flag anywhere explains, never executes
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/help_flags.py and the help gate of every drone module."""
@@ -32,15 +32,8 @@ from aipass.drone.apps.modules import (
     scan,
 )
 
-# Every drone module gated help at one fixed slot, so `--help` after the first
-# argument was invisible and the verb ran anyway (DPLAN-0291, help_flag_safety 9/100).
-# Every test here mocks its dispatch target and asserts it was NEVER CALLED: `rm`
+# Every test mocks its dispatch target and asserts it was NEVER CALLED: `rm`
 # deletes files and the git write paths mutate a repo, so no live verb is fired.
-
-
-# ===========================================================================
-# 1. The predicate itself
-# ===========================================================================
 
 
 class TestWantsHelp:
@@ -97,19 +90,13 @@ class TestWantsHelp:
         assert wants_help("run", ["-help"]) is False
 
 
-# ===========================================================================
-# 2. Per-module canaries — target mocked, asserted never called
-# ===========================================================================
-
 _M = "aipass.drone.apps.modules"
 
 
 class TestRmNeverDeletesOnHelp:
     """rm is the one that bites: every token is a PATH.
 
-    `drone rm notes.md --help` deleted notes.md and then tried to delete a file
-    literally named `--help`. _safe_delete is mocked — this proves the trap
-    without ever putting a real path at risk.
+    `drone rm notes.md --help` must not delete notes.md, nor a file named `--help`.
     """
 
     @pytest.mark.parametrize(
@@ -311,11 +298,6 @@ class TestDiscoveryHelpSubcommandSurvives:
         assert result is True
 
 
-# ===========================================================================
-# 4. Explaining is not enough — explain the verb that was asked about
-# ===========================================================================
-
-
 class TestHelpTopic:
     """help_topic() — which verb the question is about, if any."""
 
@@ -346,11 +328,7 @@ class TestHelpTopic:
 class TestGitHelpNamesTheVerb:
     """`drone @git <verb> --help` must explain THAT verb, not the whole page.
 
-    get_help(command) carries a paragraph for each of nineteen verbs, and
-    handle_command called print_help() with no argument — so every one of them
-    was unreachable from the CLI and the top-level page came back instead.
-    seedgo's subcommand_help standard names that exact shape a violation:
-    "shows top-level help (unhelpful)".
+    seedgo's subcommand_help calls top-level help for a verb a violation.
     """
 
     @pytest.mark.parametrize(

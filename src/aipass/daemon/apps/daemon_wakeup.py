@@ -3,24 +3,12 @@
 # Description: DAEMON Wake-Up Cron Trigger
 # Version: 1.2.0
 # Created: 2026-02-15
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 Cron trigger script for the DAEMON wake-up system.
-
-Called periodically by cron. Standalone script -- not imported as a module.
-
-Flow:
-  1. Acquire single-instance lock
-  2. Check daemon's email inbox (new/opened counts)
-  3. Build summary report with sender/subject listings
-  4. Log report
 """
-
-# =============================================
-# IMPORTS
-# =============================================
 
 import errno
 import os
@@ -46,19 +34,11 @@ except ImportError:
     fcntl = None  # type: ignore[assignment]
     logger.info("[DAEMON] daemon_wakeup: fcntl unavailable (Windows)")
 
-# =============================================
-# CONSTANTS
-# =============================================
-
 _DAEMON_ROOT = module_file(__file__).parents[1]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
 
 LOCK_FILE = JSON_DIR / "wakeup.lock"
 INBOX_PATH = _DAEMON_ROOT / ".ai_mail.local" / "inbox.json"
-
-# =============================================
-# LOGGING
-# =============================================
 
 
 def print_introspection():
@@ -97,20 +77,9 @@ def log(message: str) -> None:
     console.print(f"[{timestamp}] {message}")
 
 
-# =============================================
-# EMAIL CHECK
-# =============================================
-
-
 def check_inbox() -> dict:
     """
     Check daemon's email inbox for new and opened emails.
-
-    Reads inbox.json directly (stdlib only, no module imports that
-    require Rich/console).
-
-    Returns:
-        Dict with keys: new_count, opened_count, emails (list of brief dicts)
     """
     result = {
         "new_count": 0,
@@ -156,20 +125,9 @@ def check_inbox() -> dict:
     return result
 
 
-# =============================================
-# REPORT BUILDER
-# =============================================
-
-
 def build_report(inbox: dict) -> str:
     """
     Build a summary report from inbox check results.
-
-    Args:
-        inbox: Dict from check_inbox()
-
-    Returns:
-        Formatted report string
     """
     new_count = inbox["new_count"]
     opened_count = inbox["opened_count"]
@@ -183,7 +141,6 @@ def build_report(inbox: dict) -> str:
     else:
         lines.append(f"New: {new_count} | Opened: {opened_count}")
 
-        # List up to 10 most recent unread emails (brief, 1 line each)
         shown = emails[:10]
         for email in shown:
             marker = "[NEW]" if email["status"] == "new" else "[OPENED]"
@@ -196,21 +153,11 @@ def build_report(inbox: dict) -> str:
     return "\n".join(lines)
 
 
-# =============================================
-# MAIN
-# =============================================
-
-
 def main() -> int:
     """
     Main cron entry point.
 
-    Returns:
-        0 on success (and when another instance holds the lock), 1 on error
-
-    Raises:
-        OSError: flock failed for a reason other than contention; the
-        ``__main__`` catch logs it and exits 1.
+    0 on success or when another instance holds the lock, 1 on error; a non-contention flock OSError raises.
     """
     args = sys.argv[1:]
 
@@ -226,8 +173,7 @@ def main() -> int:
         print_help()
         sys.exit(0)
 
-    # A --help after the first argument is still a request for help, never a run
-    # (daemon, fleet green leg 5): `daemon_wakeup run --help` used to run the job.
+    # A --help after the first argument is still a request for help, never a run.
     remaining = args[1:]
     if "--help" in remaining or "-h" in remaining:
         print_help()
@@ -237,10 +183,8 @@ def main() -> int:
     log("=" * 60)
     log("Daemon wake-up triggered")
 
-    # Ensure lock directory exists
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Acquire single-instance lock (non-blocking, stdlib fcntl)
     if fcntl is None:
         log("fcntl not available (non-Unix platform), skipping lock.")
         return _run_locked()
@@ -250,8 +194,7 @@ def main() -> int:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
         lock_fd.close()
-        # Only contention means "another instance is running"; any other errno
-        # is a broken lock, and skipping on it would hide it behind exit 0.
+        # Only contention means another instance; skipping on any other errno would hide a broken lock.
         if e.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
             logger.error(f"Wakeup lock acquisition failed, not contention: {e}")
             raise
@@ -270,7 +213,6 @@ def _run_locked() -> int:
     """Execute the wake-up job while holding the lock."""
     exit_code = 0
 
-    # Step 1: Check inbox
     try:
         inbox = check_inbox()
         log(f"Inbox: {inbox['new_count']} new, {inbox['opened_count']} opened")
@@ -279,7 +221,6 @@ def _run_locked() -> int:
         log(f"CRITICAL: Unhandled error in check_inbox: {e}")
         return 1
 
-    # Step 2: Build report
     report = build_report(inbox)
     log(f"Report: {report.splitlines()[0]}")
 
@@ -293,7 +234,6 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        # Last-resort catch -- never crash silently
         logger.error(f"FATAL wakeup exception: {e}", exc_info=True)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         console.print(f"[{timestamp}] FATAL: Unhandled exception: {e}")

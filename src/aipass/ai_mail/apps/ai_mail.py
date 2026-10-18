@@ -3,17 +3,15 @@
 # Description: Entry point CLI for drone @ai_mail — inter-branch email system
 # Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 ai_mail Branch - Main Orchestrator
 
-Modular architecture with auto-discovered modules.
-Main handles routing, modules implement functionality.
+Main handles routing; auto-discovered modules implement functionality.
 """
 
-# Standard library imports
 import os
 import sys
 import importlib
@@ -21,13 +19,10 @@ import signal
 from pathlib import Path
 from typing import Any, List
 
-# AIPass infrastructure imports
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# CLI services for display
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit
 
-# Dashboard integration (optional, provided by prax)
 _UPDATE_SECTION = None  # type: ignore
 
 if sys.platform == "win32":
@@ -37,19 +32,9 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# =============================================================================
-# CONSTANTS & CONFIG
-# =============================================================================
-
-# Module root
 MODULE_ROOT = Path(__file__).parent
 
-# Modules directory
 MODULES_DIR = MODULE_ROOT / "modules"
-
-# =============================================================================
-# HELP DISPLAY
-# =============================================================================
 
 
 def print_help():
@@ -96,11 +81,6 @@ def print_help():
     console.print()
 
 
-# =============================================================================
-# INTROSPECTION DISPLAY
-# =============================================================================
-
-
 def print_introspection():
     """Display discovered modules only (seedgo pattern)"""
     console.print()
@@ -109,7 +89,6 @@ def print_introspection():
     console.print("[dim]Email system for branch-to-branch communication[/dim]")
     console.print()
 
-    # Discover modules
     modules = discover_modules()
 
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(modules)}")
@@ -124,18 +103,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
-
 def discover_modules() -> List[Any]:
-    """
-    Auto-discover modules from modules/ directory
-
-    Returns:
-        List of module objects with handle_command() function
-    """
+    """Auto-discover modules from modules/ directory"""
     modules = []
 
     if not MODULES_DIR.exists():
@@ -147,22 +116,19 @@ def discover_modules() -> List[Any]:
     files_found = list(MODULES_DIR.glob("*.py"))
 
     for file_path in files_found:
-        # Skip __init__.py and private files
         if file_path.name.startswith("_"):
             continue
 
         module_name = f"aipass.ai_mail.apps.modules.{file_path.stem}"
 
-        # A door_*.py is a door (DPLAN-0404): a re-export for other branches, not a command.
+        # A door_*.py is a re-export for other branches, not a command.
         if file_path.name.startswith("door_"):
             logger.info(f"  [door] {module_name}")
             continue
 
         try:
-            # Import module
             module = importlib.import_module(module_name)
 
-            # Check for required interface
             if hasattr(module, "handle_command"):
                 modules.append(module)
                 logger.info(f"  [+] {module_name}")
@@ -176,25 +142,8 @@ def discover_modules() -> List[Any]:
     return modules
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """
-    Route command to appropriate module
-
-    Pattern: Each module's handle_command() returns True if it handled the command
-
-    Args:
-        command: Command name (e.g., 'send', 'inbox', 'sent')
-        args: Additional arguments
-        modules: List of discovered modules
-
-    Returns:
-        True if command was handled, False otherwise
-    """
+    """Route command to appropriate module"""
     for module in modules:
         try:
             if module.handle_command(command, args):
@@ -208,61 +157,34 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# IDENTITY FENCE
-# =============================================================================
-
-
 def _refuse_unresolvable_caller() -> str:
-    """Return a refusal message when the caller stands outside any branch, else "".
-
-    Delegates to the email module, which owns sender identity; the entry point
-    stays a router. See ``modules.email.caller_refusal`` for the policy.
-
-    Returns:
-        str: The refusal text, or "" when the caller's identity is resolvable.
-    """
+    """Return a refusal message when the caller stands outside any branch, else ""."""
     from aipass.ai_mail.apps.modules.email import caller_refusal
 
     return caller_refusal()
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
-
 def main():
     """Main entry point - routes commands to modules
 
-    Exit codes: 0 success, 1 unroutable command, 2 routed but failed.
-    A recognised command that failed (delivery refused, message not found,
-    invalid reply_path) still returns True from its handler — that means
-    "I handled this", not "it worked". Without the resolve_exit flip those
-    failures exited 0 and every script reading the exit code was told a
-    reply had been sent when it had not.
+    Exit codes: 0 success, 1 unroutable, 2 routed but failed (a handler's True means "handled", not "worked").
     """
     reset_command_state()
     try:
-        # Parse arguments
         args = sys.argv[1:]
 
-        # Show introspection when run without arguments
         if len(args) == 0:
             print_introspection()
             return 0
 
-        # Show version
         if args[0] in ["--version", "-V"]:
             console.print("AI_MAIL v1.0.0")
             return 0
 
-        # Show help for explicit help flags
         if args[0] in ["--help", "-h", "help"]:
             print_help()
             return 0
 
-        # Command provided - try to route to modules
         modules = discover_modules()
         command = args[0]
         remaining_args = args[1:] if len(args) > 1 else []
@@ -278,16 +200,13 @@ def main():
             print_help()
             return 0
 
-        # Identity fence — after every help/version door above, because help needs
-        # no identity and @aipass's cross-OS preflight probes `drone @ai_mail --help`
-        # from wherever it happens to run. Before routing, because past this line a
-        # verb would act on a mailbox chosen by a guess.
+        # Identity fence: after every help/version door (help needs no identity; preflight probes --help
+        # from anywhere), before routing (past here a verb would act on a guessed mailbox).
         refusal = _refuse_unresolvable_caller()
         if refusal:
             error(refusal)
             return 2
 
-        # Route command
         if route_command(command, remaining_args, modules):
             return resolve_exit(True)
         else:
@@ -300,9 +219,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Handle broken pipe gracefully (e.g. output piped to head). Set here, never
-    # at import: an importer (a pytest worker) would die silently on its first
-    # EPIPE (2026-10-11). SIGPIPE does not exist on Windows.
+    # Set SIGPIPE here, never at import: an importer (a pytest worker) would die silently on its first EPIPE.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     sys.exit(main())

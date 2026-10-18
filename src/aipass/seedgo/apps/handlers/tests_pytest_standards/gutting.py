@@ -3,181 +3,20 @@
 # Description: extreme mutation - the per-function pseudo-tested probe
 # Version: 1.2.0
 # Created: 2026-09-19
-# Modified: 2026-09-19
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Extreme mutation. One mutant per FUNCTION, the whole body replaced by a constant.
+"""Extreme mutation. One mutant per FUNCTION, the whole body replaced by a constant.
 
-WHAT IT MEASURES. Gutting (Niedermayr, Juergens & Wagner, ICSE-CSED 2016;
-Vera-Perez, Danglot, Monperrus & Baudry, EMSE 2018 - the Descartes engine)
-replaces one function's ENTIRE body with ``return None``, leaves every other
-byte of the tree alone, and runs the suite once. If the suite is still green,
-no test's oracle noticed that function's behaviour disappearing - and if the
-tests also EXECUTE it, that is Descartes' PSEUDO-TESTED. Descartes measured a
-median of 10% of methods pseudo-tested across 19 Java projects. No Python tool
-ships this, which is the whole reason this module exists. The execution half of
-that definition needs coverage, which this module does not measure; the caveat
-has its own section below and it is not a footnote.
-
-WHAT IT IS NOT - CONTRACT 2, AND IT IS NOT NEGOTIABLE. Pseudo-testedness is a
-property of a FUNCTION. The pack's ``scoped_survival`` group measures
-module-granularity ORACLE SURVIVAL, which is a property of a TEST. Different
-quantity, different denominator, different unit of blame. The pack's signed
-design forbids conflating them: the per-function probe lands as a NEW group
-under S3/S4's no-vanishing rule, never as a redefinition of that one. So this
-module serves ``GROUP = "pseudo_tested"`` and touches nothing else, and no
-number it produces may be named, reported or documented as oracle survival.
-A survivor here says "no oracle watches this function"; it does not say which
-test is to blame, and the two counts will not agree because they are not
-counting the same things.
-
-CONTRACT 1 - WHY EVERY KILL MUST CARRY ITS EXCEPTION CLASS. The pack's signed
-contract 1 binds every group that executes a mutant: no mutant record may exist
-without a ``kill_cause`` splitting the kill by exception class, AssertionError
-versus everything else. On the first release that executes a mutant, an unsplit
-kill record is a REFUSAL, not a rounding error.
-
-The reason bites hardest for exactly this probe. Gutting returns ``None``, and
-in Python the next caller to touch that ``None`` raises ``TypeError`` or
-``AttributeError`` on contact. A suite can therefore post a near-perfect
-gutting kill rate WITHOUT A SINGLE ASSERTION EVER FIRING, purely on duck-typing
-collapse - the most flattering and least meaningful number the lane could
-publish. So:
-
-* A kill by ``AssertionError`` is STRONG evidence the function is tested. A
-  test looked at what the function produced and said it was wrong.
-* A kill by any other exception class is WEAK evidence. The suite noticed that
-  the program stopped working, which is roughly what an import check notices.
-  It says nothing about whether any oracle inspects the function's behaviour.
-* A kill whose class could not be determined is recorded ``"unknown"`` and
-  counted in its own THIRD bucket. It is never folded into either side. An
-  honest unknown bucket is the requirement here; a guess is the violation.
-
-READING THE CLASS OUT OF PYTEST IS ITSELF A MEASUREMENT PROBLEM, and both
-traps were found by running this probe rather than by reading pytest's docs.
-pytest drops the crash message from a short-summary line that does not fit the
-terminal width, and a non-tty child reports 80 columns; and it strips the
-leading ``AssertionError: `` from any REWRITTEN assert before printing it, in
-every traceback style there is. Left alone, those two turn the assertion bucket
-into the unknown bucket. The fixes are named constants below - a wide
-``COLUMNS`` for the child, and the exact inverse of pytest's strip rule - and
-the first campaign that ran without them is why they exist.
-
-Every record carries the raw class in ``kill_exception`` alongside the bucket,
-so a later reader can regrade the split without re-running anything. Note that
-``pytest.fail()`` raises ``Failed`` and a ``pytest.raises`` mismatch raises
-``Failed`` too: both are real oracles firing, and both land in the error bucket
-because the contract says AssertionError versus everything else. The raw class
-is in the record precisely so that caveat is auditable rather than lost.
-
-MUTATE A COPY, NEVER A BRANCH. Every mutation in this module is written into a
-copy of the target that the CALLER built and handed over. This is a measured
-lesson from this branch, not a stylistic preference: mutants written onto a
-live tree leak into any concurrent process that execs source from disk, and a
-concurrent fleet audit once scored a phantom red off exactly that. Restoration
-of the original bytes happens in a ``finally``, so a crash mid-campaign cannot
-leave a mutated file behind either.
-
-ONE CAMPAIGN PER COPY. The copy is exclusive for the duration - this module
-takes no lock, and two campaigns sharing one copy corrupt each other. Measured
-during this module's own calibration: a second campaign started against a copy
-another was already mutating read a RED baseline and a spurious
-``already_gutted`` skip, both of them artefacts of the other process's
-in-flight mutant rather than facts about the tree. It is the same failure the
-mutate-a-copy rule exists to prevent, one level down. Give each campaign its
-own copy.
-
-SKIPPING IS A MEASUREMENT. A probe that quietly drops half the tree and then
-reports a rate is lying about its denominator. Every function this module
-declines to mutate is recorded with a reason and published in the per-reason
-counts, including the functions whose gutting would be a no-op (a body that is
-already ``pass``) and the ones where gutting would be a DIFFERENT mutation than
-intended (a generator, where removing ``yield`` changes the function's type
-rather than its behaviour).
-
-A SURVIVOR IS A SUPERSET OF PSEUDO-TESTED, AND THE DIFFERENCE IS COVERAGE -
-WHICH ``SELECTION_COVERAGE`` NOW MEASURES. Descartes calls a method
-pseudo-tested only when it is COVERED and its mutant survives; a method no test
-ever executes is simply NOT COVERED, which is an ordinary coverage finding and
-not this probe's news. The default ``SELECTION_FULL_SUITE`` mode runs no
-coverage instrumentation and still cannot tell the two apart, and its limits
-say so. ``selection=SELECTION_COVERAGE`` closes the gap: the baseline pass is
-taken under coverage.py with per-test contexts, so a function whose body no
-test executes is reported in its own ``uncovered`` bucket carrying
-``reason: "no covering test"`` and NEVER appears in ``pseudo_tested``. They are
-different findings - the first is a hole in the coverage, the second is a
-missing oracle over code the suite really runs - and only the second is the
-thing Descartes named. Measured on the c5a487e2 canary fixture: of three
-full-suite survivors, two are uncovered and one is genuinely pseudo-tested.
-
-TEST SELECTION IS A COST REDUCTION AND A DIFFERENT CLAIM, SO IT IS RECORDED
-PER MUTANT. Gutting one function and running 4362 tests to watch none of them
-notice is the cost problem that keeps this probe off a weekly cadence: seedgo
-has 2091 probeable functions and a 101.9s suite, which is 35.6 projected hours
-of full-suite campaign. ``SELECTION_COVERAGE`` runs, for each mutant, ONLY the
-tests whose recorded coverage context executes that function's body - the
-mutmut-3 strategy - and every mutant record carries ``selected_tests`` and
-``selection_basis`` so a reader can see which claim it is looking at. A verdict
-from nine tests is not the verdict from the whole suite, and a record that does
-not say which one it is would be the conflation this lane exists to refuse.
-
-THE SELECTION IS SOUND ONLY BECAUSE GUTTING TOUCHES NOTHING BUT A BODY. The
-mutant keeps the original decorators, the def line and the signature byte for
-byte, so a test that never enters the body cannot observe the mutation; the
-tests that execute the body's lines are therefore the complete set that can
-kill. That argument is what makes the reduction legitimate rather than merely
-cheap, and it is exactly why this module refuses to rewrite signatures.
-
-THREE COVERAGE CLASSES, AND THE MIDDLE ONE WAS FOUND BY RUNNING THIS. A body
-line can carry a test context, no context at all, or no coverage record:
-
-* Body lines carrying test contexts -> run those tests, basis
-  ``covering_tests``.
-* Body lines executed under coverage's EMPTY context -> the function ran
-  outside any test phase, i.e. at import or collection time, and no nodeid can
-  be attributed to it. Selecting nothing here would be a silent lie. Measured:
-  the fixture's ``_find_real_caller`` runs only at import, has zero test
-  contexts, and the full suite KILLS it with a TypeError. Recorded basis
-  ``import_time_no_test_context`` and the WHOLE SUITE runs for that mutant.
-* No coverage record on any body line -> nothing executes it, so nothing can
-  kill it. That is a survivor with zero runs and ``reason: "no covering test"``,
-  and it is free.
-
-WHAT SELECTION CANNOT SEE, STATED BEFORE THE SAVING. coverage.py traces the
-process it runs in. A test that exercises the target through a SUBPROCESS - the
-fixture's own ``test_dead_cwd_imports.py`` does - contributes no context, so a
-function reached only that way reads as "no covering test" when the full suite
-would have killed it. The ``uncovered`` bucket is therefore a list to verify,
-not a conclusion, and a source file absent from the coverage data altogether
-(never imported, or dropped by an inherited ``omit``) falls back to the whole
-suite under basis ``source_file_not_instrumented`` rather than being guessed at.
-When the coverage map cannot be produced at all, the campaign REFUSES with the
-reason; it never quietly runs the full suite and reports the cheap number as if
-it were the same measurement.
-
-WHAT A SURVIVOR DOES NOT PROVE. A surviving mutant may be an EQUIVALENT mutant:
-a function that genuinely has no observable effect, in which case no test could
-have caught it and the finding is about the function, not the suite. The probe
-cannot tell those apart and does not try. It reports the survivor and leaves
-the judgement to a reader, which is also what Descartes does.
-
-NO ``check_module`` AND NO ``check_branch`` LIVE HERE. Their absence is the
-shape gate that keeps this pack invisible to the audit's file-walk scoring
-engine, exactly as in ``adapter.py``. A flag can be forgotten; a function that
-does not exist cannot be called.
-
-THIS FILE IS THE DISCOVERY, THE MUTATION, THE CAMPAIGN AND THE REPORT, AND
-NOTHING ELSE ANY MORE. Three sections moved out on 2026-09-19, when the file
-crossed the branch's 1500-line architecture cap: the record shapes into
-``mutation_shapes``, the pytest invocation and its output parsing into
-``mutation_runner``, and the coverage pass with its per-mutant test selection
-into ``mutation_selection``. It was a relocation and it changed no rule, no
-threshold and no number. The chain is strictly one-directional -
-``mutation_shapes`` <- ``mutation_runner`` <- ``mutation_selection`` <- here -
-and every name those three modules own is imported back below, because callers
-have always reached them through ``gutting`` and a split must not move an
-address.
+Contract 2: pseudo-testedness is a property of a FUNCTION; no number here may be
+named oracle survival (`scoped_survival`, a property of a TEST). Contract 1: every
+kill carries `kill_cause` (assertion / error / unknown, never folded), because a
+gutted `None` raises TypeError on contact and flatters the kill rate. Mutants go
+into a caller-built copy, one campaign per copy (no lock), restored in a `finally`.
+Coverage selection is sound only because gutting touches nothing but the body; a
+subprocess-only test contributes no context, so `uncovered` is a list to verify.
+`mutation_shapes`, `mutation_runner` and `mutation_selection` names are re-exported
+here because callers reach them through `gutting`.
 """
 
 import ast
@@ -187,11 +26,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from aipass.prax import logger
 
-# The three modules below were split out of this file and every public name
-# they own is imported back here. Callers have always reached these through
-# `gutting.<name>` - `adapter.py` still does - so the split must not move an
-# address. A name this file does not itself use carries the F401 waiver rather
-# than being dropped.
+# Re-exported: callers reach these as `gutting.<name>`; unused names carry the F401 waiver.
 from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_runner import (
     ASSERTION_EXCEPTION_NAME,  # noqa: F401  (re-exported)
     ASSERTION_REWRITE_PREFIX,  # noqa: F401  (re-exported)
@@ -275,13 +110,12 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_shapes import (
     SuiteTarget,
 )
 
-#: The group this module serves. NOT `scoped_survival` - see contract 2 above.
+#: NOT `scoped_survival` - see contract 2 above.
 GROUP = "pseudo_tested"
 
 MODULE_NAME = "gutting"
 
-#: Directory names that are never production source. Any dot-directory is
-#: excluded on top of this list, which covers `.venv`, `.git` and `.archive`.
+#: Any dot-directory is excluded on top of this list.
 EXCLUDED_DIR_NAMES: tuple = (
     "__pycache__",
     "tests",
@@ -293,12 +127,10 @@ EXCLUDED_DIR_NAMES: tuple = (
 
 SOURCE_GLOB = "*.py"
 
-#: The mutation itself. One statement, at the body's own indentation.
 GUT_STATEMENT = "return None"
 DEFAULT_NEWLINE = "\n"
 
-#: Skip reasons. Every one of these is published with a count; none of them is
-#: a quiet drop.
+#: Every skip reason is published with a count; none is a quiet drop.
 REASON_TRIVIAL_BODY = "trivial_body"
 REASON_ALREADY_GUTTED = "already_gutted"
 REASON_GENERATOR = "generator"
@@ -310,8 +142,7 @@ REASON_NO_BODY_RANGE = "no_body_range"
 REASON_UNPARSABLE_SOURCE = "unparsable_source"
 REASON_DUNDER_INIT = "dunder_init"
 
-#: The survivor that cost nothing to find. Spelled exactly as the lane's
-#: contract names it, because it is published verbatim in the mutant record.
+#: Published verbatim in the mutant record; spelled as the lane's contract names it.
 REASON_NO_COVERING_TEST = "no covering test"
 
 #: Decorator trailing names that mean the body is not a behaviour to remove.
@@ -325,33 +156,21 @@ SKIP_DECORATOR_REASONS: Dict[str, str] = {
 
 DUNDER_INIT_NAME = "__init__"
 
-#: Outcomes. `mutation_failed` is deliberately distinct from `killed`: a mutant
-#: that could not be written is not evidence about the suite.
+#: `mutation_failed` is not `killed`: a mutant that could not be written is no evidence.
 OUTCOME_SURVIVED = "survived"
 OUTCOME_KILLED = "killed"
 OUTCOME_SKIPPED = "skipped"
 OUTCOME_NOT_RUN = "not_run"
 OUTCOME_MUTATION_FAILED = "mutation_failed"
 
-#: `-rfE` keeps the FAILED/ERROR short-summary lines, which is where the
-#: exception class is read from. `--tb=line` is the fallback source for the
-#: same class when the summary line is missing.
+#: `-rfE` short-summary lines carry the exception class; `--tb=line` is the fallback.
 MUTANT_EXTRA_ARGS: tuple = ("--tb=line", "-rfE")
 
-#: One failure already means KILLED, so there is nothing to learn from the rest
-#: of the suite. `-x` is sound here and is measured rather than assumed - and
-#: it does not cost the kill cause, because the short summary and the `--tb`
-#: line for the one failure that stopped the run are both still printed.
+#: One failure already means KILLED; the stopping failure's kill cause is still printed.
 STOP_FIRST_ARG = "-x"
 
-#: Below this much remaining budget a mutant is not started at all. Starting
-#: one with two seconds left produces a timeout that reads like a slow test.
+#: A mutant started with two seconds left times out like a slow test.
 MIN_MUTANT_SECONDS = 5
-
-
-# =============================================================================
-# DISCOVERY
-# =============================================================================
 
 
 def _is_excluded_dir(name: str) -> bool:
@@ -360,16 +179,7 @@ def _is_excluded_dir(name: str) -> bool:
 
 
 def iter_source_files(target_copy: Path, source_dirs: Sequence[str] = DEFAULT_SOURCE_DIRS) -> List[Path]:
-    """Every production `.py` file under the target copy's source roots.
-
-    Args:
-        target_copy: Root of the COPY of the target tree.
-        source_dirs: Directory names under the copy that hold production code.
-
-    Returns:
-        Sorted absolute paths, with test, cache, archive and dot-directories
-        removed.
-    """
+    """Every production `.py` file under the target copy's source roots."""
     files: List[Path] = []
     for name in source_dirs:
         root = target_copy / name
@@ -415,9 +225,7 @@ def _strip_docstring(body: List[ast.stmt]) -> List[ast.stmt]:
 def _body_shape_reason(node: ast.AST) -> Optional[str]:
     """A skip reason when gutting this body would change nothing.
 
-    Gutting a body that is already a docstring, `pass`, `...`, `return` or
-    `return None` produces a mutant identical in behaviour to the original, so
-    it survives by construction and a survivor would mean nothing at all.
+    Such a mutant survives by construction, so its survivor would mean nothing.
     """
     body = _strip_docstring(list(getattr(node, "body", [])))
     if not body:
@@ -455,8 +263,7 @@ def _is_bare_none_return(statement: ast.stmt) -> bool:
 def _contains_yield(node: ast.AST) -> bool:
     """True when this function's OWN body yields.
 
-    Nested functions and lambdas are not descended into: a generator defined
-    inside an ordinary function does not make the outer one a generator.
+    Nested functions are not descended into: an inner generator does not make the outer one.
     """
     stack: List[ast.AST] = list(ast.iter_child_nodes(node))
     while stack:
@@ -496,9 +303,7 @@ def _skip_reason_for(node: ast.AST, lines: List[str], skip_dunder_init: bool) ->
 def _body_range_reason(node: ast.AST, lines: List[str]) -> Optional[str]:
     """A skip reason when the body has no replaceable line range.
 
-    A body written on the signature's own line (`def f(): return 1`) cannot be
-    replaced by whole lines without rewriting the signature, and rewriting the
-    signature is exactly what this module refuses to do.
+    An inline body (`def f(): return 1`) would need the signature rewritten, which this refuses.
     """
     body = list(getattr(node, "body", []))
     end_lineno = getattr(node, "end_lineno", None)
@@ -518,9 +323,7 @@ def _qualname(stack: Sequence[str], name: str) -> str:
 
 
 def _site_from_node(
-    # Narrow, not `ast.AST`: this reads `.name` and `.lineno`, which a bare AST
-    # does not have. The loose annotation let four type errors through the
-    # per-file checklist and the branch audit caught them.
+    # Narrow, not `ast.AST`: this reads `.name` and `.lineno`, which a bare AST lacks.
     node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
     relpath: str,
     stack: Sequence[str],
@@ -563,9 +366,7 @@ def _walk_for_sites(
 def _sites_in_file(path: Path, target_copy: Path, skip_dunder_init: bool) -> List[FunctionSite]:
     """The function sites in one file, or a single unparsable-source record.
 
-    A file that will not parse contributes exactly ONE skip record rather than
-    an unknown number of silently missing functions, so the hole it leaves in
-    the denominator is visible in the per-reason counts.
+    One skip record per unparsable file, so its hole in the denominator is visible.
     """
     relpath = path.relative_to(target_copy).as_posix()
     try:
@@ -604,19 +405,7 @@ def discover_functions(
 ) -> List[FunctionSite]:
     """Every function in the target copy's production source, with skip reasons.
 
-    `skip_dunder_init` defaults to False on purpose. Whether gutting `__init__`
-    breaks import rather than behaviour is a question to MEASURE on a given
-    tree, not to assume; leaving it on by default keeps the denominator honest
-    and lets the campaign report what those mutants actually did.
-
-    Args:
-        target_copy: Root of the COPY of the target tree. Never a live branch.
-        source_dirs: Production source roots to walk under the copy.
-        skip_dunder_init: Record `__init__` as skipped instead of probing it.
-
-    Returns:
-        Every discovered site in file then line order, including the ones that
-        will be skipped - each carrying its own reason.
+    `skip_dunder_init` is False by default: whether gutting `__init__` breaks import is measured.
     """
     sites: List[FunctionSite] = []
     for path in iter_source_files(target_copy, source_dirs):
@@ -625,27 +414,11 @@ def discover_functions(
     return sites
 
 
-# =============================================================================
-# MUTATION
-# =============================================================================
-
-
 def gut_source(source: str, site: FunctionSite) -> Optional[str]:
     """The module source with one function's body replaced by `return None`.
 
-    Line ranges plus the original text, never `ast.unparse`. Unparsing rewrites
-    the WHOLE file - quotes, spacing, comments gone - so every mutant would
-    differ from the original in a thousand irrelevant ways and a kill would no
-    longer be attributable to the gutting. Here the signature, the decorators,
-    the def line and every other byte of the file survive untouched. The same
-    replacement is correct for `async def`: the coroutine still awaits to None.
-
-    Args:
-        source: The unmutated module text.
-        site: The function to gut, carrying its own body line range.
-
-    Returns:
-        The mutated source, or None when the site cannot be gutted safely.
+    Line ranges, never `ast.unparse`: every other byte survives, so a kill stays attributable.
+    Correct for `async def` too: the coroutine still awaits to None.
     """
     if site.skip_reason is not None:
         return None
@@ -667,11 +440,6 @@ def gut_source(source: str, site: FunctionSite) -> Optional[str]:
     return "".join([*lines[:start], replacement, *lines[end + 1 :]])
 
 
-# =============================================================================
-# CAMPAIGN
-# =============================================================================
-
-
 def _read_source(path: Path) -> Tuple[Optional[bytes], Optional[str]]:
     """The file's bytes, or a recorded reason why they could not be read."""
     try:
@@ -685,10 +453,7 @@ def _read_source(path: Path) -> Tuple[Optional[bytes], Optional[str]]:
 def _mutant_text(original: bytes, site: FunctionSite) -> Tuple[Optional[str], Optional[str]]:
     """The gutted source text, or a recorded reason why there is none.
 
-    The mutant is compiled before it is written. A mutant that will not parse
-    would take the suite down with a `SyntaxError` and read as a perfect kill,
-    which would be a measurement of this module's bug rather than of the
-    target's tests.
+    Compiled before writing: a SyntaxError mutant would read as a perfect kill.
     """
     try:
         source = original.decode(SOURCE_ENCODING)
@@ -750,12 +515,7 @@ def _classify_run(
 def _survivor_note(run: SuiteRun, base: BaselineResult, selection: Selection) -> Optional[str]:
     """A warning when a green mutant ran fewer tests than it was given.
 
-    A mutant that turns tests into skips exits 0 and would otherwise read as a
-    clean survivor. The count is compared rather than assumed - and it is
-    compared against THIS MUTANT'S expected count, not the baseline's. Under a
-    reduced selection every mutant runs fewer tests than the baseline by
-    design, so comparing to the baseline would stamp the warning on every
-    selected survivor and the signal would mean nothing.
+    Compared against this mutant's expected count, not the baseline's, which selection lowers.
     """
     expected = base.passed if selection.runs_whole_suite else (selection.count or 0)
     passed = parse_counts(run.stdout).get("passed", 0)
@@ -773,11 +533,7 @@ def _probe_site(
     extra_args: Sequence[str],
     selection: Selection,
 ) -> MutantResult:
-    """Write one mutant, run its tests, classify, restore the original bytes.
-
-    Restoration is in a `finally`, so a crashed run, a keyboard interrupt or a
-    failure inside the classifier can never leave a mutated file in the copy.
-    """
+    """Write one mutant, run its tests, classify, restore the original bytes."""
     path = target.target_copy / site.relpath
     original, read_error = _read_source(path)
     if original is None:
@@ -800,9 +556,7 @@ def _probe_site(
 def _uncovered_survivor(site: FunctionSite, selection: Selection) -> MutantResult:
     """The survivor that cost nothing: no test executes this function's body.
 
-    No pytest runs at all. This is a COVERAGE HOLE rather than a missing
-    oracle, it is reported in its own bucket, and it is the half of Descartes'
-    definition the full-suite mode has never been able to separate out.
+    A coverage hole, not a missing oracle; reported in its own bucket.
     """
     return MutantResult(site, OUTCOME_SURVIVED, reason=REASON_NO_COVERING_TEST, selection=selection)
 
@@ -872,35 +626,10 @@ def run_campaign(
 ) -> CampaignResult:
     """Gut every probeable function in turn and run the tests that can kill it.
 
-    The campaign is serial and bounded twice over: `mutant_timeout_seconds`
-    caps one suite run, `budget_seconds` caps the whole campaign. On expiry the
-    remaining sites are recorded `not_run` with `budget_exhausted` and the
-    summary reports what was completed - a partial campaign never becomes a
-    whole-tree number.
-
-    `selection` DEFAULTS TO THE FULL SUITE, which is the behaviour every number
-    this group has published so far describes. `SELECTION_COVERAGE` opts into
-    the reduction: the baseline is taken under coverage.py with per-test
-    contexts and each mutant runs only the tests that execute its body. That is
-    a cheaper campaign and a different claim, so it is never selected
-    implicitly and every mutant record carries the basis it was judged on. When
-    the map cannot be built the campaign REFUSES rather than running the full
-    suite while still calling itself coverage-selected.
-
-    Args:
-        target: Where and how to run the suite, over a COPY of the tree.
-        sites: Everything `discover_functions` found, skips included.
-        budget_seconds: Wall-clock ceiling for the entire campaign.
-        mutant_timeout_seconds: Wall-clock ceiling for one mutant's suite run.
-        stop_on_first_failure: Pass `-x`; one failure already means KILLED.
-        baseline_result: A baseline already measured by the caller, if any.
-            Ignored under `SELECTION_COVERAGE`, whose baseline must be the
-            instrumented run that produced the map.
-        selection: One of `SELECTION_MODES`.
-        source_dirs: Production roots under the copy, instrumented for the map.
-
-    Returns:
-        The campaign, baseline included, ready for `summarize`.
+    On budget expiry the rest are `not_run` with `budget_exhausted`: a partial campaign is
+    never a whole-tree number. `selection` defaults to the full suite; `SELECTION_COVERAGE`
+    refuses rather than silently falling back when the map cannot be built, and ignores
+    `baseline_result` because its baseline must be the instrumented run.
     """
     started = time.monotonic()
     if selection not in SELECTION_MODES:
@@ -971,11 +700,6 @@ def _drive(
         capped = ceiling < mutant_timeout_seconds
         results.append(_probe_site(target, site, base, ceiling, capped, extra_args, selection))
     return results
-
-
-# =============================================================================
-# SUMMARY
-# =============================================================================
 
 
 def _count_reasons(results: Sequence[MutantResult], outcome: str) -> Dict[str, int]:
@@ -1061,9 +785,7 @@ def _coverage_was_measured(campaign: CampaignResult) -> bool:
 def _superset_sentence(campaign: CampaignResult) -> str:
     """How far this campaign got towards Descartes' own definition.
 
-    The full-suite mode still cannot separate an uncovered function from a
-    pseudo-tested one and must say so. The coverage mode can, and says that
-    instead - the sentence changes because the measurement changed.
+    Only the coverage mode can separate uncovered from pseudo-tested, so the sentence differs.
     """
     if not _coverage_was_measured(campaign):
         return (
@@ -1119,19 +841,8 @@ def _limits(campaign: CampaignResult, survivors: Sequence[MutantResult], unknown
 def summarize(campaign: CampaignResult) -> dict:
     """The campaign as a publishable record.
 
-    Args:
-        campaign: A finished campaign.
-
-        `pseudo_tested` and `uncovered` are SEPARATE lists and neither is a
-        subset of the other. A function no test executes is a coverage hole; a
-        function the tests execute and no oracle watches is a missing oracle.
-        Folding them together is the confusion this group exists to undo.
-
-    Returns:
-        A JSON-safe dict. `killed_by_assertion`, `killed_by_error` and
-        `killed_by_unknown` are reported separately and there is deliberately
-        no combined total: contract 1 exists to make that ratio visible, and a
-        single kill count would hide exactly the thing it was written to show.
+    No combined kill total: contract 1 exists to make the split visible. `pseudo_tested` and
+    `uncovered` are separate lists, neither a subset of the other.
     """
     results = campaign.results
     survivors = [result for result in results if result.outcome == OUTCOME_SURVIVED]
@@ -1147,9 +858,7 @@ def summarize(campaign: CampaignResult) -> dict:
         "group": GROUP,
         "functions_total": len(results),
         "functions_probed": len(probed),
-        # A `no covering test` survivor is a decided verdict that started no
-        # pytest at all, so the count of functions actually EXECUTED as mutants
-        # is published next to the count of functions judged.
+        # `no covering test` survivors ran no pytest, so executed is published beside judged.
         "functions_executed": len(probed) - len(uncovered),
         "skipped": {
             "total": sum(1 for r in results if r.outcome == OUTCOME_SKIPPED),
@@ -1157,9 +866,7 @@ def summarize(campaign: CampaignResult) -> dict:
         },
         "pseudo_tested": [_survivor_document(r) for r in unwatched],
         "uncovered": {
-            # False whenever nothing looked - the full-suite mode, and equally
-            # a coverage campaign whose map was refused. An empty list under
-            # `measured: true` must mean "looked, found none".
+            # An empty list under `measured: true` must mean "looked, found none".
             "measured": _coverage_was_measured(campaign),
             "total": len(uncovered),
             "functions": [_survivor_document(r) for r in uncovered],

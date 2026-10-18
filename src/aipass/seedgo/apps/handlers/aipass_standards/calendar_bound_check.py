@@ -3,90 +3,12 @@
 # Description: Calendar Bound Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-17
 # =============================================
 
 """Calendar Bound Standards Checker Handler.
 
-WHERE IT CAME FROM. main and PR #767 went red on every host on one test:
-
-    def test_a_slotted_job_is_seeded_before_it_can_fire(self, capsys):
-        results, _save = self._tick(interval_job_with_slot(), {"jobs": {}})
-        assert runstate["jobs"][...]["last_run"] == "2026-09-06T03:00:00"
-
-The seeder rolls a weekly slot forward to the latest occurrence at or before
-``datetime.now()``, so the expected value is a fact about NOW. The test froze
-nothing. It was green from 2026-09-06 to 2026-09-12, merged green, and turned
-red by the calendar at 2026-09-13T03:00 - a time bomb that passed every gate
-because every gate ran inside its one-week window. No rule read the clock:
-pytest_quality asks what a test proves (a literal equality is a strong oracle),
-host_portability and windows_compat ask which HOST a test runs on, and the
-execution lane runs the suite on today's date, which is exactly the blind spot.
-
-THE RULE HAS THREE LEGS AND ALL THREE MUST STAND.
-
-    1. The unit ASSERTS A DATE LITERAL: an ISO string or ``datetime(...)`` /
-       ``date(...)`` with integer literals, as an operand of an assert
-       comparison or a unittest ``assert*`` method.
-    2. The unit REACHES PRODUCTION THAT COMPUTES WITH THE CLOCK, within
-       ``MAX_HOPS`` calls: a function that feeds ``datetime.now()`` /
-       ``date.today()`` / ``time.time()`` (or a local name bound to one, or a
-       one-level wrapper that returns one) into arithmetic, an ordering or
-       equality, or another call. The incident is four hops deep: run_tick,
-       _tick_body, _seed_interval_slots, seed_interval_slot.
-    3. The unit DOES NOT OWN THE CLOCK.
-
-LEG 2 IS WHERE THE NOISE DIED, AND WHY IT READS PRODUCTION. The shape as first
-posed - a date literal in an assert, in a test whose imported module calls
-``datetime.now()``, with no freeze - convicted 58 units fleet-wide. Reading
-them: 57 were round trips. A date goes in through a helper, fixture or module
-constant and comes out unchanged, while the module under test also STAMPS
-``last_updated`` with now. Stamping is not deriving: ``now().isoformat()``
-stored in a field cannot change what another field holds. So a clock value
-counts only when something computes with it; a value turned into a string
-(``isoformat``, ``strftime``), logged, formatted or stored is a stamp. A textual
-narrowing ("the expected date appears nowhere else in the unit") was measured
-too and rejected: the incident's date DOES appear as input (the slot default),
-and inlining a helper would launder a real time bomb.
-
-WHAT OWNS THE CLOCK (acquits, and is the cure this rule teaches):
-
-  - a ``patch`` / ``patch.object`` / ``monkeypatch.setattr`` whose target names
-    datetime, date, time, now, today, clock, freeze or frozen - in the unit, its
-    class's helper methods, or a same-file function the unit calls;
-  - an injected instant: a ``now=`` / ``clock=`` / ``today=`` / ``timestamp=``
-    style keyword, or a ``datetime(...)`` literal handed positionally to a call;
-  - a fixture parameter named for a clock (``frozen_now``, ``fixed_clock``);
-  - a ``freeze_time`` / ``time_machine`` decorator on the unit or its class;
-  - an autouse fixture in the file or a conftest.py above it that patches one.
-
-A patch on ``sleep``, ``monotonic`` or ``perf_counter`` owns nothing: it stops
-a wait or a stopwatch, never the calendar. ai_mail's wake helper patches
-``wake.time.sleep`` and was acquitted by the word ``time`` until this was read.
-
-A patched call is also CUT FROM THE WALK: a seam the unit stubbed is not a road
-to the clock.
-
-ALSO ACQUITTED: A DATE PRODUCTION SPELLS ITSELF. ``"2026-09-08" in step[2]``
-(ai_mail test_wake) names the date of a ruling written into the refusal text;
-it is a fact about the code, not the calendar, even though the same call path
-ages a lock file against now. Read from production only - a string constant, by
-substring, in a module on the trail that is not under a ``tests`` directory.
-Docstrings do not count, and neither does the test's own spelling: the
-incident's date sat in its own helper's default and first acquitted it.
-
-WHAT THIS FILE DELIBERATELY DOES NOT CLAIM, all in the direction of FEWER flags:
-
-  - an expected value held in a parametrize table or a variable is not read -
-    only a literal operand is (the frozen-clock cure itself uses a table);
-  - calls are followed by NAME: a function reached through an object that is
-    not ``self``/``cls``, a module alias, or an import is invisible;
-  - a clock read in another project's package is outside the walk;
-  - a unit that owns the clock but freezes the WRONG module is acquitted.
-
-Interface: AUDIT_SCOPE = "branch_level", entry point ``check_branch``. The
-corpus is the branch's ``tests/`` and each ``lib/<skill>/tests/``; production
-is read through the tests' own imports under the package root.
+Reference: calendar_bound.md
 """
 
 import ast
@@ -189,10 +111,6 @@ _CLOCK_WORD = re.compile(r"datetime|\bdate\b|\btime\b|now|today|clock|freeze|fro
 _CLOCK_FIXTURE = re.compile(r"clock|now|frozen|freeze|fixed_time|fake_time|today", re.IGNORECASE)
 _FREEZE_DECORATOR = re.compile(r"freeze_time|time_machine|travel")
 
-
-# =============================================
-# PARSING AND MODULE RESOLUTION
-# =============================================
 
 _PARSE_CACHE: Dict[Tuple[str, int, int], Optional[ast.Module]] = {}
 
@@ -376,11 +294,6 @@ def _resolve_call(module: _Module, func: ast.expr, patched: Set[str]) -> Optiona
     return target_module, target
 
 
-# =============================================
-# LEG 2 - PRODUCTION THAT COMPUTES WITH THE CLOCK
-# =============================================
-
-
 def _clock_call(node: ast.AST) -> bool:
     """datetime.now/utcnow/today, date.today, time.time/time_ns, a bare time.localtime/gmtime."""
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
@@ -532,11 +445,6 @@ def _clock_trail(test_module: _Module, unit: _FUNC_NODE, patched: Set[str]) -> L
         if hops < MAX_HOPS:
             queue.extend((m, f, hops + 1, trail + [step]) for m, f in _call_targets(module, func, patched))
     return []
-
-
-# =============================================
-# LEG 1 AND LEG 3 - THE UNIT
-# =============================================
 
 
 def _is_constructor(node: ast.AST) -> bool:
@@ -750,11 +658,6 @@ def scan_file(file_path: str, package_root: str) -> Tuple[List[Tuple[int, str]],
     return violations, context
 
 
-# =============================================
-# CORPUS
-# =============================================
-
-
 def _test_roots(branch_root: Path) -> List[Path]:
     """The branch's tests/ and every lib/<skill>/tests/."""
     roots = [branch_root / "tests"]
@@ -792,11 +695,6 @@ def _relative(path: Path, branch_root: Path) -> str:
         return path.as_posix()
 
 
-# =============================================
-# BRANCH-LEVEL CHECK (audit pipeline entry)
-# =============================================
-
-
 def _result(score: int, checks: List[Dict], branch_path: str) -> Dict:
     """The pack's result shape, logged once."""
     json_handler.log_operation(
@@ -824,20 +722,7 @@ def _context_check(owned: int, spelled: int) -> Dict:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch's tests for assertions that are only true on some dates.
-
-    Args:
-        branch_path: Path to branch root (e.g., src/aipass/seedgo)
-        bypass_rules: Optional list of bypass rules to skip certain violations
-
-    Returns:
-        dict: {
-            'passed': bool,
-            'checks': [{'name': str, 'passed': bool, 'message': str}],
-            'score': int,
-            'standard': 'CALENDAR_BOUND'
-        }
-    """
+    """Check a branch's tests for assertions that are only true on some dates."""
     branch_root = Path(branch_path)
 
     if is_bypassed(branch_path, _BYPASS_KEY, bypass_rules=bypass_rules):

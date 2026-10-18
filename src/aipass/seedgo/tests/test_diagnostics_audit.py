@@ -3,7 +3,7 @@
 # Description: Unit tests for the diagnostics_audit module
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/diagnostics_audit.py."""
@@ -18,11 +18,6 @@ from rich.color import Color
 from rich.text import Text
 
 from aipass.seedgo.apps.modules import diagnostics_audit
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _console_lines(capsys, function_name: str, *args):
@@ -45,7 +40,7 @@ def recording(monkeypatch):
 
     No console is put in the product's place: ``record`` is the real console's
     own switch, so the channel capsys reads is unchanged. What the recording
-    adds is the style plain text loses (seedgo, fleet green leg 5).
+    adds is the style plain text loses.
 
     Returns:
         A callable answering the recorded lines as ``rich.text.Text``, styles kept.
@@ -68,11 +63,6 @@ def colour(name: str) -> set:
     return {Color.parse(name).number}
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
     """Replace diagnostics_audit's own seams with mocks, at the edge, not by rebuilding the module.
@@ -85,11 +75,6 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setattr(diagnostics_audit, "logger", MagicMock())
     monkeypatch.setattr(diagnostics_audit, "error", MagicMock())
     monkeypatch.setattr(diagnostics_audit, "warning", MagicMock())
-
-
-# ---------------------------------------------------------------------------
-# Tests — handle_command
-# ---------------------------------------------------------------------------
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -112,10 +97,7 @@ def test_handle_command_accepts_diagnostics_audit_name():
 
 
 def test_handle_command_no_args_shows_introspection(capsys):
-    """No args names the module on the console, rather than erroring quietly.
-
-    Mutant: handle_command's no-args branch skips print_introspection() (pass) — killed.
-    """
+    """No args names the module on the console, rather than erroring quietly."""
     assert diagnostics_audit.handle_command("diagnostics", []) is True
 
     assert "Diagnostics Audit Module" in capsys.readouterr().out.splitlines()
@@ -133,12 +115,7 @@ def test_handle_command_help_flag():
 
 
 def test_handle_command_h_flag():
-    """A help flag AFTER an argument explains instead of rejecting it.
-
-    The cured defect this pins, stated in handle_command itself: `diagnostics
-    aipass --help` used to answer "Unknown argument" for a question it can
-    answer. Both sides of that bug return True.
-    """
+    """A help flag AFTER an argument explains instead of rejecting it."""
     with (
         patch.object(diagnostics_audit, "print_help") as helped,
         patch.object(diagnostics_audit, "error") as reported,
@@ -160,14 +137,7 @@ def test_handle_command_help_word():
 
 
 def test_handle_command_unknown_arg(capsys):
-    """An unknown argument is named back, with the route that does work.
-
-    Was `assert result is True` under a docstring promising an error was
-    displayed gracefully — and this module returns True on every path, so the
-    test passed with all six console lines and both channels deleted.
-
-    Mutant: the unknown-argument branch drops its `drone @seedgo audit aipass` line — killed.
-    """
+    """An unknown argument is named back, with the route that does work."""
     assert diagnostics_audit.handle_command("diagnostics", ["some_unknown_arg"]) is True
 
     diagnostics_audit.error.assert_called_once_with("Unknown argument: 'some_unknown_arg'")  # type: ignore[attr-defined]
@@ -175,20 +145,8 @@ def test_handle_command_unknown_arg(capsys):
     assert "  drone @seedgo audit aipass" in capsys.readouterr().out.splitlines()
 
 
-# ---------------------------------------------------------------------------
-# Tests — introspection / help
-# ---------------------------------------------------------------------------
-
-
 def test_print_introspection_runs(capsys):
-    """Introspection names the module, its handler package, and where the work runs.
-
-    The `or mock_cli.header.called` this replaced pinned nothing: introspection
-    never calls `header`, so the second clause was dead and the first passed on
-    any single print at all.
-
-    Mutant: print_introspection drops its Connected Handlers heading — killed.
-    """
+    """Introspection names the module, its handler package, and where the work runs."""
     result, lines = _console_lines(capsys, "print_introspection")
 
     assert result is None
@@ -199,12 +157,7 @@ def test_print_introspection_runs(capsys):
 
 
 def test_print_help_runs(capsys):
-    """Help carries all three of its sections, and names pyright as the checker.
-
-    Same escape as introspection above: `header` is never called here either.
-
-    Mutant: print_help's first check line drops (Pylance/pyright) — killed.
-    """
+    """Help carries all three of its sections, and names pyright as the checker."""
     result, lines = _console_lines(capsys, "print_help")
 
     assert result is None
@@ -214,19 +167,8 @@ def test_print_help_runs(capsys):
     assert "  - Type errors (Pylance/pyright)" in lines
 
 
-# ---------------------------------------------------------------------------
-# Tests — display functions
-# ---------------------------------------------------------------------------
-
-
 def test_print_branch_diagnostics_clean(capsys, recording):
-    """Zero errors renders the green tick and the file tally, and no top-files block.
-
-    Mutant: zero errors gets the yellow warning sign instead of the tick — killed.
-    The colour is read off the real console's recording, since capsys holds
-    the plain text only (seedgo, fleet green leg 5). Mutant: the zero case's
-    colour "green" -> "yellow", glyph kept — killed.
-    """
+    """Zero errors renders the green tick and the file tally, and no top-files block."""
     result = {
         "branch": "TEST",
         "total_errors": 0,
@@ -249,12 +191,7 @@ def test_print_branch_diagnostics_clean(capsys, recording):
 
 
 def test_print_branch_diagnostics_with_errors(capsys, recording):
-    """15 errors renders the red cross, and the offending file with its first lines.
-
-    Mutant: ten or more errors gets the yellow warning sign instead of the cross — killed.
-    The colour is read off the real console's recording (seedgo, fleet green
-    leg 5). Mutant: the ten-or-more case's colour "red" -> "yellow", glyph kept — killed.
-    """
+    """15 errors renders the red cross, and the offending file with its first lines."""
     result = {
         "branch": "TEST",
         "total_errors": 15,
@@ -289,10 +226,7 @@ def test_print_branch_diagnostics_with_errors(capsys, recording):
 
 
 def test_print_system_summary_empty(capsys):
-    """An empty fleet totals to zero everywhere, and lists no branches by error count.
-
-    Mutant: the by-error-count block prints at zero branches with errors (>= 0) — killed.
-    """
+    """An empty fleet totals to zero everywhere, and lists no branches by error count."""
     _, lines = _console_lines(capsys, "print_system_summary", [])
 
     assert "SYSTEM DIAGNOSTICS SUMMARY:" in lines
@@ -303,10 +237,7 @@ def test_print_system_summary_empty(capsys):
 
 
 def test_print_system_summary_with_data(capsys):
-    """Two branches: the totals add up, and only the one with errors gets listed.
-
-    Mutant: the by-error-count block lists every branch (if True:) — killed.
-    """
+    """Two branches: the totals add up, and only the one with errors gets listed."""
     results = [
         {"branch": "FLOW", "total_errors": 0, "total_warnings": 1, "total_files": 5, "files_with_errors": 0},
         {"branch": "CLI", "total_errors": 3, "total_warnings": 0, "total_files": 8, "files_with_errors": 2},
@@ -323,11 +254,6 @@ def test_print_system_summary_with_data(capsys):
     assert "BRANCHES BY ERROR COUNT:" in lines
     assert "  CLI                3 errors" in lines
     assert not [line for line in lines if line.startswith("  FLOW")], "clean branches are not listed by error count"
-
-
-# ---------------------------------------------------------------------------
-# Help-flag safety (help_flag_safety: a flag ANYWHERE explains)
-# ---------------------------------------------------------------------------
 
 
 def test_help_after_an_argument_prints_help_not_an_error(monkeypatch):

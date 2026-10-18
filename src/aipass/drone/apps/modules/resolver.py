@@ -3,14 +3,11 @@
 # Description: Branch resolution logic for symbolic @branch names
 # Version: 1.0.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch resolution logic.
-
-Thin orchestrator for resolving symbolic @branch names to paths and metadata.
-Delegates registry access to the handler layer.
 """
 
 from pathlib import Path
@@ -33,10 +30,6 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
     """Route resolver commands to handler functions.
-
-    Args:
-        command: The command string (e.g. "resolve", "exists", "info", "list")
-        args: List of arguments for the command
 
     Returns:
         True if command succeeded, False otherwise
@@ -146,14 +139,7 @@ def normalize_branch_arg(target: str) -> str:
 def resolve_branch(symbolic_name: str) -> str:
     """Resolve a symbolic branch name to its absolute path.
 
-    Checks primary (local) registry first, then falls back to AIPASS_HOME
-    registry for cross-project resolution.
-
-    Args:
-        symbolic_name: Branch name with @ prefix (e.g. "@seedgo")
-
-    Returns:
-        Absolute path to branch directory as string
+    Checks the local registry first, then the AIPASS_HOME registry for cross-project resolution.
 
     Raises:
         BranchNotFoundError: If branch not in registry or missing @ prefix
@@ -208,10 +194,6 @@ def list_branches(
     branch_type: Optional[str] = None,
     status: str = "active",
 ) -> List[str]:
-    """List all registered branches, optionally filtered by type and status.
-
-    Returns:
-        List of branch names with @ prefix
-    """
+    """List all registered branches, optionally filtered by type and status, as @names."""
     branches = get_all_branches(branch_type=branch_type, status=status)
     return [f"@{branch['name']}" for branch in branches]

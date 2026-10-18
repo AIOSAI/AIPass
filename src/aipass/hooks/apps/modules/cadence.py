@@ -5,14 +5,12 @@
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
 
-Multi-process safe: each UserPromptSubmit hook runs as a separate OS process.
-Uses fcntl.flock + mtime debounce + per-turn token to ensure the counter
-advances exactly once per real user turn.
+Each loader runs as its own process: flock + mtime debounce + a per-turn key count each real turn once.
 """
 
 import hashlib
@@ -47,12 +45,8 @@ HELP_COMMANDS = [
 DEFAULTS = {
     "enabled": True,
     "period": 5,
-    # How far up the transcript (bytes) a completed post-compact re-ground still
-    # stands in for the turn-0 fire-all. 0 turns the stand-in off. Calibrated on
-    # the 09-16 ledgers (DPLAN-0348): the double ground sat 126,258 bytes after
-    # the backstop's last part; the two long autonomous stretches 308,557 and 587,488.
-    # This value is what a clone runs on: cadence_config.json, where an operator
-    # overrides it, is gitignored (**/*_json/).
+    # Transcript bytes within which a completed post-compact re-ground stands in for the turn-0
+    # fire-all (0 = off). cadence_config.json is gitignored, so this is what a clone runs on.
     "regroup_fresh_bytes": 150000,
     "loaders": {
         "tier0": {"period": 5, "offset": 0},
@@ -62,49 +56,29 @@ DEFAULTS = {
         "email": {"period": 5},
         "alert": {"period": 5},
     },
-    # Per-branch loader overrides (DPLAN-0355): {"<branch>": {"loaders": {"<loader>": {...}}}},
-    # each merged over the global entry for that loader only. A branch not named
-    # here runs the global entries. "beat": false fires a loader at turn 0 only.
+    # {"<branch>": {"loaders": {"<loader>": {...}}}}, each merged over that loader's global entry;
+    # "beat": false fires a loader at turn 0 only.
     "branches": {},
 }
 
 MAIL_LOADER = "email"
 
-#: The loaders that ground a seat — what the post-compact backstop carries, and
-#: what a completed backstop stands in for at turn 0 (DPLAN-0348).
+#: The loaders that ground a seat: the post-compact backstop carries them and stands in for them at turn 0.
 GROUNDING_LOADERS = frozenset({"tier0", "navmap", "identity", "branch"})
 
-#: How a turn the harness sent opens when the payload has no `source` field. A
-#: task-notification (Monitor expiry, background Bash exit) arrives as a prompt
-#: starting with its tag; measured at offset 0 on 120 of 120 notification turns.
+#: How a harness-sent turn (task-notification) opens when the payload has no `source` field.
 _AUTOMATED_PROMPT_PREFIXES = ("<task-notification>", "[SYSTEM NOTIFICATION")
 
-#: The degraded fail mode (DPLAN-0347, ruled by the room 2026-09-15: "degraded:
-#: kernel only + warning"). When turns cannot be counted, these fire and every
-#: other loader is WITHHELD. Not open — that forced turn 0 on every prompt and
-#: fired all loaders, ~21k chars a turn. Not closed — dark, and post-compact
-#: re-grounding with it. The kernel is the floor, and its banner names what was
-#: withheld and why.
-#:
-#: "alert" and "email" ride with the kernel on purpose. The ruling cut the
-#: grounding bill — navmap, branch and identity, ~18k a beat — and these two are
-#: not grounding: they are the channels that say something needs this session,
-#: tiny (an alert body is capped at 300, the mail banner is ~130) and silent
-#: unless there is something to say. A degraded session is exactly when they
-#: must not go quiet. Drop them here to make the mode literally kernel-only;
-#: nothing else reads this set.
+#: When turns cannot be counted only these fire; every other loader is WITHHELD. Not open (turn 0 on
+#: every prompt, ~21k chars a turn), not closed (dark). alert and email are tiny channels, not grounding.
 DEGRADED_LOADERS = frozenset({"tier0", "alert", MAIL_LOADER})
 
-#: The one loader whose degraded line logs at WARNING. Every withheld loader
-#: logs at info, so a degraded turn costs one WARNING, not one per loader.
+#: The one loader whose degraded line logs at WARNING, so a degraded turn costs one WARNING.
 DEGRADED_REPORTER = "tier0"
 
 _turn: int | None = None
 _config: dict | None = None
-#: Why the turn counter fell back to 0, when it did. Turn 0 fires EVERY loader,
-#: so a fallback is the whole cadence going open — the fleet pays ~21k chars a
-#: turn and nothing says why (DPLAN-0347, hooks row 1). Set beside _turn so the
-#: memoised answer carries its own provenance.
+#: Why the turn counter cannot count, when it cannot; set beside _turn so the memo carries its provenance.
 _turn_degraded: str | None = None
 
 
@@ -160,17 +134,8 @@ def _get_turn_token(hook_data: dict) -> int:
 def is_automated(hook_data: dict | None) -> bool:
     """True when the harness, not a person, sent this UserPromptSubmit (DPLAN-0348).
 
-    Since Claude Code 2.1.271 every Monitor dies at 30 minutes and wakes the seat
-    with a task-notification turn, and prompt hooks fire on it as if someone
-    typed: 33 wakes in 15 idle hours on 09-16, seven of them paying the full
-    grounding stack.
-
-    The payload's `source` decides when present: "system" is automated, any
-    other value is not. The 2.1.273 schema declares it, but no live payload
-    carried it (six measured on 09-16), so without it the prompt decides by how
-    it OPENS, never by containing a marker: a person quoting one mid-sentence
-    keeps their grounding. A missing or empty prompt reads as human, so a
-    payload change fails toward counting the turn, not toward going dark.
+    `source` decides when present; else how the prompt OPENS (a quoted marker mid-sentence stays human).
+    A missing prompt reads as human, so a payload change fails toward counting, not going dark.
     """
     data = hook_data or {}
     source = data.get("source")
@@ -215,11 +180,8 @@ def _mtime_age(fd) -> float:
 def _prompt_key(hook_data: dict, token: int) -> str | None:
     """One prompt's identity, shared by every sibling process of it; None when the payload has none.
 
-    sha1 of the transcript size and the prompt text (DPLAN-0355 follow-up). The
-    size alone was the guard until 09-30, and a headless first prompt runs before
-    the transcript exists: every sibling read 0, 0 switched the guard off, and a
-    sibling past the 2s debounce counted a second turn (canary 7f1a35f6). The
-    text tells that prompt apart; the size tells a repeated text apart.
+    A headless first prompt runs before the transcript exists (size 0), so the text tells prompts
+    apart and the size tells a repeated text apart.
     """
     prompt = hook_data.get("prompt")
     if not isinstance(prompt, str) and not hook_data.get("transcript_path"):
@@ -231,9 +193,7 @@ def _prompt_key(hook_data: dict, token: int) -> str | None:
 def _should_increment(stored_turn: int, stored_token: int, token: int, fd, key=None, stored_key=None) -> bool:
     """Decide whether to increment the counter: once per prompt key, else by the old window.
 
-    A key on both sides decides alone, however far apart the siblings run. With
-    no key (a payload with neither prompt nor transcript_path, or a state file
-    written before keys) the 2s debounce and the nonzero-token guard decide.
+    Without a key on both sides, the 2s debounce and the nonzero-token guard decide.
     """
     if stored_turn < 0:
         return True
@@ -249,12 +209,8 @@ def _should_increment(stored_turn: int, stored_token: int, token: int, fd, key=N
 def _read_turn_uncounted(path: Path) -> int:
     """The stored turn for an automated prompt: read under the lock, never written.
 
-    Nothing is written, the token included. A stored token equal to the next
-    real turn's would debounce that turn away, and a truncating write here would
-    cancel a queued post-compact re-ground. That second one is a behaviour
-    change (DPLAN-0348): until then any UserPromptSubmit, a task-notification
-    included, stopped the remaining parts. A notification is not the turn the
-    queue waits for, so the parts now keep landing through it.
+    A stored token equal to the next real turn's would debounce it away, and a truncating
+    write would cancel a queued post-compact re-ground.
     """
     global _turn_degraded
     if not path.exists():
@@ -277,10 +233,7 @@ def _read_turn_uncounted(path: Path) -> int:
 
 
 def _load_and_increment(hook_data: dict) -> int:
-    """Load turn counter, increment exactly once per real turn. Multi-process safe.
-
-    A turn the harness sent (is_automated) is read, not counted.
-    """
+    """Load turn counter, increment exactly once per real turn. Multi-process safe."""
     global _turn, _turn_degraded
     if _turn is not None:
         return _turn
@@ -335,19 +288,13 @@ def _load_and_increment(hook_data: dict) -> int:
 def degraded_reason() -> str | None:
     """Why this process cannot count turns, or None when cadence is healthy.
 
-    Meaningful after should_fire() has run in this process — that is what reads
-    the state. The kernel's banner quotes it so the session learns the cause.
+    Meaningful only after should_fire() has read the state in this process.
     """
     return _turn_degraded
 
 
 def _degraded_fire(loader_name: str) -> bool:
-    """The degraded fail mode's answer for one loader, logged once per turn at WARNING.
-
-    A degraded read used to force turn 0, and turn 0 fires every loader, so the
-    session paid the whole grounding bill on every prompt (0 real occurrences in
-    1,190 cadence decisions on 2026-09-15/16 — rare, and expensive when it hits).
-    """
+    """The degraded fail mode's answer for one loader, logged once per turn at WARNING."""
     fires = loader_name in DEGRADED_LOADERS
     log = logger.warning if loader_name == DEGRADED_REPORTER else logger.info
     log(
@@ -364,9 +311,7 @@ def _degraded_fire(loader_name: str) -> bool:
 def _prompt_branch(hook_data: dict) -> str:
     """The branch a prompt came from: its cwd's branch root, by name. "none" when there is none.
 
-    The payload's cwd only, never this process's. No branch is not a failure (the
-    repo root and an external project have none), so it is logged and the global
-    loader entries serve it.
+    The payload's cwd only, never this process's. No branch is not a failure: the global entries serve.
     """
     cwd = hook_data.get("cwd")
     root = find_branch_root(cwd) if isinstance(cwd, str) and cwd else None
@@ -379,8 +324,7 @@ def _prompt_branch(hook_data: dict) -> str:
 def _branch_loader_override(config: dict, branch: str, loader_name: str) -> dict:
     """The branch's override for one loader (DPLAN-0355), {} when it has none.
 
-    A malformed override fails loud (ERROR) and serves {}, the global entry: the
-    file is operator-owned and is never rewritten here.
+    Malformed: logs ERROR and serves {} (the global entry); the operator-owned file is never rewritten.
     """
     override = config.get("branches")
     for key in (branch, "loaders", loader_name):
@@ -406,11 +350,7 @@ def _branch_loader_override(config: dict, branch: str, loader_name: str) -> dict
 
 
 def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
-    """Check if a loader should fire this turn. Always True on turn 0 or if cadence disabled.
-
-    The prompt's branch may override a loader's entry (`branches` in the config,
-    DPLAN-0355); `"beat": false` then fires it at turn 0 and never on the period.
-    """
+    """Check if a loader should fire this turn. Always True on turn 0 or if cadence disabled."""
     config = _load_config()
 
     if not config.get("enabled", True):
@@ -433,11 +373,8 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     session_short = session_id[:8] if session_id else "none"
 
-    # Before the turn-0 clause: on 09-16 that clause fired 20,310 chars on a
-    # harness wake at 09:30. An automated turn is no beat for any loader. The
-    # channels still speak on one: mail announces through should_fire_mail, and
-    # an alert's arrival never asks cadence (persistent_alert); should_fire("alert")
-    # only decides a repeat, and a turn that does not count is not its beat.
+    # Before the turn-0 clause: an automated turn is no beat for any loader. Mail still announces
+    # via should_fire_mail, and an alert's arrival never asks cadence.
     if is_automated(hook_data):
         logger.info(
             "[HOOKS] cadence skipped loader=%s automated turn session=%s branch=%s", loader_name, session_short, branch
@@ -479,11 +416,8 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
 def _mail_state_path() -> Path | None:
     """Per-session state for the mail notification loop.
 
-    Deliberately a separate file from the turn counter: _load_and_increment()
-    truncates its state to {turn, token} every turn, and that truncation is
-    load-bearing — it is what disarms the post-compact regroup token once a real
-    UserPromptSubmit arrives. Storing mail state there would either be wiped
-    every turn or force that wipe to stop, changing regroup semantics.
+    Not the turn counter's file: _load_and_increment() truncates it every turn, and that
+    truncation is what disarms the post-compact regroup token.
     """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
@@ -523,12 +457,7 @@ def _write_last_mail_turn(path: Path, turn: int | None) -> None:
 def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
     """Mail banner cadence: announce on arrival, then at most once every Nth turn.
 
-    Zero new mail is fully silent AND clears the state, so the next arrival
-    announces on the turn it lands rather than waiting out the rest of a period.
-    A banner that shows up four turns after the mail did is not a notification.
-
-    Cadence disabled, or period <= 0, restores the previous fire-every-turn
-    behaviour — same convention as should_fire() returning True when disabled.
+    Zero new mail is silent AND clears the state, so the next arrival announces on the turn it lands.
     """
     config = _load_config()
     if new_count <= 0:
@@ -572,17 +501,14 @@ _REGROUP_DEBOUNCE_S = 30.0
 
 
 ADVISORY_PERIOD = 10
-# Used only when the turn cannot be read (no session id). Ten turns is roughly
-# this long in practice, and a throttle that silently degrades to "every time"
-# is the bug being fixed, not a fallback.
+# Used only when the turn cannot be read: a throttle must never degrade to "every time".
 ADVISORY_SECONDS = 600
 
 
 def turn_token(hook_data: dict) -> int:
     """The per-turn token for *hook_data*: identical in every sibling process of one turn.
 
-    Public for the injection ledger, which groups by it (DPLAN-0347, hooks row 3).
-    Read-only — it stats the transcript and touches no cadence state.
+    Public for the injection ledger, which groups by it. Read-only: touches no cadence state.
     """
     return _get_turn_token(hook_data)
 
@@ -590,9 +516,8 @@ def turn_token(hook_data: dict) -> int:
 def current_turn() -> int | None:
     """The turn counter WITHOUT advancing it, or None when it cannot be read.
 
-    A PreToolUse consumer must never call _load_and_increment: several tool
-    calls share one turn, and the token guard that makes incrementing safe
-    keys off UserPromptSubmit's transcript growth. Reading is always safe.
+    A PreToolUse consumer must never call _load_and_increment: several tool calls share one
+    turn, and its guard keys off UserPromptSubmit.
     """
     path = _state_path()
     if path is None or not path.exists():
@@ -609,8 +534,7 @@ def current_turn() -> int | None:
 def _advisory_state_path(name: str) -> Path | None:
     """Per-session, per-advisory throttle state.
 
-    Separate from the turn counter for the same reason mail state is:
-    _load_and_increment truncates its file to {turn, token} every turn.
+    Not the turn counter's file: _load_and_increment truncates that every turn.
     """
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
@@ -621,16 +545,8 @@ def _advisory_state_path(name: str) -> Path | None:
 def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
     """True at most once per *period* turns for the named advisory.
 
-    For standing conditions — states that stay true for days and re-assert on
-    every qualifying edit. @devpulse's seat sat over the todos cap long enough
-    to write 209 identical lines and trip repeat-signature escalation; the
-    advisory was right and the cadence was the noise (the owner, 2026-08-19).
-
-    Fires when it has never fired, when the period has elapsed, and when the
-    turn counter went BACKWARDS — a reset means compact or a new session, and
-    the old numbering must not buy silence in the new one. Falls back to
-    elapsed seconds when the turn cannot be read, so an unreadable counter
-    still throttles rather than restoring fire-every-time.
+    For standing conditions that re-assert on every edit. Also fires when the turn went BACKWARDS
+    (compact or new session); falls back to elapsed seconds when the turn cannot be read.
     """
     path = _advisory_state_path(name)
     if path is None:
@@ -671,11 +587,8 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
 def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> None:
     """Reset counter to -1 so next turn reads 0 (all loaders fire). Called from PreCompact.
 
-    Also arms a one-shot regroup token for the PostToolUse re-ground backstop
-    (DPLAN-0276). A duplicate reset within _REGROUP_DEBOUNCE_S of the last arm
-    (e.g. two callers reacting to the same compact boundary, DPLAN-0278) reuses
-    the existing token instead of minting a new one — hard-caps the backstop to
-    at most one fire per compact regardless of how many callers reset here.
+    Also arms a one-shot regroup token for the PostToolUse backstop. A duplicate reset within
+    _REGROUP_DEBOUNCE_S reuses the token, so the backstop fires at most once per compact.
     """
     path = _state_path()
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -724,9 +637,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
         state = {"turn": -1, "token": -1, "regroup_token": regroup_stamp, "regroup_armed_at": armed_at}
         if debounced:
-            # A duplicate reset on the SAME compact boundary must not cancel the
-            # re-ground parts still queued for it (issue #752); a new compaction
-            # (not debounced) starts over and rightly drops them.
+            # A duplicate reset on the SAME boundary must not cancel its queued re-ground parts.
             for key in ("regroup_next", "regroup_total"):
                 if key in data:
                     state[key] = data[key]
@@ -772,9 +683,8 @@ def _window_path(session_id: str) -> Path:
 def _stamp_window(session_id: str, opened_at: float, caller: str) -> None:
     """Record when this session's context window opened, in a file of its own.
 
-    The turn counter's file cannot carry it: _load_and_increment truncates that
-    file to {turn, token} on every real turn. A debounced reset passes the SAME
-    armed_at, so two callers on one boundary open one window, not two.
+    Not the counter's file (truncated every real turn). A debounced reset passes the SAME
+    armed_at, so two callers on one boundary open one window.
     """
     try:
         _window_path(session_id).write_text(json.dumps({"opened_at": opened_at, "caller": caller}), encoding="utf-8")
@@ -785,11 +695,8 @@ def _stamp_window(session_id: str, opened_at: float, caller: str) -> None:
 def window_opened_at(hook_data: dict | None = None) -> float | None:
     """When the current context window opened (the last reset_counter), or None if never stamped.
 
-    State keyed by session id outlives every compaction. A consumer that stores
-    this value and later reads a different one knows a new window has opened
-    (FPLAN-0588: compass recall's per-session budget was spent by lunch). The
-    payload's session id comes first on both sides, as consumers key their own
-    state by it: reset_counter stamps it, this reads it.
+    Session-keyed state outlives compaction: a consumer seeing this value change knows a new
+    window opened. The payload's session id comes first on both sides, as consumers key by it.
     """
     session_id = (hook_data or {}).get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     if not session_id:
@@ -814,12 +721,8 @@ def _regroup_done_path(session_id: str) -> Path:
 def stamp_regroup_complete(hook_data: dict | None = None) -> None:
     """Record that the post-compact backstop handed out its FINAL part (DPLAN-0348).
 
-    Before this the backstop recorded nothing, so the next prompt's turn-0
-    fire-all sent the same grounding again: 21,688 chars at 09:03 on 09-16, then
-    20,310 at 09:30. Its own file, like the window stamp, because the counter's
-    file is truncated on every real turn. It carries the window, so a new
-    compaction re-arms the fire-all, and the transcript size at completion, so
-    the stand-in lapses with distance. "used_token" names the prompt that spent it.
+    Its own file (the counter's is truncated every real turn). The window lets a new compaction
+    re-arm the fire-all; the transcript size lets the stand-in lapse with distance.
     """
     session_id = (hook_data or {}).get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     window = window_opened_at(hook_data)
@@ -858,13 +761,8 @@ def _stands_in(stamp: dict, window: float | None, token: int, distance: int) -> 
 def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
     """True when a completed post-compact re-ground stands in for this turn-0 fire-all.
 
-    All three must hold, or the answer is False and the fire-all runs as it
-    always has. The stamp is for THIS window: a second compaction re-arms, and
-    compaction then a prompt with no tool call between never had a stamp at all
-    (DPLAN-0276's dead zone). This prompt sits within regroup_fresh_bytes of the
-    completion: grounding far up the transcript is not grounding. And the stamp
-    is unspent, or spent by this same prompt: each loader is its own process, so
-    every sibling shares the token and gets one answer, and a later turn 0 fires.
+    All must hold: the stamp is for THIS window, within regroup_fresh_bytes, and unspent or spent by
+    this same prompt (sibling loader processes share the token, so a later turn 0 still fires).
     """
     distance = config.get("regroup_fresh_bytes", 0)
     session_id = hook_data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -901,11 +799,8 @@ def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
 def consume_regroup_pending(hook_data: dict | None = None) -> bool:
     """Atomically check-and-clear the post-compact regrounding token.
 
-    Set by reset_counter() on every PreCompact (armed once per compact — see
-    the debounce there). Returns True at most once per compact — the caller
-    (a PostToolUse backstop, DPLAN-0276) fires grounding content directly
-    since PostToolUse's additionalContext reaches Claude even when no
-    UserPromptSubmit arrives to let cadence's normal turn-0 path fire.
+    True at most once per compact. The PostToolUse backstop fires grounding itself, since its
+    additionalContext reaches Claude even when no UserPromptSubmit arrives.
     """
     path = _state_path()
     session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -973,15 +868,9 @@ def _regroup_state_path(hook_data: dict | None) -> tuple[Path | None, str]:
 def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
     """Record that this compaction's re-ground was split into *total* parts, part 1 fired.
 
-    Issue #752: one PostToolUse additionalContext over Claude Code's 10,000-char
-    hook-output limit is persisted to a file and the agent sees a 2,000-char
-    preview, so the backstop now spreads the re-ground over consecutive tool
-    calls. The queue lives in the SAME state file as the regroup token, on
-    purpose. A real UserPromptSubmit truncates that file to {turn, token}
-    (_load_and_increment), and that is exactly when the remaining parts must
-    stop: the cadence turn-0 path then fires every loader as its own injection.
-    A new compaction's reset_counter() rewrites the file as well, so a queue
-    left over from one compaction can never leak into the next.
+    Output over Claude Code's 10,000-char hook limit reaches the agent as a 2,000-char preview.
+    The queue shares the counter's file on purpose: a real prompt truncates it, and that is
+    exactly when the remaining parts must stop.
     """
     if total < 2:
         return
@@ -1013,10 +902,7 @@ def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
 def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
     """Atomically take the next queued re-ground part as (index, total), or None.
 
-    Each index is handed out exactly once — read, advance and write happen under
-    one flock — and the keys are removed with the last part, so the sequence
-    ends silent however many tool calls follow. That keeps DPLAN-0276's cure:
-    one re-ground per compaction, now delivered as at most *total* fires.
+    Read, advance and write under one flock; the keys go with the last part, so it ends silent.
     """
     path, session_short = _regroup_state_path(hook_data)
     if path is None or not path.exists():
@@ -1073,11 +959,6 @@ def log_regroup_fire(loaders: str, part: int, total: int, text: str, budget: int
     )
 
 
-# =============================================================================
-# MODULE INTERFACE (drone @hooks routing)
-# =============================================================================
-
-
 def print_introspection() -> None:
     """Print cadence config and current state."""
     config = _load_config()
@@ -1089,8 +970,7 @@ def print_introspection() -> None:
     for name, lcfg in loaders.items():
         lp = lcfg.get("period", global_period)
         if name == MAIL_LOADER:
-            # No offset: the mail banner is an elapsed-turns loop off its own last
-            # fire, not a modulo slot, so it can announce the turn mail arrives.
+            # No offset: the mail banner is an elapsed-turns loop, not a modulo slot.
             CONSOLE.print(f"  Loader '{name}': period={lp} (elapsed-turns loop, announces on arrival)")
         else:
             beat = "off" if lcfg.get("beat", True) is False else "on"

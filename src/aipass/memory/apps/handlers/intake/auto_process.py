@@ -3,45 +3,16 @@
 # Description: Automated pool + rollover entry point
 # Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-09-05
+# Modified: 2026-10-17
 # =============================================
 
 """
 Auto-process handler — session-start pool + rollover entry point.
 
-Single callable the hook engine fires each session to:
-1. Process any files dropped into memory_pool/ (vectorize + archive)
-2. Check/run rollover for .trinity/ files exceeding limits
-
-Idempotent: safe to call every session. Fast no-op when nothing to do.
-Pool uses upsert with content-hash IDs — re-processing same files is a no-op.
-
-HOOK ENGINE CONTRACT:
-  Module: aipass.memory.apps.handlers.intake.auto_process
-  Function: spawn_background()   <- what the hook calls (returns in milliseconds)
-  Invocation: importlib.import_module(
-      'aipass.memory.apps.handlers.intake.auto_process').spawn_background()
-  Returns: dict with success + pid, or skipped + reason
-
-  auto_process() remains the synchronous API for callers that genuinely want to
-  wait. It must NOT be called from a UserPromptSubmit hook: measured 78.5-120.5s
-  with a backlog, while its stdout is always empty -- so by the owner's test
-  (compass #272) it was blocking a prompt it never fed. DPLAN-0295 item 1.
-
-COMPLETION EVENT (1.1.0, 2026-09-05):
-  run_once() fires @trigger's `memory_pool_auto_processed` on both outcomes.
-  The fire used to live in @hooks' inline call; DPLAN-0294 phase 1b detached the
-  work and it went with it, leaving @trigger's handler registered and
-  unreachable — so a failure inside the child was visible only as counters
-  nothing reads for failure. The spawn site cannot fire it truthfully (a PID is
-  not a completion), so it belongs here, in the only process present when the
-  work ends. A declined run does NOT fire: the lock holder announces its own.
-
-WHY A DETACHED CHILD rather than a @daemon schedule:
-  The work must still happen promptly when a file is dropped into the pool, and
-  it must not depend on another service being up. A daemon that is down would
-  stop vectorizing silently -- the exact failure mode this branch exists to
-  prevent. The hook stays the trigger; only the waiting goes away.
+The hook calls spawn_background() (returns in milliseconds). auto_process() is the
+synchronous API and must NOT run from a UserPromptSubmit hook: it takes minutes with
+a backlog and feeds the prompt nothing. A detached child, not a @daemon schedule, so
+a down service never silently stops vectorizing. Idempotent: pool writes are upserts.
 """
 
 import json
@@ -59,10 +30,8 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 _MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent
 
-# Single-flight lock. Two sessions can start seconds apart, and two concurrent
-# rollovers would write the same .trinity files. Staleness is time-based rather
-# than PID-liveness based, to stay cross-platform: a crashed child frees the
-# lane by itself instead of wedging it forever.
+# Single-flight: two concurrent rollovers would write the same .trinity files.
+# Staleness is time-based (cross-platform), so a crashed child frees the lane.
 _LOCK_PATH = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.lock"
 _LOCK_STALE_SECONDS = 900
 _CHILD_LOG = Path(tempfile.gettempdir()) / "aipass-memory-auto-process.log"
@@ -91,12 +60,7 @@ def _read_lock() -> Dict[str, Any] | None:
 
 
 def _create_lock_file() -> bool | None:
-    """
-    Try to create the lock exclusively.
-
-    Returns:
-        True if taken, None if someone else holds it, False on a real OS error.
-    """
+    """Create the lock exclusively: True taken, None held elsewhere, False on OS error."""
     try:
         fd = os.open(str(_LOCK_PATH), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
@@ -151,11 +115,7 @@ def spawn_background() -> Dict[str, Any]:
     """
     Kick auto-processing in a detached child and return immediately.
 
-    This is what the hook engine calls. It never does the work inline and never
-    raises: a hook that dies takes the whole prompt with it.
-
-    Returns:
-        dict with success + pid, or skipped + reason when a run is already live.
+    Never raises: a hook that dies takes the whole prompt with it.
     """
     holder = _read_lock()
     if holder is not None and not _lock_is_stale(holder):
@@ -198,11 +158,7 @@ def spawn_background() -> Dict[str, Any]:
 def _completion_status(section: Dict[str, Any] | None) -> str:
     """Map one section of the result onto @trigger's ``status`` vocabulary.
 
-    An absent or empty section means the section never reported — the crash
-    leg's payload carries no ``pool``/``rollover`` key — and that is not the
-    same as it reporting success. Derive it to ``"unknown"``, never ``"ok"``
-    (found by @hooks 2026-09-05, published as the fourth value in @trigger's
-    contract, ``handlers/events/memory_pool.py``).
+    A section that never reported (the crash leg) is ``"unknown"``, never ``"ok"``.
     """
     if not section:
         return "unknown"
@@ -216,27 +172,10 @@ def _completion_status(section: Dict[str, Any] | None) -> str:
 def _fire_completion(result: Dict[str, Any]) -> None:
     """Announce a finished auto-process run on @trigger's bus.
 
-    DPLAN-0294 phase 1b detached this work into a child process, and the
-    ``memory_pool_auto_processed`` fire went with the inline call it replaced —
-    @hooks' handler returns the instant a PID exists, so it cannot truthfully
-    announce a completion. Only this process is present when the work ends, so
-    the fire belongs here. Found by @trigger 2026-09-05, confirmed by @hooks,
-    measured again here: zero fire sites fleet-wide.
-
-    Fired on BOTH outcomes. The failure leg is the point: @trigger's handler
-    turns ``success: False`` into ``error_detected``, which is the medic
-    dispatch path. Without it a vectorize or rollover failure inside the
-    detached child is visible only as counters nothing reads for failure.
-
-    The payload is @trigger's published contract
-    (``handlers/events/memory_pool.py``), not this module's internal shape —
-    their handler reads ``status`` on both sections, which the internal dicts
-    do not carry. ``branch`` is this branch rather than ``__global__`` on
-    purpose: the handler passes it straight into ``error_detected``, and the
-    citizen to wake for a fault in this code is its owner.
-
-    Never raises. An observability fire that breaks the work it observes is
-    worse than the silence it was added to cure.
+    Only this child is present when the work ends, so the fire lives here. Fired on
+    BOTH outcomes: failure becomes @trigger's error_detected (medic dispatch). The
+    payload is @trigger's contract (handlers/events/memory_pool.py); branch="memory"
+    so the owner is woken. Never raises.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
@@ -264,17 +203,9 @@ def _fire_completion(result: Dict[str, Any]) -> None:
 
 
 def run_once() -> Dict[str, Any]:
-    """
-    Child entry point: take the lock, do the work, always give the lock back.
-
-    Returns:
-        dict with the auto_process result, or skipped when another run holds it.
-    """
+    """Child entry point: take the lock, do the work, always give the lock back."""
     if not _acquire_lock():
-        # NOT a completion, so nothing is announced: the run that HOLDS the lock
-        # is still working and will fire its own. Announcing here would report a
-        # completion that has not happened — the same untruth that made @hooks'
-        # spawn site the wrong place to fire from.
+        # Not a completion: the lock holder fires its own announcement.
         logger.info("[auto_process] Another run holds the lock -- declining")
         return {"success": True, "skipped": True, "reason": "another run holds the lock"}
 
@@ -300,15 +231,7 @@ def _load_pool_enabled() -> bool:
 
 
 def run_pool_processing() -> Dict[str, Any]:
-    """
-    Process memory pool files if enabled.
-
-    Checks config, calls process_memory_pool(), returns summary.
-    Fast no-op when pool is empty or disabled.
-
-    Returns:
-        dict with success/skipped, files_processed, total_chunks
-    """
+    """Process memory pool files if enabled; a fast no-op when empty or disabled."""
     if not _load_pool_enabled():
         return {"skipped": True, "reason": "memory_pool disabled in config"}
 
@@ -342,12 +265,7 @@ def run_pool_processing() -> Dict[str, Any]:
 
 
 def _run_rollover_check() -> Dict[str, Any]:
-    """
-    Check all branches for rollover triggers and execute if needed.
-
-    Returns:
-        dict with success/skipped and rollover details
-    """
+    """Check all branches for rollover triggers and execute if needed."""
     try:
         from aipass.memory.apps.handlers.monitor.detector import check_all_branches
 
@@ -373,16 +291,7 @@ def _run_rollover_check() -> Dict[str, Any]:
 
 
 def auto_process() -> Dict[str, Any]:
-    """
-    Single idempotent entry point for session-start auto-processing.
-
-    Processes memory pool files and checks/runs rollover if needed.
-    Fast no-op when pool is empty and no rollover triggers.
-    Safe to call every session.
-
-    Returns:
-        dict with success, pool, and rollover results
-    """
+    """Single idempotent entry point for session-start auto-processing."""
     result: Dict[str, Any] = {"success": True, "pool": None, "rollover": None}
 
     if not _load_pool_enabled():
@@ -391,13 +300,11 @@ def auto_process() -> Dict[str, Any]:
         logger.info("[auto_process] Skipped — memory_pool disabled in config")
         return result
 
-    # 1. Process pool files
     pool_result = run_pool_processing()
     result["pool"] = pool_result
     if pool_result.get("success") is False:
         result["success"] = False
 
-    # 2. Check/run rollover
     rollover_result = _run_rollover_check()
     result["rollover"] = rollover_result
     if rollover_result.get("success") is False:
@@ -415,9 +322,7 @@ def auto_process() -> Dict[str, Any]:
     return result
 
 
-# =============================================================================
-# STANDALONE EXECUTION -- this file IS the detached child
-# =============================================================================
+# This file IS the detached child.
 
 if __name__ == "__main__":
     print(json.dumps(run_once()))

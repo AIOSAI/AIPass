@@ -3,14 +3,12 @@
 # Description: Git blame handler — who last touched each line of a file
 # Version: 1.0.0
 # Created: 2026-09-30
-# Modified: 2026-09-30
+# Modified: 2026-10-17
 # =============================================
 
 """Git blame handler — who last touched each line of a file.
 
-Granted at the GLOBAL read tier (DPLAN-0356 leg 2): raw git reads are blocked
-for every seat but devpulse, so blame needs a twin here. Like show, it is not
-scoped to the caller's branch: reading another branch's history is the use case.
+GLOBAL read tier (raw git is blocked for every seat), unscoped: other branches' history is the use.
 """
 
 from __future__ import annotations
@@ -29,8 +27,7 @@ _LINE_RANGE = re.compile(r"^(\d+),(\d+)$")
 def parse_line_range(spec: str) -> tuple[int, int] | None:
     """Read a ``START,END`` line range (1-based, inclusive), or None when it is not one.
 
-    Only the numeric form is taken: git's regex and :funcname forms of -L stay
-    out, so a token can never be read as something other than two line numbers.
+    Numeric form only: git's regex and :funcname forms of -L stay out.
     """
     match = _LINE_RANGE.match(spec)
     if match is None:
@@ -42,11 +39,7 @@ def parse_line_range(spec: str) -> tuple[int, int] | None:
 
 
 def get_git_blame(path: str, line_range: tuple[int, int] | None = None, repo_root: Path | None = None) -> dict:
-    """Blame *path* (absolute) in *repo_root* (default: the standing repo).
-
-    ``success`` is False when git could not answer, with git's reason in
-    ``message``; ``lines`` holds git blame's own output, one entry per line.
-    """
+    """Blame *path* (absolute) in *repo_root* (default: the standing repo)."""
     if repo_root is None:
         repo_root = find_repo_root()
 

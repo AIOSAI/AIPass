@@ -3,26 +3,12 @@
 # Description: One-shot module discovery scan
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """One-shot discovery scan — the registry's only writer that tells the truth.
 
-DPLAN-0339 step 4. Discovery used to be incremental: every process that logged
-started a recursive inotify watch over the whole ecosystem on a daemon thread,
-and a module was registered only if it happened to be created while some process
-was both alive and still walking. Measured 2026-09-11: the registry held 250 of
-the 1,442 modules a scan finds — 17%, and it never pruned, so entries for files
-deleted in August were still in it.
-
-A scan does not have that failure mode. It walks once, compares what is on disk
-against what is recorded, and writes the result. It is a SNAPSHOT, not a diff
-log: after a scan the registry equals what the walk found, which is the property
-the incremental path could never hold.
-
-Cheap enough to schedule: the walk is ~0.18 s and the whole scan ~4.5 s on this
-tree (1,589 directories), nearly all of it in the scanner's per-file stat calls.
-No inotify, no thread, no observer — a plain walk that returns.
+Reference: docs/discovery.md
 """
 
 from datetime import datetime, timezone
@@ -40,23 +26,12 @@ MODULE_NAME = "scan"
 def run_scan() -> Dict[str, Any]:
     """Walk the ecosystem and make the registry a truthful snapshot.
 
-    Returns:
-        Dict with ``added``/``removed`` (sorted module-name lists), ``unchanged``,
-        ``total``, ``timestamp`` and ``saved`` (False when the write failed).
-
-    A module counts as REMOVED when the scan no longer finds it — its file is
-    gone, or it now matches an ignore rule. Both mean the same thing to every
-    reader of the registry: it is not there any more.
-
-    ``discovered_time`` is carried over for a module already on record, so the
-    field keeps meaning "first seen" rather than "last scanned". A scan is not a
-    rediscovery.
+    ``discovered_time`` carries over for a module on record: it means "first seen", not "last scanned".
     """
     before = load_module_registry()
     previous_unreadable = before is None
     if before is None:
-        # Unreadable registry (load logged why): the scan rebuilds it from disk,
-        # which heals it, but nothing can be carried over or compared (prax, leg 15).
+        # Unreadable registry: the scan rebuilds it from disk, but nothing carries over or compares.
         before = {}
     found = discover_python_modules()
 

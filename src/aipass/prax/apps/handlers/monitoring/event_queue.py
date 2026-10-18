@@ -3,7 +3,7 @@
 # Description: Thread-Safe Event Queue
 # Version: 0.2.0
 # Created: 2025-11-23
-# Modified: 2026-08-08
+# Modified: 2026-10-17
 # =============================================
 
 """Thread-safe event coordination for monitoring system"""
@@ -36,7 +36,6 @@ class MonitoringEvent:
     pid: Optional[int] = field(compare=False, default=None)  # Process ID of the agent
 
     def __post_init__(self):
-        # Convert level to priority number for queue ordering
         if self.priority == 0:  # Not set
             priority_map = {"error": 1, "warning": 2, "info": 3, "debug": 4}
             self.priority = priority_map.get(self.level, 3)
@@ -58,9 +57,7 @@ class MonitoringQueue:
     def set_scope(self, scope) -> None:
         """Restrict the queue to a branch scope (None clears it).
 
-        Filtering here rather than at display keeps out-of-scope traffic from
-        occupying queue slots, so a noisy branch cannot evict the events the
-        operator actually asked to watch.
+        Filtering at the queue, not the display, stops a noisy branch evicting wanted events.
         """
         self._scope = scope
 
@@ -71,23 +68,18 @@ class MonitoringQueue:
     def enqueue(self, event: MonitoringEvent, bypass_scope: bool = False) -> bool:
         """Add event to queue (thread-safe).
 
-        Args:
-            event: The event to display
-            bypass_scope: Ignore the branch scope — for the monitor's own health
-                messages, which must reach the operator whatever they scoped to.
+        bypass_scope is for the monitor's own health messages, which must reach the operator.
         """
         if self._stopped.is_set():
             return False
 
         scope = self._scope
         if not bypass_scope and scope is not None and not scope.matches_event(event):
-            # Not a drop: the operator asked for this to be off-screen. Kept out
-            # of the overflow counter on purpose — nothing failed here.
+            # Not a drop: kept out of the overflow counter, nothing failed.
             with self.lock:
                 self._scope_suppressed += 1
             return False
 
-        # Simple deduplication + queue put under single lock
         with self.lock:
             if self._is_duplicate(event):
                 return False
@@ -97,11 +89,8 @@ class MonitoringQueue:
                 if len(self.recent_events) > 100:
                     self.recent_events.pop(0)
             except Exception as e:
-                # Rate-limited on purpose: this warning lands in a log prax itself
-                # watches, so per-event logging turns a full queue into a
-                # self-feeding firehose — every warning spawns a new log event
-                # that also fails to enqueue (live-caught 2026-07-31, 20-80
-                # warnings/sec sustained).
+                # Rate-limited: this warning lands in a log prax watches, so
+                # per-event logging turns a full queue into a self-feeding firehose.
                 self._dropped += 1
                 now = time.monotonic()
                 if now - self._last_drop_warning >= 30.0:
@@ -110,20 +99,14 @@ class MonitoringQueue:
                     self._last_drop_warning = now
                 return False
 
-        # Outside the lock, and only for events that actually queued — logging
-        # per *attempt* was another per-event write into a watched log.
+        # Only for queued events: per-attempt logging writes into a watched log.
         json_handler.log_operation("event_queued", {"event_type": event.event_type, "branch": event.branch})
         return True
 
     def _report_drops(self, exc: Exception, latest: MonitoringEvent) -> None:
         """Report skipped events to the operator in plain language.
 
-        This line shows up on the operator's Mission Control screen, so it names the
-        subsystem in plain words, says what happened, how many events it cost, and
-        whether anything is actually lost — never a bare exception repr (the owner's
-        ruling, 2026-08-08). A full queue and an unexpected failure are reported
-        separately: calling the second one an overflow would be a comforting lie
-        about a real bug.
+        Full queue and unexpected failure stay separate: calling a bug an overflow hides it.
         """
         latest_desc = f"latest: {latest.event_type} from {latest.branch}"
 
@@ -182,5 +165,4 @@ class MonitoringQueue:
         return self.queue.qsize()
 
 
-# Global instance for the monitoring system
 global_queue = MonitoringQueue()

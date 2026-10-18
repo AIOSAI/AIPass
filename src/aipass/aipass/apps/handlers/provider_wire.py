@@ -3,46 +3,15 @@
 # Description: Auto-wire provider settings from manifest into user config
 # Version: 1.5.1
 # Created: 2026-07-11
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """provider_wire — auto-wire provider settings.
 
-Hooks use manifest-driven strip-and-readd (removes stale AIPass bridge entries);
-env vars, permissions and the settings scalar slot remain additive-only merges
-into ~/.claude/settings.json.
-
-THE SETTINGS SCALAR SLOT (DPLAN-0347)
--------------------------------------
-`cli.claude.settings` in provider_manifest.json is a small map of TOP-LEVEL
-provider-settings keys and the values AIPass wants — first entry
-`includeGitInstructions: false`, which only takes effect in the personal
-settings file (the project copy is ignored, measured S470/S471).
-
-The manifest is the single source: this file never carries a default of its own.
-The merge is additive and one-directional — a key AIPass wants and the user has
-not set gets set; a key the user has set to a DIFFERENT value is reported and
-left alone, because an explicit human value outranks the manifest. No other key
-in the file is read or written.
-
-Both wire doors merge the same four things — hooks, env, permissions and the
-scalars — through the same helpers: ``refresh_provider_hooks`` at install (setup.sh)
-and ``plan_wire_provider`` + ``apply_settings_plan`` in-process (``doctor --fix``, the
-wire prompt: the doctor shows the plan and asks before it applies, FPLAN-0646), so a fresh
-clone is fully wired at install rather than at the first doctor run. Env and
-permissions joined the install door in FPLAN-0645, retiring setup.sh's second,
-stdlib heredoc that wrote them with no backup. PYTHONUTF8=1 under Git Bash/MSYS is
-the one platform-guarded key; the wire owns that guard (``_is_msys_shell``).
-Install re-points AIPASS_HOME to the tree being installed; doctor never does
-(``_repoint_aipass_home``); every other env key stays additive on both doors.
-
-BACKUP AND RECEIPT FIRST (FPLAN-0645)
--------------------------------------
-Both doors back the settings file up through ``settings_backup`` immediately before
-their write and append a receipt after it. A failed backup raises
-``SettingsBackupError`` and the file is not written; a write the fleet writer
-reports failed raises the same error and leaves no receipt. The old same-day
-``settings.json.bak.<date>`` copy is retired: a second write that day overwrote it.
+Hooks are strip-and-readd (stale bridge entries go); env, permissions and the
+top-level settings scalars are additive only: a value the user set is reported,
+never overwritten. The manifest is the single source; this file holds no defaults.
+Both doors (setup.sh install, doctor --fix) back up before the write, receipt after.
 """
 
 from __future__ import annotations
@@ -67,10 +36,6 @@ from aipass.aipass.apps.handlers.settings_backup import (
     write_receipt,
 )
 
-# =============================================================================
-# HOOK & ENV DESCRIPTIONS
-# =============================================================================
-
 HOOK_DESCRIPTIONS: Dict[str, str] = {
     "pre_edit_gate.py": "blocks edits outside agent's branch",
     "subagent_stop_gate.py": "validates agent output on exit",
@@ -89,7 +54,6 @@ ENV_DESCRIPTIONS: Dict[str, str] = {
 
 BRIDGE_MARKER = "bridges/claude.py"
 
-# --- The settings scalar slot (DPLAN-0347) ---
 SETTINGS_SLOT = "settings"
 
 SETTINGS_DESCRIPTIONS: Dict[str, str] = {
@@ -98,7 +62,6 @@ SETTINGS_DESCRIPTIONS: Dict[str, str] = {
 
 WIRE_COMMAND = "aipass doctor --fix"
 
-# The one platform-guarded env key (moved from setup.sh's stdlib heredoc, FPLAN-0645).
 MSYS_ENV_KEY = "PYTHONUTF8"
 MSYS_ENV_VALUE = "1"
 
@@ -118,17 +81,10 @@ class SettingsGap(NamedTuple):
     state: str  # STATE_SET | STATE_MISSING | STATE_DIFFERENT
 
 
-# =============================================================================
-# SETTINGS SCALAR SLOT
-# =============================================================================
-
-
 def manifest_settings(manifest: dict) -> Dict[str, Any]:
     """The top-level provider-settings keys the manifest wants, and their values.
 
-    Scalars only (bool/int/float/str). A non-scalar in the slot is dropped with a
-    log line rather than merged: this slot writes top-level scalars, so a nested
-    block typed into it can never reach settings.json through here.
+    Scalars only: a nested block typed into the slot is dropped, never merged.
     """
     slot = manifest.get("cli", {}).get("claude", {}).get(SETTINGS_SLOT, {})
     if not isinstance(slot, dict):
@@ -155,8 +111,7 @@ def _same_value(actual: Any, wanted: Any) -> bool:
 def settings_gaps(wanted: Dict[str, Any], settings: dict) -> List[SettingsGap]:
     """Per-key diff: what the manifest wants vs what the provider settings file has.
 
-    The one reader both lanes use, so `aipass doctor` reports exactly what the wire
-    verb would do — a MISSING key gets set, a DIFFERENT one is left to its owner.
+    The one reader both lanes use, so `aipass doctor` reports exactly what the wire does.
     """
     gaps: List[SettingsGap] = []
     for key, value in wanted.items():
@@ -170,11 +125,7 @@ def settings_gaps(wanted: Dict[str, Any], settings: dict) -> List[SettingsGap]:
 
 
 def _merge_settings_scalars(settings: dict, wanted: Dict[str, Any]) -> List[str]:
-    """Set the manifest's scalars that are absent; report, never overwrite, the rest.
-
-    Mutates `settings` in place — only keys the manifest names, and only when the
-    file does not have them yet.
-    """
+    """Set the manifest's scalars that are absent; report, never overwrite, the rest."""
     actions: List[str] = []
     for gap in settings_gaps(wanted, settings):
         if gap.state == STATE_MISSING:
@@ -188,24 +139,13 @@ def _merge_settings_scalars(settings: dict, wanted: Dict[str, Any]) -> List[str]
     return actions
 
 
-# =============================================================================
-# AUTO-WIRE
-# =============================================================================
-
-
 def platform_bridge_command(command: str, os_name: Optional[str] = None) -> str:
     """Write-time OS transform for the venv interpreter path (manifest stays POSIX-canonical).
 
-    *os_name* defaults to ``os.name`` read at call time; every product caller passes
-    nothing, or forwards doctor.check_provider_manifest's own os_name seam, None in
-    the product.  It exists so the tests can ask for the Windows answer without patching
-    ``os.name`` process-wide (the seam is for the test).
-
-    Public because a second module calls it: doctor's manifest check verifies with
-    the same transform this module writes with (write and verify must agree).
+    Public: doctor's manifest check verifies with this same transform (write and verify
+    must agree). *os_name* is a test seam; product callers pass None.
     """
-    # DPLAN-0234 Strand C: CC on Windows runs hooks via Git Bash so $AIPASS_HOME expansion still
-    # works, but the venv interpreter itself lives at .venv/Scripts/python.exe there, not .venv/bin/python3.
+    # Windows hooks run under Git Bash ($AIPASS_HOME still expands) but the venv is .venv/Scripts.
     if (os.name if os_name is None else os_name) == "nt":
         return command.replace("/.venv/bin/python3", "/.venv/Scripts/python.exe")
     return command
@@ -235,10 +175,8 @@ def _strip_and_readd_hooks(
 ) -> "tuple[Dict[str, list], List[str]]":
     """Strip every AIPass bridge-marked hook entry, then re-add the manifest's current set.
 
-    Prevents a stale bridge entry (old matcher/command shape from a prior manifest
-    version) from surviving alongside a fresh one after an upgrade — the additive-merge
-    double-fire bug (DPLAN-0279). User-wired (non-bridge) hooks in any event are always
-    preserved untouched.
+    An additive merge left an old-shape bridge entry beside the fresh one and the hook
+    fired twice. Non-bridge (user) hooks are preserved untouched.
     """
     fresh = _build_manifest_hook_entries(manifest_hooks)
     actions: List[str] = []
@@ -259,12 +197,7 @@ def _strip_and_readd_hooks(
 
 
 def _is_msys_shell(environ: Optional[Mapping[str, str]] = None) -> bool:
-    """True under Git Bash / MSYS / MinGW on Windows — the one place PYTHONUTF8 belongs.
-
-    The predicate setup.sh's stdlib heredoc used, moved here unchanged: ``MSYSTEM``
-    (exported by Git Bash, MINGW64 / MSYS) or ``OSTYPE`` naming msys / MINGW.
-    *environ* defaults to ``os.environ`` read at call time (the seam is for the test).
-    """
+    """True under Git Bash / MSYS / MinGW on Windows — the one place PYTHONUTF8 belongs."""
     env = os.environ if environ is None else environ
     shell = env.get("MSYSTEM", "") + env.get("OSTYPE", "")
     return "MSYS" in shell or "msys" in shell or "MINGW" in shell
@@ -273,10 +206,8 @@ def _is_msys_shell(environ: Optional[Mapping[str, str]] = None) -> bool:
 def _merge_env(settings: dict, claude_section: dict, manifest_path: Path) -> List[str]:
     """Additive env merge: the manifest's env keys the file lacks, plus PYTHONUTF8 under MSYS.
 
-    ``{{REPO_ROOT}}`` resolves to the manifest's parent's parent, ``{{PROJECT_ROOT}}`` to
-    the cwd. A key already in the file keeps the file's value. PYTHONUTF8=1 is the one
-    platform-guarded key (Rich output in Windows hook processes); the manifest carries
-    no guard syntax, so the wire owns this one conditional.
+    The manifest has no guard syntax, so the wire owns the PYTHONUTF8 conditional
+    (Rich output in Windows hook processes needs it).
     """
     actions: List[str] = []
     wanted: Dict[str, str] = {}
@@ -299,10 +230,8 @@ def _merge_env(settings: dict, claude_section: dict, manifest_path: Path) -> Lis
 def _repoint_aipass_home(settings: dict, manifest_path: Path) -> List[str]:
     """Install only: point env.AIPASS_HOME at the tree being installed, whatever it said.
 
-    The one env key the install door overwrites (owner ruling, FPLAN-0645): a re-install
-    from a new clone location heals the split the old heredoc used to heal. Absent is
-    _merge_env's job; matching emits no line. doctor --fix never calls this — a fix from
-    a second checkout must not take the home from the first.
+    doctor --fix never calls this: a fix from a second checkout must not take the home
+    from the first.
     """
     env_block = settings.get("env")
     if not isinstance(env_block, dict) or "AIPASS_HOME" not in env_block:
@@ -345,12 +274,7 @@ def _write_with_receipt(
 ) -> None:
     """Write the settings a door merged, then its receipt; the backup lines go in *actions*.
 
-    *record* is the door's own ``backup_before_write``, taken just before this call.
-    *consent* (``y (tty)``, ``--yes``, ``install``) becomes the receipt summary's first
-    line, ``consent: <it>``, when given (FPLAN-0646).
-
-    The fleet writer returns False on a failed write instead of raising; that raises
-    ``SettingsBackupError`` naming the path here, and no receipt is written.
+    The fleet writer returns False instead of raising; that becomes SettingsBackupError, no receipt.
     """
     if record.backup is not None:
         actions.append(f"Backed up settings to {record.backup}")
@@ -365,18 +289,11 @@ def _write_with_receipt(
     actions.append(f"Receipt: {receipt}")
 
 
-# =============================================================================
-# PLAN, THEN WRITE (FPLAN-0646)
-# =============================================================================
-
-
 class SettingsPlan(NamedTuple):
     """A change to the provider settings file, computed and not yet written.
 
-    *actions* are the door's past-tense lines (what it reports after the write);
-    *planned* are the same changes in the planned tense, one per line, for the
-    question — only lines that change the file. *notes* are the lines that change
-    nothing (a human value kept). *door* names the writer for the backup and receipt.
+    *actions* are past tense (reported after the write); *planned* only the lines that
+    change the file, in planned tense; *notes* the lines that change nothing.
     """
 
     settings_path: Path
@@ -445,17 +362,8 @@ def settings_diff(before: dict, after: dict) -> List[str]:
 def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None) -> Optional[SettingsPlan]:
     """What the doctor's wire door would write, computed without writing.
 
-    Hooks: manifest-driven strip-and-readd (removes stale AIPass bridge entries).
-    Env vars, permissions and the settings scalar slot: additive merge only — never
-    removed or overwritten; a settings key the user set to a different value is a
-    note, left as the user set it. ``apply_settings_plan`` writes it.
-
-    None when the manifest is unreadable or carries no ``cli.claude`` section — the
-    door then has nothing to do. A hook refresh that leaves an event as it was is not
-    a planned change, so a fully wired file plans nothing.
-
-    *settings_path* defaults to ``~/.claude/settings.json`` computed at call time
-    (the seam is for the test).
+    None when the manifest is unreadable or has no ``cli.claude`` section. A hook refresh
+    that leaves an event as it was is not a change, so a fully wired file plans nothing.
     """
     manifest = json_handler.read_json(manifest_path)
     if manifest is None:
@@ -477,18 +385,12 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
 
     actions.extend(_merge_env(settings, claude_section, manifest_path))
     actions.extend(_merge_permissions(settings, claude_section))
-    # Top-level scalars the manifest names (DPLAN-0347) — same write, same backup.
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
     return _make_plan(settings_path, before, settings, actions, DOOR_DOCTOR_FIX, "Updated ~/.claude/settings.json")
 
 
 def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent: Optional[str] = None) -> List[str]:
-    """Write a plan through its backed-up door: backup, write, receipt. Returns the action lines.
-
-    *door* overrides the plan's own (``install`` for the install tail's doctor run);
-    *consent* is recorded as the receipt's first summary line. A failed backup raises
-    ``SettingsBackupError`` and nothing is written.
-    """
+    """Write a plan through its backed-up door: backup, write, receipt. Returns the action lines."""
     actions = list(plan.actions)
     record = backup_before_write(plan.settings_path, door or plan.door)
     _write_with_receipt(plan.settings_path, copy.deepcopy(plan.after), record, actions, plan.updated_line, consent)
@@ -499,28 +401,9 @@ def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent:
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
     """Write the manifest's hooks, env, permissions and settings scalars into ~/.claude/settings.json.
 
-    The install-time entry point: setup.sh's venv-python heredoc is its only caller.
-    The in-process path (`doctor --fix`, the interactive wire-prompt) goes through
-    plan_wire_provider and apply_settings_plan instead — siblings, not a chain. What they share
-    is _strip_and_readd_hooks, _merge_env, _merge_permissions and
-    _merge_settings_scalars, the single sources of
-    truth for each merge, so upgrades never leave a stale bridge entry from an old
-    manifest version alongside the current one, and both doors treat a human's own
-    settings value the same way: report it, never overwrite it.
-
-    The scalars belong at INSTALL, not one doctor run later: without
-    includeGitInstructions a fresh clone pays the ~4k-char gitStatus block from its
-    very first session, and this is the only wire door install itself calls.
-
-    Fails honestly: raises if the manifest can't be read/parsed rather than silently
-    leaving stale wiring in place.
-
-    *settings_path* defaults to ``~/.claude/settings.json`` computed at call time;
-    setup.sh passes nothing.  It exists so the tests write a tmp file instead of
-    patching ``Path.home`` (the seam is for the test).
-
-    Backs the file up (door ``setup-sh``) before the write and leaves a receipt after;
-    a failed backup raises ``SettingsBackupError`` and nothing is written.
+    setup.sh is the only caller; doctor --fix uses plan_wire_provider, sharing the merge
+    helpers. The scalars land here so a fresh clone is wired from its first session.
+    Raises on an unreadable manifest rather than leave stale wiring in place.
     """
     manifest = json_handler.read_json(manifest_path)
     if manifest is None:

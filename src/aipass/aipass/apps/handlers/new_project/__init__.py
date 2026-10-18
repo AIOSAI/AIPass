@@ -1,24 +1,17 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-17
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 New Project Handler — creates projects inside AIPass installations.
 
-Business logic for `aipass new`. Creates a project at <host>/projects/<name>
-with its own git repo, registry, and optional AIPass agent.
-
-Flow: find host -> validate -> mkdir -> mint registry (FIRST) ->
-      write template -> scaffold AIPass files -> git init -> optional agent.
-
-RULES:
-  - Registry MUST be minted before any spawn call
-  - git init via subprocess (hooks git gate only intercepts agent Bash)
-  - Cleanup on failure: partial project is worse than no project
+The registry is minted before any spawn call (spawn finds it walking up); git init runs
+via subprocess (the hooks git gate only intercepts agent Bash); a failure removes the
+partial project, which is worse than none.
 """
 
 import json
@@ -39,10 +32,7 @@ TEMPLATES = ("empty", "python")
 
 
 def find_host_root(start: Path) -> Path | None:
-    """Walk up from *start* to find the AIPass host installation root.
-
-    Returns the directory containing ``*_REGISTRY.json``, or ``None``.
-    """
+    """Walk up from *start* to find the AIPass host installation root."""
     for p in [start, *start.parents]:
         try:
             entries = list(p.iterdir())
@@ -79,9 +69,6 @@ def _git(args: list[str], cwd: Path) -> str:
     return r.stdout.strip()
 
 
-# ── registry ────────────────────────────────────────────────────────────
-
-
 def _write_registry(target: Path, name: str) -> tuple[str, str]:
     """Mint the project registry. Returns ``(registry_id, filename)``."""
     registry_id = str(uuid.uuid4())
@@ -102,9 +89,6 @@ def _write_registry(target: Path, name: str) -> tuple[str, str]:
     }
     sm.write_text_lf(target / filename, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     return registry_id, filename
-
-
-# ── templates ───────────────────────────────────────────────────────────
 
 
 def _write_template(target: Path, name: str, template: str) -> list[str]:
@@ -144,9 +128,6 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
     return created
 
 
-# ── AIPass scaffold ─────────────────────────────────────────────────────
-
-
 def _scaffold_aipass(target: Path, name: str) -> list[str]:
     """Write AIPass scaffold files (tiers, hooks, CLAUDE.md, settings, .venv)."""
     from aipass.aipass.shared.project_home import (
@@ -162,23 +143,19 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
     aipass_home = _detect_aipass_home()
     reg = _registry_name(name)
 
-    # .aipass/
     aipass_dir = target / ".aipass"
     aipass_dir.mkdir(exist_ok=True)
 
-    # Tier files
     if aipass_home:
         for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
             dest = aipass_dir / tier_file
             src_path = Path(aipass_home) / ".aipass" / tier_file
             if src_path.is_file():
-                # Read-then-write, never copy2: a CRLF checkout of AIPASS_HOME
-                # would otherwise hand the project bytes no template comparison
-                # can match (PR #761, windows-setup).
+                # Read-then-write, never copy2: a CRLF checkout of AIPASS_HOME would
+                # hand the project bytes no template comparison can match.
                 sm.write_text_lf(dest, src_path.read_text(encoding="utf-8"))
                 created.append(f".aipass/{tier_file}")
 
-    # hooks.json + trust enrollment
     if aipass_home:
         template = Path(aipass_home) / ".aipass" / "project_hooks.json"
         if template.is_file():
@@ -186,7 +163,6 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
             created.append(".aipass/hooks.json")
             _enroll_project(target)
 
-    # CLAUDE.md, AGENTS.md
     for md_name in ("CLAUDE.md", "AGENTS.md"):
         dest = target / md_name
         if dest.exists():
@@ -208,8 +184,7 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
     sm.write_text_lf(claude_dir / "settings.json", _claude_settings())
     created.append(".claude/settings.json")
 
-    # .claude/settings.local.json — machine-local AIPASS_HOME + claudeMdExcludes
-    # fence (gitignored). `aipass new` always creates under <host>/projects/<name>.
+    # .claude/settings.local.json — machine-local AIPASS_HOME + claudeMdExcludes fence (gitignored)
     if aipass_home and not is_throwaway_path(aipass_home):
         sm.write_text_lf(
             claude_dir / "settings.local.json",
@@ -217,20 +192,16 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
         )
         created.append(".claude/settings.local.json")
 
-    # .claude/commands/prep.md
     commands_dir = claude_dir / "commands"
     commands_dir.mkdir(exist_ok=True)
     sm.write_text_lf(commands_dir / "prep.md", sc.prep_md())
     created.append(".claude/commands/prep.md")
 
-    # .aipass/scaffold_manifest.json — `aipass new` mints a whole tree, so
-    # every file in it is ours and the stamp is honest. Without it, a project
-    # born here would meet its first `init update` as unknown provenance and
-    # collect a sidecar for files nobody had touched (DPLAN-0335).
+    # `aipass new` mints the whole tree, so every file is ours; without the stamp the first
+    # `init update` reads them as unknown provenance and writes sidecars.
     sm.write_manifest(target, _managed_manifest_entries(target))
     created.append(str(sm.MANIFEST_REL.as_posix()))
 
-    # .venv symlink
     if aipass_home:
         venv = Path(aipass_home) / ".venv"
         if venv.is_dir():
@@ -241,18 +212,11 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
     return created
 
 
-# ── git ─────────────────────────────────────────────────────────────────
-
-
 def _git_init(target: Path, name: str, template: str) -> None:
     """Initialize git repo with a birth commit on main, then cut dev. Guards re-init.
 
-    R6 (DPLAN-0319): a new project is born with BOTH branches and is LEFT on
-    dev — agents default to ``git_branch: dev``, main trails until merge day.
-
-    dev is cut AFTER the birth commit on purpose: branching an empty repo would
-    give dev no history in common with main, so the first merge back would be
-    an unrelated-histories refusal.
+    Left on dev (agents default to ``git_branch: dev``). dev is cut after the birth commit:
+    cut from an empty repo it shares no history with main and the first merge is refused.
     """
     if (target / ".git").exists():
         raise RuntimeError(f"'{target}' already has a .git directory")
@@ -265,9 +229,6 @@ def _git_init(target: Path, name: str, template: str) -> None:
     _git(["checkout", "-b", "dev"], target)
 
 
-# ── agent (via @spawn) ──────────────────────────────────────────────────
-
-
 def _agent_home(project_root: Path, name: str) -> Path:
     """Compute the agent home directory: src/<pkg>/<pkg>/."""
     pkg = name.replace("-", "_").lower()
@@ -277,23 +238,9 @@ def _agent_home(project_root: Path, name: str) -> Path:
 def _spawn_project_agent(project_root: Path, name: str) -> dict:
     """Create the project agent via spawn_agent().
 
-    Agent lives at src/<pkg>/<pkg>/ inside the project. Spawn discovers
-    the project-local registry (minted earlier by _write_registry) by
-    walking up from the agent home to the project root.
-
-    NO citizen_class is passed, deliberately (DPLAN-0319 R3). The class is
-    decided at mint from the citizen number, and this agent is always citizen
-    #1 of a registry minted moments earlier by ``_write_registry`` — so spawn's
-    first-agent rule mints ``manager`` on its own. Naming a class here would
-    replace a derived fact with a guess; the value this used to pass
-    ("project_agent") is a retired name spawn now refuses by name rather than
-    translate, so passing it broke agent minting outright.
-
-    ``role`` is free text (nothing branches on it — the ``role == "project_agent"``
-    tiebreaker died with the template fork), but it is rendered verbatim into
-    the agent's own injected identity. Leaving the retired class name there
-    would have every project agent introduce itself with a class name that no
-    longer exists, one field away from a passport correctly saying "manager".
+    No citizen_class: agent #1 of a fresh registry is minted ``manager`` by spawn's
+    first-agent rule, and the retired "project_agent" class is refused. ``role`` is
+    rendered into the agent's identity, so it never names a retired class.
     """
     home = _agent_home(project_root, name)
     result = spawn_agent(
@@ -311,29 +258,25 @@ def _spawn_project_agent(project_root: Path, name: str) -> dict:
     return result
 
 
-# ── public API ──────────────────────────────────────────────────────────
-
-
 def create_project(
     name: str,
     template: str = "empty",
     no_agent: bool = False,
+    host: Path | None = None,
 ) -> dict:
     """Create a new project inside the AIPass host installation.
 
-    Returns:
-        dict with name, template, target, host, registry_id, registry_file,
-        files, agent_spawned.
-
-    Raises:
-        ValueError: Invalid name or template.
-        RuntimeError: Not inside AIPass, target exists, git failure.
+    *host* None finds the root from cwd; a server names it, since it cannot chdir per
+    request. Raises ValueError (name, template) or RuntimeError (no host, exists, git).
     """
     _validate_name(name)
     if template not in TEMPLATES:
         raise ValueError(f"Unknown template '{template}'. Choose from: {', '.join(TEMPLATES)}")
 
-    host = find_host_root(Path.cwd())
+    if host is None:
+        host = find_host_root(Path.cwd())
+    elif find_host_root(host) != host:
+        raise RuntimeError(f"Not an AIPass installation root: {host}")
     if host is None:
         raise RuntimeError(
             "Not inside an AIPass installation (no *_REGISTRY.json found). "

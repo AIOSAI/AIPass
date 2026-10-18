@@ -3,37 +3,15 @@
 # Description: Branch health module — public API (entry-count + entry-size)
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Health Module — Public API
 
-Wraps two existing read-only checks — entry-count (is a branch's
-``.trinity`` file over its rollover trigger) and entry-size (are any
-entries over their character cap) — into one public function.
-
-Built for @daemon: ``apps/handlers/*`` files are HANDLERS, and seedgo
-blocks handler-to-other-branch-handler imports outright, so a consumer
-in another branch cannot reach ``apps/handlers/monitor/detector.py`` or
-``apps/handlers/json/lint_handler.py`` directly. This module is the
-public, cross-branch-importable surface that bridges to both:
-
-    from aipass.memory.apps.modules.health import get_branch_health
-
-Strictly **read-only** — never writes, modifies, truncates, or deletes
-any file.
-
-Severity is the caller's call, not this module's — ``get_branch_health``
-only reports facts. Intended severities (as recorded for @daemon's own
-consumption, documented here so every consumer applies them the same
-way):
-
-    - Entry-count ``should_rollover: True``  -> INFO / pending. Rollover
-      being due is not a fault; it auto-fires at the next PreCompact.
-      Never WARNING.
-    - Entry-size violations (``total_violations > 0``) -> WARNING. A
-      write got past the character-cap gate.
+Cross-branch surface: seedgo blocks importing another branch's handlers. Read-only.
+Consumer severity: should_rollover -> INFO (auto-fires at PreCompact), never WARNING;
+total_violations > 0 -> WARNING (a write got past the cap gate).
 """
 
 import os
@@ -50,13 +28,9 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 
-# Handler import (same package family — json handlers)
 from aipass.memory.apps.handlers.json.lint_handler import run_lint
 
-# Cross-handler access for branch discovery + rollover check (module
-# layer bridges handlers — established precedent, see apps/modules/lint.py)
-# read_scope, not _read_registry: health reads and never writes, so its scope
-# is the declared fleet including externals. The write scope stops at the edge.
+# read_scope, not _read_registry: health never writes, so it reads the declared fleet incl. externals.
 from aipass.memory.apps.handlers.monitor.detector import (
     RegistryUnreadable,
     _get_memory_file_path,
@@ -67,53 +41,8 @@ from aipass.memory.apps.handlers.monitor.detector import (
 __all__ = ["get_branch_health"]
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def get_branch_health(branch_name: str) -> dict:
-    """Combine entry-count and entry-size checks for one branch.
-
-    Read-only. Never writes, modifies, truncates, or deletes any file.
-
-    Resolves ``branch_name`` case-insensitively against the registry
-    (``read_scope()``). For each of ``local`` and ``observations``:
-    resolves the ``.trinity`` file path via ``_get_memory_file_path`` and,
-    if it exists, runs ``check_single_file`` (entry-count / rollover-
-    trigger check). A memory_type whose file does not exist is skipped
-    gracefully — its entry in the result is ``None`` — rather than
-    failing the whole call. Entry-size violations come from
-    ``run_lint`` scoped to this one branch.
-
-    Args:
-        branch_name: Branch name to check, matched case-insensitively.
-
-    Returns:
-        On an unknown branch::
-
-            {"success": False, "error": "Unknown branch: <branch_name>"}
-
-        On success::
-
-            {
-                "success": True,
-                "branch": <canonical registry name>,
-                "entry_count": {
-                    "local": {"should_rollover": bool, "current_lines": int, "reason": str} | None,
-                    "observations": {"should_rollover": bool, "current_lines": int, "reason": str} | None,
-                },
-                "entry_size": {"violations": [...], "total_violations": int},
-            }
-
-        See the module docstring for the intended severity mapping a
-        consumer should apply to ``should_rollover`` and to a non-empty
-        ``violations`` list — this function itself assigns none.
-
-        An unreadable registry answers ``{"success": False, "error": ...}``
-        naming the file, never a raise: @daemon calls this outside any try
-        (DPLAN-0354 leg 3b).
-    """
+    """Combine entry-count and entry-size checks for one branch; an unreadable registry returns, never raises."""
     try:
         branches = read_scope()
     except RegistryUnreadable as e:
@@ -140,8 +69,6 @@ def get_branch_health(branch_name: str) -> dict:
 
         result = check_single_file(file_path)
         if not result.get("success"):
-            # File vanished between resolution and check, or unreadable —
-            # skip gracefully rather than erroring the whole call.
             entry_count[memory_type] = None
             continue
 
@@ -179,11 +106,6 @@ def get_branch_health(branch_name: str) -> dict:
     }
 
 
-# =============================================================================
-# MODULE ROUTING (handle_command for drone auto-discovery)
-# =============================================================================
-
-
 def print_introspection() -> None:
     """Display module introspection (seedgo standard)."""
     from aipass.cli.apps.modules import console
@@ -212,7 +134,6 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # A help flag ANYWHERE wins: `health @x --help` is a question, never a render.
     if wants_help(args, allow_bare_word=True):
         print_introspection()
         return True
@@ -233,12 +154,7 @@ def handle_command(command: str, args: list) -> bool:
 
 
 def _print_health(result: dict) -> None:
-    """Render one ``get_branch_health`` answer: a refusal through ``error()``, else the facts.
-
-    Severity follows the module docstring: a due rollover is information on the
-    console, an entry-size violation is a ``warning()``. Neither fails the command;
-    only a refusal (unknown branch, unreadable registry) does.
-    """
+    """Render one ``get_branch_health`` answer: a refusal through ``error()``, else the facts."""
     from aipass.cli.apps.modules import console, error, warning
 
     if not result.get("success"):

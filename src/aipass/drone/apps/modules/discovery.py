@@ -3,7 +3,7 @@
 # Description: Module and command discovery for branch introspection
 # Version: 1.0.0
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -23,15 +23,7 @@ from aipass.drone.apps.handlers.help_flags import wants_help
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
-    """Route discovery commands to handler functions.
-
-    Args:
-        command: The command string (e.g. "modules", "help", "system")
-        args: List of arguments for the command
-
-    Returns:
-        True if command succeeded, False otherwise
-    """
+    """Route discovery commands to handler functions."""
     if not args:
         if command is None:
             print_introspection()
@@ -117,10 +109,7 @@ def print_introspection():
 
 
 def discover_modules(target: str) -> List[str]:
-    """Discover available commands for a branch.
-
-    Resolves target to path and delegates to handler.
-    """
+    """Discover available commands for a branch."""
     from aipass.drone.apps.handlers.discovery_handler import (
         discover_modules as _discover,
     )
@@ -131,10 +120,7 @@ def discover_modules(target: str) -> List[str]:
 
 
 def get_help(target: str, command: Optional[str] = None) -> HelpResult:
-    """Get structured help for a branch or a specific command.
-
-    Resolves target to path and delegates to handler.
-    """
+    """Get structured help for a branch or a specific command."""
     from aipass.drone.apps.handlers.discovery_handler import (
         get_help as _get_help,
     )

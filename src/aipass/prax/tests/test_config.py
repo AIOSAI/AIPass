@@ -3,15 +3,10 @@
 # Description: Tests for prax config handlers (load + ignore_patterns)
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
-
-# Tests for prax config handlers — covers load.py functions
-# (get_system_logs_dir, get_module_logs_dir, lines_to_bytes,
-# get_debug_prints_enabled, load_log_config) and ignore_patterns.py
-# (load_ignore_patterns_from_config).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
@@ -28,11 +23,6 @@ from aipass.prax.apps.handlers.config import load as load_mod
 from aipass.prax.apps.handlers.json import json_service
 
 
-# =============================================
-# HELPERS
-# =============================================
-
-
 def _patch_load_world(monkeypatch, tmp_path):
     """Point load.py's module-level paths at tmp_path and record its json_handler.
 
@@ -46,7 +36,6 @@ def _patch_load_world(monkeypatch, tmp_path):
     monkeypatch.setattr(load_mod, "_config_schema_warned", False)
     monkeypatch.setattr(load_mod, "_bad_level_warned", set())
 
-    # Patch module-level paths to use tmp_path
     prax_root = tmp_path / "prax"
     prax_root.mkdir(exist_ok=True)
     ecosystem_root = prax_root.parent
@@ -57,12 +46,9 @@ def _patch_load_world(monkeypatch, tmp_path):
     monkeypatch.setattr(load_mod, "ECOSYSTEM_ROOT", ecosystem_root)
     monkeypatch.setattr(load_mod, "PRAX_JSON_DIR", prax_json_dir)
     monkeypatch.setattr(load_mod, "PRAX_LOGGER_CONFIG_FILE", prax_json_dir / "prax_logger_config.json")
-    # Reset the lazy cache so get_system_logs_dir() re-resolves
     monkeypatch.setattr(load_mod, "_system_logs_dir_cache", None)
-    # Clear test log redirects so tests exercise real path resolution. The real
-    # json service reads the same variable, so its directory is held under
-    # tmp_path at its own edge: with no redirect, the direct and introspection
-    # records would land in the live prax_json (prax, leg 13).
+    # Redirects cleared for real path resolution; the json service, reading the same variable,
+    # is held under tmp_path or its records land in the live prax_json.
     json_root = tmp_path / "json_service"
     monkeypatch.setattr(
         json_service.JsonHandle, "json_dir", property(lambda handle: json_root / handle.branch_root.name)
@@ -88,17 +74,11 @@ def _patch_ignore_world(monkeypatch, tmp_path):
     monkeypatch.setattr(ip_mod, "PRAX_LOGGER_CONFIG_FILE", prax_json_dir / "prax_logger_config.json")
 
 
-# =============================================
-# TESTS: get_system_logs_dir
-# =============================================
-
-
 class TestGetSystemLogsDir:
     """Tests for get_system_logs_dir()."""
 
     def test_returns_path(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
-        # Patch _find_repo_root to return tmp_path
         monkeypatch.setattr(load_mod, "_find_repo_root", lambda: tmp_path)
         result = load_mod.get_system_logs_dir()
         assert isinstance(result, Path)
@@ -137,7 +117,7 @@ class TestGetSystemLogsDir:
     def test_an_installed_package_logs_under_the_user_home_never_the_filesystem_root(
         self, mock_prax_infrastructure, monkeypatch, tmp_path
     ):
-        """FPLAN-0642: a uv tool install resolved its log home to /system_logs, Errno 13."""
+        """A uv tool install resolved its log home to /system_logs, Errno 13."""
         _patch_load_world(monkeypatch, tmp_path)
         home = tmp_path / "home"
         # Path.home() reads HOME on POSIX and USERPROFILE on Windows.
@@ -174,11 +154,6 @@ class TestGetSystemLogsDir:
             locked.chmod(0o700)
 
 
-# =============================================
-# TESTS: get_module_logs_dir
-# =============================================
-
-
 class TestGetModuleLogsDir:
     """Tests for get_module_logs_dir(module_name)."""
 
@@ -189,13 +164,10 @@ class TestGetModuleLogsDir:
         assert isinstance(result, Path)
         # Which Path: no flow/ exists under either root here, so the
         # unknown-module fallback answers system_logs/external/<module>.
-        # (Without the _find_repo_root patch above this resolved against the
-        # real checkout and created system_logs/external/flow in it.)
         assert result == tmp_path / "system_logs" / "external" / "flow"
 
     def test_existing_module_under_ecosystem(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
-        # Create the module directory so the first branch is taken
         module_dir = tmp_path / "flow"
         module_dir.mkdir()
         result = load_mod.get_module_logs_dir("flow")
@@ -224,7 +196,6 @@ class TestGetModuleLogsDir:
         assert result == tmp_path / "system_logs" / "external" / "unknown_branch"
         assert result.exists()
         assert result.is_dir()
-        # Verify ECOSYSTEM_ROOT is not polluted
         assert not (tmp_path / "unknown_branch").exists()
 
     def test_aipass_caller_cwd_routes_to_caller_project(self, mock_prax_infrastructure, monkeypatch, tmp_path):
@@ -242,13 +213,7 @@ class TestGetModuleLogsDir:
         assert result == caller_project / "logs" / "polyglot"
         assert result.exists()
         assert result.is_dir()
-        # ECOSYSTEM_ROOT must not be polluted
         assert not (tmp_path / "polyglot").exists()
-
-
-# =============================================
-# TESTS: PYTEST_CURRENT_TEST routing
-# =============================================
 
 
 class TestPytestCurrentTestRouting:
@@ -290,11 +255,6 @@ class TestPytestCurrentTestRouting:
         assert result == tmp_path / "system_logs"
 
 
-# =============================================
-# TESTS: lines_to_bytes
-# =============================================
-
-
 class TestLinesToBytes:
     """Tests for lines_to_bytes(num_lines, avg_line_length)."""
 
@@ -326,11 +286,6 @@ class TestLinesToBytes:
         assert load_mod.lines_to_bytes(1_000_000) == 1_000_000 * 200
 
 
-# =============================================
-# TESTS: get_debug_prints_enabled
-# =============================================
-
-
 class TestGetDebugPrintsEnabled:
     """Tests for get_debug_prints_enabled()."""
 
@@ -344,7 +299,6 @@ class TestGetDebugPrintsEnabled:
 
     def test_false_when_config_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)
-        # No config file exists
         assert load_mod.get_debug_prints_enabled() is False
 
     def test_true_when_enabled_in_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
@@ -381,11 +335,6 @@ class TestGetDebugPrintsEnabled:
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(json.dumps({}), encoding="utf-8")
         assert load_mod.get_debug_prints_enabled() is False
-
-
-# =============================================
-# TESTS: load_log_config
-# =============================================
 
 
 class TestLoadLogConfig:
@@ -443,7 +392,6 @@ class TestLoadLogConfig:
         config_file.write_text("not json at all!", encoding="utf-8")
 
         result = load_mod.load_log_config()
-        # Should fall back to defaults
         assert result["system_logs"]["max_lines"] == 1000
         assert result["local_logs"]["max_lines"] == 250
 
@@ -478,7 +426,6 @@ class TestLoadLogConfig:
     def test_defaults_keep_three_backups(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         # Retained history scales with backup_count, so this number IS the
         # forensic window: 1 -> 3 triples the floor and doubles the ceiling.
-        # Measured 2026-08-04, hooks_engine.log held 45 min at 1 backup.
         _patch_load_world(monkeypatch, tmp_path)
         assert load_mod.DEFAULT_SYSTEM_LOGS["backup_count"] == 3
         assert load_mod.DEFAULT_LOCAL_LOGS["backup_count"] == 3
@@ -548,11 +495,6 @@ class TestLoadLogConfig:
         assert result["system_logs"]["backup_count"] == 4
         assert result["local_logs"]["backup_count"] == 2
         mock_logger.warning.assert_not_called()
-
-
-# =============================================
-# TESTS: load_ignore_patterns_from_config
-# =============================================
 
 
 class TestLoadIgnorePatternsFromConfig:
@@ -630,18 +572,8 @@ class TestLoadIgnorePatternsFromConfig:
         assert result == ip_mod.DEFAULT_IGNORE_FOLDERS
 
 
-# =============================================
-# resolve_log_level / level_to_int
-# =============================================
-
-
 class TestResolveLogLevel:
-    """Tests for resolve_log_level() — the read side of the log_level config key.
-
-    The key was declared in DEFAULT_SYSTEM_LOGS/DEFAULT_LOCAL_LOGS and returned
-    by load_log_config() long before anything applied it, so a config asking
-    for DEBUG silently got INFO.
-    """
+    """Tests for resolve_log_level(): a config asking for DEBUG must get DEBUG, not INFO."""
 
     def test_defaults_to_info_when_nothing_configured(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         _patch_load_world(monkeypatch, tmp_path)

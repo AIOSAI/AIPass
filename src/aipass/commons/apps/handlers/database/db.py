@@ -3,20 +3,10 @@
 # Description: The Commons SQLite connection manager
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-The Commons - SQLite Connection Manager
-
-Handles database initialization, connection lifecycle,
-and schema bootstrapping for The Commons social network.
-
-Pure sqlite3 stdlib - no external dependencies.
-
-Database location: {branch_root}/commons.db
-resolved by walking up from __file__ to find the branch root (src/aipass/commons/).
-"""
+"""The Commons - SQLite Connection Manager"""
 
 import os
 import json
@@ -29,32 +19,11 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.json import json_handler
 from aipass.commons.apps.handlers.module_root import module_file
 
-# =============================================================================
-# DATABASE PATHS
-# =============================================================================
-
 
 def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
-    """
-    Walk up from a starting path to find the commons branch root.
-
-    Public so a caller diagnosing a checkout (a fresh clone, a moved tree)
-    can ask which root commons would resolve without opening the database.
-
-    Accepts the branch root if EITHER .trinity/ OR .aipass/ is a directory
-    there. .trinity/ is checked first, but .aipass/ is git-tracked (unlike
-    .trinity/, which is gitignored) so it is what resolves this on a fresh
-    clone that has never run and so has no .trinity/ yet.
-
-    Args:
-        start_path: Directory to start the walk from. Defaults to this
-            file's own directory (module_file(__file__).parent).
-
-    Returns:
-        Path to branch root (src/aipass/commons/), or None if not found.
-    """
-    # module_file() rather than a bare .resolve(): DB_PATH calls this at module
-    # scope, so on Windows a bare resolve reads cwd at import time.
+    """Walk up from a starting path to find the commons branch root."""
+    # .aipass/ is git-tracked (.trinity/ is not): it is what resolves a fresh clone.
+    # module_file(), not .resolve(): DB_PATH calls this at import, where Windows resolve reads cwd.
     current = start_path if start_path is not None else module_file(__file__).parent
     for _ in range(10):
         if (current / ".trinity").is_dir() or (current / ".aipass").is_dir():
@@ -67,21 +36,7 @@ def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
 
 
 def resolve_db_path() -> Optional[Path]:
-    """
-    Resolve the database file path.
-
-    Public for the same reason as find_branch_root: it answers where commons
-    would put its database, or None, without creating or opening anything.
-
-    Resolution order:
-    1. Walk up from __file__ to find branch root (.trinity/ or .aipass/
-       marker) → {branch_root}/commons.db
-    2. AIPASS_ROOT environment variable → {AIPASS_ROOT}/src/aipass/commons/commons.db
-
-    Returns:
-        Path to the commons.db file, or None if neither resolves. Callers
-        must not silently fall back to a guessed location — see get_db().
-    """
+    """Resolve the database file path; None means callers must not guess a location."""
     branch_root = find_branch_root()
     if branch_root:
         return branch_root / "commons.db"
@@ -97,44 +52,18 @@ DB_PATH = resolve_db_path()
 
 
 class CommonsRootNotFound(RuntimeError):
-    """Raised when the commons branch root cannot be resolved.
-
-    Deferred to use-time (see get_db()) rather than raised at import time,
-    so that importing the package never fails on its own.
-    """
+    """Raised by get_db() at use-time, never at import, when the branch root cannot be resolved."""
 
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
-# Retry configuration for locked-database scenarios
-_RETRY_DELAYS = (0.1, 0.5, 2.0)  # exponential backoff: 3 retries
+_RETRY_DELAYS = (0.1, 0.5, 2.0)
 
 T = TypeVar("T")
 
 
-# =============================================================================
-# RETRY LOGIC
-# =============================================================================
-
-
 def retry_on_locked(fn: Callable[..., T], *args, **kwargs) -> T:
-    """
-    Retry wrapper for database operations that may hit "database is locked".
-
-    Catches sqlite3.OperationalError with "database is locked" message and
-    retries with exponential backoff (0.1s, 0.5s, 2.0s).
-
-    Args:
-        fn: The callable to execute.
-        *args: Positional arguments forwarded to fn.
-        **kwargs: Keyword arguments forwarded to fn.
-
-    Returns:
-        The return value of fn.
-
-    Raises:
-        sqlite3.OperationalError: If all retries are exhausted.
-    """
+    """Retry wrapper for database operations that may hit "database is locked"."""
     last_err: Optional[sqlite3.OperationalError] = None
     for delay in (*_RETRY_DELAYS, None):
         try:
@@ -150,30 +79,8 @@ def retry_on_locked(fn: Callable[..., T], *args, **kwargs) -> T:
     raise last_err  # type: ignore[misc]
 
 
-# =============================================================================
-# CONNECTION MANAGEMENT
-# =============================================================================
-
-
 def get_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    """
-    Open a connection to the Commons database.
-
-    Returns a connection with row_factory set to sqlite3.Row
-    so results behave like dicts. Uses a 30-second busy timeout
-    and retries with exponential backoff on "database is locked".
-
-    Args:
-        db_path: Override database file path (useful for testing).
-
-    Returns:
-        sqlite3.Connection with Row factory and foreign keys enabled.
-
-    Raises:
-        CommonsRootNotFound: If db_path is not given and the commons branch
-            root could not be resolved (no .trinity/ or .aipass/ marker found
-            walking up from this file, and AIPASS_ROOT is unset).
-    """
+    """Open a connection to the Commons database; CommonsRootNotFound if no path resolves."""
     path = db_path or DB_PATH
     if path is None:
         raise CommonsRootNotFound(
@@ -196,58 +103,28 @@ def get_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
 
 def close_db(conn: sqlite3.Connection) -> None:
-    """
-    Close a database connection safely.
-
-    Args:
-        conn: The connection to close.
-    """
+    """Close a database connection safely."""
     if conn:
         conn.close()
 
 
-# =============================================================================
-# DATABASE INITIALIZATION
-# =============================================================================
-
-
 def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    """
-    Initialize the database: create tables from flattened schema.sql,
-    seed default rooms, secret rooms, and room personalities.
-
-    The schema is fully flattened - no migrations needed. All 16 tables
-    are created via CREATE IF NOT EXISTS in a single schema file.
-
-    Args:
-        db_path: Override database file path (useful for testing).
-
-    Returns:
-        sqlite3.Connection to the initialized database.
-    """
-    # Resolved once here and reused below: get_db() raises CommonsRootNotFound
-    # before returning if this would be None, so by the time we log it is
-    # guaranteed to be the real path get_db() just opened.
+    """Create tables from schema.sql (CREATE IF NOT EXISTS, no migrations) and seed rooms and agents."""
     resolved_path = db_path or DB_PATH
     conn = get_db(db_path)
 
-    # Load and execute flattened schema
     if not SCHEMA_PATH.exists():
         raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
 
     schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
     conn.executescript(schema_sql)
 
-    # Seed default rooms
     _seed_default_rooms(conn)
 
-    # Seed room personalities
     _seed_room_personalities(conn)
 
-    # Seed secret rooms
     _seed_secret_rooms(conn)
 
-    # Auto-register branches from BRANCH_REGISTRY
     _register_branches(conn)
 
     logger.info("[commons.db] Database initialized successfully")
@@ -255,22 +132,8 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     return conn
 
 
-# =============================================================================
-# SEED DATA
-# =============================================================================
-
-
 def _seed_default_rooms(conn: sqlite3.Connection) -> None:
-    """
-    Create default rooms if they don't exist.
-
-    The Commons starts with five rooms:
-    - general: main gathering space
-    - dev: development discussions
-    - watercooler: casual, off-topic chat
-    - announcements: system-wide announcements
-    - ideas: brainstorming and proposals
-    """
+    """Create default rooms if they don't exist."""
     default_rooms = [
         ("general", "General", "Main gathering space for all branches", "SYSTEM"),
         ("dev", "Dev", "Development discussions, code reviews, technical topics", "SYSTEM"),
@@ -279,7 +142,7 @@ def _seed_default_rooms(conn: sqlite3.Connection) -> None:
         ("ideas", "Ideas", "Brainstorming, proposals, and feature requests", "SYSTEM"),
     ]
 
-    # Ensure SYSTEM agent exists as the room creator
+    # rooms.created_by references agents: SYSTEM must exist first.
     conn.execute(
         "INSERT OR IGNORE INTO agents (branch_name, display_name, description) VALUES (?, ?, ?)",
         ("SYSTEM", "System", "The Commons system account"),
@@ -295,12 +158,7 @@ def _seed_default_rooms(conn: sqlite3.Connection) -> None:
 
 
 def _seed_room_personalities(conn: sqlite3.Connection) -> None:
-    """
-    Set default personality data for built-in rooms.
-
-    Only updates rooms that still have default/empty personality values
-    so manual customizations are preserved.
-    """
+    """Set default personality data for built-in rooms, leaving customized rooms alone."""
     personalities = {
         "general": {
             "mood": "welcoming",
@@ -330,7 +188,6 @@ def _seed_room_personalities(conn: sqlite3.Connection) -> None:
     }
 
     for room_name, personality in personalities.items():
-        # Only update if mood is still 'neutral' (default) or empty
         row = conn.execute("SELECT mood FROM rooms WHERE name = ?", (room_name,)).fetchone()
 
         if row and (not row["mood"] or row["mood"] == "neutral"):
@@ -343,12 +200,7 @@ def _seed_room_personalities(conn: sqlite3.Connection) -> None:
 
 
 def _seed_secret_rooms(conn: sqlite3.Connection) -> None:
-    """
-    Seed secret (hidden) rooms if they don't already exist.
-
-    These rooms are discoverable through the 'explore' command
-    and don't show up in normal room listings.
-    """
+    """Seed secret (hidden) rooms, found only through 'explore', if they don't already exist."""
     secret_rooms = [
         ("the-void", "The Void", "Where deleted thoughts echo", "Look beyond what's listed", "SYSTEM"),
         ("glitch-garden", "Glitch Garden", "Where beautiful failures bloom", "Errors have their own beauty", "SYSTEM"),
@@ -375,17 +227,7 @@ def _seed_secret_rooms(conn: sqlite3.Connection) -> None:
 
 
 def _register_branches(conn: sqlite3.Connection) -> None:
-    """
-    Auto-register all branches from AIPASS_REGISTRY.json as agents.
-
-    Reads the registry and inserts any missing branches. Existing
-    branches are left untouched (INSERT OR IGNORE).
-
-    Searches for AIPASS_REGISTRY.json in standard locations:
-    1. AIPASS_ROOT environment variable
-    2. ~/.aipass/AIPASS_REGISTRY.json
-    3. ~/AIPASS_REGISTRY.json (legacy)
-    """
+    """Auto-register missing branches from AIPASS_REGISTRY.json as agents."""
     registry_path = _find_branch_registry()
     if not registry_path:
         return
@@ -398,9 +240,7 @@ def _register_branches(conn: sqlite3.Connection) -> None:
 
     branches = registry.get("branches", [])
     for branch in branches:
-        # Lowercase to keep one branch = one identity regardless of registry
-        # casing (registry has historically mixed BACKUP vs devpulse). Matches
-        # the normalization in identity_ops.get_caller_branch().
+        # Registry casing is mixed; lowercase to match identity_ops.get_caller_branch().
         name = branch.get("name", "").lower()
         if not name:
             continue
@@ -417,22 +257,14 @@ def _register_branches(conn: sqlite3.Connection) -> None:
 
 
 def _find_branch_registry() -> Optional[Path]:
-    """
-    Locate AIPASS_REGISTRY.json by searching standard paths.
-
-    Returns:
-        Path to registry file, or None if not found.
-    """
+    """Locate AIPASS_REGISTRY.json by searching standard paths."""
     search_paths = []
 
-    # Check AIPASS_ROOT env var
     aipass_root = os.environ.get("AIPASS_ROOT", "")
     if aipass_root:
         search_paths.append(Path(aipass_root) / "AIPASS_REGISTRY.json")
 
-    # Walk up from this package to find project root. Not reached at import
-    # time, but it shares the helper: on a machine with an unreadable cwd the
-    # right answer is still this file's own absolute path, not an OSError.
+    # module_file(): with an unreadable cwd a bare resolve raises OSError.
     current = module_file(__file__).parent
     for _ in range(10):
         candidate = current / "AIPASS_REGISTRY.json"
@@ -443,7 +275,6 @@ def _find_branch_registry() -> Optional[Path]:
             break
         current = parent
 
-    # Standard locations
     search_paths.extend(
         [
             Path.home() / ".aipass" / "AIPASS_REGISTRY.json",
@@ -457,10 +288,6 @@ def _find_branch_registry() -> Optional[Path]:
 
     return None
 
-
-# =============================================================================
-# DIRECT EXECUTION
-# =============================================================================
 
 if __name__ == "__main__":
     print("Initializing The Commons database...")

@@ -3,15 +3,10 @@
 # Description: DPLAN-0139 Track E — single-path enforcement tests
 # Version: 1.3.1
 # Created: 2026-04-21
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 """Tests for apps/modules/permissions.py and apps/modules/inbox_audit.py, DPLAN-0139 Track E single-path enforcement."""
 
-# Covers:
-#   - permissions.py: TRUSTED_CROSS_WRITERS, is_trusted_caller(), identify_caller()
-#   - drone auth.py: no name-based caller list (owner-tier is earned per-repo, DPLAN-0281)
-#   - inbox_audit.py: handle_command routing, and the inbox-ids scan's live-inbox and id validation
-#   - delivery.py: deliver_to_inbox_file single-path helper
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that modules/permissions.py and modules/inbox_audit.py parse and import
@@ -30,11 +25,6 @@ from aipass.seedgo.apps.modules.inbox_audit import handle_command
 from aipass.seedgo.apps.modules.permissions import TRUSTED_CROSS_WRITERS, identify_caller, is_trusted_caller
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _find_repo_root() -> Path:
     """Walk up from this file to find the git repo root."""
     current = Path(__file__).resolve().parent
@@ -45,11 +35,6 @@ def _find_repo_root() -> Path:
 
 
 REPO_ROOT = _find_repo_root()
-
-
-# ---------------------------------------------------------------------------
-# permissions.py
-# ---------------------------------------------------------------------------
 
 
 def test_trusted_cross_writers_contains_expected_members():
@@ -108,8 +93,7 @@ def test_identify_caller_falls_back_to_identity_name(tmp_path):
 
 
 def test_identify_caller_raises_on_a_passport_it_cannot_parse(tmp_path):
-    """A found passport that does not parse names itself; it is never the "" of no
-    passport (fleet green leg 14). Red first: identify_caller returned ""."""
+    """A found passport that does not parse names itself, never the "" of no passport."""
     trinity = tmp_path / ".trinity"
     trinity.mkdir()
     passport = trinity / "passport.json"
@@ -120,27 +104,14 @@ def test_identify_caller_raises_on_a_passport_it_cannot_parse(tmp_path):
 
 
 def test_handle_command_prints_nothing_for_another_modules_command(capsys):
-    """A module that does not own the command must not write to the display.
-
-    route_command() calls every module's handle_command in discovery order until
-    one returns True, so a module that prints while returning False dumps its
-    output above the module that actually answers. permissions used to print on
-    ANY no-arg or --help command, which is why the trust list appeared over
-    `drone @seedgo standard`.
-    """
+    """A module that does not own the command must not write: route_command tries every module in turn."""
     assert permissions.handle_command("standard", []) is False
     assert permissions.handle_command("audit", ["--help"]) is False
     assert capsys.readouterr().out == ""
 
 
 def test_handle_command_claims_its_own_command_and_renders_the_trust_list(capsys):
-    """`permissions` is a real command: it renders and it is claimed.
-
-    Returning False for its own name is what produced "Unknown command:
-    permissions" followed by the introspection block — the error and the answer
-    for the same input. Asserting on rendered output, not on the return value
-    alone, is what catches the block going missing.
-    """
+    """`permissions` is a real command: it renders and it is claimed."""
     assert permissions.handle_command("permissions", []) is True
     out = capsys.readouterr().out
     assert "TRUSTED_CROSS_WRITERS" in out
@@ -151,27 +122,11 @@ def test_handle_command_claims_its_own_command_and_renders_the_trust_list(capsys
     assert "TRUSTED_CROSS_WRITERS" in capsys.readouterr().out
 
 
-# ---------------------------------------------------------------------------
-# drone auth.py — no name-based caller list (DPLAN-0281)
-# ---------------------------------------------------------------------------
-
-
 def test_drone_auth_has_no_hardcoded_caller_list():
-    """Owner-tier git is earned per-repo, never granted by name (DPLAN-0281).
-
-    The old ALLOWED_CALLERS constant read as though seedgo and spawn held git
-    write — they never did; verify_git_access ignored it. Its absence is
-    load-bearing: this test failing means someone reintroduced a name-based
-    gate, which is exactly the special-casing the owner ruling removed.
-    """
+    """Owner-tier git is earned per-repo, never granted by name: no ALLOWED_CALLERS list exists."""
     assert not hasattr(auth, "ALLOWED_CALLERS")
     for tier in auth.GIT_ACCESS_TIERS.values():
         assert "allowed_callers" not in tier
-
-
-# ---------------------------------------------------------------------------
-# inbox_audit.py — handle_command routing and the inbox-ids scan
-# ---------------------------------------------------------------------------
 
 
 def test_inbox_audit_ignores_non_audit_command():
@@ -211,13 +166,7 @@ def _inbox(path, ids):
 
 
 def test_inbox_audit_skips_archived_and_backed_up_inboxes(tmp_path, monkeypatch, capsys):
-    """Mutant: _is_live_inbox ignores _DEAD_TREE_DIRS in apps/modules/inbox_audit.py — killed.
-
-    The sweep audits LIVE mail only — a deleted branch's archived inbox is nobody's to fix.
-    Live repo shapes this pins: of 109 paths matching .ai_mail.local/inbox.json,
-    only 25 are live; 84 sit under .backup/ or .archive/ (deleted-branch snapshots
-    and @backup's versioned copies).
-    """
+    """_is_live_inbox skips .backup/ and .archive/: a deleted branch's archived inbox is nobody's to fix."""
     _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4"])
     for dead_root in (".backup", ".archive"):
         _inbox(tmp_path / dead_root / "deleted_branches" / "old" / ".ai_mail.local" / "inbox.json", ["not-hex!"])
@@ -230,14 +179,7 @@ def test_inbox_audit_skips_archived_and_backed_up_inboxes(tmp_path, monkeypatch,
 
 
 def test_inbox_audit_skips_a_directory_named_inbox_json(tmp_path, monkeypatch, capsys):
-    """Mutant: _is_live_inbox answers True for a directory in apps/modules/inbox_audit.py — killed.
-
-    @backup versions a file into a DIRECTORY of the same name — 47 exist on disk.
-    read_text() on one raises IsADirectoryError, which the scanner logged as a
-    warning per path. 44 of the 47 sit under .ai_mail.local/ and so matched the
-    sweep's glob: 44 warnings per run, for a condition no branch can act on. It
-    is not an unreadable inbox, it is not an inbox.
-    """
+    """_is_live_inbox is False for a directory: @backup versions a file into a same-named directory."""
     as_dir = tmp_path / "branch" / ".ai_mail.local" / "inbox.json"
     as_dir.mkdir(parents=True)
     (as_dir / "inbox.json").write_text("{}", encoding="utf-8")
@@ -248,10 +190,7 @@ def test_inbox_audit_skips_a_directory_named_inbox_json(tmp_path, monkeypatch, c
 
 
 def test_inbox_audit_scan_detects_bad_id(tmp_path, monkeypatch, capsys):
-    """_scan_inbox flags message ids that are not 8-char lowercase hex.
-
-    Mutant: the id pattern accepts any 8 characters in apps/modules/inbox_audit.py — killed.
-    """
+    """_scan_inbox flags message ids that are not 8-char lowercase hex."""
     _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["not-hex!", "a1b2c3d4"])
 
     out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
@@ -261,10 +200,7 @@ def test_inbox_audit_scan_detects_bad_id(tmp_path, monkeypatch, capsys):
 
 
 def test_inbox_audit_scan_passes_valid_ids(tmp_path, monkeypatch, capsys):
-    """_scan_inbox returns empty list when all message ids are valid 8-hex.
-
-    Mutant: every id is flagged in apps/modules/inbox_audit.py — killed.
-    """
+    """_scan_inbox returns empty list when all message ids are valid 8-hex."""
     _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4", "deadbeef"])
 
     out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
@@ -272,10 +208,7 @@ def test_inbox_audit_scan_passes_valid_ids(tmp_path, monkeypatch, capsys):
     assert err == ""
 
 
-# ---------------------------------------------------------------------------
-# delivery.py — deliver_to_inbox_file single-path helper
 # Load by file path to avoid cross-branch package import restriction.
-# ---------------------------------------------------------------------------
 
 
 def _load_delivery():
@@ -327,19 +260,8 @@ def test_deliver_to_inbox_file_writes_message_and_returns_id(tmp_path):
     assert data["messages"][0]["id"] == reply_id
 
 
-# ---------------------------------------------------------------------------
-# Help-flag safety — help_flag_safety: a flag ANYWHERE explains, never executes
-# ---------------------------------------------------------------------------
-
-
 def test_inbox_ids_help_does_not_run_the_repo_wide_scan():
-    """`drone @seedgo audit inbox-ids --help` walked every inbox in the repo.
-
-    args[0] was "inbox-ids", so the module's help gate never looked at the flag
-    behind it and _run_inbox_id_scan() rglob'd the whole repo root. Asserted
-    against a MOCK of the scan: a test that proves a scan did not run must
-    never run it to find out.
-    """
+    """`drone @seedgo audit inbox-ids --help` explains and never runs the scan, asserted on a mock."""
     with (
         patch.object(inbox_audit, "_run_inbox_id_scan") as scan,
         patch.object(inbox_audit, "print_introspection") as shown,

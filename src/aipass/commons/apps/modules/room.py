@@ -3,17 +3,10 @@
 # Description: Room management orchestration module
 # Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-10-05
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Room Management Module
-
-Thin router for room management. Delegates all implementation
-to handlers/rooms/room_ops.py and renders the results.
-
-Handles: room create, room list, room join commands.
-"""
+"""Room Management Module"""
 
 from typing import List
 
@@ -56,22 +49,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle room-related commands.
-
-    Args:
-        command: Command name (room).
-        args: Command arguments (subcommand + params).
-
-    Returns:
-        True if command handled, False otherwise.
-    """
+    """Handle `room <create|list|join|leave>`; False if the command is not ours."""
     if command != "room":
         return False
 
@@ -102,11 +81,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"room_{subcommand}_executed", {"command": "room", "success": True})
     return result
-
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 
 def _handle_create_room(args: List[str]) -> bool:

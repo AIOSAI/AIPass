@@ -3,13 +3,12 @@
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
 
-# Split out of test_wake.py on 2026-10-08 to keep that file under the 1,200-line
-# target: who may be woken and how, and what the wake promises other branches.
+# Who may be woken and how, and what the wake promises other branches.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — wake_branch()'s spawn, session pointer and model: tests/test_wake.py
@@ -41,26 +40,14 @@ from aipass.ai_mail.tests.support_wake import (
 pytestmark = pytest.mark.usefixtures("wake_log_operation_suppressed")
 
 
-# --- scheduled lane (DPLAN-0287) ---------------------------------------
-
-
 class TestScheduledManagerLane:
     """The opt-in scheduled lane: manager wakes run headless with the 350k pin.
 
-    The pin itself lives in dispatch_monitor (see
-    test_dispatch_monitor.test_auto_compact_window_pinned_to_350k). What wake
-    can prove is the route: a scheduled manager wake must hand off to the
-    monitor, because the monitor is the only thing that writes the pin.
+    The pin lives in dispatch_monitor, so what wake can prove is the route to the monitor.
     """
 
     def test_daemon_manager_wake_is_interactive_tmux_with_no_pin(self, tmp_path, monkeypatch):
-        """The hole this lane closes: a @daemon-sender manager wake spawns tmux.
-
-        tmux never touches dispatch_monitor, so nothing sets
-        CLAUDE_CODE_AUTO_COMPACT_WINDOW — the session inherits its model's
-        native window and sits unattended. True before and after this change:
-        the un-scheduled manager path is deliberately untouched.
-        """
+        """The hole this lane closes: a @daemon-sender manager wake spawns tmux, which sets no pin."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
         calls = _record_spawn_routes(monkeypatch)
@@ -92,12 +79,7 @@ class TestScheduledManagerLane:
         assert any(s[0] == "ok" and s[1] == "scheduled" for s in status.steps)
 
     def test_scheduled_wake_with_an_unreadable_passport_still_runs(self, tmp_path, monkeypatch):
-        """The fail-closed skip is the default lane's alone: the scheduled lane wakes managers too.
-
-        An unreadable passport in this lane spawns headless, the same as a manager
-        would. Its proof is the mutant that drops ``scheduled`` from the exemption
-        (ai_mail, leg 11).
-        """
+        """The fail-closed skip is the default lane's alone: the scheduled lane wakes managers too."""
         branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch)
         (branch_path / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
         _patch_wake_deps(monkeypatch)
@@ -110,7 +92,7 @@ class TestScheduledManagerLane:
         assert len(calls["popen"]) == 1
 
     def test_an_unreadable_safety_config_refuses_the_wake(self, tmp_path, monkeypatch):
-        """No spawn on an unreadable safety config: its max_turns may be under the default 100 (ai_mail, leg 13)."""
+        """No spawn on an unreadable safety config: its max_turns may be under the default 100."""
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         (tmp_path / "safety_config.json").write_text("{max_turns", encoding="utf-8")
         _patch_wake_deps(monkeypatch)
@@ -128,9 +110,7 @@ class TestScheduledManagerLane:
     def test_scheduled_manager_wake_hands_the_pin_site_the_spawn(self, tmp_path, monkeypatch):
         """The monitor is argv[1] and wake's own env carries no CLAUDE_* leak.
 
-        dispatch_monitor writes the 350k pin after stripping CLAUDE*; wake must
-        deliver a spawn that is (a) the monitor and (b) free of a parent window
-        that could otherwise be read as the effective pin.
+        A parent CLAUDE_* window in the env could be read as the effective pin.
         """
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch)
@@ -213,13 +193,10 @@ class TestScheduledManagerLane:
 
 
 class TestAdminManagerLane:
-    """The admin lane (FPLAN-0401 Phase 4): a verified admin dispatch wakes a
-    manager-class target headless, like any citizen dispatch (wake.py 2.3.0).
+    """The admin lane: a verified admin dispatch wakes a
+    manager-class target headless, like any citizen dispatch.
 
-    wake_branch takes `admin` as an already-decided boolean. It cannot verify
-    the grant itself — the 5-leg check needs the caller env, which lives in
-    dispatch.py. Everything below is about what the flag ROUTES, not what
-    earns it (that is test_admin_lane.py).
+    These pin what the flag ROUTES; what earns it is test_admin_lane.py.
     """
 
     def test_admin_manager_wake_routes_headless_through_monitor(self, tmp_path, monkeypatch):
@@ -314,17 +291,11 @@ class TestAdminManagerLane:
         assert status.find_step("admin") is None
 
 
-# --- wake-back opt-out (library callers) -------------------------------
-
-
 class TestWakeBackOptOut:
     """wake_back=False: a library caller (@daemon's scheduled nudges) declines
-    the completion wake-back. A nudge owes no reply, so waking @daemon back to
-    read an empty inbox was a wasted session.
+    the completion wake-back.
 
-    It travels to the monitor as an ARGV flag between the four positionals and
-    '--', never an env var: spawn_env becomes the agent's own environment and
-    would leak into any dispatch that agent makes (the AIPASS_DISPATCH_ID class).
+    It travels as an ARGV flag, never an env var: spawn_env leaks into the agent's own dispatches.
     """
 
     def test_wake_back_is_keyword_only_and_defaults_true(self):
@@ -430,10 +401,7 @@ class TestIsManager:
     def test_a_passport_that_cannot_be_read_is_treated_as_a_manager(self, tmp_path, monkeypatch):
         """Fail closed: an unreadable passport answers True, the same as the wake gate.
 
-        The gate skips the wake and the caller mails, so the dispatch-time promise
-        "you will be MAILED" is the true one. A missing passport above stays False
-        (no class was ever declared). Its proof is the mutant that answers False
-        again (ai_mail, leg 11).
+        A missing passport (above) stays False: no class was ever declared.
         """
         branch = tmp_path / "corrupt"
         (branch / ".trinity").mkdir(parents=True)
@@ -442,20 +410,12 @@ class TestIsManager:
         assert wake_mod.is_manager("@corrupt") is True
 
     def test_an_unreadable_registry_is_treated_as_a_manager(self, repo_root):
-        """Fail closed: a seat that cannot be resolved has an unknown class, so True.
-
-        resolve_branch raises on an unreadable AIPASS_REGISTRY.json since leg 12;
-        is_manager answers as for an unreadable passport. Green from its first
-        run on the cured tree; its proof is the mutant that answers False
-        (ai_mail, leg 12).
-        """
+        """Fail closed: a seat that cannot be resolved has an unknown class, so True."""
         (repo_root / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
         assert wake_mod.is_manager("@corrupt") is True
 
     def test_manager_gate_log_does_not_claim_mail_it_did_not_send(self):
-        """wake_branch's manager gate sends NO mail — the caller does. Its log line
-        claimed 'mail delivered', which is how a silent drop read as a delivery for
-        as long as it did (@devpulse P0, 2026-08-21)."""
+        """wake_branch's manager gate sends NO mail — the caller does — so its log must not claim one."""
         src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
         assert "wake skipped, mail delivered" not in src
 
@@ -463,10 +423,7 @@ class TestIsManager:
 class TestTheGrantIsReadFromTheUntrackedConfig:
     """fable_allowed() — The owner edits the grant, the repo does not ship it.
 
-    The direction of every fallback here is the point: a grant that collapsed to
-    EMPTY on a bad file would demote @devpulse silently, and the only symptom
-    would be devpulse spawning on opus. Failing toward the written ruling is the
-    recoverable direction; failing toward nobody is not.
+    Every fallback fails toward the written default, never toward an empty grant (a silent demotion).
     """
 
     def test_a_missing_config_falls_back_to_the_written_default(self, monkeypatch, tmp_path):
@@ -527,31 +484,22 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
         assert wake_mod.fable_allowed() == frozenset({"@devpulse", "@vera"})
 
     def test_the_grant_lives_where_the_repo_does_not_ship_it(self):
-        """The config path is inside .ai_mail.local/, which is gitignored. It
-        pointed at the branch root until 2026-09-08 — tracked territory, i.e.
-        the repo would have shipped an answer to who may run Fable."""
+        """The config path is inside .ai_mail.local/, which is gitignored."""
         assert wake_mod.CONFIG_FILE.parent.name == ".ai_mail.local"
 
 
 class TestDispatchStatusLabelsAreACrossBranchContract:
     """@daemon's scheduler classifies BLOCKED-vs-FAILED by these four step
-    LABELS plus a fail status — never by matching ``status.summary``, because
-    summary is human prose I am free to reword (their S53, 2026-08-30).
+    LABELS plus a fail status, never by ``status.summary``.
 
-    That makes the labels a contract between two branches, and the contract is
-    pinned HERE rather than in their tree: the rename would be written in this
-    file, so this is where it has to go red. If one of these disappears, their
-    scheduler silently reclassifies "never started" as "ran and failed", stamps
-    last_run, and starts eating scheduling periods again — the exact defect they
-    fixed. Renaming one is allowed; doing it without telling @daemon is not.
+    A lost label makes their scheduler read "never started" as "ran and failed". Tell @daemon before renaming one.
     """
 
     CONTRACT = ("pause", "lock", "blocked", "lock-acquire")
 
     def test_every_contracted_label_still_exists_in_the_wake_lane(self):
         """Cheap and total: the four strings @daemon reads must still be emitted
-        somewhere in wake.py. A grep, deliberately — it survives refactors of
-        WHICH path emits a label, and only fails when a label truly leaves."""
+        somewhere in wake.py (a grep survives refactors of which path emits one)."""
         src = _Path(wake_mod.__file__).read_text(encoding="utf-8")
         missing = [label for label in self.CONTRACT if f'"{label}"' not in src]
         assert missing == [], (
@@ -621,20 +569,13 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
 class TestRecipientDashboardRefresh:
     """The recipient's dashboard is refreshed BEFORE their session spawns.
 
-    FPLAN-0599 (FPLAN-0593 Phase 3). An agent's first turn reads
-    DASHBOARD.local.json as its single status glance; until now nothing
-    refreshed it on the way in, so a woken agent read whatever its last session
-    left behind — "0 unread" while three dispatches waited. The refresh is one
-    branch (measured 0.85-0.98 s), never the fleet, and it is FAIL-OPEN: a
-    dashboard is a convenience, a wake is the work, so every failure mode below
-    still spawns.
+    One branch, never the fleet, and FAIL-OPEN: every failure mode below still spawns.
     """
 
     @staticmethod
     def _prax(monkeypatch, fake=None, fleet_guard=True):
         """Patch the prax entry point where the wake imports it from — the
-        MODULE door (apps/modules/dashboard.py), which is prax's published
-        surface and the only one another branch may read."""
+        MODULE door (apps/modules/dashboard.py), prax's published surface."""
         prax_refresh = prax_dashboard_mod
 
         if fake is not None:
@@ -649,10 +590,7 @@ class TestRecipientDashboardRefresh:
 
     @staticmethod
     def _real_refresh(monkeypatch, **overrides):
-        """_patch_wake_deps, but with the REAL refresh hook left in place.
-
-        The hook is named at its public home, wake_dashboard (ai_mail, leg 14).
-        """
+        """_patch_wake_deps, but with the REAL refresh hook left in place."""
         _patch_wake_deps(
             monkeypatch,
             _refresh_recipient_dashboard=refresh_recipient_dashboard,

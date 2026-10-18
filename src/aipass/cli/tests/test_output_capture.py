@@ -3,7 +3,7 @@
 # Description: strip_ansi and the capture console, fed display.py's real rendering
 # Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for tests/conftest.py strip_ansi and make_capture_console, fed apps/modules/display.py output."""
@@ -24,28 +24,13 @@ from aipass.cli.apps.modules import display
 from .conftest import make_capture_console, strip_ansi
 
 
-# WHY THIS FILE EXISTS. On 2026-08-16 four tests in test_templates.py were green
-# at 09:00 and red at 22:00 on byte-identical code. Only the shell had changed:
-# it exported FORCE_COLOR=3, which makes Rich treat even a StringIO as a colour
-# terminal, so `created: 5` rendered as `created: \x1b[1m5\x1b[0m` and the plain
-# substring assert failed while a human would read the output as correct.
-#
-# A display test means to assert what is VISIBLE. These tests pin that the
-# capture helper answers that question and no other, so the next person cannot
-# quietly reintroduce a raw-bytes assert and hand the suite back to the shell.
-#
-# strip_ansi is fed what the product really renders — display.py's functions
-# printing through a colour-forced console — not hand-written escapes, so a Rich
-# upgrade that changes the bytes it emits reaches these tests.
+# FORCE_COLOR makes Rich colour even a StringIO, so display tests assert the VISIBLE text.
+# strip_ansi is fed display.py's real rendering, so a Rich upgrade's new bytes reach it.
 
 
 def _render(monkeypatch, fn, *args, colour=True, no_color=False, **kwargs) -> str:
-    """Run a display.py function against one console and return its raw bytes.
-
-    colour=True forces a truecolor terminal, the FORCE_COLOR=3 shell that bit
-    us; no_color=True keeps the terminal but drops colour, leaving bold/dim.
-    Both product consoles are swapped, since error() writes to err_console.
-    """
+    """Run a display.py function against one console and return its raw bytes."""
+    # Both product consoles are swapped, since error() writes to err_console.
     buf = StringIO()
     console = Console(
         file=buf,
@@ -75,9 +60,7 @@ class TestStripAnsi:
 
     def test_removes_attribute_codes(self, monkeypatch):
         """no_color=True strips COLOUR but leaves bold/dim — the actual trap.
-
-        Mutant: pattern matches only colour and reset (0, 3x, 9x) params — killed.
-        """
+        Mutant: pattern matches only colour and reset (0, 3x, 9x) params — killed."""
         raw = _render(monkeypatch, display.section, "Summary", no_color=True)
 
         assert "\x1b[1m" in raw, f"no bold was emitted, nothing to strip: {raw!r}"
@@ -99,9 +82,7 @@ class TestStripAnsi:
 
     def test_does_not_eat_square_brackets(self, monkeypatch):
         """Rich markup is consumed at render time; literal brackets must survive.
-
-        Mutant: strip [tag]-shaped runs after the escapes, a naive markup strip — killed.
-        """
+        Mutant: strip [tag]-shaped runs after the escapes, a naive markup strip — killed."""
         raw = _render(monkeypatch, display.success, display.escape("a [literal] bracket"))
 
         assert "\x1b[" in raw, f"no escapes were emitted around the brackets: {raw!r}"
@@ -127,12 +108,8 @@ class TestCaptureConsoleIsEnvironmentProof:
         assert "\x1b" not in get_output()
 
     def test_rendering_is_identical_across_hostile_environments(self):
-        """The regression itself: same code, four shells, one answer.
-
-        Spawns real subprocesses because Rich resolves the colour system once,
-        from the environment, at Console construction — an in-process
-        monkeypatch of os.environ would not reproduce what bit us.
-        """
+        """The regression itself: same code, four shells, one answer."""
+        # Subprocesses: Rich reads the colour env once, at Console construction.
         script = (
             "from tests.conftest import make_capture_console\n"
             "console, get_output = make_capture_console(highlight=False)\n"

@@ -3,61 +3,16 @@
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
 # Version: 1.5.0
 # Created: 2026-09-15
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
 
-A branch's todos are a sticky-note pad: at most N live, where N is
-``rollover.defaults.local.todos.count`` resolved per branch by
-``config_loader.get_todos_count`` (never a literal). When the pad holds more,
-the OLDEST by ``number`` roll off to a plain JSON file::
-
-    <repo_root>/.backup/todo/<branch_dir>/backlog.json
-
-FILE ONLY. No embedding, no ChromaDB, no subprocess, no extractor, no
-orchestrator. A vectorized rolled todo is the CPLAN-0002 duplicate species:
-restore then re-roll lands a second copy with nothing linking the two.
-
-THE ORDER IS THE CONTRACT. The classic rollover prunes first and restores on
-failure, which is wrong for open work. Here: append to the backlog, replace it
-atomically, read it back and compare every record json-equal, and only then
-write the pruned pad. Any mismatch refuses and leaves the pad untouched. A
-todo may end up in both places; it must never end up in neither.
-
-OWN BRANCH ONLY. Nothing on the detached fleet walk
-(``auto_process._run_rollover_check`` -> ``detector.check_all_branches`` ->
-``orchestrator.execute_rollover``) calls this module. A roll names ONE branch:
-``--branch @name``, or the branch the caller's working directory sits in.
-
-KEYED BY DIRECTORY. Registry names are mixed case (BACKUP); the trinity push
-resolves ``name_from="path"``, so the backlog directory is the branch
-directory name. Residents under ``projects/<name>/`` share the repo-root
-``.backup/todo/``, so two in-scope branches sharing a directory name are
-REFUSED by name: their backlogs would merge.
-
-``.backup/`` is gitignored. A fresh clone has no backlog, and that is a state
-("no backlog"), never an error.
-
-Backlog document (nested, so the todo itself stays closed and json-comparable)::
-
-    {"document_metadata": {"managed_by": "memory", "branch": "<dir>", "high_water": <int>},
-     "entries": [{"rolled": "<iso>", "reason": "overflow|non-canonical|migration",
-                  "entry": {<the todo, json-equal to the pad's copy>}}]}
-
-NUMBERS ARE NEVER RE-ISSUED ON PURPOSE. ``high_water`` is the highest todo
-number memory has seen for the branch, raised (never lowered) on every
-backlog write; a backlog written before it existed has no floor, never an
-error. The next number is one past the highest of the pad, the backlog's
-original numbers, ``high_water`` and the ``next #N`` the branch's own tab last
-rendered (N - 1). Residual: a todo added by hand and deleted by hand with no
-memory write or tab render in between leaves no trace, so its number can be
-issued again once.
-
-A RESTORE RE-RENDERS THE TAB. The pad write that lands a restored todo carries
-a fresh ``todos_meta`` from ``tracking/tab_renderer`` (the push and refresh
-renderer, never a second one), so its ``next #N`` names the number after the
-one just issued the moment the verb returns.
+FILE ONLY, never vectorized: a vectorized rolled todo duplicates on restore then re-roll.
+THE ORDER IS THE CONTRACT: append the backlog, replace atomically, read back json-equal,
+and only then write the pruned pad. A todo may sit in both places, never in neither.
+OWN BRANCH ONLY: nothing on the detached fleet walk calls this module.
+Reference: docs/todos_and_backlog.md
 """
 
 import copy
@@ -81,19 +36,13 @@ MODULE_NAME = "todo_roll"
 BACKUP_DIR = ".backup"
 TODO_DIR = "todo"
 BACKLOG_FILE = "backlog.json"
-# Where records past the ceiling go. A SIBLING of the backlog, not a deletion:
-# the backlog is the only copy of a rolled todo and is never vectorised, so
-# "trim" here means move deeper, exactly as the house rule says — rename or
-# move to an archive, never delete. Same document shape, so the file can be
-# read with the same reader and, if it ever needs to, poured back.
+# Records past the ceiling move here, never deleted: the backlog is a rolled todo's only copy.
 ARCHIVE_FILE = "backlog.archive.json"
 MANAGED_BY = "memory"
 TRINITY_DIR = ".trinity"
 LOCAL_FILE = "local.json"
 
-# The entry type and container as memory.config.json spells them. Named rather
-# than inlined: the shape check reads the fleet's own config, and a typo here
-# would silently find no rules and report an illegal entry as clean.
+# As memory.config.json spells them: a typo finds no rules and passes an illegal entry clean.
 TODO_TYPE = "todos"
 TODO_CONTAINER = "todos"
 
@@ -102,26 +51,15 @@ REASON_NON_CANONICAL = "non-canonical"
 REASON_MIGRATION = "migration"
 REASONS = (REASON_OVERFLOW, REASON_NON_CANONICAL, REASON_MIGRATION)
 
-# document_metadata key: the highest todo number memory has seen for the branch.
 HIGH_WATER_KEY = "high_water"
 
-# memory's own todos tab (tab_renderer._todos_tab) ends its first ⟦ ⟧ with
-# "· next #N ⟧". Only that shape is read; "#?", another tab or free text is no floor.
+# Only tab_renderer._todos_tab's "· next #N ⟧" shape is read; anything else is no floor.
 _TAB_NEXT_RE = re.compile(r"⟦ [^⟧]* · next #([1-9][0-9]*) ⟧")
 
-# Drone stamps both on every branch it invokes. CALLER_CWD is EVIDENCE of where
-# the caller stood. BRANCH_NAME without CALLER_CWD means this process's working
-# directory was picked by whoever launched it (drone runs a branch from the
-# branch's own directory), so the process cwd says nothing about the caller.
-# AIPASS_CALLER_BRANCH is deliberately never read: at a repo root drone stamps
-# the PROJECT name there, which collides with the @aipass citizen.
+# BRANCH_NAME without CALLER_CWD: the launcher picked the process cwd, so it says nothing.
+# AIPASS_CALLER_BRANCH is never read: at a repo root drone stamps the PROJECT name there.
 CALLER_CWD_VAR = "AIPASS_CALLER_CWD"
 BRANCH_NAME_VAR = "AIPASS_BRANCH_NAME"
-
-
-# =============================================================================
-# SMALL PURE HELPERS
-# =============================================================================
 
 
 def _find_repo_root() -> Path:
@@ -157,11 +95,7 @@ def _age(todo: Any, index: int) -> tuple[int, int, int]:
 
 
 def high_water_of(document: Any) -> int | None:
-    """The ``document_metadata.high_water`` a backlog document carries, or None.
-
-    A backlog without the key (every one written before it existed) or with a
-    value that is not a real integer has no floor - never an error.
-    """
+    """The ``document_metadata.high_water`` a backlog carries, or None (no floor, never an error)."""
     metadata = document.get("document_metadata") if isinstance(document, dict) else None
     return _as_number(metadata.get(HIGH_WATER_KEY)) if isinstance(metadata, dict) else None
 
@@ -191,18 +125,7 @@ def next_number(
     high_water: int | None = None,
     tab_floor: int | None = None,
 ) -> int:
-    """The next todo number: one past the highest number memory can see for the branch.
-
-    Args:
-        pad: The live todos list.
-        backlog_entries: The backlog's ``entries`` records.
-        high_water: The backlog's :func:`high_water_of`, or None.
-        tab_floor: :func:`floor_from_tab` of the branch's current ``todos_meta``, or None.
-
-    Returns:
-        max(pad numbers, backlog original numbers, high_water, tab_floor) + 1,
-        or 1 when none holds a real integer.
-    """
+    """The next todo number: one past the highest number memory can see for the branch."""
     highest = _highest(pad, backlog_entries, high_water, tab_floor)
     return highest + 1 if highest is not None else 1
 
@@ -228,42 +151,16 @@ def _display(path: Path) -> str:
         return Path(path).as_posix()
 
 
-# =============================================================================
-# WHERE A PAD AND ITS BACKLOG LIVE
-# =============================================================================
-
-
 def backlog_path_for(branch_dir: str, backup_root: Path | None = None) -> Path:
-    """The backlog file for one branch directory name.
-
-    Args:
-        branch_dir: The branch DIRECTORY name (not the registry name).
-        backup_root: The ``.backup`` directory to use; defaults to ``<repo_root>/.backup``.
-
-    Returns:
-        ``<backup_root>/todo/<branch_dir>/backlog.json``.
-    """
+    """The backlog file for one branch DIRECTORY name (not the registry name)."""
     root = Path(backup_root) if backup_root is not None else _find_repo_root() / BACKUP_DIR
     return root / TODO_DIR / branch_dir / BACKLOG_FILE
 
 
 def in_scope_branches(root: Path | None = None) -> list[dict[str, Any]]:
-    """Core citizens and passport-declared residents, named by directory.
+    """Core citizens and passport-declared residents, named by directory; no external tier (this lane writes).
 
-    The external tier is excluded: this lane writes, and no memory writer
-    reaches outside this repository.
-
-    Args:
-        root: Repo root; defaults to this checkout's.
-
-    Returns:
-        ``registry_scope.fleet_branches`` rows without the external tier.
-
-    Raises:
-        registry_scope.RegistryUnreadable: the core registry exists and cannot
-            be read. Without its rows a resident sharing a core citizen's
-            directory name would be the only answer for that name, and the
-            backlog path is keyed by the name (leg 10 of DPLAN-0354).
+    strict: without the core rows a resident sharing a citizen's directory name would win the backlog path.
     """
     base = Path(root) if root is not None else _find_repo_root()
     return [
@@ -332,13 +229,7 @@ def _resolved(path: Path) -> Path:
 
 
 def _caller_cwd(environ: Mapping[str, str]) -> tuple[Path | None, str | None]:
-    """Where the caller stood, or ``(None, reason)`` when there is no evidence.
-
-    Drone stamps the caller's directory and runs @memory from memory's own
-    directory, so the process cwd answers only when nothing was stamped - and
-    not when a branch name is set, because a launcher that names its target
-    and stands in its directory would make every caller look like that branch.
-    """
+    """Where the caller stood, or ``(None, reason)`` when there is no evidence."""
     if not environ.get(CALLER_CWD_VAR) and environ.get(BRANCH_NAME_VAR):
         return None, f"{BRANCH_NAME_VAR} is set without {CALLER_CWD_VAR}, so no caller directory is known"
     try:
@@ -368,22 +259,7 @@ def resolve_target(
     backup_root: Path | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Resolve the ONE branch a todo operation acts on.
-
-    Args:
-        branch: ``@name`` or ``name`` (directory name, case-insensitive). None
-            resolves the caller's branch from ``AIPASS_CALLER_CWD`` (or the
-            process cwd when no launcher stamped one).
-        fleet: Scope rows to resolve against; defaults to :func:`in_scope_branches`.
-        backup_root: ``.backup`` override for the backlog path.
-        environ: Environment override; defaults to ``os.environ``.
-
-    Returns:
-        ``{"name", "path", "local", "backlog", "backlog_display", "error", "reason"}``.
-        ``name`` is None when nothing resolved: ``error`` carries a refusal
-        (unknown branch, directory-name collision, unreadable core registry),
-        ``reason`` an honest "no branch here" (repo root, outside every branch).
-    """
+    """Resolve the ONE branch a todo operation acts on; *branch* None means the caller's cwd branch."""
     if fleet is not None:
         scope = list(fleet)
     else:
@@ -440,11 +316,6 @@ def _pad_count(name: str) -> tuple[int | None, str | None]:
     return count, None
 
 
-# =============================================================================
-# FILE I/O THROUGH THE HOUSE WRITER
-# =============================================================================
-
-
 def _read_document(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     """Read one JSON object through ``memory_files.read_memory_file``."""
     result = read_memory_file(Path(path))
@@ -457,11 +328,7 @@ def _read_document(path: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def _write_document(path: Path, document: dict[str, Any]) -> str | None:
-    """Atomic write (temp file + os.replace) through ``memory_files.write_memory_file``.
-
-    Returns:
-        The writer's refusal, or None when the file was replaced.
-    """
+    """Atomic write through ``memory_files.write_memory_file``; the refusal, or None."""
     result = write_memory_file(Path(path), document)
     if result.get("success"):
         return None
@@ -502,11 +369,6 @@ def _read_pad(local_path: Path) -> tuple[dict[str, Any] | None, list[Any] | None
     return data, todos, None
 
 
-# =============================================================================
-# THE BACKLOG
-# =============================================================================
-
-
 def _shape_problem(document: dict[str, Any]) -> str | None:
     """Why *document* is not a backlog, or None."""
     if not isinstance(document.get("document_metadata"), dict):
@@ -517,17 +379,7 @@ def _shape_problem(document: dict[str, Any]) -> str | None:
 
 
 def read_backlog(backlog_path: Path) -> dict[str, Any]:
-    """Read one branch's backlog, answering a missing file honestly.
-
-    Args:
-        backlog_path: The backlog file.
-
-    Returns:
-        ``{"path", "exists", "document", "entries", "error", "message"}``.
-        A missing file is ``exists: False`` with a ``message`` and NO error -
-        ``.backup/`` is gitignored, so a fresh clone has none. An unreadable or
-        misshapen file carries ``error`` and is never written over.
-    """
+    """Read one branch's backlog; a missing file is a state (``.backup/`` is gitignored), not an error."""
     path = Path(backlog_path)
     state: dict[str, Any] = {
         "path": path,
@@ -585,21 +437,7 @@ def append_to_backlog(
 ) -> dict[str, Any]:
     """Append todos to a backlog: append, raise ``high_water``, replace atomically, read back, compare.
 
-    The push rule (row 3) and :func:`roll_todos` both go through here, and
-    both prune the pad only after this returns ``success``.
-
-    Args:
-        backlog_path: The backlog file.
-        branch_dir: The branch directory name stamped into a new backlog.
-        todos: The todos to append, in order. Each is stored json-equal under ``entry``.
-        reason: One of :data:`REASONS`.
-        pad: The whole pad as it stands before the prune; its numbers reach ``high_water``.
-
-    Returns:
-        ``{"success", "appended", "archived", "path", "error"}``. On failure
-        the pad must not be touched. ``archived`` is how many records the trim
-        moved to the sibling archive on the way past, and is never a reason
-        this returns failure.
+    Callers (the push, :func:`roll_todos`) prune the pad only after ``success``.
     """
     path = Path(backlog_path)
     result: dict[str, Any] = {"success": False, "appended": 0, "archived": 0, "path": path, "error": None}
@@ -646,10 +484,7 @@ def append_to_backlog(
     result["success"] = True
     result["appended"] = len(records)
 
-    # Bound the working file at the one moment it grows. A failed trim NEVER
-    # fails the append: by here the records are safely on disk and the caller
-    # is about to prune the pad on the strength of that. The failure mode of a
-    # trim is "the backlog stays long", which is a state, not a loss.
+    # A failed trim never fails the append: the records are on disk and the caller prunes on that.
     trimmed = trim_backlog(path, branch_dir)
     result["archived"] = trimmed["archived"]
     if not trimmed["success"]:
@@ -663,44 +498,11 @@ def archive_path_for(backlog_path: Path) -> Path:
 
 
 def trim_backlog(backlog_path: Path, branch_dir: str, *, ceiling: int | None = None) -> dict[str, Any]:
-    """Move the OLDEST records past *ceiling* out of the backlog and into its archive.
+    """Move the OLDEST records (file order) past *ceiling* out of the backlog and into its archive.
 
-    WHAT FALLS OFF THE END GOES SOMEWHERE. A backlog is the only copy of a
-    rolled todo — it is never vectorised, by a ruling this branch made and
-    @devpulse endorsed ("a todo in a vector is a debt nobody is billed for") —
-    so a trim that dropped records would delete the last copy of open work
-    nobody was told about. This moves them to :data:`ARCHIVE_FILE` instead.
-    Nothing is destroyed at any point, and the bound is on the WORKING file:
-    ``todo backlog`` stays readable while the history stays whole.
-
-    THE ORDER IS THE SAME CONTRACT AS THE ROLL. Append to the archive, replace
-    it atomically, read it back and compare every record — and only then write
-    the shortened backlog. A record may briefly sit in both files; it must
-    never sit in neither.
-
-    OLDEST IS FILE ORDER, not number. Records are appended in roll order, and
-    that is the only honest reading of "oldest" for a file whose entries carry
-    a ``rolled`` timestamp but whose todo numbers were never sequential across
-    branches.
-
-    ``high_water`` is NOT lowered by a trim: it is stamped from numbers, lives
-    in ``document_metadata`` and exists precisely so a number is never
-    re-issued after its record is gone from the working file.
-
-    NOT REACHABLE BY ``todo restore``. A restore reads the backlog only, so an
-    archived record cannot be put back on a pad by that verb. That is stated
-    rather than solved: at 100 records deep a todo is history, and building a
-    second restore lane is a decision for whoever needs one.
-
-    Args:
-        backlog_path: The backlog file.
-        branch_dir: The branch directory name, for a new archive's metadata.
-        ceiling: Records to keep; read from config when None. ``None`` from
-            config means NO TRIM — never a trim to zero.
-
-    Returns:
-        ``{"success", "archived", "kept", "archive", "error"}``. ``success``
-        is True when nothing needed doing.
+    Same order as the roll: archive written and verified before the backlog shortens.
+    ``high_water`` is not lowered. ``todo restore`` reads the backlog only, never the archive.
+    Config ``None`` means NO TRIM, never a trim to zero.
     """
     path = Path(backlog_path)
     archive = archive_path_for(path)
@@ -779,11 +581,6 @@ def trim_backlog(backlog_path: Path, branch_dir: str, *, ceiling: int | None = N
     return result
 
 
-# =============================================================================
-# ROLL / RESTORE / NEXT NUMBER
-# =============================================================================
-
-
 def roll_todos(
     branch: str,
     *,
@@ -792,23 +589,7 @@ def roll_todos(
     backup_root: Path | None = None,
     fleet: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Roll ONE branch's overflow todos, oldest by number, to its backlog.
-
-    Order: backlog append -> atomic replace -> read back and compare every
-    record -> only then the pruned pad (atomic, read back). Nothing is
-    written when the pad is within its count.
-
-    Args:
-        branch: Branch directory name (``@`` optional).
-        local_path: Explicit pad file (a scratch copy); skips registry resolution.
-        backlog_path: Explicit backlog file.
-        backup_root: ``.backup`` override when the backlog path is derived.
-        fleet: Scope rows for registry resolution.
-
-    Returns:
-        ``{"success", "branch", "count", "pad_before", "pad_after", "rolled",
-        "numbers", "backlog", "backlog_display", "error"}``.
-    """
+    """Roll ONE branch's overflow todos, oldest by number, to its backlog; nothing written within count."""
     target = _locate(branch, local_path, backlog_path, backup_root, fleet)
     result: dict[str, Any] = {
         "success": False,
@@ -894,11 +675,7 @@ def _rendered_todos_meta(
 ) -> tuple[str | None, str | None]:
     """The ``todos_meta`` line memory's renderer writes for *pad*, or ``(None, refusal)``.
 
-    The renderer is ``tracking/tab_renderer`` - the one the push and the tab
-    refresh use (``todo_context`` then ``compose_meta``), numbers from config
-    and prose from the gold template. Imported here rather than at the top:
-    tab_renderer imports this module at ITS top, and by the time a restore
-    runs both are fully loaded, so the call-time import cannot cycle.
+    Imported at call time: tab_renderer imports this module at its top.
     """
     from aipass.memory.apps.handlers.tracking import tab_renderer
 
@@ -915,32 +692,9 @@ def _rendered_todos_meta(
 
 
 def shape_problems(entry: Any, branch: str) -> list[str]:
-    """Every way *entry* sits outside the todo shape, one readable line per rule.
+    """Every way *entry* sits outside the todo shape, one readable line per rule. Reports only.
 
-    The backlog is the ONLY copy of a rolled todo and the contract forbids
-    reshaping it, so a record that was written before a rule existed — a
-    ``status`` field, a ``task`` over its cap — comes back verbatim and the
-    write gate refuses it. That refusal is correct and stays. What was missing
-    is what it SAYS: two seats hit this the same night and reshaped five records
-    by hand, because the only way to learn which field was wrong was to attempt
-    the write, read one refusal, fix one field and attempt again.
-
-    This is that check, run BEFORE anything is written, naming every broken rule
-    at once. It REPORTS ONLY. Whether an over-cap task should be cut to fit or
-    carried verbatim is an open question (todo 251) and is deliberately not
-    answered here: under either answer this text is the same, so the half that
-    does not depend on the ruling is the half that got built.
-
-    The rules come from ``entry_limits`` and the sentences from the write
-    gate's own renderer — a second copy of either would be a pre-flight check
-    that disagreed with the gate it is meant to predict.
-
-    Args:
-        entry: The todo as it would land on the pad.
-        branch: Branch directory name, for its per_branch caps.
-
-    Returns:
-        One line per violation, empty when the entry is legal.
+    Rules and sentences come from the write gate's own code, so the pre-flight cannot disagree with it.
     """
     limits = load_entry_limits(branch)
     hits = check_entry_shape(TODO_TYPE, TODO_CONTAINER, "0", entry, limits)
@@ -958,29 +712,8 @@ def restore_todo(
 ) -> dict[str, Any]:
     """Move ONE todo from the backlog back onto the TOP of the pad under a fresh number.
 
-    Refused when the pad already holds its configured count, when no record
-    carries *number*, or when more than one does (the candidates are named).
-    The fresh number is :func:`next_number` with both floors (the backlog's
-    ``high_water`` and the pad's rendered ``next #N``), so it is the highest on
-    the pad and lands at index 0: lists are newest-first. The same pad write
-    carries ``todos_meta`` re-rendered for the new pad, so the tab's ``next #N``
-    is the fresh number + 1 (a tab that cannot be rendered refuses the restore
-    with nothing written). The pad is written
-    first (atomic, read back, verified); only then is that one record removed
-    from the backlog and ``high_water`` raised to the fresh number (atomic,
-    read back). Every field but ``number`` is carried json-equal.
-
-    Args:
-        branch: Branch directory name (``@`` optional).
-        number: The todo's ORIGINAL number as it sits in the backlog.
-        local_path: Explicit pad file (a scratch copy); skips registry resolution.
-        backlog_path: Explicit backlog file.
-        backup_root: ``.backup`` override when the backlog path is derived.
-        fleet: Scope rows for registry resolution.
-
-    Returns:
-        ``{"success", "branch", "original_number", "number", "task", "pad",
-        "count", "backlog", "error"}``.
+    Lists are newest-first, so the fresh (highest) number lands at index 0. The pad, with a
+    re-rendered ``todos_meta``, is written and verified before the backlog record is removed.
     """
     target = _locate(branch, local_path, backlog_path, backup_root, fleet)
     result: dict[str, Any] = {
@@ -1029,8 +762,6 @@ def restore_todo(
     )
     restored = {key: (fresh if key == "number" else copy.deepcopy(value)) for key, value in record["entry"].items()}
 
-    # Pre-write: the gate would refuse this anyway, one field at a time. Refuse
-    # here instead, naming every broken rule at once and touching nothing.
     problems = shape_problems(restored, target["name"])
     if problems:
         result["error"] = (

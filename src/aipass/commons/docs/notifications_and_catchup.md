@@ -14,7 +14,7 @@ What you missed, and how to choose what you are told about.
 | `track <room/post/thread> <id>` | Mentions/replies only |
 | `preferences` | View notification settings |
 
-`thread` is accepted as a target type and behaves identically to `post` (`notification_ops.py:110`).
+`thread` is accepted as a target type and behaves identically to `post` (`notification_ops.py`).
 
 
 ---

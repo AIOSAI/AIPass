@@ -3,18 +3,10 @@
 # Description: Tests for the read lane's feed cursor and name fence — limits, robustness, branch roots, the seat
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/host/feed.py (the cursor) and the name fence in apps/handlers/host/reads.py."""
-
-# Split out of test_host_read_lane.py along the unit under test (api, the
-# oversize split leg, 2026-10-08): the feed cursor and its caps, and the fence
-# that decides what a remote caller may read — the two things the original
-# file's header names as the ones that must not be got wrong. The file and
-# diff reads and their routes stay in test_host_read_lane.py; the git-changes
-# lane is in test_host_read_lane_changes.py; per-file diffs, history and the
-# remote in test_host_read_lane_history.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that feed.py and reads.py parse and import
@@ -34,11 +26,6 @@ from aipass.api.tests.support_host_read_lane import _RegistryBroken, _event, _wr
 # seedgo's discarded_patch rule reads a target imported from this branch's
 # package as one it judges.
 PATCH_FEED_PATH = "aipass.api.apps.handlers.host.feed.feed_path"
-
-
-# =============================================
-# FEED — the cursor
-# =============================================
 
 
 class TestFeedCursor:
@@ -198,28 +185,16 @@ class TestFeedRobustness:
     def test_unreadable_feed_raises_rather_than_faking_empty(self, feed_file: Path) -> None:
         """
         Fail honest: an unreadable feed is not 'no notifications'.
-
-        Unreadable for real: the handler's own feed_path seam names a directory,
-        which exists and cannot be read as text, and the platform picks the
-        error. Path.read_text is no longer replaced for the process (api, fleet
-        green leg 10); the assert is on the product's FeedUnavailable only.
         """
         with patch(PATCH_FEED_PATH, return_value=feed_file.parent):
             with pytest.raises(host_feed.FeedUnavailable):
                 host_feed.read_feed()
 
 
-# =============================================
-# READS — the name fence
-# =============================================
-
-
 class TestFence:
     """A remote caller must never choose what gets read.
 
-    Asked through read_file, the public verb that stands the fence (api, fleet
-    green leg 4). read_file has refusals of its own, so each case pins the
-    message of the gate it aims at, not only the type.
+    read_file has refusals of its own, so each case pins the gate's message, not only the type.
     """
 
     def test_absolute_path_refused(self, fake_repo: dict) -> None:

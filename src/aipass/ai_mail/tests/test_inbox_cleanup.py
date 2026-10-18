@@ -3,7 +3,7 @@
 # Description: Tests for inbox cleanup handler
 # Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/inbox_cleanup.py."""
@@ -315,7 +315,7 @@ def test_mark_as_closed_and_archive_updates_counts(tmp_path: Path):
 
 # ---- the closed-message sweep, through load_inbox ----------------
 # The sweep is reached the way its callers reach it: load_inbox on a tmp_path
-# inbox, its far side the deleted/ folder beside it (ai_mail, leg 7).
+# inbox, its far side the deleted/ folder beside it.
 
 
 def _load_swept(monkeypatch, tmp_path: Path, messages: list) -> tuple:

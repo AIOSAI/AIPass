@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_modules.py
 # Description: modules_check sub-functions and the door shape (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/modules_check.py."""
@@ -229,6 +229,63 @@ class TestCheckNoDirectFileOps:
         result = check_no_direct_file_ops(lines)
         assert result is not None
         assert result["passed"] is True
+
+
+class TestAOneLineDocstringHidesNothing:
+    """A one-line docstring opens and closes on its own line, so the code after it is still read."""
+
+    def test_a_read_after_a_one_line_docstring_is_named_by_its_line(self):
+        """The permissions.py shape: a one-line module docstring, then a direct read."""
+        content = (
+            '"""Shared permission definitions."""\n'
+            "\n"
+            "def identify(passport):\n"
+            '    return json.loads(passport.read_text(encoding="utf-8"))\n'
+        )
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is False
+        assert result["message"].startswith("Module has direct file operations: line 4: ")
+
+    def test_file_op_words_inside_a_multi_line_docstring_are_not_code(self):
+        """Prose naming read_text( inside a docstring body is skipped, open to close."""
+        content = (
+            "def identify(passport):\n"
+            '    """Return the branch name.\n'
+            "\n"
+            "    Never calls passport.read_text( directly.\n"
+            '    """\n'
+            "    return handler.load(passport)\n"
+        )
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_file_op_words_on_a_one_line_docstring_are_not_code(self):
+        """The docstring line itself is prose, even when it opens and closes on that line."""
+        content = (
+            "def identify(passport):\n"
+            '    """Never calls passport.read_text( directly."""\n'
+            "    return handler.load(passport)\n"
+        )
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_a_read_after_a_closed_multi_line_docstring_is_still_read(self):
+        """Closing a multi-line docstring turns the reading back on."""
+        content = (
+            "def identify(passport):\n"
+            '    """Return the branch name.\n'
+            "\n"
+            "    Reads the passport.\n"
+            '    """\n'
+            "    return passport.read_text()\n"
+        )
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is False
+        assert "line 6: " in result["message"]
 
 
 # -- check_no_business_logic -------------------------------------------------

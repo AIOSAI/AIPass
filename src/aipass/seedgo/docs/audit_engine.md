@@ -31,8 +31,10 @@ Each module's `handle_command(command, args)` is called in discovery order and t
 returning `True` wins. Nothing is registered by hand, which is why the bare-branch
 introspection can list the verbs truthfully.
 
-**Packs.** A checker pack is a `handlers/*_standards/` directory with a `pack.json`.
-`standards_audit` strips the `_standards` suffix for command routing
+**Packs.** A checker pack is a `handlers/*_standards/` directory holding at least one
+`*_check.py`. An optional `pack.json` declares its `kind`; a pack with none is a standards
+(scoring) pack, which is what `aipass_standards/` is, and the audit refuses to score an
+execution pack such as `tests_pytest_standards/`. `standards_audit` strips the `_standards` suffix for command routing
 (`aipass_standards/` → `audit aipass`); `standards_query` uses the full directory name
 (`standards_query aipass_standards`). Four packs live here today and the bare branch command
 counts them for you.
@@ -50,10 +52,8 @@ under `tests/`. The PostToolUse **checklist** hook checks whatever file was just
 bypass rule can therefore be live in one lane and dead in the other — the mistake a naive
 rot detector makes.
 
-`tests/` joined the corpus on **2026-09-21** (owner ruling 21:20). Four standards in the pack
-are written for test files, and an `apps/`-only corpus handed them nothing: they printed a
-grey unscored backlog line and never a row. They score like any other standard now, and
-branch scores dropped on arrival — which is the ruling of 2026-09-20, *let all files fail*.
+The standards written for test files (`APPLIES_TO = "tests"`) score like any other standard:
+a test file that fails a rule lowers the branch score — *let all files fail*.
 
 Which files enter and which do not:
 
@@ -65,8 +65,8 @@ Which files enter and which do not:
 | `tests/parked/**`, `.archive/`, `deprecated/`, `(disabled)` names | no — retired code is not lintable |
 
 WHICH checkers run on each file is still decided per checker by `APPLIES_TO`, never by the
-corpus. Every checker in the pack declares one as of the same ruling; the default is still
-`everywhere`, and forgetting it still costs noise rather than a missed bug.
+corpus. Every checker in the pack declares one; the default is `everywhere`, and forgetting
+it costs noise rather than a missed bug.
 
 A pack declares its own corpus in `pack.json`, and the banner printed over its scores is that
 declaration, not the engine's file count.
@@ -93,7 +93,7 @@ Without those two channels a cache hit is a stale answer wearing a fresh timesta
 
 ### What invalidates what
 
-Two stamps, not one, because they answer different questions (2026-09-21):
+Two stamps, not one, because they answer different questions:
 
 - **Per checker** — `compute_checker_stamps()` fingerprints each `*_check.py` on its own.
   Edit one and only that checker re-runs, across the branch; every other checker's cached
@@ -104,11 +104,8 @@ Two stamps, not one, because they answer different questions (2026-09-21):
   stale green is worse than a slow audit.
 - **Neither** — a standard's `.md` page and its `*_content.py`. Both belong to
   `standards_query`, a separate command with no cache; no audit output carries a line of
-  either, checked against the live cache doc. Rewording a page is a cache hit.
-
-Measured on @memory: a one-checker edit cost 76.9s before the split and 8.7s after; a doc-page
-edit 78.4s and 1.4s. Across the fleet, 1261.3s and 475.2s — of which seedgo's own 404.5s is
-irreducible, because the checker file it edited *is* one of the files seedgo audits.
+  either. Rewording a page is a cache hit. A one-checker edit re-runs that checker only, except
+on seedgo itself, where the edited checker file *is* one of the files seedgo audits.
 
 ---
 
@@ -117,10 +114,8 @@ irreducible, because the checker file it edited *is* one of the files seedgo aud
 An `all_files` row is the mean of its files' scores. A file leaves that mean only when the
 checker says, in a field, that it did not judge the file: every check passed and at least one
 carries `"declined": True`. A file with any failing check is always averaged, whatever else it
-declines. The engine never reads message text to decide it. Until 2026-09-25 any passing
-message containing "skipped" or "not applicable" stood a file down, so a word choice decided the
-row (owner, 14:58: *"if stuff is being skipped or ignored that is not intended we have to
-resolve that"*).
+declines. The engine never reads message text to decide it, so a word like "skipped" in a
+passing message stands nothing down.
 
 Every declined file is named: `audit_branch` returns `declined` (`{row: [rel paths]}`), the
 summary prints `Not judged: <Row> N declined`, and each artifact branch entry carries the list.
@@ -144,10 +139,10 @@ and each carries its reason:
 | `/artifacts/` | a branch's published `artifacts/` at its root (gitignored) |
 | `/apps/integrations/` | the private driver layer (gitignored) |
 
-Until 2026-09-25 these were substrings of the whole path, and `/integrations/` and
-`/artifacts/` silently removed five tracked files (1,399 lines) in api's
-`handlers/integrations/` and commons' `handlers/artifacts/`. `.temp`, `.old` and `/test/` went
-the same day: in a `*.py` corpus they could only ever hit real source.
+The patterns are anchored, never substrings of the whole path: a substring `/artifacts/`
+would drop tracked source in a `handlers/artifacts/` directory. Patterns such as `.temp`,
+`.old` or `/test/` are not on the list: in a `*.py` corpus they could only ever hit real
+source.
 
 Every removal is named. `audit_branch` returns `ignored` (`{pattern: [rel paths]}`), the
 summary prints `Ignored by the audit list: <pattern> N`, and each artifact branch entry
@@ -171,7 +166,7 @@ it deliberately does not judge.
 
 - `json_structure` lists the operator files in `{branch}_json/custom_config/` — names only;
   the content is operator-owned and never judged.
-- `readme` carries the docs-index, named-path and rot-bait lane of DPLAN-0347. Each line is
+- `readme` carries the docs-index, named-path and rot-bait lane of the layer contract (`context_standards.md`). Each line is
   prefixed `(advisory)` because info lines are stored and re-rendered one at a time: a line
   quoted on its own must still arrive marked as advice.
 
@@ -186,41 +181,27 @@ documented deviation — not a way to ignore a rule.
 
 `bypass/inert.py` derives inert (unreachable) rules from the checker ASTs: a rule that could
 never match anything the checker can produce is noise, and it says so. The audit says it on
-its info channel, under its caveat. The checklist says it too (2026-10-03, seedgo fleet
-green leg 13). For a rule that names the file and standard being checked, with a `lines` or
+its info channel, under its caveat. The checklist says it too: for a rule that names the file and standard being checked, with a `lines` or
 `functions` scope that checker never passes, it prints an `inert bypass` note after the
 verdicts, fenced off by a blank line. The note never changes a verdict. Without it, a rule
-like this sits in `bypass.json` and closes nothing, and nothing says so: trigger measured a
-line-scoped `introspection` rule at 85 and the same rule file-wide at 100. The map is read
+like this sits in `bypass.json` and closes nothing, and nothing says so: a line-scoped rule
+on a checker that passes no line leaves the score where the violation put it. The map is read
 from the checker sources, so a checker that starts passing a line drops off it. A standard
-passed as a module constant (`STANDARD_KEY = "..."`) is read as its value. Until the evening
-of 2026-10-03 only a string literal was read, so every checker using `STANDARD_KEY` was
-missing from the map, and its inert rules went unreported. Spawn met it with `sleep_in_test`
-in its leg 8. At that fix the checkers that pass no line were:
-accepted_and_never_used_parameter, architecture, cli_flags, cli_ux, commented_logger,
-conftest_fixtures, constant_predicate, dead_code, declared_pass_contradiction,
-declared_pass_symbol_resolves, deep_nesting, discarded_patch, docs_page, documentation,
-duplicate_test, error_handling, file_top, flag_never_passed, handlers,
-help_flag_safety, imports, introspection, json_handler, json_structure, log_structure, meta,
-module_scope_side_effect, modules, naming, no_product_call, oversize_test_file, readme,
-readme_quality, retired_token_docstring, ruff_check, self_set_assert, shebang, silent_catch,
-sleep_in_test, stale_header_date, stdlib_patch, subcommand_help, template, test_quality,
-todo, trigger, uncalled_public_function, unconsumed_side_effect, unused_conftest_fixture
-and weak_oracle. `inert.scope_support()` is the live answer.
+passed as a module constant (`STANDARD_KEY = "..."`) is read as its value. Which checkers pass
+no line is `inert.scope_support()`'s live answer; this page does not copy it.
 
 A score of 100 with documented exceptions under it is a real score, not a clean sheet — read
 the rules with it.
 
 ### Dead rules and dead comments
 
-`bypass/dead_rules.py` judges every rule on every audit, cached or not (survey rows #11-#13,
-2026-09-25). A rule is **dead** — it matches nothing, so it does nothing — when its `file` is a
+`bypass/dead_rules.py` judges every rule on every audit, cached or not. A rule is **dead** — it matches nothing, so it does nothing — when its `file` is a
 substring of no file on disk (the matcher's own semantics; retired directories and `(disabled)`
 names are never handed to a checker), its `standard` is not a checker, or every line it names
 lies past the end of every file it matches. A rule with a blank `file` or blank `standard` is
-never convicted: a blank field means *every*, and that breadth is not ruled (row #10).
+never convicted: a blank field means *every*, and that breadth is not judged.
 
-An inline `# seedgo:bypass …` comment is also named. No code path has ever read one, so each is
+An inline `# seedgo:bypass …` comment is also named. No code path reads one, so each is
 a comment that claims an exception nobody grants; the only way to grant one is a rule in
 `bypass.json`.
 
@@ -258,8 +239,7 @@ diagnostics is disabled.
 
 ## Refusals
 
-An unknown command, pack, flag or branch REFUSES by name and exits non-zero (the owner's
-ruling, the 2026-09-07 fleet sweep): exit 7 for an argument nobody recognised, 3 for a target
+An unknown command, pack, flag or branch REFUSES by name and exits non-zero: exit 7 for an argument nobody recognised, 3 for a target
 with nothing to check, 2 for a lane that could not run. `CommandRefused` lives in
 `apps/modules/__init__.py`; `apps/seedgo.py` turns it into the exit code.
 

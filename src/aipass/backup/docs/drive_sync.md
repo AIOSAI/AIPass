@@ -3,8 +3,8 @@
 # The Drive lane
 
 Optional, off by default, and the only part of this branch that leaves the
-machine. Since DPLAN-0411 (2026-10-16) it uploads the **snapshot** store; the
-versioned store never leaves the machine.
+machine. It uploads the **snapshot** store; the versioned store never leaves
+the machine.
 
 ## When it runs
 
@@ -27,26 +27,24 @@ deletes anything already uploaded to Drive.
 
 ## What is verified, and what is not
 
-`drive_check` authenticated through the gateway and returned a live backup-folder
-ID, and `drive_stats` read the tracker, both on 2026-09-05. The **upload** path
-(`drive_sync`, `share`) was deliberately *not* exercised — it publishes files to
-a real Drive account — so it stands **unverified since 2026-08-29**, the last
-recorded `drive_sync` run. The snapshot-store upload (DPLAN-0411) has been
-exercised only against a mocked client; its first live run is devpulse's. A page that claims an upload works because the code
-looks right would be worth less than this sentence.
+`drive_check` (authenticates through the gateway and prints the backup-folder
+ID) and `drive_stats` (reads the tracker and the account quota) upload nothing.
+The **upload** path (`drive_sync`, `share`) publishes files to a real Drive
+account, and the suite exercises it only against a mocked client: no test
+verifies it end to end.
 
 ## What the lane uploads
 
 `drive_sync` walks `<project>/.backup/snapshots/` and uploads each file under
 `AIPass Backups/<project dir name>/snapshot/<path relative to the snapshot
-store>`. What an earlier versioned-era sync put on Drive (directly under
-`AIPass Backups/<project dir name>/`) is left there: this branch never deletes
-anything remote, and the owner removes that tree by hand when he chooses.
+store>`. Anything else under `AIPass Backups/<project dir name>/` (such as what
+a versioned-store sync put directly there) is left alone: this branch never
+deletes anything remote; removing it is a job done by hand.
 
 Before uploading, the store is re-filtered through `load_spec()`, so a store that
 was filled before an ignore rule existed still does not publish the files that
-rule now covers. That is why the pre-rule `*.tmp` copies described in [store
-cleanup](store_cleanup.md) are inert rather than urgent.
+rule now covers. That is why copies taken before a rule existed (see [store
+cleanup](store_cleanup.md)) are inert rather than urgent.
 
 ## The never-leaves floor
 
@@ -100,9 +98,41 @@ line. A run with nothing to upload never asks for the quota.
 fit ends on the same sentence, exits 2, and keeps what its snapshot and
 versioned steps wrote. `all` does not repeat the sentence (`error_shown`).
 Under `all --registered` the per-project summary still follows it, as it
-follows every project. The wire shape is the "Drive headroom" section of
-`src/aipass/devpulse/docs.local/backup_door_contract.md`; it is not retyped
-here.
+follows every project. Through the host API's backup door, a refused run is a
+`failed` job, not an HTTP error: the lane exits 2, the job read answers 200, and
+the job's `summary`, the tail of the lane's output, carries the sentence.
+
+## On the host API's backup door
+
+The host API (@api) runs these lanes for the phone through four routes. A lane is
+one of the four drone verb names, `snapshot`, `versioned`, `all` or `drive_sync`,
+and runs as `drone @backup <lane> <root>`, with `--quiet` for all but
+`drive_sync`, which has none.
+
+| Route | Scope | Sends | Answers |
+|---|---|---|---|
+| `POST /v1/backup/run` | operate | `{project, lane}` | **202**, the job with `state: "running"` |
+| `GET /v1/backup/job?id=<job>` | read | the job id | the job |
+| `GET /v1/backup/status?project=<name>[&sizes=1]` | read | the project, `sizes=1` for the store sizes | the status |
+| `POST /v1/backup/cancel` | operate | `{project, lane}`, the lane pressed | **200**, `{project, lane, stopped: true, message}` |
+
+- **The status** is `status <root> --json [--sizes]` (see [the CLI](cli.md#status---json))
+  passed through, with `project` as asked and `root` as resolved added, and each
+  `running` entry given `job`: the server's id when it started that run, else null.
+- **A job** carries `job`, `project`, `lane`, `state` and `started_at`; once it
+  ends, also `finished_at`, `exit`, `summary` (the tail of the lane's output,
+  verbatim, at most 600 characters) and `error`. `state` is `running`, `done`
+  (exit 0), `stopped` (exit 130) or `failed` (any other exit, the 30-minute
+  timeout, or a routing error mid-run, whose sentence is in `error`). Jobs live in
+  the server's memory: a finished one is kept an hour, and a restart forgets all.
+- **Four error codes.** **400 `verb_refused`**: no project or an unknown one, a
+  lane outside the four, or that lane already running for that project
+  (`<lane> already running for <project> since <iso>`). **404 `job_unknown`**: a
+  job the server does not hold. **404 `not_running`**: cancel found nothing of
+  that lane running; the message is `stop`'s line verbatim. **503
+  `verb_unavailable`**: @backup, drone or the project resolver cannot answer, or
+  `status --json` is missing; the message is a fixed sentence with a `ref` into
+  the host's log.
 
 ## The tracker is saved while the upload runs
 

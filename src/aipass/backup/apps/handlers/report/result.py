@@ -3,14 +3,10 @@
 # Description: BackupResult dataclass — typed outcome container for backup runs
 # Version: 2.0.0
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-10-17
 # =============================================
 
-"""Backup result dataclass.
-
-Typed container returned by backup modules (snapshot, versioned)
-describing what the run did. Consumed by the report formatter.
-"""
+"""Backup result dataclass."""
 
 from dataclasses import dataclass, field
 
@@ -51,6 +47,3 @@ def new_result(mode: str, project_root: str = "") -> BackupResult:
     """Construct an empty BackupResult for a given mode."""
     trail.log_operation("backup_result_created", {"mode": mode})
     return BackupResult(mode=mode, project_root=project_root)
-
-
-# =============================================

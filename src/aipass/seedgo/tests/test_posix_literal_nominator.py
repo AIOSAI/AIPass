@@ -3,16 +3,13 @@
 # Description: pins for the POSIX-LITERAL nominator
 # Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/posix_literal_check.py."""
 
-# THE FACT THIS RULE DEPENDS ON is pinned first, because @drone's round-7 note is
-# right: every rule has a premise underneath it and almost none of them say so out
-# loud. Here the premise is that ntpath treats a rooted literal as DRIVE-RELATIVE
-# while posixpath treats it as absolute. If that ever stops being true this file
-# goes red rather than quietly nominating a defect nobody can hit.
+# The premise is pinned first: ntpath reads a rooted literal as drive-relative, posixpath as
+# absolute. If that stops being true this file goes red rather than nominating a defect nobody can hit.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — SPECIFICATION's rule, flags, exempts and evidence prose
@@ -43,9 +40,7 @@ class TestTheHazardItself:
     """The platform fact the whole rule rests on, measured not assumed."""
 
     def test_ntpath_does_not_call_a_rooted_literal_absolute(self):
-        """The premise. ntpath.isabs is True for a rooted literal, but the path
-        carries no DRIVE, which is what makes resolve() attach the current one
-        and hand back something the author never wrote."""
+        """The premise: ntpath.isabs is True for a rooted literal, yet it carries no drive for resolve() to keep."""
         assert ntpath.splitdrive("/tmp") == ("", "/tmp")
         assert posixpath.splitdrive("/tmp") == ("", "/tmp")
         # The half that differs: ntpath joins a drive onto it, posixpath cannot.
@@ -76,9 +71,7 @@ class TestWhatItNominates:
         assert len(rows) == 1, rows
 
     def test_a_windows_rooted_literal_is_nominated_too(self, tmp_path):
-        r"""The rule is not "POSIX spelling bad". A hardcoded C:\ is the same
-        claim pointing the other way, and a rule that only caught one direction
-        would be a platform preference wearing a portability name."""
+        r"""A hardcoded C:\ is the same claim the other way: the rule is portability, not a POSIX preference."""
         rows = _nominate(
             tmp_path,
             'from pathlib import Path\n\n\ndef test_x():\n    assert Path("C:\\\\tmp").resolve()\n',
@@ -97,10 +90,7 @@ class TestWhatItAcquits:
     """The acquittals are most of this rule - measured before it shipped."""
 
     def test_another_objects_resolve_verb_is_not_nominated(self, tmp_path):
-        """The measurement that decided the shape. Six of the ten sites a
-        name-keyed rule found fleet-wide were this: a branch-name resolver
-        sharing a verb with pathlib and holding a rooted literal in a dict value
-        it never resolves. Keyed on the receiver, none of them are nominated."""
+        """A branch-name resolver sharing a verb with pathlib is not nominated: the rule keys on the receiver."""
         rows = _nominate(
             tmp_path,
             "def test_x():\n"
@@ -110,14 +100,7 @@ class TestWhatItAcquits:
         assert rows == []
 
     def test_any_objects_resolve_handed_a_rooted_literal_directly_acquits(self, tmp_path):
-        """The receiver test carrying its own weight, and it needed a second pin.
-
-        The first acquittal above holds the literal inside a dict, so a mutant
-        that dropped the receiver test and scanned the arguments instead SURVIVED
-        it - the mutation was invisible to the only pin guarding the clause.
-        This one hands the literal straight to a foreign resolve, where nothing
-        but the receiver test can acquit it. Run round 7, M8.
-        """
+        """A rooted literal handed straight to a foreign resolve is acquitted by the receiver test alone."""
         rows = _nominate(
             tmp_path,
             'def test_x():\n    assert branch_registry.resolve("/tmp")\n',
@@ -125,8 +108,7 @@ class TestWhatItAcquits:
         assert rows == []
 
     def test_a_realpath_on_a_non_path_module_acquits(self, tmp_path):
-        """Guards the os.path clause, which no pin reached until a mutant
-        deleting it survived the whole file. Run round 7, M11."""
+        """A realpath on a non-path module acquits: the os.path clause, which no other pin reaches."""
         rows = _nominate(
             tmp_path,
             'def test_x():\n    assert translator.realpath("/tmp")\n',
@@ -149,9 +131,7 @@ class TestWhatItAcquits:
         assert rows == []
 
     def test_a_resolve_on_a_variable_is_not_nominated(self, tmp_path):
-        """The stated limit, pinned so it is a decision rather than a surprise:
-        this rule reads the RECEIVER, so a literal that travelled through a name
-        is invisible to it. It errs SHORT."""
+        """The stated limit: the rule reads the RECEIVER, so a literal that travelled through a name errs SHORT."""
         rows = _nominate(
             tmp_path,
             'from pathlib import Path\n\n\ndef test_x():\n    p = Path("/tmp")\n    assert p.resolve()\n',
@@ -177,22 +157,17 @@ class TestTheNominatorShape:
         assert target.GROUP in adapter.STATIC_GROUPS
 
     def test_it_does_not_define_a_module_or_branch_check(self):
-        """A nominator that grows a check_module becomes a convicting tier by
-        accident (Law M1)."""
+        """A nominator that grows a check_module becomes a convicting tier by accident (Law M1)."""
         assert not hasattr(target, "check_module")
         assert not hasattr(target, "check_branch")
 
     def test_the_spec_states_the_limit_the_live_run_actually_hit(self):
-        """Not decoration: running this over @drone's tree found 3 of the 4
-        sites a whole-file scan finds, because the fourth sits in a fixture.
-        The limits list has to say so."""
+        """The limits list says a literal in a fixture is missed: the live run found 3 of 4 sites because of it."""
         limits = " ".join(target.SPECIFICATION["limits"])
         assert "fixture" in limits and "FEWER" in limits
 
     def test_the_fix_does_not_tell_anyone_to_delete_the_literal(self):
-        """A rooted literal is drive-relative on Windows, not invalid. A fix
-        line that says 'remove it' would break tests whose subject IS the
-        literal."""
+        """A rooted literal is drive-relative on Windows, not invalid; 'remove it' breaks tests whose subject IS it."""
         assert "keep it" in target.SPECIFICATION["fix"]
 
     @pytest.mark.parametrize(

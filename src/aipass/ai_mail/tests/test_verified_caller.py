@@ -3,15 +3,13 @@
 # Description: Tests for the verified-caller rail (FPLAN-0401 Phase 1)
 # Version: 1.0.2
 # Created: 2026-08-12
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py."""
 
-# The rail exists because ``--from`` / ``--sender`` are unauthenticated strings:
-# before this, ``dispatch @manager --from @daemon`` resolved ``sender="@daemon"``
-# and unlocked the manager wake lane for any caller. Identity that gates a
-# privilege may only come from the env drone stamps from real process ancestry.
+# ``--from`` / ``--sender`` are unauthenticated strings; identity that gates a privilege
+# may only come from the env drone stamps from real process ancestry.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — the win32 console re-encoding guard at import time
@@ -82,9 +80,7 @@ class TestResolveVerifiedCaller:
     def test_bare_process_cwd_is_never_the_answer(self, tmp_path, monkeypatch):
         """THE rule: this process's own cwd cannot satisfy a privilege check.
 
-        ai_mail runs with cwd=<its own tree> under drone, and a dispatched agent
-        runs with cwd=<the target branch> — a bare-cwd walk would hand back an
-        identity that says nothing about who called.
+        Under drone and under dispatch the cwd is ai_mail's or the target's tree, never the caller's.
         """
         branch = _make_branch(tmp_path, "daemon")
         monkeypatch.chdir(branch)
@@ -175,9 +171,7 @@ class TestPrivilegedSendersCoverage:
         """Structural canary: any `sender == "@x"` decision in wake.py must be
         a listed privileged value, or dispatch.py stops guarding it.
 
-        Scans executable lines only (comment lines are stripped) — prose about
-        a gate is not a gate. Phase 4 adds the admin identity to that tree; this
-        goes red if the set is not updated with it.
+        Scans executable lines only (comment lines are stripped): prose about a gate is not a gate.
         """
         wake_src = (Path(__file__).resolve().parents[1] / "apps" / "handlers" / "dispatch" / "wake.py").read_text(
             encoding="utf-8"

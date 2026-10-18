@@ -3,16 +3,10 @@
 # Description: Tests for integrations_manager command handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
-
-# Tests for integrations_manager.py -- handle_command, _run_list, _run_call,
-# print_introspection, print_help.
-#
-# Existing test_integrations.py covers bridge, registry, fetch_contracts,
-# call_contract. This file covers the remaining uncovered functions.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that integrations_manager.py parses and imports
@@ -29,11 +23,6 @@ from aipass.api.apps.modules.integrations_manager import (
 )
 
 _IM = "aipass.api.apps.modules.integrations_manager"
-
-
-# =============================================
-# handle_command tests
-# =============================================
 
 
 class TestHandleCommand:
@@ -123,19 +112,8 @@ class TestHandleCommand:
         mock_error.assert_called_once()
 
 
-# =============================================
-# _run_list tests
-# =============================================
-
-
 class TestRunList:
-    """
-    Tests for integrations_manager._run_list(), through `integrations list`.
-
-    Asked through handle_command and read off its exit code (api, fleet green
-    leg 9); _ensure_loaded is a stand-in, as in the help tests below, so no
-    driver directory is loaded.
-    """
+    """Tests for integrations_manager._run_list(), through `integrations list`."""
 
     @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.header", new_callable=MagicMock)
@@ -153,8 +131,6 @@ class TestRunList:
         with pytest.raises(SystemExit) as result:
             handle_command("integrations", ["list"])
         assert result.value.code == 0
-        # The docstring's line is read, not only the exit code (api, fleet green leg 3).
-        # Mutant that reddens it: the empty-list line dropped or reworded.
         out = capsys.readouterr().out
         assert "No integrations configured." in out
         assert "apps/integrations/{project}/driver.py" in out
@@ -178,24 +154,13 @@ class TestRunList:
         with pytest.raises(SystemExit) as result:
             handle_command("integrations", ["list"])
         assert result.value.code == 0
-        # Each contract name is printed
         full_output = capsys.readouterr().out
         assert "alpha" in full_output
         assert "beta" in full_output
 
 
-# =============================================
-# _run_call tests
-# =============================================
-
-
 class TestRunCall:
-    """
-    Tests for integrations_manager._run_call(), through `integrations call`.
-
-    Asked through handle_command and read off its exit code (api, fleet green
-    leg 9); resolve and invoke are stand-ins, so no driver runs.
-    """
+    """Tests for integrations_manager._run_call(), through `integrations call`."""
 
     @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
@@ -234,7 +199,6 @@ class TestRunCall:
             handle_command("integrations", ["call", "mycontract", "arg1"])
         assert result.value.code == 0
         mock_invoke.assert_called_once_with(mock_resolve.return_value, "mycontract", ["arg1"])
-        # The driver's result is what the caller sees (api, fleet green leg 3).
         assert capsys.readouterr().out == "done\n"
 
     @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
@@ -258,11 +222,6 @@ class TestRunCall:
             handle_command("integrations", ["call", "failing"])
         assert result.value.code == 1
         mock_error.assert_called_once()
-
-
-# =============================================
-# print_introspection / print_help tests
-# =============================================
 
 
 class TestPrintFunctions:
@@ -296,13 +255,9 @@ class TestPrintFunctions:
 
 
 class TestTrailingHelpDoesNotDispatch:
-    """A help flag must never dispatch a contract.
+    """A help flag must never dispatch a contract."""
 
-    api.py's entry guard only inspects the first arg after the command, so
-    `integrations call publish_devto --help` reaches handle_command with
-    args[0] == "call". Dispatching there runs a live publishing driver from
-    what the user typed as a help probe.
-    """
+    # api.py's entry guard reads only the first arg, so a trailing --help reaches here and must not run a live driver.
 
     @patch(f"{_IM}.print_help", new_callable=MagicMock)
     @patch(f"{_IM}._run_call", new_callable=MagicMock)

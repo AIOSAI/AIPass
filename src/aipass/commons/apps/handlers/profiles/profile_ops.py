@@ -3,15 +3,10 @@
 # Description: Profile Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Profile Operations Handler
-
-Implementation logic for profile viewing/editing and member listing.
-Returns dicts for module display layer.
-"""
+"""Profile Operations Handler"""
 
 from typing import List
 
@@ -30,33 +25,11 @@ from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# PROFILE OPERATIONS
-# =============================================================================
-
-
 def show_profile(args: List[str]) -> dict:
-    """
-    View or edit social profiles.
-
-    Usage:
-        commons profile                      - Show your profile
-        commons profile <branch_name>        - Show someone's profile
-        commons profile set bio "text"       - Set your bio
-        commons profile set status "text"    - Set your status
-        commons profile set role "text"      - Set your role
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Dict with success and profile/update data
-    """
-    # Handle 'set' subcommand
+    """View a profile (yours, or a named branch's), or route `set <field> <text>` to an edit."""
     if len(args) >= 3 and args[0].lower() == "set":
         return _handle_profile_set(args)
 
-    # Determine which branch to show
     if args:
         target_branch = args[0].lower()
     else:
@@ -76,7 +49,6 @@ def show_profile(args: List[str]) -> dict:
         if not profile:
             return {"success": False, "error": f"Agent '{target_branch}' not found"}
 
-        # Enrich with display values
         profile["last_active_display"] = (
             format_time_ago(profile.get("last_active", "")) if profile.get("last_active") else "never"
         )
@@ -125,14 +97,7 @@ def _handle_profile_set(args: List[str]) -> dict:
 
 
 def list_members() -> dict:
-    """
-    List all agents with brief profile info.
-
-    Usage: commons who
-
-    Returns:
-        Dict with success and agents list
-    """
+    """List all agents with brief profile info."""
     try:
         conn = get_db()
         agents = get_all_agents_brief(conn)

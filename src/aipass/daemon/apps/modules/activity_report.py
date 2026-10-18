@@ -3,24 +3,13 @@
 # Description: Branch Activity Report Generator Module
 # Version: 0.5.0
 # Created: 2026-01-30
-# Modified: 2026-09-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Branch Activity Report Generator Module
 
-Orchestrates monitoring handlers to generate comprehensive activity reports.
-Provides formatted CLI output and programmatic JSON access.
-
-This is a MODULE (orchestration layer) that coordinates:
-- activity_collector: Scans branches for file modifications
-- memory_health: Checks memory file health status
-- red_flag_detector: Detects presence violations (code changed but memory not updated)
-- @memory's get_branch_health: entry-count + entry-size facts (cross-branch)
-
-The @memory call lives HERE, in the module layer, deliberately: seedgo blocks
-handler-to-other-branch imports, so apps/handlers/monitoring/memory_health.py
-must never reach for it.
+Reference: docs/monitoring.md
 """
 
 import os
@@ -40,31 +29,19 @@ from aipass.cli.apps.modules import console
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate, refuse
 
-# Import report generation handler (implementation lives in handler layer)
 from aipass.daemon.apps.handlers.monitoring.report_generator import (
     generate_activity_report,
     generate_branch_report,
     get_json_report,
 )
 
-# The same roster generate_branch_report() resolves against, so a name this
-# module accepts is exactly a name that module can report on.
+# The same roster generate_branch_report() resolves against, so accepted names are reportable names.
 from aipass.daemon.apps.handlers.monitoring import activity_collector
 
 
-# =============================================
-# CONSTANTS
-# =============================================
-
 MODULE_NAME = "activity_report"
 
-# The one cure line every branch-health refusal points at.
 BRANCH_HEALTH_USAGE = "drone @daemon branch-health <branch_name> [--hours N]"
-
-
-# =============================================
-# INTROSPECTION
-# =============================================
 
 
 def print_introspection():
@@ -91,11 +68,6 @@ def print_introspection():
         " [dim](entry-count + entry-size facts for branch-health — severity applied here)[/dim]"
     )
     console.print()
-
-
-# =============================================
-# COMMAND INTEGRATION (AUTO-DISCOVERY)
-# =============================================
 
 
 def _print_activity_help() -> None:
@@ -167,30 +139,9 @@ def _print_branch_health_help() -> None:
     console.print()
 
 
-# =============================================
-# MEMORY ENTRY HEALTH (@memory's public API)
-# =============================================
-
-# Severity is the CALLER's call — get_branch_health reports facts only. The
-# mapping below is @memory's, pinned in words in their module docstring
-# (aipass.memory.apps.modules.health) and restated here so no consumer
-# silently redecides it:
-#
-#   should_rollover True  -> INFO / pending. Rollover being due is not a
-#                            fault; it auto-fires at the next PreCompact.
-#                            NEVER WARNING.
-#   total_violations > 0  -> WARNING. A write got past the character-cap gate.
-#
-# The caps themselves are NOT re-encoded here. They live in @memory's
-# memory.config.json (defaults deep-merged with per-branch overrides); a copy
-# on this side would be a snapshot that drifts.
-#
-# Markers are UPPERCASE deliberately. console.print() parses Rich markup, and a
-# lowercase bracket tag like "[ok]" or "[info]" reads as a style name and is
-# silently swallowed — the marker vanishes from the live output while a test
-# asserting on the returned string still passes. Uppercase is not a valid style,
-# so it survives. Verified live, and pinned by test_markers_survive_rich_markup.
-
+# Severity mapping is @memory's (aipass.memory.apps.modules.health): should_rollover is PENDING, never
+# WARNING (it auto-fires at PreCompact); total_violations > 0 is WARNING. Caps are not copied here.
+# Markers are UPPERCASE: Rich swallows lowercase "[ok]" as a style tag (test_markers_survive_rich_markup).
 SYMBOL_OK = "[OK]"
 SYMBOL_WARNING = "[!]"
 SYMBOL_PENDING = "[PENDING]"
@@ -198,25 +149,15 @@ SYMBOL_SKIP = "[SKIP]"
 
 
 def _render_entry_health(branch_name: str) -> str:
-    """
-    Render entry-count and entry-size health for one branch via @memory.
+    """Render entry-count and entry-size health for one branch via @memory.
 
-    Read-only. Degrades visibly, never silently: an unimportable @memory or an
-    unknown branch prints a named reason instead of an empty section.
-
-    Args:
-        branch_name: Branch to check, matched case-insensitively by @memory.
-
-    Returns:
-        Formatted report block (never raises).
+    Never raises: an unimportable @memory or unknown branch prints a named reason.
     """
     lines: List[str] = ["", "=" * 60, f"MEMORY ENTRY HEALTH: {branch_name} (via @memory)", "=" * 60]
 
     try:
         from aipass.memory.apps.modules.health import get_branch_health
-    # OSError as well: a cross-branch optional import can fail on the FILESYSTEM,
-    # not only on absence. @memory imports clean under a dead cwd today (measured
-    # 2026-08-31); this catches the condition rather than today's measurement.
+    # OSError too: a cross-branch import can fail on the filesystem, not only on absence.
     except (ImportError, OSError) as e:
         logger.warning("[DAEMON] activity_report: @memory health API unavailable: %s", e)
         lines.append(f"  {SYMBOL_WARNING} UNAVAILABLE - @memory health API not importable: {e}")
@@ -262,15 +203,7 @@ def _render_entry_health(branch_name: str) -> str:
 
 
 def _parse_hours_arg(args: List[str]) -> float:
-    """
-    Extract --hours or -t argument from args list.
-
-    Args:
-        args: Command arguments list.
-
-    Returns:
-        Hours value (default 24 if not specified).
-    """
+    """Extract --hours or -t argument from args list (default 24)."""
     hours = 24.0
     i = 0
     while i < len(args):
@@ -286,24 +219,8 @@ def _parse_hours_arg(args: List[str]) -> float:
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle activity monitoring commands via auto-discovery.
-
-    Routes commands to appropriate report generation functions.
-
-    Commands:
-        - activity: Quick activity summary (verbosity="normal", last 24h)
-        - activity-report: Full detailed report (verbosity="detailed")
-        - branch-health <branch>: Single branch deep dive
-
-    Args:
-        command: Command name (e.g., 'update', 'activity-report', 'branch-health')
-        args: Additional arguments (e.g., ['--hours', '48'])
-
-    Returns:
-        True if command was handled, False if not our command.
-    """
-    # Handle 'activity_report' as alias — help shows module name, users expect it to work
+    """Handle activity monitoring commands. Returns False if not our command."""
+    # Alias: help shows the module name, so users type it.
     if command == "activity_report":
         if args and args[0] in ("--help", "-h", "help"):
             print_introspection()
@@ -316,7 +233,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.info("[DAEMON] activity_report: Activity summary generated")
         return True
 
-    # Handle 'activity' command - quick summary (runs with no args, defaults to 24h)
     if command == "activity":
         if args and args[0] in ("--help", "-h", "help"):
             _print_activity_help()
@@ -331,7 +247,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.info("[DAEMON] activity_report: Activity summary generated")
         return True
 
-    # Handle 'activity-report' command - detailed report (runs with no args, defaults to 24h)
     if command == "activity-report":
         if args and args[0] in ("--help", "-h", "help"):
             _print_activity_report_help()
@@ -348,7 +263,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         json_handler.log_operation("activity_report", {"command": command})
         hours = _parse_hours_arg(args)
 
-        # Check for --json flag
         if "--json" in args or "-j" in args:
             import json
 
@@ -360,11 +274,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         logger.info("[DAEMON] activity_report: Detailed report generated")
         return True
 
-    # Handle 'branch-health' command - requires branch name arg
     if command == "branch-health":
         return _handle_branch_health(args)
 
-    # Not our command
     return False
 
 
@@ -387,12 +299,7 @@ def _known_branch_names() -> List[str]:
 
 
 def _resolve_branch(branch_name: str) -> str | None:
-    """Match *branch_name* case-insensitively to a canonical name, or None.
-
-    Asked BEFORE any report is generated, so an unknown token is refused once
-    with its own name in the message instead of producing two report blocks
-    that each say "not found" in their own words.
-    """
+    """Match *branch_name* case-insensitively to a canonical name, or None."""
     wanted = branch_name.upper()
     for name in _known_branch_names():
         if name.upper() == wanted:
@@ -401,17 +308,7 @@ def _resolve_branch(branch_name: str) -> str | None:
 
 
 def _refuse(verb: str, token: str, usage: str = "") -> NoReturn:
-    """Refuse *token* by name and exit non-zero, through the shared gate.
-
-    The owner's standing ruling: an unknown command or argument FAILS with a
-    non-zero exit and a message naming the token. Printing a refusal and
-    returning 0 tells a caller's `&&` that the command succeeded - reported by
-    @devpulse's 2026-09-07 fleet sweep against `branch-health`, which rendered
-    two "not found" blocks and exited 0.
-
-    Delegated to handlers/cli/arg_gate rather than spelled here: wave 2b gates
-    eleven verbs, and eleven refusals written independently drift.
-    """
+    """Refuse *token* by name and exit non-zero, through the shared gate."""
     refuse(verb, token, usage)
 
 
@@ -426,8 +323,6 @@ def _handle_branch_health(args: List[str]) -> bool:
         _print_branch_health_help()
         return True
 
-    # The usage line rides the refusal's own suggestion slot now, so it is not
-    # printed a second time here — one refusal, one cure, in one place.
     branch_name = _extract_branch_name(args)
     if not branch_name:
         _refuse("branch-health", " ".join(args), BRANCH_HEALTH_USAGE)
@@ -444,11 +339,6 @@ def _handle_branch_health(args: List[str]) -> bool:
     console.print(_render_entry_health(resolved))
     logger.info("[DAEMON] activity_report: Branch health report generated for %s", resolved)
     return True
-
-
-# =============================================
-# CLI ENTRY POINT
-# =============================================
 
 
 def main() -> None:

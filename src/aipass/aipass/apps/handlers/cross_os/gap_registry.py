@@ -3,20 +3,13 @@
 # Description: Live-parse the cross-OS gap registry and filter by platform
 # Version: 1.0.0
 # Created: 2026-07-02
-# Modified: 2026-07-02
+# Modified: 2026-10-17
 # =============================================
 
 """Cross-OS gap registry parser — Layer-3-lite pre-flight source.
 
-Live-reads ``tests/CROSS_OS_TESTING.md`` (read-only to @aipass), parses the
-"Known cross-OS gap registry" markdown table, and filters rows to the running
-platform. This is a *machine pre-flight* — it surfaces tracked OS-specific gaps
-for the box the user is on. It NEVER claims the checklist's human acceptance
-green ("you watched it work on that OS").
-
-Fail-to-error contract: if the doc is missing, the section is absent, or no data
-rows can be parsed, functions raise ``CrossOsGapError`` — they never silently
-return "no gaps". Callers must surface the error as a WARN/FAIL, not swallow it.
+Source: the table in tests/CROSS_OS_TESTING.md (read-only to @aipass). A missing doc, section
+or row raises CrossOsGapError, never "no gaps"; callers surface it as WARN/FAIL.
 """
 
 from __future__ import annotations
@@ -28,13 +21,11 @@ from typing import List, NamedTuple
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
 
-# Path of the source-of-truth doc, relative to the repo root.
 DOC_RELATIVE = Path("tests") / "CROSS_OS_TESTING.md"
 
-# Case-insensitive marker identifying the registry section header line.
 _SECTION_MARKER = "known cross-os gap registry"
 
-# Expected column count in the registry table: # | Gap | OS | Symptom | Owner | Status
+# The doc's table columns: # | Gap | OS | Symptom | Owner | Status
 _EXPECTED_COLUMNS = 6
 
 
@@ -54,14 +45,7 @@ class CrossOsGap(NamedTuple):
 
 
 def find_gap_doc(start: Path | None = None) -> Path:
-    """Search upward from ``start`` (or this file) for ``tests/CROSS_OS_TESTING.md``.
-
-    Portable — derives the repo root by walking ancestors rather than hardcoding
-    an absolute path.
-
-    Raises:
-        CrossOsGapError: if the doc is not found in any ancestor directory.
-    """
+    """Search upward from ``start`` (or this file) for ``tests/CROSS_OS_TESTING.md``."""
     base = (start or Path(__file__)).resolve()
     for parent in [base, *base.parents]:
         candidate = parent / DOC_RELATIVE
@@ -71,14 +55,7 @@ def find_gap_doc(start: Path | None = None) -> Path:
 
 
 def parse_gap_registry(text: str) -> List[CrossOsGap]:
-    """Parse the 'Known cross-OS gap registry' table out of the doc text.
-
-    Only rows whose first cell begins with a digit are treated as data rows,
-    which naturally skips the header and the ``|---|`` separator.
-
-    Raises:
-        CrossOsGapError: if the section is missing or no data rows parse.
-    """
+    """Parse the 'Known cross-OS gap registry' table out of the doc text."""
     lines = text.splitlines()
 
     section_idx = None
@@ -92,7 +69,6 @@ def parse_gap_registry(text: str) -> List[CrossOsGap]:
     gaps: List[CrossOsGap] = []
     for line in lines[section_idx + 1 :]:
         stripped = line.strip()
-        # Stop at the next top-level section.
         if stripped.startswith("## "):
             break
         if not stripped.startswith("|"):
@@ -101,7 +77,7 @@ def parse_gap_registry(text: str) -> List[CrossOsGap]:
         if len(cells) < _EXPECTED_COLUMNS:
             continue
         number = cells[0]
-        # Skip header ("#") and separator ("---") rows — data rows start with a digit.
+        # Data rows start with a digit; the header ("#") and separator ("---") do not.
         if not number or not number[0].isdigit():
             continue
         gaps.append(
@@ -121,11 +97,7 @@ def parse_gap_registry(text: str) -> List[CrossOsGap]:
 
 
 def load_gaps(start: Path | None = None) -> List[CrossOsGap]:
-    """Locate, read, and parse the full gap registry.
-
-    Raises:
-        CrossOsGapError: on missing/unreadable doc or unparseable table.
-    """
+    """Locate, read, and parse the full gap registry."""
     doc = find_gap_doc(start)
     try:
         raw = doc.read_text(encoding="utf-8")
@@ -138,8 +110,7 @@ def load_gaps(start: Path | None = None) -> List[CrossOsGap]:
 def os_matches(os_cell: str, platform_name: str) -> bool:
     """Return True if an OS cell applies to ``platform_name`` (a ``sys.platform`` value).
 
-    Mapping (case-insensitive): 'all' matches every platform; 'win' matches
-    win32; 'mac' matches darwin. So 'Win/mac' matches both win32 and darwin.
+    'all' matches every platform, 'win' win32, 'mac' darwin; 'Win/mac' matches both.
     """
     cell = os_cell.lower()
     if "all" in cell:
@@ -152,11 +123,7 @@ def os_matches(os_cell: str, platform_name: str) -> bool:
 
 
 def gaps_for_platform(platform_name: str | None = None, start: Path | None = None) -> List[CrossOsGap]:
-    """Return only the gap rows relevant to ``platform_name`` (defaults to ``sys.platform``).
-
-    Raises:
-        CrossOsGapError: on any load/parse failure (never silently empty).
-    """
+    """Return only the gap rows relevant to ``platform_name`` (defaults to ``sys.platform``)."""
     plat = platform_name or sys.platform
     gaps = load_gaps(start)
     relevant = [g for g in gaps if os_matches(g.os, plat)]

@@ -3,38 +3,12 @@
 # Description: nominator - declared entry points no test ever names (WRONG-LAYER)
 # Version: 1.0.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-10-17
 # =============================================
 
-"""
-TAXONOMY rule 10 — the verb the suite has never once said out loud.
+"""TAXONOMY rule 10 — the verb the suite has never once said out loud.
 
-Enumerate the entry points production DECLARES — CLI verbs in a
-`COMMANDS`/`HANDLED_COMMANDS` tuple, HTTP routes on a decorator — and diff
-them against every string literal in the test corpus. A declared entry point
-no test mentions anywhere is an entry point nothing covers, however green the
-line-coverage number over the handler behind it.
-
-In wave 1 this found **six unexercised HTTP routes over a 97%-covered handler
-lane** and was the only security-consequential finding in the sweep. TAXONOMY
-records the cost estimate from the branch that proposed it: ten lines of code.
-
-THE COMPARISON IS DELIBERATELY THE WEAKEST ONE THAT WORKS. A verb is
-"mentioned" if its exact string appears as a literal ANYWHERE in the corpus —
-in an argument list, a parametrize table, a docstring. That over-acquits on
-purpose. A verb mentioned in a docstring and nowhere else is not really
-tested, and this rule will miss it; the alternative is a rule that guesses
-which mentions are real, and a guessing nominator is worse than a blind spot
-you can name. This one is named, in `limits`, and the execution tier is where
-"mentioned" becomes "exercised".
-
-THE COMPANION FINDING IS WHY THIS RULE MATTERS MORE THAN ITS SIZE SUGGESTS.
-TAXONOMY corpus row 26 is a production hole with no test at all: @daemon's
-`install-timer` arm can be renamed and the verb falls through to `_uninstall`,
-stopping the fleet's scheduler, with all 481 tests green. The only tests
-pinning those verb strings are the membership tests wave 1 tagged TAUTOLOGY.
-That pairing is the whole reason this file exists beside `assertion_shape` and
-the reason Law M11 forbids acting on a nomination by deleting.
+Reference: entry_point_diff.md
 """
 
 import ast
@@ -53,9 +27,8 @@ ROUTE_DECORATORS: frozenset = frozenset({"route", "get", "post", "put", "patch",
 #: Verbs too short or too generic for a literal match to mean anything.
 MINIMUM_VERB_LENGTH = 3
 
-#: This rule reads PRODUCTION, so a production file that would not parse makes
-#: it report less than the tree holds. `nominators` merges the corpus's count
-#: into this group's published limits when the flag is set.
+#: Reads production, so an unparseable production file under-reports; `nominators`
+#: merges the corpus's count into this group's limits when set.
 READS_PRODUCTION = True
 
 SPECIFICATION = {
@@ -136,11 +109,7 @@ def _declared_entry_points(scanned: corpus.Corpus) -> Dict[str, str]:
     """Every entry point production declares, across the whole target."""
     declared: Dict[str, str] = {}
 
-    # Parsed once by the corpus and shared. A file that would not parse is
-    # counted there and reported through `production_limits`: it declares
-    # nothing this rule can read, so its absence biases the rule toward FEWER
-    # nominations, and an unrecorded lean toward clean is the shape this whole
-    # lane exists to catch.
+    # An unparseable file is counted by the corpus and published via `production_limits`.
     for tree in scanned.production_trees.values():
         declared.update(_declared_in(tree))
 
@@ -158,9 +127,7 @@ def _mentioned_strings(scanned: corpus.Corpus) -> Set[str]:
 def nominate(scanned: corpus.Corpus) -> List[dict]:
     """Every declared entry point the test corpus never names.
 
-    Nominations are attributed to the corpus rather than to a unit, because
-    the defect is an ABSENCE: there is no test to point at. The row carries
-    the declaring site so the reader has somewhere to go.
+    Attributed to the corpus, not a unit: the defect is an absence; the row carries the declaring site.
     """
     declared = _declared_entry_points(scanned)
     mentioned = _mentioned_strings(scanned)

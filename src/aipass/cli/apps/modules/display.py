@@ -3,29 +3,17 @@
 # Description: CLI Display Module — public API for Rich terminal output formatting
 # Version: 0.5.3
 # Created: 2025-11-12
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """
 CLI Display Module - PUBLIC API
-
-Provides display functions for all branches:
-- header() - Bordered section headers
-- success() - Green checkmark + message
-- error() - Red X + error message
-- warning() - Yellow warning + message
-- fatal() - Error + sys.exit(1)
-- section() - Visual section breaks
-- escape() - Rich's own, so a literal bracket survives a markup-parsing function
-
-Uses Rich library for beautiful terminal output.
 """
 
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-# Rich library
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -36,20 +24,14 @@ from rich.markup import escape  # published, bound not wrapped: docs/rich_markup
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.handlers.cli.help_flags import wants_help
 
-# NOTE: Cannot import prax here — circular import (prax depends on cli)
-# Silent catches in this file are bypassed via .seedgo/bypass.json
+# No prax logger: circular import (prax depends on cli).
 
 
 class _LiveConsole(Console):
     """A Console that decides colour at each print, against the live stream.
 
-    An isatty() read at import pinned the answer for the life of the process: a
-    conftest imported while pytest's capture was suspended read an xdist
-    worker's NUL, which Windows calls a terminal, and every later capture carried
-    escape codes (CI on PR #774, 2026-10-10). Leaving force_terminal unset makes
-    is_terminal live, but Rich still fixes its colour system once, in __init__,
-    so the colour system is re-detected here every time Rich reads it - once per
-    rendered print. Measured against rich 15.0.0.
+    Rich fixes its colour system once in __init__; an import-time answer goes stale
+    when the stream changes (pytest capture), so it is re-detected on every read.
     """
 
     @property
@@ -63,7 +45,6 @@ class _LiveConsole(Console):
         """Console.__init__ assigns its import-time answer here; it is not kept."""
 
 
-# Initialize Rich console (lowercase follows service instance pattern)
 CONSOLE = _LiveConsole()  # terminal=colour, pipe or capture=plain, decided per print
 console = CONSOLE  # Primary export (lowercase service instance pattern)
 err_console = _LiveConsole(stderr=True)  # same, against the live sys.stderr
@@ -72,7 +53,6 @@ err_console = _LiveConsole(stderr=True)  # same, against the live sys.stderr
 _TRIGGER = None
 _TRIGGER_LOADED = False
 
-# Process-level command failure flag — mutable container avoids global statement
 _CMD_STATE = {"failed": False}
 
 
@@ -92,20 +72,12 @@ def reset_command_state() -> None:
 
 
 def resolve_exit(handled: bool) -> int:
-    """Map handled/failed state to an exit code.
-
-    Returns 1 if not handled, 2 if handled but failed, 0 otherwise.
-    """
+    """Map handled/failed state to an exit code: 1 not handled, 2 failed, 0 clean."""
     if not handled:
         return 1
     if _CMD_STATE["failed"]:
         return 2
     return 0
-
-
-# ============================================================================
-# MODULE PATTERN FUNCTIONS (SEEDGO compliant)
-# ============================================================================
 
 
 def print_introspection():
@@ -134,28 +106,18 @@ def print_help():
 
     CONSOLE.print()
 
-    # =========================================================================
-    # RICH FORMATTING TIP: Use header() function for main titles
-    # header() creates a bordered box automatically
-    # =========================================================================
     header("CLI Display Module")
 
     CONSOLE.print()
 
-    # RICH FORMATTING TIP: [dim] makes text appear dimmed/grayed out
     CONSOLE.print("[dim]Rich terminal output formatting for all AIPass branches[/dim]")
     CONSOLE.print()
     CONSOLE.print("─" * 70)  # Separator line (matches handler style)
     CONSOLE.print()
 
-    # =========================================================================
-    # RICH FORMATTING TIP: Match handler style - simple [bold cyan]LABEL:[/bold cyan] format
-    # NO decorative borders (═══), just clean headers like handlers use
-    # =========================================================================
     CONSOLE.print("[bold cyan]WHAT IS DISPLAY?[/bold cyan]")
     CONSOLE.print()
     CONSOLE.print("Display is the [bold]CLI's universal output service[/bold] that provides:")
-    # RICH FORMATTING TIP: Use [green]✓[/green] for checkmarks in lists
     CONSOLE.print("  [green]✓[/green] Consistent Rich-formatted output across all branches")
     CONSOLE.print(
         "  [green]✓[/green] Six core display functions ([green]header, success, error, warning, fatal, section[/green])"
@@ -164,14 +126,9 @@ def print_help():
     CONSOLE.print("  [green]✓[/green] Integration with CLI error handler for advanced error display")
     CONSOLE.print()
 
-    # =========================================================================
-    # RICH FORMATTING TIP: Tables are powerful for structured data
-    # Create with Table(), add columns, add rows, then print
-    # =========================================================================
     CONSOLE.print("[bold cyan]PUBLIC API FUNCTIONS (6 total):[/bold cyan]")
     CONSOLE.print()
 
-    # RICH FORMATTING TIP: Table styling - show_header, header_style, border_style
     table = Table(show_header=True, header_style="bold cyan", border_style="dim")
     table.add_column("Function", style="green")  # Column styling
     table.add_column("Signature", style="yellow")
@@ -184,16 +141,11 @@ def print_help():
     table.add_row("fatal()", "message, suggestion=None", "Error message + sys.exit(1) for unrecoverable failures")
     table.add_row("section()", "title", "Visual section separators with title and line")
 
-    # RICH FORMATTING TIP: Print the table after adding all rows
     CONSOLE.print(table)
     CONSOLE.print()
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    # =========================================================================
-    # RICH FORMATTING TIP: Columns layout for side-by-side content
-    # Columns([item1, item2, item3], equal=True, expand=True)
-    # =========================================================================
     CONSOLE.print("[bold cyan]USAGE:[/bold cyan]")
     CONSOLE.print()
 
@@ -203,16 +155,11 @@ def print_help():
         "[yellow]Show Help:[/yellow]\n  [dim]drone @cli display --help[/dim]",
     ]
 
-    # RICH FORMATTING TIP: Columns creates side-by-side layout
     CONSOLE.print(Columns(usage_examples, equal=True, expand=True))
     CONSOLE.print()
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    # =========================================================================
-    # RICH FORMATTING TIP: Panels are good for highlighted content blocks
-    # Panel(content, border_style="color", padding=(top/bottom, left/right))
-    # =========================================================================
     CONSOLE.print("[bold cyan]CODE EXAMPLES:[/bold cyan]")
     CONSOLE.print()
 
@@ -235,13 +182,11 @@ def print_help():
   [dim]# Create section break[/dim]
   section('Validation Results')"""
 
-    # RICH FORMATTING TIP: Panel wraps content in a bordered box
     CONSOLE.print(Panel(code_examples, border_style="green", padding=(1, 2)))
     CONSOLE.print()
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    # Simple header style (matching handlers)
     CONSOLE.print("[bold cyan]INTEGRATION:[/bold cyan]")
     CONSOLE.print()
     CONSOLE.print("  [green]✓[/green] [bold]Rich Formatting:[/bold] Beautiful terminal output with colors and styles")
@@ -253,13 +198,9 @@ def print_help():
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    # Simple header style (matching handlers)
     CONSOLE.print("[bold cyan]REFERENCE:[/bold cyan]")
     CONSOLE.print()
-    # RICH FORMATTING TIP: Use [yellow] for labels, [dim] for paths
-    # Guarded: resolve() routes through ntpath.realpath on Windows, which reads
-    # os.getcwd() unconditionally. Call-time, not import-time — but printing help
-    # in a dead-cwd world should not traceback. __file__ is already absolute.
+    # On Windows resolve() reads os.getcwd(); help must not traceback with a dead cwd.
     try:
         _display_path = Path(__file__).resolve()
     except OSError:
@@ -272,14 +213,12 @@ def print_help():
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    # RICH FORMATTING TIP: Use [bold] for emphasis without color
     CONSOLE.print("[bold]TIP:[/bold] Run [green]drone @cli display demo[/green] to see all functions in action!")
     CONSOLE.print()
     CONSOLE.print("─" * 70)
     CONSOLE.print()
 
-    # RICH FORMATTING TIP: Commands line required for drone discovery
-    # This is how drone finds available commands - keep [dim] style
+    # drone discovers commands from this line; keep its shape.
     CONSOLE.print("[dim]Commands: display, show, demo, --help[/dim]")
     CONSOLE.print()
 
@@ -288,8 +227,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle module commands"""
     if command not in ("display", "show", "demo"):
         return False
-    # help_flag_safety: scan the WHOLE sequence before any doing path — a flag
-    # after a subcommand (`display demo --help`) must still explain, not run.
     # command holds our own name, so position 0 comes from args.
     if wants_help(None, args):
         print_help()
@@ -303,8 +240,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args[0] == "demo":
         run_demo()
         return True
-    # The verb is ours, so the refusal is ours too: name the refused token,
-    # not the verb, and return True so resolve_exit reports 2, not 1.
+    # Return True so resolve_exit reports 2 (our verb, bad token), not 1.
     error(f"Unknown display subcommand: {args[0]}", suggestion="Run 'drone @cli display --help' for usage")
     return True
 
@@ -317,23 +253,19 @@ def run_demo():
     CONSOLE.print("[bold]Display functions with Rich formatting:[/bold]")
     CONSOLE.print()
 
-    # Demo success
     success("Operation completed successfully", items=5, time="2.3s")
     CONSOLE.print()
 
-    # Demo warning
     warning("Template version mismatch", details="Expected v2.1, found v2.0")
     CONSOLE.print()
 
-    # Demo error — an exhibit, not a failure of the demo command, so the flag it
-    # trips is cleared unless something had already failed before it ran.
+    # The demo error is an exhibit: clear the flag it trips unless already failed.
     failed_before = command_failed()
     error("Cannot create virtual environment", suggestion="sudo apt install python3-venv")
     if not failed_before:
         reset_command_state()
     CONSOLE.print()
 
-    # Demo section
     section("Summary")
     CONSOLE.print("  ✅ 3 operations succeeded")
     CONSOLE.print("  ⚠️  1 warning")
@@ -348,28 +280,13 @@ def run_demo():
     CONSOLE.print()
 
 
-# ============================================================================
-# PUBLIC API FUNCTIONS (Keep existing - don't break compatibility)
-# ============================================================================
-
-
 def header(title: str, details: Optional[Dict[str, Any]] = None) -> None:
-    """
-    Display bordered section header using Rich Panel
-
-    Args:
-        title: Header title
-        details: Optional key-value pairs to display
-
-    Example:
-        header('Create Branch', {'Name': 'new_branch', 'Type': 'module'})
-    """
+    """Display bordered section header using Rich Panel"""
     CONSOLE.print(Panel(f"[bold cyan]{title}[/bold cyan]", expand=False))
     if details:
         CONSOLE.print()
         for key, value in details.items():
             CONSOLE.print(f"  [dim]{key}:[/dim] {value}")
-    # Fire trigger event for header display (lazy load to avoid circular import)
     global _TRIGGER, _TRIGGER_LOADED
     if not _TRIGGER_LOADED:
         _TRIGGER_LOADED = True
@@ -385,32 +302,14 @@ def header(title: str, details: Optional[Dict[str, Any]] = None) -> None:
 
 
 def success(message: str, **kwargs) -> None:
-    """
-    Display success message with Rich styling
-
-    Args:
-        message: Success message
-        **kwargs: Optional details to display
-
-    Example:
-        success('Branch created', items=5, time='2.3s')
-    """
+    """Display success message with Rich styling"""
     CONSOLE.print(f"✅ [green]{message}[/green]")
     for key, value in kwargs.items():
         CONSOLE.print(f"   [dim]{key}: {value}[/dim]")
 
 
 def error(message: str, suggestion: str | None = None) -> None:
-    """
-    Display error message with Rich styling
-
-    Args:
-        message: Error message
-        suggestion: Optional suggestion for fixing
-
-    Example:
-        error('Branch not found', suggestion='Check branch name spelling')
-    """
+    """Display error message with Rich styling"""
     mark_command_failed()
     msg = Text("❌ ")
     msg.append(message, style="red bold")
@@ -422,16 +321,7 @@ def error(message: str, suggestion: str | None = None) -> None:
 
 
 def warning(message: str, details: str | None = None) -> None:
-    """
-    Display warning message with Rich styling
-
-    Args:
-        message: Warning message
-        details: Optional additional details
-
-    Example:
-        warning('Branch already exists, skipping')
-    """
+    """Display warning message with Rich styling"""
     msg = Text("⚠️  ")
     msg.append(message, style="yellow")
     err_console.print(msg)
@@ -442,18 +332,7 @@ def warning(message: str, details: str | None = None) -> None:
 
 
 def fatal(message: str, suggestion: str | None = None) -> None:
-    """
-    Display error message with Rich styling and exit with code 1
-
-    Like error() but terminates the process. Use for unrecoverable failures.
-
-    Args:
-        message: Error message
-        suggestion: Optional suggestion for fixing
-
-    Example:
-        fatal('Config file missing', suggestion='Run aipass init first')
-    """
+    """Display error message with Rich styling and exit with code 1"""
     msg = Text("❌ ")
     msg.append(message, style="red bold")
     err_console.print(msg)
@@ -465,25 +344,12 @@ def fatal(message: str, suggestion: str | None = None) -> None:
 
 
 def section(title: str) -> None:
-    """
-    Display section separator with Rich styling
-
-    Args:
-        title: Section title
-
-    Example:
-        section('Validation Results')
-    """
+    """Display section separator with Rich styling"""
     CONSOLE.print()
     CONSOLE.print(f"[bold]{title}[/bold]")
     CONSOLE.print("─" * 50)
 
 
-# ============================================================================
-# MODULE EXPORTS
-# ============================================================================
-
-# Note: __all__ uses lowercase by convention (Python standard library pattern)
 __all__ = [
     "console",  # Primary export (service instance pattern)
     "CONSOLE",  # Internal constant (kept for backward compatibility)
@@ -501,27 +367,20 @@ __all__ = [
     "resolve_exit",
 ]
 
-# ============================================================================
-# ENTRY POINT (SEEDGO pattern)
-# ============================================================================
-
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     try:
-        # Show introspection when run without arguments
         if len(sys.argv) == 1:
             print_introspection()
             sys.exit(0)
 
-        # Handle help flag (drone compliance)
         if sys.argv[1] in ["--help", "-h", "help"]:
             print_help()
             sys.exit(0)
 
-        # Route commands
         command = sys.argv[1]
         args = sys.argv[2:] if len(sys.argv) > 2 else []
 

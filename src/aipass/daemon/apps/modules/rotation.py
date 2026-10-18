@@ -3,20 +3,14 @@
 # Description: Rounds firing + status surface (drone @daemon rotation)
 # Version: 1.3.1
 # Created: 2026-08-12
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Rounds — the night watch: wakes one citizen a night for its maintenance turn.
 
-A single rotation-type job, id `rounds` in daemon's own .daemon/schedule.json,
-fires at 05:00, picks the next citizen off the alphabetical roster, wakes it
-with the rounds prompt, and advances the pointer. Busy target? The miss is
-logged with the branch named and the pointer advances anyway — that citizen gets
-its next turn in the cycle.
-
-This module owns wake POLICY (blocklist, manager lane, model); the rotation
-handler owns roster and pointer state.
+Wake POLICY (blocklist, manager lane, model) lives here; roster and pointer state in the handler.
+Reference: docs/rounds.md
 """
 
 import inspect
@@ -48,8 +42,7 @@ HANDLED_COMMANDS = {"rotation"}
 
 ROTATION_TYPE = "rotation"
 
-# The owner's ruling 2026-09-10 (DPLAN-0337 R2): rounds run on opus. The job stanza
-# names it as well; this is only the fallback for a stanza that omits it.
+# Rounds run on opus; the job stanza names it too, this is only the fallback for a stanza that omits it.
 DEFAULT_WAKE_MODEL = "opus"
 
 SKIP_BLOCKLIST = "wake-blocklist"
@@ -109,17 +102,12 @@ def _log(message: str) -> None:
 def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
     """Drop roster entries ai_mail refuses to wake.
 
-    The handler excludes @devpulse structurally; this re-checks the live
-    blocklist so a branch added there tomorrow is honoured without a code change.
+    The handler excludes @devpulse structurally; this re-checks the live blocklist.
     """
     try:
         from aipass.ai_mail.apps.modules.door_wake import is_wake_blocked
-    # OSError, not only ImportError: MEASURED 2026-08-31 - importing ai_mail's wake
-    # module under a dead working directory raises FileNotFoundError today, and an
-    # uncaught one here takes the whole rotation down from inside an OPTIONAL
-    # consult. The fallback is unchanged and still fail-open by design (an
-    # unfiltered roster, logged); what changes is that the world reaching it no
-    # longer arrives as a traceback.
+    # OSError, not only ImportError: the import raises FileNotFoundError under a dead working directory.
+    # Fail-open by design: an unfiltered roster, logged.
     except (ImportError, OSError) as e:
         logger.warning("[rotation] Wake blocklist unavailable, roster unfiltered: %s", e)
         return roster
@@ -136,9 +124,8 @@ def _apply_wake_blocklist(roster: List[dict]) -> List[dict]:
 def _scheduled_lane_available() -> bool:
     """Report whether ai_mail's wake_branch accepts the scheduled headless lane.
 
-    @ai_mail is building `scheduled=True` (headless + 350k pin) in parallel with
-    this build. Until the parameter exists, manager targets are skipped by name
-    rather than dropped into an interactive 5am tmux session.
+    Without the `scheduled` parameter, manager targets are skipped by name rather than dropped into an
+    interactive tmux session.
     """
     try:
         from aipass.ai_mail.apps.modules.door_wake import wake_branch
@@ -152,10 +139,8 @@ def _scheduled_lane_available() -> bool:
 def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
     """Wake one steward. Returns (ok: bool, detail: str, errored: bool).
 
-    `errored` separates a crash in the wake path from an ordinary busy target —
-    the first is a rotation failure worth reading, the second is just a miss.
+    `errored` separates a crash in the wake path from an ordinary busy target (just a miss).
     """
-    # Through ai_mail's published door (DPLAN-0404), as run.py and inbox_sweep.py
     from aipass.ai_mail.apps.modules.door_wake import wake_branch
 
     email = target["email"]
@@ -165,8 +150,7 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
         "auto": True,
         "sender": "@daemon",
         "model": model,
-        # A rounds night owes @daemon nothing — its report is the @devpulse mail.
-        # sender stays: the bounce and the manager gate's daemon exception read it.
+        # A rounds night owes @daemon nothing. sender stays: the bounce and the manager gate read it.
         "wake_back": False,
     }
 
@@ -187,13 +171,10 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
     """
     Fire one rotation turn: pick the next citizen, wake it, advance the pointer.
 
-    ``header`` is the DPLAN-0332 wake header. It arrives composed rather than
-    built here, because why a wake is happening is the scheduler's knowledge —
-    the rotation only knows whose night it is.
+    ``header`` arrives composed: why a wake is happening is the scheduler's knowledge.
 
-    Returns (ok: bool, detail: str) for the scheduler tick. `ok` reports whether
-    the rotation completed a turn — a target that was busy is a recorded miss,
-    not a job failure.
+    Returns (ok: bool, detail: str). `ok` reports whether the rotation completed a turn;
+    a busy target is a recorded miss, not a job failure.
     """
     key = job_key(job["owner"], job["id"])
     config = job.get("config", {})

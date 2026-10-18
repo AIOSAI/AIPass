@@ -3,20 +3,10 @@
 # Description: Tests for provider configuration handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/config/provider.py, the provider configuration handler."""
-
-# Tests for config.provider — provider configuration handler.
-#
-# Tests:
-# - merge_configs deep merge behavior
-# - merge_configs in-place mutation and return value
-# - merge_configs nested dict recursion
-# - merge_configs non-dict overwrite
-# - get_validation_rules known providers
-# - get_validation_rules unknown provider returns None
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — PROVIDER_DEFAULTS' values, beyond the prefixes get_validation_rules returns
@@ -26,11 +16,6 @@ from unittest.mock import patch
 
 
 from aipass.api.apps.handlers.config import provider as config_provider
-
-
-# =============================================
-# merge_configs tests
-# =============================================
 
 
 class TestMergeConfigs:
@@ -144,11 +129,6 @@ class TestMergeConfigs:
         mock_jh.log_operation.assert_called_once_with("config_merged", {"keys_updated": 2})
 
 
-# =============================================
-# get_validation_rules tests (config.provider)
-# =============================================
-
-
 class TestGetValidationRulesConfigProvider:
     """Tests for config.provider.get_validation_rules()."""
 
@@ -194,15 +174,8 @@ class TestGetValidationRulesConfigProvider:
 
     @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)
     def test_known_providers_keep_prefixes_that_tell_them_apart(self, mock_logger):
-        """
-        The handler and the module must agree, value for value.
-
-        This asserted isinstance(dict) only, which is true of any answer at
-        all. What matters is that the two providers do NOT share a prefix:
-        this is the layer api_key.get_validation_rules reads through, so the
-        two collapsing here would silently let an OpenAI key validate as an
-        OpenRouter one. Measured 2026-09-07.
-        """
+        """The handler and the module must agree, value for value."""
+        # api_key.get_validation_rules reads through this layer: a shared prefix lets an OpenAI key pass as OpenRouter.
         openrouter = config_provider.get_validation_rules("openrouter")
         openai = config_provider.get_validation_rules("openai")
 

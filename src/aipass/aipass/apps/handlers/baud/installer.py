@@ -3,25 +3,15 @@
 # Description: The install chain of aipass baud: face and baud-cli from disk or a fetched release, verified, placed
 # Version: 1.1.0
 # Created: 2026-09-13
-# Modified: 2026-09-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 The install chain behind ``aipass baud install`` (FPLAN-0587 row 2, FPLAN-0589 row 3).
 
-Two entries, one chain: ``install_from_file`` takes a tarball (and optionally a
-baud-cli binary) the user handed over with --from / --binary,
-``install_from_release`` fetches them into a temporary directory that never
-outlives the call.
-
-The order is the safety property: EVERY file is verified against the one
-SHA256SUMS, and the binary's location is checked, before anything is placed. A
-bad binary refuses the whole install rather than leaving a new face beside an
-old binary. Then the face is unpacked and swapped (unpack.py), then the binary
-lands (binary.py).
-
-Pointing @api at the result is not here: it crosses a branch, so the module
-layer does it.
+The order is the safety property: every file is verified and the binary's place checked
+before anything lands, so a bad binary never leaves a new face beside an old one.
+Pointing @api at the result crosses a branch, so the module layer does it.
 """
 
 from __future__ import annotations
@@ -129,16 +119,7 @@ def install_from_file(
 ) -> InstallOutcome:
     """Verify and install a tarball, and a baud-cli binary when given, from disk. The user's files are never deleted.
 
-    Args:
-        tarball: The phone tarball.
-        sums: Its SHA256SUMS file; None means SHA256SUMS.txt beside the tarball.
-            The binary's line is read from the same file.
-        dest: The face's install directory; the binary lands in its parent's bin/.
-        tag: The tag to record, or "latest" to read it off the file name.
-        binary: A baud-cli binary, or None for the face only.
-
-    Raises:
-        UnpackError, VerifyError: A missing file, no sums, a refused bundle or location.
+    ``sums`` None means SHA256SUMS.txt beside the tarball; the binary's line is read from it too.
     """
     sums_file = sums or tarball.parent / SUMS_ASSET
     if not tarball.is_file():
@@ -155,11 +136,7 @@ def install_from_file(
 
 
 def install_from_release(tag: str, dest: Path) -> InstallOutcome:
-    """Fetch a release into a temporary directory, verify it, install the face and, when there is one, the binary.
-
-    Raises:
-        FetchError, VerifyError, UnpackError: Any refusal along the chain.
-    """
+    """Fetch a release into a temporary directory, verify it, install the face and, when there is one, the binary."""
     with tempfile.TemporaryDirectory(prefix="aipass-baud-") as workdir:
         fetched = fetch_release(tag, Path(workdir))
         chosen = _Binary(fetched.binary, fetched.source) if fetched.binary is not None else None

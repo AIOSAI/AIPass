@@ -3,15 +3,11 @@
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
 # Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
 
-# Tests for 5 seedgo checker handlers: stderr_routing, todo, trigger, dead_code,
-# unused_function. Was 6. The test_quality section retired 2026-09-07 with the v4
-# standard itself (FPLAN-0491); disposal copy in
-# tests/.archive/deleted_2026-09-07_test_quality_v4.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(retired) — the v4 test_quality checker, retired with its standard in FPLAN-0491
@@ -44,11 +40,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import (
 )
 
 
-# =============================================
-# HELPERS
-# =============================================
-
-
 def _write_file(path: Path, content: str) -> None:
     """Write content to a file, creating parent dirs as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,11 +54,6 @@ def _make_branch(tmp_path: Path) -> Path:
     handlers = apps / "handlers"
     handlers.mkdir(parents=True)
     return tmp_path
-
-
-# =============================================
-# 1. stderr_routing_check (check_module)
-# =============================================
 
 
 @patch("aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_check.json_handler")
@@ -111,11 +97,6 @@ class TestStderrRoutingCheck:
         assert result["passed"] is True
 
 
-# =============================================
-# 2. todo_check (check_module)
-# =============================================
-
-
 @patch("aipass.seedgo.apps.handlers.aipass_standards.todo_check.json_handler")
 class TestTodoCheck:
     """Tests for the todo_check checker."""
@@ -142,11 +123,7 @@ class TestTodoCheck:
         assert any("TODO" in c["message"] for c in result["checks"])
 
     def test_todo_tag_inside_a_string_is_not_a_comment(self, mock_json, tmp_path: Path) -> None:
-        """A hash-TODO inside a string literal is text, not a comment (fleet green leg 13).
-
-        Red first: the line scan read the string on one line and the second line of
-        an assigned triple-quoted string as comments and scored 0.
-        """
+        """A hash-TODO inside a string literal is text, not a comment (fleet green leg 13)."""
         py_file = tmp_path / "specimen.py"
         _write_file(py_file, ('text = "# TODO: a specimen"\nblock = """\n# FIXME: also text\n"""\n'))
         result = todo_check_module(str(py_file))
@@ -177,11 +154,6 @@ class TestTodoCheck:
         result = todo_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
-
-
-# =============================================
-# 3. trigger_check (check_module)
-# =============================================
 
 
 @patch("aipass.seedgo.apps.handlers.aipass_standards.trigger_check.json_handler")
@@ -215,11 +187,6 @@ class TestTriggerCheck:
         assert result["passed"] is True
 
 
-# =============================================
-# 4. dead_code_check (check_branch)
-# =============================================
-
-
 @patch("aipass.seedgo.apps.handlers.aipass_standards.dead_code_check.json_handler")
 class TestDeadCodeCheck:
     """Tests for the dead_code_check checker."""
@@ -244,12 +211,7 @@ class TestDeadCodeCheck:
         assert result["standard"] == "DEAD_CODE"
 
     def test_dead_code_finding_tells_the_owner_to_re_run(self, mock_json, tmp_path: Path) -> None:
-        """The finding reports the frontier, not the closure — say so in the message.
-
-        @memory archived one named file, re-ran the audit, and a NEW file appeared:
-        its only referencer had just been removed. 95 -> 100 took two rounds, not
-        one. An owner who fixes once and stops leaves the tail behind.
-        """
+        """The finding reports the frontier, not the closure — say so in the message."""
         branch = _make_branch(tmp_path)
         _write_file(branch / "apps" / "modules" / "orphan.py", "def unused():\n    return True\n")
         _write_file(branch / "apps" / (branch.name + ".py"), "def handle_command(): pass\n")
@@ -325,13 +287,7 @@ class TestDeadCodeCheck:
     def test_a_handler_imported_only_inside_a_parenthesised_block_is_referenced(
         self, mock_json, tmp_path: Path
     ) -> None:
-        """A name inside `from pkg import (\\n    a,\\n    b,\\n)` is an import - @drone, 2026-09-13.
-
-        Rule 5's line pattern stopped at the newline after `(`, so drone's
-        repo_door.py, imported only inside that block, scored unreferenced and
-        took drone to 99 under CI's 100. Mutation caught:
-        `_imported_in_parenthesised_block` returning False.
-        """
+        """A name inside `from pkg import (\\n    a,\\n    b,\\n)` is an import - @drone, 2026-09-13."""
         branch = _make_branch(tmp_path)
         _write_file(
             branch / "apps" / "handlers" / "git" / "repo_door.py",
@@ -355,12 +311,7 @@ class TestDeadCodeCheck:
     def test_a_stem_named_only_in_a_comment_inside_an_import_block_is_still_dead(
         self, mock_json, tmp_path: Path
     ) -> None:
-        """The block's comments are stripped before the name is read.
-
-        `lock_handler,  # repo_door moved out` names the stem, and it imports
-        nothing. Mutation caught: `re.sub(r"#[^\\n]*", "", block.group(1))` in
-        `_imported_in_parenthesised_block` becoming `block.group(1)`.
-        """
+        """The block's comments are stripped before the name is read."""
         branch = _make_branch(tmp_path)
         _write_file(
             branch / "apps" / "handlers" / "git" / "repo_door.py",
@@ -386,12 +337,7 @@ class TestDeadCodeCheck:
         ids=["shaped_door_is_referenced", "door_that_defines_a_function_is_dead"],
     )
     def test_a_door_counts_as_referenced_by_its_shape(self, mock_json, tmp_path: Path, tail: str, dead: bool) -> None:
-        """A door is called from other branches, so its own corpus never names it (DPLAN-0404).
-
-        spawn's door_class_registry and door_owner read unreferenced on 2026-10-08.
-        A door_*.py that passes Door shape is referenced the way the entry point is;
-        one that fails Door shape is read like any other module.
-        """
+        """A door is called from other branches, so its own corpus never names it (DPLAN-0404)."""
         branch = _make_branch(tmp_path)
         _write_file(branch / "apps" / "handlers" / "trail.py", "def log_operation():\n    return True\n")
         door = f'from aipass.{branch.name}.apps.handlers.trail import log_operation\n\n__all__ = ["log_operation"]\n'
@@ -401,11 +347,6 @@ class TestDeadCodeCheck:
         result = dead_code_check_branch(str(branch))
 
         assert ("door_trail.py" in result["checks"][0]["message"]) is dead
-
-
-# =============================================
-# 6. unused_function_check (check_branch)
-# =============================================
 
 
 @patch("aipass.seedgo.apps.handlers.aipass_standards.unused_function_check.json_handler")
@@ -454,20 +395,13 @@ class TestUnusedFunctionCheck:
             "from modules.bloat import used_func\ndef handle_command():\n    return used_func()\n",
         )
         result = unused_function_check_branch(str(branch))
-        # Keyed on the check's own PAYLOAD, not on prose in its message. This
-        # used to grep the message for "unused"; when the wording was narrowed
-        # to "no caller in this branch" (2026-08-31, @memory's overclaim report)
-        # the test went red without anything about the finding having changed.
+        # Keyed on the check's own PAYLOAD, not on prose in its message, so rewording never reddens it.
         unused_checks = [c for c in result["checks"] if c.get("unused")]
         assert len(unused_checks) > 0
         assert any("never_called_delta" in u["name"] for c in unused_checks for u in c["unused"])
 
     def test_a_method_overriding_an_imported_base_is_used_by_the_base(self, mock_json, tmp_path: Path) -> None:
-        """socketserver calls handle() by name; the override is used though the branch never names it.
-
-        The controls stay convicted: a method the base does not define, and an
-        override of a base the imports cannot resolve (seedgo, fleet green leg 10).
-        """
+        """socketserver calls handle() by name; the override is used though the branch never names it."""
         branch = _make_branch(tmp_path)
         _write_file(
             branch / "apps" / "handlers" / "server.py",
@@ -521,25 +455,12 @@ class TestUnusedFunctionCheck:
         assert result["passed"] is True
 
 
-# A file caught mid-save must not sink the branch (FPLAN-0382 ruling d)
+# A file caught mid-save must not sink the branch
 
 
 @patch("aipass.seedgo.apps.handlers.aipass_standards.unused_function_check.json_handler.log_operation")
 def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_path):
-    """IndentationError is a SyntaxError, not a TokenError.
-
-    Uncaught it escaped check_branch(), and branch_audit scores an escaped exception
-    as a flat 0 for the whole branch -- the spurious 'Unused_Function 0%' seen on
-    uncached runs, unreproducible because the file is saved correctly by the retry.
-
-    THE PATCH NAMES THE FUNCTION, NOT THE MODULE (MOCK-DRIFT, 2026-09-07). It read
-    `...unused_function_check.json_handler`, which replaces the whole module with a
-    MagicMock answering every attribute - so renaming or deleting `log_operation`
-    left this test green while the checker crashed in production. Patching the
-    attribute keeps the real module in place: the name has to EXIST for the patch
-    to bind, and the pin fails the moment it does not.
-    Mutant: check_completed's `"unused_count": len(unused_functions)` to `total_functions` — killed.
-    """
+    """IndentationError is a SyntaxError, not a TokenError."""
     branch = tmp_path / "victim"
     (branch / "apps").mkdir(parents=True)
     (branch / "apps" / "good.py").write_text(
@@ -551,7 +472,7 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
 
     assert result["score"] > 0
     assert "error" not in result
-    # A file Python cannot parse is named, not counted as a file with no functions (seedgo, fleet green leg 12).
+    # A file Python cannot parse is named, not counted as a file with no functions.
     assert result.get("unparsed") == ["apps/midsave.py"]
     # The completed scan is logged last, with what it measured: alpha has no caller, beta has one.
     # (json_handler is the fleet's shared shim, so the .seedgoignore load logs through it first.)
@@ -568,11 +489,7 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
 
 
 def test_unused_function_counts_a_call_made_from_a_file_that_cannot_be_tokenized(tmp_path):
-    """A file caught mid-save still counts as a caller: the tokenizer falls back to the raw corpus.
-
-    Was a direct call of the private _strip_non_code; now through check_branch.
-    Mutant: the fallback's `return _MAIN_BLOCK_RE.sub("", source)` to `return ""` — killed.
-    """
+    """A file caught mid-save still counts as a caller: the tokenizer falls back to the raw corpus."""
     branch = tmp_path / "victim"
     (branch / "apps").mkdir(parents=True)
     (branch / "apps" / "good.py").write_text("def beta():\n    return 1\n", encoding="utf-8")
@@ -632,12 +549,7 @@ FSTRING_FIELD_USES = ['f"{helper()}"', 'f"total {helper() + 1:>{helper()}}"', "f
 @pytest.mark.parametrize("tokenizer", ["host", "older"])
 @pytest.mark.parametrize("use", FSTRING_FIELD_USES)
 def test_a_name_in_an_fstring_field_is_a_reference(tmp_path, request, tokenizer, use):
-    """A replacement field is code, so the name in it is a caller (seedgo, fleet green leg 9).
-
-    Asked of the host's tokenizer and of the 3.10/3.11 token shape, so the
-    verdict is one across the CI matrix. Red first on the older shape: before
-    leg 9 the single STRING was blanked whole and helper had no caller.
-    """
+    """A replacement field is code, so the name in it is a caller (seedgo, fleet green leg 9)."""
     if tokenizer == "older":
         request.getfixturevalue("older_tokenizer")
 
@@ -652,11 +564,7 @@ DOTTED_PATH_USES = ['f"{ROOT}.lib.helper"', '"aipass.victim.lib.helper"']
 @pytest.mark.parametrize("tokenizer", ["host", "older"])
 @pytest.mark.parametrize("use", DOTTED_PATH_USES)
 def test_a_string_that_is_a_dotted_path_names_its_last_segment(tmp_path, request, tokenizer, use):
-    """A registry names a handler by its import path, and a loader calls it (seedgo, fleet green leg 11).
-
-    hooks config/gates.py: f"{_SECURITY}.edit_gate.tripwire". Red first: the
-    string was blanked as prose and tripwire had no caller.
-    """
+    """A registry names a handler by its import path, and a loader calls it (seedgo, fleet green leg 11)."""
     if tokenizer == "older":
         request.getfixturevalue("older_tokenizer")
 
@@ -681,11 +589,7 @@ FSTRING_TEXT_USES = [
 @pytest.mark.parametrize("tokenizer", ["host", "older"])
 @pytest.mark.parametrize("use", FSTRING_TEXT_USES)
 def test_a_name_in_fstring_text_is_not_a_reference(tmp_path, request, tokenizer, use):
-    """The literal text of an f-string is prose, as in any string: helper still has no caller.
-
-    Red first on 3.12+, where FSTRING_MIDDLE was kept as code. Asked of both
-    token shapes, so the verdict is one on every interpreter.
-    """
+    """The literal text of an f-string is prose, as in any string: helper still has no caller."""
     if tokenizer == "older":
         request.getfixturevalue("older_tokenizer")
 
@@ -708,11 +612,7 @@ def _charged_with_a_live_copy(root):
 
 
 def test_a_top_level_dot_directory_copy_is_not_charged(tmp_path):
-    """hooks keeps promoted engine copies under .live-<stamp>/ (seedgo, fleet green leg 16).
-
-    A copy is not edited, so a row charged to it can never be cured: g is
-    reported once, for apps/m.py.
-    """
+    """hooks keeps promoted engine copies under .live-<stamp>/ (seedgo, fleet green leg 16)."""
     assert _charged_with_a_live_copy(tmp_path / "branchroot") == [(Path("apps", "m.py"), "g")]
 
 
@@ -729,13 +629,7 @@ def _charged_names(root: Path, files: dict[str, str]) -> list[str]:
 
 
 def test_one_pass_over_the_corpus_counts_as_the_per_name_scans_did(tmp_path):
-    """Words and definition lines are counted once per branch (seedgo, fleet green leg 18).
-
-    The per-name scans held 398 of 1033 profiled seconds of seedgo's own
-    audit. ``run`` is not used by ``run_all``, ``async def`` with two spaces
-    is still idle's definition line, and helper is called from another file.
-    Green on the per-name scans too: its proof is its mutants.
-    """
+    """Words and definition lines are counted once per branch (seedgo, fleet green leg 18)."""
     body = (
         "async def  idle():\n    return run_all()\n\n\n"
         "def run_all():\n    return 1\n\n\n"
@@ -747,13 +641,7 @@ def test_one_pass_over_the_corpus_counts_as_the_per_name_scans_did(tmp_path):
 
 
 def test_a_name_with_a_mark_no_word_pattern_reads_is_still_counted(tmp_path):
-    """A name holding a character ``\\w`` does not match is counted by its own scan.
-
-    U+093F is a combining vowel sign: valid in an identifier, not a word
-    character, so the one-pass count would split the name and charge it while
-    it is called (seedgo, fleet green leg 18). Green on the per-name scans too:
-    its proof is its mutant.
-    """
+    """A name holding a character ``\\w`` does not match is counted by its own scan."""
     name = "aिb"
     files = {"apps/a.py": f"def {name}():\n    return 1\n", "apps/b.py": f"x = {name}()\n"}
     assert _charged_names(tmp_path / "branchroot", files) == []

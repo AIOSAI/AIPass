@@ -3,7 +3,7 @@
 # Description: Versioned copy — per-file baseline + diff engine
 # Version: 2.1.1
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Versioned copy handler — per-file baseline + unified diff engine.
@@ -49,10 +49,8 @@ def _copy_new_file(source: Path, target: Path) -> bool:
     """Handle a new file: create baseline + current."""
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    # Current copy (mtime preserved via copy2)
     shutil.copy2(str(source), str(target))
 
-    # Baseline copy (never overwritten after creation)
     baseline_name = _make_baseline_name(target)
     baseline_path = target.parent / baseline_name
     if not baseline_path.exists():
@@ -63,7 +61,6 @@ def _copy_new_file(source: Path, target: Path) -> bool:
 
 def _copy_changed_file(source: Path, target: Path) -> bool:
     """Handle a changed file: diff old current, then overwrite current."""
-    # Generate diff before overwriting
     if should_create_diff(source):
         old_mtime = target.stat().st_mtime
         ts = datetime.datetime.fromtimestamp(old_mtime).strftime("%Y-%m-%d_%H-%M-%S")
@@ -76,18 +73,13 @@ def _copy_changed_file(source: Path, target: Path) -> bool:
         if diff_content:
             diff_path.write_text(diff_content, encoding="utf-8")
 
-    # Overwrite current with new version
     _ensure_writable(target)
     shutil.copy2(str(source), str(target))
     return True
 
 
 def _copy_one(source: Path, target: Path, abs_path: str) -> int:
-    """Copy one file into its file-folder; bytes copied, or -1 when unchanged.
-
-    New: baseline + current. Changed (mtime differs): diff old->new, overwrite
-    current. Unchanged: nothing.
-    """
+    """Copy one file into its file-folder; bytes copied, or -1 when unchanged."""
     if not target.exists():
         _copy_new_file(source, target)
         return os.path.getsize(abs_path)
@@ -103,27 +95,9 @@ def copy_versioned(
     on_progress=None,
     on_file=None,
 ) -> dict:
-    """Copy files into the persistent versioned store.
+    """Copy files into the persistent versioned store; a stop finishes the file in flight, starts no other.
 
-    For each file:
-    - New: create baseline + current (two copies)
-    - Changed (mtime differs): diff old->new, overwrite current
-    - Unchanged: skip
-
-    The stop flag (handlers/state/stop_flag.py) is read before each file: a
-    stop lets the file in flight finish and starts no other.
-
-    Args:
-        files: List of (absolute_path, relative_path) tuples.
-        project_root: Project root (used to build store paths).
-        on_progress: Optional no-argument callback after each file.
-        on_file: Optional callback after each file with (relative_path,
-            bytes_copied, ok); the running file's writer.
-
-    Returns:
-        Dict with files_copied, files_unchanged, bytes_copied, errors, and
-        files_done (files gone through) and stopped (True when the stop flag
-        ended the loop early).
+    on_file(relative_path, bytes_copied, ok) is the running file's writer.
     """
     files_copied = 0
     files_unchanged = 0
@@ -142,7 +116,6 @@ def copy_versioned(
         ok = True
 
         if exceeds_max_path(str(target)):
-            # Long-path guard: Windows' MAX_PATH only (path/builder.py)
             logger.warning(f"Path too long (>260), skipping: {rel_path}")
             errors.append(f"{rel_path}: path too long (>260 chars)")
             ok = False
@@ -183,6 +156,3 @@ def copy_versioned(
         },
     )
     return result
-
-
-# =============================================

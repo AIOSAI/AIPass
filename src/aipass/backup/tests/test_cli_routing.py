@@ -3,7 +3,7 @@
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
 # Version: 2.0.8
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -40,18 +40,10 @@ from aipass.backup.apps.modules import (
     versioned,
 )
 
-# The real console writes to sys.stdout and error()/warning() write to
-# sys.stderr, so capsys reads both channels with no console built here;
-# conftest.py pins the console widths and clears the command-failed flag.
-#
-# argv is patched as `patch("sys.argv", ...)`, not `patch.object(sys, "argv",
-# ...)`: seedgo's stdlib_patch reads only a patch call's first argument, and
-# bare `sys` scores as an unsanctioned stdlib patch. main() reads sys.argv
-# itself, so argv is the entry point's input.
+# argv is patched as patch("sys.argv", ...), not patch.object(sys, ...): seedgo's stdlib_patch
+# reads only the first argument and scores bare `sys` as an unsanctioned stdlib patch.
 
 
-#: The five modules whose whole job is routing: one command they own, a help
-#: gate, an introspection page.
 SIMPLE_MODULES = [
     pytest.param(drive_sync, id="drive_sync"),
     pytest.param(drive_check, id="drive_check"),
@@ -60,12 +52,8 @@ SIMPLE_MODULES = [
     pytest.param(settings, id="settings"),
 ]
 
-#: The verb each simple module reaches once an argument gets PAST the help
-#: gate. The help tests spy it, so a gate that stops screening fails the test
-#: instead of doing the work: 'drive_check foo --help' made a live Drive auth
-#: call before the gate screened the whole sequence (proven 2026-08-13).
-#: settings is absent on purpose -- its post-gate path raises rather than
-#: calling a verb, and a test sees that without a spy.
+#: The verb past each help gate, spied so a gate that stops screening fails instead of doing the work.
+#: settings is absent: its post-gate path raises rather than calling a verb.
 VERB_AFTER_THE_GATE: dict[ModuleType, str] = {
     drive_sync: "run_drive_sync",
     drive_check: "run_drive_check",
@@ -73,10 +61,7 @@ VERB_AFTER_THE_GATE: dict[ModuleType, str] = {
     drive_clear: "run_drive_clear",
 }
 
-#: The line print_help adds that print_introspection does not, per module, so a
-#: help test pins the HELP page and not merely "some page". drive_check and
-#: settings are absent because their print_help renders the introspection and
-#: nothing else -- there is no extra line to pin, and claiming one would lie.
+#: The line print_help adds over print_introspection; drive_check and settings have none to pin.
 HELP_ONLY_LINE: dict[ModuleType, str] = {
     drive_sync: "Usage: drive_sync",
     drive_stats: "Usage: drive_stats",
@@ -101,7 +86,6 @@ def _assert_help_page(mod: ModuleType, out: str, err: str, ran: list) -> None:
     if extra is not None:
         assert extra in out, f"help printed the introspection but not the help page: {out!r}"
     assert err == "", f"a help request wrote to stderr: {err!r}"
-    # settings has no spy, so `ran` stays empty for it; its gate is proven by the call not raising.
     assert ran == [], f"the help gate let the verb run: {ran!r}"
 
 
@@ -177,24 +161,17 @@ class TestModuleDiscovery:
 
     def test_discovery_imports_the_command_modules_that_exist_in_apps_modules(self) -> None:
         """discover_modules returns the modules on disk, imported -- not a list a patch handed it."""
-        # Every other discover_modules in this file is a patch target: the
-        # routing tests below replace it with [fake_module], which is right for
-        # a routing test and leaves the discovery itself unrun. The glob, the
-        # leading-underscore skip and the handle_command filter are exercised
-        # here and nowhere else.
+        # The only test that runs discovery unpatched; every other one replaces it with [fake_module].
         discovered = entry.discover_modules()
 
         found = sorted(module.__name__.split(".")[-1] for module in discovered)
-        # A door publishes names and carries no handle_command (DPLAN-0404): not a command.
+        # A door publishes names and carries no handle_command: not a command.
         on_disk = sorted(
             path.stem for path in entry.MODULES_DIR.glob("*.py") if not path.name.startswith(("_", "door_"))
         )
         assert found == on_disk, f"discovery and apps/modules/ disagree: {found!r} vs {on_disk!r}"
         assert "door_trail" not in found, "a door reached the router as a command module"
-        # Not decoration: MODULES_DIR pointed somewhere empty would make both
-        # sides [] and the equality above pass on nothing. These name modules
-        # that must be in the list, and the identity check says the walk
-        # imported THE module rather than a throwaway twin of it.
+        # An empty MODULES_DIR would pass the equality on []; identity rules out a re-imported twin.
         assert {"drive_sync", "register", "restore", "share"} <= set(found)
         assert drive_sync in discovered and register in discovered
         assert all(callable(module.handle_command) for module in discovered)
@@ -232,10 +209,7 @@ class TestReturnBool:
         self, mod: ModuleType, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """A command the module does not own is declined in silence."""
-        # Silence is the other half of the contract, not decoration: route_command
-        # asks every discovered module in turn, so a module that prints while
-        # declining speaks over the one that owns the command. That is exactly
-        # the display.py regression pinned further down this file.
+        # route_command asks every module in turn: one that prints while declining talks over the owner.
         assert mod.handle_command("nonexistent", []) is False
 
         out, err = capsys.readouterr()
@@ -261,31 +235,22 @@ class TestPrintHelp:
         out, err = capsys.readouterr()
         assert err == "", f"the help page wrote to stderr: {err!r}"
 
-        # The page is read by block, not by substring over the whole thing:
-        # every verb is also spelled in EXAMPLES, so a whole-page match would
-        # pass with the COMMANDS row gone.
+        # Read by block: every verb is also spelled in EXAMPLES, so a whole-page match passes on nothing.
         commands = _rows(out.split("COMMANDS:", 1)[1].split("OPTIONS:", 1)[0])
         options = _rows(out.split("OPTIONS:", 1)[1].split("EXAMPLES:", 1)[0])
 
-        # The first word of a row is the thing the row is about. Matching that,
-        # rather than "appears anywhere in the block", keeps 'snapshot' from
-        # being satisfied by the 'all' row's description of its own stages.
+        # First word only: the 'all' row's description also names 'snapshot'.
         listed_verbs = [row.split()[0] for row in commands]
         for mod in (snapshot, versioned, all_module, register, status, settings, restore):
             verb = mod.PRIMARY_COMMAND
             assert verb in listed_verbs, f"COMMANDS block has no row for {verb}"
 
-        # modules/all.py runs drive_sync after versioned, so the row must say
-        # the verb uploads.
         all_row = next(row for row in commands if row.split()[0] == "all")
         assert "drive" in all_row.lower(), f"'all' row hides its drive stage: {all_row}"
 
-        # settings has one live key now; the row must not call it unimplemented.
         settings_row = next(row for row in commands if row.split()[0] == "settings")
         assert "drive_sync" in settings_row and "Not implemented" not in settings_row, settings_row
 
-        # Flags live in the verbs, not the router, so the page has to name them,
-        # in OPTIONS, where a reader looks for them.
         documented_flags = [row.split()[0] for row in options]
         for flag in ("--name", "--quiet", "--registered", "--force", "--project", "--note", "--public"):
             assert flag in documented_flags, f"OPTIONS block has no row for {flag}"
@@ -295,11 +260,7 @@ class TestPrintHelp:
         self, mod: ModuleType, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """print_introspection, called on its own, prints the module's name and command."""
-        # A direct call: the routed tests reach the page through handle_command,
-        # so a print_introspection hollowed to `pass` while handle_command
-        # printed the page inline would leave them green. The module's __main__
-        # entry and print_help reach this function without handle_command.
-        # It subsumes test_every_simple_module_carries_a_callable_print_introspection (owner's call).
+        # Direct: a print_introspection hollowed to `pass` behind an inline handle_command passes the routed tests.
         mod.print_introspection()
 
         out, err = capsys.readouterr()
@@ -308,16 +269,8 @@ class TestPrintHelp:
         assert err == "", f"introspection wrote to stderr: {err!r}"
 
 
-#: (module, sentinel called right after the help gate, args after the project
-#: arg, the ONE call that invocation must produce)
-#: Each row builds the module's OWN executing invocation from a tmp_path.
-#: A builder rather than a shared "<project> plus extras" shape, because the
-#: shape is not shared: drive_check takes no project at all, and assuming it
-#: did would make a bare tmp_path read as a normal run (see its row).
-#:
-#: The fourth column is the argument binding: the expected call is built from
-#: the same tmp_path as the args, so a wrong operand, a wrong flag value or a
-#: hardcoded project root fails the row.
+#: (module, sentinel right after the help gate, args builder, the ONE expected call), built from one tmp_path
+#: so a wrong operand, flag value or hardcoded root fails the row.
 STANDALONE_ENTRY_MODULES = [
     pytest.param(
         all_module,
@@ -326,16 +279,13 @@ STANDALONE_ENTRY_MODULES = [
         lambda p: call(str(p), verb=all_module.PRIMARY_COMMAND),
         id="all",
     ),
-    # drive_check is account-wide and takes NO project: "run" is its only
-    # executing route, and it reaches run_drive_check with NO arguments. An
-    # unrecognised first arg is refused, never executed.
+    # drive_check is account-wide: "run" is its only executing route, with no project.
     pytest.param(drive_check, "run_drive_check", lambda p: ["run"], lambda p: call(), id="drive_check"),
     pytest.param(
         drive_clear,
         "run_drive_clear",
         lambda p: [str(p)],
-        # force is a FLAG the row never passes, so False is the claim: a
-        # tracker deletion that self-confirms is the regression this pins.
+        # The row never passes --force, so False is the claim: a self-confirming clear is the regression.
         lambda p: call(str(p), force=False),
         id="drive_clear",
     ),
@@ -344,9 +294,6 @@ STANDALONE_ENTRY_MODULES = [
         drive_sync,
         "run_drive_sync",
         lambda p: [str(p)],
-        # The empty defaults are what a plain flagless run must hand the verb.
-        # With no flags the --note / --project pair-scan never fires, so this
-        # row does not pin it.
         lambda p: call(str(p), project_name="", note="", force=False),
         id="drive_sync",
     ),
@@ -355,8 +302,7 @@ STANDALONE_ENTRY_MODULES = [
         restore,
         "run_list_versions",
         lambda p: [str(p), "list", "some_file.py"],
-        # args[2] is the FILE. args[1] is the verb, and a module that reads it
-        # instead looks up a file literally named "list" on every restore.
+        # args[2] is the FILE; reading args[1] looks up a file named "list".
         lambda p: call(str(p), "some_file.py"),
         id="restore",
     ),
@@ -366,25 +312,10 @@ STANDALONE_ENTRY_MODULES = [
     pytest.param(versioned, "run_versioned", lambda p: [str(p)], lambda p: call(str(p)), id="versioned"),
 ]
 
-#: The same rows without the expected-call column: a help request produces no call.
 HELP_GATE_MODULES = [pytest.param(*row.values[:3], id=row.id) for row in STANDALONE_ENTRY_MODULES]
 
-#: Real work that runs AFTER the sentinel and must be neutralised too.
-#:
-#: Patching the sentinel alone is not enough for 'all': handle_command calls
-#: run_snapshot, then run_versioned, then a LIVE run_drive_sync. With only
-#: run_snapshot spied, the rest of the production pipeline really executed --
-#: the Drive step authenticated through @api and refreshed the machine's real
-#: ~/.secrets/aipass/google_creds.json (mkdir + chmod 0700 + a write-mode
-#: open + chmod 0600 in api/apps/handlers/google/auth.py:261-265). A write-mode
-#: open truncates the file as it opens, so a failure mid-write could corrupt
-#: live credentials on any machine that ran this suite. Found 2026-08-30 by
-#: @seedgo's audit-tests
-#: lane -- the only write any branch made outside the audit copy.
-#:
-#: run_drive_sync is imported INSIDE all.handle_command, so it has to be
-#: patched on its OWN module, not as an attribute of 'all' -- which is why the
-#: pairs below name the module the attribute lives on.
+#: Real work after the sentinel, neutralised too: 'all' otherwise runs a LIVE run_drive_sync that
+#: rewrites the machine's real google_creds.json. Patched on its own module: all imports it inside handle_command.
 DOWNSTREAM_AFTER_SENTINEL: dict[ModuleType, tuple[tuple[ModuleType, str], ...]] = {
     all_module: (
         (all_module, "run_versioned"),
@@ -394,14 +325,7 @@ DOWNSTREAM_AFTER_SENTINEL: dict[ModuleType, tuple[tuple[ModuleType, str], ...]] 
 
 
 class TestHelpGateInsideHandleCommand:
-    """handle_command itself must screen help flags, not just the router.
-
-    Every one of these modules has a standalone entry --
-    'if __name__ == "__main__": handle_command(PRIMARY_COMMAND, sys.argv[1:])'
-    -- which never touches the router's normalisation. With only a positional
-    gate at args[0], 'python modules/snapshot.py <project> --help' ran a REAL
-    snapshot (proven live, 2026-08-13). Reported by @seedgo via help_flag_safety.
-    """
+    """handle_command itself must screen help flags: each module's __main__ entry bypasses the router."""
 
     @pytest.mark.parametrize(("mod", "sentinel", "build_args"), HELP_GATE_MODULES)
     @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -422,8 +346,6 @@ class TestHelpGateInsideHandleCommand:
         self, mod: ModuleType, sentinel: str, build_args, build_call, tmp_path: Path
     ) -> None:
         """A normal run reaches the sentinel ONCE, with the arguments the row built."""
-        # The expected call comes off the row, so a wrong operand, a wrong flag
-        # value or a hardcoded project root fails here.
         args = build_args(tmp_path)
 
         with ExitStack() as stack:
@@ -483,28 +405,13 @@ def _drive_sync_on(project: Path) -> None:
 class TestNoWriteEscapesToRealSecrets:
     """The 'all' cycle must never reach live credential storage from a test.
 
-    Regression, found 2026-08-30 by @seedgo's audit-tests lane -- the only write
-    any branch made outside the audit copy. test_real_invocation_still_dispatches
-    patched run_snapshot only, so handle_command fell straight through to a REAL
-    run_drive_sync, which authenticated through @api and rewrote
-    ~/.secrets/aipass/google_creds.json (auth.py:261-265: mkdir, chmod 0700, a
-    write-mode open, chmod 0600). That open truncates the file as it opens, so
-    a failure mid-write could corrupt the machine's live Google credentials.
-
-    The audit hook here RECORDS and does not block. Blocking mid-auth pushes the
-    Google client into its interactive browser flow, which hangs forever -- a pin
-    that hangs teaches nobody anything. The cost of recording is that a genuine
-    regression writes the real file once before this test goes red; that is the
-    status quo it exists to end, not a new risk it introduces.
+    The audit hook RECORDS and does not block: blocking mid-auth pushes Google into its
+    interactive browser flow, which hangs forever.
     """
 
     def test_all_stops_at_the_patched_doubles(self, tmp_path: Path) -> None:
         """Every step of the cycle lands on a double, each with the run's own arguments."""
-        # Each double stands where a real run would have gone, so each is checked
-        # against the arguments the real step takes. The doubles are compared by
-        # name as a whole map, so a step added to DOWNSTREAM_AFTER_SENTINEL
-        # without an expectation here fails. drive_sync is switched on, since
-        # 'all' skips the Drive step for a project that has it off (DPLAN-0411).
+        # The doubles are compared as a whole map, so a step added to DOWNSTREAM_AFTER_SENTINEL fails here.
         project = str(tmp_path)
         _drive_sync_on(tmp_path)
 
@@ -516,21 +423,15 @@ class TestNoWriteEscapesToRealSecrets:
             }
             all_module.handle_command(all_module.PRIMARY_COMMAND, [project])
 
-        # verb: each sub-lane's running file names the verb invoked (DPLAN-0412).
         assert snap.call_args_list == [call(project, verb=all_module.PRIMARY_COMMAND)]
         assert sorted(doubles) == ["run_drive_sync", "run_versioned"]
 
-        # show_panels is derived from the absence of --quiet, and this run has
-        # no flags: True is the claim, not a placeholder.
+        # show_panels comes from the absence of --quiet: True is the claim, not a placeholder.
         assert doubles["run_drive_sync"].call_args_list == [
             call(project, show_panels=True, verb=all_module.PRIMARY_COMMAND)
         ]
 
-        # The single-scan rule: versioned is handed the list 'all' already
-        # walked, never a path to re-walk. The seed .backupignore that
-        # create_backup_dir writes is the one entry a bare project is
-        # guaranteed to carry, so it is what proves the list came from the
-        # shared scan.
+        # Single-scan rule: versioned gets the list 'all' walked; the seed .backupignore proves it.
         versioned_call = doubles["run_versioned"].call_args
         assert doubles["run_versioned"].call_count == 1
         assert versioned_call.args == (project,)
@@ -549,25 +450,13 @@ class TestNoWriteEscapesToRealSecrets:
 
 
 class TestStubFailsHonestly:
-    """A deferred command must say so, not exit 0 in silence.
-
-    Regression: 'backup settings <project>' logged to file, printed nothing and
-    returned success, while print_help and the README advertised it as a
-    working command.
-
-    Second regression (refusal sweep 2026-09-07): saying so was not enough.
-    The stub printed its warning and returned True, so main() exited 0 --
-    measured from the shell, 'backup settings <project>' exited 0 before this
-    cure and exits 1 after it. The stub now raises NotImplementedError, which
-    route_command catches and main reports as a named failure.
-    """
+    """A deferred command must say so, not exit 0 in silence: the stub raises NotImplementedError."""
 
     def test_settings_stub_refuses_and_names_the_reason(self, tmp_path: Path) -> None:
         """The stub raises rather than returning a success the caller believes."""
         with pytest.raises(NotImplementedError) as caught:
             settings.handle_command("settings", [str(tmp_path)])
 
-        # The exact sentence the operator gets, not an either/or over two words.
         assert str(caught.value) == (
             "settings sets one key today, drive_sync on|off <project_path|@name>; "
             "the settings UI is deferred (Phase 3). Edit .backup/config.json in the project directly for anything else."
@@ -577,12 +466,7 @@ class TestStubFailsHonestly:
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """main() turns the raise into exit 1, naming the module and the reason on stderr."""
-        # The whole point of the sweep row: a refusal that exits 0 is a refusal
-        # nobody downstream can see. This drives the REAL entry point, so the
-        # route_command handler and main's failure branch are both on the path.
-        # The exit code alone does not prove the operator was told WHICH module
-        # refused -- route_command's `failure` string is what carries that, and
-        # error() puts it on stderr, where drone's piping reads it.
+        # Through the REAL entry point: the exit code and the named failure on stderr are both the claim.
         with patch("sys.argv", ["backup", "settings", str(tmp_path)]):
             code = entry.main()
 
@@ -595,19 +479,8 @@ class TestStubFailsHonestly:
 class TestRestoreRefusesAMalformedInvocation:
     """A restore invocation that cannot run must fail loudly, not print help and exit 0.
 
-    The 2026-09-22 refusal cure covered ONE shape -- `restore <project> list`
-    with no filename. The two shapes below fell through to the same
-    `print_help(); return True` tail at restore.py:186-187, so
-    `restore <project> file notes.txt` (no output path) and any fat-fingered
-    verb answered exactly like `restore --help`: the usage page on stdout and
-    exit 0. A script reading the code saw success for a restore that never
-    happened.
-
-    Both pins drive the REAL entry point, because the exit code is half the
-    defect and handle_command alone cannot show it. Exit 2 -- not 1 -- is the
-    claim: 1 is what the router returns for a command nobody handled, and
-    returning False here would buy the refusal a second, false line
-    ("Unknown command: restore") on top of the true one.
+    Exit 2, not 1: 1 is the router's unhandled-command code, and returning False would add a
+    second, false "Unknown command: restore" line.
     """
 
     def test_a_missing_output_path_is_refused_instead_of_exiting_zero(
@@ -620,8 +493,7 @@ class TestRestoreRefusesAMalformedInvocation:
         assert code == 2, f"a restore that never ran exited {code}"
 
         out, err = capsys.readouterr()
-        # The channel is the other half: a refusal on stdout is indistinguishable
-        # from the "Restored X to Y" line a pipe is reading for.
+        # On stdout a refusal is indistinguishable from the "Restored X to Y" line a pipe reads for.
         assert "restore <project> file <file> <out>" in err, f"the missing operand was never named on stderr: {err!r}"
         assert "Unknown command" not in err, f"the refusal returned False and drew a second, false line: {err!r}"
         assert "Usage:" not in out, "the malformed invocation still answered with the help page"
@@ -644,21 +516,13 @@ class TestRestoreRefusesAMalformedInvocation:
 
 
 class TestUnknownCommandNotSwallowed:
-    """An unrecognised command must reach the 'Unknown command' error.
-
-    Regression: display.py is not a command module (its docstring says it
-    always returns False), but handle_command returned True for ANY command
-    when args were empty. Discovery order put it first, so 'backup wibble'
-    printed the display module's introspection and exited 0.
-    """
+    """An unrecognised command must reach the 'Unknown command' error, not display.py's introspection."""
 
     def test_display_rejects_foreign_command(self, capsys: pytest.CaptureFixture[str]) -> None:
         """display.handle_command declines a command it does not own, printing nothing."""
         assert display.handle_command("wibble", []) is False
 
-        # Printing nothing IS the regression: the bug was not a wrong return
-        # value alone, it was this module's introspection page reaching the
-        # operator in place of the unknown-command error.
+        # Printing nothing IS the claim: display's page once reached the operator in place of the error.
         assert capsys.readouterr().out == ""
 
     def test_display_rejects_foreign_command_with_help_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -682,15 +546,9 @@ class TestUnknownCommandNotSwallowed:
 
 
 class TestHelpNeverExecutes:
-    """A --help anywhere in the args must print help, never run the verb.
+    """A --help anywhere in the args must print help, never run the verb."""
 
-    Regression guard: main() used to check only the FIRST arg after the
-    command, so 'backup snapshot <project> --help' resolved the project and
-    ran a real backup instead of printing help.
-    """
-
-    #: PROJECT is a placeholder each test swaps for its own tmp_path: the table
-    #: is read at class-body time, before any fixture exists.
+    #: A placeholder each test swaps for tmp_path: the table is read before any fixture exists.
     PROJECT = "<project>"
     HELP_ARGV = [
         ["snapshot", PROJECT, "--help"],
@@ -703,8 +561,7 @@ class TestHelpNeverExecutes:
     def test_the_help_sweep_still_covers_every_shape_it_was_built_for(self) -> None:
         """HELP_ARGV keeps its five rows in order, every one ending in a help flag and exactly one in -h."""
         assert len(self.HELP_ARGV) == 5
-        # By name, not by literal: a sweep that dispatches a command no module
-        # owns sweeps nothing. The row order is the sweep's shape.
+        # By name, not literal: a sweep dispatching a command no module owns sweeps nothing.
         assert [row[0] for row in self.HELP_ARGV] == [
             snapshot.PRIMARY_COMMAND,
             versioned.PRIMARY_COMMAND,
@@ -712,7 +569,6 @@ class TestHelpNeverExecutes:
             drive_clear.PRIMARY_COMMAND,
             restore.PRIMARY_COMMAND,
         ]
-        # Every row must actually carry a help flag, or it sweeps nothing.
         assert all(row[-1] in ("--help", "-h") for row in self.HELP_ARGV)
         assert sum(1 for row in self.HELP_ARGV if "-h" in row) == 1
 

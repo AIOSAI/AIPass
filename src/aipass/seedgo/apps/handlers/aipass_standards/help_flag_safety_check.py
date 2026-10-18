@@ -3,97 +3,12 @@
 # Description: Help-Flag Safety Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-09-25
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Help-Flag Safety Standards Checker Handler
+"""Help-Flag Safety Standards Checker Handler
 
-THE RULE: a help flag ANYWHERE in the arguments means EXPLAIN, never EXECUTE.
-
-Why this standard exists:
-    Every branch probed on 2026-08-13 read help flags at ONE fixed position --
-    almost always ``args[0]``. A flag any later in the line was discarded and
-    the subcommand ran instead. ``drone @memory rollover push --help``
-    performed the fleet-wide ``per_branch`` reset it was being asked to
-    describe. One morning of that shape cost a 17-branch config reset, a real
-    backup run, a real data cleanup and an enrollment write, and came within a
-    keystroke of an external publish. A question must never execute.
-
-WHAT IS FLAGGED (shape (a), the module gate):
-    A routing function in ``apps/modules/*.py`` that
-      1. gates help at a FIXED POSITION (``args[0] in ("--help", ...)``), and
-      2. never scans the whole argument sequence, and
-      3. leaves a stray flag somewhere to hide, EITHER by
-           3a. CONSUMING arguments as data -- binding, slicing, iterating,
-               probing or forwarding them (see find_argument_consumption), OR
-           3b. matching the gated position against a SUBCOMMAND WORD and then
-               still reaching a call that DOES something (see
-               find_positional_dispatch / find_work_call) -- and
-      4. is not already protected by its branch's entry-point router.
-
-WHAT IS ALSO FLAGGED (shape (e), no gate at all):
-    ``handle_command`` that
-      1. dispatches on the ``command`` parameter against a literal word, and
-      2. never READS its ``args`` parameter anywhere in the routing closure --
-         no subscript, membership test, iteration, len(), forward or
-         truthiness test, and
-      3. still reaches a work call (see find_unread_args_violation).
-
-    The verb is in the COMMAND slot, so ``drone @branch demo --help`` arrives as
-    command="demo", args=["--help"] and the flag is discarded unread. Reported
-    by @cli on 2026-08-13. The router exemption does NOT apply: a normalising
-    router protects a module by REWRITING its arguments, and this module ignores
-    them. Fleet population when the arm was written: 0 of 152 modules.
-
-    3b was added on 2026-08-13 after the value-slot cut proved a systematic
-    false negative: @flow's run named 5 modules where a grep found 8, @hooks'
-    named 2 where a grep found 9, and one miss was ``sessions reclaim --help``
-    stopping live sessions. seedgo's own inbox_audit.py scored 100 while
-    ``audit inbox-ids --help`` rglob'd every inbox in the repo -- args[0] there
-    is only ever COMPARED, so every consumption probe came back empty. The harm
-    is not that the tail becomes data; the harm is that a work call runs.
-
-WHY A SUBCOMMAND WORD IS THE DISCRIMINATOR:
-    The router splits ``drone @branch <command> <rest...>``, so a module's
-    ``args`` begins at the SECOND word the user typed. If the module dispatches
-    on ``command``, then ``args[0]`` is the first thing after it and a
-    positional gate genuinely catches ``<command> --help``. If the module
-    instead matches ``args[0]`` against a word of its own vocabulary, the user
-    must type that word, which pushes any flag to ``args[1]`` -- a position
-    nothing in the module reads. That is the whole difference between
-    ``drone @cli display demo --help`` (runs the demo) and
-    ``drone @daemon update --help`` (explains itself).
-
-WHAT MAKES A MODULE PASS (any one is enough):
-    a) whole-sequence scan: ``"--help" in args``
-    b) comprehension scan:  ``any(a in ("--help", "-h") for a in args)``
-    c) loop scan:           ``for token in args: if token in ("--help", ...)``
-    d) helper call:         ``wants_help(args)``
-    e) argparse:            ``parse_known_args`` absorbs the flag anywhere
-    f) the branch router normalises before the module is ever reached AND the
-       module has no standalone ``__main__`` door that hands raw ``sys.argv``
-       to ``handle_command`` (see STANDALONE REACHABILITY below)
-
-Shape (b) -- a router that intercepts ``remaining[0]`` only -- is detected, but
-as the PRECONDITION above rather than as its own violation. In AIPass a router
-may legitimately delegate help handling downstream (that is exactly how
-@memory was fixed: the router still reads ``remaining_args[0]``, the modules
-scan the whole list), so a positional-only router is a defect only when the
-module below it is positional-only too -- and that module is what gets named.
-
-Shape (c) -- a help flag consumed as an ACTION or BRANCH value -- is reported
-only where it CO-OCCURS with shape (a), naming the value slot the flag lands
-in. It is deliberately NOT detected on its own: "this function has no help
-gate at all" is indistinguishable from "this function is not a CLI surface"
-without heuristics that would flood the fleet with false positives. Shape (e)
-above is the single exception, and it is an exception for one reason: the
-function is ``handle_command``, which is a CLI surface by definition in AIPass,
-so the surface does not have to be guessed at. For every other function the
-limit stands.
-
-One check per file: passed, or failed naming the function, the gate and the
-slot the flag would land in.
+Reference: help_flag_safety.md
 """
 
 import ast
@@ -174,11 +89,6 @@ _ARGPARSE_PARSE = frozenset({"parse_args", "parse_known_args"})
 _DASHED_HELP_TOKENS = frozenset({"--help", "-h"})
 
 
-# =============================================================================
-# AST PREDICATES
-# =============================================================================
-
-
 def _is_help_constant(node: ast.AST) -> bool:
     """Whether *node* is a string literal that asks for help."""
     return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in _HELP_TOKENS
@@ -227,20 +137,8 @@ def _callee_name(node: ast.Call) -> str:
     return ""
 
 
-# =============================================================================
-# DETECTION -- the three questions asked of every routing function
-# =============================================================================
-
-
 def find_fixed_gates(func: ast.AST) -> List[Tuple[str, int, int]]:
-    """Find help gates pinned to one argument position.
-
-    Args:
-        func: Function node to inspect
-
-    Returns:
-        List of (sequence_name, index, lineno)
-    """
+    """Find help gates pinned to one argument position."""
     gates: List[Tuple[str, int, int]] = []
     for node in ast.walk(func):
         if not isinstance(node, ast.Compare):
@@ -305,17 +203,7 @@ def _scan_call_kind(node: ast.Call) -> Optional[str]:
 
 
 def has_whole_list_scan(func: ast.AST) -> Optional[str]:
-    """Return a description of the whole-sequence help scan, or None.
-
-    Every accepted form answers the question "is a help flag ANYWHERE in
-    this list?" -- which is the only question that makes the command safe.
-
-    Args:
-        func: Function node to inspect
-
-    Returns:
-        Human-readable description of the scan, or None if there is none
-    """
+    """Return a description of the whole-sequence help scan, or None."""
     for node in ast.walk(func):
         line = getattr(node, "lineno", 0)
         if isinstance(node, ast.Compare) and _is_membership_scan(node):
@@ -332,22 +220,7 @@ def has_whole_list_scan(func: ast.AST) -> Optional[str]:
 
 
 def find_argument_consumption(func: ast.AST, sequences: Set[str]) -> List[Tuple[str, str, int]]:
-    """Find places where the gated sequence is used as DATA, not as a dispatch key.
-
-    This is the precision cut. A command whose vocabulary is closed -- one that
-    only ever compares ``args[0]`` against literal subcommand names -- has
-    nowhere for a stray flag to hide, so a positional gate is sufficient for
-    it. A command that binds an argument to a value, reads a later position,
-    slices, iterates or forwards the list DOES have somewhere to hide, and a
-    trailing flag reaches an executing path.
-
-    Args:
-        func: Function node to inspect
-        sequences: Names of the argument sequences the help gate reads
-
-    Returns:
-        List of (kind, detail, lineno)
-    """
+    """Find places where the gated sequence is used as DATA, not as a dispatch key."""
     found: List[Tuple[str, str, int]] = []
     for node in ast.walk(func):
         line = getattr(node, "lineno", 0)
@@ -440,24 +313,6 @@ def _element_source(arg: ast.AST, sequences: Set[str]) -> Optional[str]:
     return arg.value.id
 
 
-# =============================================================================
-# POSITIONAL SUBCOMMAND -- the gated slot is a WORD the user has to type
-# =============================================================================
-#
-# Value-slot consumption is not the only harm. The harm is that a work call
-# EXECUTES at all. seedgo's own inbox_audit.py proved it: `audit inbox-ids
-# --help` gates on args[0], finds "inbox-ids" there, and runs a repo-wide
-# rglob -- yet args[0] is only ever COMPARED, never bound, sliced, iterated or
-# forwarded, so every consumption probe came back empty and the file scored 100.
-#
-# What makes that dangerous, and `drone @x start --help` safe, is whether the
-# gated position holds a SUBCOMMAND WORD. If args[0] is matched against a
-# non-help literal on the way to work, the user must type that word, which
-# pushes any help flag to args[1] -- a position nothing in the module reads. If
-# the module dispatches on `command` instead, args[0] IS the first thing typed
-# and the gate catches it.
-
-
 def _literal_strings(node: ast.AST) -> List[str]:
     """Every string literal a comparator holds, bare or inside a collection."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -470,11 +325,8 @@ def _literal_strings(node: ast.AST) -> List[str]:
 def _non_help_literals(node: ast.Compare) -> List[str]:
     """Subcommand words a Compare tests its left operand against, in source order.
 
-    Help tokens are excluded: a gate is a gate, not a dispatch. A collection
-    that mixes the two -- ``args[0] in ("scan", "--help")`` -- still counts,
-    because "scan" is a word the user can type ahead of the flag. Source order
-    is kept so the reported word is the one written first, not the one that
-    happens to sort first.
+    Help tokens are excluded; a mixed collection still counts, and source order is kept so
+    the reported word is the one written first.
     """
     words: List[str] = []
     for op, comparator in zip(node.ops, node.comparators):
@@ -498,14 +350,7 @@ def slot_bound_names(func: ast.AST, sequences: Set[str]) -> Dict[str, Tuple[str,
 
     ``subcommand = args[0] if args else "status"`` binds args[0] through an
     IfExp, which is not an Assign-from-Subscript and so is invisible to the
-    value-slot probe -- that is exactly how @flow's registry_monitor hid.
-
-    Args:
-        func: Function node to inspect
-        sequences: Names of the argument sequences the help gate reads
-
-    Returns:
-        Mapping of local name -> (sequence_name, index) it was bound from
+    value-slot probe.
     """
     bound: Dict[str, Tuple[str, int]] = {}
     for node in ast.walk(func):
@@ -524,16 +369,7 @@ def slot_bound_names(func: ast.AST, sequences: Set[str]) -> Dict[str, Tuple[str,
 
 
 def find_positional_dispatch(func: ast.AST, sequences: Set[str]) -> Optional[Tuple[str, int, str, int]]:
-    """Where the gated position is matched against a subcommand word.
-
-    Args:
-        func: Function node to inspect
-        sequences: Names of the argument sequences the help gate reads
-
-    Returns:
-        (sequence_name, index, subcommand_word, lineno) for the earliest such
-        match, or None if the module never dispatches on a gated position
-    """
+    """Where the gated position is matched against a subcommand word."""
     bound = slot_bound_names(func, sequences)
     found: List[Tuple[str, int, str, int]] = []
     for node in ast.walk(func):
@@ -557,20 +393,7 @@ def _is_display_call(name: str) -> bool:
 
 
 def find_work_call(func: ast.AST, after_line: int) -> Optional[Tuple[str, int]]:
-    """The first call below *after_line* that DOES something.
-
-    Display sinks and inert value-builders are excluded -- reaching
-    ``print_help()`` or ``len(args)`` past a gate is not "the command ran".
-    What is left is a doing-path: the thing the user asked about instead of
-    being told about.
-
-    Args:
-        func: Function node to inspect
-        after_line: Only calls strictly below this line count
-
-    Returns:
-        (callee_name, lineno), or None if nothing past the gate executes
-    """
+    """The first call below *after_line* that DOES something."""
     found: List[Tuple[int, str]] = []
     for node in ast.walk(func):
         if not isinstance(node, ast.Call):
@@ -586,38 +409,6 @@ def find_work_call(func: ast.AST, after_line: int) -> Optional[Tuple[str, int]]:
     return (name, line)
 
 
-# =============================================================================
-# UNREAD ARGUMENTS -- the verb is in the COMMAND slot and args is never read
-# =============================================================================
-#
-# Both arms above need a fixed-position gate to EXIST before anything fires.
-# @cli reported the shape where there is none at all:
-#
-#     def handle_command(command, args):
-#         if command == "demo":
-#             run_demo()
-#             return True
-#         return False
-#
-# `drone @cli demo --help` arrives as command="demo", args=["--help"]. The verb
-# is in the COMMAND slot, so nothing is left for a positional gate to read --
-# and `args` is not read at the wrong index, it is never read at all. The router
-# did its job here: it rewrote `remaining` to ["--help"] and delegated. The
-# module threw the flag away and ran the demo.
-#
-# This is the one place where "no help gate at all" IS detectable without
-# flooding the fleet, and it is detectable for one reason only: the function is
-# `handle_command`, which is definitionally a CLI surface in AIPass. The honest
-# limit stated elsewhere in this pack -- that "this function has no help gate"
-# is indistinguishable from "this function is not a CLI surface" -- is untouched
-# for every other function. Here the surface is known by name.
-#
-# The router exemption deliberately does NOT apply to this arm. A normalising
-# router protects a module by REWRITING its arguments to ["--help"]; a module
-# that never reads its arguments cannot benefit from a rewrite, so the flag is
-# discarded exactly as it was before. Fleet population of this shape when the
-# arm was written: 0 of 152 modules (measured by @cli, who fixed theirs first).
-
 # handle_command(command, args) -- the fleet-wide signature the router calls.
 _COMMAND_PARAM_INDEX = 0
 _ARGS_PARAM_INDEX = 1
@@ -632,15 +423,7 @@ def _positional_params(func: ast.AST) -> List[str]:
 
 
 def find_command_dispatch(func: ast.AST, command_param: str) -> Optional[Tuple[str, int]]:
-    """Where the command parameter is matched against a literal word.
-
-    Args:
-        func: Function node to inspect
-        command_param: Name of the parameter holding the command word
-
-    Returns:
-        (subcommand_word, lineno) for the earliest such match, or None
-    """
+    """Where the command parameter is matched against a literal word."""
     found: List[Tuple[int, str]] = []
     for node in ast.walk(func):
         if not isinstance(node, ast.Compare):
@@ -659,17 +442,7 @@ def find_command_dispatch(func: ast.AST, command_param: str) -> Optional[Tuple[s
 def reads_sequence(closure: Sequence[ast.AST], name: str) -> bool:
     """Whether *name* is READ anywhere in the routing closure.
 
-    Any read counts -- subscript, membership test, iteration, len(), a forward
-    to another call, a bare truthiness test. All of them are Name loads, so one
-    predicate covers the lot, and a module that touches its arguments at all is
-    judged by the gate arms instead of by this one.
-
-    Args:
-        closure: handle_command and the helpers it routes through
-        name: Parameter name to look for
-
-    Returns:
-        True if the name is loaded anywhere in the closure
+    Any read counts; every read is a Name load, so one predicate covers the lot.
     """
     return any(
         isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)
@@ -679,15 +452,7 @@ def reads_sequence(closure: Sequence[ast.AST], name: str) -> bool:
 
 
 def find_unread_args_violation(closure: Sequence[ast.AST]) -> Optional[Tuple[str, str, str, int, str, int]]:
-    """A command dispatch that ignores its argument list and works anyway.
-
-    Args:
-        closure: handle_command and the helpers it routes through
-
-    Returns:
-        (function_name, args_param, subcommand_word, dispatch_line, call, call_line),
-        or None when any of the four conditions is absent
-    """
+    """A command dispatch that ignores its argument list and works anyway."""
     if not closure or getattr(closure[0], "name", "") != _ENTRY_FUNC:
         return None
     entry = closure[0]
@@ -708,24 +473,11 @@ def find_unread_args_violation(closure: Sequence[ast.AST]) -> Optional[Tuple[str
     return (_ENTRY_FUNC, args_param, word, dispatch_line, call, call_line)
 
 
-# =============================================================================
-# ROUTING CLOSURE -- handle_command plus the private helpers it delegates to
-# =============================================================================
-
-
 def routing_closure(tree: ast.Module) -> List[ast.AST]:
     """Return handle_command and the module-level helpers it routes through.
 
-    Several branches keep ``handle_command`` as a one-line forwarder and put
-    the gate in ``_handle_x(args)``. Following those delegates keeps the
-    checker honest in both directions: it finds gates that hide one call
-    deep, and it credits scans that hide there too.
-
-    Args:
-        tree: Parsed module
-
-    Returns:
-        List of function nodes forming the module's routing surface
+    Branches often keep ``handle_command`` as a one-line forwarder with the gate in
+    ``_handle_x(args)``; following delegates finds gates and credits scans that hide there.
     """
     top_level = {
         node.name: node
@@ -759,26 +511,8 @@ def routing_closure(tree: ast.Module) -> List[ast.AST]:
     return closure
 
 
-# =============================================================================
-# CHAIN -- does the branch router normalise before the module is reached?
-# =============================================================================
-
-
 def router_normalises(apps_dir: Path) -> Optional[str]:
-    """Whether this branch's entry point scans the whole remaining argument list.
-
-    A router that finds a help flag anywhere and rewrites the arguments to
-    ``["--help"]`` before delegating protects every module behind it -- that is
-    how @backup, @aipass and @daemon were fixed, and a standard that failed
-    its own reference implementations would be wrong.
-
-    Args:
-        apps_dir: The branch's apps/ directory
-
-    Returns:
-        Description of the protecting scan, or None if the router leaves the
-        argument list untouched
-    """
+    """Whether this branch's entry point scans the whole remaining argument list."""
     if not apps_dir.is_dir():
         return None
     for entry_point in sorted(apps_dir.glob("*.py")):
@@ -798,28 +532,6 @@ def router_normalises(apps_dir: Path) -> Optional[str]:
             if scan:
                 return f"{entry_point.name}:{node.name}() {scan}"
     return None
-
-
-# =============================================================================
-# STANDALONE REACHABILITY -- the second door into handle_command
-# =============================================================================
-#
-# The router exemption assumed a module is only ever reached THROUGH the
-# router. It is not. Nearly every module also carries
-#
-#     if __name__ == "__main__":
-#         handle_command(PRIMARY_COMMAND, sys.argv[1:])
-#
-# which hands raw argv straight to the gate and never touches the router.
-# @api proved it live: `python apps/modules/api_key.py get-key openrouter
-# --help` still reached the retrieval path with their router already
-# normalised. So the exemption may only stand for a module that is NOT
-# independently reachable with raw arguments.
-#
-# A `__main__` block that screens the command line itself keeps the exemption
-# -- but it must screen BOTH dashed spellings. A screen for "--help" alone
-# still lets `-h` through to the positional gate, which is the same hole in a
-# different place.
 
 
 def _walk_all(nodes: Sequence[ast.AST]) -> Iterator[ast.AST]:
@@ -844,16 +556,8 @@ def _is_main_guard(node: ast.If) -> bool:
 def standalone_scope(tree: ast.Module) -> List[ast.stmt]:
     """Return every statement reachable from ``if __name__ == "__main__":``.
 
-    The block itself plus the bodies of the module-level functions it calls
-    (``main()`` most often), depth-limited. ``handle_command`` is deliberately
-    NOT followed: its gate is the thing being judged, so crediting it here
-    would let a module vouch for itself.
-
-    Args:
-        tree: Parsed module
-
-    Returns:
-        Statements forming the standalone execution path, empty if there is none
+    ``handle_command`` is deliberately not followed: its gate is the thing being judged,
+    so crediting it here would let a module vouch for itself.
     """
     guards = [node for node in ast.iter_child_nodes(tree) if isinstance(node, ast.If) and _is_main_guard(node)]
     if not guards:
@@ -914,12 +618,6 @@ def argv_tainted_names(scope: Sequence[ast.stmt]) -> Set[str]:
     ``args = sys.argv[1:]``, ``rest = [a for a in sys.argv[1:] if ...]`` and
     ``parsed, extra = parser.parse_known_args()`` all bind argv. Chains are
     followed to a fixpoint so a value renamed twice is still recognised.
-
-    Args:
-        scope: Statements of the standalone execution path
-
-    Returns:
-        Set of tainted local names
     """
     tainted: Set[str] = set()
     for _ in range(_MAX_DELEGATE_DEPTH):
@@ -939,13 +637,6 @@ def routes_raw_argv(scope: Sequence[ast.stmt], tainted: Set[str]) -> Optional[in
 
     A call passing a literal list -- ``handle_command(cmd, ["--help"])`` -- is
     normalised, not raw, and is not reported.
-
-    Args:
-        scope: Statements of the standalone execution path
-        tainted: Names carrying command-line text
-
-    Returns:
-        Line number of the offending call, or None
     """
     for node in _walk_all(scope):
         if not isinstance(node, ast.Call) or _callee_name(node) != _ENTRY_FUNC:
@@ -987,8 +678,7 @@ def _argparse_tokens(scope: Sequence[ast.stmt]) -> Set[str]:
     """Help tokens argparse screens on the standalone path.
 
     A default parser absorbs both dashed forms. ``add_help=False`` turns that
-    off, leaving only whatever ``add_argument`` declares -- which is how
-    @prax's monitor let ``-h`` through to the module gate.
+    off, leaving only whatever ``add_argument`` declares.
     """
     nodes = [node for node in _walk_all(scope) if isinstance(node, ast.Call)]
     if not any(_callee_name(node) in _ARGPARSE_PARSE for node in nodes):
@@ -1007,14 +697,7 @@ def _argparse_tokens(scope: Sequence[ast.stmt]) -> Set[str]:
 
 
 def screened_help_tokens(scope: Sequence[ast.stmt]) -> Set[str]:
-    """Help tokens the standalone path itself catches anywhere on the line.
-
-    Args:
-        scope: Statements of the standalone execution path
-
-    Returns:
-        Set of tokens screened before handle_command is reached
-    """
+    """Help tokens the standalone path itself catches anywhere on the line."""
     tokens: Set[str] = _argparse_tokens(scope)
     for node in _walk_all(scope):
         tokens |= _scan_tokens(node)
@@ -1024,11 +707,7 @@ def screened_help_tokens(scope: Sequence[ast.stmt]) -> Set[str]:
 def standalone_bypasses_router(tree: ast.Module) -> Optional[str]:
     """Whether ``python apps/modules/thing.py ...`` reaches the gate unscreened.
 
-    Args:
-        tree: Parsed module
-
-    Returns:
-        Description of the unrouted path, or None if there is none
+    Returns a description of the unrouted path, or None if there is none.
     """
     scope = standalone_scope(tree)
     if not scope:
@@ -1043,11 +722,6 @@ def standalone_bypasses_router(tree: ast.Module) -> Optional[str]:
         f"__main__ hands raw sys.argv to {_ENTRY_FUNC}() at line {line} without screening "
         f"{' or '.join(missing)}, so `python <this module> <arg> --help` never reaches the router"
     )
-
-
-# =============================================================================
-# RESULT HELPERS
-# =============================================================================
 
 
 def _result(passed: bool, name: str, message: str, score: int) -> Dict:
@@ -1075,10 +749,8 @@ def _decline(message: str) -> Dict:
 def _describe_consumption(consumption: Sequence[Tuple[str, str, int]], gate_line: int) -> str:
     """Describe where a stray flag lands, naming a value slot when there is one.
 
-    Sites BELOW the gate are preferred. A routing function often carries
-    several independent command paths, and naming a call that sits above the
-    gate reads as though the gate were unreachable, which is a different bug
-    from the one being reported.
+    Sites below the gate are preferred: naming a call above it reads as though the gate
+    were unreachable, which is a different bug.
     """
     below = [c for c in consumption if c[2] > gate_line] or list(consumption)
     value_slots = [c for c in below if c[0] == "value-slot"]
@@ -1092,9 +764,8 @@ def _describe_consumption(consumption: Sequence[Tuple[str, str, int]], gate_line
 def _describe_execution(func: ast.AST, sequences: Set[str], gate_line: int) -> Optional[str]:
     """Describe the subcommand word that hides the flag and the call that then runs.
 
-    The second harm, and the one the consumption probes could not see: nothing
-    binds, slices or forwards the tail, but the gated position still holds a
-    word the user must type, and something past the gate still executes.
+    Nothing binds, slices or forwards the tail, but the gated position holds a word the user
+    must type, and something past the gate still executes.
     """
     dispatch = find_positional_dispatch(func, sequences)
     if dispatch is None:
@@ -1123,15 +794,7 @@ def _describe_unread_args(violation: Tuple[str, str, str, int, str, int]) -> str
 
 
 def _find_violation(closure: Sequence[ast.AST]) -> Optional[Tuple[str, Tuple[str, int, int], str]]:
-    """The first routing function whose positional gate leaves a doing-path open.
-
-    Args:
-        closure: handle_command and the helpers it routes through
-
-    Returns:
-        (function_name, gate, harm_description), or None if every gated
-        function is closed-vocabulary and inert past its gate
-    """
+    """The first routing function whose positional gate leaves a doing-path open."""
     for func in closure:
         gates = find_fixed_gates(func)
         if not gates:
@@ -1148,33 +811,8 @@ def _find_violation(closure: Sequence[ast.AST]) -> Optional[Tuple[str, Tuple[str
     return None
 
 
-# =============================================================================
-# ENTRY POINT
-# =============================================================================
-
-
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check that a routing module treats a help flag anywhere as a help request
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip specific violations
-
-    Returns:
-        dict: {
-            'passed': bool,           # Overall pass/fail
-            'checks': [               # Individual check results
-                {
-                    'name': str,      # Check name
-                    'passed': bool,   # Pass/fail
-                    'message': str,   # Details
-                }
-            ],
-            'score': int,             # 0-100 percentage
-            'standard': str           # Standard name
-        }
-    """
+    """Check that a routing module treats a help flag anywhere as a help request"""
     path = Path(module_path)
     posix_path = path.as_posix()
 

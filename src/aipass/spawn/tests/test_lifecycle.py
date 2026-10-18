@@ -3,7 +3,7 @@
 # Description: Tests for spawn lifecycle commands (delete, sync-registry)
 # Version: 1.1.3
 # Created: 2026-03-07
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -30,10 +30,6 @@ from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 # Also exercises apps/modules/delete.py's and apps/modules/sync_registry.py's CLI entry points,
 # apps/modules/core.py's spawn_agent() adopt-existing path, and apps/handlers/registry.py's
 # fix_passport_registry_id().
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -121,11 +117,6 @@ def mock_registry(repo_root, mock_branch):
     return reg_path
 
 
-# ---------------------------------------------------------------------------
-# DELETE Tests
-# ---------------------------------------------------------------------------
-
-
 class TestDeleteBranch:
     """Tests for delete_branch()."""
 
@@ -139,16 +130,13 @@ class TestDeleteBranch:
         assert result["registry_updated"] is True
         assert result["archive_path"] != ""
 
-        # Branch directory should be gone
         assert not mock_branch.exists()
 
-        # Archive should exist
         archive_path = Path(result["archive_path"])
         assert archive_path.exists()
         assert (archive_path / "README.md").exists()
         assert (archive_path / ".trinity" / "passport.json").exists()
 
-        # Registry should no longer contain TEST_API
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
         assert "TEST_API" not in names
@@ -189,10 +177,8 @@ class TestDeleteBranch:
         assert result["success"] is True
         assert result.get("dry_run") is True
 
-        # Branch should still exist
         assert mock_branch.exists()
 
-        # Registry should be unchanged
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
         assert "TEST_API" in names
@@ -251,19 +237,12 @@ class TestDeleteBranch:
         assert result == 1
 
 
-# ---------------------------------------------------------------------------
-# SYNC REGISTRY Tests
-# ---------------------------------------------------------------------------
-
-
 class TestSyncRegistry:
     """Tests for sync_registry()."""
 
     def test_detect_stale_entries(self, repo_root, mock_registry):
         """Registry entries for non-existent directories should be detected as stale."""
 
-        # The registry has DRONE, SPAWN, DEVPULSE entries but those directories
-        # don't exist in our tmp_path repo, so they should be stale
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=mock_registry):
             result = sync_registry(fix=False)
 
@@ -276,7 +255,6 @@ class TestSyncRegistry:
     def test_detect_unregistered_branches(self, repo_root, mock_registry):
         """Directories with passport.json not in registry should be unregistered."""
 
-        # Create a new branch directory with passport that's NOT in registry
         new_branch = repo_root / "src" / "aipass" / "phantom"
         new_branch.mkdir(parents=True)
         (new_branch / ".trinity").mkdir()
@@ -300,7 +278,6 @@ class TestSyncRegistry:
     def test_fix_removes_stale_and_adds_unregistered(self, repo_root, mock_branch, mock_registry):
         """With --fix, stale entries are removed and unregistered are added."""
 
-        # Create an unregistered branch
         new_branch = repo_root / "src" / "aipass" / "phantom"
         new_branch.mkdir(parents=True)
         (new_branch / ".trinity").mkdir()
@@ -313,25 +290,20 @@ class TestSyncRegistry:
 
         assert result["fixed"] is True
 
-        # Verify registry was actually updated
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
 
-        # Stale entries removed (drone, spawn, devpulse dirs don't exist)
         assert "DRONE" not in names
         assert "SPAWN" not in names
         assert "DEVPULSE" not in names
 
-        # Unregistered added
         assert "PHANTOM" in names
 
-        # Healthy branch kept
         assert "TEST_API" in names
 
     def test_no_mismatches_no_fix_needed(self, repo_root, mock_branch, mock_registry):
         """When everything is healthy, fix=True should not modify registry."""
 
-        # Remove all stale entries from registry (only keep test_api which exists)
         reg = json.loads(mock_registry.read_text(encoding="utf-8"))
         reg["branches"] = [b for b in reg["branches"] if b["name"] == "TEST_API"]
         mock_registry.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
@@ -342,11 +314,6 @@ class TestSyncRegistry:
         assert result["stale"] == []
         assert result["unregistered"] == []
         assert result["fixed"] is False  # Nothing to fix
-
-
-# ---------------------------------------------------------------------------
-# CWD-AWARE SYNC Tests (external projects)
-# ---------------------------------------------------------------------------
 
 
 def _scan_through_sync(project, monkeypatch, fix=False):
@@ -429,7 +396,6 @@ class TestSyncRegistryCwdAware:
     def test_external_project_sync(self, tmp_path):
         """sync_registry should work with an external project registry."""
 
-        # Set up external project structure
         registry = {
             "metadata": {"version": "1.0.0", "last_updated": "2026-04-09", "total_branches": 0},
             "branches": [],
@@ -437,7 +403,6 @@ class TestSyncRegistryCwdAware:
         reg_path = tmp_path / "MYPROJECT_REGISTRY.json"
         reg_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
 
-        # Create an agent in src/
         agent = tmp_path / "src" / "navigator"
         agent.mkdir(parents=True)
         (agent / ".trinity").mkdir()
@@ -476,14 +441,12 @@ class TestSyncRegistryCwdAware:
         names = [b["name"] for b in reg["branches"]]
         assert "DAEMON" in names
 
-        # Verify relative path stored
         daemon_entry = next(b for b in reg["branches"] if b["name"] == "DAEMON")
         assert daemon_entry["path"] == "src/daemon"
 
     def test_escaped_paths_detected_as_stale(self, tmp_path):
         """Registry entries with ../paths that escape project root should be stale."""
 
-        # Simulate external project with stale cross-project entries
         project = tmp_path / "myproject"
         project.mkdir()
 
@@ -493,7 +456,6 @@ class TestSyncRegistryCwdAware:
         (external / ".trinity").mkdir()
         (external / ".trinity" / "passport.json").write_text('{"name": "AI_MAIL"}', encoding="utf-8")
 
-        # Create a local agent that belongs to this project
         local_agent = project / "src" / "polyglot"
         local_agent.mkdir(parents=True)
         (local_agent / ".trinity").mkdir()
@@ -551,7 +513,6 @@ class TestSyncRegistryCwdAware:
         (external / ".trinity").mkdir()
         (external / ".trinity" / "passport.json").write_text('{"name": "FLOW"}', encoding="utf-8")
 
-        # Local agent
         local = project / "src" / "myagent"
         local.mkdir(parents=True)
         (local / ".trinity").mkdir()
@@ -602,18 +563,12 @@ class TestSyncRegistryCwdAware:
         assert reg["metadata"]["total_branches"] == 1
 
 
-# ---------------------------------------------------------------------------
-# ADOPT EXISTING Tests
-# ---------------------------------------------------------------------------
-
-
 class TestAdoptExisting:
     """Tests for spawn_agent adopting existing directories with passports."""
 
     def test_adopt_existing_with_passport(self, tmp_path):
         """Target with .trinity/passport.json should be adopted, not rejected."""
 
-        # Create existing agent directory with passport
         agent = tmp_path / "my_agent"
         agent.mkdir()
         (agent / ".trinity").mkdir()
@@ -645,7 +600,6 @@ class TestAdoptExisting:
         assert result["branch_name"] == "MY_AGENT"
         assert result["registry_updated"] is True
 
-        # Verify registered in registry
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
         names = [b["name"] for b in reg["branches"]]
         assert "MY_AGENT" in names
@@ -780,7 +734,6 @@ class TestAdoptExisting:
             encoding="utf-8",
         )
 
-        # Get mtime before adoption to detect writes
         before_mtime = (agent / ".trinity" / "passport.json").stat().st_mtime
 
         result = spawn_agent(str(agent), registry_path=str(reg_path))
@@ -829,8 +782,8 @@ def test_adoption_update_touches_the_branch_of_the_registry_handed_in(tmp_path, 
 
     Two tmp projects, one branch name in both. The CWD sits in project B, so a
     lookup through find_registry() from the CWD would land on B's twin. Adopting
-    A's twin must update A's twin and leave B's twin byte-equal (spawn's
-    decision, DPLAN-0354 leg 3: the registry path travels to update_branch).
+    A's twin must update A's twin and leave B's twin byte-equal: the registry path
+    travels to update_branch.
     Mutant: adopt_existing calls update_branch without registry_path -> red.
     Mutant: update_branch drops registry_path on its _resolve_branch_path call -> red.
     """
@@ -847,11 +800,6 @@ def test_adoption_update_touches_the_branch_of_the_registry_handed_in(tmp_path, 
     assert result["files_copied"] > 0
     assert _tree_bytes(twin_a) != before_a
     assert _tree_bytes(twin_b) == before_b
-
-
-# ---------------------------------------------------------------------------
-# FIX PASSPORT REGISTRY ID Tests
-# ---------------------------------------------------------------------------
 
 
 class TestFixPassportRegistryId:
@@ -937,11 +885,7 @@ class TestFixPassportRegistryId:
         assert result is False
 
     def test_an_unreadable_registry_answers_none_not_already_correct(self, tmp_path):
-        """A failure has its own answer, None; False stays "nothing to change".
-
-        Ran red before the cure: False, the answer for already correct
-        (spawn's decision, DPLAN-0354 leg 5).
-        """
+        """A failure has its own answer, None; False stays "nothing to change"."""
         branch = tmp_path / "myagent"
         (branch / ".trinity").mkdir(parents=True)
         passport = branch / ".trinity" / "passport.json"
@@ -953,10 +897,7 @@ class TestFixPassportRegistryId:
         assert json.loads(passport.read_text(encoding="utf-8")) == {"citizenship": {"registry_id": "old-id"}}
 
     def test_a_failed_passport_write_answers_none(self, tmp_path):
-        """The writer refusing, where registry.py binds it, is a failure: None.
-
-        Ran red before the cure: the writer's False came back as the answer.
-        """
+        """The writer refusing, where registry.py binds it, is a failure: None."""
         branch = tmp_path / "myagent"
         (branch / ".trinity").mkdir(parents=True)
         (branch / ".trinity" / "passport.json").write_text(
@@ -973,10 +914,7 @@ class TestFixPassportRegistryId:
         assert answer is None
 
     def test_sync_registry_names_a_passport_it_could_not_fix(self, tmp_path, monkeypatch):
-        """sync --fix reports a failed fix under ids_failed, never as fixed or silent.
-
-        Ran red before the cure: the branch was in neither list.
-        """
+        """sync --fix reports a failed fix under ids_failed, never as fixed or silent."""
         project = tmp_path / "project"
         (project / "myagent" / ".trinity").mkdir(parents=True)
         entry = {"name": "MYAGENT", "path": "myagent", "email": "@myagent", "status": "active"}
@@ -1022,7 +960,6 @@ class TestFixPassportRegistryId:
     def test_sync_registry_fix_repairs_ids(self, tmp_path, monkeypatch):
         """sync_registry --fix calls fix_passport_registry_id on healthy branches."""
 
-        # Set up a project with one healthy branch that has wrong registry_id
         project = tmp_path / "project"
         project.mkdir()
 
@@ -1075,11 +1012,6 @@ class TestFixPassportRegistryId:
         assert passport["citizenship"]["registry_id"] == "correct-uuid-abc"
 
 
-# ---------------------------------------------------------------------------
-# HANDLE CLI Tests
-# ---------------------------------------------------------------------------
-
-
 class TestHandleDelete:
     """Tests for handle_delete() CLI entry."""
 
@@ -1105,7 +1037,7 @@ class TestHandleDelete:
         """The failure line must not leak literal Rich tags.
 
         error() writes plain text, so the dry-run mode marker built for console.print()
-        surfaced as '[dim](dry-run)[/dim]' on every failed preview (DPLAN-0291 audit).
+        would surface as '[dim](dry-run)[/dim]' on every failed preview.
         """
 
         with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):

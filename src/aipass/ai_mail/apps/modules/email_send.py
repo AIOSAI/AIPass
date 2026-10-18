@@ -3,15 +3,13 @@
 # Description: Email Send Orchestration (extracted from email.py)
 # Version: 1.2.0
 # Created: 2026-04-22
-# Modified: 2026-08-12
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Send Orchestration
 
-Handles the send/email command workflow: direct send, interactive send,
-broadcast, and dispatch trigger. Extracted from email.py to keep modules
-under the size threshold.
+Direct, interactive and broadcast send, plus the dispatch trigger.
 """
 
 import os
@@ -63,12 +61,7 @@ except ImportError as e:
 
 
 def _delivery_callback(branch_path, new_count, opened_count, total):
-    """Post-delivery callback: delegates to error_dispatch handler.
-
-    Signature matches deliver_email_to_branch's on_delivered contract;
-    only update_central_fn is forwarded — on_email_delivered has no use
-    for the per-delivery counts.
-    """
+    """Post-delivery callback: delegates to error_dispatch handler."""
     on_email_delivered(update_central_fn=update_central)
 
 
@@ -85,11 +78,7 @@ def _get_branch_info_fn():
 
 COMMAND = "send"
 
-# The only commands this module answers to. It used to ignore `command`
-# entirely and run a send for whatever reached it, so every command an earlier
-# module declined — `dispatch`, and any send another module had already run and
-# reported as failed — was executed here a second time. That is what put two
-# sent records on disk and printed every refusal twice.
+# The only commands this module answers to; answering any other would re-run sends another module declined.
 COMMANDS = ("send", "email")
 
 
@@ -100,8 +89,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if not args:
         print_introspection()
         return True
-    # Whole-sequence: a flag after the first argument would otherwise reach
-    # handle_send and deliver the mail it was asked to describe.
+    # Whole-sequence: a later --help must not reach handle_send and deliver the mail.
     if wants_help(args):
         print_introspection()
         return True
@@ -111,11 +99,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 def handle_send(args: List[str]) -> bool:
     """Orchestrate email sending workflow.
 
-    Returns True for "I recognised and ran this command", which is not "it
-    worked" — a refused delivery already reported itself through error(), which
-    sets the process failure flag that main() maps to exit 2. Returning False
-    here sent the router on to the next module, which ran the send again and
-    then printed "Unknown command: email" over a command it had just executed.
+    True means recognised and run, not "it worked": failures go through error(). False on failure re-runs the send.
     """
     json_handler.log_operation("send_email_initiated", {"args_count": len(args)})
     parsed = parse_send_args(args)
@@ -126,8 +110,7 @@ def handle_send(args: List[str]) -> bool:
         return True
 
     if parsed["mode"] == "interactive":
-        # A cancelled or failed interactive send is still a handled command —
-        # returning its bool made "Cancelled" fall through to "Unknown command: email".
+        # A cancelled or failed interactive send is still a handled command.
         _send_interactive()
         return True
 
@@ -170,10 +153,7 @@ def handle_send(args: List[str]) -> bool:
 
 def _send_interactive() -> bool:
     """Interactive email sending with prompts."""
-    # Announce the outcome, not the branch list: without a terminal there is no
-    # interactive send to offer, and printing 17 branches before refusing reads as
-    # progress. The handler refuses too — this is the caller-side half, so the
-    # command exits 2 with usage instead of falling through as a plain cancel.
+    # No terminal: refuse with usage (exit 2) before printing the branch list, which would read as progress.
     if not sys.stdin.isatty():
         error('Interactive send needs a terminal. Use: email @recipient "Subject" "Message"')
         return False
@@ -192,9 +172,7 @@ def _send_interactive() -> bool:
         return False
 
     console.print("\n" + "=" * 50)
-    # Same rule as the view body: this echoes text the user just typed, so it
-    # renders with markup off. A subject or body containing "[/rc]" must not
-    # blow up the confirmation step of the send that carries it.
+    # Echoed user text renders with markup off, so "[/rc]" in a subject cannot break confirmation.
     console.print(
         f"To: {result['to']}\nSubject: {result['subject']}\nMessage:\n{result['message']}",
         markup=False,
@@ -216,9 +194,7 @@ def _send_direct(
 ) -> bool:
     """Direct email send - thin wrapper over send handlers.
 
-    upsert_key: optional repeat signature. When set, the recipient's open
-    message carrying that key from this sender is rewritten in place with a
-    bumped counter instead of a second message landing next to it.
+    upsert_key rewrites the recipient's open message with that key in place (bumped counter) instead of adding one.
     """
     try:
         user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
@@ -226,8 +202,7 @@ def _send_direct(
             message = prepend_dispatch_header(message, no_memory_save=no_memory_save)
 
         if to_branch.lower() in ["all", "@all"]:
-            # Broadcast has no single message to update — refuse rather than
-            # silently dropping the key and stacking N messages per repeat.
+            # Broadcast has no single message to update: refuse rather than silently drop the key.
             if upsert_key:
                 error("--upsert-key is not supported for broadcast (@all) sends")
                 return False
@@ -256,8 +231,7 @@ def _send_direct(
             if upsert_key:
                 label = f"\\[upsert: {upsert_key}]"
             console.print(f"[green]Email sent to {to_branch} {label}[/green]")
-            # An upsert send may have landed on an existing message; firing the
-            # dispatch trigger for it would wake work off a repeat signal.
+            # An upsert may have landed on an existing message; do not wake work off a repeat.
             if auto_execute and not upsert_key:
                 _fire_dispatch_trigger(to_branch, subject)
             return True
@@ -286,22 +260,8 @@ def _fire_dispatch_trigger(to_branch: str, subject: str) -> None:
 def resolve_broadcast_targets() -> list:
     """Who @all reaches: the fleet, plus the residents for a verified admin.
 
-    Ruled 2026-08-27 (DPLAN-0318 circle close). The fleet-push announcement had
-    to be hand-sent to baud, earmark, finch and aipass_site in four separate
-    admin sends because @all could not carry it -- an announcement every citizen
-    should hear, and the exact case the fleet/project asymmetry was built for.
-
-    The widening rides the SAME five-leg verification (DPLAN-0288) that already
-    permits admin-initiated direct mail into projects. It grants no new
-    authority: an ordinary citizen's @all resolves exactly the branches it did
-    before, and every recipient still passes the per-delivery boundary check.
-
-    Fails closed in both directions. An unverified caller widens nothing, and a
-    verifier that RAISES is a refusal, not an opening -- a privilege path must
-    never take mail down or, worse, fall open when it cannot answer.
-
-    Residents already present in the core registry are not added twice: one
-    inbox must receive one copy, or the announcement arrives double.
+    Widening rides the five-leg admin check and fails closed (a raising verifier widens nothing).
+    Residents already in the core registry are not added twice.
     """
     branches = get_all_branches()
     try:

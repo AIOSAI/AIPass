@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX log_audit module
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/log_audit.py."""
@@ -27,10 +27,6 @@ import pytest
 from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.prax.apps.handlers.logging import log_watchdog
 from aipass.prax.apps.modules import log_audit
-
-# =============================================
-# HELPERS
-# =============================================
 
 _WATCHDOG_NAMES = (
     "scan_log_files",
@@ -150,11 +146,6 @@ def test_the_guard_fails_when_sys_modules_holds_another_watchdog():
     _stood_where_log_audit_looks(log_watchdog, {name: log_watchdog})
 
 
-# =============================================
-# TESTS
-# =============================================
-
-
 def test_handle_command_help(audit_world, monkeypatch, capsys):
     """--help flag returns True and displays help text."""
 
@@ -224,7 +215,7 @@ _QUIET_BRANCH = {
 
 
 def _audit_through_command(monkeypatch, capsys, files=(), summary=None, branch_files=(), branch_summary=None):
-    """Both displays through `log-audit audit`, the read-only route (prax, leg 6).
+    """Both displays through `log-audit audit`, the read-only route.
 
     enforce sits stubbed by _ensure_watchdog_mock and must stay uncalled; sweep is
     reachable only from its own subcommand. The side not under test is given a
@@ -290,12 +281,7 @@ def test_display_audit_oversized(audit_world, monkeypatch, capsys):
 
 
 def test_handle_command_unknown_subcommand(audit_world, monkeypatch, capsys):
-    """An unknown subcommand is refused BY NAME instead of reporting itself handled.
-
-    It used to print the right words and return True, which prax.py turns into
-    exit 0 — so `drone @prax log-audit typo && next-step` ran next-step
-    (@devpulse's fleet CLI sweep, 2026-09-07).
-    """
+    """An unknown subcommand is refused BY NAME; returning True would exit 0 and run `&& next-step`."""
     _ensure_watchdog_mock(monkeypatch)
 
     with pytest.raises(UnknownArgument) as refusal:

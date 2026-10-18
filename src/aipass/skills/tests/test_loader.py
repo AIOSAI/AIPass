@@ -3,7 +3,7 @@
 # Description: Unit tests for skills loader
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # Category: skills/tests
 # =============================================
 
@@ -54,7 +54,6 @@ class TestLoadSkill:
         metadata = result["metadata"]
         assert "name" in metadata
         assert "description" in metadata
-        # Verify actual values, not just key existence
         assert metadata["name"] == "github"
         assert isinstance(metadata["description"], str)
         assert len(metadata["description"]) > 0
@@ -62,10 +61,7 @@ class TestLoadSkill:
     def test_body_is_markdown_content(self):
         result = load_skill("github")
         body = result["body"]
-        # The old `or` was two facts about the same body, so either half
-        # carried it. The real contract is the split: the body is what sits
-        # BELOW the frontmatter, so the H1 opens it and no frontmatter key
-        # survives into it.
+        # The body is what sits below the frontmatter: the H1 opens it, no frontmatter key survives.
         assert body.startswith("# GitHub Skill")
         assert "## When to Use" in body
         assert "name: github" not in body
@@ -75,10 +71,8 @@ class TestLoadSkill:
         """Verify handler follows the run(action, args, config) contract."""
         result = load_skill("system_status")
         handler = result["handler"]
-        # Must have run() and get_actions()
         assert callable(handler.run)
         assert callable(handler.get_actions)
-        # get_actions returns a list
         actions = handler.get_actions()
         assert isinstance(actions, list)
         assert len(actions) > 0

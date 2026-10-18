@@ -3,33 +3,20 @@
 # Description: CLI Templates Module — reusable operation output patterns
 # Version: 0.3.2
 # Created: 2025-11-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 CLI Templates Module - PUBLIC API
-
-Pre-built output templates for common operations:
-- operation_start() - Standard operation header
-- operation_complete() - Standard completion summary
-
-Uses Rich library for beautiful terminal output.
 """
 
 import sys
 from typing import List
 
-# Import console from CLI display module (using our own service!)
 from aipass.cli.apps.modules.display import console as CONSOLE, error
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.handlers.cli.help_flags import wants_help
-# NOTE: Cannot import prax here — circular import (prax depends on cli)
-# from aipass.prax import logger
-
-
-# ============================================================================
-# MODULE PATTERN FUNCTIONS (SEEDGO compliant)
-# ============================================================================
+# No prax logger: circular import (prax depends on cli).
 
 
 def print_introspection():
@@ -50,7 +37,6 @@ def print_introspection():
 
 def print_help():
     """Print Rich-formatted help output"""
-    # Import header from CLI services
     from aipass.cli.apps.modules.display import header
 
     CONSOLE.print()
@@ -104,8 +90,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     """Handle 'templates' and 'demo' commands"""
     if command not in ("templates", "demo"):
         return False
-    # help_flag_safety: scan the WHOLE sequence before any doing path — a flag
-    # after a subcommand (`templates demo --help`) must still explain, not run.
     # command holds our own name, so position 0 comes from args.
     if wants_help(None, args):
         print_help()
@@ -119,8 +103,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if args[0] == "demo":
         run_demo()
         return True
-    # The verb is ours, so the refusal is ours too: name the refused token,
-    # not the verb, and return True so resolve_exit reports 2, not 1.
+    # Return True so resolve_exit reports 2 (our verb, bad token), not 1.
     error(f"Unknown templates subcommand: {args[0]}", suggestion="Run 'drone @cli templates --help' for usage")
     return True
 
@@ -135,10 +118,8 @@ def run_demo():
     CONSOLE.print("[bold]Operation templates with Rich formatting:[/bold]")
     CONSOLE.print()
 
-    # Demo operation start
     operation_start("Creating new branch", target="/path/to/my_branch", type="module")
 
-    # Simulate some work
     CONSOLE.print("✅ [green]Directory created[/green]")
     CONSOLE.print("   [dim]/path/to/my_branch[/dim]")
     CONSOLE.print()
@@ -147,7 +128,6 @@ def run_demo():
     CONSOLE.print("   [dim]12 files from template[/dim]")
     CONSOLE.print()
 
-    # Demo operation complete
     operation_complete(created=12, skipped=0, time="1.2s")
 
     CONSOLE.print("[bold green]✨ Rich library integration complete![/bold green]")
@@ -158,22 +138,8 @@ def run_demo():
     CONSOLE.print()
 
 
-# ============================================================================
-# PUBLIC API FUNCTIONS (Keep existing - don't break compatibility)
-# ============================================================================
-
-
 def operation_start(operation: str, **details) -> None:
-    """
-    Display standard operation start template with Rich styling
-
-    Args:
-        operation: Operation name
-        **details: Operation details to display
-
-    Example:
-        operation_start('Create Branch', target='/path', name='mybranch')
-    """
+    """Display standard operation start template with Rich styling"""
     CONSOLE.print()
     CONSOLE.print(f"⚙️  [blue]{operation}...[/blue]")
     if details:
@@ -183,15 +149,7 @@ def operation_start(operation: str, **details) -> None:
 
 
 def operation_complete(**summary) -> None:
-    """
-    Display standard operation completion template with Rich styling
-
-    Args:
-        **summary: Summary statistics
-
-    Example:
-        operation_complete(created=5, skipped=2, time='3.2s')
-    """
+    """Display standard operation completion template with Rich styling"""
     CONSOLE.print()
     CONSOLE.print("─" * 50)
     CONSOLE.print("[bold]Summary:[/bold]")
@@ -204,26 +162,19 @@ def operation_complete(**summary) -> None:
     CONSOLE.print()
 
 
-# ============================================================================
-# ENTRY POINT (SEEDGO pattern)
-# ============================================================================
-
 if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    # Show introspection when run without arguments
     if len(sys.argv) == 1:
         print_introspection()
         sys.exit(0)
 
-    # Handle help flag (drone compliance)
     if sys.argv[1] in ["--help", "-h", "help"]:
         print_help()
         sys.exit(0)
 
-    # Route commands
     command = sys.argv[1]
     args = sys.argv[2:] if len(sys.argv) > 2 else []
 

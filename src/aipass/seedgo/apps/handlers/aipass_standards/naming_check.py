@@ -3,7 +3,7 @@
 # Description: Naming Standards Checker Handler
 # Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-10-03
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -21,7 +21,6 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 # APPLIES_TO: snake_case and column-0 constants are the house style everywhere.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
@@ -35,48 +34,20 @@ _BOUND_ALIAS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]
 def _without_trailing_comment(value: str) -> str:
     """Strip a trailing ``# ...`` so ``x = a.b  # noqa`` still reads as ``a.b``.
 
-    Splitting on the first ``#`` is safe for the one caller: the result is only
-    ever handed to a pattern that refuses anything but a bare dotted name, so a
-    value carrying a quoted ``#`` fails to match either way.
-
-    Args:
-        value: The right-hand side of a module-level assignment.
-
-    Returns:
-        The value with any trailing comment removed.
+    Splitting on the first ``#`` is safe: the one caller hands the result to a pattern that refuses
+    anything but a bare dotted name.
     """
     return value.split("#", 1)[0].strip()
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows naming standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules to skip certain violations
-
-    Returns:
-        dict: {
-            'passed': bool,           # Overall pass/fail
-            'checks': [               # Individual check results
-                {
-                    'name': str,      # Check name
-                    'passed': bool,   # Pass/fail
-                    'message': str,   # Details
-                }
-            ],
-            'score': int,             # 0-100 percentage
-            'standard': str           # Standard name
-        }
-    """
+    """Check if module follows naming standards"""
     checks = []
     path = Path(module_path)
 
     # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "naming", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -85,7 +56,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "NAMING",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -94,7 +64,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "NAMING",
         }
 
-    # Read file
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -107,31 +76,25 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "NAMING",
         }
 
-    # Check 1: File naming (snake_case, no redundant prefixes)
     file_naming_check = check_file_naming(module_path, path)
     checks.append(file_naming_check)
 
-    # Check 2: Function naming (snake_case)
     function_naming_check = check_function_naming(content)
     if function_naming_check:
         checks.append(function_naming_check)
 
-    # Check 3: Constant naming (UPPER_CASE)
     constant_naming_check = check_constant_naming(content)
     if constant_naming_check:
         checks.append(constant_naming_check)
 
-    # Check 4: Class naming (PascalCase) - if classes exist
     class_naming_check = check_class_naming(content)
     if class_naming_check:
         checks.append(class_naming_check)
 
-    # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
-    # Overall pass if score >= 75%
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "naming"})
@@ -139,22 +102,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 def check_file_naming(module_path: str, path: Path) -> Dict:
-    """
-    Check file naming conventions
-
-    Rules:
-    - snake_case filenames
-    - No redundant prefixes (json/json_ops.py should be json/ops.py)
-    - Exception: json_handler.py (documented exception)
-    - Prefer standard verbs (create, ops, load, save, initialize, etc.)
-    """
+    """Check file naming conventions"""
     filename = path.stem  # filename without extension
 
     # Python-reserved package marker — cannot be renamed
     if path.name == "__init__.py":
         return {"name": "File naming", "passed": True, "message": "__init__.py (Python-reserved package marker)"}
 
-    # Check if it's the documented exception
     if filename == "json_handler" and "/handlers/json/" in module_path:
         return {
             "name": "File naming",
@@ -162,7 +116,6 @@ def check_file_naming(module_path: str, path: Path) -> Dict:
             "message": f"{filename}.py (documented exception - standardized handler)",
         }
 
-    # Check for snake_case
     if not re.match(r"^[a-z][a-z0-9_]*$", filename):
         return {
             "name": "File naming",
@@ -170,12 +123,9 @@ def check_file_naming(module_path: str, path: Path) -> Dict:
             "message": f"{filename}.py uses invalid characters (use snake_case: lowercase + underscores)",
         }
 
-    # Check for redundant prefixes
-    # Extract parent directory name
     if len(path.parts) > 1:
         parent_dir = path.parts[-2]
 
-        # Check if filename starts with parent directory name
         if filename.startswith(f"{parent_dir}_"):
             suggested = filename.replace(f"{parent_dir}_", "")
             return {
@@ -184,7 +134,6 @@ def check_file_naming(module_path: str, path: Path) -> Dict:
                 "message": f"{filename}.py has redundant prefix (in {parent_dir}/ dir, use {suggested}.py)",
             }
 
-    # Check for standard verbs (informational)
     standard_verbs = [
         "create",
         "ops",
@@ -220,10 +169,8 @@ _UNITTEST_HOOKS = frozenset(
 def _protocol_name(func_name: str) -> bool:
     """Whether an inherited protocol, not the author, chose this name (seedgo, fleet green leg 9).
 
-    ``ast.NodeVisitor`` dispatches on ``visit_`` plus the node's class name, so
-    ``visit_Call`` is the only spelling that is ever called (spawn's
-    test_json_durability); only a real ``ast`` node class counts after the
-    prefix. unittest's hooks are a fixed list.
+    ``ast.NodeVisitor`` dispatches on ``visit_`` plus the node's class name, so only a real ``ast`` node
+    class counts after the prefix; unittest's hooks are a fixed list.
     """
     if func_name in _UNITTEST_HOOKS:
         return True
@@ -232,30 +179,20 @@ def _protocol_name(func_name: str) -> bool:
 
 
 def check_function_naming(content: str) -> Optional[Dict]:
-    """
-    Check function naming conventions
-
-    Rules:
-    - snake_case function names
-    - No single-letter names (except in list comprehensions/loops)
-    """
-    # Find all function definitions
+    """Check function naming conventions"""
     function_pattern = r"^\s*(?:async\s+)?def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\("
     functions = re.findall(function_pattern, content, re.MULTILINE)
 
     if not functions:
         return None  # No functions to check
 
-    # Check each function name
     bad_functions = []
     for func_name in functions:
-        # Skip dunder methods
         if func_name.startswith("__") and func_name.endswith("__"):
             continue
         if _protocol_name(func_name):
             continue
 
-        # Check for snake_case
         if not re.match(r"^[a-z_][a-z0-9_]*$", func_name):
             bad_functions.append(func_name)
 
@@ -274,18 +211,8 @@ def check_function_naming(content: str) -> Optional[Dict]:
     }
 
 
-#: MODULE GLOBALS PYTEST READS BY NAME. Each of these is API, not style:
-#: pytest looks them up at collection time by this exact lowercase spelling, so
-#: an UPPER_CASE rename does not fail - it silently stops working while looking
-#: tidier. @devpulse met this live, refused the auto-fix on
-#: src/aipass/conftest.py, and reported it as a counterexample rather than
-#: taking the rename; the rule learns it here because it is structurally
-#: detectable, which is what a waiver would have been standing in for.
-#:
-#: Exempted BY NAME, not by file: this checker is handed content and never a
-#: path, so a module outside a conftest that happens to use one of these
-#: spellings is acquitted too. Stated rather than worked around - the names are
-#: distinctive enough that the trade is worth one sentence.
+#: MODULE GLOBALS PYTEST READS BY NAME: an UPPER_CASE rename silently stops them working. Exempted by
+#: name, not by file: this checker is handed content, never a path.
 PYTEST_CONTRACT_GLOBALS = frozenset(
     {
         "collect_ignore",
@@ -297,41 +224,20 @@ PYTEST_CONTRACT_GLOBALS = frozenset(
 
 
 def check_constant_naming(content: str) -> Optional[Dict]:
-    """
-    Check constant naming conventions
-
-    Rules:
-    - UPPER_CASE for module-level constants
-    - Assigned outside of functions/classes (column 0 only)
-    - Excludes module imports (from X import Y as Z)
-    - Excludes __dunder__ variables (PEP 8 convention: always lowercase)
-    - Excludes the pytest contract globals (see PYTEST_CONTRACT_GLOBALS): those
-      spellings are read by pytest itself, so renaming them disables a
-      mechanism rather than tidying a name
-    """
-    # First pass: collect imported names to exclude from constant checking
+    """Check constant naming conventions"""
     imported_names = set()
     for line in content.split("\n"):
         stripped = line.strip()
-        # Match: from X import Y, Z
         if stripped.startswith("from ") and " import " in stripped:
             import_part = stripped.split(" import ", 1)[1]
-            # Handle 'as' aliases: logger = system_logger
             for item in import_part.split(","):
                 item = item.strip()
                 if " as " in item:
-                    # "system_logger as logger" -> get "logger"
                     imported_names.add(item.split(" as ")[1].strip())
                 else:
-                    # Direct import like "console"
                     imported_names.add(item.strip())
 
-    # Second pass: find TRUE module-level assignments
-    # Only check lines at column 0 (no indentation) — this eliminates local
-    # variables inside functions/classes, which are always indented.
-    # The old _iter_module_level_lines approach had a bug: multi-line function
-    # signatures with closing ) at column 0 tricked it into thinking the
-    # function body had ended.
+    # Column 0 only: local variables are always indented.
     constants = []
     bad_constants = []
     in_multiline_string = False
@@ -339,7 +245,6 @@ def check_constant_naming(content: str) -> Optional[Dict]:
     for line in content.split("\n"):
         stripped = line.strip()
 
-        # Track multiline strings
         for delimiter in ('"""', "'''"):
             if delimiter in stripped:
                 count = stripped.count(delimiter)
@@ -349,15 +254,12 @@ def check_constant_naming(content: str) -> Optional[Dict]:
         if in_multiline_string:
             continue
 
-        # Only consider lines with zero indentation (true module-level)
         if line and (line[0] == " " or line[0] == "\t"):
             continue
 
-        # Find assignments
         if "=" not in stripped or stripped.startswith("#"):
             continue
 
-        # Extract variable name and assignment value
         match = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$", stripped)
         if not match:
             continue
@@ -365,47 +267,28 @@ def check_constant_naming(content: str) -> Optional[Dict]:
         const_name = match.group(1)
         assigned_value = match.group(2)
 
-        # Skip __dunder__ variables (__all__, __version__, etc.)
         if const_name.startswith("__") and const_name.endswith("__"):
             continue
 
-        # Skip names pytest reads by their exact lowercase spelling.
         if const_name in PYTEST_CONTRACT_GLOBALS:
             continue
 
-        # Skip if this is an imported name (like logger, console)
         if const_name in imported_names:
             continue
 
-        # Skip if assignment is a function call or class instantiation (has parentheses)
-        # Examples: logger = logging.getLogger(...), console = Console()
         if "(" in assigned_value:
             continue
 
-        # Skip a bound alias: a bare attribute access is another object's
-        # member under a local name, not a constant. `save_json = _h.save_json`
-        # and `InvalidDocument = json_handler.InvalidDocument` name a callable
-        # and a class; PEP 8 spells both lowercase, and renaming them to
-        # UPPER_CASE would make the module lie about what they are. This is the
-        # shape DPLAN-0325 makes fleet-wide — every branch's json handler
-        # becomes nine of these — and canary, memory and spawn carried bypasses
-        # for it before the rule existed.
-        #
-        # The narrowing is only visible on a lowercase name: an UPPER_CASE one
-        # was never flagged, so `TIMEOUT = settings.DEFAULT` is unaffected. What
-        # is given up is convicting `max_entries = settings.LIMIT`, a real
-        # mis-named constant that reads identically to an alias in the text.
+        # A bound alias (`save_json = _h.save_json`) names another object's member, not a constant; PEP 8 spells
+        # it lowercase. Given up: convicting `max_entries = settings.LIMIT`, which reads identically.
         if _BOUND_ALIAS_RE.match(_without_trailing_comment(assigned_value)):
             continue
 
-        # Skip if assigning an imported value to a variable
-        # Example: from prax import system_logger; logger = system_logger
         if assigned_value.strip() in imported_names:
             continue
 
         constants.append(const_name)
 
-        # Constants should be UPPER_CASE
         if not const_name.isupper():
             bad_constants.append(const_name)
 
@@ -427,20 +310,13 @@ def check_constant_naming(content: str) -> Optional[Dict]:
 
 
 def check_class_naming(content: str) -> Optional[Dict]:
-    """
-    Check class naming conventions
-
-    Rules:
-    - PascalCase class names
-    """
-    # Find all class definitions
+    """Check class naming conventions"""
     class_pattern = r"^\s*class\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*[\(:]"
     classes = re.findall(class_pattern, content, re.MULTILINE)
 
     if not classes:
         return None  # No classes to check
 
-    # Check each class name
     bad_classes = []
     for class_name in classes:
         # Check for PascalCase (PEP 8 sanctions a single leading underscore for internal classes)

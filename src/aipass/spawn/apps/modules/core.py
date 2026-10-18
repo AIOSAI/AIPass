@@ -3,20 +3,12 @@
 # Description: Main orchestrator for agent spawning
 # Version: 1.4.2
 # Created: 2026-03-05
-# Modified: 2026-10-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 Spawn Module — Create new AIPass agents from templates.
-
-Orchestrates the full agent creation workflow:
-1. Validate target path
-2. Copy template to target
-3. Rename placeholder paths
-4. Replace all {{PLACEHOLDER}} patterns
-5. Regenerate .template_registry.json
-6. Register in AIPASS_REGISTRY.json
-7. Validate no unreplaced placeholders remain
+Reference: docs/birth.md
 """
 
 from pathlib import Path
@@ -26,12 +18,8 @@ from aipass.prax import logger
 
 try:
     from aipass.cli.apps.modules.display import console
-# An optional dependency's fallback has to be at least as wide as the failures its import can produce.
-# A peer's handler package does real filesystem work at import time (its access guard), so a broken
-# peer can raise OSError — FileNotFoundError from a dead cwd — not only ImportError.
-# Catching ImportError alone means 'the peer is unavailable' is handled and 'the peer is broken'
-# is fatal, which is backwards.
-# Raised by @prax 2026-08-31 from their own watcher, measured against spawn the same hour.
+# A peer's import-time access guard touches the filesystem, so a broken peer raises OSError
+# (dead cwd), not only ImportError; catching ImportError alone makes "broken" fatal.
 except (ImportError, OSError) as e:
     logger.warning("Failed to import aipass.cli.apps.modules.display, falling back to rich.console: %s", e)
     from rich.console import Console
@@ -55,8 +43,7 @@ from aipass.spawn.apps.handlers.class_registry import (
 )
 from aipass.spawn.apps.handlers.mint_ops import spawn_at
 
-# Default template location (relative to spawn package root). One template for
-# every citizen — the class no longer picks a scaffold (DPLAN-0319 R3).
+# One template for every citizen: the class no longer picks a scaffold.
 DEFAULT_TEMPLATE = Path(__file__).parents[2] / "templates" / "citizen"
 
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
@@ -65,9 +52,7 @@ _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVAT
 def _load_meta_tabs(branch_dir: str | None = None):
     """Load memory meta-tab values from @memory's renderer.
 
-    branch_dir is the newborn's folder name, so its todos tab names its own
-    backlog instead of ``<branch>``. Returns empty dict when @memory is
-    unavailable (standalone project).
+    Returns empty dict when @memory is unavailable (standalone project).
     """
     try:
         from aipass.memory.apps.modules.door_tab_renderer import render_all_meta_tabs
@@ -123,17 +108,7 @@ def print_introspection():
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Route spawn commands to implementation.
-
-    Args:
-        command: The command string (e.g. "create")
-        args: List of arguments for the command
-
-    Returns:
-        True if command succeeded, False otherwise
-    """
-    # No args → introspection
+    """Route spawn commands to implementation."""
     if not args:
         print_introspection()
         return True
@@ -161,9 +136,7 @@ def handle_command(command: str, args: List[str]) -> bool:
                 i += 2
             elif args[i] == "--template" and i + 1 < len(args):
                 template_val = args[i + 1]
-                # A retired class name reaching here would otherwise be read as a
-                # DIRECTORY path and fail with "Template not found: aipass_framework",
-                # naming the wrong problem. Refuse by name instead (DPLAN-0319).
+                # Refuse a retired class by name, or it is read as a template directory path.
                 refusal = refuse_retired_or_forbidden(template_val)
                 if refusal:
                     logger.error(refusal)
@@ -197,9 +170,7 @@ def spawn_agent(
 ):
     """Create a new AIPass agent from template — the public door (aipass.spawn exports it).
 
-    The lane (refusals, adopt, birth from seed, mint) lives in handlers/mint_ops.py
-    spawn_at, which documents every argument and the result dict (DPLAN-0354 leg 9).
-    This module keeps the routing and hands in its @memory meta-tab importer.
+    Arguments and the result dict are documented on handlers/mint_ops.py spawn_at.
     """
     return spawn_at(
         target_path,
@@ -214,10 +185,7 @@ def spawn_agent(
     )
 
 
-# The target-exists lane (adopt / birth-from-seed / the shared error dict) lives
-# in handlers/adoption_ops.py — split out when this module crossed the 600-line
-# standard. Re-exported under the old private names so the module seam the tests
-# and callers know stays put.
+# Old private names re-exported from handlers/adoption_ops.py: tests and callers use them.
 _birth_from_seed = birth_from_seed
 
 

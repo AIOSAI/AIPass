@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -42,11 +42,6 @@ from aipass.commons.apps.modules import engagement as engagement_module
 from aipass.commons.apps.modules import welcome as welcome_module
 
 
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-
 def _seed_test_agents(conn: sqlite3.Connection) -> None:
     """Insert standard test agents into the database."""
     conn.execute(
@@ -58,11 +53,6 @@ def _seed_test_agents(conn: sqlite3.Connection) -> None:
         ("THE_COMMONS", "The Commons"),
     )
     conn.commit()
-
-
-# =============================================================================
-# WELCOME HANDLER — has_been_welcomed
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
@@ -88,11 +78,6 @@ def test_has_been_welcomed_welcomed_branch_returns_true(
     assert has_been_welcomed(initialized_db, "TEST_BRANCH") is True
 
 
-# =============================================================================
-# WELCOME HANDLER — create_welcome_post
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
 def test_create_welcome_post_creates_post_in_general(
     mock_json: MagicMock,
@@ -111,7 +96,6 @@ def test_create_welcome_post_creates_post_in_general(
     assert row["post_type"] == "announcement"
     assert "TEST_BRANCH" in row["title"]
 
-    # Verify mention was created
     mention = initialized_db.execute(
         "SELECT * FROM mentions WHERE post_id = ? AND mentioned_agent = ?",
         (post_id, "TEST_BRANCH"),
@@ -133,11 +117,6 @@ def test_create_welcome_post_double_welcome_prevented(
 
     second = create_welcome_post(initialized_db, "TEST_BRANCH")
     assert second is None
-
-
-# =============================================================================
-# WELCOME HANDLER — get_onboarding_nudge
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
@@ -168,11 +147,6 @@ def test_get_onboarding_nudge_active_branch_returns_none(
 
     nudge = get_onboarding_nudge(initialized_db, "TEST_BRANCH")
     assert nudge is None
-
-
-# =============================================================================
-# WELCOME HANDLER — welcome_new_branches
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
@@ -218,13 +192,7 @@ def test_run_welcome_scan_names_a_failed_branch_and_keeps_scanning(
 ) -> None:
     """A database failure welcoming one branch is named in the scan's answer; the scan still welcomes the rest.
 
-    Before the cure create_welcome_post swallowed the error and answered None, the scan skipped the branch and
-    reported success, and the half-written welcome post (no rollback) was committed by the next branch's welcome,
-    so the failed branch counted as welcomed and was never retried. commons' decision, DPLAN-0354 leg 3: a scan with
-    a failed branch answers success False, so the command refuses (exit 2) with the failed names.
-    Mutants (runner, killed): welcome_handler drop `conn.rollback()`; welcome_handler `raise` -> `return None`;
-    welcome_ops `if failed:` -> `if False:`.
-    """
+    Pins the rollback: a half-written post committed by the next welcome would mark the failed branch welcomed."""
     _refuse_welcome_mention_for_broken(initialized_db)
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
@@ -252,12 +220,7 @@ def test_run_welcome_specific_names_the_database_failure(
     mock_handler_json: MagicMock,
     initialized_db: sqlite3.Connection,
 ) -> None:
-    """Welcoming one branch that hits a database error refuses with the error named and leaves no half post.
-
-    Before the cure the answer was a bare "Failed to create welcome post" with the cause only in the log, and the
-    post row written before the failing mention insert stayed in the open transaction.
-    Mutant (runner, killed): welcome_ops `database error: {e}` -> `database error`.
-    """
+    """Welcoming one branch that hits a database error refuses with the error named and leaves no half post."""
     _refuse_welcome_mention_for_broken(initialized_db)
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
@@ -268,11 +231,6 @@ def test_run_welcome_specific_names_the_database_failure(
     assert "@broken" in result["error"]
     assert "mention refused" in result["error"]
     assert has_been_welcomed(initialized_db, "broken") is False
-
-
-# =============================================================================
-# ENGAGEMENT OPS — generate_prompt
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.engagement.engagement_ops.json_handler", autospec=True)
@@ -298,15 +256,9 @@ def test_generate_prompt_creates_post(
     assert result["author"] == "THE_COMMONS"
     assert "theme" in result
 
-    # Verify post exists in DB
     row = initialized_db.execute("SELECT * FROM posts WHERE id = ?", (result["post_id"],)).fetchone()
     assert row is not None
     assert row["post_type"] == "discussion"
-
-
-# =============================================================================
-# ENGAGEMENT OPS — create_event
-# =============================================================================
 
 
 def test_create_event_no_args_returns_error() -> None:
@@ -339,16 +291,10 @@ def test_create_event_with_args_creates_event_post(
     assert result["title"] == "Code Jam"
     assert result["author"] == "THE_COMMONS"
 
-    # Verify post exists in DB
     row = initialized_db.execute("SELECT * FROM posts WHERE id = ?", (result["post_id"],)).fetchone()
     assert row is not None
     assert row["post_type"] == "announcement"
     assert "Code Jam" in row["title"]
-
-
-# =============================================================================
-# MODULE ROUTING — welcome.handle_command
-# =============================================================================
 
 
 @patch("aipass.commons.apps.modules.welcome.run_welcome")
@@ -371,11 +317,6 @@ def test_welcome_module_rejects_unknown_command() -> None:
     """welcome.handle_command should return False for non-welcome commands."""
     result = welcome_module.handle_command("post", [])
     assert result is False
-
-
-# =============================================================================
-# MODULE ROUTING — engagement.handle_command
-# =============================================================================
 
 
 @patch("aipass.commons.apps.modules.engagement.generate_prompt")

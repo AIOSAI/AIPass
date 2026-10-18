@@ -3,7 +3,7 @@
 # Description: Finish the phone through @api's installer doors: move the bind to the tailnet, install the boot unit
 # Version: 1.2.0
 # Created: 2026-10-12
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -23,7 +23,7 @@ A dry run never calls set_bind or autostart: autostart has no dry run and render
 a file, so the dry run names it instead.
 
 Where no boot unit will bring the server up (no user systemd, a failed or
-unreachable unit), ``serve_detached()`` starts it in its own session (DPLAN-0407),
+unreachable unit), ``serve_detached()`` starts it in its own session,
 and ``probe_until_serving`` gives a starting server its few seconds.
 """
 
@@ -39,7 +39,6 @@ from aipass.aipass.apps.handlers.baud.phone_ready import SERVER_ANSWERING, SERVE
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.prax import logger
 
-# bind states
 BIND_KEPT = "kept"  # already a tailnet address, or set_bind found it unchanged
 BIND_MOVED = "moved"  # set_bind stored the tailnet address
 BIND_WOULD_MOVE = "would_move"  # a dry run on a bind that is not a tailnet address
@@ -47,7 +46,6 @@ BIND_STAYS = "stays"  # tailscale is not up: there is no tailnet address to move
 BIND_REFUSED = "refused"  # set_bind raised BindRefused; nothing was stored
 BIND_NO_DOOR = "no_door"  # this @api publishes no set_bind
 
-# boot states
 BOOT_DONE = "done"  # rendered, installed, enabled
 BOOT_LIVE = "live"  # systemd already runs the unit: left alone
 BOOT_PLANNED = "planned"  # a dry run: the steps named, none run
@@ -59,7 +57,6 @@ BOOT_NO_DOOR = "no_door"  # this @api publishes no installer doors
 
 _BOOT_DOORS = ("autostart", "install_unit", "enable_unit")
 
-# server start states (DPLAN-0407)
 SERVE_STARTED = "started"  # serve_detached() spawned it; pid is set
 SERVE_REFUSED = "refused"  # serve_detached() raised; detail holds the door's words
 SERVE_NO_DOOR = "no_door"  # this @api publishes no serve_detached
@@ -174,7 +171,6 @@ def set_up_boot(host_config: Any, dry_run: bool) -> BootSetup:
     return setup
 
 
-# pairing states (DPLAN-0406 slice C)
 PAIR_MINTED = "minted"  # a one-use code minted; qr and url are set
 PAIR_PLANNED = "planned"  # a dry run: nothing minted
 PAIR_SKIPPED = "skipped"  # the server does not answer on a tailnet bind: no code, the pair command instead

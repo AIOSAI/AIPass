@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help output
 # Version: 1.0.3
 # Created: 2026-03-27
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -75,12 +75,7 @@ class TestCliRouting:
         mock_error.assert_called_once()
 
     def test_command_returns_int(self):
-        """main() with no argv prints introspection and exits 0 - the value, not just the type.
-
-        Measured 2026-09-08: exactly 0. A bare invocation is not a refusal, so
-        this is the one door in the file that is SUPPOSED to exit zero, and the
-        number is pinned rather than its type.
-        """
+        """main() with no argv prints introspection and exits 0 - the value, not just the type."""
 
         with patch("sys.argv", ["spawn"]):
             with patch("aipass.spawn.apps.spawn.print_introspection") as mock_introspection:
@@ -118,8 +113,7 @@ class TestCreateHelp:
         mock_help.assert_called_once()
 
     def test_create_help_beats_a_retired_class(self):
-        """--help is answered before the retired-name refusal — asking for help
-        is never the thing that gets refused."""
+        """--help is answered before the retired-name refusal."""
 
         with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
             result = handle_create(["aipass_framework", "--help"])
@@ -133,8 +127,7 @@ class TestCreateDryRun:
     def test_dry_run_returns_zero(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """--dry-run returns 0 for valid target.
 
-        Mutant: the preview drops its 'DRY RUN' header -> red.
-        """
+        Mutant: the preview drops its 'DRY RUN' header -> red."""
 
         target = str(tmp_path / "drytest")
         result = handle_create([target, "--dry-run"])
@@ -154,8 +147,7 @@ class TestCreateDryRun:
     def test_dry_run_existing_target_returns_error(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """--dry-run returns 1 if target already exists.
 
-        Mutant: the refusal no longer names 'Target already exists' -> red.
-        """
+        Mutant: the refusal no longer names 'Target already exists' -> red."""
 
         target = tmp_path / "existing"
         target.mkdir()
@@ -180,13 +172,10 @@ class TestTemplateFlag:
 
 class TestCreateUnknownClassRefusal:
     """`create <bare-token>` refuses when the lone positional is neither a
-    registered class nor path-shaped, instead of silently reading it as the
-    target path (APLAN-0007 open item 1; devpulse: general refusal in front
-    of the parser, not another special case)."""
+    registered class nor path-shaped."""
 
     def test_bare_unrecognized_token_refuses_no_branch_created(self, tmp_path, monkeypatch):
-        """`create wizard` (no path arg) must refuse — not silently create a
-        branch named WIZARD in ./wizard."""
+        """`create wizard` (no path arg) must refuse — not silently create ./wizard."""
 
         monkeypatch.chdir(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -198,9 +187,7 @@ class TestCreateUnknownClassRefusal:
         mock_error.assert_called_once()
         message = str(mock_error.call_args).lower()
         assert "wizard" in message
-        # The refusal names the classes that DO exist. Both, since DPLAN-0319 R4
-        # collapsed the roster to manager|specialist — a caller who mistyped needs
-        # the live names, not the retired ones.
+        # The refusal names the live classes, not the retired ones.
         assert "manager" in message
         assert "specialist" in message
         assert not (tmp_path / "wizard").exists()
@@ -208,10 +195,7 @@ class TestCreateUnknownClassRefusal:
 
     def test_path_like_single_positional_still_creates(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """A token carrying a path marker is unaffected — still creates via the
-        default class exactly as before (legitimate `create <path>` usage).
-
-        Mutant: the success report drops 'Agent created:' -> red.
-        """
+        default class. Mutant: the success report drops 'Agent created:' -> red."""
 
         target = tmp_path / "legit_agent"
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -226,12 +210,7 @@ class TestCreateUnknownClassRefusal:
     def test_explicit_class_and_path_still_works(self, tmp_path, citizen_class, capsys: pytest.CaptureFixture[str]):
         """`create <class> <path>` — the two-positional form — is untouched.
 
-        Rewritten for DPLAN-0319 R4: this used to drive "aipass_framework", a
-        name that is now retired and refused (see the sibling test below). Both
-        LIVE classes must still create, and the class the caller typed must be
-        the class the passport ends up claiming — a create that accepted the
-        word and wrote something else would be the exact drift the rework ends.
-        """
+        The class the caller typed must be the class the passport claims."""
         import json
 
         target = tmp_path / f"legit_{citizen_class}"
@@ -247,10 +226,7 @@ class TestCreateUnknownClassRefusal:
     def test_retired_class_and_path_refuses_by_name(self, tmp_path):
         """`create aipass_framework <path>` is REFUSED, not silently remapped.
 
-        Was green as a create; the contract inverted with DPLAN-0319 R4. It also
-        must not die as a bare argparse SystemExit(2) — the caller has to be told
-        the name retired and what replaced it.
-        """
+        Never a bare argparse SystemExit(2): the caller is told what replaced the name."""
 
         target = tmp_path / "legacy_agent"
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -283,8 +259,7 @@ class TestPrintHelp:
     def test_print_help_runs(self, capsys: pytest.CaptureFixture[str]):
         """print_help executes without error.
 
-        Mutant: the help header text changed -> red.
-        """
+        Mutant: the help header text changed -> red."""
 
         print_help()
         out = capsys.readouterr().out
@@ -298,8 +273,7 @@ class TestPrintIntrospection:
     def test_print_introspection_runs(self, capsys: pytest.CaptureFixture[str]):
         """print_introspection executes without error.
 
-        Mutant: the 'spawn Entry Point' title dropped -> red.
-        """
+        Mutant: the 'spawn Entry Point' title dropped -> red."""
 
         print_introspection()
         assert "spawn Entry Point" in capsys.readouterr().out
@@ -307,8 +281,7 @@ class TestPrintIntrospection:
     def test_output_capture(self, capsys: pytest.CaptureFixture[str]):
         """Verify print_introspection mentions connected modules.
 
-        Mutant: the core.py line dropped from the listing -> red.
-        """
+        Mutant: the core.py line dropped from the listing -> red."""
 
         print_introspection()
         assert "core.py" in capsys.readouterr().out
@@ -321,8 +294,7 @@ class TestSyncRegistryCheckFlags:
         """--check runs the read-only owner/identity check on a tmp_path registry; --json turns
         the report into a JSON document. Neither reaches sync_registry's write path.
 
-        Mutant: --json ignored (json_output=False) -> red.
-        """
+        Mutant: --json ignored (json_output=False) -> red."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
         before = registry.read_bytes()
@@ -347,8 +319,7 @@ class TestUpdateTraceFlag:
         """--trace logs where the branch resolved; without it nothing is said. Dry run is the
         default and the branch has no passport, so the update stops before any write.
 
-        Mutant: --trace ignored (trace = False) -> red.
-        """
+        Mutant: --trace ignored (trace = False) -> red."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text('{"metadata": {}, "branches": [{"name": "PROBE", "path": "probe"}]}', encoding="utf-8")
         (tmp_path / "probe").mkdir()
@@ -373,13 +344,7 @@ class TestExportSeedsOnlyFlag:
     def test_only_restricts_the_written_seeds_to_the_named_branch(self, tmp_path, monkeypatch):
         """--only decides which seed is written; the other branch is left untouched.
 
-        The world is tmp_path: --root points discovery there, the cwd is there,
-        and spawn's operations log goes there through conftest's
-        AIPASS_TEST_LOG_DIR. export_seeds takes no registry, so there is no
-        find_registry to point.
-
-        Mutant: --only dropped on its way to export_seeds (only=None) -> red.
-        """
+        Mutant: --only dropped on its way to export_seeds (only=None) -> red."""
         for branch in ("wanderer", "stranger"):
             trinity = tmp_path / "src" / "aipass" / branch / ".trinity"
             trinity.mkdir(parents=True)

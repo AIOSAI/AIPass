@@ -3,7 +3,7 @@
 # Description: Every location-inference site survives a deleted working directory
 # Version: 1.0.5
 # Created: 2026-08-31
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -31,43 +31,15 @@ from aipass.drone.apps.modules import git_module
 from aipass.drone.apps.plugins.devpulse_ops import auth
 from aipass.drone.tests import conftest as drone_conftest
 
-# No location is not a failure — pinned at every site that infers one.
-#
-# THE SPECIES. ``Path.cwd()`` raises ENOENT the moment the directory it names is
-# gone. Session 68 fixed that in the deletion RECORD and session 69 fixed it on
-# the ROUTING path, and both times the fix landed on the sites already in hand
-# rather than on every site in the tree. @trigger reproduced the leftover live —
-# ``drone rm`` from a deleted directory, exit 1, ``FileNotFoundError`` at
-# ``rm_handler.py:37`` — and named it as the pattern rather than the incident: a
-# fix that lands on some of N identical paths. This file is the N.
-#
-# It is also the recovery case, which is what makes it more than tidiness. The
-# first ``drone rm`` succeeds and deletes the directory the caller stands in; the
-# SECOND command — the one a person runs to clean up after — is the one that
-# crashed. Fixing the crash in session 68 is what put a live process here to run
-# it.
-#
-# THE RULE, identical at every site: a walk that infers something from where the
-# caller STANDS has nothing to read when the caller stands nowhere. That is the
-# absence of a signal, said out loud at INFO, not an error — so the walk is
-# SKIPPED and every other source still answers. Sites that can honestly return
-# "unknown" do. The one gate that cannot — owner-tier auth — fails CLOSED and
-# says why.
-#
-# ``caller_cwd()`` in ``router_handler`` is the single reader. A tenth private
-# copy of ``try: Path.cwd() except OSError: None`` would be this file's own
-# lesson repeated.
+# No cwd is the absence of a signal, not an error: the cwd walk is skipped and every other source
+# still answers; owner-tier auth alone fails closed. ``caller_cwd()`` is the single reader.
 
 
 @pytest.fixture()
 def no_cwd(monkeypatch):
     """The process has no working directory — the state, not a mock of a guard.
 
-    Patches the raw read BENEATH ``caller_cwd`` rather than ``caller_cwd`` on
-    purpose: before the sweep, nine sites never went through ``caller_cwd`` at
-    all, so patching the guard would have made this file green against unfixed
-    code. A site that bypasses the guard with its own ``Path.cwd()`` is caught
-    by TestTheSweepIsComplete below, which bans the bare read.
+    Patches the read beneath ``caller_cwd``: patching the guard itself stays green for a site that bypasses it.
     """
 
     def gone():
@@ -85,11 +57,6 @@ def home_root(tmp_path, monkeypatch):
     (home / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
     monkeypatch.setenv("AIPASS_HOME", str(home))
     return home
-
-
-# ---------------------------------------------------------------------------
-# The entry point
-# ---------------------------------------------------------------------------
 
 
 class TestDroneEntryPointSurvives:
@@ -112,10 +79,8 @@ class TestDroneEntryPointSurvives:
     def test_the_seat_inbox_is_unknown_not_a_crash(self, no_cwd, tmp_path, monkeypatch):
         """A seat is inferred from where you stand. Standing nowhere means no seat.
 
-        Through `drone @ai_mail view 1`: with no seat the index is handed on as
-        typed. The seat built under the chdir would turn 1 into "oldest" for a
-        site that read the cwd past the guard. Mutant killed (runner):
-        _find_seat_inbox's no-cwd return removed (a traceback, not a token).
+        With no seat the index is handed on as typed; a cwd read past the guard would turn 1 into "oldest".
+        Mutant killed (runner): _find_seat_inbox's no-cwd return removed (a traceback, not a token).
         """
         (tmp_path / ".trinity").mkdir()
         (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
@@ -136,11 +101,6 @@ class TestDroneEntryPointSurvives:
 
         assert drone.main() == 0
         assert routed == [["1"]]
-
-
-# ---------------------------------------------------------------------------
-# The delete lane — the one @trigger reproduced
-# ---------------------------------------------------------------------------
 
 
 class TestTheDeleteLaneSurvives:
@@ -183,11 +143,7 @@ class TestTheDeleteLaneSurvives:
 
 @pytest.mark.deletable_cwd
 class TestTheDeleteLaneSurvivesForReal:
-    """The end-to-end case, in a subprocess with a genuinely deleted directory.
-
-    @trigger ran exactly this and got exit 1 with a traceback. Patched fixtures
-    prove the guards; only a real deleted directory proves the lane.
-    """
+    """The end-to-end case, in a subprocess with a genuinely deleted directory: only that proves the lane."""
 
     def test_drone_rm_from_a_deleted_directory_reports_instead_of_crashing(self, tmp_path):
         stand_in = tmp_path / "standhere"
@@ -219,18 +175,11 @@ class TestTheDeleteLaneSurvivesForReal:
         assert not victim.exists()
 
 
-# ---------------------------------------------------------------------------
-# The git lane
-# ---------------------------------------------------------------------------
-
-
 class TestTheGitLaneSurvives:
     def test_the_caller_branch_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
         """``drone @git diff`` with no cwd names the missing branch and exits 1, reaching no git.
 
-        Through the command, not the private detector. Auth is stubbed where the
-        product resolves it at call time (the module in sys.modules), and the
-        diff handler fails loudly if the lane ever got past detection.
+        Auth is stubbed on the module in sys.modules, where the product resolves it at call time.
         """
 
         def no_git(*_args, **_kwargs):
@@ -249,36 +198,14 @@ class TestTheGitLaneSurvives:
         }
 
     def test_the_repo_root_comes_from_aipass_home_when_there_is_no_cwd(self, no_cwd, home_root):
-        """``find_repo_root`` promises a Path, not an Optional — so it must find one.
-
-        With no cwd both the walk and the toplevel-query fallback lose their
-        starting point, so the answer comes from the sources that never needed
-        one. AIPASS_HOME is the first of them, and it is checkable against a
-        stand-in rather than against this machine.
-        """
+        """``find_repo_root`` promises a Path, not an Optional — so it must find one."""
         assert lock_handler.find_repo_root() == home_root
 
     def test_with_no_registry_findable_anywhere_it_still_returns_a_real_directory(self, no_cwd, monkeypatch):
-        """The bare-runner world, reproduced — and the assertion this file got wrong.
+        """The bare-runner world: no registry anywhere, so the marker leg is the one that answers.
 
-        The first cut asserted ``list(root.glob("*_REGISTRY.json"))`` — "the
-        answer is a project root". That reads the MACHINE. ``*_REGISTRY.json``
-        is gitignored and machine-local, so a clean checkout has none, and it
-        red on CI with "/home/runner/work/AIPass/AIPass is not a project root"
-        — which was the honest answer to a question nobody should have asked.
-        The half-present world this file's own sweep was written about, committed
-        in the one test the sweep added. @devpulse caught it on PR#750.
-
-        The registry walk is switched off here rather than assumed absent, so
-        the marker leg — the only leg a bare runner reaches — actually executes.
-
-        WHAT IS DURABLE, and true in both worlds: with no cwd the answer is a
-        real absolute directory that CONTAINS this package. Never a relative
-        sentinel, never the deleted directory, never a raise. Whether that
-        directory happens to hold a registry is a fact about the checkout, not
-        about the function.
+        Never assert a registry exists: ``*_REGISTRY.json`` is gitignored, so a clean checkout has none.
         """
-        # Switched off at registries_in's one listing, the read every registry walk shares.
         monkeypatch.setattr(router_handler, "_registry_candidates", lambda directory: [])
         monkeypatch.delenv("AIPASS_HOME", raising=False)
 
@@ -290,22 +217,13 @@ class TestTheGitLaneSurvives:
         assert Path(lock_handler.__file__).resolve().is_relative_to(root), (
             f"{root} does not contain the package that answered from it"
         )
-        # "Contains the package" alone is too weak — apps/handlers/git/ satisfies
-        # it, and that is the last-resort return. A project root is a directory
-        # that DECLARES itself one, and a bare checkout still has .git.
+        # "Contains the package" alone passes on the last-resort return; a bare checkout still has .git.
         # Mutant killed: find_repo_root skipping its marker walk (the last resort answered).
         assert (root / ".git").exists(), f"{root} carries no .git — a lock would land in a subdirectory"
 
 
 class TestTheAuthGateFailsClosed:
-    """The one site that must NOT answer "unknown".
-
-    Every other site here infers a convenience. This one decides whether a
-    caller may write to the repository, and "I could not tell who you are" is a
-    refusal — the same answer it already gives when the walk finds no passport.
-    What changes is that it arrives as a stated refusal instead of an ENOENT
-    traceback from inside a credential check.
-    """
+    """The one site that must NOT answer "unknown": no identity is a stated refusal, as with no passport."""
 
     def test_no_cwd_is_a_refusal_that_says_why(self, no_cwd):
         """Mutant killed: _resolve_caller walking a cwd it does not have (a traceback, not a refusal)."""
@@ -327,25 +245,9 @@ class TestTheBrokerSurvives:
 
 
 class TestTheSweepIsComplete:
-    """The count is the finding — three times a list of these sites came in low.
+    """A prose count of these sites kept coming in low, so the count is a test.
 
-    Session 69 reported two unguarded reads where there were three. @trigger
-    corrected "exactly one in the whole tree" to nine, and their nine was itself
-    short of the ten actually there (``broker/daemon.py`` and
-    ``git/lock_handler.py`` were not on their list). A prose count is what keeps
-    being wrong, so the count is a test.
-
-    THE INSTRUMENT CHANGED 2026-08-31, and the reason is worth keeping. This
-    was a line scan that stripped ``#`` comments and matched the text
-    ``Path.cwd()`` / ``os.getcwd()``. It went red on the Windows round-4 build
-    against two DOCSTRINGS — prose in ``handlers/__init__.py`` and
-    ``handlers/module_root.py`` explaining that ``ntpath.realpath`` reads
-    ``os.getcwd()`` unconditionally, which is why those files were cured. A
-    string ban convicts the explanation along with the defect, which is how a
-    cure ends up undocumented. It parses now, so the ban is on the CALL.
-
-    The parse also closed a hole the text match had: ``from os import getcwd``
-    followed by a bare ``getcwd()`` was invisible to it, and is not now.
+    The ban parses the AST, so it convicts the call and not a docstring that names it.
     """
 
     @staticmethod
@@ -391,12 +293,9 @@ class TestTheSweepIsComplete:
         )
 
     def test_the_sweeps_never_walk_into_a_dropbox_or_an_archive(self, tmp_path):
-        """A dropbox and an .archive are sandboxes: nothing in them is swept (owner ruling).
+        """A dropbox and an .archive are sandboxes: nothing in them is swept.
 
-        Both sweeps in this file and in test_registry_case_sweep.py walk through
-        conftest's python_sources, which skips three names: dropbox, .archive and
-        __pycache__. Red first on python_sources without the skip (the mutant
-        runner cannot serve conftest, which pytest loads first).
+        Mutant: python_sources without the skip goes red (the runner cannot serve conftest).
         """
         (tmp_path / "handlers").mkdir()
         (tmp_path / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
@@ -409,9 +308,10 @@ class TestTheSweepIsComplete:
         assert walked == [tmp_path / "handlers" / "real.py"], walked
 
     def test_a_sweep_rooted_inside_a_dropbox_still_sees_its_sources(self, tmp_path):
-        """The skip judges the parts below the walked root: a project under a directory named
-        dropbox keeps every source. Green from its first run and held for mutants (the runner
-        cannot serve conftest); its proof is that a whole-path comparison empties the list."""
+        """The skip judges the parts below the walked root: a project under a dropbox keeps every source.
+
+        Mutant: a whole-path comparison empties the list (held; the runner cannot serve conftest).
+        """
         root = tmp_path / "dropbox" / "apps"
         (root / "handlers").mkdir(parents=True)
         (root / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
@@ -426,17 +326,7 @@ class TestTheSweepIsComplete:
 class TestTheWindowsSkipIsNarrow:
     """A skip that fires everywhere reports its own defeat as a pass.
 
-    Nine tests in this branch build their world by deleting the directory they
-    stand in, and Windows will not let a process do that (conftest's
-    WINDOWS_CWD_REASON states the ruling: the recipe is unavailable there, not
-    the state). They carry ``@pytest.mark.deletable_cwd`` and conftest skips
-    them on win32 only.
-
-    "Only" is the whole load-bearing word. A condition that quietly became true
-    everywhere would turn nine red tests into nine green ones and read the same
-    in the summary line — @memory found exactly that mutant surviving in their
-    own tree, which is why this is measured rather than asserted about the
-    marker object.
+    ``deletable_cwd`` tests delete their own cwd, which Windows forbids; conftest skips them on win32 only.
     """
 
     MARKED = (
@@ -466,11 +356,7 @@ class TestTheWindowsSkipIsNarrow:
     def test_the_hook_skips_marked_items_on_windows_and_only_there(self, monkeypatch):
         """The Windows half of the ruling, checked from a machine that is not Windows.
 
-        The subprocess pin above can only observe THIS platform, so a
-        ``pytest_collection_modifyitems`` that stopped matching the marker
-        entirely would leave it green here and hand Windows nine reds back.
-        The hook is a function; called directly with the platform it branches
-        on, both of its answers are observable anywhere.
+        The subprocess pin sees only this platform; calling the hook directly observes both answers anywhere.
         """
 
         def one_item():

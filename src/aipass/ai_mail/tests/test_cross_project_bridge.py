@@ -3,20 +3,13 @@
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
 # Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-10-06
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
 
-# Two blockers stood between the devpulse seat and a citizen in projects/*:
-# resolution only ever walked the CALLER's ancestor tree, and delivery actively
-# refused mail across project roots. Both now have a verified-admin exemption —
-# and only a verified-admin one. Everyone else must be byte-identical, so most of
-# these tests assert that nothing happened.
-#
-# The 5-leg verifier itself is devpulse's and is covered in test_admin_lane.py;
-# here it is the seam, patched to a verdict. Phase 5b adds the return path: a
-# reply is always deliverable to the mail it answers.
+# Resolution and delivery widen across projects for a verified admin only; everyone else is unchanged.
+# The 5-leg verifier is devpulse's (test_admin_lane.py); here it is a seam patched to a verdict.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — _is_private_branch_email(), unrelated to the bridge: tests/test_delivery.py
@@ -40,12 +33,9 @@ _H_DELIVERY = "aipass.ai_mail.apps.handlers.email.delivery"
 
 
 def _deliver_across(recipient: Path, sender_email: str, email_data=None, to_branch: str = "@devpulse"):
-    """Deliver `to_branch`'s mail into `recipient` and answer (refused, message) (ai_mail, leg 14).
+    """Deliver `to_branch`'s mail into `recipient` and answer (refused, message).
 
-    The cross-project boundary is reached through deliver_email_to_branch, not
-    called: only the registry lookup is stubbed, so `to_branch` names `recipient`.
-    The tmp inbox is written when the mail passes; contacts and the feed are the
-    conftest's tmp copies.
+    The boundary is reached through deliver_email_to_branch; only the registry lookup is stubbed.
     """
     data = {
         "subject": "S",
@@ -78,10 +68,7 @@ def repo(tmp_path):
     )
     devpulse_seat = tmp_path / "src" / "aipass" / "devpulse"
     (devpulse_seat / ".trinity").mkdir(parents=True)
-    # Every real citizen carries a passport; a seat without one is a shape that
-    # does not exist on disk. The identity fence proves the caller by walking
-    # AIPASS_CALLER_CWD up to this file, so a passport-less fixture made the
-    # admin caller unprovable for a reason no live tree could reproduce.
+    # The identity fence proves the caller by walking AIPASS_CALLER_CWD up to this passport.
     (devpulse_seat / ".trinity" / "passport.json").write_text(
         json.dumps({"branch_info": {"branch_name": "devpulse", "email": "@devpulse"}}),
         encoding="utf-8",
@@ -118,9 +105,7 @@ class TestProjectTreeBranches:
     def test_an_unreadable_registry_drops_the_sweep_and_names_it(self, repo):
         """One corrupt registry stops the sweep, by name.
 
-        Until leg 12 it was skipped and the healthy ones answered; a citizen of
-        the skipped project then fell to the external tier, which could serve a
-        namesake. A dropped map refuses honestly (ai_mail, leg 12).
+        Skipping it would let a citizen of that project fall to the external tier and a namesake.
         """
         (repo / "projects" / "baud" / "BAUD_REGISTRY.json").write_text("{not json", encoding="utf-8")
         with pytest.raises(reg.RegistryUnreadable, match=r"^BAUD_REGISTRY\.json could not be read "):
@@ -138,20 +123,7 @@ class TestProjectTreeBranches:
     def test_a_dot_prefixed_project_is_refused(self, repo):
         """projects/.archive/ is depth-legal, so ONLY the dot filter can refuse it.
 
-        The fixture for this was written during DPLAN-0319 and parked; the gap it
-        described was live until FPLAN-0492. ``pathlib`` globs match hidden
-        directories — unlike the ``glob`` module — so ``projects/*/*_REGISTRY.json``
-        walked straight into the archive and handed the ADMIN lane ``@archive`` as
-        an addressable seat. The resident half filtered; this half did not.
-
-        Asserting the healthy seats survive in the same test on purpose: a filter
-        that refuses everything would satisfy the negative alone.
-
-        THE REGISTRY SITS ONE LEVEL DOWN, at projects/.archive/*_REGISTRY.json,
-        and that placement is the whole test. My first draft nested it a level
-        deeper and the mutation pass caught it: with the filter broken the test
-        still passed, because the DEPTH rule was refusing it and the dot rule was
-        never reached. A pin that two rules can satisfy tests neither.
+        pathlib globs match hidden dirs; the healthy seats are asserted too, so refuse-all cannot pass.
         """
         archive = repo / "projects" / ".archive"
         archive.mkdir(parents=True)
@@ -242,9 +214,7 @@ class TestCrossProjectBoundary:
 class TestReplyReturnPath:
     """The return path: a reply is always deliverable to the mail it answers.
 
-    The inbound message sitting in the sender's OWN mailbox is the proof the
-    channel was sanctioned — replying is answering, not initiating. Initiation
-    across projects stays admin-only, inbound only.
+    The inbound message in the sender's OWN mailbox is the proof; initiation stays admin-only.
     """
 
     def _boundary(self, recipient: Path, sender_email: str = "@baud", email_data=None, to_branch: str = "@devpulse"):
@@ -307,11 +277,7 @@ class TestReplyReturnPath:
         assert "Cross-project mail refused" in msg
 
     def test_original_reply_to_is_an_accepted_destination(self, repo, baud):
-        """reply.py routes to `reply_to or from`; the exemption mirrors that rule.
-
-        The replier never picks this address — only the ORIGINAL sender could
-        have written it — so it is still the sanctioned channel, not laundering.
-        """
+        """reply.py routes to `reply_to or from`; the exemption mirrors that rule."""
         seat = repo / "projects" / "baud"
         (seat / ".ai_mail.local" / "inbox.json").write_text(
             json.dumps({"messages": [{"id": "abc123", "from": "@devpulse", "reply_to": "@flow", "subject": "Admin"}]}),
@@ -359,9 +325,7 @@ class TestReplyReturnPath:
 class TestLaneDarkMeansNoWidening:
     """A dark lane closes both halves, end to end.
 
-    These simulate the grant failing rather than asserting the real world has no
-    key — the owner's ceremony has since happened, so the key exists and the world
-    answers True. What must stay true is that a FAILING grant widens nothing.
+    The grant failure is simulated: the real key exists, so the live world answers True.
     """
 
     def test_a_dark_lane_means_no_resolution_widening(self, repo, monkeypatch):
@@ -427,28 +391,7 @@ class TestIsVerifiedAdminCaller:
 class TestReplyProofMailboxResolution:
     """The proof must be found wherever the replying branch's mailbox actually is.
 
-    @baud's replies to fleet dispatches were refused with the cross-project
-    sentence (2026-08-16), and the reply lane itself was never the problem — it
-    passes whenever the proof is found. The failure is that two different
-    resolvers disagree about *which mailbox is the sender's*:
-
-    ``handle_reply`` finds the original through ``_resolve_branch_path()``
-    (env, registry, fallback), so the reply is built and sent. The boundary then
-    re-derives the mailbox through ``_resolve_reply_path()``, a walk UP from
-    ``AIPASS_CALLER_CWD`` — which finds nothing unless the caller happens to be
-    standing in the mailbox directory or below it. Original found, proof not
-    found, reply refused.
-
-    ``reply.py`` already saw this coming and stamps ``reply_path`` on every
-    reply, derived from ``from_branch_path`` — "the branch actually replying" —
-    precisely because the CWD guess "can name the wrong branch entirely". The
-    boundary just never read it.
-
-    The real tree is why the old fixture hid this: @baud's seat is
-    ``projects/baud/src/baud/baud``, four levels below the project root, so a
-    caller standing at ``projects/baud`` walks up past the mailbox and out of
-    the project entirely. Every existing test set the CWD to the mailbox
-    directory itself, pinning the one condition under which the resolver works.
+    The boundary reads reply.py's ``reply_path`` stamp; a CWD walk-up misses a seat deep in the project.
     """
 
     def _boundary(self, recipient: Path, email_data, sender_email: str = "@baud", to_branch: str = "@devpulse"):
@@ -469,8 +412,7 @@ class TestReplyProofMailboxResolution:
         return seat
 
     def test_reply_passes_when_the_cwd_walk_up_finds_no_mailbox(self, repo, deep_seat):
-        """The reported bug: a real reply, refused because the proof was sought
-        in a mailbox the caller does not happen to be standing in."""
+        """A real reply passes though the caller does not stand in its mailbox."""
         refused, msg = self._boundary(
             repo / "src" / "aipass" / "devpulse",
             email_data={
@@ -490,8 +432,7 @@ class TestReplyProofMailboxResolution:
         assert refused is True
 
     def test_a_stamped_path_outside_the_senders_project_is_not_proof(self, repo, deep_seat):
-        """The fence: reply_path travels with the message, so it cannot be
-        allowed to nominate an arbitrary mailbox elsewhere on disk."""
+        """reply_path travels with the message, so it cannot nominate a mailbox outside the project."""
         outsider = repo / "src" / "aipass" / "devpulse" / ".ai_mail.local"
         outsider.mkdir(parents=True, exist_ok=True)
         (outsider / "inbox.json").write_text(
@@ -536,23 +477,11 @@ class TestReplyProofMailboxResolution:
         assert refused is False
 
 
-# --- Verified-admin @all reaches the residents (DPLAN-0318 circle close) ----
-#
-# Ruled after this morning's fleet-push announcement had to be hand-sent to the
-# four resident projects in four separate admin sends, because @all could not
-# carry it. The widening applies ONLY behind the five-leg admin verification;
-# an ordinary citizen's @all stays fleet-only, unchanged.
+# A verified admin's @all reaches the residents; an ordinary citizen's @all stays fleet-only.
 
 
 class TestResidentDiscovery:
-    """Discovery is registry-led, shallow, and refuses dot-prefixed components.
-
-    Replaces an AST pin that parsed @memory's RESIDENT_REGISTRIES assignment to
-    prove this branch's hardcoded mirror matched theirs. Both are gone: the
-    mirror because residency is now DECLARED in a passport, and the pin because
-    it asserted agreement between two constants rather than the behaviour either
-    produced. Nothing here reads @memory's file.
-    """
+    """Discovery is registry-led, shallow, and refuses dot-prefixed components."""
 
     @staticmethod
     def _project(root, project, branch, *, residency: Optional[str] = "resident", status="active", nested=""):
@@ -592,19 +521,10 @@ class TestResidentDiscovery:
         """CI checks out exactly this tree. Empty is an answer, not a fault."""
         assert reg.get_resident_branches(tmp_path) == {}
 
-    # --- The exclusion layers, each asserted ALONE ----------------------
-    #
-    # @memory's mutation pass proved the dot filter and the depth rule MASK each
-    # other: on the real tree marketstand is excluded by both, so deleting
-    # either one changes nothing and a passing suite says nothing. Each fixture
-    # below is refused by exactly ONE layer.
+    # The dot filter and depth rule mask each other: each fixture below is refused by exactly ONE layer.
 
     def test_dot_prefixed_project_is_refused_by_the_dot_filter_alone(self, tmp_path):
-        """Depth-legal (one level) but hidden: only the dot filter can refuse it.
-
-        pathlib globs DO match hidden directories, unlike a shell — so without
-        an explicit filter `projects/.archive/` walks straight back in.
-        """
+        """Depth-legal (one level) but hidden: only the dot filter can refuse it (pathlib globs match dot dirs)."""
         self._project(tmp_path, ".archive", "marketstand")
         assert reg.get_resident_branches(tmp_path) == {}
 
@@ -612,8 +532,6 @@ class TestResidentDiscovery:
         """No dot anywhere: only the one-level depth rule can refuse it."""
         self._project(tmp_path, "deepproj", "deepbranch", nested="held/inner")
         assert reg.get_resident_branches(tmp_path) == {}
-
-    # --- Classification: both keys required, every refusal NAMED --------
 
     def test_registry_active_but_passport_silent_is_refused(self, tmp_path):
         self._project(tmp_path, "quiet", "quiet", residency=None)
@@ -645,11 +563,8 @@ class TestResidentDiscovery:
         reg.get_resident_branches(tmp_path)
         assert any("impostor" in e.lower() and "core" in e.lower() for e in errors), errors
 
-    # --- The trust model ------------------------------------------------
-
     def test_a_passport_cannot_add_a_branch_no_registry_lists(self, tmp_path):
-        """Unreachable BY CONSTRUCTION: nothing walks passports, so there is no
-        path for a declaration alone to widen scope."""
+        """Unreachable BY CONSTRUCTION: nothing walks passports, so a declaration alone cannot widen scope."""
         stray = tmp_path / "projects" / "ghost" / "src" / "ghost" / ".trinity"
         stray.mkdir(parents=True)
         (stray / "passport.json").write_text(json.dumps({"citizenship": {"residency": "resident"}}), encoding="utf-8")
@@ -658,18 +573,7 @@ class TestResidentDiscovery:
     def test_a_built_fleet_of_four_residents_all_resolve(self, tmp_path):
         """Behavioural, against a tree this test builds — not against THIS machine.
 
-        projects/* is gitignored — each project is its own repo — so a fresh
-        checkout and CI have no fleet to read (fresh_clone, 2026-09-08). The
-        previous version of this test read the real projects/ tree and, when
-        that tree was absent, fell back to asserting the empty dict — two
-        oracles for one test, and the one a fresh clone or CI actually hits was
-        never proven against a real multi-project shape.
-
-        This plants a synthetic fleet with the same shape as the live one —
-        four declared residents, plus a retired project and a dot-prefixed one
-        that the existing exclusion tests above already prove are refused —
-        and resolves it the way ``test_a_declared_resident_is_discovered``
-        already does, just with more than one project at once.
+        projects/* is gitignored, so a fresh checkout and CI have no fleet to read.
         """
         assert reg.RESIDENT_PROJECTS_DIR == "projects", (
             "the resident tree was renamed — re-aim this pin rather than letting it skip"

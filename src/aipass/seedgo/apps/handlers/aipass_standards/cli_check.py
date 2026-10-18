@@ -3,15 +3,10 @@
 # Description: CLI Standards Checker Handler
 # Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
-"""
-CLI Standards Checker Handler
-
-Validates module compliance with AIPass CLI standards.
-Checks console.print() usage, CLI service imports, handler separation.
-"""
+"""CLI Standards Checker Handler"""
 
 import ast
 import re
@@ -22,11 +17,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
-# Audit scope: all Python files
 AUDIT_SCOPE = "all_files"
-# Applies to production source only: this is about a branch's CLI surface, and a
-# test file is not one. Declared for correctness rather than for noise -- it fails
-# on no test file in the fleet today, but nothing made that a guarantee.
+# Applies to production source only: a test file is not a branch's CLI surface.
 APPLIES_TO = "production"
 
 
@@ -41,18 +33,7 @@ _RELAYED_STREAM = re.compile(
 
 
 def _is_raw_write_violation(line: str) -> bool:
-    """Is this line a raw stream write the CLI standard should object to?
-
-    The rule means "route YOUR OWN output through Rich". @drone's router relays
-    a child process's captured bytes verbatim — `sys.stdout.write(result.stdout)`
-    — and Rich would interpret markup in, wrap and re-style output drone never
-    authored, which is exactly what a router must not do (@devpulse, 2026-08-31).
-    The checker was grepping a VERB where the rule asks an AUTHORSHIP question.
-
-    The exemption is keyed on the ARGUMENT so it cannot be borrowed: a literal,
-    an f-string or a value you built is still a violation. It also requires the
-    streams to correspond, so a captured stderr written to stdout stays red.
-    """
+    """Is this line a raw stream write the CLI standard should object to?"""
     code_part = line.split("#")[0] if "#" in line else line
     if "sys.stdout.write(" not in code_part and "sys.stderr.write(" not in code_part:
         return False
@@ -60,23 +41,7 @@ def _is_raw_write_violation(line: str) -> bool:
 
 
 def _console_import_line(content: str) -> Optional[int]:
-    """Line number of the module's OWN module-level import of the cli console.
-
-    Returns None when the module never imports it — which is deliberately NOT
-    an exemption on its own. A module that has no console has nothing this
-    standard would recognise as the right instrument, and exempting all of them
-    would hand every future modules/ file a blanket pass for raw writes. In the
-    checker's current scope (modules/ and apps/ entry points) that clause alone
-    exempts 0 sites today and an unbounded number tomorrow, which is exactly the
-    kind of hole a single clause hides. Measured, then rejected.
-
-    Args:
-        content: Full file source.
-
-    Returns:
-        The 1-based line of the earliest module-level ``aipass.cli`` import, or
-        None if the module never imports one.
-    """
+    """Line number of the module's OWN module-level import of the cli console."""
     try:
         tree = ast.parse(content)
     except SyntaxError as exc:
@@ -95,72 +60,17 @@ def _console_import_line(content: str) -> Optional[int]:
 
 
 def _is_pre_console_bootstrap(line_number: int, console_line: Optional[int]) -> bool:
-    """True for a raw write in the window before the console exists.
-
-    THE WINDOW IS REAL, not a preference. @commons' entry point removes apps/
-    from sys.path[0] so commons.py cannot shadow the commons package, and that
-    repair must run BEFORE any cross-branch import — importing @cli up there is
-    the very thing the repair exists to make safe. So in those few lines the
-    console this standard demands does not exist yet, and the rule is not
-    "wrong", it is UNSATISFIABLE. A checker that convicts on an unsatisfiable
-    clause teaches branches to take waivers.
-
-    TWO CLAUSES, and the pair is what makes it narrow (measured 2026-08-31):
-      1. the module imports the cli console AT ALL — so the exemption is only
-         ever available to code that does use Rich, twenty lines further down;
-      2. the write LEXICALLY PRECEDES that import — the window, and nothing
-         after it.
-    Clause 2 alone is meaningless without an import to precede. Clause 1 alone
-    exempts every console-less module. Together they clear exactly ONE site in
-    the fleet, the one reported.
-
-    Lexical order is the right test rather than a stricter "before any
-    cross-branch import", because the write's only alternative instrument is
-    the console, and the console's availability is decided by that one import
-    line. @commons proved the point by MEASURING the alternative — moving the
-    prax import above their repair works today — and reverting it anyway,
-    because "no leak" is a fact about another branch's import hygiene that
-    their entry point would then silently depend on forever.
-
-    Args:
-        line_number: 1-based line of the raw write.
-        console_line: Result of :func:`_console_import_line`.
-
-    Returns:
-        True if the write sits in the pre-console window.
-    """
+    """True for a raw write in the window before the console exists."""
     return console_line is not None and line_number < console_line
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """
-    Check if module follows CLI standards
-
-    Args:
-        module_path: Path to Python module to check
-        bypass_rules: Optional list of bypass rules for specific violations
-
-    Returns:
-        dict: {
-            'passed': bool,           # Overall pass/fail
-            'checks': [               # Individual check results
-                {
-                    'name': str,      # Check name
-                    'passed': bool,   # Pass/fail
-                    'message': str,   # Details
-                }
-            ],
-            'score': int,             # 0-100 percentage
-            'standard': str           # Standard name
-        }
-    """
+    """Check if module follows CLI standards"""
     checks = []
     path = Path(module_path)
 
-    # Normalize to forward slashes so string matching works on Windows too
     module_path = Path(module_path).as_posix()
 
-    # Check if entire standard is bypassed for this file
     if is_bypassed(module_path, "cli", bypass_rules=bypass_rules):
         return {
             "passed": True,
@@ -169,7 +79,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "CLI",
         }
 
-    # Validate file exists
     if not path.exists():
         return {
             "passed": False,
@@ -178,7 +87,6 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "CLI",
         }
 
-    # Read file
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -192,42 +100,35 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "CLI",
         }
 
-    # Determine file type (handle both absolute and relative paths)
     is_handler = "handlers/" in module_path
     is_module = "modules/" in module_path
     is_entry_point = path.name.endswith(".py") and "apps/" in module_path and path.parent.name == "apps"
 
-    # Check 1: Handler separation (handlers must NOT have console output)
     if is_handler:
         handler_separation_check = check_handler_separation(content)
         checks.append(handler_separation_check)
 
-    # Check 2: CLI service imports (modules/entry points should use CLI services)
     if is_module or is_entry_point:
         cli_imports_check = check_cli_imports(content, module_path)
         if cli_imports_check:
             checks.append(cli_imports_check)
 
-    # Check 3: No bare print() statements (modules should use console.print())
     if is_module or is_entry_point:
         print_usage_check = check_print_usage(content, lines, module_path, bypass_rules=bypass_rules)
         if print_usage_check:
             checks.append(print_usage_check)
 
-    # Check 4: --help flag support (modules should have --help)
     if is_module or is_entry_point:
         help_flag_check = check_help_flag(content)
         if help_flag_check:
             checks.append(help_flag_check)
 
-    # Check 5: No duplicate display functions (use CLI service instead)
     if is_module or is_entry_point:
         duplicate_display_check = check_duplicate_display_functions(content, module_path)
         if duplicate_display_check:
             checks.append(duplicate_display_check)
 
-    # If no checks applied (file outside 3-layer architecture: plugins, helpers, etc.)
-    # treat as passing — these files are not subject to CLI standards
+    # Files outside the 3-layer architecture are not subject to CLI standards.
     if not checks:
         return {
             "passed": True,
@@ -243,12 +144,10 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "CLI",
         }
 
-    # Calculate score
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
 
-    # Overall pass if score >= 75%
     overall_passed = score >= 75
 
     json_handler.log_operation("check_completed", {"file": str(module_path), "score": score, "standard": "cli"})
@@ -274,43 +173,7 @@ def _console_print_in_string(line: str, stripped: str) -> bool:
 
 
 def _stderr_directed_print_lines(content: str) -> set:
-    r"""Lines holding a ``print(..., file=sys.stderr)`` call.
-
-    THE RULE ALREADY AGREED, on one of its two spellings. ``check_module``
-    scores a handler 100 for ``sys.stderr.write(msg)`` and 0 for
-    ``print(msg, file=sys.stderr)`` — measured on @skills' module_paths.py and
-    @flow's import fence, 2026-08-31. Same stream, same bytes, 100 points apart
-    on nothing but which call the author reached for.
-
-    Handler separation exists so a handler does not DISPLAY, and display is
-    stdout: the channel a router's output travels on. stderr is where a
-    diagnostic goes precisely so it does not pollute that channel, which is why
-    the raw-write form was never flagged. @flow reported it from the hardest
-    case — the cross-branch import fence, which runs before any logger in the
-    branch exists, being told to "use logger instead".
-
-    The stream must be NAMED. A bare ``print()`` is display, ``file=sys.stdout``
-    is display said out loud, and a print into some other file handle is a write
-    nobody is watching — the same qualification ``exception_handling``'s report
-    clause needs for ``.write``.
-
-    Args:
-        content: Module source.
-
-    Returns:
-        1-indexed line numbers of stderr-directed print calls. Empty when the
-        source will not parse: an exemption bought with a SyntaxError is an
-        exemption granted on ignorance.
-
-    Note:
-        The ``ast.Name`` test on the callee is an EQUIVALENT MUTANT — widening
-        it to match ``obj.print(...)`` changes no answer, because the caller
-        only ever subtracts from lines the ``^\s*print\s*\(`` regex already
-        matched, and a dotted call never starts a line that way. Recorded here
-        (mutation run 2026-08-31, survived) so nobody hunts for the pin that
-        does not exist. It stays because the function claims to find print
-        calls and should mean the builtin.
-    """
+    r"""Lines holding a ``print(..., file=sys.stderr)`` call."""
     try:
         tree = ast.parse(content)
     except SyntaxError:
@@ -330,24 +193,16 @@ def _stderr_directed_print_lines(content: str) -> set:
 
 
 def check_handler_separation(content: str) -> Dict:
-    """
-    Check that handlers don't have console output
-
-    Handlers should return data, modules should handle display
-    Only checks actual code (not strings or comments)
-    Excludes: if __name__ == '__main__': blocks (test/debug code is OK)
-    """
+    """Check that handlers don't have console output"""
     lines = content.split("\n")
     stderr_prints = _stderr_directed_print_lines(content)
 
-    # Find code section boundaries (skip docstrings and comments)
     in_docstring = False
     docstring_marker: Optional[str] = None
     console_print_lines = []
     cli_import_lines = []
     print_lines = []
 
-    # Track if we're inside an if __name__ == '__main__': block
     in_main_block = False
     main_block_indent = 0
 
@@ -355,30 +210,18 @@ def check_handler_separation(content: str) -> Dict:
         stripped = line.strip()
         current_indent = len(line) - len(line.lstrip()) if line.strip() else 0
 
-        # Detect entry into if __name__ == '__main__': block
         if "if __name__ ==" in stripped and "__main__" in stripped:
             in_main_block = True
             main_block_indent = current_indent
             continue
 
-        # Detect exit from if __name__ == '__main__': block
         if in_main_block and stripped and current_indent <= main_block_indent:
             in_main_block = False
 
-        # Skip checking if we're inside the __main__ block (test/debug code)
         if in_main_block:
             continue
 
-        # Track docstrings, REMEMBERING WHICH MARKER OPENED THE BLOCK.
-        #
-        # A single boolean toggled by either marker is wrong inside a block: a
-        # `'''` written as prose inside a `\"\"\"` docstring closed it, and every
-        # line after it was read as code. Measured 2026-09-19 on this pack's own
-        # `imports_check.py`, whose docstring quotes both markers while
-        # explaining them - one prose line flipped the flag and the line
-        # `Allowed: from aipass.cli import ...` two lines later was reported as
-        # a real CLI import in a handler. Only the marker that opened a block
-        # can close it; the other is content.
+        # Only the marker that opened a docstring block can close it; the other is content.
         triple_double = line.count('"""')
         triple_single = line.count("'''")
         if in_docstring:
@@ -400,30 +243,22 @@ def check_handler_separation(content: str) -> Dict:
         if triple_double >= 2 or triple_single >= 2:
             continue
 
-        # Skip if in docstring or comment
         if in_docstring or stripped.startswith("#"):
             continue
 
-        # Look for actual console.print() calls
-        # Must be actual code, not in a string
         if "console.print(" in stripped:
             if _console_print_in_string(line, stripped):
                 continue
-            # This is likely an actual call
             console_print_lines.append(i)
 
-        # Look for actual CLI service imports (canonical, sub-module, or shortcut)
         if re.search(r"from aipass\.cli\.apps\.modules[\.\s]", stripped) or "from aipass.cli import" in stripped:
-            # Skip if in a string
             if '"from aipass.cli' in line or "'from aipass.cli" in line:
                 continue
-            # This is likely an actual import
             cli_import_lines.append(i)
 
         # Look for print() calls. A print DIRECTED AT stderr is a diagnostic,
         # not display, and the raw-write spelling of it has always passed.
         if re.search(r"^\s*print\s*\(", line) and i not in stderr_prints:
-            # This is an actual print call at start of line (not in string)
             print_lines.append(i)
 
     if console_print_lines:
@@ -451,26 +286,16 @@ def check_handler_separation(content: str) -> Dict:
 
 
 def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
-    """
-    Check for CLI service imports
-
-    Modules should import from cli.apps.modules
-    Exception: CLI branch itself uses internal imports
-    """
+    """Check for CLI service imports"""
     # Exception: CLI branch uses internal imports (it's the implementation)
     if "/cli/apps/" in module_path.replace("\\", "/"):
         return {"name": "CLI service imports", "passed": True, "message": "CLI branch exempt (uses internal imports)"}
 
-    # Check for CLI imports (canonical, sub-module, or shortcut via cli/__init__.py)
-    # Matches: from aipass.cli.apps.modules import X
-    #          from aipass.cli.apps.modules.display import X
-    #          from aipass.cli import X
     has_cli_imports = (
         bool(re.search(r"from aipass\.cli\.apps\.modules[\.\s]", content)) or "from aipass.cli import" in content
     )
 
     if has_cli_imports:
-        # Check what's imported (canonical full path, sub-module path, or shortcut via __init__.py)
         import_match = (
             re.search(r"from aipass\.cli\.apps\.modules\.\w+ import (.+)", content)
             or re.search(r"from aipass\.cli\.apps\.modules import (.+)", content)
@@ -480,7 +305,6 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
             imports = import_match.group(1)
             return {"name": "CLI service imports", "passed": True, "message": f"Using CLI services ({imports})"}
 
-    # No CLI imports found - check if there's any output at all
     has_console_print = "console.print(" in content
     has_print = bool(re.search(r"\bprint\s*\(", content))
     has_raw_write = "sys.stdout.write(" in content or "sys.stderr.write(" in content
@@ -492,35 +316,19 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
             "message": "Has output but missing CLI service imports (import from cli.apps.modules)",
         }
 
-    # No output at all - that's fine for some modules
     return {"name": "CLI service imports", "passed": True, "message": "No CLI output needed"}
 
 
 def check_print_usage(
     content: str, lines: List[str], module_path: str = "", bypass_rules: list | None = None
 ) -> Optional[Dict]:
-    """
-    Check for bare print() statements (should use console.print() instead)
-
-    Looks for print( NOT preceded by a dot (to exclude console.print, logger.print, etc.)
-    Also checks for parser.print_help() which uses plain print internally
-    Excludes: if __name__ == '__main__': blocks (test/debug code is OK)
-    Excludes: lines with bypass rules in .seedgo/bypass.json
-
-    Args:
-        content: File content as string
-        lines: File lines as list
-        module_path: Path to module being checked (for error messages)
-        bypass_rules: Optional bypass rules from .seedgo/bypass.json
-    """
-    # Find print() statements and raw stdout/stderr writes
+    """Check for bare print() statements (should use console.print() instead)"""
     console_line = _console_import_line(content)
     print_lines = []
     parser_print_help_lines = []
     format_help_lines = []
     raw_write_lines = []
 
-    # Track if we're inside an if __name__ == '__main__': block
     in_main_block = False
     main_block_indent = 0
 
@@ -528,32 +336,24 @@ def check_print_usage(
         stripped = line.strip()
         current_indent = len(line) - len(line.lstrip()) if line.strip() else 0
 
-        # Detect entry into if __name__ == '__main__': block
         if "if __name__ ==" in stripped and "__main__" in stripped:
             in_main_block = True
             main_block_indent = current_indent
             continue
 
-        # Detect exit from if __name__ == '__main__': block
-        # (when we find non-empty code at same or lower indentation level)
         if in_main_block and stripped and current_indent <= main_block_indent:
             in_main_block = False
 
-        # Skip checking if we're inside the __main__ block (test/debug code)
         if in_main_block:
             continue
 
-        # Skip comments
         if stripped.startswith("#"):
             continue
 
-        # Skip bypassed lines
         if is_bypassed(module_path, "cli", line=i, bypass_rules=bypass_rules):
             continue
 
-        # Check for parser.print_help() - uses plain print() internally
         if "parser.print_help()" in stripped:
-            # Skip if in a comment
             if "#" in line:
                 code_part = line.split("#")[0]
                 if "parser.print_help()" in code_part:
@@ -561,7 +361,6 @@ def check_print_usage(
             else:
                 parser_print_help_lines.append(i)
 
-        # Check for .format_help() - returns plain argparse text
         if ".format_help()" in stripped:
             if "#" in line:
                 code_part = line.split("#")[0]
@@ -570,16 +369,12 @@ def check_print_usage(
             else:
                 format_help_lines.append(i)
 
-        # Raw sys.stdout/stderr.write() — bypasses Rich, EXCEPT when it is a
-        # verbatim relay of a captured subprocess stream (see the helper), or
-        # when it sits in the window before this module's own console exists.
+        # Raw sys.stdout/stderr.write() bypasses Rich, except a captured-stream relay
+        # or a write in the window before this module's own console exists.
         if _is_raw_write_violation(line) and not _is_pre_console_bootstrap(i, console_line):
             raw_write_lines.append(i)
 
-        # Use regex to find BARE print() - not preceded by . or word character
-        # This excludes: console.print(), logger.print(), pprint(), etc.
         if re.search(r"(?<![.\w])print\s*\(", line):
-            # Skip if in a comment
             if "#" in line:
                 code_part = line.split("#")[0]
                 if re.search(r"(?<![.\w])print\s*\(", code_part):
@@ -587,12 +382,10 @@ def check_print_usage(
             else:
                 print_lines.append(i)
 
-    # Get filename for better error messages
     from pathlib import Path
 
     filename = Path(module_path).name if module_path else "file"
 
-    # Check for parser.print_help() first (more specific violation)
     if parser_print_help_lines:
         return {
             "name": "print() usage",
@@ -635,7 +428,6 @@ def check_print_usage(
             ),
         }
 
-    # Check if using console.print()
     has_console_print = "console.print(" in content
 
     if has_console_print:
@@ -645,24 +437,16 @@ def check_print_usage(
 
 
 def check_help_flag(content: str) -> Optional[Dict]:
-    """
-    Check for --help flag implementation
-
-    Modules should respond to --help
-    """
-    # Look for --help handling
+    """Check for --help flag implementation"""
     has_help_flag = "--help" in content and ("-h" in content or "help" in content)
 
-    # Look for argparse usage
     has_argparse = "argparse.ArgumentParser" in content or "import argparse" in content
 
-    # Look for print_help function
     has_print_help = "def print_help" in content
 
     if has_print_help or (has_help_flag and has_argparse):
         return {"name": "--help flag", "passed": True, "message": "--help flag implemented"}
 
-    # Check if it's a simple module that might not need --help
     if "__main__" not in content:
         return None  # Not an executable module
 
@@ -689,14 +473,7 @@ def _module_level_function_names(content: str) -> set:
 
 
 def check_duplicate_display_functions(content: str, module_path: str = "") -> Optional[Dict]:
-    """
-    Check for duplicate display functions that should use CLI service instead.
-
-    CLI service provides: header(), success(), error(), warning(), info()
-    Modules should import these, not define their own.
-    Exception: CLI branch itself defines these functions.
-    """
-    # Exception: CLI branch defines these functions
+    """Check for duplicate display functions that should use CLI service instead."""
     if "/cli/apps/" in module_path.replace("\\", "/"):
         return None
 
@@ -704,15 +481,10 @@ def check_duplicate_display_functions(content: str, module_path: str = "") -> Op
     if "/prax/apps/modules/logger" in module_path.replace("\\", "/"):
         return None
 
-    # Display functions that CLI service provides
     cli_display_functions = ["header", "success", "error", "warning", "info"]
 
-    # Look for local function definitions that duplicate CLI service.
-    # Module-level defs only: a substring scan cannot tell a display helper from
-    # a logger METHOD (class TrailLogger: def error(self, ...)), and a class that
-    # exposes .error/.warning/.info is the fleet's logger API, not a duplicate of
-    # cli.display. Parsing also keeps "def error(" inside a string or comment
-    # from reading as a definition.
+    # Module-level defs only: a class exposing .error/.warning/.info is the fleet's logger
+    # API, not a duplicate of cli.display; parsing also ignores "def error(" in strings.
     defined_at_module_level = _module_level_function_names(content)
     duplicates_found = [name for name in cli_display_functions if name in defined_at_module_level]
 

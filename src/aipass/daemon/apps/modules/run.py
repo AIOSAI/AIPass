@@ -3,14 +3,13 @@
 # Description: Manual one-tick scheduler command (drone @daemon run)
 # Version: 1.6.2
 # Created: 2026-06-15
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Manual one-tick scheduler — discover .daemon/ jobs, fire due ones via wake_branch.
 
-Handles 'drone @daemon run': one discover -> due-check -> fire pass.
-Part of the DPLAN-0204 decentralized scheduler redesign.
+Reference: docs/scheduler_tick.md
 """
 
 import sys
@@ -53,24 +52,14 @@ LOCK_FILE = _DAEMON_ROOT / "daemon_json" / "schedule.lock"
 
 HANDLED_COMMANDS = {"run"}
 
-# What a single fire attempt ended as. Three states, not two: a wake that was
-# REFUSED before anything started is neither a run nor a failure, and collapsing
-# it into either one is the defect this vocabulary exists to prevent.
-# Re-exported, not redefined: catch_up_lane's drain branches on the same three
-# words this module returns, and one definition means they cannot drift. Callers
-# and tests that import these from run keep working.
+# Three states: a wake REFUSED before it started is neither a run nor a failure.
+# Re-exported from catch_up_lane so the drain and this module cannot drift.
 OUTCOME_FIRED = catch_up_lane.OUTCOME_FIRED
 OUTCOME_FAILED = catch_up_lane.OUTCOME_FAILED
 OUTCOME_BLOCKED = catch_up_lane.OUTCOME_BLOCKED
 
-# wake_branch gates that refuse BEFORE a process exists. Read by step LABEL from
-# the DispatchStatus rather than by matching the prose in `summary`, which is a
-# human-facing string ai_mail is free to reword.
-#
-# Deliberately NOT here: "resolve" (the branch does not exist) and "blocklist"
-# (the target is refused by policy). Both are decided, not transient - nothing
-# about the next two minutes changes the answer, so retrying them on every tick
-# inside the window is noise. Those stay failures and keep the failure backoff.
+# wake_branch gates that refuse BEFORE a process exists, matched by step label (summary prose may change).
+# "resolve" and "blocklist" are deliberately absent: not transient, so they stay failures with backoff.
 _BLOCKED_STEPS = ("pause", "lock", "blocked", "lock-acquire")
 
 
@@ -121,9 +110,7 @@ def _should_notify(job: dict) -> bool:
 def _blocked_reason(status) -> str:
     """Name the gate that refused to START this wake, or "" if none did.
 
-    Reads the gate's own verdict via find_step() — a step counts only when it
-    actually FAILED, because the same labels are written on the happy path too
-    ("lock: No active lock — agent is sleeping" is an `ok`, not a refusal).
+    Only a FAILED step counts: the same labels are written as `ok` on the happy path.
     """
     for label in _BLOCKED_STEPS:
         step = status.find_step(label)
@@ -141,12 +128,9 @@ def _mail_notice(to: str, subject: str, body: str) -> None:
 
 
 def _fire_command_job(job: dict) -> tuple:
-    """Run a command job's drone command as a subprocess (DPLAN-0338). No wake, no seat, no tokens.
+    """Run a command job's drone command as a subprocess. No wake, no seat, no tokens.
 
-    Never BLOCKED: nothing uses a seat, so no gate can refuse it and no active-agent
-    lock is taken. Exit 0 is FIRED; a non-zero exit, a timeout or a command that
-    never started is FAILED with the output tail as its detail. FIRE and DONE go
-    to the console (the tick log) AND the logger (logs/run.log), pass or fail.
+    Never BLOCKED: exit 0 is FIRED; anything else is FAILED with the output tail as detail.
     """
     from aipass.daemon.apps.handlers.schedule.telegram_notifier import notify_complete, notify_error, notify_triggered
 
@@ -177,38 +161,23 @@ def _fire_command_job(job: dict) -> tuple:
 
 
 def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
-    """Fire a single job via direct wake_branch import (DPLAN-0204 path A).
+    """Fire a single job via direct wake_branch import.
 
-    Rotation jobs don't wake their owner — they wake tonight's steward — so they
-    are handed to the rotation module, which owns target selection and pointer
-    state (DPLAN-0287).
-
-    Returns (outcome: str, detail: str) where outcome is one of OUTCOME_FIRED,
-    OUTCOME_FAILED or OUTCOME_BLOCKED. The third state is the point: only a wake
-    that actually STARTED consumes the job's period.
-
-    Rotation keeps the two-state answer and is mapped, not reclassified. A busy
-    steward is already a recorded MISS there — the pointer advanced and a
-    different citizen gets the night — so that night is genuinely spent, and
-    calling it blocked would re-fire a rotation whose turn was already taken.
-
-    A command job (DPLAN-0338) is asked about FIRST, ahead of rotation: a job that
-    carries a command never wakes anyone, whatever else its schedule says.
+    Returns (outcome, detail); only OUTCOME_FIRED consumes the job's period. Rotation never
+    reports BLOCKED: a busy steward is already a recorded miss, so blocked would re-fire it.
     """
     if "command" in job:
         return _fire_command_job(job)
 
     if job.get("schedule", {}).get("type") == ROTATION_TYPE:
         ok, detail = fire_rotation(job, runstate, header=header)
-        # Logged here, not in rotation: prax files a line under the calling
-        # module, and every tick outcome belongs in logs/run.log.
+        # Logged here, not in rotation: prax files a line under the calling module (logs/run.log).
         if ok:
             logger.info("[run] Fired %s/%s: %s", job["owner"], job["id"], detail)
         else:
             logger.warning("[run] Failed to fire %s/%s: %s", job["owner"], job["id"], detail)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
-    # Through ai_mail's published door (DPLAN-0404)
     from aipass.ai_mail.apps.modules.door_wake import wake_branch
     from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
         notify_triggered,
@@ -238,18 +207,10 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             auto=True,
             sender="@daemon",
             model=model,
-            # Every wake this module makes was fired by a clock, so it is a
-            # scheduled wake by definition — the flag describes THIS caller's
-            # lane, never the target. A manager target then goes headless
-            # through dispatch_monitor (self-terminating, context pin, bounce
-            # mail, lock cleanup) instead of an interactive tmux room that
-            # nothing ever closes, and which blocked the next night's fire.
-            # Deciding it per-target would mean reading the target's passport
-            # here — a second copy of the manager gate wake_branch owns.
+            # Describes this caller's lane, not the target: a manager target goes headless
+            # instead of an interactive tmux room nothing closes (which blocks the next fire).
             scheduled=True,
-            # A clock fired this, so the daemon never wants the answer: no job
-            # prompt asks for one, and a wake-back would spend a whole @daemon
-            # session reading a reply that does not exist (DPLAN-0337 R2).
+            # No job prompt wants an answer; a wake-back would spend a @daemon session on nothing.
             wake_back=False,
         )
         if ok:
@@ -261,9 +222,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
 
         blocked = _blocked_reason(status)
         if blocked:
-            # No telegram: a deferral is not an error, and a target that stays
-            # busy would otherwise ping once per retry for as long as it sat
-            # there. The console line and the prax record still name it.
+            # No telegram: a deferral is not an error, and a busy target would ping once per retry.
             _log(f"BLOCKED: {owner}/{job_id} — {blocked}; stays due, retries this window")
             logger.info("[run] Blocked firing %s/%s: %s — not recorded as a run", owner, job_id, blocked)
             return OUTCOME_BLOCKED, blocked
@@ -285,15 +244,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
 def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> int:
     """Give every never-run interval job a rhythm before it can fire. Returns count seeded.
 
-    Runs BEFORE the due check, because an unseeded interval job is due on the
-    very tick that discovers it — seeding afterwards would already have fired it
-    at whatever minute the daemon happened to tick, which is the whole defect.
-
-    A job declaring no slot keeps today's behaviour and fires immediately, unless
-    its interval_minutes is not a positive number, which never fires. That
-    is not silent: it warns, names itself, and says what is about to happen, so
-    an owner who wanted a slot finds out on the first tick rather than a week
-    later from the wrong hour in their log.
+    Must run BEFORE the due check: an unseeded interval job is due on the tick that discovers it.
     """
     seeded_count = 0
     for job in enabled:
@@ -340,13 +291,7 @@ def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> 
 
 
 def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -> int:
-    """Write one MISSED line per daily job whose window closed unrun. Returns count.
-
-    Independent of ``catch_up``: a job nobody opted in still missed its window,
-    and that is exactly the fact an operator needs in order to decide whether to
-    opt it in. Stamped once per job per day so a tick every two minutes does not
-    repeat the same miss until midnight.
-    """
+    """Write one MISSED line per daily job whose window closed unrun, catch_up or not. Returns count."""
     missed_count = 0
     for job in enabled:
         if not missed_window(job, runstate):
@@ -354,9 +299,7 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
 
         owner, job_id = job["owner"], job["id"]
         window = window_label(job["schedule"])
-        # ONE predicate for the line and the fire. Reading the raw field here
-        # while is_job_due() read catch_up_on() is what let 11:37:52 log
-        # "catch_up is off - not firing" three seconds before firing.
+        # Same predicate is_job_due() uses; reading the raw field lets the line contradict the fire.
         catch_up = catch_up_on(job.get("schedule", {}))
 
         if dry_run:
@@ -379,14 +322,7 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
 def run_tick(dry_run: bool = False) -> dict:
     """Execute one discover -> due-check -> fire pass, and stamp the tick.
 
-    THE STAMP IS IN A finally, and that is the whole reason this wrapper exists.
-    ``last_tick`` is what gap detection reads, so a tick that returned early —
-    no jobs discovered, nothing enabled — must still record that the scheduler
-    was alive. Miss those and the next tick reports a gap the fleet never had,
-    and queues catch-ups for windows nobody missed.
-
-    A dry run stamps nothing: it is a question about the world, not an event in
-    it, and answering it must not erase the gap a real tick is about to report.
+    The stamp is in a finally: gap detection reads last_tick, so early returns must stamp too.
     """
     runstate = load_runstate()
     try:
@@ -416,7 +352,6 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 
     json_handler.log_operation("scheduler_tick", {"dry_run": dry_run})
 
-    # Step 1: Discover
     _log("Discovering .daemon/ schedule files...")
     jobs = discover_jobs()
     results["discovered"] = len(jobs)
@@ -425,7 +360,6 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         _log("No jobs discovered.")
         return results
 
-    # Step 2: Filter enabled
     enabled = [j for j in jobs if j.get("enabled", True)]
     results["enabled"] = len(enabled)
     _log(f"Found {len(jobs)} job(s), {len(enabled)} enabled")
@@ -434,12 +368,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         _log("No enabled jobs.")
         return results
 
-    # Step 3: Check due. The runstate arrived from run_tick, which holds it so
-    # the tick stamp survives every early return above.
-    # Prune orphan runstate entries. Persist immediately when anything changed:
-    # pruning happens on every tick but the save used to live inside the fire
-    # loop, so quiet ticks dropped their prunes and stale entries survived for
-    # months (DPLAN-0287 piece 3).
+    # Save prunes now: quiet ticks never reach the save in the fire loop.
     active_keys = {job_key(j["owner"], j["id"]) for j in jobs}
     pruned = prune_orphans(runstate, active_keys)
     if pruned and not dry_run:
@@ -448,9 +377,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 
     results["seeded"] = _seed_interval_slots(enabled, runstate, dry_run)
 
-    # DPLAN-0332. Before the due check on purpose: a job whose regular window is
-    # open right now must be able to supersede its own queued entry on this very
-    # tick, and it can only do that if the entry already exists.
+    # Before the due check: an open window can only supersede its queued entry if the entry exists.
     gap, results["queued"] = catch_up_lane.detect_and_queue(enabled, runstate, dry_run, _log)
 
     results["missed"] = _report_missed_windows(enabled, runstate, dry_run)
@@ -463,8 +390,6 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         _log("No jobs due at this time.")
         for j in enabled:
             _log(f"  {j['owner']}/{j['id']} — not due")
-        # A quiet tick is exactly when the queue should move: nothing is
-        # competing for the fleet and the branches are most likely free.
         results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, _log, _fire_job)
         return results
 
@@ -476,17 +401,11 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         _log("DRY RUN — no jobs fired.")
         return results
 
-    # Step 4: Fire due jobs
     for job in due_jobs:
-        # Asked BEFORE the fire: firing is what makes it untrue, so a caught-up
-        # run read after the fact would always report as an ordinary one.
+        # Asked BEFORE the fire: firing makes it untrue.
         caught_up = is_catch_up_fire(job, runstate)
 
-        # SUPERSESSION (DPLAN-0332). This job's regular window arrived before
-        # its queued catch-up got a turn, so the queue entry is dropped — but
-        # its missed list rides along on THIS wake. The truth about time travels
-        # with whichever wake goes first, or an agent whose catch-up was
-        # superseded would never learn it was away at all.
+        # A superseded queue entry's missed list rides on this wake, or the agent never learns it was away.
         superseded = recovery.drop_from_queue(runstate, job["owner"], job["id"])
         missed_list = superseded.get("missed", []) if superseded else []
         if superseded:
@@ -506,8 +425,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
                 _log(f"CAUGHT UP: {job['owner']}/{job['id']} — ran after its {window} window closed")
             update_job_runstate(runstate, job["owner"], job["id"], job["schedule"], caught_up=caught_up)
         elif outcome == OUTCOME_BLOCKED:
-            # Never stamps last_run — the job stays due and the next tick tries
-            # again inside the same window.
+            # Never stamps last_run: the job stays due for the next tick.
             results["blocked"] += 1
             record_job_blocked(runstate, job["owner"], job["id"], detail)
         else:
@@ -518,8 +436,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         if job != due_jobs[-1]:
             time.sleep(1.0)
 
-    # One catch-up per tick at most, and never in front of a live window: the
-    # on-time fires above have already had their turn.
+    # At most one catch-up per tick, and only after the on-time fires.
     results["drained"] = catch_up_lane.drain_one(runstate, enabled, dry_run, _log, _fire_job)
 
     _log(
@@ -534,8 +451,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
 def _run_with_lock(dry_run: bool = False) -> int:
     """Run one tick under the single-instance lock. Returns the process exit code.
 
-    LOCK_FILE stays owned HERE and is passed in, so a test that seams the path on
-    this module still seams the file that actually gets opened.
+    LOCK_FILE is read here, not in tick_lock, so tests patching run.LOCK_FILE hit the real open.
     """
     tick_lock.prepare(LOCK_FILE)
 

@@ -3,23 +3,13 @@
 # Description: Dashboard Template Diff Handler
 # Version: 1.2.0
 # Created: 2026-02-25
-# Modified: 2026-09-24
+# Modified: 2026-10-17
 # =============================================
 
 """
 Dashboard Template Diff Handler
 
-Compares the dashboard template against branch DASHBOARD.local.json files.
-Reports structural differences without modifying any files.
-
-Purpose:
-    Audit tool to see what would change before pushing templates.
-    Shows additions (sections in template not in branch), removals
-    (deprecated sections in branch not in template), and modifications
-    (quick_status keys that are outdated).
-
-Independence:
-    Reads template and registry directly. No service dependencies.
+Reference: docs/dashboard.md
 """
 
 import json
@@ -35,35 +25,18 @@ from aipass.prax.apps.handlers.dashboard.template_pusher import DEPRECATED_QUICK
 
 logger = get_direct_logger()
 
-# =============================================================================
-# PATH RESOLUTION
-# =============================================================================
-
 _PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
 
 
 def _find_repo_root() -> Path:
-    """Walk up from this file to find the repo root, never reading the cwd.
-
-    Delegates to ``handlers/repo_root.py``. Prax carried eight private copies of
-    this walk, every one ending ``return Path.cwd()`` — @memory reported the
-    consequence with a traceback on 2026-08-31: the walk runs at IMPORT time in
-    most of the fleet, so a deleted working directory crashed the import, and a
-    registry-less checkout (every clean CI clone) resolved against wherever the
-    shell stood.
-    """
+    """Walk up from this file to find the repo root, never reading the cwd."""
     return find_repo_root(Path(__file__))
 
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
 
 TEMPLATE_DIR = _PRAX_ROOT / "templates"
 TEMPLATE_FILE = TEMPLATE_DIR / "DASHBOARD.template.json"
 AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-# Deprecated sections that should be flagged for removal
 DEPRECATED_SECTIONS = [
     "bulletin_board",
     "devpulse",
@@ -74,34 +47,14 @@ DEPRECATED_SECTIONS = [
     "todo",
 ]
 
-# Deprecated quick_status keys are the pusher's list, imported above — one
-# policy, one place. The differ carried its own copy and kept recommending the
-# deletion of commons_mentions (a key @flow owns and writes) for weeks after the
-# pusher's list was corrected on 2026-08-13 (docs/dashboard.md, 2026-08-25).
-
-# The shape a template that cannot be read is assumed to have. _diff_branch
-# prefers the template it is handed; these are what it falls back to.
+# DEPRECATED_QUICK_STATUS_KEYS is imported from the pusher: a local copy drifts and
+# recommends deleting live keys. These two are only the fallback when the template says nothing.
 REQUIRED_SECTIONS = ["ai_mail", "flow", "memory"]
 REQUIRED_QUICK_STATUS_KEYS = ["new_mail", "opened_mail", "active_plans", "action_required", "summary"]
 
 
-# =============================================================================
-# DIFF LOGIC
-# =============================================================================
-
-
 def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[str, Any]:
-    """
-    Compare a single branch's dashboard against the template.
-
-    Args:
-        branch_name: Uppercase branch name
-        branch_path: Path to branch directory
-        template: Loaded template dict
-
-    Returns:
-        Dict with branch, path, additions, removals, modifications, status
-    """
+    """Compare a single branch's dashboard against the template."""
     result: Dict[str, Any] = {
         "branch": branch_name,
         "path": str(branch_path),
@@ -130,76 +83,50 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
         result["status"] = "invalid_json"
         return result
 
-    # Check _warning header
     if "_warning" not in data:
         result["additions"].append("_warning header")
 
-    # Check sections dict exists
     sections = data.get("sections", {})
     if not isinstance(sections, dict):
         result["additions"].append("sections dict (missing or invalid)")
         result["status"] = "needs_update"
         return result
 
-    # The template the caller loaded is the source, not a copy of its shape:
-    # the constants below are the fallback for a template that cannot say.
     for section_name in template.get("sections") or REQUIRED_SECTIONS:
         if section_name not in sections:
             result["additions"].append(f"{section_name} section")
 
-    # Check for deprecated sections still present
     for deprecated in DEPRECATED_SECTIONS:
         if deprecated in sections:
             result["removals"].append(f"{deprecated} section")
 
-    # Check for missing last_updated in sections
     for section_name, section_data in sections.items():
         if isinstance(section_data, dict) and "last_updated" not in section_data:
             result["additions"].append(f"last_updated field in {section_name}")
 
-    # Check quick_status for deprecated keys
     quick_status = data.get("quick_status", {})
     if isinstance(quick_status, dict):
         for dep_key in DEPRECATED_QUICK_STATUS_KEYS:
             if dep_key in quick_status:
                 result["modifications"].append(f"quick_status: remove {dep_key}")
 
-        # Same source, same fallback, for the quick_status row.
         for key in template.get("quick_status") or REQUIRED_QUICK_STATUS_KEYS:
             if key not in quick_status:
                 result["additions"].append(f"quick_status.{key}")
 
-    # Determine status
     if result["additions"] or result["removals"] or result["modifications"]:
         result["status"] = "needs_update"
 
     return result
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Compare dashboard template against branch dashboards.
-
-    If branch_name is provided, only diff that single branch.
-    Otherwise, diff all active branches from the registry.
-
-    Args:
-        branch_name: Optional uppercase branch name to filter to
-
-    Returns:
-        Dict with branches list (per-branch diffs) and summary counts
-    """
+    """Compare dashboard template against branch dashboards."""
     result: Dict[str, Any] = {
         "branches": [],
         "summary": {"needs_update": 0, "up_to_date": 0, "missing": 0, "invalid_json": 0},
     }
 
-    # Load template
     if not TEMPLATE_FILE.exists():
         return {"error": f"Template file not found: {TEMPLATE_FILE}", "branches": [], "summary": {}}
 
@@ -209,7 +136,6 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         logger.error("Invalid template JSON: %s", e)
         return {"error": f"Invalid template JSON: {e}", "branches": [], "summary": {}}
 
-    # Load AIPASS registry
     if not AIPASS_REGISTRY.exists():
         return {"error": f"AIPASS_REGISTRY.json not found: {AIPASS_REGISTRY}", "branches": [], "summary": {}}
 
@@ -219,10 +145,8 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
         logger.error("Invalid registry JSON: %s", e)
         return {"error": f"Invalid registry JSON: {e}", "branches": [], "summary": {}}
 
-    # Filter to active branches
     branches = [b for b in registry.get("branches", []) if b.get("status") == "active"]
 
-    # If branch_name specified, filter further
     if branch_name:
         target = branch_name.upper()
         branches = [b for b in branches if b.get("name", "").upper() == target]
@@ -265,10 +189,6 @@ def diff_dashboard_template(branch_name: Optional[str] = None) -> Dict[str, Any]
 
     return result
 
-
-# =============================================================================
-# CLI INTERFACE
-# =============================================================================
 
 if __name__ == "__main__":
     import sys as _sys

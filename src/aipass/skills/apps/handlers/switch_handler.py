@@ -3,27 +3,13 @@
 # Description: Per-skill off-switch — state, declaration, systemd actuation
 # Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-09-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 Skill Off-Switch Handler
 
-Core logic for the per-skill ON/OFF toggle designed in DPLAN-0306.
-
-OFF means a skill is disconnected from AIPass, and a skill's processes have
-two doors:
-
-  * the process door — systemd user units the skill declares, closed with
-    stop + disable + mask (mask is what refuses a respawn, not merely a boot)
-  * the runner door — run_skill(), gated before the handler is imported
-
-Both are held here. The toggle's value is a document on disk, so it survives
-a restart, a reboot, and a fresh checkout.
-
-Purpose:
-    Implementation logic for the off-switch, separated from the
-    orchestration layer to satisfy the thin-module standard.
+Reference: docs/off_switch.md
 """
 
 import json
@@ -35,17 +21,12 @@ from typing import Any, Dict, List
 from aipass.prax import logger
 from aipass.skills.apps.handlers.json import json_handler
 
-# =============================================
-# CONSTANTS
-# =============================================
-
 STATE_FILENAME = "switch_state.json"
 
-# systemd is asked, never told to wait forever: a hung systemctl must not hang
-# the switch. The verbs used here are all local bookkeeping plus a unit stop.
+# A hung systemctl must not hang the switch.
 _SYSTEMCTL_TIMEOUT = 15
 
-# Frontmatter block a skill uses to declare what belongs to it.
+# The SKILL.md frontmatter block a skill uses to declare what belongs to it.
 _DECLARATION_KEY = "switch"
 _SYSTEMD_KIND = "systemd_user"
 
@@ -53,55 +34,21 @@ _SYSTEMD_KIND = "systemd_user"
 class SwitchStateUnreadable(RuntimeError):
     """The state document exists but cannot be trusted.
 
-    Deliberately NOT a "default everything to on" condition. The switch's whole
-    purpose is that OFF stays off; answering an unreadable document with "all
-    on" resurrects exactly the processes an operator deliberately killed.
-    """
-
-
-# =============================================
-# STATE
-# =============================================
+    Never answer it with "all on": that resurrects the processes an operator switched off."""
 
 
 def get_state_path() -> Path:
     """Return the switch state document's path.
 
-    Resolved at call time, not import time, so the branch's JSON directory can
-    be relocated (and isolated in tests) without this handler holding a stale
-    copy of where it used to be.
-
-    The directory is MEASURED off the fleet service rather than spelled out
-    here: the service recomputes it on every call (AIPASS_TEST_LOG_DIR is read
-    there), so asking it where a document lands cannot drift from where it
-    actually lands.
-
-    Returns:
-        Path: Location of switch_state.json.
-    """
+    Asked of the fleet service at call time (it reads AIPASS_TEST_LOG_DIR per call), so it cannot go stale."""
     return json_handler.get_json_path("switch", "data").parent / STATE_FILENAME
 
 
 def read_state() -> Dict[str, Any]:
     """Read the recorded switch state.
 
-    Three worlds, kept distinct:
-        missing        -> {} (nothing has ever been toggled; every skill is on)
-        parseable      -> the recorded truth
-        anything else  -> SwitchStateUnreadable
-
-    Note:
-        This does NOT go through json_handler.load_json. That path calls
-        ensure_json_exists, which answers an unparseable document by writing a
-        fresh template over it — for a toggle that silently flips every skill
-        back ON and destroys the record of why they were off.
-
-    Returns:
-        dict: Mapping of skill name -> {"enabled": bool, ...}. Empty if unset.
-
-    Raises:
-        SwitchStateUnreadable: The document exists but cannot be parsed.
-    """
+    Not json_handler.load_json: it overwrites an unparseable document with a fresh
+    template, which would flip every skill back ON and erase why they were off."""
     state_path = get_state_path()
     if not state_path.exists():
         return {}
@@ -133,21 +80,7 @@ def read_state() -> Dict[str, Any]:
 
 
 def write_state(skills: Dict[str, Any]) -> bool:
-    """Persist the switch state through the fleet's atomic writer.
-
-    write_json is the service's path primitive for a bespoke document - one
-    outside the config/data/log trio - so the switch keeps the same durability
-    (staged temp file in the target directory, fsync, os.replace with the
-    Windows sharing-violation retry) without this branch owning a second
-    writer. It reports a failed write as False rather than raising, which is
-    exactly the answer this function already gave.
-
-    Args:
-        skills: Mapping of skill name -> entry dict.
-
-    Returns:
-        bool: True when the document landed.
-    """
+    """Persist the switch state through the fleet's atomic writer."""
     state_path = get_state_path()
     today = datetime.now().date().isoformat()
 
@@ -158,8 +91,7 @@ def write_state(skills: Dict[str, Any]) -> bool:
             if isinstance(existing, dict):
                 created = existing.get("created", today)
         except (OSError, ValueError) as exc:
-            # A rewrite over an unreadable document is the one write that is
-            # always allowed — it is how an operator recovers.
+            # A rewrite over an unreadable document is always allowed: it is how an operator recovers.
             logger.warning("Rewriting an unreadable switch state document: %s", exc)
 
     document = {
@@ -177,17 +109,7 @@ def write_state(skills: Dict[str, Any]) -> bool:
 
 
 def is_enabled(skill_name: str) -> bool:
-    """Report whether a skill is switched on.
-
-    Args:
-        skill_name: Skill to check.
-
-    Returns:
-        bool: True when on. A skill with no recorded entry is on.
-
-    Raises:
-        SwitchStateUnreadable: The state document cannot be trusted.
-    """
+    """Report whether a skill is switched on."""
     entry = read_state().get(skill_name)
     if not isinstance(entry, dict):
         return True
@@ -195,17 +117,7 @@ def is_enabled(skill_name: str) -> bool:
 
 
 def off_reason(skill_name: str) -> str | None:
-    """The reason recorded with a skill's switch entry.
-
-    Args:
-        skill_name: Skill to look up.
-
-    Returns:
-        str | None: The recorded reason, or None when there is none.
-
-    Raises:
-        SwitchStateUnreadable: The state document cannot be trusted.
-    """
+    """The reason recorded with a skill's switch entry."""
     entry = read_state().get(skill_name)
     if not isinstance(entry, dict):
         return None
@@ -213,21 +125,11 @@ def off_reason(skill_name: str) -> str | None:
 
 
 def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bool:
-    """Record a skill's on/off value.
-
-    Args:
-        skill_name: Skill to record.
-        enabled: True for on, False for off.
-        reason: Optional note kept with the entry.
-
-    Returns:
-        bool: True when the document landed.
-    """
+    """Record a skill's on/off value."""
     try:
         skills = read_state()
     except SwitchStateUnreadable as exc:
-        # Recording over a broken document is recovery, not data loss: the
-        # operator is stating the intent the file could no longer carry.
+        # Recovery, not data loss: the operator states the intent the file could no longer carry.
         logger.warning("Replacing an unreadable switch state document: %s", exc)
         skills = {}
 
@@ -237,9 +139,7 @@ def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bo
 
     entry: Dict[str, Any] = {"enabled": enabled}
 
-    # "changed" must name when the value actually moved. Advancing it on a
-    # repeat of the same instruction reports a change that never happened, in
-    # the one document meant to be the durable truth.
+    # "changed" names when the value actually moved; a repeat instruction must not advance it.
     if value_moved or "changed" not in previous:
         entry["changed"] = datetime.now().isoformat()
     else:
@@ -248,10 +148,7 @@ def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bo
     if reason:
         entry["reason"] = reason
     elif not value_moved and previous.get("reason"):
-        # A repeat of the same instruction keeps the recorded WHY. Found live:
-        # `off telegram "<why>"` followed by a bare `off telegram` erased it.
-        # A reason is dropped only when the value flips, because it describes
-        # the state it was attached to.
+        # A bare repeat keeps the recorded reason; it is dropped only when the value flips.
         entry["reason"] = previous["reason"]
 
     skills[skill_name] = entry
@@ -264,21 +161,10 @@ def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bo
     return saved
 
 
-# =============================================
-# DECLARATION
-# =============================================
-
-
 def _discovered_skills() -> List[dict]:
     """Build the skill registry using handler-layer pieces only.
 
-    Deliberately not modules.discovery.discover_all: a handler importing an
-    orchestration module inverts the layering this branch is built on. The
-    registry is assembled from the same handler functions that module calls.
-
-    Returns:
-        list[dict]: Discovered skills, deduplicated by name.
-    """
+    Not modules.discovery.discover_all: a handler importing a module inverts the branch's layering."""
     from aipass.skills.apps.handlers.discovery_handler import (
         discover_skills_in_path,
         get_search_paths,
@@ -291,16 +177,7 @@ def _discovered_skills() -> List[dict]:
 def declared_units(skill_name: str) -> List[str]:
     """Return the systemd user units a skill declares as its own.
 
-    Read straight from SKILL.md frontmatter rather than through load_skill,
-    which would import the skill's handler — the switch must be able to reason
-    about a skill without executing any of its code.
-
-    Args:
-        skill_name: Skill to inspect.
-
-    Returns:
-        list[str]: Declared unit names, empty when the skill declares none.
-    """
+    Read from frontmatter, not load_skill: the switch must never import or run a skill's code."""
     from aipass.skills.apps.handlers.discovery_handler import parse_frontmatter
     from aipass.skills.apps.handlers.loader_handler import find_skill_in_registry
 
@@ -325,23 +202,10 @@ def declared_units(skill_name: str) -> List[str]:
     return [str(unit) for unit in units if unit]
 
 
-# =============================================
-# SYSTEMD ACTUATION
-# =============================================
-
-
 def _systemctl(*args: str, timeout: int = _SYSTEMCTL_TIMEOUT) -> tuple[int, str, str]:
     """Run one `systemctl --user` verb.
 
-    Args:
-        *args: Verb and operands, e.g. ("stop", "telegram-bot@base").
-        timeout: Seconds before the call is abandoned.
-
-    Returns:
-        tuple: (returncode, stdout, stderr). A call that could not run at all
-            returns a non-zero code with the reason in stderr, never an
-            exception — the caller decides what a failure means.
-    """
+    Never raises: a call that cannot run returns non-zero with the reason in stderr."""
     try:
         completed = subprocess.run(
             ["systemctl", "--user", *args],
@@ -359,50 +223,21 @@ def _systemctl(*args: str, timeout: int = _SYSTEMCTL_TIMEOUT) -> tuple[int, str,
 
 
 def unit_is_active(unit: str) -> bool:
-    """Report whether a systemd user unit is currently active.
-
-    Args:
-        unit: Unit name.
-
-    Returns:
-        bool: True when systemd reports it active.
-    """
+    """Report whether a systemd user unit is currently active."""
     code, out, _ = _systemctl("is-active", unit)
     return code == 0 and out == "active"
 
 
 def active_units(units: List[str]) -> List[str]:
-    """Return which of the given units are still alive.
-
-    Args:
-        units: Unit names to poll.
-
-    Returns:
-        list[str]: The subset systemd reports as active.
-    """
+    """Return which of the given units are still alive."""
     return [unit for unit in units if unit_is_active(unit)]
-
-
-# =============================================
-# THE TOGGLE
-# =============================================
 
 
 def turn_off(skill_name: str, reason: str | None = None) -> Dict[str, Any]:
     """Switch a skill off: record it, stop its processes, block their respawn.
 
-    Order matters. The intent is recorded BEFORE systemd is touched, so a crash
-    mid-actuation leaves a machine going dark with a record of why rather than
-    a silent one. The runner gate reads that same record, so it holds from the
-    first moment too.
-
-    Args:
-        skill_name: Skill to switch off.
-        reason: Optional note kept with the entry.
-
-    Returns:
-        dict: {"success": bool, "output": str, "error": str|None}
-    """
+    The record lands before systemd is touched: a crash mid-actuation keeps the why,
+    and the runner gate, which reads the same record, holds from the first moment."""
     if not set_enabled(skill_name, False, reason=reason):
         return {
             "success": False,
@@ -416,9 +251,7 @@ def turn_off(skill_name: str, reason: str | None = None) -> Dict[str, Any]:
     for unit in units:
         _systemctl("stop", unit)
         _systemctl("disable", unit)
-        # Disable closes the boot path only. Mask is what makes a respawn
-        # impossible — manual start, dependency pull, or a script that thinks
-        # it knows better all get refused while the skill is off.
+        # Disable closes only the boot path; mask is what refuses a manual start or dependency pull.
         _systemctl("mask", unit)
 
     survivors = active_units(units)
@@ -445,15 +278,7 @@ def turn_off(skill_name: str, reason: str | None = None) -> Dict[str, Any]:
 def turn_on(skill_name: str) -> Dict[str, Any]:
     """Switch a skill on: record it, unblock its processes, start them.
 
-    ON means running now AND after the next reboot, so the units are enabled as
-    well as started.
-
-    Args:
-        skill_name: Skill to switch on.
-
-    Returns:
-        dict: {"success": bool, "output": str, "error": str|None}
-    """
+    ON means running now and after the next reboot, so units are enabled as well as started."""
     if not set_enabled(skill_name, True):
         return {
             "success": False,
@@ -465,8 +290,7 @@ def turn_on(skill_name: str) -> Dict[str, Any]:
     lines = [f"Skill '{skill_name}' is ON."]
 
     for unit in units:
-        # Unmask first: a start issued against a masked unit is refused
-        # outright, so the order here is the contract, not a preference.
+        # Unmask first: systemd refuses a start against a masked unit.
         _systemctl("unmask", unit)
         _systemctl("enable", unit)
         _systemctl("start", unit)
@@ -495,16 +319,7 @@ def turn_on(skill_name: str) -> Dict[str, Any]:
 def switch_rows() -> List[Dict[str, Any]]:
     """Build one status row per discovered skill.
 
-    A row reports what the STATE says and what the MACHINE says, separately. A
-    skill recorded as off whose units are still alive is the case worth looking
-    for, so it is never collapsed into the state's own claim.
-
-    Returns:
-        list[dict]: Rows with name, enabled, reason, units, live_units.
-
-    Raises:
-        SwitchStateUnreadable: The state document cannot be trusted.
-    """
+    State and machine are reported separately: an off skill with live units is the case to catch."""
     skills = read_state()
     rows = []
 
@@ -522,9 +337,7 @@ def switch_rows() -> List[Dict[str, Any]]:
                 "reason": entry.get("reason"),
                 "changed": entry.get("changed"),
                 "units": units,
-                # Only an off skill's units are polled: an on skill's units are
-                # meant to be running, and polling every unit of every skill
-                # would spend a subprocess per unit on every status call.
+                # Only off skills are polled: one subprocess per unit per status call is the cost.
                 "live_units": active_units(units) if not enabled else [],
             }
         )

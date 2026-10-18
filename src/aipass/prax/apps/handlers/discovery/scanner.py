@@ -3,13 +3,11 @@
 # Description: Directory Scanning
 # Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """
 PRAX Discovery Scanner
-
-Safe directory scanning for Python module discovery.
 """
 
 import logging
@@ -19,10 +17,8 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-# Import from prax config
 from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT, get_system_logs_dir, get_module_logs_dir
 
-# Import filtering
 from aipass.prax.apps.handlers.discovery.filtering import in_sandbox, should_ignore_path
 from aipass.prax.apps.handlers.json import json_handler
 
@@ -30,18 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10):
-    """Safely scan directory with depth limit
-
-    Recursively scans directory for Python files, respecting ignore patterns
-    and depth limits to prevent infinite loops. A dropbox, an .archive or a
-    __pycache__ below the directory is never entered (filtering.in_sandbox), so
-    an archived copy cannot take a live module's entry, which is keyed by stem.
-
-    Args:
-        directory: Directory to scan
-        modules: Dict to populate with discovered modules
-        max_depth: Maximum recursion depth (default 10)
-    """
+    """Safely scan directory with depth limit"""
+    # Sandboxes are never entered: an archived copy would take a live module's stem-keyed entry.
     if max_depth <= 0:
         return
 
@@ -75,14 +61,9 @@ def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10):
 
 
 def discover_python_modules() -> Dict[str, Dict[str, Any]]:
-    """Discover all Python modules in the ecosystem
-
-    Returns:
-        Dict mapping module names to their metadata
-    """
+    """Discover all Python modules in the ecosystem"""
     modules = {}
 
-    # Scan entire ecosystem recursively
     scan_directory_safely(ECOSYSTEM_ROOT, modules)
 
     json_handler.log_operation("modules_scanned", {"modules_found": len(modules)})

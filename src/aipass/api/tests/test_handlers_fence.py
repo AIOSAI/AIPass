@@ -3,14 +3,10 @@
 # Description: The handlers fence: a foreign importer is refused, kin and the modules door pass (DPLAN-0404)
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/__init__.py, the fence, in a fresh interpreter per case."""
-
-# A foreign importer of aipass.api.apps.handlers is refused at import time;
-# kin and the modules door pass. The refusal banner's prose beyond the caller
-# line is not asserted.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/handlers/__init__.py parses and imports
@@ -66,9 +62,7 @@ class TestAForeignImporterIsRefused:
     @pytest.mark.parametrize("shape", FOREIGN_SHAPES)
     def test_a_foreign_branch_is_refused_and_named(self, foreign_seat, tmp_path, shape):
         """pkg, deep and a dynamic name: refused for importing with no kin frame; chain:
-        refused on the line's spelling through a kin frame; mock: refused inside
-        pkgutil.resolve_name, which surfaces as AttributeError; sibling: a frame under
-        the fleet root beside this branch, foreign even inside site-packages."""
+        refused on the line's spelling; mock: refused in pkgutil, so AttributeError."""
         answer = _probe(foreign_seat, shape, tmp_path)
         assert answer.startswith(("DENIED", "REFUSED")), answer
         if answer.startswith("DENIED"):
@@ -82,10 +76,8 @@ class TestAForeignImporterIsRefused:
 
     @pytest.mark.parametrize("shape", FOREIGN_SHAPES)
     def test_the_cwd_inside_this_branch_buys_a_foreign_seat_nothing(self, foreign_seat, shape):
-        """The process cwd is not a frame. Measured 2026-10-08: the bootstrap's pseudo
-        filenames resolved against a cwd inside this branch and read as kin, so a
-        foreign line that did not spell the handlers was let through. The cwd here
-        is the branch root; the verdicts are the ones the tmp cwd gives."""
+        """The process cwd is not a frame: the bootstrap's pseudo filenames resolved
+        against a cwd inside this branch must not read as kin."""
         answer = _probe(foreign_seat, shape, KIN_PROBE.parents[1])
         assert answer.startswith(("DENIED", "REFUSED")), answer
         if answer.startswith("DENIED"):
@@ -99,8 +91,7 @@ class TestKinAndTheDoorPass:
 
     @pytest.mark.parametrize("shape", ["pkg", "deep", "dyn", "chain", "mock"])
     def test_the_branch_itself_is_allowed(self, tmp_path, shape):
-        """The probe run from its own seat under this branch; mock is the 2026-04-25
-        shape (mock.patch imports from unittest/mock.py and pkgutil.py)."""
+        """The probe run from its own seat under this branch."""
         assert _probe(KIN_PROBE, shape, tmp_path) == "ALLOWED"
 
     def test_the_modules_door_is_open_to_a_foreign_branch(self, foreign_seat, tmp_path):

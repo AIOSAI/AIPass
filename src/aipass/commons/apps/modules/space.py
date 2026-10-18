@@ -3,16 +3,11 @@
 # Description: Spatial Navigation Module
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Spatial Navigation Module
-
-Router + renderer for spatial room commands.
-Delegates data retrieval to handlers/rooms/space_ops.py.
-
-Handles: enter, look, decorate, visitors commands.
 """
 
 from typing import List
@@ -61,10 +56,6 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# MOOD DISPLAY HELPERS
-# =============================================================================
-
 MOOD_STYLES = {
     "welcoming": ("green", "~"),
     "relaxed": ("blue", "~"),
@@ -85,26 +76,12 @@ def _mood_icon(mood: str) -> str:
     return MOOD_STYLES.get(mood, ("dim", "-"))[1]
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle spatial navigation commands.
-
-    Args:
-        command: Command name (enter, look, decorate, visitors)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle spatial navigation commands."""
     if command not in ["enter", "look", "decorate", "visitors"]:
         return False
 
-    # Action commands that work without args — route before introspection gate
+    # look/visitors are valid with no args: route them before the introspection gate.
     if command in ("look", "visitors"):
         if command == "look":
             result = _cmd_look(args)
@@ -128,11 +105,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
-
-
-# =============================================================================
-# ENTER
-# =============================================================================
 
 
 def _cmd_enter(args: List[str]) -> bool:
@@ -190,7 +162,6 @@ def _cmd_enter(args: List[str]) -> bool:
     )
     console.print()
 
-    # Record the visit (best-effort — never break the enter display)
     try:
         caller = get_caller_branch()
         visitor_name = caller["name"] if caller else "unknown"
@@ -201,11 +172,6 @@ def _cmd_enter(args: List[str]) -> bool:
         logger.warning("[space] Failed to get room state")  # visit recording is non-critical
 
     return True
-
-
-# =============================================================================
-# LOOK
-# =============================================================================
 
 
 def _cmd_look(args: List[str]) -> bool:
@@ -259,11 +225,6 @@ def _cmd_look(args: List[str]) -> bool:
     return True
 
 
-# =============================================================================
-# DECORATE
-# =============================================================================
-
-
 def _cmd_decorate(args: List[str]) -> bool:
     """Place a decoration in a room."""
     if len(args) < 3:
@@ -299,11 +260,6 @@ def _cmd_decorate(args: List[str]) -> bool:
         error("Failed to place decoration")
 
     return True
-
-
-# =============================================================================
-# VISITORS
-# =============================================================================
 
 
 def _cmd_visitors(args: List[str]) -> bool:

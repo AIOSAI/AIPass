@@ -1,35 +1,13 @@
 # =================== AIPass ====================
 # Name: denials.py
 # Description: Host API Denials — the fixed sentence a client gets, the words the log keeps
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-10
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Host API Denials
-
-How the host API says no when a caught exception is the reason. The exception's
-words belong to the operator: they can carry a host path, another program's
-stderr, another branch's JSON, an OSError's text. Copied into a response they go
-to whoever sent the request (CodeQL py/stack-trace-exposure, PR #774; seedgo
-exception_text_in_response). So the words go to this host's log with the
-traceback, the client gets one fixed sentence per error code, and a short `ref`
-on both sides joins the two: the handset shows it, the operator greps for it.
-
-The code is still the contract. A client branches on `code` (and on `reason`
-where a route carries one), never on prose, so the prose can be fixed without
-taking anything a client can act on.
-
-Split out of server.py, which sits at its 1500-line cap; the stand-in exception
-class came with it, being the other half of "what an error looks like here".
-
-Classes:
-    UnavailableHTTPException - Stand-in for FastAPI's HTTPException without the [host] extra
-
-Functions:
-    logged()  - Log a caught exception's words under a fresh ref, and return the ref
-"""
+"""Host API Denials
+Reference: docs/host_api.md"""
 
 import uuid
 from typing import Any
@@ -37,8 +15,7 @@ from typing import Any
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 
-#: The one sentence each error code hands a client when an exception is the reason.
-#: Every one ends by saying where the words went, so nobody reads it as the whole story.
+#: Every sentence ends by saying where the words went, so nobody reads it as the whole story.
 SENTENCES = {
     "face_unavailable": "The phone face could not be served; the reason is in this host's log",
     "feed_unavailable": "The notification feed could not be read; the reason is in this host's log",
@@ -48,6 +25,8 @@ SENTENCES = {
     "memory_config_refused": "@memory refused this config request; the reason is in this host's log",
     "memory_config_unavailable": "@memory could not answer this config request; the reason is in this host's log",
     "pairing_unavailable": "The pairing could not be completed; the reason is in this host's log",
+    "project_door_failed": "@aipass could not create the project; the reason is in this host's log",
+    "project_refused": "@aipass refused this project; the reason is in this host's log",
     "read_refused": "This read was refused; the reason is in this host's log",
     "read_unavailable": "This read could not be answered; the reason is in this host's log",
     "roots_unavailable": "The branch roots could not be listed; the reason is in this host's log",
@@ -64,13 +43,8 @@ SOCKET_UNAVAILABLE = "This room could not be opened; the reason is in this host'
 
 
 class UnavailableHTTPException(Exception):
-    """
-    Stand-in for FastAPI's HTTPException when the [host] extra is absent.
-
-    It mirrors the real signature because the name is both raised and handed to
-    @app.exception_handler(), which wants a class. Learning banked on d7330b00:
-    an import fallback that lands in a type position cannot be None.
-    """
+    """Stand-in for FastAPI's HTTPException when the [host] extra is absent.
+    Not None: the name is also handed to @app.exception_handler(), which wants a class."""
 
     def __init__(self, status_code: int = 500, detail: Any = None) -> None:
         super().__init__(detail)
@@ -79,17 +53,7 @@ class UnavailableHTTPException(Exception):
 
 
 def logged(error: BaseException, status: int, code: str) -> str:
-    """
-    Keep a caught exception's words in this host's log, under a fresh ref.
-
-    Args:
-        error: The exception that is the reason for the refusal.
-        status: The HTTP status the client is about to get.
-        code: The error code the client is about to get.
-
-    Returns:
-        The ref: short enough to read off a handset, unique enough to grep.
-    """
+    """Keep a caught exception's words in this host's log, under a fresh ref."""
     ref = uuid.uuid4().hex[:12]
     logger.warning("[host_api] %s %s refused (ref %s): %s", status, code, ref, error, exc_info=error)
     json_handler.log_operation("host_api_denied", {"status": status, "code": code, "ref": ref})

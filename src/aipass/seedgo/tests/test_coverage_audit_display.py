@@ -3,7 +3,7 @@
 # Description: audit coverage, render phase: the branch and system summaries audit_display prints
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py."""
@@ -18,11 +18,6 @@ from rich.text import Text
 from aipass.seedgo.apps.handlers.audit import audit_display
 
 pytestmark = pytest.mark.usefixtures("coverage_audit_seams")
-
-
-# ===========================================================================
-# AUDIT_DISPLAY TESTS
-# ===========================================================================
 
 
 def _summary(capsys, scores: dict, results: dict | None = None, **extra) -> str:
@@ -336,13 +331,7 @@ class TestRenderInfoLines:
         assert "ⓘ" not in out
 
     def test_info_lines_rendered(self, capsys, monkeypatch):
-        """Each info line renders once and dimmed, through the branch summary a user reaches.
-
-        It called the private renderer on a mocked console (seedgo, fleet green
-        leg 5). The dim is read per character off the real console's own recording
-        (seedgo, fleet green leg 6). Mutants: the info line printed twice — killed;
-        the dim dropped — killed.
-        """
+        """Each info line renders once and dimmed, through the branch summary a user reaches."""
         console = audit_display.console
         monkeypatch.setattr(console, "record", True)
         console.export_text(clear=True)
@@ -399,8 +388,7 @@ class TestRenderDeprecatedPatterns:
 def _rendered(capsys, render, *args, **kwargs) -> str:
     """Everything *render* wrote to stdout while it ran, as one string.
 
-    Calling a renderer and asserting nothing pins only that it did not raise,
-    so a renderer that printed NOTHING AT ALL passed (no_oracle, 2026-09-07).
+    Calling a renderer and asserting nothing pins only that it did not raise.
     The console is the real one, so stdout is where a render is observable.
     Drained first, so each assertion reads its own render.
     """
@@ -447,21 +435,7 @@ class TestPrintBranchSummary:
         return out
 
     def test_basic_summary(self, capsys):
-        """The summary renders for every score tier, and for a standard at 100.
-
-        MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band). Four
-        further rows called this same renderer with different numbers and
-        asserted nothing: ``test_high_scores``, ``test_medium_scores``,
-        ``test_low_scores`` and ``test_score_100_skipped_in_violations``. The
-        icon each named in its docstring is a literal string choice no row
-        checked, and a standard at 100 only skips a render branch. What the
-        five rows really pinned together was "none of these shapes crashes the
-        renderer", so the inputs move here and the claim is made once.
-
-        Mutation-checked at the merge: a renderer that raises on any one of
-        these tiers reds this test.
-        Mutant: the branch name dropped from the header in apps/handlers/audit/audit_display.py — killed.
-        """
+        """The summary renders for every score tier, and for a standard at 100."""
         for scores, average in (
             ({"architecture": 90, "naming": 80}, 85),  # the baseline fixture
             ({"architecture": 95, "naming": 92}, 93),  # >= 90
@@ -477,41 +451,19 @@ class TestPrintBranchSummary:
             assert str(average) in rendered, f"the overall {average} was not rendered"
 
     def test_the_header_states_what_it_measured_not_only_how_much(self, capsys):
-        """The count is scoped out loud, because the corpus is not the branch.
-
-        ``_collect_py_files`` walks ``apps/**/*.py`` and nothing else, so a bare
-        "N files checked" beside a 100 invites the reader to conclude the branch
-        is clean when a third of its Python was never opened. This asserts the
-        SCOPE WORDS, not the number: a header that keeps the count and drops the
-        qualifier is exactly the overclaim, and it would pass a count-only pin.
-        Mutant: the corpus detail dropped from the header in apps/handlers/audit/audit_display.py — killed.
-        """
+        """The count is scoped out loud, because the corpus is not the branch."""
         rendered = _rendered(capsys, audit_display.print_branch_summary, self._make_audit_result(files_checked=171))
         assert "171 files measured" in rendered
         assert "apps/ plus tests/" in rendered
         assert "test_*.py and conftest.py" in rendered
 
     def test_the_scope_words_are_not_hardcoded_around_the_count(self, capsys):
-        """Negative control on the pin above: the number still has to be real.
-
-        A header that printed the qualifier with a constant would satisfy every
-        assertion above while reporting the wrong corpus size.
-        Mutant: the corpus size defaulted to 171 in apps/handlers/audit/audit_display.py — killed.
-        """
+        """Negative control on the pin above: the number still has to be real."""
         rendered = _rendered(capsys, audit_display.print_branch_summary, self._make_audit_result(files_checked=3))
         assert "3 files measured" in rendered
 
     def test_post_check_crash_prints_even_at_a_perfect_score(self, capsys):
-        """A crashed post-check reaches the CONSOLE on a branch scoring 100.
-
-        Not red before the fix — audit_display already had the catch-all lane
-        this leans on — but the fix depends on it: the crash deliberately
-        leaves the file-lane score alone, so the standard usually still reads
-        100, and the score-driven renderer skips every standard at 100. The
-        catch-all violation lane is the only thing that prints it, so it is
-        pinned here rather than assumed.
-        Mutant: the catch-all lane reads no violations in apps/handlers/audit/audit_display.py — killed.
-        """
+        """A crashed post-check reaches the CONSOLE on a branch scoring 100."""
         detail = (
             "log_structure post-check crashed on branch test_branch (TypeError: check_branch_post() "
             "got an unexpected keyword argument 'bypass_rules') — the branch's log_structure score "
@@ -695,12 +647,7 @@ class TestPrintBranchSummary:
         assert "Rename to docs/" in rendered, "the deprecated-pattern message was not rendered"
 
     def test_the_branch_name_heads_the_summary(self, capsys):
-        """The summary names its branch.
-
-        It also passed system_averages and overall_system_avg, which the product
-        never read; both were dropped (seedgo, fleet green leg 8).
-        Mutant: the branch name dropped from the header in audit_display.py — killed.
-        """
+        """The summary names its branch."""
         result = self._make_audit_result()
 
         rendered = _rendered(capsys, audit_display.print_branch_summary, result)
@@ -708,10 +655,7 @@ class TestPrintBranchSummary:
         assert "test_branch" in rendered, "the branch summary rendered nothing at all"
 
     def test_no_bypass_label_travels_with_the_branch_score(self, capsys):
-        """A --no-bypass summary says so: the score alone reads as a regression.
-
-        Mutant: no_bypass forced False in apps/handlers/audit/audit_display.py — killed.
-        """
+        """A --no-bypass summary says so: the score alone reads as a regression."""
         printed = _rendered(
             capsys, audit_display.print_branch_summary, self._make_audit_result(), no_bypass=True
         ).upper()
@@ -761,20 +705,7 @@ class TestPrintSystemSummary:
         assert "TOP IMPROVEMENT AREAS:" not in lines
 
     def test_mixed_tiers(self, capsys):
-        """A fleet spanning all three tiers renders, and so does an all-excellent one.
-
-        MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band).
-        ``test_all_excellent`` built a two-branch list at 95 and 92 and
-        asserted nothing; the counting it named in its docstring is never
-        checked, and the excellent branch below already walks that arm. Its
-        input moves here so the all-one-tier shape is still executed rather
-        than assumed to be covered.
-
-        FPLAN-0509: it asserted nothing, so "renders" was the whole claim. Both
-        lists now pin the tier counts they were chosen to exercise. Re-mutated:
-        widening `excellent` to `average >= 96` reds it.
-        Mutant: excellent read as average >= 96 in apps/handlers/audit/audit_display.py — killed.
-        """
+        """A fleet spanning all three tiers renders, and so does an all-excellent one."""
         cases = [
             (
                 [
@@ -831,19 +762,7 @@ class TestPrintSystemSummary:
         assert not [line for line in lines if line.startswith("  Type errors:") and "branches)" in line]
 
     def test_odd_standard_count(self, capsys):
-        """An odd standard count renders the last one alone, at any tier of averages.
-
-        MERGED 2026-09-07 (FPLAN-0496, the DPLAN-0323 contested band).
-        ``test_standard_averages_icons`` was this same single-result shape with
-        three standards at 95/80/50; the per-tier icons it named are literal
-        string choices that cannot crash and were never asserted. Its scores
-        move here, so the three-tier spread is still rendered.
-
-        FPLAN-0509: the icons the merge note called "never asserted" are asserted
-        here now, alongside the odd-one-out row. Re-mutated: stepping the pairing
-        loop by 3 reds it, and so does moving the ✅ threshold to `>= 91`.
-        Mutant: the pairing loop stepped by 3 in apps/handlers/audit/audit_display.py — killed.
-        """
+        """An odd standard count renders the last one alone, at any tier of averages."""
         cases = [
             (
                 {"arch": 80, "naming": 85, "meta": 90},

@@ -3,7 +3,7 @@
 # Description: Handler for module and command discovery
 # Version: 1.1.0
 # Created: 2026-03-09
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """
@@ -79,15 +79,7 @@ def parse_help_for_commands(help_text: str) -> List[str]:
 
 
 def discover_modules(branch_path: str, branch_name: str) -> List[str]:
-    """Discover available commands for a branch.
-
-    Args:
-        branch_path: Absolute path to the branch directory
-        branch_name: Branch name (without @ prefix)
-
-    Returns:
-        List of discovered command names
-    """
+    """Discover available commands for a branch."""
     entry_point = get_entry_point(branch_path, branch_name)
     if entry_point is not None:
         try:
@@ -117,16 +109,7 @@ def discover_modules(branch_path: str, branch_name: str) -> List[str]:
 def get_help(branch_path: str, branch_name: str, command: Optional[str] = None) -> HelpResult:
     """Get structured help for a branch or a specific command.
 
-    Args:
-        branch_path: Absolute path to the branch directory
-        branch_name: Branch name (without @ prefix)
-        command: Optional specific command to get help for
-
-    Returns:
-        HelpResult with structured help data
-
-    Raises:
-        CommandExecutionError: If entry point not found or execution fails
+    Raises CommandExecutionError when the entry point is missing or the run fails.
     """
     entry_point = get_entry_point(branch_path, branch_name)
     if entry_point is None:
@@ -170,11 +153,7 @@ def get_help(branch_path: str, branch_name: str, command: Optional[str] = None) 
 def get_system_help(active_branches: List[str]) -> Dict[str, HelpResult]:
     """Aggregate help across a list of branches.
 
-    Args:
-        active_branches: List of branch symbolic names (with @ prefix)
-
-    Returns:
-        Dict mapping branch names to their HelpResult
+    *active_branches* are @-prefixed; the result is keyed by bare name.
     """
     # Import here to avoid circular imports - resolver needs registry_handler
     from aipass.drone.apps.handlers.registry_handler import load_registry

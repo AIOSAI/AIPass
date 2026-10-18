@@ -3,7 +3,7 @@
 # Description: Tests for skill template management
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/template.py: resolution, placeholder replacement, copy."""
@@ -22,11 +22,6 @@ from aipass.skills.apps.handlers.template import (
     copy_template,
     get_template,
 )
-
-
-# ===================================================================
-# 1. get_template — template path resolution
-# ===================================================================
 
 
 class TestGetTemplate:
@@ -58,8 +53,7 @@ class TestGetTemplate:
 
     def test_error_lists_valid_types(self):
         result = get_template("wrong")
-        # The floor: an emptied VALID_TYPES would make the loop below pass
-        # having read nothing out of the error string.
+        # The floor: an emptied VALID_TYPES would pass the loop having read nothing.
         assert VALID_TYPES == ("markdown_only", "with_handler", "full")
         for vt in VALID_TYPES:
             assert vt in result["error"]
@@ -87,20 +81,12 @@ class TestGetTemplate:
             assert (TEMPLATES_DIR / vt).exists(), f"Missing template dir: {vt}"
 
 
-# ===================================================================
-# 2. Placeholder substitution — reached through copy_template's copy step
-# ===================================================================
-
-
 class TestReplacePlaceholder:
-    """Placeholder substitution ({{SKILL_NAME}} replacement), reached through
-    copy_template() on a template dir built under tmp_path (item 10) rather
-    than by calling the private in-file replacer directly."""
+    """{{SKILL_NAME}} substitution, reached through copy_template(), not the private replacer."""
 
     @staticmethod
     def _copied(tmp_path, files, skill_name="my-tool"):
-        """Build a one-off template dir under tmp_path holding `files`, copy it
-        via copy_template, and return the target directory it was copied to."""
+        """Copy a one-off template dir holding `files` via copy_template; return the target."""
         src = tmp_path / "src-template"
         src.mkdir()
         for name, content in files.items():
@@ -127,10 +113,7 @@ class TestReplacePlaceholder:
 
     def test_skips_binary_file(self, tmp_path):
         """Binary files with UnicodeDecodeError should be silently skipped."""
-        # Should not raise, and copy_template (asserted success inside _copied)
-        # must still complete the rest of the copy.
         target = self._copied(tmp_path, {"binary.bin": b"\x80\x81\x82\xff{{SKILL_NAME}}"})
-        # File should still be binary (unchanged or at least not crash)
         assert (target / "binary.bin").exists()
 
     def test_empty_file_no_error(self, tmp_path):
@@ -145,11 +128,6 @@ class TestReplacePlaceholder:
         )
         content = (target / "multi.md").read_text(encoding="utf-8")
         assert content == "A=x B=x C=x"
-
-
-# ===================================================================
-# 3. copy_template — full template copy pipeline
-# ===================================================================
 
 
 class TestCopyTemplate:
@@ -175,17 +153,8 @@ class TestCopyTemplate:
         target = tmp_path / "placeholder-test"
         copy_template(src["path"], target, "placeholder-test")
         files = [p for p in target.rglob("*") if p.is_file()]
-        # The floor. The old shape put the assert under `if f.is_file()` with
-        # no else, so a target that laid down nothing passed. The
-        # except UnicodeDecodeError below it was dead too: the with_handler
-        # template is two utf-8 files and no binary (measured), so it only
-        # stood ready to swallow a real failure.
-        #
-        # Compared as a set, not a sorted list: sorting Paths compares
-        # case-insensitively on Windows and byte-wise on POSIX, so
-        # ["handler.py", "SKILL.md"] and ["SKILL.md", "handler.py"] are both
-        # "sorted" depending on the platform. Which two files exist is the
-        # claim; their filesystem listing order never is.
+        # The floor: an empty target must fail. A set, not sorted(): Path ordering
+        # is case-insensitive on Windows and byte-wise on POSIX.
         assert {f.name for f in files} == {"SKILL.md", "handler.py"}
         for f in files:
             content = f.read_text(encoding="utf-8")
@@ -211,14 +180,12 @@ class TestCopyTemplate:
         target = tmp_path / "cleanup-test"
         result = copy_template(tmp_path / "nonexistent", target, "test")
         assert result["success"] is False
-        # Target should not exist after cleanup
         assert not target.exists()
 
     def test_pycache_excluded(self, tmp_path):
         """__pycache__ directories must not appear in output."""
         src = get_template("full")
         assert src["success"]
-        # Inject a __pycache__ into the template temporarily
         pycache = src["path"] / "__pycache__"
         created = False
         if not pycache.exists():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: state_leak_content.py
 # Description: State Leak Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-16
 # =============================================
 
 """
@@ -39,7 +39,7 @@ def get_state_leak_standards() -> str:
         "  That is the only reason the suite was ever green.",
         "",
         "[bold cyan]WHAT IT CHECKS -- a write to shared state, at test time,[/bold cyan]",
-        "[bold cyan]with nothing to put it back. Three shapes:[/bold cyan]",
+        "[bold cyan]with nothing to put it back. Four shapes:[/bold cyan]",
         "",
         "  [red](a) A DIRECT WRITE[/red]",
         '      [dim]os.environ["AIPASS_BRANCH"] = "spawn"[/dim]',
@@ -52,6 +52,14 @@ def get_state_leak_standards() -> str:
         '      [dim]p = patch("aipass.x.y"); p.start()[/dim]  with no stop()',
         "",
         "  [red](c) os.chdir WITH NO RESTORE[/red]",
+        "",
+        "  [red](d) A PRODUCT'S OWN RESET THAT NO FIXTURE CALLS[/red]",
+        "      The product module keeps a module-level dict/list/set and a public",
+        "      reset*() that writes it; the test calls a function that writes it",
+        "      [dim]with stop_flag.catch_sigterm(): ...[/dim]   (backup, PR 792)",
+        "      and no autouse fixture in the file or any conftest.py, no fixture the",
+        "      test requests and no finally in the test calls the reset. A test that",
+        "      only READS that state is a known miss: it needs a call graph.",
         "",
         "[bold cyan]NEVER CONVICTED (each measured over 580 fleet test files):[/bold cyan]",
         "  [green]Every monkeypatch verb[/green] -- 4,890 uses: setattr 3,321, setitem 608,",
@@ -88,6 +96,7 @@ def get_state_leak_standards() -> str:
         "  an attribute->  [green]monkeypatch.setattr[/green]",
         "  the cwd     ->  [green]monkeypatch.chdir[/green]",
         "  a patcher   ->  [green]stop() in teardown, or addCleanup(p.stop)[/green]",
+        "  a product's reset -> [green]an autouse fixture in conftest.py calling it[/green]",
         "",
         "[bold cyan]WHY IT EXISTS:[/bold cyan]",
         "  Measured 2026-09-22 over 580 fleet test files: 343 hits in 49 files.",

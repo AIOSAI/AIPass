@@ -3,24 +3,11 @@
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
 # Version: 2.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """
 CLI Branch - Universal Display/Output Service Provider
-
-Routes commands to auto-discovered modules via seedgo pattern.
-- Modules auto-discovered from modules/ directory
-- Service modules (display, templates) also discoverable via handle_command()
-
-SERVICES PROVIDED:
-- Display: headers, success/error/warning messages, sections
-- Templates: Reusable output patterns (operation_start, operation_complete)
-- Formatting: Tables, lists, progress indicators
-
-ARCHITECTURE:
-- apps/modules/   = PUBLIC API (what other branches import)
-- apps/handlers/  = PRIVATE implementation (internal use only)
 """
 
 import sys
@@ -28,15 +15,12 @@ import importlib
 from pathlib import Path
 from typing import List, Any
 
-# Prax logger
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# Rich library components
 from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-# CLI modules (showcasing our own services!)
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
 VERSION = "2.3.1"
@@ -47,18 +31,8 @@ MODULES_DIR = CLI_ROOT / "modules"
 SERVICE_MODULES = {"display", "templates"}
 
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
-
 def discover_modules() -> List[Any]:
-    """Auto-discover CLI modules in modules/ directory.
-
-    Scans modules/*.py for files with handle_command().
-    Excludes __init__.py and private files.
-    Follows seedgo discovery pattern exactly.
-    """
+    """Auto-discover CLI modules in modules/ directory."""
     modules = []
 
     if not MODULES_DIR.exists():
@@ -69,9 +43,8 @@ def discover_modules() -> List[Any]:
             continue
 
         try:
-            # Imported by dotted name, never executed again from the file: a second
-            # copy of display.py kept its own failure flag, so error() inside a routed
-            # module never reached the flag resolve_exit reads (fleet green leg 3).
+            # Import by dotted name, never from the file: a second copy of display.py
+            # keeps its own failure flag, which resolve_exit never reads.
             module = importlib.import_module(f"aipass.cli.apps.modules.{file_path.stem}")
             if hasattr(module, "handle_command"):
                 modules.append(module)
@@ -92,20 +65,10 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     return False
 
 
-# =============================================================================
-# DISPLAY
-# =============================================================================
-
-
 def print_introspection() -> None:
-    """Display auto-discovered modules — seedgo-compliant introspection.
-
-    Called when cli.py runs with no arguments.
-    Shows command modules (with handle_command) and service modules separately.
-    """
+    """Display auto-discovered modules — seedgo-compliant introspection."""
     modules = discover_modules()
 
-    # Separate command modules from service modules
     command_modules = [m for m in modules if getattr(m, "__name__", "").split(".")[-1] not in SERVICE_MODULES]
     service_modules = [m for m in modules if getattr(m, "__name__", "").split(".")[-1] in SERVICE_MODULES]
 
@@ -116,7 +79,6 @@ def print_introspection() -> None:
     console.print("[dim]Universal Display & Output Service Provider[/dim]")
     console.print()
 
-    # Discovered command modules
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(command_modules)}")
     for module in command_modules:
         name = getattr(module, "__name__", "unknown").split(".")[-1]
@@ -126,7 +88,6 @@ def print_introspection() -> None:
         console.print("  [dim]No command modules discovered[/dim]")
     console.print()
 
-    # Service modules (import-only, but with utility commands)
     if service_modules:
         console.print(f"[yellow]Services:[/yellow] {len(service_modules)}")
         for module in service_modules:
@@ -146,7 +107,6 @@ def print_help() -> None:
     """Display Rich-formatted help - CLI services showcase!
 
     Shows COMMANDS, EXAMPLES, full reference.
-    Follows seedgo help pattern.
     """
     console.print()
 
@@ -157,7 +117,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # Usage
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
     console.print("  [dim]drone @cli <command> \\[args...][/dim]")
@@ -166,7 +125,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # What is CLI
     console.print("[bold cyan]WHAT IS CLI?[/bold cyan]")
     console.print()
     console.print("CLI is the [bold]Display & Templates Service[/bold] - like Prax for logging:")
@@ -180,7 +138,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # Commands
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
     console.print()
     console.print("  [green]drone @cli[/green]                             [dim]# Show discovered modules[/dim]")
@@ -198,7 +155,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # Public services
     console.print("[bold cyan]PUBLIC SERVICES (apps/modules/):[/bold cyan]")
     console.print()
 
@@ -217,7 +173,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # Import examples
     console.print("[bold cyan]HOW TO IMPORT CLI SERVICES:[/bold cyan]")
     console.print()
 
@@ -242,7 +197,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # Architecture
     console.print("[bold cyan]ARCHITECTURE:[/bold cyan]")
     console.print()
 
@@ -263,7 +217,6 @@ def print_help() -> None:
     console.print("\u2500" * 70)
     console.print()
 
-    # Drone compliance — commands line
     console.print("[dim]Commands: display, templates, show, demo, --help[/dim]")
     console.print()
 
@@ -273,35 +226,20 @@ def show_version():
     console.print(f"CLI v{VERSION}")
 
 
-# =============================================================================
-# MAIN ENTRY POINT
-# =============================================================================
-
-
 def main() -> int:
     """Main entry point - routes to modules.
 
-    THE EXIT SEAM (this branch owns it; see README). Three lines, in this order:
-    reset the process failure flag on entry, route, and let resolve_exit() turn
-    the routed outcome into the code. The flag is process-level state that
-    error() trips, so a run that does not reset it inherits the previous
-    command's verdict; and a main() that returns a bare 0 on a truthy route
-    throws away the only thing the flag was recorded for.
-
-    Codes: 0 routed and clean, 2 routed but a refusal went through error(),
-    1 not routed at all. The 1 is decided before the flag is consulted, so a
-    caller's own non-zero is never overwritten by this seam.
+    Reset the failure flag first (else a run inherits the last verdict), then let
+    resolve_exit() map the route: 0 clean, 2 refused via error(), 1 not routed.
     """
     reset_command_state()
     modules = discover_modules()
     args = sys.argv[1:]
 
-    # No args -> introspection (discovery mode)
     if not args:
         print_introspection()
         return 0
 
-    # Help flag -> full help with usage
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         return 0
@@ -320,7 +258,6 @@ def main() -> int:
         print_help()
         return 0
 
-    # Route to modules
     handled = route_command(command, remaining, modules)
     if not handled:
         error(f"Unknown command: {command}", suggestion="Run 'drone @cli --help' for usage")
@@ -331,14 +268,7 @@ def main() -> int:
 def run_cli() -> int:
     """Run main() and map an interrupt or an unhandled crash to an exit code.
 
-    Lives here as a function rather than inside the __main__ block so both
-    codes can be pinned by test. The block below was the only home for this
-    logic until 2026-09-08, and no test could reach it there: a contract that
-    only runs inside a script-entry guard is a contract nothing measures.
-
-    Cancellation is 130 — 128 + SIGINT — not 0. It exited 0 until tonight
-    (@canary's fleet refusal sweep, 2026-09-07), which told every caller and
-    every shell that an interrupted run had succeeded.
+    A function, not inline in __main__, so tests can pin both codes. Cancel is 130 (128 + SIGINT).
     """
     try:
         return main()

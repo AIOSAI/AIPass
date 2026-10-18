@@ -3,63 +3,32 @@
 # Description: Usage Aggregation Handler
 # Version: 1.0.1
 # Created: 2025-11-15
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Usage Aggregation Handler
+"""Usage Aggregation Handler"""
 
-Business logic for aggregating usage statistics:
-- Calculate per-caller stats from usage data
-- Daily/monthly rollups and summaries
-- Cost, token, and latency aggregation
-- Model usage tracking and breakdown
-
-Functions: get_caller_usage(), get_session_summary()
-"""
-
-# Standard library imports
 from typing import Dict, Any
 
-# Standard library for JSON operations
 import json
 
-# Logging
 from aipass.prax import logger
 
 from aipass.api.apps.handlers.module_root import module_file
 
-# JSON handler
 from aipass.api.apps.handlers.json import json_handler
 
 
-# =============================================
-# MODULE CONSTANTS
-# =============================================
-
 MODULE_NAME = "aggregation"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
-# Navigate: aggregation.py -> usage/ -> handlers/ -> apps/ -> api/
 API_JSON_DIR = module_file(__file__).parent.parent.parent.parent / "api_json"
-
-
-# =============================================
-# AGGREGATION FUNCTIONS
-# =============================================
 
 
 def get_overall_stats() -> Dict[str, Any]:
     """
     Aggregate usage statistics across all callers.
 
-    Returns:
-        Dict with total_requests, total_cost, total_tokens, callers (count),
-        models_used (set of model names).
-        Returns empty dict {} if no data found.
-
-    Raises:
-        ValueError or OSError when the store exists but cannot be read or
-        parsed; {} is the no-data answer, never a failure's (api, fleet green leg 3).
+    {} means no data; an unreadable or unparseable store raises, so a failure never wears the no-data answer.
     """
     try:
         data_path = API_JSON_DIR / DATA_FILE
@@ -110,21 +79,8 @@ def get_overall_stats() -> Dict[str, Any]:
 
 
 def get_caller_usage(caller: str) -> Dict[str, Any]:
-    """
-    Calculate usage statistics for specific caller
-
-    Args:
-        caller: Module name that made API calls
-
-    Returns:
-        Dict with requests, total_cost, total_tokens, models_used, last_request
-        Returns empty dict {} if no data found
-
-    Raises:
-        ValueError or OSError when the store cannot be read or parsed (api, fleet green leg 3).
-    """
+    """Calculate usage statistics for specific caller"""
     try:
-        # Load usage data from JSON
         data_path = API_JSON_DIR / DATA_FILE
         if not data_path.exists():
             logger.info(f"[{MODULE_NAME}] No usage data file found")
@@ -137,7 +93,6 @@ def get_caller_usage(caller: str) -> Dict[str, Any]:
             logger.info(f"[{MODULE_NAME}] No usage data available")
             return {}
 
-        # Extract caller-specific data
         usage_by_caller = data["data"].get("usage_by_caller", {})
         caller_data = usage_by_caller.get(caller, {})
 
@@ -155,21 +110,8 @@ def get_caller_usage(caller: str) -> Dict[str, Any]:
 
 
 def get_session_summary() -> Dict[str, Any]:
-    """
-    Aggregate current session usage totals
-
-    Takes no session id: the store holds one current session, and an argument
-    nothing read was dropped (api, fleet green leg 3).
-
-    Returns:
-        Dict with start_time, total_requests, total_cost, total_tokens
-        Returns empty dict {} if no session data found
-
-    Raises:
-        ValueError or OSError when the store cannot be read or parsed (api, fleet green leg 3).
-    """
+    """Aggregate current session usage totals"""
     try:
-        # Load usage data from JSON
         data_path = API_JSON_DIR / DATA_FILE
         if not data_path.exists():
             logger.info(f"[{MODULE_NAME}] No session data file found")
@@ -182,7 +124,6 @@ def get_session_summary() -> Dict[str, Any]:
             logger.info(f"[{MODULE_NAME}] No session data available")
             return {}
 
-        # Extract session summary
         session_data = data["data"].get("current_session", {})
 
         if not session_data:

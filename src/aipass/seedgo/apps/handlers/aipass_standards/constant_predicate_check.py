@@ -3,60 +3,12 @@
 # Description: Constant Predicate Standards Checker Handler
 # Version: 1.0.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Constant Predicate Standards Checker Handler
+"""Constant Predicate Standards Checker Handler
 
-Crack class C from the 2026-09-22 eyes-on review of @backup's tests: a
-``lambda`` whose body is a constant, handed to product code as an argument. It
-cannot discriminate a product that honours the callable from one that ignores
-it entirely.
-
-@backup's ``test_ignore_pathspec.py:491`` is the shape::
-
-    mirror_tree(src, dst, should_ignore=lambda p: False)
-
-``mirror.py:95`` never calls ``should_ignore``. The lambda answers False for
-every path, and a product that dropped the parameter would pass the same test.
-
-THE SPLIT IS THE JUDGEMENT THE DISPATCH ASKED FOR, and the numbers make the
-case rather than an argument:
-
-  SCORED -- the body is a ``bool``. ``lambda p: False`` is a PREDICATE, and a
-  predicate that returns the same answer for every input cannot discriminate.
-  There is no input for which it says anything, so no test using it can tell a
-  product that consults it from one that does not. 163 hits.
-
-  REPORTED WITH A COUNT, NEVER SCORED -- the body is anything else. 309 hits,
-  and 236 of those return ``None``: ``lambda *a: None`` as an ``on_progress``
-  or a logger. That is an inert CALLBACK, not a predicate, and a no-op stub
-  for a callback that is not under test is a legitimate thing to write. The
-  other 73 return a value the product then uses -- ``0``, ``'HEADER'``,
-  ``'/usr/bin/python3'`` -- which is a stand-in answering a question, not a
-  predicate refusing to.
-
-  163 + 309 = 472, which is the review's own first cut to the hit. We are
-  measuring the same population; this rule scores the third of it that cannot
-  be right.
-
-NOT RESTRICTED TO TEST BODIES, and this is the one place it reads wider than
-the dispatch's wording. A constant predicate handed to the product from a
-fixture or a module-level helper is the same defect reaching the same product
-call, and the file it lives in is test code either way. Every hit is still
-inside a ``tests/`` file.
-
-CHECK FIRST, measured 2026-09-22 over the fleet's 565 test files:
-
-  * SCORED: 38 files, 163 hits. REPORTED: 309 in the same files and others.
-  * The evidence lines all land: ``test_ignore_pathspec.py:491`` and
-    ``test_snapshot_fidelity.py`` 89, 107, 124, 149.
-
-WHY IT CANNOT BE SATISFIED BY ACCIDENT: a bool-constant lambda returns the
-same answer for every argument it is ever given. Delete the product's call to
-it and nothing about the test changes. There is no threshold and nothing to
-tune.
+Reference: constant_predicate.md
 """
 
 import ast
@@ -79,8 +31,7 @@ CURE = "return an answer that depends on the argument, or assert the product cal
 def _parse(source: str) -> ast.Module | None:
     """The file's tree, or None when Python cannot read it.
 
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
+    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
     """
     try:
         return ast.parse(source)
@@ -146,11 +97,7 @@ def _one_check(passed: bool, message: str) -> List[Dict]:
 
 
 def _clean_message(counted: List[str]) -> str:
-    """The passing message, carrying the inert-callback count without a verdict.
-
-    The device ``weak_oracle`` uses for its soft oracles: a number the owner
-    asked for rides along, and nobody is charged for it.
-    """
+    """The passing message, carrying the inert-callback count without a verdict."""
     if not counted:
         return "Every callable handed to the product here can discriminate"
     shape = "stub" if len(counted) == 1 else "stubs"
@@ -161,15 +108,7 @@ def _clean_message(counted: List[str]) -> str:
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a test file for constant lambdas handed to the product.
-
-    Args:
-        module_path: Path to the file to check.
-        bypass_rules: Optional bypass rules, applied per standard.
-
-    Returns:
-        dict: {'passed', 'checks', 'score', 'standard'} -- the pack's shape.
-    """
+    """Check a test file for constant lambdas handed to the product."""
     if is_bypassed(module_path, STANDARD_KEY, bypass_rules=bypass_rules):
         return _result(True, _one_check(True, "Standard bypassed via .seedgo/bypass.json"), 100)
 
@@ -186,8 +125,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, _one_check(True, _clean_message(counted)), 100)
 
     # Every hit on ONE check: checklist._format_failure prints the first failed
-    # check and appends "(+N more)", so one check per lambda would show the
-    # first and hide the rest behind a count.
+    # check and appends "(+N more)", so one check per lambda would hide the rest.
     detail = "\n".join(f"{path.name}:{line} lambda always returns {value} - {CURE}" for line, value in scored)
 
     json_handler.log_operation(

@@ -1,29 +1,15 @@
 # =================== AIPass ====================
 # Name: delivery.py
 # Description: Email Delivery Handler
-# Version: 3.5.0
+# Version: 3.5.1
 # Created: 2025-12-02
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 Email Delivery Handler
 
-Handles delivery of emails to branch inboxes.
-Independent handler - no module dependencies.
-
-Upsert delivery (``upsert_key``)
---------------------------------
-A repeating signal — the same WARNING firing every poll — must occupy ONE
-inbox slot, not one per repeat. Senders that repeat give the send a stable
-``upsert_key``; delivery then rewrites the open message carrying that key
-instead of stacking a new one, bumping an ``updates`` counter so the reader
-can see how many times it fired.
-
-The read status is the whole point: an update NEVER flips a message back to
-new and never wakes anything. A repeat is not a fresh demand for attention —
-it is the same demand, louder in the counter only. Closing the message
-re-arms the signature: the next send starts a fresh message at ``updates: 1``.
+Reference: docs/sending_and_delivery.md
 """
 
 import json
@@ -48,30 +34,18 @@ if sys.platform == "win32":
 
 _REPO_ROOT = find_repo_root()
 
-# Lazy imports to avoid circular dependencies
 _INBOX_LOCK = None
 
 
 def _load_caller_project_branches(caller_cwd: str) -> Dict[str, str]:
-    """Load branches from the caller's project registry.
-
-    Delegates to registry.read.get_caller_project_branches — shared
-    implementation used by both delivery and wake for cross-project resolution.
-    """
+    """Load branches from the caller's project registry."""
     from aipass.ai_mail.apps.handlers.registry.read import get_caller_project_branches
 
     return get_caller_project_branches(caller_cwd)
 
 
 def _auto_register_contact(email: str, inbox_file: Path) -> None:
-    """Auto-register a recipient in the contacts address book after successful delivery.
-
-    Non-critical: failures are logged and silently ignored.
-
-    Args:
-        email: Recipient email address (e.g., '@devpulse').
-        inbox_file: Path to the branch's inbox.json file.
-    """
+    """Auto-register a recipient in the contacts address book after successful delivery."""
     try:
         from aipass.ai_mail.apps.handlers.email.contacts import register_contact
 
@@ -82,15 +56,7 @@ def _auto_register_contact(email: str, inbox_file: Path) -> None:
 
 
 def _auto_register_sender(branch_name: str, caller_cwd: str) -> None:
-    """Auto-register a sender in contacts when called from an external project.
-
-    Walks up from caller_cwd to find .ai_mail.local/inbox.json.
-    Non-critical: failures are logged and silently ignored.
-
-    Args:
-        branch_name: Sender branch name or email (e.g., 'vera' or '@vera').
-        caller_cwd: Working directory of the calling project.
-    """
+    """Auto-register a sender in contacts when called from an external project."""
     try:
         candidate = Path(caller_cwd)
         for path in [candidate] + list(candidate.parents)[:5]:
@@ -116,40 +82,22 @@ def _get_inbox_lock():
 
 
 def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
-    """
-    Auto-migrate old inbox format to v2 schema.
-
-    Old format: {"inbox": [...]}
-    New format: {"mailbox": "inbox", "total_messages": N, "unread_count": N, "messages": [...]}
-
-    Migrates in-place and persists to disk if changes were made.
-
-    Args:
-        inbox_data: Loaded inbox dict (may be old or new format)
-        inbox_file: Path to inbox.json (for persisting migration)
-
-    Returns:
-        Migrated inbox data dict with v2 schema
-    """
+    """Auto-migrate old inbox format to v2 schema."""
     migrated = False
 
-    # Case 0: inbox_data is a list instead of a dict (corrupted/malformed inbox.json)
     if isinstance(inbox_data, list):
         inbox_data = {"messages": inbox_data}
         migrated = True
 
-    # Case 1: Old format with "inbox" key instead of "messages"
     if "inbox" in inbox_data and "messages" not in inbox_data:
         old_messages = inbox_data.pop("inbox", [])
         inbox_data["messages"] = old_messages if isinstance(old_messages, list) else []
         migrated = True
 
-    # Case 2: Missing "messages" key entirely
     if "messages" not in inbox_data:
         inbox_data["messages"] = []
         migrated = True
 
-    # Ensure v2 metadata fields exist
     if "mailbox" not in inbox_data:
         inbox_data["mailbox"] = "inbox"
         migrated = True
@@ -166,7 +114,6 @@ def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
         )
         migrated = True
 
-    # Persist migration to disk
     if migrated:
         try:
             with open(inbox_file, "w", encoding="utf-8") as f:
@@ -179,17 +126,7 @@ def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
 
 
 def _is_private_branch_email(email: str) -> bool:
-    """Check if email belongs to a private branch.
-
-    Reads PRIVATE_BRANCH_REGISTRY.json to determine if the given
-    email address is registered to a private (isolated) branch.
-
-    Args:
-        email: Email address to check (e.g., "@private_branch")
-
-    Returns:
-        True if email belongs to a private branch, False otherwise
-    """
+    """Check if email belongs to a private branch."""
     registry_path = _REPO_ROOT / "PRIVATE_BRANCH_REGISTRY.json"
     if not registry_path.exists():
         return False
@@ -205,18 +142,10 @@ def _is_private_branch_email(email: str) -> bool:
 
 
 def _resolve_reply_path() -> str:
-    """Detect the caller's ai_mail inbox path from AIPASS_CALLER_CWD env var.
-
-    Used to store a reply_path on delivered messages so cross-project replies
-    can bypass registry lookup and write directly to the sender's inbox.
-
-    Returns the absolute path to the caller's inbox.json, or empty string if
-    AIPASS_CALLER_CWD is not set or no inbox directory is found.
-    """
+    """Detect the caller's ai_mail inbox path from AIPASS_CALLER_CWD env var."""
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     if not caller_cwd:
         return ""
-    # Check the CWD itself and up to 5 parent directories for .ai_mail.local/
     candidate = Path(caller_cwd)
     for path in [candidate] + list(candidate.parents)[:5]:
         inbox = path / ".ai_mail.local" / "inbox.json"
@@ -226,20 +155,11 @@ def _resolve_reply_path() -> str:
 
 
 def _path_is_inside(candidate: Path, root: Path) -> bool:
-    """True when candidate sits within root.
-
-    Args:
-        candidate: Path to test.
-        root: Directory that must contain it.
-
-    Returns:
-        True if candidate is root or below it.
-    """
+    """True when candidate sits within root."""
     try:
         resolved_candidate = Path(candidate).resolve()
         resolved_root = Path(root).resolve()
     except OSError as exc:
-        # Resolution itself failing is a real fault, unlike "simply not inside".
         logger.warning("[delivery] could not resolve %s against %s: %s", candidate, root, exc)
         return False
 
@@ -249,30 +169,8 @@ def _path_is_inside(candidate: Path, root: Path) -> bool:
 def _reply_proof_mailboxes(email_data: Optional[Dict], sender_root: Optional[Path]) -> List[Path]:
     """Where a reply's proof may live, most reliable source first.
 
-    Two resolvers disagreed about which mailbox belongs to the sender, and that
-    disagreement was the @baud outage (2026-08-16). ``handle_reply`` locates the
-    original through ``_resolve_branch_path()`` — env, registry, fallback — so
-    the reply is built and sent; the boundary then re-derived the mailbox by
-    walking UP from ``AIPASS_CALLER_CWD``, which finds nothing unless the caller
-    is standing in the mailbox directory or below it. @baud's seat is four
-    levels below its project root, so a caller at the project root walked past
-    the mailbox and out of the project. Original found, proof not found, reply
-    refused.
-
-    ``reply.py`` already stamps ``reply_path`` on every reply, derived from
-    ``from_branch_path`` — the branch actually replying — precisely because the
-    CWD guess "can name the wrong branch entirely". This reads it.
-
-    The stamp travels with the message, so it is bounded: it only counts when it
-    lands inside the sender's own project. That keeps the fence exactly where it
-    was — a crafted ``reply_path`` cannot nominate a mailbox elsewhere on disk.
-
-    Args:
-        email_data: The outbound message, possibly carrying ``reply_path``.
-        sender_root: The sender's project root, or None when unknown.
-
-    Returns:
-        Candidate inbox paths, in order of trust, without duplicates.
+    reply.py's stamped reply_path first (the CWD walk misses a seat below the caller), and only
+    when it lands inside the sender's own project, so a crafted one cannot nominate any mailbox.
     """
     candidates: List[Path] = []
 
@@ -310,23 +208,8 @@ def _reply_proof_mailboxes(email_data: Optional[Dict], sender_root: Optional[Pat
 def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str, sender_root: Optional[Path] = None) -> bool:
     """True when this outbound mail is a reply to something the recipient sent us.
 
-    The return path (FPLAN-0401 phase 5b). A reply is answering, not initiating:
-    the referenced message sitting in the sender's OWN mailbox is the proof the
-    channel was sanctioned. Initiation across projects stays admin-only.
-
-    Accepts the referenced mail's ``from`` or its ``reply_to`` — reply.py routes
-    to ``reply_to or from``, so an exemption matching only ``from`` would refuse
-    the very replies it exists to allow. Neither field is chosen by the replier;
-    only the original sender could have written them, so this is still the
-    sanctioned channel and not a laundered new recipient.
-
-    Args:
-        email_data: The outbound message. A reply carries ``in_reply_to``.
-        to_branch: Where the outbound message is addressed.
-
-    Returns:
-        True only if the referenced mail exists in the sender's mailbox AND
-        named this recipient. False on anything unproven — fails closed.
+    Proof is the referenced mail in the sender's own mailbox naming the recipient in ``from`` or
+    ``reply_to`` (reply.py routes to ``reply_to or from``). Fails closed on anything unproven.
     """
     in_reply_to = (email_data or {}).get("in_reply_to", "")
     if not in_reply_to or not to_branch:
@@ -358,17 +241,7 @@ def _is_sanctioned_reply(email_data: Optional[Dict], to_branch: str, sender_root
 def _refuse_unverified_external(recipient_path: Path, to_branch: str, caller_cwd: str) -> Tuple[bool, str]:
     """Fail closed for an external-tier recipient when the sender cannot be placed.
 
-    No reply exemption on this path: a reply's proof only counts inside the
-    sender's own project, so with no project a stamped ``reply_path`` could name
-    any mailbox on disk. The verified-admin grant stays the bridge and runs last.
-
-    Args:
-        recipient_path: The resolved branch path of the external citizen.
-        to_branch: The address as sent.
-        caller_cwd: AIPASS_CALLER_CWD as delivery saw it, possibly "".
-
-    Returns:
-        (True, reason) to refuse, (False, "") for a verified admin.
+    No reply exemption here: with no sender project a stamped reply_path could name any mailbox.
     """
     from aipass.ai_mail.apps.handlers.users import verified_caller
 
@@ -399,26 +272,8 @@ def _check_cross_project_boundary(
 ) -> Tuple[bool, str]:
     """Refuse mail when sender and recipient are in different projects.
 
-    Compares project roots (first *_REGISTRY.json found walking up) for the
-    sender (from AIPASS_CALLER_CWD) and recipient (from resolved branch path).
-    Same-project and host-to-host mail passes through unchanged.
-
-    A VERIFIED admin caller is exempt — that is the cross-project bridge
-    (FPLAN-0401 phase 5). The exemption is checked LAST, only once a refusal is
-    otherwise certain, so ordinary same-project mail never touches the grant.
-
-    A sender with no project (no AIPASS_CALLER_CWD, or none above it) gives
-    nothing to compare. Fleet mail from one still passes — @trigger's in-process
-    sends carry no caller cwd. A recipient found only by the declared-roots
-    external tier fails CLOSED instead: the address map no longer refuses it,
-    so this is the last wall (#754).
-
-    Args:
-        external_tier: True when ``to_branch`` resolved through the external
-            tier and no earlier one. Only the resolver knows this.
-
-    Returns:
-        (True, error_message) to refuse, (False, "") to allow.
+    A sender with no project passes (@trigger's in-process sends carry no caller cwd), except to an
+    external-tier recipient, which fails closed: this is its last wall (#754).
     """
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     sender_root = find_project_root(Path(caller_cwd)) if caller_cwd else None
@@ -434,8 +289,7 @@ def _check_cross_project_boundary(
     if sender_root == recipient_root:
         return False, ""
 
-    # Everything below this line is a refusal — so this is where, and the only
-    # place where, an exemption is worth the file reads. Both fail closed.
+    # Everything below is a refusal, so only here are the exemptions worth their file reads.
     if _is_sanctioned_reply(email_data, to_branch, sender_root=sender_root):
         logger.info("[delivery] cross-project boundary exempted for reply: %s -> %s", sender_email, to_branch)
         return False, ""
@@ -464,20 +318,11 @@ def _check_cross_project_boundary(
 
 
 def _hosted_project_name(branch_path: str) -> str:
-    """Name the ``projects/<name>`` directory a hosted branch path sits under.
-
-    Args:
-        branch_path: Absolute path to a branch inside the projects tree.
-
-    Returns:
-        The project directory name, or "unknown" if the path sits elsewhere.
-    """
+    """Name the ``projects/<name>`` directory a hosted branch path sits under."""
     try:
         rel = Path(branch_path).resolve().relative_to((_REPO_ROOT / "projects").resolve())
         return rel.parts[0]
     except (ValueError, OSError, IndexError) as exc:
-        # It came out of a projects/*/ registry, so not sitting under projects/
-        # means the registry's paths disagree with its own location.
         logger.warning("[delivery] hosted branch path %s is not under projects/: %s", branch_path, exc)
         return "unknown"
 
@@ -485,24 +330,7 @@ def _hosted_project_name(branch_path: str) -> str:
 def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
     """Explain why an address did not resolve, without widening resolution.
 
-    An address can fail to resolve for two very different reasons, and saying
-    "unknown" for both is a lie in one of them. @baud is a registered citizen of
-    a hosted project; @devpulse reaches it through the admin lane. Telling @api
-    it did not exist sent them debugging an addressing bug that was not there
-    (2026-08-14), when the true answer is a policy: fleet-to-project initiation
-    is walled, replies only (DPLAN-0288).
-
-    This runs ONLY once delivery has already failed, so the extra registry read
-    costs nothing on any successful send. It returns a **string** and nothing
-    else — the caller's branch map is deliberately not updated, because the
-    whole point is to describe the wall, not open it.
-
-    Args:
-        to_branch: The address that failed to resolve.
-        known_count: How many branches were in scope for this caller.
-
-    Returns:
-        A refusal message stating the real reason.
+    Returns a string only: the caller's branch map is never updated, so the wall is described, not opened.
     """
     fallback = f"Unknown branch email: {to_branch} (available: {known_count} branches)"
 
@@ -522,19 +350,14 @@ def _describe_unresolved_address(to_branch: str, known_count: int) -> str:
     logger.info("[delivery] out-of-scope address refused: %s (hosted project: %s)", to_branch, project)
     return (
         f"Out of scope: {to_branch} is a citizen of hosted project '{project}', not the AIPass "
-        f"fleet ({known_count} branches in scope). Fleet-to-project mail is replies-only by "
-        f"ruling (DPLAN-0288) — only @devpulse's verified-admin lane may initiate. Reply to an "
+        f"fleet ({known_count} branches in scope). Fleet-to-project mail is replies-only — "
+        f"only @devpulse's verified-admin lane may initiate. Reply to an "
         f"existing message from {to_branch}, or use the feedback channel."
     )
 
 
 def _coerce_updates(value) -> int:
-    """Read a stored ``updates`` counter defensively, defaulting to 1.
-
-    The counter lives in a hand-editable JSON file, so a string, None or
-    garbage must not crash a delivery — an unreadable counter restarts at 1
-    rather than taking the message down with it.
-    """
+    """Read a stored ``updates`` counter defensively, defaulting to 1."""
     try:
         count = int(value)
     except (TypeError, ValueError):
@@ -544,19 +367,7 @@ def _coerce_updates(value) -> int:
 
 
 def _find_upsert_target(messages: List[Dict], from_addr: str, upsert_key: str) -> Optional[Dict]:
-    """Find the open message this upsert should rewrite.
-
-    Match rule: same sender AND same upsert_key AND not closed. Messages are
-    newest-first, so the first hit is the most recent open one.
-
-    Args:
-        messages: The inbox's message list.
-        from_addr: Sender address of the incoming mail.
-        upsert_key: Stable signature supplied by the sender.
-
-    Returns:
-        The matching message dict (live reference into *messages*), or None.
-    """
+    """Find the open message this upsert should rewrite."""
     for msg in messages:
         if msg.get("upsert_key") != upsert_key:
             continue
@@ -571,16 +382,7 @@ def _find_upsert_target(messages: List[Dict], from_addr: str, upsert_key: str) -
 def _apply_upsert_update(existing: Dict, email_data: Dict) -> Dict:
     """Rewrite *existing* in place with the fresh render and a bumped counter.
 
-    Preserves id, original timestamp and status — an update must never flip a
-    message back to new or unread. auto_execute is forced off: an in-place
-    update never wakes or dispatches anything, whatever the sender asked for.
-
-    Args:
-        existing: The matched message dict, mutated in place.
-        email_data: The incoming email data (fresh subject/body/timestamp).
-
-    Returns:
-        The same dict, for convenience.
+    Status is preserved and auto_execute forced off: an update never re-marks new or wakes anything.
     """
     existing["subject"] = email_data["subject"]
     existing["message"] = email_data["message"]
@@ -593,48 +395,20 @@ def _apply_upsert_update(existing: Dict, email_data: Dict) -> Dict:
 def deliver_email_to_branch(
     to_branch: str, email_data: Dict, on_delivered: Optional[Callable] = None, upsert_key: Optional[str] = None
 ) -> Tuple[bool, str]:
-    """
-    Deliver email to target branch's .ai_mail.local/inbox.json file.
+    """Deliver email to target branch's .ai_mail.local/inbox.json file.
 
-    Appends message to inbox JSON messages array — unless an upsert_key is
-    given and an open message from the same sender already carries it, in
-    which case that message is rewritten in place (see module docstring).
-
-    Args:
-        to_branch: Target email address (e.g., "@admin")
-        email_data: Email data dict with keys:
-            - from: Sender email address
-            - from_name: Sender display name
-            - to: Recipient email address
-            - subject: Email subject
-            - message: Email body
-            - timestamp: Email timestamp string
-            - upsert_key: Optional, alternative to the keyword argument
-        on_delivered: Optional callback(branch_path, new_count, opened_count, total)
-            for post-delivery actions (dashboard updates, central sync, etc.)
-        upsert_key: Optional stable signature for a repeating signal. None
-            (the default) is plain delivery: every send is a new message.
-            Takes precedence over email_data["upsert_key"].
-
-    Returns:
-        Tuple of (success: bool, error_message: str)
-        error_message is empty string if successful
-
-    Note:
-        When an upsert_key is in play, the outcome is reported back through
-        email_data["upsert_action"] = "created" | "updated" so the caller can
-        tell a fresh message from a bumped counter without re-reading the inbox.
+    on_delivered is called as (branch_path, new_count, opened_count, total). An upsert reports
+    back through email_data["upsert_action"] ("created" or "updated").
     """
     json_handler.log_operation("deliver_email", {"to": to_branch, "subject": email_data.get("subject", "")})
 
-    # Handle path input from DRONE's @ resolution
+    # drone's @ resolution may hand in a path instead of an address.
     if to_branch.startswith("/") or Path(to_branch).is_absolute():
         branches_list = get_all_branches()
         path_to_email = {b["path"]: b["email"] for b in branches_list}
         if to_branch in path_to_email:
             to_branch = path_to_email[to_branch]
         else:
-            # Stage 2: Longest-path-first prefix matching against registry
             sorted_branches = sorted(branches_list, key=lambda b: len(b["path"]), reverse=True)
             matched = False
             for b in sorted_branches:
@@ -645,14 +419,12 @@ def deliver_email_to_branch(
             if not matched:
                 return False, f"Could not resolve path to email: {to_branch}"
 
-    # Map email address to branch path (AIPass registry + caller's project registry)
     all_branches = get_all_branches()
     branches = {b["email"]: b["path"] for b in all_branches}
 
     if to_branch not in branches:
-        # get_all_branches answers [] for an unreadable registry too. Before the
-        # map widens, an AIPass name must not be read as absent and served to a
-        # project's or another root's namesake (ai_mail, leg 12).
+        # get_all_branches answers [] for an unreadable registry too: before the map widens,
+        # an AIPass name must not read as absent and be served to another root's namesake.
         from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable, check_registry_readable
 
         try:
@@ -660,21 +432,17 @@ def deliver_email_to_branch(
         except RegistryUnreadable as e:
             logger.warning("[delivery] AIPass registry unreadable for %s: %s", to_branch, e)
             return False, f"AIPass registry unreadable, {to_branch} not resolved: {e}"
-        # Check caller's project registry for local branches (e.g. @strategy in Vera Studio)
         caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
         if caller_cwd:
             try:
                 caller_branches = _load_caller_project_branches(caller_cwd)
             except RegistryUnreadable as e:
-                # The caller's own project cannot say who it names; the tiers
-                # below would serve a namesake from another project (ai_mail, leg 12).
                 logger.warning("[delivery] caller's project registry unreadable for %s: %s", to_branch, e)
                 return False, f"Caller's project registry unreadable, {to_branch} not resolved: {e}"
             branches.update(caller_branches)
 
     if to_branch not in branches:
-        # Hosted projects (verified-admin only — the cross-project bridge).
-        # Last resort, and gated: an unverified caller's map never widens.
+        # Hosted projects: gated, an unverified caller's map never widens.
         from aipass.ai_mail.apps.handlers.users import verified_caller
 
         if verified_caller.is_verified_admin_caller():
@@ -683,39 +451,26 @@ def deliver_email_to_branch(
             try:
                 branches.update(get_project_tree_branches(_REPO_ROOT))
             except RegistryUnreadable as e:
-                # A hosted registry that cannot be read may hold this citizen;
-                # the external tier would serve its namesake (ai_mail, leg 12).
                 logger.warning("[delivery] hosted project registry unreadable for %s: %s", to_branch, e)
                 return False, f"Hosted project registry unreadable, {to_branch} not resolved: {e}"
 
     via_external = False
     if to_branch not in branches:
-        # The declared-roots external tier - last, so every local source has
-        # already missed, exactly as wake.resolve_branch orders it. Ungated like
-        # the wake tier (declaration IS the credential); the cross-project
-        # boundary check downstream holds the policy, and needs to be TOLD this
-        # tier answered - an unverifiable sender fails closed only here (#754).
-        # Before 2026-09-02 an admin dispatch to @vera (Vera-Studio) died here as
-        # "Unknown branch email" while the wake already knew the address.
+        # External tier last, in wake.resolve_branch's order; ungated (declaration is the
+        # credential), so the boundary check must be TOLD this tier answered (#754).
         from aipass.ai_mail.apps.handlers.registry.read import get_external_branches
 
         try:
             branches.update(get_external_branches(_REPO_ROOT))
         except Exception as e:
-            # The gateway is @memory's; its failures are not ours to type. It is
-            # caught here, at delivery's own door, so trigger and every other
-            # caller keep the (False, message) shape they handle (ai_mail, leg 11).
+            # Caught at delivery's door so every caller keeps the (False, message) shape.
             logger.warning("[delivery] external citizen tier unavailable for %s: %s", to_branch, e)
             return False, f"External citizen tier unavailable, {to_branch} not resolved: {e}"
         via_external = to_branch in branches
 
     if to_branch not in branches:
-        # Refusal is correct here; the STATED REASON is what was wrong. Explain
-        # the wall instead of denying the address — the map is not widened.
         return False, _describe_unresolved_address(to_branch, len(branches))
 
-    # Private branch inbound blocking: reject delivery to private branches
-    # Self-send is allowed (private branch can send to itself)
     sender_email = email_data.get("from", "")
     if _is_private_branch_email(to_branch) and sender_email != to_branch:
         return False, f"Cannot deliver to private branch: {to_branch}"
@@ -725,21 +480,18 @@ def deliver_email_to_branch(
     if not branch_path.is_absolute():
         branch_path = (_REPO_ROOT / branch_path).resolve()
 
-    # Cross-project boundary: refuse mail when sender and recipient are in different projects
     refused, refusal_msg = _check_cross_project_boundary(
         branch_path, sender_email, email_data=email_data, to_branch=to_branch, external_tier=via_external
     )
     if refused:
         return False, refusal_msg
 
-    # Find the branch's .ai_mail.local/inbox.json file
     if branch_path == Path("/") or branch_path == _REPO_ROOT:
         inbox_file = _REPO_ROOT / ".ai_mail.local" / "inbox.json"
     else:
         inbox_file = branch_path / ".ai_mail.local" / "inbox.json"
 
     if not inbox_file.exists():
-        # Auto-provision inbox for new branches (self-healing)
         try:
             mailbox_dir = inbox_file.parent
             mailbox_dir.mkdir(parents=True, exist_ok=True)
@@ -751,7 +503,6 @@ def deliver_email_to_branch(
             logger.warning("[delivery] auto-provision inbox failed for %s: %s", to_branch, e)
             return False, f"Failed to auto-provision inbox for {to_branch}: {e}"
 
-    # Lock inbox.json for the entire read-modify-write cycle
     try:
         with _get_inbox_lock()(inbox_file):
             try:
@@ -761,11 +512,8 @@ def deliver_email_to_branch(
                 logger.warning("[delivery] failed to read inbox %s: %s", inbox_file, e)
                 return False, f"Failed to read inbox: {e}"
 
-            # Auto-migrate old inbox format {"inbox": []} -> v2 schema
             inbox_data = _migrate_inbox_format(inbox_data, inbox_file)
 
-            # Upsert: rewrite the open message carrying this key instead of
-            # stacking a second one. No key = plain delivery, unchanged.
             effective_key = upsert_key if upsert_key is not None else email_data.get("upsert_key")
             existing = None
             delivered_id = ""
@@ -785,7 +533,6 @@ def deliver_email_to_branch(
                 )
             else:
                 updated_in_place = False
-                # Create message object (v2 schema: status instead of read)
                 message = {
                     "id": str(uuid.uuid4())[:8],
                     "timestamp": email_data["timestamp"],
@@ -798,12 +545,7 @@ def deliver_email_to_branch(
                     "priority": email_data.get("priority", "normal"),
                 }
 
-                # The sender's own id for this message, kept as a back-reference.
-                # The id above is minted fresh so it is unique in THIS mailbox;
-                # without this field the recipient's copy and the sender's sent/
-                # record share no identifier at all, and a delivered message
-                # cannot be proven to have arrived. That untraceability was read
-                # as a delivery outage on 2026-08-16 (@seedgo -> @devpulse).
+                # sent_id links this copy to the sender's sent/ record; the id above is per-mailbox.
                 if email_data.get("id"):
                     message["sent_id"] = email_data["id"]
 
@@ -813,19 +555,15 @@ def deliver_email_to_branch(
                 if email_data.get("dispatched_to"):
                     message["dispatched_to"] = email_data["dispatched_to"]
 
-                # Store reply_path for cross-project replies.
-                # Pass-through from email_data, or auto-detect from AIPASS_CALLER_CWD.
                 reply_path = email_data.get("reply_path") or _resolve_reply_path()
                 if reply_path:
                     message["reply_path"] = reply_path
 
-                # Carry the key on the message so the NEXT send can find it
                 if effective_key:
                     message["upsert_key"] = effective_key
                     message["updates"] = 1
                     email_data["upsert_action"] = "created"
 
-                # Prepend message to inbox (newest first)
                 inbox_data["messages"].insert(0, message)
                 delivered_id = message["id"]
 
@@ -854,18 +592,14 @@ def deliver_email_to_branch(
         logger.warning("[delivery] failed to acquire inbox lock for %s: %s", to_branch, e)
         return False, f"Failed to acquire inbox lock: {e}"
 
-    # Auto-register recipient in contacts for future fast lookup
     _auto_register_contact(to_branch, inbox_file)
 
-    # Auto-register sender if external project called with AIPASS_CALLER_BRANCH
     caller_branch = os.environ.get("AIPASS_CALLER_BRANCH", "")
     caller_cwd = os.environ.get("AIPASS_CALLER_CWD", "")
     if caller_branch and caller_cwd:
         _auto_register_sender(caller_branch, caller_cwd)
 
-    # Write a feed event for new email. An in-place update is the same signal
-    # repeating, so it stays silent — one feed line per repeat is the stacking
-    # problem again, just in the bell instead of in the inbox.
+    # An in-place update stays silent: one feed line per repeat is the stacking problem again.
     if not updated_in_place:
         _emit_notification_event(
             email_data["from"],
@@ -875,7 +609,6 @@ def deliver_email_to_branch(
             address=_mail_address(delivered_id, to_branch, branch_path),
         )
 
-    # Invoke post-delivery callback (dashboard updates, central sync, etc.)
     if on_delivered:
         try:
             on_delivered(branch_path, new_count, opened_count, inbox_data["total_messages"])
@@ -889,18 +622,7 @@ def deliver_email_to_branch(
 def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str, str]:
     """Write *email_data* to an inbox.json file and fire a notification event.
 
-    Single canonical path for direct-path delivery (used by cross-project
-    reply.py to replace the raw-write backdoor).  Always writes to the feed.
-
-    Args:
-        inbox_file: Absolute path to the target inbox.json.
-        email_data: Dict with at minimum ``from``, ``to``, ``subject``,
-                    ``message``, ``timestamp``.  An ``id`` key is assigned
-                    internally if absent.
-
-    Returns:
-        ``(success, error_msg, reply_id)`` — ``reply_id`` is the 8-char hex
-        string assigned to the message (empty string on failure).
+    The one direct-path delivery (reply.py's cross-project lane). Returns (success, error, message id).
     """
     if not inbox_file.exists():
         return False, f"inbox not found: {inbox_file}", ""
@@ -918,10 +640,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
 
             reply_id = str(uuid.uuid4())[:8]
             email_data = dict(email_data)
-            # This lane keeps the sender's id AS the message id, so correlation
-            # is already possible here. Stamp sent_id anyway: a reader must not
-            # have to know which lane delivered a message to know how to trace
-            # it. Both lanes answer "which sent record is this" the same way.
+            # sent_id is stamped in both lanes, so tracing never depends on which lane delivered.
             if email_data.get("id"):
                 email_data.setdefault("sent_id", email_data["id"])
             email_data.setdefault("id", reply_id)
@@ -982,7 +701,7 @@ def _project_name(branch_home: Path) -> str:
 
 
 def _mail_address(mail_id: str, recipient: str, branch_home: Path) -> Dict[str, str]:
-    """Where the phone finds a delivered mail: its inbox id, the recipient branch, its project (DPLAN-0414 C-A)."""
+    """Where the phone finds a delivered mail: its inbox id, the recipient branch, its project."""
     return {
         "mail_id": str(mail_id),
         "recipient": str(recipient).lstrip("@"),
@@ -992,7 +711,6 @@ def _mail_address(mail_id: str, recipient: str, branch_home: Path) -> Dict[str, 
 
 _NOTIFICATION_TIMESTAMPS: Dict[str, List[float]] = {}
 
-# Rate limit: max notifications per recipient within time window
 _NOTIFICATION_MAX = 3
 _NOTIFICATION_WINDOW = 30.0  # seconds
 
@@ -1000,20 +718,7 @@ _NOTIFICATION_WINDOW = 30.0  # seconds
 def _emit_notification_event(
     sender: str, recipient: str, subject: str, message: str = "", address: Optional[Dict[str, str]] = None
 ) -> None:
-    """
-    Write a "mail" event to the notification feed for new email.
-
-    Rate-limited: max 3 events per recipient within 30 seconds.
-    Desktop toasts are retired — this appends to the shared feed BAUD reads.
-
-    Args:
-        sender: Email sender address (e.g., @devpulse)
-        recipient: Email recipient address (e.g., @ai_mail)
-        subject: Email subject line
-        message: Email body (first ~100 chars shown in notification)
-        address: mail_id, recipient and project, merged into the event so a
-            reader can open the whole message (_mail_address)
-    """
+    """Write a "mail" event to the notification feed for new email."""
     import time
 
     now = time.time()
@@ -1027,7 +732,6 @@ def _emit_notification_event(
     if len(_NOTIFICATION_TIMESTAMPS[recipient]) >= _NOTIFICATION_MAX:
         return
 
-    # Build informative notification
     sender_name = sender.replace("@", "").upper()
     recipient_name = recipient.replace("@", "").upper()
     title = f"{sender_name} -> {recipient_name}"

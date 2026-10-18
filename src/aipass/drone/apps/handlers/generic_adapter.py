@@ -3,16 +3,10 @@
 # Description: Generic capture adapter for external branch modules
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-10-17
 # =============================================
 
-"""Generic capture adapter for external branch modules.
-
-Replaces per-branch drone_adapter.py boilerplate with a single centralized
-capture function.  Given a dotted import path to any branch's ``main()``,
-captures stdout/stderr via StringIO and returns the standard drone result
-dict (stdout, stderr, exit_code).
-"""
+"""Generic capture adapter for external branch modules."""
 
 from __future__ import annotations
 
@@ -35,19 +29,7 @@ def capture_main(
 ) -> dict:
     """Capture stdout/stderr from an external branch's ``main()`` function.
 
-    Builds ``sys.argv`` as if the branch CLI was invoked directly, redirects
-    stdout/stderr to StringIO buffers, calls ``main()``, then restores
-    everything in a finally block.
-
-    Args:
-        entry_point_module: Dotted import path to the module containing
-            ``main()`` (e.g. ``"aipass.seedgo.apps.seedgo"``).
-        name: Program name for ``sys.argv[0]``.
-        command: Optional subcommand (becomes ``sys.argv[1]``).
-        args: Optional extra arguments appended after command.
-
-    Returns:
-        Dict with keys ``stdout``, ``stderr``, ``exit_code``.
+    Swaps process-wide ``sys.argv``/``sys.stdout``/``sys.stderr``, hence the lock.
     """
     if args is None:
         args = []

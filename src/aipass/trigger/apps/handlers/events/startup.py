@@ -3,33 +3,13 @@
 # Description: Startup event handler with error catch-up scanning
 # Version: 1.5.0
 # Created: 2025-12-04
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Startup Event Handler - Run startup checks
 
-Replaces Prax logger's hardcoded calls with event-based approach.
-Includes error catch-up: scans system logs for unprocessed errors on each startup.
-
-DPLAN-037 hardening (2026-02-26):
-    - MAX_ERRORS_PER_SCAN: Stop scanning after this many new errors (prevents 100K+ event storms)
-    - MAX_FILE_SIZE_BYTES: Skip log files larger than this threshold (prevents scanning 6MB files)
-    - SCAN_TIME_BUDGET_SECONDS: Abort scan if it exceeds this duration
-
-Catch-up state lives in trigger_json/error_catchup.json. It used to live in
-trigger_json/trigger_data.json — a name json_handler's trio machinery owns for
-module "trigger", which validates such a file against a data template and
-overwrites it when the shape does not match. This file has never carried the
-template's created/last_updated keys, so a single trio call resolving to caller
-module "trigger" would have blanked the processed-hash set and re-dispatched
-every already-handled error. Same defect as the medic state move; see
-medic_state.py. _load_trigger_data() migrates on first read.
-
-last_scan_timestamp advances ONLY after a scan that covered every candidate
-file (DPLAN-0339 step 2, row 12). It used to advance unconditionally, so any
-of the DPLAN-037 limits above silently discarded the window they aborted in:
-the files the scan never reached fell behind the new cutoff and their errors
-were never recoverable. See ScanOutcome and _run_error_catchup.
+Never store state in trigger_data.json: json_handler's trio owns that name and would blank the processed hashes.
+last_scan_timestamp advances only after a scan covered every file, or the unread window is lost for good.
 """
 
 import json
@@ -55,14 +35,11 @@ SUPPRESSED_LOG = TRIGGER_ROOT / "logs" / "medic_suppressed.jsonl"
 MAX_HASHES = 500
 MAX_LOOKBACK_HOURS = 24
 
-# DPLAN-037: Safeguards to prevent unbounded scanning
 MAX_ERRORS_PER_SCAN = 50  # Stop after this many new errors found
 MAX_FILE_SIZE_BYTES = 512_000  # Skip files larger than 500KB
 SCAN_TIME_BUDGET_SECONDS = 5.0  # Abort entire scan after this many seconds
 
-# Deliberately NOT prax: this handler runs on the event path the log watchers
-# read, so a line through prax would be detected and fired straight back at it.
-# The sidecar is `.jsonl`, which the watchers skip — they read only `*.log`.
+# Not prax: the watchers would read its line and fire it back; they skip `.jsonl`.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "startup_handler.jsonl")
 
 
@@ -120,23 +97,7 @@ def _log_suppression(reason: str) -> None:
 class ScanOutcome(NamedTuple):
     """What one catch-up scan found, and whether it got through the whole tree.
 
-    `completed` is the row-12 gate: it is True only when the scan read every
-    candidate file to its end. Anything that cut the walk short — a DPLAN-037
-    limit, or a file skipped for size — makes it False, and the caller then
-    leaves last_scan_timestamp where it was so the next run covers the same
-    window again. `reason` names what stopped it, for the log line; it is ""
-    exactly when `completed` is True.
-
-    Holding the timestamp back cannot re-dispatch what was already found:
-    processed_hashes is persisted on every run, aborted or not, and the
-    fingerprint gate drops a hash it has seen. What it re-covers is only the
-    part of the window the scan never read.
-
-    The cost of holding it back is bounded by MAX_LOOKBACK_HOURS, so the worst
-    case is a 24-hour window instead of a one-minute one. Measured on this tree
-    2026-09-11, 363 files: 181 ms cold (full 24 h) against 161 ms warm — 20 ms.
-    That bound is what makes it safe to treat a permanently oversized file as
-    "not completed" rather than inventing a second, softer verdict for it.
+    `completed` is False on any limit or size skip; `reason` is "" exactly when it is True.
     """
 
     errors: List[Dict[str, Any]]
@@ -147,20 +108,8 @@ class ScanOutcome(NamedTuple):
 def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
     """Parse a log line and extract fields if it's an ERROR.
 
-    Uses positional parsing (like log_watcher.py) instead of content-matching
-    to avoid false positives from lines that mention 'ERROR' in their message text.
-
-    Args:
-        log_line: Raw log line
-
-    Returns:
-        Dict with timestamp, module, level, message if ERROR/CRITICAL.
-        None otherwise.
+    Positional, not content-matching: a message that mentions 'ERROR' is not an error line.
     """
-    # No try: the body is str methods on a str (the one caller hands in a line
-    # read in text mode), so nothing here raises. The except arm that stood
-    # here returned None for a failure it could never see (leg 5, 2026-09-29).
-    # Prax format: timestamp | module | LEVEL | message
     if " | " in log_line:
         parts = log_line.split(" | ", 3)
         if len(parts) >= 4:
@@ -174,7 +123,6 @@ def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
                 }
         return None
 
-    # Python logging format: timestamp - module - LEVEL - message
     if " - " in log_line:
         parts = log_line.split(" - ", 3)
         if len(parts) >= 4:
@@ -191,14 +139,7 @@ def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
 
 
 def _extract_timestamp(timestamp_str: str) -> Optional[datetime]:
-    """Parse timestamp string into datetime.
-
-    Args:
-        timestamp_str: Timestamp from log line
-
-    Returns:
-        datetime object, or None if unparseable
-    """
+    """Parse timestamp string into datetime."""
     formats = [
         "%Y-%m-%d %H:%M:%S,%f",
         "%Y-%m-%d %H:%M:%S.%f",
@@ -215,9 +156,7 @@ def _extract_timestamp(timestamp_str: str) -> Optional[datetime]:
 def _registry_fingerprint(level: str, message: str, component: str) -> str:
     """The fingerprint the registry would store for this line, computed, not minted.
 
-    The level goes in as the log wrote it: the watcher passes parsed["level"]
-    straight through as error_type, so stored rows carry "ERROR", and a
-    lower-cased level here would compute a twin of a row that already exists.
+    Keep the level as logged ("ERROR"): lower-casing it computes a twin of an existing row.
     """
     try:
         from aipass.trigger.apps.handlers.error_registry import compute_fingerprint, normalize_message
@@ -253,12 +192,7 @@ def _registry_report(**kwargs: Any) -> Dict[str, Any]:
 def _registry_identity(level: str, message: str, branch: str, log_path: str, line_iso: str) -> Optional[Dict[str, str]]:
     """{fingerprint, registry_id} for a scanned line, or None when it is a replay.
 
-    Lookup first: a row that exists is named, never bumped — reporting it would
-    move last_seen to now for a line read off disk. A line no newer than the
-    row's last_seen is one the watcher already registered; a restart re-reads
-    the same window, so firing it re-dispatches with the stamp unmoved, a loop
-    nobody closes (@hooks, 2026-09-24). Only an untracked error is reported,
-    as the watcher does, so the responder has a row to resolve.
+    Never report a known row (it would move last_seen to now); a line no newer than last_seen is a replay.
     """
     fingerprint = _registry_fingerprint(level, message, branch)
     known = _registry_get_entry(fingerprint) if fingerprint else None
@@ -272,11 +206,7 @@ def _registry_identity(level: str, message: str, branch: str, log_path: str, lin
 
 
 def _count_repeat(entry: Optional[Dict[str, Any]], line_iso: str) -> None:
-    """Fold one more sighting into an entry already collected this scan.
-
-    `entry` is None when the hash came from a previous run's persisted state —
-    there is no entry here to count against, so the line stays dropped.
-    """
+    """Fold one more sighting into an entry already collected this scan; None (a past run's hash) stays dropped."""
     if entry is None:
         return
     entry["count"] += 1
@@ -294,22 +224,8 @@ def _scan_single_log_file(
     scan_start: float,
     by_hash: Dict[str, Dict[str, Any]],
 ) -> Optional[str]:
-    """Scan a single log file for ERROR entries.
-
-    Args:
-        by_hash: Entries collected so far this scan, keyed by error hash, so a
-            repeat line can be counted instead of dropped. Shared across files
-            — the same error in two logs is one error.
-
-    Returns:
-        None when the whole file was read and scanning should continue, or the
-        reason string naming the limit that stopped it. A reason means files
-        after this one were never read, which is what row 12 has to know: it
-        travels up to ScanOutcome rather than being flattened back to a bool.
-    """
-    # The system_logs reader's own parsers, not a copy of them (fleet green leg 5,
-    # 2026-09-29). Function-local like the registry calls below: medic imports
-    # this module, and the reader pulls watchdog and prax in at its import.
+    """Scan a single log file for ERROR entries; returns None when fully read, else the limit's reason."""
+    # Function-local: medic imports this module, and log_watcher pulls watchdog and prax in at import.
     from aipass.trigger.apps.handlers.watchers.log_watcher import detect_branch_from_log, generate_error_hash
 
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -338,9 +254,7 @@ def _scan_single_log_file(
 
             module = parsed["module"]
             message = parsed["message"]
-            # Timestamp-free on purpose: the key answers "is this the same error?",
-            # so 37 identical lines are one error counted 37 times, never 37
-            # dispatches, and never one line with count=1 (gate 3 needs count >= 2).
+            # Timestamp-free on purpose: identical lines are one error counted N times (gate 3 needs count >= 2).
             error_hash = generate_error_hash(module, message)
             line_iso = line_ts.isoformat() if line_ts else datetime.now().isoformat()
 
@@ -351,25 +265,20 @@ def _scan_single_log_file(
             branch = detect_branch_from_log(str(log_file))
             identity = _registry_identity(parsed["level"], message, branch, str(log_file), line_iso)
             if identity is None:
-                # Not added to processed_hashes: a newer line of the same error
-                # later in this file is a real occurrence and must still fire.
+                # Not added to processed_hashes: a newer line of the same error must still fire.
                 continue
             entry = {
                 "branch": branch,
                 "module": module,
                 "message": message,
-                # log_path, not log_file: it is the key handle_error_detected
-                # reads. log_file fell into **kwargs and the mail said "unknown".
+                # log_path, not log_file: it is the key handle_error_detected reads.
                 "log_path": str(log_file),
                 "error_hash": error_hash,
                 "fingerprint": identity["fingerprint"],
                 "registry_id": identity["registry_id"],
                 "timestamp": line_iso,
                 "level": parsed["level"].lower(),
-                # Occurrence facts. `count` is what gate 3 reads; first/last_seen
-                # are what the notification prints. No severity is derived from
-                # any of them — catch-up has never set severity and still does
-                # not, so the registry default stands (@devpulse's ruling).
+                # No severity derived from these: catch-up leaves the registry default.
                 "count": 1,
                 "first_seen": line_iso,
                 "last_seen": line_iso,
@@ -382,30 +291,13 @@ def _scan_single_log_file(
 
 
 def _scan_system_logs_for_errors(since_timestamp: Optional[datetime], processed_hashes: Set[str]) -> ScanOutcome:
-    """Scan system logs for ERROR entries since timestamp.
-
-    DPLAN-037 safeguards, every one of which can cut the walk short:
-        - Skips files larger than MAX_FILE_SIZE_BYTES
-        - Stops after MAX_ERRORS_PER_SCAN new errors found
-        - Aborts if total scan time exceeds SCAN_TIME_BUDGET_SECONDS
-
-    Returns:
-        ScanOutcome. `errors` holds one dict per distinct error — branch,
-        module, message, log_file, error_hash, timestamp, level, and the
-        occurrence facts count / first_seen / last_seen, with `count` holding
-        how many lines produced it. `completed` and `reason` report whether
-        every candidate file was read; see ScanOutcome for why the caller needs
-        that and not just the list.
-    """
+    """Scan system logs for ERROR entries since timestamp."""
     errors: List[Dict[str, Any]] = []
-    # Same list, keyed for O(1) repeat lookup. MAX_ERRORS_PER_SCAN still measures
-    # len(errors), so counting repeats cannot widen the storm guard.
     by_hash: Dict[str, Dict[str, Any]] = {}
     scan_start = time.monotonic()
 
     if not SYSTEM_LOGS_DIR.exists():
-        # Nothing to read is not a failure to read: there is no unscanned
-        # window being left behind, so the timestamp may advance.
+        # No directory leaves no unread window, so the timestamp may advance.
         return ScanOutcome(errors, True, "")
 
     cutoff = since_timestamp
@@ -443,10 +335,7 @@ def _scan_system_logs_for_errors(since_timestamp: Optional[datetime], processed_
     if files_skipped_size > 0:
         skipped = f"skipped {files_skipped_size} file(s) exceeding MAX_FILE_SIZE_BYTES ({MAX_FILE_SIZE_BYTES})"
         _log_suppression(skipped.capitalize())
-        # A file too large to read is a hole in the window whether or not the
-        # walk finished, so it blocks the timestamp too — @devpulse's wording
-        # for row 12 is "aborted OR skipped files". An abort already found is
-        # the more specific answer, so it is the one reported.
+        # A skipped file is a hole in the window, so it holds the timestamp too.
         abort_reason = abort_reason or skipped
 
     return ScanOutcome(errors, not abort_reason, abort_reason)
@@ -455,20 +344,7 @@ def _scan_system_logs_for_errors(since_timestamp: Optional[datetime], processed_
 def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> None:
     """Catch-up on errors missed while Trigger wasn't running.
 
-    Loads last_scan_timestamp from error_catchup.json, scans system logs for
-    ERROR entries since that time, fires error_detected events for new errors,
-    and persists the processed hashes.
-
-    The timestamp is the one thing here that is conditional. It advances only
-    on a completed scan (row 12, DPLAN-0339 step 2); an aborted or
-    file-skipping scan leaves it alone so the next run re-covers the window it
-    did not read. Processed hashes are persisted either way — they are what
-    stops the re-covered window from re-dispatching what was already handled.
-
-    DPLAN-037 safeguards applied via _scan_system_logs_for_errors().
-
-    Args:
-        fire_event: Callback to fire events (passed from module via kwargs)
+    Hashes persist on every run; they keep a re-covered window from re-dispatching.
     """
     try:
         data = _load_trigger_data()
@@ -519,29 +395,12 @@ def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> No
 def run_startup_catchup(fire_event: Optional[Callable[..., object]] = None) -> None:
     """Run the error catch-up explicitly, without going through the event bus.
 
-    The door for a process that owns recovery and should not have to wait for
-    somebody else to fire an event at it. log_watcher_service.main() calls this
-    once its watchers are up, so the service recovers errors missed while it
-    was down whether or not anything fires `startup` (DPLAN-0339 step 2, the
-    prerequisite for prax dropping the per-process fire at logger.py:132).
-
-    Safe to run alongside that fire while it still exists: the scan dedupes on
-    persisted processed_hashes, so a second run moments later finds nothing new
-    and dispatches nothing twice.
-
-    Args:
-        fire_event: Callback used to fire error_detected for each error found.
-            None scans and records without dispatching.
+    fire_event=None scans and records without dispatching.
     """
     _run_error_catchup(fire_event)
 
 
 def handle_startup(**kwargs: Any) -> None:
-    """Run startup checks - replaces Prax logger's hardcoded calls.
-
-    Args:
-        **kwargs: Event data, may include 'fire_event' callback
-    """
-    # Error catch-up (scan for missed errors)
+    """Run startup checks - replaces Prax logger's hardcoded calls."""
     fire_event = kwargs.get("fire_event")
     _run_error_catchup(fire_event)

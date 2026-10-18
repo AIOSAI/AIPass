@@ -9,7 +9,7 @@ read in one pass. The face is [../README.md](../README.md); the live inventory i
 | Doc | What it covers |
 |---|---|
 | [event_bus.md](event_bus.md) | `fire`/`on`/`off`, handler isolation, the deferred nested fire, the help-flag rule, `report_error()` |
-| [events.md](events.md) | Every live event and its handler, the deprecated alias, the retired and decommissioned files, the names with nothing behind them |
+| [events.md](events.md) | Every live event and its handler, the rename-alias mechanism, the retired and decommissioned files, the names with nothing behind them |
 | [medic.md](medic.md) | The dispatch pipeline gate by gate, suppression doctrine, the two mute classes, runaway gating |
 | [error_registry.md](error_registry.md) | Fingerprinting, the circuit breaker, per-fingerprint backoff |
 | [escalation.md](escalation.md) | The repeat-signature digest lane, what makes a signature, every operator knob |

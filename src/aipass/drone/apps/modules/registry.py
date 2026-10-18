@@ -3,14 +3,11 @@
 # Description: Registry operations for branch management
 # Version: 1.0.1
 # Created: 2026-03-09
-# Modified: 2026-08-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 Registry operations for branch management.
-
-Thin orchestrator that delegates to registry_handler for all
-registry loading and querying operations.
 """
 
 from typing import List, Optional
@@ -26,11 +23,7 @@ from aipass.drone.apps.handlers.registry_handler import (
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
 
-# The registry's public contract. get_registry_path and the error types belong
-# here alongside the readers: a caller that has to say WHICH registry refused it,
-# or handle a tenancy mismatch, cannot do either through the readers alone — and
-# reaching into the handler for them is exactly the encapsulation break this
-# module exists to prevent.
+# Public contract: path and error types live here too, so callers never reach into the handler.
 __all__ = [
     "load_registry",
     "get_all_branches",
@@ -70,15 +63,7 @@ def print_introspection():
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
-    """Route registry commands to handler functions.
-
-    Args:
-        command: The command string (e.g. "load", "branches", "lookup")
-        args: List of arguments for the command
-
-    Returns:
-        True if command succeeded, False otherwise
-    """
+    """Route registry commands to handler functions."""
     if not args:
         if command is None:
             print_introspection()

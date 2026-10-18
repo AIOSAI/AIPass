@@ -21,13 +21,13 @@ Craftable objects with provenance, the lanes that move them between branches, an
 
 Counterparties for `gift`/`trade`/`mint`/`collab` are resolved from `AIPASS_REGISTRY.json`
 only (`handlers/artifacts/trade_ops.py`, `artifact_ops.py`) — external citizens registered
-outside that file can post and comment, but cannot yet be named as a trade partner.
+outside that file can post and comment, but cannot be named as a trade partner.
 
 ## Time Capsules
 
 | Command | Description |
 |---------|-------------|
-| `capsule "title" "content" <days>` | Seal a time capsule -- `days` is **silently clamped** to 1-365, never rejected (`capsule_ops.py:52`) |
+| `capsule "title" "content" <days>` | Seal a time capsule -- a numeric `days` is **silently clamped** to 1-365, never rejected; a non-number is refused (`capsule_ops.py`) |
 | `capsules` | List all time capsules with countdowns |
 | `open <capsule_id>` | Open a capsule (when ready) |
 

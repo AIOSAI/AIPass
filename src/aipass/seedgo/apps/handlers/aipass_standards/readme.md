@@ -88,7 +88,7 @@ Four readings arrive as non-scored info lines on `drone @seedgo audit aipass @<b
 
 **Why advisory, not a ninth check.** `readme` is scored and CI gates every branch at 100 (`.github/scripts/seedgo_audit.py`). 17 of 18 branches have no docs index today, so a scored check would put the whole fleet red on the commit that landed it — the mistake of 2026-09-13, when a renderer change reded 17 of 18 branches. The ruling is *advisory, then ratchet*: measure for a week, then gate per file.
 
-**Why `check_branch_info()` and not the other non-scored channels.** `ADVISORY = True` is a module flag — on a scored standard it drops the whole standard out of the gating average. `check_branch_observe()` carries a would-be score and writes a dated series to `branch_observe_log.json`, but nothing renders it, and these lines exist to be read per branch by the owner doing the diet. `check_branch_info()` renders for every branch at any score and can move no number.
+**Why `check_branch_info()` and not the other non-scored channels.** `ADVISORY = True` is a module flag — on a scored standard it drops the whole standard out of the gating average. `check_branch_observe()` carries a would-be score and writes a dated series to `branch_observe_log.json`, but nothing renders it, and these lines exist to be read per branch by the owner doing the diet. `check_branch_info()` renders for every branch at any score and can move no number. Every line is prefixed `(advisory)`: info lines are stored and re-rendered one at a time, so a line quoted on its own still arrives marked as advice, not as a finding.
 
 ---
 

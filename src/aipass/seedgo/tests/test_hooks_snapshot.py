@@ -3,14 +3,11 @@
 # Description: Snapshot tests for hook configurations across provider, project, and branch levels
 # Version: 1.1.0
 # Created: 2026-05-07
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for the hook wiring .claude/provider_manifest.json gives hooks/apps/handlers/bridges/claude.py."""
 
-# Hook Configuration Snapshot Tests.
-# Compares current settings.json hook configurations against known-good baselines.
-# Detects: hooks added/removed, command strings changed, matchers changed, events changed.
 # Baselines in tests/fixtures/*_hooks_snapshot.json.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
@@ -54,12 +51,7 @@ def _load_settings_hooks(settings_path: Path) -> dict:
 
 
 def _normalize_command(cmd: str) -> str:
-    """Normalize a hook command to be path-independent.
-
-    Strips environment-specific absolute paths from hook command strings
-    so snapshots are comparable across machines (Linux vs Windows CI).
-    Keeps the interpreter and script name, removes path prefixes.
-    """
+    """Normalize a hook command to be path-independent."""
     cmd = cmd.replace("\\", "/")
     cmd = re.sub(r"\$AIPASS_HOME/", "", cmd)
     cmd = re.sub(r"(?:(?<=^)|(?<= ))([A-Za-z]:)?/.+?/AIPass/", "", cmd)
@@ -68,11 +60,7 @@ def _normalize_command(cmd: str) -> str:
 
 
 def _extract_hook_commands(hooks_config: dict) -> dict[str, list[str]]:
-    """Extract {event: [command_strings]} from a hooks config, sorted.
-
-    Command strings are normalized to strip environment-specific path
-    prefixes so comparisons work across different machines.
-    """
+    """Extract {event: [command_strings]} from a hooks config, sorted."""
     result = {}
     for event, entries in hooks_config.items():
         commands = []
@@ -95,9 +83,6 @@ def _extract_hook_matchers(hooks_config: dict) -> dict[str, list[str]]:
             matchers.append(m)
         result[event] = sorted(matchers)
     return result
-
-
-# -- Provider hooks snapshot ---------------------------------------------------
 
 
 class TestProviderHooksSnapshot:
@@ -168,9 +153,6 @@ class TestProviderHooksSnapshot:
         assert removed == set(), f"Hooks removed since snapshot: {removed}"
 
 
-# -- Project hooks snapshot ----------------------------------------------------
-
-
 class TestProjectHooksSnapshot:
     """Confirm project-root .claude/settings.json has NO hooks (correct state)."""
 
@@ -189,9 +171,6 @@ class TestProjectHooksSnapshot:
         assert current == baseline == {}, f"Project root should have no hooks, found: {list(current.keys())}"
 
 
-# -- Double-fire assertion -----------------------------------------------------
-
-
 class TestDoubleFire:
     """Verify no hook command string appears at both provider AND project level with different paths."""
 
@@ -207,7 +186,6 @@ class TestDoubleFire:
         for cmds in _extract_hook_commands(project).values():
             project_cmds.update(cmds)
 
-        # Extract just the script filename from each command for overlap detection
         def script_name(cmd: str) -> str:
             """Extract the .py filename from a hook command string."""
             for part in cmd.split():
@@ -219,10 +197,8 @@ class TestDoubleFire:
         project_scripts = {script_name(c) for c in project_cmds}
         overlap = provider_scripts & project_scripts
 
-        # If same script appears in both, the command strings MUST be identical (dedup)
-        # or it will double-fire. Collected rather than looped over so the assertion
-        # runs even when the overlap is empty — an empty overlap is the healthy case,
-        # but a loop over it would report green without checking anything.
+        # If a script appears in both, the commands MUST be identical or it double-fires. Collected, not
+        # looped, so the assertion runs on the healthy empty overlap too.
         double_fire = [
             (script, pc, jc)
             for script in sorted(overlap)
@@ -243,9 +219,6 @@ class TestDoubleFire:
 
         leaked = provider_only_events & set(branch_baseline)
         assert leaked == set(), f"Branch baseline has {sorted(leaked)} hooks — these only fire from provider settings"
-
-
-# -- Branch hooks snapshot -----------------------------------------------------
 
 
 class TestBranchHooksSnapshot:
@@ -275,21 +248,11 @@ class TestBranchHooksSnapshot:
             )
 
 
-# -- Fixture is not allowed to fall behind the installer -----------------------
-
-
 class TestTheSnapshotTracksTheManifest:
     """The provider fixture must equal the repo's own provider manifest.
 
-    ``TestProviderHooksSnapshot`` reads ``~/.claude/settings.json`` — a personal,
-    untracked file — and skips where it is absent. That made the fixture a
-    hand-copied snapshot of one machine: when ``SessionStart:release_notice``
-    entered ``.claude/provider_manifest.json`` and the installer started writing
-    it, the fixture stayed behind and every host that had run ``setup.sh`` went
-    red (macOS run 34682737363, and this branch's own Linux checkout).
-
-    This pins the two tracked files against each other instead, so it runs on
-    every host including CI, and the fixture can no longer drift silently.
+    The settings.json snapshot test skips where that untracked file is absent; this pins the two
+    tracked files against each other, so it runs on every host including CI.
     """
 
     @staticmethod
@@ -320,12 +283,7 @@ class TestTheSnapshotTracksTheManifest:
         )
 
     def test_fixture_matchers_match_the_manifest(self):
-        """Every matcher the installer writes is the fixture's, on every host.
-
-        Commands were pinned and matchers were not: the manifest's PreToolUse
-        matcher gained NotebookEdit, the fixture kept the old one, and only the
-        macOS runner (the one host that installs fresh) saw it (PR #774).
-        """
+        """Every matcher the installer writes is the fixture's, on every host."""
         manifest = json.loads((_REPO_ROOT / ".claude" / "provider_manifest.json").read_text(encoding="utf-8"))
         expected: dict[str, list[str]] = {}
         for hook in manifest["cli"]["claude"]["hooks"]:

@@ -3,72 +3,13 @@
 # Description: Decentralized .daemon/ schedule file discovery
 # Version: 2.5.0
 # Created: 2026-06-15
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Decentralized schedule discovery — sweeps every active citizen's .daemon/*.json
 and returns validated Job dicts.
-
-Two trees are scanned (DPLAN-0287 piece 2):
-  - src/aipass/*        — framework citizens, listed in AIPASS_REGISTRY.json
-  - projects/<name>/    — project citizens, listed in that project's own sealed
-                          <NAME>_REGISTRY.json
-
-WHO COUNTS AS A CITIZEN (2.0.0, DPLAN-0319 wave 3)
---------------------------------------------------
-This module decides who the scheduler fires for, who the steward rotation
-walks, and whose inbox the sweep looks in. It now answers that question the
-same way @memory's fleet gateway and @ai_mail's registry/read.py answer it,
-because a fleet definition with three implementations agrees only by
-coincidence.
-
-DISCOVERY IS REGISTRY-LED AND SHALLOW. Candidates are exactly
-``projects/<project>/<NAME>_REGISTRY.json``, one level down, with every
-dot-prefixed path component refused by an explicit filter — ``pathlib`` globs
-match hidden directories where a shell would not, so without that line
-``projects/.archive/`` walks straight back in. Before this version the walk
-reached it: ``SKIP_DIRS`` never listed ``.archive``, and a registry planted
-directly inside it WAS discovered (verified on a temp tree, ``@ghost``
-resolved). The parked projects escaped only because they sit one level deeper
-than the walk reached — excluded by an accident of depth, not by a rule.
-
-DISCOVERY NEVER WALKS PASSPORTS, and the distinction is load-bearing rather
-than stylistic: on this machine a passport walk under ``projects/`` returns
-EIGHT passports for FOUR residents, because ``baud`` carries real
-resident-declaring passports under ``.backup/versioned/`` and
-``.backup/snapshots/``. A backup copy of a declaration is still a declaration.
-Reading a passport only at a path some registry declared is what makes the
-count right.
-
-CLASSIFICATION READS THE BRANCH'S OWN PASSPORT — ``citizenship.residency`` via
-:func:`declared_residency`. Inside ``projects/`` BOTH keys are required: the
-registry lists the branch active AND the passport declares ``resident``. Every
-other outcome is refused and NAMED through :func:`_refuse_resident` — missing
-passport, unreadable passport, absent field, ``core`` claimed from inside
-``projects/``, an unknown value, or a registry path that is not on disk. A
-candidate refused without a line in the log is indistinguishable from one that
-was never discovered, and those two need very different fixes.
-
-THE TRUST MODEL is asymmetric on purpose. A passport can never ADD scope —
-nothing walks passports, so a declared resident no discovered registry lists is
-unreachable by construction. A passport can never REMOVE a core citizen — a
-core branch that declares nothing is KEPT and the disagreement is logged,
-because if an absent field could drop a citizen, an agent could stop its own
-jobs firing by deleting one line of its own file.
-
-POLICY CHANGE, stated plainly. The old walk made every branch a projects
-registry marked ``active`` into a citizen, so a parked project kept its place
-in the scheduler, the rotation and the sweep on the strength of a status field
-nobody had revisited — ``marketstand`` is parked and its registry still says
-``active``. The passport is now the second key and such a project is refused.
-On this machine the live roster is unchanged (22 citizens: 18 core + 4
-residents, all four declaring ``resident``), because both parked projects
-already sat under ``projects/.archive/``; the change bites the day one is
-parked in place rather than moved.
-
-Part of the DPLAN-0204 decentralized scheduler redesign.
-"""
+Reference: docs/schedule_contract.md"""
 
 import json
 from pathlib import Path
@@ -77,9 +18,7 @@ from typing import List, Optional
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 
-# @memory's PUBLIC gateway to the fleet definition (apps/modules/fleet.py,
-# built on our dispatch 2a70bbcd): handlers/ is private implementation, and
-# importing it cross-branch failed encapsulation + handlers on the checklist.
+# @memory's PUBLIC fleet gateway: its handlers/ are private and fail the cross-branch checklist.
 from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.module_root import module_file
 from aipass.daemon.apps.handlers.schedule import command_job
@@ -89,72 +28,48 @@ _SRC_AIPASS = _REPO_ROOT / "src" / "aipass"
 _REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 _PROJECTS_DIR_NAME = "projects"
 
-# Candidate discovery: exactly one level under projects/, dot-prefixed
-# components refused by the explicit filter in _project_registry_files().
 RESIDENT_REGISTRY_GLOB = "*/*_REGISTRY.json"
 
 SKIP_DIRS = frozenset({"compass", "__pycache__", ".git", ".venv"})
 
 PASSPORT_RELATIVE = Path(".trinity") / "passport.json"
 
-# The values passport 2.0 defines for citizenship.residency. Re-exported from
-# @memory rather than re-spelled: two copies of a vocabulary drift silently.
+# Re-exported from @memory rather than re-spelled: two copies of a vocabulary drift silently.
 RESIDENCY_CORE = fleet.RESIDENCY_CORE
 RESIDENCY_RESIDENT = fleet.RESIDENCY_RESIDENT
 
 REQUIRED_JOB_KEYS = {"id", "schedule"}
 
-# What a job DOES, and a job says exactly one (DPLAN-0338): a prompt wakes the
-# owner; a command runs a drone verb as a subprocess and wakes nobody. Both is
-# ambiguous and neither is empty, so either one is refused like a missing key.
+# A job carries exactly one: prompt wakes the owner, command runs a drone verb and wakes nobody.
 JOB_ACTION_KEYS = ("prompt", "command")
 VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
 
-# Source labels on a citizen record — which registry vouched for it.
 SOURCE_AIPASS = "aipass"
 SOURCE_EXTERNAL = "external"
 
-# The core registry's file name, as @memory's records spell it.
+# Must match the registry file name as @memory's records spell it.
 _CORE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
-# Passport citizen_class that reads its mail live and must never be woken into
-# an interactive session by a scheduled job.
+# Reads its mail live; must never be woken into an interactive session by a scheduled job.
 MANAGER_CLASS = "manager"
 
 
 def declared_residency(branch_path: Path) -> Optional[str]:
     """What the passport at *branch_path* declares itself to be.
-
-    Delegates through @memory's ``modules/fleet`` gateway, which owns the field. Kept as a name
-    here because callers and tests in this branch import it from discovery,
-    and because re-spelling the read is exactly the duplication 2.1.0 removes.
-    """
+    Delegates to @memory's fleet gateway; kept here because callers and tests import it from discovery."""
     return fleet.declared_residency(branch_path)
 
 
 def _source_label(record: dict, repo_root: Path) -> str:
     """A human label for WHICH registry vouched for this citizen.
-
-    Presentation only — nothing routes on it. It is printed by
-    ``drone @daemon rotation`` and carried in the rotation's JSON, so the
-    strings are a display contract rather than a policy one.
-
-    @memory's record carries the registry FILE NAME, which is enough to tell
-    core from everything else but not enough to name the project. The project
-    directory is recovered from the citizen's own path, one level under
-    ``projects/``. A citizen outside both trees is labelled by its registry
-    stem, so the federated externals land as ``external/WREN`` rather than
-    silently reading as core.
-    """
+    Display contract only (drone @daemon rotation and its JSON); nothing routes on it."""
     if record.get("registry") == _CORE_REGISTRY_NAME:
         return SOURCE_AIPASS
 
     path = Path(record["path"])
     projects_dir = repo_root / _PROJECTS_DIR_NAME
 
-    # Asked rather than caught: a citizen outside projects/ is the ORDINARY
-    # federated-external case, not an exception, and catching ValueError here
-    # would read as error handling for something that is simply a third tier.
+    # A citizen outside projects/ is a federated external: labelled by registry stem, never as core.
     if not path.is_relative_to(projects_dir):
         stem = str(record.get("registry", "")).replace("_REGISTRY.json", "")
         return f"{SOURCE_EXTERNAL}/{stem}" if stem else SOURCE_EXTERNAL
@@ -164,43 +79,11 @@ def _source_label(record: dict, repo_root: Path) -> str:
 
 def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
     """Return an ordered record per active citizen, in @memory's fleet order.
-
-    Record: {name, email, dir_name, path, source}.
-
-    WHO COUNTS IS NOT DECIDED HERE ANY MORE (FPLAN-0460). The core-registry
-    read, the ``projects/*`` glob, the dot-filter and the two-key resident
-    rule all used to live in this module in a second copy. They are now one
-    call to :func:`fleet.fleet_branches`, because a fleet definition
-    with two implementations agrees only by coincidence — and the day the
-    federated-external anchor lands in the core registry, this lane gains
-    those citizens without a line changing here. That is the whole point of
-    consuming rather than mirroring.
-
-    WHAT IS STILL DECIDED HERE is the one thing @memory deliberately left to
-    each caller: an address. Their ruling is that a branch with no ``email``
-    is KEPT, because the path-based lanes (trinity push, rollover) still want
-    it. Daemon cannot use it — a job's owner IS an email and the wake targets
-    an email — so it is refused, and refused LOUDLY at error level. A citizen
-    dropped without a line in the log is indistinguishable from one that was
-    never discovered.
-
-    Args:
-        repo_root: Root to resolve the fleet against; defaults to this
-            checkout's. Threaded through so a test can drive a temp tree
-            without patching module state.
-
-    Returns:
-        One record per addressable active citizen, fleet order preserved.
-    """
-    # Defaults to the module constant rather than passing None straight through,
-    # so patching _REPO_ROOT still redirects the whole lane — the seam every
-    # temp-tree test in this branch already drives.
+    Who counts is @memory's; daemon refuses (at error level) citizens with no email or a duplicate one."""
+    # Not passed through as None: patching _REPO_ROOT must still redirect the lane (temp-tree tests).
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
 
-    # @memory deduplicates by resolved PATH — correct for their lanes, which are
-    # path-keyed. Daemon is email-keyed: a job's owner IS an address and the wake
-    # targets one, so two rows sharing an email are ambiguous here even when they
-    # name different directories. Deduplicated on daemon's own axis, and named.
+    # @memory dedupes by path; daemon is email-keyed, so a shared email would double-fire.
     records = []
     seen: dict = {}
     for citizen in fleet.fleet_branches(root, name_from="registry"):
@@ -242,31 +125,20 @@ def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
 
 
 def active_branch_map(repo_root: Optional[Path] = None) -> dict:
-    """Return dir_name -> branch_email for every active, registered citizen.
-
-    Public entry point so sibling handlers (inbox_scanner) can resolve branch
-    directories to owners without reaching into the private helpers.
-    """
+    """Return dir_name -> branch_email for every active, registered citizen."""
     return {c["dir_name"]: c["email"] for c in active_citizens(repo_root)}
 
 
 def framework_root(repo_root: Optional[Path] = None) -> Path:
     """This install's src/aipass/ — the directory every framework citizen's branch lives in.
-
-    Computed per call from the same root active_citizens() walks, not frozen at
-    import like _SRC_AIPASS, so a temp-tree test (or a patched _REPO_ROOT) moves
-    the fleet and the framework boundary together.
-    """
+    Computed per call, not frozen like _SRC_AIPASS, so a patched root moves fleet and boundary together."""
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
     return root / "src" / "aipass"
 
 
 def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
     """Return the on-disk path for a branch directory name.
-
-    Resolved from the citizen records so project citizens land in their own
-    tree; falls back to src/aipass/<dir_name> for anything unregistered.
-    """
+    Falls back to src/aipass/<dir_name> for anything unregistered."""
     for citizen in active_citizens(repo_root):
         if citizen["dir_name"] == dir_name:
             return citizen["path"]
@@ -275,25 +147,16 @@ def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
 
 def _stat_passport(passport_file: Path) -> None:
     """Ask the filesystem whether *passport_file* is there, raising whatever it raises.
-
-    What each failure MEANS is citizen_class_for's decision, not this function's:
-    kept apart so a test can hand that decision an EACCES or ENOTDIR without
-    replacing pathlib for the whole process.
-    """
+    A seam so a test can inject EACCES or ENOTDIR without replacing pathlib process-wide."""
     passport_file.stat()
 
 
 def citizen_class_for(branch_path: Path) -> Optional[str]:
     """Read citizen_class from a branch passport.
 
-    A missing passport answers '' (no class, an ordinary citizen). A passport that
-    exists but cannot be read answers None, which no passport can hold: it may be a
-    manager's, so callers must not treat it as a worker (the sweep skips it, the
-    rounds roster leaves it off). A .trinity that cannot be read is the same case:
-    only a passport truly absent (FileNotFoundError) answers ''; any other failure
-    to learn whether it is there answers None. Asked with stat() rather than
-    exists(), which on Python 3.12 raises on EACCES and answers False on ENOTDIR.
-    """
+    Only a truly absent passport answers ''; any unreadable case answers None (may be a
+    manager's: callers must not treat it as a worker). stat(), not exists(): on 3.12
+    exists() raises on EACCES and answers False on ENOTDIR."""
     passport_file = branch_path / ".trinity" / "passport.json"
     try:
         _stat_passport(passport_file)
@@ -350,11 +213,8 @@ def _validate_job(job: dict, file_path: Path) -> bool:
         )
         return False
 
-    # Refused at the source rather than guarded in every reader: a text or null
-    # interval raised TypeError downstream and stopped the whole tick, and a zero
-    # or negative one can never fire. Absent is fine: the readers default to 60.
-    # JSON also reads NaN and Infinity: NaN compares false both ways, so the chained
-    # bound refuses it, and an infinite interval overflows timedelta downstream.
+    # Refused here, not in every reader: a non-number stops the whole tick, <=0 never fires,
+    # NaN fails the chained bound and Infinity overflows timedelta. Absent reads as 60.
     interval = schedule.get("interval_minutes")
     if sched_type == "interval" and "interval_minutes" in schedule:
         if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not 0 < interval < float("inf"):
@@ -382,10 +242,7 @@ def _validate_job(job: dict, file_path: Path) -> bool:
 
 def _load_schedule_file(file_path: Path) -> Optional[dict]:
     """Load and validate a schedule.json file. Returns parsed dict or None.
-
-    An unreadable file answers None like a malformed one, so the caller skips
-    that one file with a warning and one bad file cannot stop the fleet's tick.
-    """
+    None (unreadable or malformed) skips that one file so it cannot stop the fleet's tick."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -432,10 +289,8 @@ def _jobs_for_citizen(citizen: dict) -> List[dict]:
                 "config": job.get("config", {}),
             }
             if "command" in job:
-                # The branch this schedule file was read from IS the command's cwd,
-                # and drone reads cwd as identity. Carried from the record that
-                # vouched for the file rather than looked up again by directory
-                # name, which two citizens can share across federated roots.
+                # cwd is identity to drone; taken from the vouching record, not re-looked-up by
+                # dir name, which two citizens can share across federated roots.
                 entry.update(command=job["command"], branch_path=str(citizen["path"]), wake={})
                 if "timeout_seconds" in job:
                     entry["timeout_seconds"] = job["timeout_seconds"]
@@ -448,14 +303,7 @@ def _jobs_for_citizen(citizen: dict) -> List[dict]:
 
 
 def discover_jobs() -> list:
-    """
-    Sweep every active citizen's .daemon/*.json and return validated Job dicts.
-
-    Each Job dict: {owner, id, schedule, wake, enabled, config} plus either
-    prompt (a wake job) or command + branch_path [+ timeout_seconds] (a command
-    job, DPLAN-0338); notify rides along when the file sets it.
-    Covers both src/aipass/* and projects/*/ citizens.
-    """
+    """Sweep every active citizen's .daemon/*.json and return validated Job dicts."""
     citizens = active_citizens()
 
     if not citizens:

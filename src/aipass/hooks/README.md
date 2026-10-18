@@ -140,7 +140,6 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
-| [docs/cadence_redo_brief.md](docs/cadence_redo_brief.md) | The brief that rebuilt cadence after the suite modelled the wrong execution model |
 
 ---
 
@@ -167,7 +166,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 
 ---
 
-**Last Updated:** 2026-09-30
+**Last Updated:** 2026-10-17
 
 ---
 [← Back to AIPass](../../../README.md)

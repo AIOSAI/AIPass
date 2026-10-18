@@ -19,8 +19,8 @@ and nothing else does it.
    Exit 2 means there is a plan to read; exit 0 means nothing to do.
 3. Paste the plan to the owner or devpulse and ask. **Apply only on a go** — an
    update can replace files, so it is a decision, not a repair. `doctor --fix`
-   deliberately will not do it for you. **One exception (the owner, DPLAN-0337
-   R1):** a *stamp-only* plan — no file would change, only the manifest's
+   deliberately will not do it for you. **One exception, set by the
+   owner:** a *stamp-only* plan — no file would change, only the manifest's
    record of the version — applies without a go. The preview says so in its
    last line, and `--json` carries `"stamp_only": true`. The receipt apply
    prints is the contract, not the go.
