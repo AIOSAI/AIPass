@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -323,6 +323,7 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
 
     head_before = repo_door.head_sha(target.root)
     result = _run_door_verb(command, flag.args, target.root)
+    taken = result.pop("theirs_taken", [])
     repo_door.record_use(
         caller=verdict.caller,
         verb=verb,
@@ -334,6 +335,7 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         exit_code=result["exit_code"],
         outcome=repo_door.OUTCOME_RAN,
         reason="",
+        theirs_taken=taken,
     )
     return result
 
@@ -354,14 +356,17 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
         return _handle_untrack(args, repo_root=repo_root)
     if command == "tag":
         return _handle_tag(args, repo_root=repo_root)
-    if command in ("fetch", "sync", "merge-upstream") and args:
+    if command in ("fetch", "sync") and args:
         return {"stdout": "", "stderr": repo_door.REFUSE_NO_ARGS.format(verb=command), "exit_code": 1}
     if command == "fetch":
         return repo_door.fetch_report(repo_root)
     if command == "sync":
         return repo_door.sync_fast_forward(repo_root)
     if command == "merge-upstream":
-        return repo_door.merge_upstream(repo_root)
+        theirs, refusal = repo_door.theirs_paths(args, repo_root)
+        if refusal:
+            return {"stdout": "", "stderr": refusal, "exit_code": 1}
+        return repo_door.merge_upstream(repo_root, theirs)
     if command == "run":
         gh_args, refusal = repo_door.gh_run_args(args, repo_root)
         if refusal:
