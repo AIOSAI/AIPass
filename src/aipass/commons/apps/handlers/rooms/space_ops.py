@@ -3,14 +3,13 @@
 # Description: Spatial Navigation Data Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Spatial Navigation Data Handler
 
-Data retrieval and mutation for spatial room commands: enter, look, decorate, visitors.
-Returns structured dicts for module-layer rendering.
+Returns structured dicts for module-layer rendering; never prints.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -23,18 +22,8 @@ from aipass.commons.apps.handlers.rooms.room_state_ops import get_all_room_state
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# DATA RETRIEVAL
-# =============================================================================
-
-
 def get_room_enter_data(room_name: str) -> Dict[str, Any]:
-    """
-    Gather all data needed to render the 'enter' view for a room.
-
-    Returns:
-        Dict with keys: found, room, state, post_count, recent_count, decorations, error
-    """
+    """Gather all data needed to render the 'enter' view for a room."""
     result: Dict[str, Any] = {"found": False, "error": None}
 
     try:
@@ -81,15 +70,7 @@ def get_room_enter_data(room_name: str) -> Dict[str, Any]:
 
 
 def record_visit(room_name: str, visitor: str) -> None:
-    """
-    Record a branch entering a room in the room_visits table.
-
-    Each call inserts a new row — no deduplication, every enter is a visit.
-
-    Args:
-        room_name: The room being entered.
-        visitor: The branch name of the visitor.
-    """
+    """Record a branch entering a room; no deduplication, every enter is a visit."""
     try:
         conn = get_db()
         conn.execute(
@@ -103,12 +84,7 @@ def record_visit(room_name: str, visitor: str) -> None:
 
 
 def get_room_look_data(room_name: str) -> Dict[str, Any]:
-    """
-    Gather all data needed to render the 'look' view for a room.
-
-    Returns:
-        Dict with keys: found, room, state, decorations, recent_posts, error
-    """
+    """Gather all data needed to render the 'look' view for a room."""
     result: Dict[str, Any] = {"found": False, "error": None}
 
     try:
@@ -151,12 +127,7 @@ def get_room_look_data(room_name: str) -> Dict[str, Any]:
 
 
 def place_decoration(room_name: str, item_name: str, description: str, branch_name: str) -> Dict[str, Any]:
-    """
-    Place a decoration in a room (stored as room_state key=decor_<name>).
-
-    Returns:
-        Dict with keys: success, display_name, error
-    """
+    """Place a decoration in a room (stored as room_state key=decor_<name>)."""
     result: Dict[str, Any] = {"success": False, "error": None}
 
     try:
@@ -187,15 +158,7 @@ def place_decoration(room_name: str, item_name: str, description: str, branch_na
 
 
 def get_visitors_data(room_name: str) -> Dict[str, Any]:
-    """
-    Get distinct visitors in a room in the last 48h.
-
-    Combines explicit room visits (room_visits table) with authors
-    who posted or commented, for a complete picture.
-
-    Returns:
-        Dict with keys: found, visitors (sorted list), error
-    """
+    """Get distinct visitors in a room in the last 48h (room_visits plus post/comment authors)."""
     result: Dict[str, Any] = {"found": False, "visitors": [], "error": None}
 
     try:
@@ -209,13 +172,12 @@ def get_visitors_data(room_name: str) -> Dict[str, Any]:
 
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Primary source: explicit room visits
         visit_rows = conn.execute(
             "SELECT DISTINCT visitor FROM room_visits WHERE room_name = ? AND visited_at > ?",
             (room_name, cutoff),
         ).fetchall()
 
-        # Secondary source: post/comment authors (for backward compat)
+        # Authors count too: activity from before room_visits existed has no visit rows.
         post_authors = conn.execute(
             "SELECT DISTINCT author FROM posts WHERE room_name = ? AND created_at > ?",
             (room_name, cutoff),

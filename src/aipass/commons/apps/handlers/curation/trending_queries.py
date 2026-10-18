@@ -3,16 +3,10 @@
 # Description: Trending Query Handlers
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Trending Query Handlers for The Commons
-
-Database operations for detecting trending posts based on
-engagement metrics (votes + comments + reactions) within a time window.
-Pure sqlite3 - no external dependencies.
-"""
+"""Trending Query Handlers for The Commons"""
 
 import sqlite3
 from typing import List, Dict, Any
@@ -29,12 +23,7 @@ def get_trending_posts(
     """
     Get trending posts based on total engagement within a time window.
 
-    A post is "trending" if it has at least min_engagement total actions
-    (votes + comments + reactions) within the last N hours.
-
-    Returns:
-        List of dicts with: id, title, room_name, author, engagement_count,
-        vote_score, vote_count, comment_count, reaction_count
+    Trending means at least min_engagement votes + comments + reactions in the last N hours.
     """
     query = """
         SELECT

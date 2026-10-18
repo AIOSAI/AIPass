@@ -3,15 +3,10 @@
 # Description: Notification Preference Operations Handler
 # Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Notification Preference Operations Handler
-
-Implementation logic for watch, mute, track, and preferences commands.
-Returns dicts for module display layer.
-"""
+"""Notification Preference Operations Handler"""
 
 from typing import List
 
@@ -26,54 +21,23 @@ from aipass.commons.apps.handlers.notifications.preferences import (
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# NOTIFICATION OPERATIONS
-# =============================================================================
-
-
 def set_watch(args: List[str]) -> dict:
-    """
-    Watch a target for all notifications.
-
-    Usage: commons watch <room|post|thread> <name_or_id>
-
-    Returns:
-        Dict with success and preference info
-    """
+    """Watch a target for all notifications."""
     return _set_notification_level(args, "watch")
 
 
 def set_mute(args: List[str]) -> dict:
-    """
-    Mute a target (no notifications).
-
-    Usage: commons mute <room|post|thread> <name_or_id>
-
-    Returns:
-        Dict with success and preference info
-    """
+    """Mute a target (no notifications)."""
     return _set_notification_level(args, "mute")
 
 
 def set_track(args: List[str]) -> dict:
-    """
-    Track a target (mentions/replies only).
-
-    Usage: commons track <room|post|thread> <name_or_id>
-
-    Returns:
-        Dict with success and preference info
-    """
+    """Track a target (mentions/replies only)."""
     return _set_notification_level(args, "track")
 
 
 def _set_notification_level(args: List[str], level: str) -> dict:
-    """
-    Set notification level for a target. Shared logic for watch/mute/track.
-
-    Returns:
-        Dict with success, level, target info, and agent
-    """
+    """Set notification level for a target. Shared logic for watch/mute/track."""
     if len(args) < 2:
         return {"success": False, "error": f"Usage: commons {level} <room|post|thread> <name_or_id>"}
 
@@ -102,7 +66,6 @@ def _set_notification_level(args: List[str], level: str) -> dict:
     try:
         conn = get_db()
 
-        # Validate target exists
         if target_type == "room":
             row = conn.execute("SELECT name FROM rooms WHERE name = ?", (target_id.lower(),)).fetchone()
             if not row:
@@ -148,14 +111,7 @@ def _set_notification_level(args: List[str], level: str) -> dict:
 
 
 def show_preferences() -> dict:
-    """
-    Show all notification preferences for the caller.
-
-    Usage: commons preferences
-
-    Returns:
-        Dict with success, agent name, and list of preferences
-    """
+    """Show all notification preferences for the caller."""
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:

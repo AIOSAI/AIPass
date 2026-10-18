@@ -3,18 +3,11 @@
 # Description: Engagement Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Engagement Operations Handler
-
-Implementation logic for daily prompts and event creation.
-THE_COMMONS acts as autonomous host for community engagement.
-
-Daily prompts rotate through themes to spark discussion.
-Events are announcement posts with a special format.
-Returns dicts for module display layer.
 """
 
 from typing import List
@@ -25,10 +18,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
-
-# =============================================================================
-# CONSTANTS
-# =============================================================================
 
 AUTONOMOUS_HOST = "THE_COMMONS"
 DEFAULT_ROOM = "watercooler"
@@ -45,23 +34,8 @@ PROMPT_THEMES = [
 ]
 
 
-# =============================================================================
-# DAILY PROMPT
-# =============================================================================
-
-
 def generate_prompt(args: List[str]) -> dict:
-    """
-    Generate a discussion-starting prompt post in the watercooler.
-
-    Posts as THE_COMMONS (autonomous host) to spark community engagement.
-    Picks a theme based on day-of-year rotation.
-
-    Usage: commons prompt [--theme "Custom question"]
-
-    Returns:
-        Dict with success, post_id, room, theme, author
-    """
+    """Post a day-of-year rotating discussion prompt in the watercooler as THE_COMMONS."""
     dry_run = "--dry-run" in args
     filtered_args = [a for a in args if a != "--dry-run"]
 
@@ -124,23 +98,8 @@ def generate_prompt(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# EVENT CREATION
-# =============================================================================
-
-
 def create_event(args: List[str]) -> dict:
-    """
-    Create an event announcement post in the watercooler.
-
-    Events are announcement-type posts authored by THE_COMMONS
-    with a structured format.
-
-    Usage: commons event "title" "description"
-
-    Returns:
-        Dict with success, post_id, room, title, author
-    """
+    """Create an event announcement post in the watercooler, authored by THE_COMMONS."""
     dry_run = "--dry-run" in args
     filtered_args = [a for a in args if a != "--dry-run"]
 

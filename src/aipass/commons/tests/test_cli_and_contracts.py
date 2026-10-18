@@ -4,7 +4,7 @@
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
 # Version: 1.3.0
 # Created: 2026-03-28
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -50,11 +50,6 @@ from aipass.commons.apps.modules import digest as digest_module
 from aipass.commons.apps.modules import explore as explore_module
 
 
-# ===========================================================================
-# CLI Routing: --help flag
-# ===========================================================================
-
-
 def test_help_flag_returns_zero():
     """Passing --help to main() should return 0 and show help."""
     with (
@@ -66,11 +61,6 @@ def test_help_flag_returns_zero():
         result = main()
         assert result == 0
         mock_ph.assert_called_once()
-
-
-# ===========================================================================
-# CLI Routing: -h short help flag
-# ===========================================================================
 
 
 def test_short_help_flag_returns_zero():
@@ -86,11 +76,6 @@ def test_short_help_flag_returns_zero():
         mock_ph.assert_called_once()
 
 
-# ===========================================================================
-# CLI Routing: "help" word
-# ===========================================================================
-
-
 def test_help_word_returns_zero():
     """Passing 'help' as a command to main() should return 0 and show help."""
     with (
@@ -102,11 +87,6 @@ def test_help_word_returns_zero():
         result = main()
         assert result == 0
         mock_ph.assert_called_once()
-
-
-# ===========================================================================
-# Module routing: a help flag on a verb that takes no arguments
-# ===========================================================================
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
@@ -121,17 +101,12 @@ def test_help_word_returns_zero():
     ],
 )
 def test_a_help_flag_prints_the_module_help_and_never_runs_the_verb(module, command, verb, headline, flag, capsys):
-    """Until 2026-09-27 these five ignored their arguments, so asking for help ran the command."""
+    """A help flag on a no-argument verb explains; asking for help must never run the command."""
     with patch.object(module, verb) as ran:
         assert module.handle_command(command, [flag]) is True
 
     ran.assert_not_called()
     assert headline in capsys.readouterr().out
-
-
-# ===========================================================================
-# Dispatcher: a help flag anywhere after the verb explains, never executes
-# ===========================================================================
 
 
 @pytest.mark.parametrize(
@@ -144,7 +119,7 @@ def test_a_help_flag_prints_the_module_help_and_never_runs_the_verb(module, comm
     ],
 )
 def test_a_help_flag_on_an_unguarded_verb_prints_general_help_and_never_runs_it(argv, target):
-    """Until 2026-10-05 main() forwarded the flag, so 'prompt --help' posted a live daily prompt."""
+    """A help flag anywhere after the verb explains, never executes: 'prompt --help' must not post a live prompt."""
     with (
         patch("sys.argv", ["commons", *argv]),
         patch.object(commons_main, "ensure_database", return_value=True),
@@ -177,31 +152,15 @@ def test_a_help_aware_verb_gets_its_own_help_with_the_args_it_was_given(argv):
     mock_ph.assert_not_called()
 
 
-# ===========================================================================
-# CLI Routing: print_help callable
-# ===========================================================================
-
-
 def test_print_help_is_callable():
     """print_help should be a callable function."""
     assert callable(print_help)
 
 
-# ===========================================================================
-# CLI Routing: print_introspection callable
-# ===========================================================================
-
-
 def test_print_introspection_is_callable():
     """print_introspection should be callable and accept a modules list."""
     assert callable(print_introspection)
-    # Should not raise when called with an empty list
     print_introspection([])
-
-
-# ===========================================================================
-# CLI Routing: no_args triggers print_introspection
-# ===========================================================================
 
 
 def test_no_args_triggers_introspection():
@@ -215,11 +174,6 @@ def test_no_args_triggers_introspection():
         result = main()
         assert result == 0
         mock_pi.assert_called_once()
-
-
-# ===========================================================================
-# Success/Failure Paths: help preempts command routing (--help)
-# ===========================================================================
 
 
 def test_help_preempts_command_routing():
@@ -238,16 +192,10 @@ def test_help_preempts_command_routing():
         mock_module.handle_command.assert_not_called()
 
 
-# ===========================================================================
-# Success/Failure Paths: known routes return True, unknown return False
-# ===========================================================================
-
-
 def test_route_command_returns_true_for_handled():
     """route_command returns True when a module handles the command: the first module that takes it, then stops.
 
-    Mutant killed: loop not stopped after the first module handles it.
-    """
+    Mutant killed: loop not stopped after the first module handles it."""
     mock_module = MagicMock()
     mock_module.handle_command.return_value = True
     later_module = MagicMock()
@@ -265,21 +213,10 @@ def test_route_command_returns_false_for_unhandled():
     assert result is False
 
 
-# ===========================================================================
-# Return Type Contracts: command_returns_bool
-# ===========================================================================
-
-
 def test_route_command_returns_bool():
-    """route_command answers its own True, never the module's truthy value.
+    """route_command answers its own True, never the module's truthy value: main() feeds it to resolve_exit().
 
-    handle_command may return anything truthy - a dict of results, a status
-    string. route_command's contract is bool, and main() feeds that straight to
-    resolve_exit(). An isinstance check cannot catch a regression here because a
-    passed-through dict would fail it too loudly to reach production; what this
-    pins is that the value is the literal True and not the payload.
-    Mutant killed: route_command passing [] instead of the args it was given.
-    """
+    Mutant killed: route_command passing [] instead of the args it was given."""
     mock_module = MagicMock()
     mock_module.handle_command.return_value = {"handled": True, "rows": 3}
     result = route_command("test", ["x"], [mock_module])
@@ -287,27 +224,13 @@ def test_route_command_returns_bool():
     mock_module.handle_command.assert_called_once_with("test", ["x"])
 
 
-# ===========================================================================
-# Exit Status: a printed refusal exits non-zero (the owner's ruling 2026-09-07)
-# ===========================================================================
-
-
 def test_main_returns_nonzero_when_a_handled_command_refused(capsys):
-    """A module that handled the command but refused must exit non-zero.
+    """A module that handled the command but refused must exit 2 (handled-but-failed; 1 is unhandled).
 
-    The defect this pins: handle_command() answers *handled*, not *succeeded*,
-    so a refusal returned True and main() turned that into exit 0 -
-    `thread not_a_real_subarg_xyz` printed "Invalid post_id" and reported
-    success to the shell that called it. 2 is the fleet's code for
-    handled-but-failed (cli's resolve_exit), 1 is reserved for unhandled.
-    Mutant killed: error() rendering on the stdout console instead of err_console.
-    """
+    handle_command() answers *handled*, not *succeeded*, so main() must read cli's refusal flag."""
 
     def refusing_module(command, args):
-        # What post.py does with a non-integer post_id: print through cli's
-        # error(), which marks the command failed, then report it as handled.
-        # Driven through the real error() on purpose - setting the flag by hand
-        # would still pass if error() stopped marking, the exact regression.
+        # The real error(), not a hand-set flag: that would pass even if error() stopped marking.
         cli_error("Invalid post_id - must be an integer")
         return True
 
@@ -323,11 +246,7 @@ def test_main_returns_nonzero_when_a_handled_command_refused(capsys):
 
 
 def test_main_returns_zero_when_a_handled_command_did_not_refuse():
-    """The other half of the contract: a clean run still exits 0.
-
-    Without this, a seam that simply always returned 1 would satisfy the test
-    above and break every successful command in the fleet.
-    """
+    """The other half of the contract: a clean run still exits 0."""
     mock_module = MagicMock()
     mock_module.handle_command.return_value = True
     with (
@@ -339,14 +258,9 @@ def test_main_returns_zero_when_a_handled_command_did_not_refuse():
 
 
 def test_cli_error_marks_the_command_failed(capsys):
-    """The seam commons relies on: cli's error() marks, main() reads.
+    """The seam commons relies on: cli's error() marks, main() reads; every commons refusal depends on it.
 
-    Commons owns no refusal machinery of its own - all 62 of its error() call
-    sites reach cli's renderer, which sets the flag resolve_exit() consults. If
-    that ever stopped marking, every one of them would silently return to exit
-    0, which is why this branch's suite pins someone else's function.
-    Mutant killed: error() rendering on the stdout console instead of err_console.
-    """
+    Mutant killed: error() rendering on the stdout console instead of err_console."""
     assert command_failed() is False
     cli_error("Invalid post_id - must be an integer")
     assert command_failed() is True
@@ -356,12 +270,7 @@ def test_cli_error_marks_the_command_failed(capsys):
 
 
 def test_unknown_command_names_the_whole_invocation():
-    """An unknown command exits non-zero and names what was actually typed.
-
-    Reporting only the first word hid the token that failed: `thread bogus`
-    used to be reported as "Unknown command: thread", naming a command that
-    plainly exists.
-    """
+    """An unknown command exits non-zero and names the whole invocation, not just the first word."""
     mock_module = MagicMock()
     mock_module.handle_command.return_value = False
     with (
@@ -377,13 +286,7 @@ def test_unknown_command_names_the_whole_invocation():
 def test_ensure_database_answers_false_when_init_db_raises(tmp_path: Path):
     """A failed init must answer False, not propagate - main() refuses on it.
 
-    ensure_database catches broadly and returns a verdict; if that except ever
-    stops answering False, main() reads a None as falsey by luck rather than by
-    contract, and a re-raise would crash the CLI instead of printing the
-    refusal. Both halves are pinned here: the failure verdict and the success
-    verdict on the same real function. The success half runs the real init_db,
-    so DB_PATH is pointed at tmp_path first - the branch's commons.db is live.
-    """
+    The success half runs the real init_db, so DB_PATH points at tmp_path: the branch's commons.db is live."""
     with patch("aipass.commons.apps.modules.database.init_db", side_effect=sqlite3.OperationalError("no such table")):
         assert ensure_database() is False
 
@@ -393,40 +296,17 @@ def test_ensure_database_answers_false_when_init_db_raises(tmp_path: Path):
     assert scratch.exists()
 
 
-# ===========================================================================
-# Return Type Contracts: paths_return_path
-# ===========================================================================
-
-
 def test_json_path_returns_path_like():
-    """get_json_path answers a real pathlib.Path.
-
-    It used to answer a str built by os.path.join, and this test asserted
-    ``result.endswith(".json")`` — which only a str can do. That was commons
-    diverging from the other seventeen branches, and seedgo's contract carried
-    it as a named strict xfail (GET_JSON_PATH_TYPE). The shim (DPLAN-0325)
-    binds the one service, which answers a Path, so a caller doing
-    ``.parent`` or ``/`` works here now like it does everywhere else.
-    """
+    """get_json_path answers a real pathlib.Path, like the shared json service everywhere else."""
     result = jh.get_json_path("testmod", "config")
     assert isinstance(result, Path), f"expected a pathlib.Path, got {type(result).__name__}"
     assert result.name.endswith(".json")
 
 
-# ===========================================================================
-# Error Resilience: missing_file (FileNotFoundError handling)
-# ===========================================================================
-
-
 def test_missing_file_load_json_auto_creates(tmp_path, monkeypatch):
     """Loading JSON for a missing_file should auto-create it, not raise FileNotFoundError.
 
-    Redirected through the fleet seam rather than by patching a module
-    constant: the shim holds no BRANCH_JSON_DIR, because the one service
-    (DPLAN-0325) resolves the directory on every call from AIPASS_TEST_LOG_DIR.
-    Patching an attribute would silently do nothing.
-    Mutant killed: load_json answering defaults without writing the file.
-    """
+    Redirected via AIPASS_TEST_LOG_DIR: the service resolves its dir per call, so patching a constant does nothing."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "missing_file_test"))
     ghost_path = jh.get_json_path("ghost", "config")
     assert not ghost_path.exists()
@@ -436,19 +316,11 @@ def test_missing_file_load_json_auto_creates(tmp_path, monkeypatch):
     assert result is not None and result["module_name"] == "ghost"
 
 
-# ===========================================================================
-# Error Resilience: empty_file handling
-# ===========================================================================
-
-
 def test_empty_file_recovery(tmp_path, monkeypatch):
     """An empty_file should be detected as corrupt and recreated with defaults."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "empty_file_test"))
 
-    # Create the directory and an empty_content file. The sandbox is MEASURED
-    # off the handler rather than spelled out here: the one service spells it
-    # <seam>/<branch>/<branch>_json, so a literal would drift the first time
-    # that changes.
+    # The path is asked of the handler, not spelled here: a literal would drift with the service's layout.
     empty_path = jh.get_json_path("emptymod", "config")
     empty_path.parent.mkdir(parents=True, exist_ok=True)
     empty_path.write_text("", encoding="utf-8")
@@ -462,56 +334,28 @@ def test_empty_file_recovery(tmp_path, monkeypatch):
     assert loaded["module_name"] == "emptymod"
 
 
-# ===========================================================================
-# Infrastructure Mocking: reimport_after_mock (importlib.reload)
-# ===========================================================================
-
-
 def test_reimport_after_mock_preserves_function():
-    """Verify that importlib.reload can reimport a module after mocking.
-
-    Asserts on a PUBLIC name now. It used to reach for ``_get_default``, a
-    private factory the old handler owned; the shim binds the one service and
-    has no private surface at all, so the reload claim has to be made about
-    something the shim actually publishes. ``load_json`` is one of its nine
-    names and is rebound by the reload exactly as the factory was.
-    """
-    # reload() the module and confirm it still works
+    """Verify that importlib.reload can reimport a module after mocking."""
     importlib.reload(jh)
     assert callable(jh.load_json)
 
-    # Deliberately NOT restoring a pre-reload binding here. The old version of
-    # this test saved and re-assigned `_get_default`, a private symbol nothing
-    # else looked at. Doing the same to a shim name is a leak: the reload
-    # rebinds all nine names to a FRESH handle over the one service, so putting
-    # one name back to the pre-reload object leaves the module holding two
-    # handles at once. Caught by seedgo's contract
-    # (test_a_migrated_shim_binds_one_handle_rooted_at_its_own_branch) and only
-    # in the composed CI run, where this suite executes before that check in
-    # the same process. The reload already leaves a consistent module; the
-    # restore was the side effect it claimed to prevent.
+    # Never restore a pre-reload binding: the reload rebinds all names to one fresh handle, and
+    # restoring one leaves two handles, which seedgo's one-handle shim contract catches later in CI.
     assert len({id(getattr(jh, name).__self__) for name in ("load_json", "save_json", "get_json_path")}) == 1, (
         "the reload left this module holding more than one service handle"
     )
 
 
 def test_discover_modules_returns_every_public_router_in_modules_dir():
-    """discover_modules imports each non-underscore file in apps/modules/ and keeps it.
+    """discover_modules imports each non-underscore file in apps/modules/ and keeps it (run for real, no patch).
 
-    Every other test replaces discover_modules with a patch; this one runs it
-    for real against the shipped modules directory (imports only, no writes).
-    Mutant killed: the `modules.append(module)` line removed - discovery answers [].
-    """
+    Mutant killed: the `modules.append(module)` line removed - discovery answers []."""
     found = commons_main.discover_modules()
 
     expected = sorted(p.stem for p in commons_main.MODULES_DIR.glob("*.py") if not p.name.startswith("_"))
     assert [m.__name__.rsplit(".", 1)[-1] for m in found] == expected
     assert all(callable(m.handle_command) for m in found)
 
-
-# ===========================================================================
-# SIGPIPE disposition: set by the started program, never by an import
-# ===========================================================================
 
 _NO_SIGPIPE = "this platform has no SIGPIPE, and commons.py sets nothing where it is missing"
 
@@ -531,7 +375,7 @@ def _child(code: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
 
 @pytest.mark.skipif(not hasattr(signal, "SIGPIPE"), reason=_NO_SIGPIPE)
 def test_importing_the_entry_leaves_sigpipe_as_the_interpreter_set_it(tmp_path):
-    """An import set SIG_DFL in every xdist worker, so the first EPIPE killed it silently (CI 38132534544)."""
+    """An import must not set SIG_DFL: in an xdist worker the first EPIPE would kill it silently."""
     code = (
         "import signal\n"
         "before = int(signal.getsignal(signal.SIGPIPE))\n"

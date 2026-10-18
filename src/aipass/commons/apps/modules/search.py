@@ -3,14 +3,11 @@
 # Description: Search & Log Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Search & Log Orchestration Module
-
-Thin router for search and log export workflows. Delegates query logic
-to handlers/search/search_ops.py and renders results with Rich.
 
 Handles: search, log commands.
 """
@@ -45,22 +42,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle search and log commands.
-
-    Args:
-        command: Command name (search, log)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle search and log commands."""
     if command == "search":
         result = _handle_search(args)
     elif command == "log":
@@ -71,11 +54,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
-
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 
 def _handle_search(args: List[str]) -> bool:

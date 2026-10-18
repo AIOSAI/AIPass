@@ -3,14 +3,11 @@
 # Description: Catchup Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Catchup Operations Handler
-
-Implementation logic for the catchup command: showing branches what
-they missed since their last visit. Returns dicts for module display layer.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -27,21 +24,8 @@ from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# PRIVATE HELPERS
-# =============================================================================
-
-
 def _calculate_time_label(last_active: str) -> str:
-    """
-    Calculate a human-readable time label from a last_active timestamp.
-
-    Args:
-        last_active: ISO format timestamp string
-
-    Returns:
-        Human-readable time delta string
-    """
+    """Calculate a human-readable time label from a last_active timestamp."""
     try:
         last_dt = datetime.strptime(last_active, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         delta = datetime.now(timezone.utc) - last_dt
@@ -59,20 +43,8 @@ def _calculate_time_label(last_active: str) -> str:
         return "your last visit"
 
 
-# =============================================================================
-# CATCHUP OPERATIONS
-# =============================================================================
-
-
 def run_catchup() -> dict:
-    """
-    Show what the branch missed since last visit.
-
-    Usage: commons catchup
-
-    Returns:
-        Dict with success, is_first_visit, time_label, data, nudge keys
-    """
+    """Show what the branch missed since last visit (the last 24 hours on a first visit)."""
     try:
         caller = get_caller_branch()
     except CallerLookupFailed as exc:
@@ -109,7 +81,6 @@ def run_catchup() -> dict:
             close_db(conn)
         return {"success": False, "error": str(e)}
 
-    # Onboarding nudge
     nudge = None
     try:
         from aipass.commons.apps.handlers.welcome.welcome_handler import get_onboarding_nudge

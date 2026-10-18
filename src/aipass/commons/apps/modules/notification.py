@@ -3,15 +3,11 @@
 # Description: Notification Preferences Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Notification Preferences Module
-
-Thin router for notification preference commands. Delegates all
-implementation to handlers/notifications/notification_ops.py
-and renders results with Rich.
 
 Handles: watch, mute, track, preferences commands.
 """
@@ -53,26 +49,12 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle notification preference commands.
-
-    Args:
-        command: Command name (watch, mute, track, preferences)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle notification preference commands."""
     if command not in ("watch", "mute", "track", "preferences"):
         return False
 
-    # Action command that works without args — route before introspection gate
+    # preferences takes no args, so it must route before the no-args introspection gate.
     if command == "preferences":
         result = _handle_preferences()
         if result:
@@ -96,10 +78,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
 
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 LEVEL_LABELS = {
     "watch": ("watching", "cyan", "All activity notifications"),

@@ -3,15 +3,13 @@
 # Description: Activity Feed Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Activity Feed Operations Handler
 
-Implementation logic for the activity command: showing recent comments
-across ALL threads in The Commons, with optional room filtering.
-Returns dicts for module display layer.
+Returns dicts for the module display layer; never prints.
 """
 
 from datetime import datetime, timezone
@@ -23,21 +21,8 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# PRIVATE HELPERS
-# =============================================================================
-
-
 def _relative_time(timestamp_str: str) -> str:
-    """
-    Convert an ISO timestamp to a human-readable relative time string.
-
-    Args:
-        timestamp_str: ISO format timestamp
-
-    Returns:
-        Human-readable relative time (e.g., "3h ago", "2d ago")
-    """
+    """Convert an ISO timestamp to a relative time string ("3h ago", "2d ago")."""
     try:
         dt = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         delta = datetime.now(timezone.utc) - dt
@@ -60,16 +45,7 @@ def _relative_time(timestamp_str: str) -> str:
 
 
 def _truncate(text: str, max_len: int = 60) -> str:
-    """
-    Truncate text to a maximum length, adding ellipsis if needed.
-
-    Args:
-        text: The text to truncate
-        max_len: Maximum character length
-
-    Returns:
-        Truncated string
-    """
+    """Truncate text to a maximum length, adding ellipsis if needed."""
     if not text:
         return ""
     text = text.replace("\n", " ").strip()
@@ -78,23 +54,8 @@ def _truncate(text: str, max_len: int = 60) -> str:
     return text[: max_len - 3] + "..."
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def run_activity(args: List[str]) -> dict:
-    """
-    Query recent comment activity across all threads.
-
-    Usage: commons activity [--limit N] [--room ROOM]
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Dict with success, activities list, room_filter
-    """
+    """Query recent comment activity across all threads: [--limit N] [--room ROOM]."""
     limit = 20
     room: Optional[str] = None
 

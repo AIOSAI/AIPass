@@ -3,16 +3,11 @@
 # Description: Digest Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Digest Orchestration Module
-
-Thin router for community digest workflows. Delegates query logic
-to handlers/digest/digest_ops.py and renders results with Rich.
-
-Handles: digest command.
 """
 
 from typing import List
@@ -48,22 +43,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle digest-related commands.
-
-    Args:
-        command: Command name (digest)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle digest-related commands."""
     if command != "digest":
         return False
 
@@ -72,11 +53,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     return _handle_digest()
-
-
-# =============================================================================
-# DISPLAY HANDLER
-# =============================================================================
 
 
 def _handle_digest() -> bool:
@@ -94,7 +70,6 @@ def _handle_digest() -> bool:
 
     console.print()
 
-    # Header
     console.print(
         Panel(
             "[bold]Community Activity Digest[/bold]\n[dim]Last 24 hours[/dim]",
@@ -104,13 +79,11 @@ def _handle_digest() -> bool:
     )
     console.print()
 
-    # Activity totals
     console.print(
         f"  [bold cyan]Activity:[/bold cyan] {totals['total_posts']} posts, {totals['total_comments']} comments"
     )
     console.print()
 
-    # Top posts
     if top_posts:
         console.print("[bold cyan]Top Posts by Engagement:[/bold cyan]")
         console.print()
@@ -132,7 +105,6 @@ def _handle_digest() -> bool:
         console.print("[dim]  No posts with engagement in the last 24h[/dim]")
         console.print()
 
-    # Most active branches
     if active_branches:
         console.print("[bold cyan]Most Active Branches:[/bold cyan]")
         console.print()
@@ -147,7 +119,6 @@ def _handle_digest() -> bool:
         console.print("[dim]  No branch activity in the last 24h[/dim]")
         console.print()
 
-    # New branches
     if new_branches:
         console.print("[bold cyan]New Branches:[/bold cyan]")
         console.print()

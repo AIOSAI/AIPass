@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -36,13 +36,8 @@ from aipass.commons.apps.handlers.notifications.preferences import (
 )
 
 
-# =============================================================================
-# set_preference -- a failed write raises (DPLAN-0354 leg 5)
-# =============================================================================
-
-
 def test_set_preference_raises_a_failed_write_instead_of_answering_invalid() -> None:
-    """Before: the except answered False, the same False as an invalid level or target type."""
+    """A failed write raises; False is reserved for an invalid level or target type."""
     conn = MagicMock()
     conn.execute.side_effect = sqlite3.OperationalError("database is locked")
 
@@ -53,11 +48,6 @@ def test_set_preference_raises_a_failed_write_instead_of_answering_invalid() -> 
     conn.commit.assert_not_called()
 
 
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-
 def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_BRANCH") -> None:
     """Insert a test agent so foreign key constraints are satisfied."""
     conn.execute(
@@ -65,11 +55,6 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_BRANCH") -> N
         (name, "Test"),
     )
     conn.commit()
-
-
-# =============================================================================
-# set_preference
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
@@ -136,11 +121,6 @@ def test_set_preference_invalid_target_type(
     mock_logger.warning.assert_called_once_with("Invalid target_type: channel")
 
 
-# =============================================================================
-# get_preference
-# =============================================================================
-
-
 def test_get_preference_nonexistent(initialized_db: sqlite3.Connection) -> None:
     """get_preference should return None when no preference exists for the agent/target."""
     conn: sqlite3.Connection = initialized_db
@@ -148,11 +128,6 @@ def test_get_preference_nonexistent(initialized_db: sqlite3.Connection) -> None:
 
     level = get_preference(conn, "TEST_BRANCH", "room", "nonexistent-room")
     assert level is None
-
-
-# =============================================================================
-# get_all_preferences
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
@@ -184,11 +159,6 @@ def test_get_all_preferences_empty_for_new_agent(initialized_db: sqlite3.Connect
 
     prefs = get_all_preferences(conn, "FRESH_BRANCH")
     assert prefs == []
-
-
-# =============================================================================
-# should_notify
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
@@ -246,15 +216,9 @@ def test_should_notify_default_no_preference(initialized_db: sqlite3.Connection)
     conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
-    # No preference set — should default to track behavior
     assert should_notify(conn, "TEST_BRANCH", "room", "general", "mention") is True
     assert should_notify(conn, "TEST_BRANCH", "room", "general", "reply") is True
     assert should_notify(conn, "TEST_BRANCH", "room", "general", "new_post") is False
-
-
-# =============================================================================
-# get_watchers
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)

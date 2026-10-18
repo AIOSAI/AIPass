@@ -3,7 +3,7 @@
 # Description: Tests for central_writer, dashboard_writer, and dashboard_pipeline handlers
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/central/, apps/handlers/dashboard/, and apps/handlers/notifications/dashboard_pipeline.py."""
@@ -22,11 +22,6 @@ import pytest
 from aipass.commons.apps.handlers.central import central_writer
 from aipass.commons.apps.handlers.dashboard import dashboard_writer
 from aipass.commons.apps.handlers.notifications import dashboard_pipeline
-
-
-# =============================================================================
-# CENTRAL WRITER — get_registered_branches
-# =============================================================================
 
 
 def test_get_registered_branches_returns_dict(tmp_path: Path) -> None:
@@ -59,11 +54,6 @@ def test_get_registered_branches_missing_file() -> None:
             central_writer.get_registered_branches()
 
 
-# =============================================================================
-# CENTRAL WRITER — aggregate_branch_stats (DB-backed)
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.central.central_writer._read_last_checked", return_value="1970-01-01T00:00:00Z")
 @patch("aipass.commons.apps.handlers.central.central_writer.get_registered_branches")
@@ -81,7 +71,6 @@ def test_aggregate_branch_stats_with_data(
     mock_get_db.return_value = initialized_db
     mock_branches.return_value = {"ALPHA": "/path/alpha", "BETA": "/path/beta"}
 
-    # Seed agents, a room, posts, comments, and mentions
     initialized_db.execute(
         "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
         ("ALPHA", "Alpha"),
@@ -106,14 +95,8 @@ def test_aggregate_branch_stats_with_data(
     assert "BETA" in stats
     assert stats["BETA"]["mentions"] == 1
     assert stats["ALPHA"]["mentions"] == 0
-    # Both branches see 1 post and 1 comment since epoch
     assert stats["ALPHA"]["new_posts_since_last_visit"] == 1
     assert stats["BETA"]["new_comments_since_last_visit"] == 1
-
-
-# =============================================================================
-# CENTRAL WRITER — query_top_threads (DB-backed)
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
@@ -129,18 +112,15 @@ def test_query_top_threads_returns_sorted(
     mock_get_db.return_value = initialized_db
 
     initialized_db.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('A', 'A')")
-    # Two posts
     initialized_db.execute(
         "INSERT INTO posts (room_name, author, title, comment_count) VALUES ('general', 'A', 'Old Thread', 1)"
     )
     initialized_db.execute(
         "INSERT INTO posts (room_name, author, title, comment_count) VALUES ('general', 'A', 'Hot Thread', 2)"
     )
-    # Older comment on post 1
     initialized_db.execute(
         "INSERT INTO comments (post_id, author, content, created_at) VALUES (1, 'A', 'old', '2026-01-01T00:00:00Z')"
     )
-    # Newer comments on post 2
     initialized_db.execute(
         "INSERT INTO comments (post_id, author, content, created_at) VALUES (2, 'A', 'new1', '2026-03-29T00:00:00Z')"
     )
@@ -152,7 +132,6 @@ def test_query_top_threads_returns_sorted(
     threads = central_writer.query_top_threads()
 
     assert len(threads) == 2
-    # Most recently active thread should be first
     assert threads[0]["title"] == "Hot Thread"
     assert threads[0]["room"] == "general"
     assert threads[1]["title"] == "Old Thread"
@@ -174,11 +153,6 @@ def test_query_top_threads_empty_db(
     assert threads == []
 
 
-# =============================================================================
-# CENTRAL WRITER — build_central_data
-# =============================================================================
-
-
 def test_build_central_data_structure() -> None:
     """build_central_data should produce the expected JSON structure."""
     stats = {"SEED": {"mentions": 2, "new_posts_since_last_visit": 5}}
@@ -198,11 +172,6 @@ def test_build_central_data_defaults_top_threads() -> None:
     assert result["top_threads"] == []
 
 
-# =============================================================================
-# CENTRAL WRITER — write_central_file
-# =============================================================================
-
-
 def test_write_central_file_atomic_write(tmp_path: Path) -> None:
     """write_central_file should write to .tmp then atomically rename."""
     central_dir = tmp_path / "central"
@@ -216,15 +185,9 @@ def test_write_central_file_atomic_write(tmp_path: Path) -> None:
         data = {"service": "the_commons", "branch_stats": {}}
         central_writer.write_central_file(data)
 
-    # Should write real content and atomically replace — no leftover .tmp file
     assert central_file.exists()
     assert json.loads(central_file.read_text(encoding="utf-8")) == data
     assert not tmp_file.exists()
-
-
-# =============================================================================
-# CENTRAL WRITER — update_central (orchestrator)
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
@@ -251,11 +214,6 @@ def test_update_central_orchestrates_full_pipeline(
     mock_build.assert_called_once_with({"X": {"mentions": 0}}, top_threads=[])
     mock_write.assert_called_once()
     assert result["service"] == "the_commons"
-
-
-# =============================================================================
-# DASHBOARD WRITER — write_commons_activity
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
@@ -290,18 +248,13 @@ def test_write_commons_activity_branch_not_found(
 
 
 def test_write_commons_activity_raises_a_failed_write_instead_of_answering_not_found() -> None:
-    """Before (DPLAN-0354 leg 5): the except answered False, the same False as "branch not found"."""
+    """A failed write raises, never answering the False that means "branch not found"."""
     with (
         patch.object(dashboard_writer, "_find_branch_path", side_effect=OSError("registry unreadable")) as lookup,
         pytest.raises(OSError, match="registry unreadable"),
     ):
         dashboard_writer.write_commons_activity("SEED", {"mentions": 0})
     lookup.assert_called_once_with("SEED")
-
-
-# =============================================================================
-# DASHBOARD WRITER — update_commons_dashboard
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
@@ -327,7 +280,6 @@ def test_update_commons_dashboard_queries_db(
     mock_write_section = MagicMock(return_value=True)
     mock_ws.return_value = mock_write_section
 
-    # Seed data
     initialized_db.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('SEED', 'Seed')")
     initialized_db.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('OTHER', 'Other')")
     initialized_db.execute("INSERT INTO posts (room_name, author, title) VALUES ('general', 'OTHER', 'Hey')")
@@ -339,7 +291,6 @@ def test_update_commons_dashboard_queries_db(
     result = dashboard_writer.update_commons_dashboard("SEED")
 
     assert result is True
-    # Verify write_section was called with section data containing real counts
     call_args = mock_write_section.call_args
     section_data = call_args[0][2]
     assert section_data["managed_by"] == "the_commons"
@@ -348,7 +299,7 @@ def test_update_commons_dashboard_queries_db(
 
 
 def test_update_commons_dashboard_raises_a_failed_write_instead_of_answering_not_found() -> None:
-    """Before (DPLAN-0354 leg 5): the except answered False, the same False as "branch not found"."""
+    """A failed lookup raises before any database opens, never answering the "not found" False."""
     with (
         patch.object(dashboard_writer, "_find_branch_path", side_effect=OSError("registry unreadable")) as lookup,
         patch.object(dashboard_writer, "get_db") as db,
@@ -378,11 +329,6 @@ def test_update_dashboards_for_event_counts_past_a_branch_whose_write_raised(
     assert count == 2
     assert mock_update_dash.call_count == 3
     mock_update_central.assert_called_once()
-
-
-# =============================================================================
-# DASHBOARD PIPELINE — update_dashboards_for_event
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)

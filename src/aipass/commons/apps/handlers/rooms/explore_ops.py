@@ -3,15 +3,11 @@
 # Description: Secret Room Exploration Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Secret Room Exploration Handler
-
-Implementation logic for discovering hidden rooms.
-Shows hints, tracks which secret rooms a branch has discovered.
-Returns dicts for module display layer.
 """
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -20,20 +16,8 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# EXPLORE - SHOW HINTS FOR HIDDEN ROOMS
-# =============================================================================
-
-
 def explore_rooms() -> dict:
-    """
-    Show discovery hints for hidden rooms.
-
-    If the caller has visited 3+ different rooms, reveal one secret room name.
-
-    Returns:
-        Dict with success, hidden_rooms, rooms_visited, revealed room (if any)
-    """
+    """Show discovery hints for hidden rooms; a caller who has visited 3+ rooms gets one revealed."""
     from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 
     try:
@@ -89,18 +73,8 @@ def explore_rooms() -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# SECRETS - LIST DISCOVERED SECRET ROOMS
-# =============================================================================
-
-
 def list_secrets() -> dict:
-    """
-    List secret rooms the caller has discovered (posted or commented in).
-
-    Returns:
-        Dict with success, discovered list, total_hidden count
-    """
+    """List secret rooms the caller has discovered (posted or commented in)."""
     from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 
     try:

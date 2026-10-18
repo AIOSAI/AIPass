@@ -3,14 +3,11 @@
 # Description: Curation Operations Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Curation Operations Handler
-
-Implementation logic for reactions, pins, and trending commands.
-Returns dicts for module display layer.
 """
 
 from typing import List
@@ -36,20 +33,8 @@ from aipass.commons.apps.handlers.curation.trending_queries import get_trending_
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# REACTION OPERATIONS
-# =============================================================================
-
-
 def add_react(args: List[str]) -> dict:
-    """
-    Add a reaction to a post or comment.
-
-    Usage: commons react <post|comment> <id> <reaction>
-
-    Returns:
-        Dict with success, reaction info, and whether it was new
-    """
+    """Add a reaction to a post or comment."""
     if len(args) < 3:
         return {
             "success": False,
@@ -123,14 +108,7 @@ def add_react(args: List[str]) -> dict:
 
 
 def remove_react(args: List[str]) -> dict:
-    """
-    Remove a reaction from a post or comment.
-
-    Usage: commons unreact <post|comment> <id> <reaction>
-
-    Returns:
-        Dict with success and whether the reaction was found/removed
-    """
+    """Remove a reaction from a post or comment."""
     if len(args) < 3:
         return {"success": False, "error": "Usage: commons unreact <post|comment> <id> <reaction>"}
 
@@ -185,14 +163,7 @@ def remove_react(args: List[str]) -> dict:
 
 
 def show_reactions(args: List[str]) -> dict:
-    """
-    Show reactions on a post or comment.
-
-    Usage: commons reactions <post|comment> <id>
-
-    Returns:
-        Dict with success and detailed reactions mapping
-    """
+    """Show reactions on a post or comment."""
     if len(args) < 2:
         return {"success": False, "error": "Usage: commons reactions <post|comment> <id>"}
 
@@ -227,20 +198,8 @@ def show_reactions(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# PIN OPERATIONS
-# =============================================================================
-
-
 def pin_post_cmd(args: List[str]) -> dict:
-    """
-    Pin a post. Only the post author or SYSTEM can pin.
-
-    Usage: commons pin <post_id>
-
-    Returns:
-        Dict with success and post info
-    """
+    """Pin a post. Only the post author or SYSTEM can pin."""
     if len(args) < 1:
         return {"success": False, "error": "Usage: commons pin <post_id>"}
 
@@ -301,14 +260,7 @@ def pin_post_cmd(args: List[str]) -> dict:
 
 
 def unpin_post_cmd(args: List[str]) -> dict:
-    """
-    Unpin a post.
-
-    Usage: commons unpin <post_id>
-
-    Returns:
-        Dict with success and post info
-    """
+    """Unpin a post."""
     if len(args) < 1:
         return {"success": False, "error": "Usage: commons unpin <post_id>"}
 
@@ -365,14 +317,7 @@ def unpin_post_cmd(args: List[str]) -> dict:
 
 
 def show_pinned(args: List[str]) -> dict:
-    """
-    Get all pinned posts.
-
-    Usage: commons pinned [--room <room_name>]
-
-    Returns:
-        Dict with success and list of pinned posts
-    """
+    """Get all pinned posts."""
     room_name = None
     if "--room" in args:
         idx = args.index("--room")
@@ -395,20 +340,8 @@ def show_pinned(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-# =============================================================================
-# TRENDING OPERATIONS
-# =============================================================================
-
-
 def show_trending() -> dict:
-    """
-    Get trending posts.
-
-    Usage: commons trending
-
-    Returns:
-        Dict with success and list of trending posts
-    """
+    """Get trending posts."""
     try:
         conn = get_db()
         trending = get_trending_posts(conn, hours=1, min_engagement=3, limit=5)

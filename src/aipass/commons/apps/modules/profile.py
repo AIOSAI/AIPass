@@ -3,17 +3,11 @@
 # Description: Social Profile Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-17
 # =============================================
 
 """
 Social Profile Orchestration Module
-
-Thin router for profile viewing/editing and member listing.
-Delegates query logic to handlers/profiles/profile_ops.py
-and renders results with Rich.
-
-Handles: profile, who commands.
 """
 
 from typing import List
@@ -49,22 +43,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle profile and who commands.
-
-    Args:
-        command: Command name (profile, who)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle profile and who commands."""
     if command == "profile":
         result = _handle_profile(args)
     elif command == "who":
@@ -75,11 +55,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
-
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 
 def _handle_profile(args: List[str]) -> bool:
@@ -94,7 +69,6 @@ def _handle_profile(args: List[str]) -> bool:
         success(f"Updated {result['field']} for {result['branch']}")
         return True
 
-    # View profile
     profile = result["profile"]
     branch_name = profile["branch_name"]
     description = profile.get("description", "")

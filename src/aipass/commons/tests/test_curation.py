@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -47,11 +47,6 @@ from aipass.commons.apps.handlers.curation.trending_queries import get_trending_
 _REACTION_MOD = "aipass.commons.apps.modules.reaction"
 
 
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-
 def _seed_agent_and_post(conn: sqlite3.Connection) -> int:
     """Insert a test agent and post, return the post ID."""
     conn.execute(
@@ -78,11 +73,6 @@ def _seed_comment(conn: sqlite3.Connection, post_id: int) -> int:
     row = conn.execute("SELECT last_insert_rowid()").fetchone()
     comment_id: int = row[0]
     return comment_id
-
-
-# =============================================================================
-# REACTION QUERIES — add_reaction
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
@@ -126,7 +116,6 @@ def test_add_reaction_comment_target(mock_json: object, initialized_db: sqlite3.
     result = add_reaction(conn, "TEST_BRANCH", "agree", comment_id=comment_id)
     assert result is True
 
-    # Verify the reaction is stored against the comment, not the post
     counts = get_reactions(conn, comment_id=comment_id)
     assert counts.get("agree") == 1
 
@@ -139,11 +128,6 @@ def test_add_reaction_both_targets_returns_false(mock_json: object, initialized_
 
     result = add_reaction(conn, "TEST_BRANCH", "agree", post_id=post_id, comment_id=99)
     assert result is False
-
-
-# =============================================================================
-# REACTION QUERIES — remove_reaction
-# =============================================================================
 
 
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
@@ -166,18 +150,12 @@ def test_remove_reaction_nonexistent_returns_false(initialized_db: sqlite3.Conne
     assert result is False
 
 
-# =============================================================================
-# REACTION QUERIES — get_reactions / get_reactions_detailed / summary
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.curation.reaction_queries.json_handler", autospec=True)
 def test_get_reactions_returns_correct_counts(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_reactions should return accurate per-type counts."""
     conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
-    # Second agent
     conn.execute(
         "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
         ("AGENT_B", "Agent B"),
@@ -239,11 +217,6 @@ def test_get_reaction_summary_empty_returns_empty_string(
     assert summary == ""
 
 
-# =============================================================================
-# PIN QUERIES
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.curation.pin_queries.json_handler", autospec=True)
 def test_pin_post_success(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """Pinning an existing post should return True and set pinned=1."""
@@ -273,7 +246,6 @@ def test_get_pinned_posts_returns_only_pinned(mock_json: object, initialized_db:
     conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
-    # Before pinning, list should be empty
     pinned = get_pinned_posts(conn)
     assert len(pinned) == 0
 
@@ -290,7 +262,6 @@ def test_get_pinned_posts_filters_by_room(mock_json: object, initialized_db: sql
     conn: sqlite3.Connection = initialized_db
     _seed_agent_and_post(conn)  # post in "general"
 
-    # Create a second post in "dev"
     conn.execute(
         "INSERT INTO posts (title, content, room_name, author) VALUES (?, ?, ?, ?)",
         ("Dev Post", "Dev content", "dev", "TEST_BRANCH"),
@@ -298,7 +269,6 @@ def test_get_pinned_posts_filters_by_room(mock_json: object, initialized_db: sql
     conn.commit()
     dev_post_id: int = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-    # Pin both
     pin_post(conn, 1)
     pin_post(conn, dev_post_id)
 
@@ -325,11 +295,6 @@ def test_is_pinned_false_for_nonexistent_post(initialized_db: sqlite3.Connection
     assert is_pinned(conn, 99999) is False
 
 
-# =============================================================================
-# TRENDING QUERIES
-# =============================================================================
-
-
 @patch("aipass.commons.apps.handlers.curation.trending_queries.json_handler", autospec=True)
 def test_get_trending_posts_empty(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_trending_posts with no engagement data should return an empty list."""
@@ -351,7 +316,6 @@ def test_get_trending_posts_with_engagement(
     conn: sqlite3.Connection = initialized_db
     post_id = _seed_agent_and_post(conn)
 
-    # Add agents for engagement
     for name in ("AGENT_A", "AGENT_B", "AGENT_C"):
         conn.execute(
             "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
@@ -359,7 +323,6 @@ def test_get_trending_posts_with_engagement(
         )
     conn.commit()
 
-    # Add reactions (3 total = meets min_engagement=3)
     add_reaction(conn, "AGENT_A", "thumbsup", post_id=post_id)
     add_reaction(conn, "AGENT_B", "agree", post_id=post_id)
     add_reaction(conn, "AGENT_C", "celebrate", post_id=post_id)
@@ -369,11 +332,6 @@ def test_get_trending_posts_with_engagement(
     assert trending[0]["id"] == post_id
     assert trending[0]["reaction_count"] == 3
     assert trending[0]["engagement_count"] == 3
-
-
-# =============================================================================
-# MODULE ROUTING — every verb reaction.py declares reaches its own handler
-# =============================================================================
 
 
 @pytest.mark.parametrize(
@@ -386,12 +344,9 @@ def test_get_trending_posts_with_engagement(
     ],
 )
 def test_reaction_handle_command_routes_verb_to_its_own_handler(verb: str, handler: str) -> None:
-    """Each arg-taking verb in HANDLED_COMMANDS reaches the handler named for it.
+    """Each arg-taking verb in HANDLED_COMMANDS reaches the handler named for it, through the CLI door.
 
-    A misroute is silent: rename the verb or swap two arms of the if-chain and
-    every reaction test still passes, because they all call the handlers
-    directly. This enters by the CLI door instead, and names the verb as a
-    literal so the entry point is measurably exercised.
+    Every other reaction test calls the handlers directly, so a misroute would pass them all.
     """
     with (
         patch(f"{_REACTION_MOD}.{handler}", return_value=True) as mock_handler,
@@ -405,23 +360,14 @@ def test_reaction_handle_command_routes_verb_to_its_own_handler(verb: str, handl
 def test_reaction_handle_command_declines_a_verb_it_does_not_own() -> None:
     """A verb outside HANDLED_COMMANDS returns False so routing can continue.
 
-    Both arg shapes, because only one of them reaches the membership guard. With
-    args, an unowned verb falls off the end of the if-chain and returns False on
-    its own. With NO args it does not get that far: the introspection arm fires
-    first, so without the guard commons would print reaction's module map for
-    somebody else's verb and report it handled - and route_command would stop
-    there, never offering the command to the module that owns it.
+    The no-args case matters: the introspection arm would otherwise claim another module's verb.
     """
     assert reaction.handle_command("nosuchverb", ["arg"]) is False
     assert reaction.handle_command("nosuchverb", []) is False
 
 
 def test_reaction_declares_the_seven_verbs_the_router_dispatches() -> None:
-    """HANDLED_COMMANDS is the declaration entry_point_diff measures against.
-
-    Adding a verb here without an arm in handle_command makes it unroutable and
-    silently so - the command falls through to the unknown-command refusal.
-    """
+    """HANDLED_COMMANDS is the declaration entry_point_diff measures against."""
     assert reaction.HANDLED_COMMANDS == [
         "react",
         "unreact",

@@ -3,19 +3,13 @@
 # Description: Entry point CLI for drone @commons
 # Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-10-11
+# Modified: 2026-10-17
 # =============================================
 
 """
 The Commons - Main Orchestrator
 
-A social network for AIPass branches. Branches can post, comment,
-vote, browse feeds, and join rooms.
-
-Auto-discovery architecture:
-- Scans modules/ directory for .py files with handle_command()
-- Routes commands to discovered modules automatically
-- Initializes database and default rooms on first run
+Routes each command to the first module in modules/ whose handle_command() claims it.
 """
 
 import importlib
@@ -32,29 +26,15 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-# Fix: When run as a script, Python adds apps/ to sys.path[0] which causes
-# this file (commons.py) to shadow the commons package. Remove it so the
-# installed package resolves correctly.
-#
-# The .resolve() is LOAD-BEARING and measured, not decorative: through a
-# symlinked checkout CPython sets sys.path[0] to the REAL directory while
-# __file__ keeps the symlinked spelling, so the unresolved form alone would
-# never match and the repair would silently not happen. Both spellings are
-# removed, because the guarded world below can only offer the raw one.
-#
-# The guard is inline rather than through handlers.module_root because it runs
-# BEFORE this repair - importing the commons package here is exactly what the
-# repair exists to make safe. Same reason as everywhere else in this branch:
-# on Windows ntpath.realpath reads os.getcwd() unconditionally, so a bare
-# resolve() makes the entry point undefined in a process with a dead cwd.
+# Run as a script, apps/ is sys.path[0] and this file shadows the commons package.
+# Both spellings go: through a symlinked checkout sys.path[0] is the REAL dir while
+# __file__ keeps the link. The guard is inline (not handlers.module_root) because
+# importing the package before this repair is unsafe; resolve() can raise with a dead cwd.
 _script_dirs = [str(Path(__file__).parent)]
 try:
     _script_dirs.append(str(Path(__file__).resolve().parent))
 except OSError as _exc:
-    # stderr, not the logger: @prax is imported below, AFTER this block, and
-    # importing it up here is what the repair exists to make safe. The
-    # condition is abnormal and belongs on the operator's screen rather than
-    # being swallowed - a shadowed package is a confusing failure to debug.
+    # stderr, not the logger: @prax is not importable until after this repair.
     sys.stderr.write(
         f"[commons] Cannot resolve {__file__} ({type(_exc).__name__}) — "
         "sys.path repair limited to its unresolved spelling\n"
@@ -63,46 +43,23 @@ for _script_dir in _script_dirs:
     if _script_dir in sys.path:
         sys.path.remove(_script_dir)
 
-# Cross-branch imports
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error, warning
 from aipass.cli.apps.modules.display import reset_command_state, resolve_exit
 
 
-# =============================================================================
-# CONSTANTS & CONFIG
-# =============================================================================
-
 MODULE_ROOT = Path(__file__).parent
 MODULES_DIR = MODULE_ROOT / "modules"
-# The one version constant. --version prints it, the file header above states it,
-# and the README header quotes it - three places that used to be free to disagree
-# (the header said 1.1.0 while --version answered 1.0.0).
+# The one version: the file header and the README header must quote this same value.
 VERSION = "1.2.1"
 
-# A help flag anywhere after the verb means explain, never execute. Only these
-# verbs' modules read the flag themselves, so only they are handed it; every
-# other module would treat it as an ordinary argument and run ('prompt --help'
-# posted a live daily prompt). Missing from this set costs contextual help,
-# never a run.
+# Only these modules read --help themselves; any other module would run with it as an
+# ordinary argument. Missing from this set costs contextual help, never a run.
 HELP_AWARE_COMMANDS = frozenset({"activity", "catchup", "digest", "explore", "room", "secrets", "whoami"})
 
 
-# =============================================================================
-# DATABASE INITIALIZATION
-# =============================================================================
-
-
 def ensure_database() -> bool:
-    """
-    Ensure the database is initialized with schema and default rooms.
-
-    Called once on startup. Uses init_db() from handlers which handles
-    schema creation, default room seeding, and branch registration.
-
-    Returns:
-        True if database is ready, False on error.
-    """
+    """Ensure the database is initialized with schema and default rooms."""
     try:
         from aipass.commons.apps.modules.database import init_db, close_db
 
@@ -114,20 +71,8 @@ def ensure_database() -> bool:
         return False
 
 
-# =============================================================================
-# MODULE DISCOVERY
-# =============================================================================
-
-
 def discover_modules() -> List[Any]:
-    """
-    Auto-discover modules in modules/ directory.
-
-    Modules must implement handle_command(command: str, args: List[str]) -> bool
-
-    Returns:
-        List of module objects with handle_command function.
-    """
+    """Auto-discover modules in modules/ that implement handle_command(command, args) -> bool."""
     modules = []
 
     if not MODULES_DIR.exists():
@@ -158,25 +103,8 @@ def discover_modules() -> List[Any]:
     return modules
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
-    """
-    Route command to appropriate module.
-
-    Each module's handle_command() returns True if it handled the command.
-
-    Args:
-        command: Command name (e.g., 'post', 'feed', 'room').
-        args: Additional arguments.
-        modules: List of discovered modules.
-
-    Returns:
-        True if command was handled, False otherwise.
-    """
+    """Route command to the first module whose handle_command() returns True."""
     for module in modules:
         try:
             if module.handle_command(command, args):
@@ -189,11 +117,6 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
             logger.error(f"[commons] Module {module.__name__} error: {e}")
 
     return False
-
-
-# =============================================================================
-# HELP DISPLAY
-# =============================================================================
 
 
 def print_help() -> None:
@@ -351,40 +274,29 @@ def print_introspection(modules: List[Any]) -> None:
     console.print()
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-
-
 def main() -> int:
     """Main entry point - initializes database and routes commands to modules."""
 
-    # One invocation, one verdict: clear the CLI's process-level failure flag
-    # before anything can print. error() sets it, resolve_exit() reads it.
+    # One invocation, one verdict: error() sets a process-level failure flag that
+    # resolve_exit() reads, so it is cleared before anything can print.
     reset_command_state()
 
-    # Ensure database is ready
     if not ensure_database():
         error("Failed to initialize The Commons database")
         return 1
 
-    # Discover available modules
     modules = discover_modules()
 
-    # Parse arguments
     args = sys.argv[1:]
 
-    # Show introspection when run with no arguments
     if len(args) == 0:
         print_introspection(modules)
         return 0
 
-    # Show version
     if args[0] in ["--version", "-V"]:
         console.print(f"THE_COMMONS v{VERSION}")
         return 0
 
-    # Show help for explicit help flags
     if args[0] in ["--help", "-h", "help"]:
         print_help()
         return 0
@@ -393,12 +305,9 @@ def main() -> int:
         error("No modules available")
         return 1
 
-    # Extract command and remaining args
     command = args[0]
     remaining_args = args[1:] if len(args) > 1 else []
 
-    # A help flag anywhere after the verb: the help-aware modules explain
-    # themselves from the arguments as given, everyone else gets general help
     if "--help" in remaining_args or "-h" in remaining_args:
         if command in HELP_AWARE_COMMANDS:
             for module in modules:
@@ -407,15 +316,11 @@ def main() -> int:
                         return 0
                 except Exception as e:
                     logger.warning(f"[commons] Module help error: {e}")
-        # Fallback to general help
         print_help()
         return 0
 
-    # Route to modules. Handled is not the same as succeeded: a module that
-    # printed a refusal still returns True, because it DID handle the command.
-    # resolve_exit() is the fleet's one door for that distinction - 0 clean,
-    # 2 handled-but-refused, 1 unhandled - and error() has already set the flag
-    # it reads (the owner's ruling 2026-09-07: an unknown argument fails).
+    # Handled is not succeeded: a module that printed a refusal still returns True.
+    # resolve_exit() maps that through error()'s flag: 0 clean, 2 refused, 1 unhandled.
     handled = route_command(command, remaining_args, modules)
     if handled:
         return resolve_exit(handled)
@@ -428,9 +333,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # Handle broken pipe gracefully (e.g. output piped to head). Here, never at
-    # import: an import set it in every pytest worker, and the first EPIPE then
-    # killed the worker with no traceback (CI 38132534544).
+    # SIGPIPE default here, never at import: set at import it kills pytest workers
+    # silently on the first EPIPE.
     if hasattr(signal, "SIGPIPE"):
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     try:

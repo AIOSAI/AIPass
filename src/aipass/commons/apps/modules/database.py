@@ -3,17 +3,13 @@
 # Description: Database Module Layer
 # Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 Database Module
 
-Module-layer wrapper for database handler. Provides database initialization
-and connection management to the entry point without direct handler imports.
-
-This is a service module — it does not handle user-facing commands.
-Other modules import init_db/close_db/get_db directly.
+Service module: the entry point and other modules import init_db/close_db/get_db from here.
 """
 
 from typing import List
@@ -48,25 +44,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle commands routed by the entry point.
-
-    This is a service module providing database connections to other modules.
-    It does not handle any user-facing commands directly.
-
-    Args:
-        command: The command name.
-        args: Additional arguments.
-
-    Returns:
-        Always False — this module is infrastructure only.
-    """
+    """Handle only bare `database` (introspection); every other command is declined."""
     if command == "database":
         if not args:
             print_introspection()

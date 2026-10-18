@@ -3,16 +3,11 @@
 # Description: Feed orchestration module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Feed Orchestration Module
-
-Thin router for feed display. Delegates query logic to
-handlers/feed/feed_ops.py and renders the results as a Rich table.
-
-Handles: feed command with hot/new/top/activity sorting.
 """
 
 from typing import List
@@ -50,31 +45,12 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle feed-related commands.
-
-    Args:
-        command: Command name (feed).
-        args: Command arguments.
-
-    Returns:
-        True if command handled, False otherwise.
-    """
+    """Handle feed-related commands."""
     if command != "feed":
         return False
 
     return _handle_feed(args)
-
-
-# =============================================================================
-# DISPLAY HANDLER
-# =============================================================================
 
 
 def _handle_feed(args: List[str]) -> bool:
@@ -92,7 +68,6 @@ def _handle_feed(args: List[str]) -> bool:
     limit = result["limit"]
     offset = result["offset"]
 
-    # Header
     console.print()
     if room_name:
         console.print(f"[bold cyan]r/{room_name}[/bold cyan] [dim]| {sort} | {total} posts[/dim]")
@@ -105,7 +80,6 @@ def _handle_feed(args: List[str]) -> bool:
         console.print()
         return True
 
-    # Build table
     table = Table(show_header=True, header_style="bold", expand=False, padding=(0, 1))
     table.add_column("ID", style="dim", width=5, justify="right")
     table.add_column("Score", width=6, justify="center")

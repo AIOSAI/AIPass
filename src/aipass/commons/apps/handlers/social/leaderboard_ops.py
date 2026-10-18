@@ -3,15 +3,11 @@
 # Description: Leaderboard Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Leaderboard Operations Handler
-
-Implementation logic for displaying rankings across categories:
-most artifacts, most trades, most posts, most active room, top karma.
-Returns dicts for module display layer.
 """
 
 import sqlite3
@@ -22,10 +18,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
-
-# =============================================================================
-# LEADERBOARD CATEGORIES
-# =============================================================================
 
 VALID_CATEGORIES = ["artifacts", "trades", "posts", "rooms", "karma"]
 
@@ -72,22 +64,8 @@ def _query_karma(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     return [{"branch": row["branch_name"], "count": row["karma"]} for row in rows]
 
 
-# =============================================================================
-# PUBLIC API
-# =============================================================================
-
-
 def show_leaderboard(args: List[str]) -> dict:
-    """
-    Query leaderboard data.
-
-    Usage: commons leaderboard [--category CATEGORY]
-    Categories: artifacts, trades, posts, rooms, karma
-    Default: show all categories.
-
-    Returns:
-        Dict with success, category, and boards data
-    """
+    """Query leaderboard data for one --category, or all of VALID_CATEGORIES by default."""
     category = None
     i = 0
     while i < len(args):

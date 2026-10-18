@@ -3,14 +3,11 @@
 # Description: Search Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Search Operations Handler
-
-Implementation logic for search and log export commands.
-Returns dicts for module display layer.
 """
 
 from typing import List
@@ -27,21 +24,8 @@ from aipass.commons.apps.handlers.search.log_export import export_room_log
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# PRIVATE HELPERS
-# =============================================================================
-
-
 def _parse_search_args(args: List[str]) -> dict:
-    """
-    Parse search command arguments.
-
-    Args:
-        args: Raw argument list
-
-    Returns:
-        Dict with query, room, author, search_type keys
-    """
+    """Parse search command arguments."""
     result = {
         "query": "",
         "room": None,
@@ -75,23 +59,8 @@ def _parse_search_args(args: List[str]) -> dict:
     return result
 
 
-# =============================================================================
-# SEARCH OPERATIONS
-# =============================================================================
-
-
 def run_search(args: List[str]) -> dict:
-    """
-    Full-text search across posts and comments.
-
-    Usage: commons search "query" [--room ROOM] [--author AUTHOR] [--type posts|comments]
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Dict with success, posts, comments, query keys
-    """
+    """Full-text search across posts and comments."""
     if not args:
         return {
             "success": False,
@@ -137,17 +106,7 @@ def run_search(args: List[str]) -> dict:
 
 
 def run_log_export(args: List[str]) -> dict:
-    """
-    Export a room's post/comment history as plaintext.
-
-    Usage: commons log <room_name> [--limit N]
-
-    Args:
-        args: Command arguments
-
-    Returns:
-        Dict with success and log_text keys
-    """
+    """Export a room's post/comment history as plaintext."""
     if not args:
         return {"success": False, "error": "Usage: commons log <room_name> [--limit N]"}
 

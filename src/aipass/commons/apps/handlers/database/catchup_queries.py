@@ -3,16 +3,10 @@
 # Description: Catchup Database Queries Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Catchup Database Queries Handler
-
-Provides database query functions for the catchup feature.
-Queries new posts, comments, mentions, replies, trending, and karma
-since a given timestamp.
-"""
+"""Catchup Database Queries Handler"""
 
 import sqlite3
 from datetime import datetime, timezone, timedelta
@@ -22,18 +16,7 @@ from aipass.commons.apps.handlers.json import json_handler
 
 
 def query_catchup_data(conn: sqlite3.Connection, branch_name: str, since_time: str) -> Dict[str, Any]:
-    """
-    Query all catchup data from the database for a branch.
-
-    Args:
-        conn: Database connection
-        branch_name: The branch to query catchup data for
-        since_time: ISO timestamp to query activity since
-
-    Returns:
-        Dict with keys: new_posts_count, new_comments_count, unread_mentions,
-        replies, trending, karma_change
-    """
+    """Query all catchup data from the database for a branch."""
     new_posts_count = _count_new_posts(conn, since_time)
     new_comments_count = _count_new_comments(conn, since_time)
     unread_mentions = _get_unread_mentions(conn, branch_name)
@@ -55,16 +38,7 @@ def query_catchup_data(conn: sqlite3.Connection, branch_name: str, since_time: s
 
 
 def get_last_active(conn: sqlite3.Connection, branch_name: str) -> Optional[str]:
-    """
-    Get the last_active timestamp for a branch.
-
-    Args:
-        conn: Database connection
-        branch_name: The branch name to look up
-
-    Returns:
-        ISO timestamp string or None if never active
-    """
+    """Get the last_active timestamp for a branch, or None if never active."""
     row = conn.execute("SELECT last_active FROM agents WHERE branch_name = ?", (branch_name,)).fetchone()
 
     if row:
@@ -73,16 +47,7 @@ def get_last_active(conn: sqlite3.Connection, branch_name: str) -> Optional[str]
 
 
 def update_last_active(conn: sqlite3.Connection, branch_name: str) -> str:
-    """
-    Update the branch's last_active timestamp to now.
-
-    Args:
-        conn: Database connection
-        branch_name: The branch name to update
-
-    Returns:
-        The ISO timestamp that was set
-    """
+    """Update the branch's last_active timestamp to now and return it."""
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     conn.execute("UPDATE agents SET last_active = ? WHERE branch_name = ?", (now_iso, branch_name))
     conn.commit()

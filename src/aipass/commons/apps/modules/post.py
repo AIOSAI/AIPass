@@ -3,16 +3,11 @@
 # Description: Post orchestration module
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Post Orchestration Module
-
-Thin router for post workflows. Delegates all implementation
-to handlers/posts/post_ops.py and renders the results.
-
-Handles: post, thread, delete commands.
 """
 
 from typing import List
@@ -53,22 +48,8 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle post-related commands.
-
-    Args:
-        command: Command name (post, thread, delete).
-        args: Command arguments.
-
-    Returns:
-        True if command handled, False otherwise.
-    """
+    """Handle post-related commands (post, thread, delete)."""
     if command == "post":
         result = _handle_create_post(args)
     elif command == "thread":
@@ -81,11 +62,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
-
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 
 def _handle_create_post(args: List[str]) -> bool:
@@ -122,7 +98,6 @@ def _handle_view_thread(args: List[str]) -> bool:
     post = result["post"]
     comments = result["comments"]
 
-    # Display the post
     console.print()
     type_color = {
         "discussion": "blue",
@@ -151,7 +126,6 @@ def _handle_view_thread(args: List[str]) -> bool:
         console.print()
         return True
 
-    # Build threaded display
     console.print(f"\n[bold]Comments ({len(comments)}):[/bold]")
     console.print()
 

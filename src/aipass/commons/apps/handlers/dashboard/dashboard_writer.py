@@ -3,27 +3,10 @@
 # Description: Dashboard Write-Through Handler
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Dashboard Write-Through Handler
-
-Updates branch DASHBOARD.local.json files via the devpulse write_section() API.
-Queries the Commons SQLite database for real activity counts (mentions,
-new posts, new comments) and pushes them to each branch's dashboard.
-
-Usage:
-    from aipass.commons.apps.handlers.dashboard.dashboard_writer import (
-        write_commons_activity, update_commons_dashboard
-    )
-
-    # Low-level: write arbitrary activity dict
-    write_commons_activity("SEED", {"managed_by": "the_commons", "mentions": 3})
-
-    # High-level: query DB and push real counts for a branch
-    update_commons_dashboard("SEED")
-"""
+"""Dashboard Write-Through Handler"""
 
 import json
 import os
@@ -36,7 +19,6 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# Constants — walk up from __file__ to find project root (AIPASS_REGISTRY.json marker)
 def _find_registry_path() -> str:
     """Walk up from __file__ to find AIPASS_REGISTRY.json at project root."""
     current = os.path.dirname(os.path.abspath(__file__))
@@ -50,7 +32,6 @@ def _find_registry_path() -> str:
 
 BRANCH_REGISTRY_PATH = _find_registry_path()
 
-# Lazy-loaded write_section reference
 _write_section_fn: Optional[Callable[..., Any]] = None
 _write_section_loaded = False
 
@@ -74,16 +55,7 @@ def _find_branch_path(branch_name: str) -> Optional[str]:
     """
     Look up a branch's directory path from BRANCH_REGISTRY.json.
 
-    Args:
-        branch_name: The branch name to look up (e.g., "SEED")
-
-    Returns:
-        Path string to the branch directory, or None if not found
-
-    Raises:
-        OSError, json.JSONDecodeError: the registry exists but cannot be read.
-        Both callers log it and raise it on, so an unreadable registry is
-        never reported as "branch path not found".
+    Raises on an unreadable registry so it is never reported as "branch path not found".
     """
     if not os.path.exists(BRANCH_REGISTRY_PATH):
         return None
@@ -102,20 +74,7 @@ def write_commons_activity(branch_name: str, activity: Dict[str, Any]) -> bool:
     """
     Write the commons_activity section to a branch's DASHBOARD.local.json.
 
-    Uses the devpulse write_section() API for atomic, consistent dashboard writes.
-
-    Args:
-        branch_name: The branch name whose dashboard to update (e.g., "SEED")
-        activity: The commons_activity dict to write
-
-    Returns:
-        True if written; False when the branch is not registered, write_section
-        is unavailable, or write_section answered False.
-
-    Raises:
-        Whatever the registry read or write_section raises, logged first, so a
-        broken write is never the False of "not found" (commons' decision,
-        DPLAN-0354 leg 5).
+    Errors are logged and re-raised so a broken write is never the False of "not found".
     """
     try:
         branch_path = _find_branch_path(branch_name)
@@ -143,25 +102,9 @@ def write_commons_activity(branch_name: str, activity: Dict[str, Any]) -> bool:
 
 def update_commons_dashboard(branch_name: str) -> bool:
     """
-    Query the Commons SQLite database for real activity counts and push
-    them to the branch's dashboard via write_section().
+    Query the Commons database for real activity counts and push them to the branch's dashboard.
 
-    Counts:
-    - mentions: unread @mentions for this branch (read=0)
-    - new_posts_since_last_visit: posts created after last_checked
-    - new_comments_since_last_visit: comments created after last_checked
-
-    Args:
-        branch_name: The branch name to update (e.g., "SEED")
-
-    Returns:
-        True if updated; False when the branch is not registered, write_section
-        is unavailable, or write_section answered False.
-
-    Raises:
-        Whatever the registry read, the database or write_section raises, logged
-        first. dashboard_pipeline.update_dashboards_for_event catches it per
-        branch and goes on (commons' decision, DPLAN-0354 leg 5).
+    Errors are logged and re-raised; dashboard_pipeline catches them per branch.
     """
     try:
         branch_path = _find_branch_path(branch_name)
@@ -214,17 +157,7 @@ def update_commons_dashboard(branch_name: str) -> bool:
 
 
 def _read_last_checked(branch_path: str) -> str:
-    """
-    Read the last_checked timestamp from the branch's current dashboard.
-
-    Falls back to epoch if the dashboard doesn't exist or has no last_checked field.
-
-    Args:
-        branch_path: Path to the branch directory
-
-    Returns:
-        ISO timestamp string
-    """
+    """Read the last_checked timestamp from the branch's dashboard, falling back to epoch."""
     epoch = "1970-01-01T00:00:00Z"
     dashboard_file = os.path.join(branch_path, "DASHBOARD.local.json")
 
@@ -255,20 +188,7 @@ def _count_unread_mentions(conn: sqlite3.Connection, branch_name: str) -> int:
 
 
 def _get_mention_details(conn: sqlite3.Connection, branch_name: str, limit: int = 5) -> list:
-    """
-    Get recent unread mention details for a branch.
-
-    Returns up to `limit` unread mentions with mentioner, thread title,
-    post_id, and timestamp.
-
-    Args:
-        conn: SQLite database connection
-        branch_name: The branch name to get mentions for
-        limit: Max number of mention details to return
-
-    Returns:
-        List of dicts with mention details
-    """
+    """Get up to `limit` recent unread mention details for a branch."""
     rows = conn.execute(
         "SELECT m.mentioner_agent, m.post_id, m.created_at, p.title "
         "FROM mentions m "

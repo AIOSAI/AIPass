@@ -3,15 +3,11 @@
 # Description: Feed display and query operations
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Feed Operations Handler
-
-Queries and returns post feed data from The Commons database.
-Supports room filtering, multiple sort modes (hot/new/top/activity),
-and pagination via limit/offset.
 """
 
 from typing import List
@@ -22,18 +18,8 @@ from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
 
 
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-
 def format_time_ago(timestamp: str | None) -> str:
-    """Convert ISO timestamp to human-readable relative time.
-
-    timestamp is Optional: the falsy check below has always treated None the
-    same as "" (commons' decision, DPLAN-0354 leg 3, item 7 — the signature
-    was the lie, not the behaviour; no caller's runtime meaning changes).
-    """
+    """Convert ISO timestamp to human-readable relative time; None and "" both read "never"."""
     if not timestamp:
         return "never"
     try:
@@ -57,31 +43,9 @@ def format_time_ago(timestamp: str | None) -> str:
         return "unknown"
 
 
-# =============================================================================
-# FEED DISPLAY
-# =============================================================================
-
-
 def display_feed(args: List[str]) -> dict:
-    """
-    Query and return the post feed from The Commons.
+    """Query and return the post feed (--room, --sort hot|new|top|activity, --limit, --offset, --page)."""
 
-    Parses CLI-style flags from args list:
-        --room <name>       Filter to a specific room
-        --sort <mode>       Sort mode: hot, new, top, activity (default: hot)
-        --limit <n>         Posts per page (default: 25)
-        --offset <n>        Skip N posts (for pagination)
-        --page <n>          Page number (alternative to --offset)
-
-    Args:
-        args: List of string arguments with optional flags.
-
-    Returns:
-        Dict with keys: success, posts, total, sort, room, limit, offset.
-        On error: dict with success=False and error message.
-    """
-
-    # Parse flags
     room_name = None
     sort = "hot"
     limit = 25
@@ -118,18 +82,15 @@ def display_feed(args: List[str]) -> dict:
         else:
             i += 1
 
-    # Validate sort mode
     valid_sorts = ("hot", "new", "top", "activity")
     if sort not in valid_sorts:
         sort = "hot"
 
-    # Clamp limit
     if limit < 1:
         limit = 1
     elif limit > 100:
         limit = 100
 
-    # Convert page to offset if provided
     if page is not None:
         if page < 1:
             page = 1
@@ -141,14 +102,13 @@ def display_feed(args: List[str]) -> dict:
     try:
         conn = get_db()
 
-        # Build query
         where_clause = ""
         params = []
         if room_name:
             where_clause = "WHERE p.room_name = ?"
             params.append(room_name)
 
-        # Sort order - pinned DESC always first
+        # Pinned posts lead every sort mode.
         if sort == "top":
             order_by = "ORDER BY p.pinned DESC, p.vote_score DESC, p.created_at DESC"
         elif sort == "hot":
@@ -162,10 +122,8 @@ def display_feed(args: List[str]) -> dict:
         else:  # "new"
             order_by = "ORDER BY p.pinned DESC, p.created_at DESC"
 
-        # Count
         total = conn.execute(f"SELECT COUNT(*) FROM posts p {where_clause}", params).fetchone()[0]
 
-        # Get posts
         rows = conn.execute(
             f"""SELECT p.*, COALESCE(p.last_comment_at, p.created_at) AS last_activity
             FROM posts p {where_clause} {order_by} LIMIT ? OFFSET ?""",

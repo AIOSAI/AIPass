@@ -3,18 +3,10 @@
 # Description: Engagement Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
-"""
-Engagement Orchestration Module
-
-Thin router for community engagement workflows. Delegates all
-implementation to handlers/engagement/engagement_ops.py and
-renders results with Rich.
-
-Handles: prompt, event commands.
-"""
+"""Engagement Orchestration Module"""
 
 from typing import List
 
@@ -47,24 +39,11 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
 HANDLED_COMMANDS = ["prompt", "event"]
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle engagement-related commands.
-
-    Args:
-        command: Command name (prompt, event)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle engagement-related commands; False if the command is not ours."""
     if command not in HANDLED_COMMANDS:
         return False
 
@@ -78,11 +57,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if result:
         json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
     return result
-
-
-# =============================================================================
-# DISPLAY HANDLERS
-# =============================================================================
 
 
 def _handle_prompt(args: List[str]) -> bool:

@@ -3,16 +3,11 @@
 # Description: Leaderboard Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-17
 # =============================================
 
 """
 Leaderboard Module
-
-Thin router for leaderboard commands. Delegates all query logic
-to handlers/social/leaderboard_ops.py and renders results as Rich tables.
-
-Handles: leaderboard, leaderboards commands.
 """
 
 from typing import List
@@ -47,31 +42,13 @@ def print_introspection():
     console.print()
 
 
-# =============================================================================
-# COMMAND ROUTING
-# =============================================================================
-
-
 def handle_command(command: str, args: List[str]) -> bool:
-    """
-    Handle leaderboard commands.
-
-    Args:
-        command: Command name (leaderboard, leaderboards)
-        args: Command arguments
-
-    Returns:
-        True if command handled, False otherwise
-    """
+    """Handle leaderboard commands."""
     if command not in ("leaderboard", "leaderboards"):
         return False
 
     return _handle_leaderboard(args)
 
-
-# =============================================================================
-# DISPLAY HANDLER
-# =============================================================================
 
 BOARD_TITLES = {
     "artifacts": "Most Artifacts",
