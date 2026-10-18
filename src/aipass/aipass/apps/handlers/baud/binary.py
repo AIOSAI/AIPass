@@ -3,36 +3,13 @@
 # Description: Land a verified baud-cli beside the phone face: staging, rename, 0755, marker, previous kept
 # Version: 1.0.0
 # Created: 2026-09-14
-# Modified: 2026-09-14
+# Modified: 2026-10-17
 # =============================================
 
 """
 Land the headless baud binary beside the phone face (FPLAN-0589 row 3).
 
-The release asset is ``baud-cli-<tag>-linux-x86_64``. Releases build for that
-one platform today, so anywhere else ``binary_asset_name`` answers None and the
-install says so in one line and lands the face only.
-
-THE LAYOUT
-----------
-The binary sits beside the face, under one baud root: the face's parent.
-
-    ~/.aipass/baud/phone/             the face (unpack.py)
-    ~/.aipass/baud/bin/baud-cli       the binary, 0755
-    ~/.aipass/baud/bin/baud-cli.prev  the binary it replaced, kept
-    ~/.aipass/baud/.baud-cli.json     marker: tag, sha256, installed_at, source
-
-``--dest DIR`` moves the root with it: the binary lands in ``DIR/../bin``.
-
-THE SWAP
---------
-The bytes are copied into ``bin/.baud-cli.staging``, hashed again (what lands is
-what was verified, even if the source file changed in between), set 0755, then
-baud-cli -> baud-cli.prev and staging -> baud-cli. If the second rename fails,
-the previous binary goes back. The marker is written last.
-
-What this refuses to replace: a baud-cli with no marker beside it. It is not one
-this command installed.
+Reference: docs/baud_phone_face.md (layout, swap, the marker refusal).
 """
 
 from __future__ import annotations
@@ -107,11 +84,6 @@ def check_bin_dest(root: Path) -> None:
     """Refuse a binary location this command must not write.
 
     Called before anything is installed, so a refusal leaves the face untouched too.
-
-    Raises:
-        UnpackError: bin/ is not a plain directory; baud-cli, its prev or its
-            staging is a link or not a regular file; or a baud-cli is there
-            with no marker.
     """
     bin_dir = root / BIN_DIR
     if bin_dir.is_symlink() or (bin_dir.exists() and not bin_dir.is_dir()):
@@ -128,7 +100,7 @@ def check_bin_dest(root: Path) -> None:
 
 
 def _stage(source: Path, staging: Path, digest: str) -> None:
-    """Copy the bytes, check them against the verified digest, set 0755."""
+    """Copy the bytes, check them against the verified digest (the source may change after verify), set 0755."""
     staging.unlink(missing_ok=True)
     try:
         shutil.copyfile(source, staging)
@@ -143,17 +115,8 @@ def _stage(source: Path, staging: Path, digest: str) -> None:
 def install_binary(source: Path, root: Path, record: dict[str, Any]) -> Path:
     """Land a verified binary at root/bin/baud-cli, keep the old one as .prev, write the marker.
 
-    Args:
-        source: The verified binary.
-        root: The baud root (the face's parent).
-        record: The marker content: tag, sha256 (the verified digest), installed_at, source.
-
-    Returns:
-        The installed path.
-
-    Raises:
-        UnpackError: A refused location, bytes that no longer match, an unwritable marker.
-        OSError: The filesystem failed under the rename (the previous binary is restored).
+    ``record["sha256"]`` must be the verified digest; the staged bytes are checked against it.
+    OSError from the rename propagates after the previous binary is restored.
     """
     check_bin_dest(root)
     target, staging, prev = bin_path(root), bin_staging_path(root), bin_prev_path(root)

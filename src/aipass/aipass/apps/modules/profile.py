@@ -3,26 +3,13 @@
 # Description: User profile read/write — aipass profile command
 # Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """
 aipass profile — show/edit what aipass remembers about the user
 
-Reads and writes ``aipass_json/user_profile.json``.
-
-The profile used to live as a top-level ``user`` section inside
-.trinity/local.json. It does not any more: .trinity/local.json's top-level
-key set is a CLOSED set under the trinity standard, so a module writing its
-own section there drifts the branch off 100 every time it runs. The profile
-is module state, not memory, so it lives in this module's own data dir with
-the rest of the branch's json. A legacy ``user`` section is still READ as a
-fallback so no profile is lost on an old file -- never written back.
-Commands:
-    aipass profile               — pretty-print current profile
-    aipass profile set <f> <v>   — update a field
-    aipass profile clear         — reset (confirm required)
-    aipass profile clear --yes   — reset without confirmation (dev/CI)
+Store: ``aipass_json/user_profile.json``; .trinity/local.json's keys are a closed set (read only).
 """
 
 from __future__ import annotations
@@ -39,17 +26,12 @@ from aipass.aipass.apps.handlers.module_root import module_file
 COMMAND = "profile"
 # module_file, not resolve(): import-time cwd read on Windows (module_root).
 _BRANCH_ROOT = module_file(__file__).parents[2]
-# NOT profile_data.json: <module>_{config,data,log}.json is json_handler's OWN
-# managed triplet, and ensure_module_jsons REGENERATES any of the three that
-# fails its shape check. save_profile's own log_operation call auto-detects
-# module "profile" and would therefore destroy the profile it had just written
-# -- observed 2026-08-27, the store came back as {created, last_updated}.
+# NOT profile_data.json: json_handler regenerates its own <module>_{config,data,log}.json
+# triplet, so save_profile's log_operation would wipe the profile it just wrote.
 _PROFILE_FILENAME = "user_profile.json"
 _PROFILE_JSON = _BRANCH_ROOT / "aipass_json" / _PROFILE_FILENAME
 
-# Read-only legacy source. Pre-1.1.0 the profile was a top-level "user" section
-# in local.json; a file still carrying one is migrated forward on first read.
-# Never written -- .trinity/ belongs to the memory standard, not to this module.
+# Read-only legacy source, migrated forward on first read; .trinity/ is never written here.
 _LEGACY_LOCAL_JSON = _BRANCH_ROOT / ".trinity" / "local.json"
 
 USER_FIELDS = ["name", "os", "shell", "preferred_cli", "install_method", "first_seen"]
@@ -68,17 +50,7 @@ def _read_json_file(path: Path) -> dict:
 def _fire_profile_write_failed(path: str) -> None:
     """Fire the write-failure trigger event, ignoring an absent trigger branch.
 
-    The event fires on a FAILED WRITE, never on a deletion, and since 2026-09-07
-    it is named for what it is. It was ``file_deleted`` when the writer was
-    hand-rolled and the temp file this module unlinked was the only thing the
-    name could honestly describe. @trigger carried the old name as an alias
-    for one release and has since retired it: only ``profile_write_failed``
-    is delivered today.
-
-    ``path`` is the STORE the failed write targeted, not a temp file:
-    json_handler owns its temp file and unlinks it internally, so this module
-    never learns that name. ``detail`` keeps saying that the store itself
-    survived, which the name no longer has to carry alone.
+    ``path`` is the store the write targeted; json_handler owns and unlinks its temp file.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
@@ -96,16 +68,7 @@ def _fire_profile_write_failed(path: str) -> None:
 def _write_profile_json(data: dict) -> None:
     """Write the store through json_handler, raising when it cannot be written.
 
-    The handler's save is atomic -- temp file, fsync, then a retried replace --
-    so an OSError mid-write leaves the previous store byte-intact rather than
-    half-written, and the temp file is unlinked on any exception. That is the
-    durability the hand-rolled writer provided, kept.
-
-    What the handler does NOT do is raise: it answers False and logs. Answering
-    False up to save_profile would make a failed save look identical to a
-    successful one at every call site, so the False is turned back into the
-    OSError the callers were already written against. A profile that quietly
-    failed to save is worse than one that says so.
+    The handler answers False; callers expect OSError, so a failed save never looks saved.
     """
     if json_handler.write_json(_PROFILE_JSON, data):
         return
@@ -126,9 +89,7 @@ def _legacy_profile() -> dict:
 def get_user_profile() -> dict:
     """Return the stored profile, creating defaults if absent.
 
-    Order: this module's own store, then a legacy local.json "user" section,
-    then None-filled defaults. Whatever is found is written to the store, so
-    the legacy read happens at most once and local.json is never written.
+    Whatever is found is written to the store, so the legacy read happens at most once.
     """
     data = _read_json_file(_PROFILE_JSON)
     profile = data.get("profile")
@@ -185,10 +146,7 @@ def print_help() -> None:
 
 
 def handle_command(command: str, args: list[str]) -> bool:
-    """Route profile subcommands: show, set <field> <value>, clear, help.
-
-    Returns True if handled, False if command does not match.
-    """
+    """Route profile subcommands: show, set <field> <value>, clear, help."""
     if command != COMMAND:
         return False
 
@@ -220,8 +178,6 @@ def handle_command(command: str, args: list[str]) -> bool:
         return True
 
     if args[0] == "clear":
-        # --yes / -y skips the interactive confirmation (CI, dev resets,
-        # piped invocations where stdin isn't a TTY).
         skip_confirm = any(a in ("--yes", "-y") for a in args[1:])
         if skip_confirm:
             save_profile({f: None for f in USER_FIELDS})
@@ -231,9 +187,7 @@ def handle_command(command: str, args: list[str]) -> bool:
         try:
             confirm = input("> ").strip()
         except (KeyboardInterrupt, EOFError) as exc:
-            # No usable stdin (piped, or ctrl-C): the profile was NOT cleared, so
-            # this cannot exit 0. A piped `aipass profile clear` reported success
-            # while clearing nothing until 2026-09-07 (FPLAN-0492 wave 6).
+            # Nothing was cleared, so this must not exit 0.
             logger.info("[profile] clear input interrupted: %s", exc)
             error("Cancelled — no confirmation read, profile NOT cleared.")
             raise SystemExit(1) from exc

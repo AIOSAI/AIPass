@@ -3,49 +3,16 @@
 # Description: Init handler — provision a project for manager-class git (owner-tier)
 # Version: 1.1.1
 # Created: 2026-08-04
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """
 Git-auth provisioning handler - PRIVATE implementation
 
-Project-side counterpart to drone's owner-tier gate (DPLAN-0281). Drone grants
-git write to a caller iff ALL FOUR of these hold:
-
-  1. the caller's passport declares ``citizen_class: manager``
-  2. tenancy — passport ``citizenship.registry_id`` == registry ``metadata.id``
-  3. the project registry lists the caller with ``owner: true``
-  4. path-binding — the passport is presented from at/under the registry-recorded
-     path for that entry
-
-This handler makes those four true for a consuming project, or refuses with an
-error that names the exact fix. It repairs; it never guesses:
-
-  - mints ``metadata.id`` when the registry has none
-  - backfills the owner's passport ``citizenship.registry_id`` to match
-  - flips the owner's ``citizen_class`` to ``manager``
-  - writes ``owner: true`` onto the owner's registry entry, and records the
-    owner's real branch directory as its path
-
-GUARDRAIL (from @drone, non-negotiable): an owner entry must NEVER record the
-repo root or a dot path. Path-binding is at-or-under, so a root path degrades
-authority to repo-wide — any directory in the repo could then host a forged
-passport and hold git. That case refuses instead of repairing.
-
-Owner selection never guesses. The citizen the REGISTRY marks with
-``owner: true`` IS the owner — the single source. With none marked, or more
-than one, the run refuses and says what to add.
-
-The passport-side ``citizenship.owner`` fallback retired with passport 2.0
-(DPLAN-0319), which drops that field at migration; the refusal names the
-retirement so a project that used to be seated by a passport claim is told why,
-not just that nobody is marked. Registry-entry ``owner: true`` in
-``*_REGISTRY.json`` is a DIFFERENT field and is unaffected.
-
-RULES:
-  - No CLI output — returns dicts, raises GitAuthRefusal; the module prints
-  - Reads and writes go through json_handler (atomic write + fsync)
-  - No hardcoded paths
+Makes drone's four owner-tier conditions true (manager class, tenancy, owner flag,
+path-binding) or refuses naming the fix. @drone's guardrail: an owner entry NEVER records
+the repo root or a dot path; binding is at-or-under, so a root path lets a forged
+passport anywhere in the repo hold git.
 """
 
 import os
@@ -60,21 +27,14 @@ from aipass.aipass.shared.registry_discovery import registries_in
 
 MANAGER_CLASS = "manager"
 
-# Directories never worth walking when locating a citizen's branch directory.
 _SKIP_DIRS = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache"})
 
-# Depth cap for that walk — citizens live a few levels down (src/<pkg>/<name>),
-# never at the bottom of a deep tree.
+# Citizens live a few levels down (src/<pkg>/<name>), never deep in a tree.
 _MAX_SCAN_DEPTH = 6
 
 
 class GitAuthRefusal(ValueError):
     """Provisioning cannot proceed honestly — message names the required fix."""
-
-
-# =============================================================================
-# JSON I/O
-# =============================================================================
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -88,8 +48,7 @@ def _read_json(path: Path) -> Dict[str, Any]:
 def _read_passport(path: Path) -> Optional[Dict[str, Any]]:
     """Read a passport, or None when it is missing or unreadable.
 
-    Used by the scans, where one unreadable passport must not sink the run —
-    the owner's own passport is read with ``_read_json`` and does refuse.
+    For scans only, where one bad passport must not sink the run; the owner's refuses via ``_read_json``.
     """
     if not path.is_file():
         return None
@@ -103,25 +62,16 @@ def _read_passport(path: Path) -> Optional[Dict[str, Any]]:
 def _write_json(path: Path, data: Dict[str, Any]) -> None:
     """Write *data* to *path* atomically, refusing loudly if the write fails.
 
-    A half-written registry locks every citizen out of its own project, so the
-    file is only ever swapped in complete — and a failed write is never
-    reported as a repair.
+    A half-written registry locks every citizen out; a failed write is never reported as a repair.
     """
     if not json_handler.write_json(path, data):
         raise GitAuthRefusal(f"{path} could not be written — check file permissions, then re-run")
 
 
-# =============================================================================
-# Registry + passport reading
-# =============================================================================
-
-
 def find_registry(target: Path) -> Optional[Path]:
     """Walk up from *target* for a ``*_REGISTRY.json``; None when there is none.
 
-    Matches drone's discovery: the glob convention (``VERA-STUDIO_REGISTRY.json``)
-    and sorted-first so a directory holding two registries resolves the same way
-    on every platform.
+    Matches drone's discovery (glob, sorted-first) so two registries resolve alike on every platform.
     """
     current = target.resolve()
     for candidate in [current, *current.parents]:
@@ -134,9 +84,7 @@ def find_registry(target: Path) -> Optional[Path]:
 def _entries(registry_data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return branch entries as a list of live dicts (both registry shapes).
 
-    Registries are authored as a list of objects or as a name-keyed dict. The
-    dicts inside are returned by reference, so mutating one here mutates what
-    gets written back — the file's own shape is preserved, never reshaped.
+    By reference: mutating an entry mutates what is written back, so the file keeps its own shape.
     """
     branches = registry_data.get("branches", [])
     if isinstance(branches, dict):
@@ -159,13 +107,8 @@ def _citizen_class(passport: Dict[str, Any]) -> str:
 def _resolved_path(entry: Dict[str, Any], repo_root: Path) -> Optional[Path]:
     """Resolve an entry's recorded path against the repo root, None when unset.
 
-    Relative paths resolve against the repo root — never CWD, which would bind
-    authority to wherever the user happened to be standing.
-
-    A recorded path that cannot resolve (a symlink loop raises RuntimeError on
-    Python 3.12) refuses by name. None would read as "records no path" and send
-    provision to the passport search, which rewrites the recorded path
-    (aipass's decision, fleet green leg 3).
+    Never against CWD, which binds authority to wherever the user stands. An unresolvable path
+    (symlink loop) refuses: None would send provision to the search that rewrites the path.
     """
     raw = entry.get("path")
     if not raw or not str(raw).strip():
@@ -186,11 +129,8 @@ def _resolved_path(entry: Dict[str, Any], repo_root: Path) -> Optional[Path]:
 def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
     """Find the citizen's real branch directory by its passport, or None.
 
-    Used only when the registry records no path at all. The repo root is never
-    a candidate — a root-level passport would mean root-level path-binding,
-    which is exactly what the guardrail exists to prevent. A miss over a tree
-    with unreadable directories refuses and names them: None would claim the
-    passport is absent when it may sit inside one of them.
+    The repo root is never a candidate (the root-path guardrail). A miss over unreadable
+    directories refuses naming them: None would claim absent a passport that may sit inside.
     """
     wanted = name.lower()
     root_depth = len(repo_root.parts)
@@ -220,24 +160,11 @@ def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
     return None
 
 
-# =============================================================================
-# Owner selection — marked, never guessed
-# =============================================================================
-
-
 def _select_owner(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Return the owner entry. Refuses rather than guessing.
 
-    The registry's own ``owner: true`` is the ONLY source. The passport-side
-    ``citizenship.owner`` fallback that used to run here retired with passport
-    2.0 (DPLAN-0319): the migration DROPS that field, so consulting it would be
-    reading a key no current passport carries — a branch that can only ever go
-    dead-silent, turning "the rule changed" into "nobody is marked".
-
-    Which is why the no-owner refusal below NAMES the retirement. A project
-    that used to be seated off a passport claim otherwise gets a message that
-    is true but unhelpful, and no way to learn why yesterday's setup stopped
-    working. Loud beats silent even when the silence is technically correct.
+    Registry ``owner: true`` is the ONLY source; passport 2.0 dropped ``citizenship.owner``,
+    and the no-owner refusal names that so a project once seated by it learns why.
     """
     flagged = [entry for entry in entries if entry.get("owner") is True]
     if len(flagged) == 1:
@@ -258,17 +185,10 @@ def _select_owner(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
 
 
-# =============================================================================
-# Independent verification — re-read from disk, never trust the repair's own count
-# =============================================================================
-
-
 def verify_git_auth(registry_path: Path, owner_name: str) -> List[str]:
     """Re-check drone's four conditions from disk; return the failures.
 
-    Deliberately independent of the repair pass: it re-reads both files and
-    re-derives every answer, so a repair that reported success but wrote the
-    wrong thing still shows up as a failure here.
+    Independent of the repair pass, so a repair that reported success but wrote wrong still fails here.
     """
     failures: List[str] = []
     try:
@@ -328,29 +248,10 @@ def verify_git_auth(registry_path: Path, owner_name: str) -> List[str]:
     return failures
 
 
-# =============================================================================
-# Public entry point
-# =============================================================================
-
-
 def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     """Provision or repair *target* so its owner citizen can hold git.
 
-    Plans every repair before writing anything, so a run that must refuse
-    (root path, no marked owner, missing passport) leaves the project exactly
-    as it found it rather than half-provisioned.
-
-    Args:
-        target: A directory inside the project (the registry is found upward).
-        dry_run: Plan and report the repairs without writing them.
-
-    Returns:
-        dict with ``registry``, ``owner``, ``repairs``, ``already_ok``,
-        ``verified``, ``verify_failures``, ``dry_run``.
-
-    Raises:
-        GitAuthRefusal: The four conditions cannot be made true honestly. The
-            message names what a human must add or correct.
+    Plans every repair before writing, so a refusing run leaves the project untouched, never half-provisioned.
     """
     registry_path = find_registry(Path(target))
     if registry_path is None:
@@ -370,12 +271,9 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     already_ok: List[str] = []
     registry_dirty = False
 
-    # --- check 3: owner: true on the registry entry ---
-    # Never a repair any more: the registry flag is the only way to reach here,
-    # so the alternative is the named refusal in _select_owner, not a backfill.
+    # Check 3 is never a repair: only a flagged entry gets past _select_owner.
     already_ok.append(f"registry: '{owner_name}' already marked owner: true")
 
-    # --- check 2 (registry half): metadata.id ---
     registry_id = registry_data.get("metadata", {}).get("id")
     if not registry_id:
         registry_id = str(uuid.uuid4())
@@ -385,7 +283,6 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     else:
         already_ok.append(f"registry: metadata.id already set ({registry_id})")
 
-    # --- check 4: path-binding, with the never-a-root-path guardrail ---
     raw_path = owner_entry.get("path")
     branch_dir = _resolved_path(owner_entry, repo_root)
     if branch_dir is not None and branch_dir == repo_root:
@@ -407,8 +304,7 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
         try:
             recorded = located.relative_to(repo_root).as_posix()
         except ValueError as exc:
-            # Symlinked citizen dir that resolves outside the root — record the
-            # absolute path so path-binding still has something exact to compare.
+            # A symlinked citizen dir outside the root: absolute keeps binding exact.
             logger.info("[git-auth] %s is not under %s (%s) — recording absolute path", located, repo_root, exc)
             recorded = str(located)
         owner_entry["path"] = recorded
@@ -430,7 +326,6 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
             )
         already_ok.append(f"registry: '{owner_name}' path already bound to {branch_dir}")
 
-    # --- checks 1 + 2 (passport half) ---
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.is_file():
         raise GitAuthRefusal(
@@ -445,8 +340,7 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     current_class = _citizen_class(passport)
     if current_class != MANAGER_CLASS:
         passport.setdefault("identity", {})["citizen_class"] = MANAGER_CLASS
-        # Older passports carry the class under branch_info too. Drone reads
-        # identity first, but a stale second copy is a trap for the next reader.
+        # Drone reads identity first, but a stale branch_info copy traps the next reader.
         if "citizen_class" in passport.get("branch_info", {}):
             passport["branch_info"]["citizen_class"] = MANAGER_CLASS
         passport_dirty = True
@@ -462,7 +356,6 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     else:
         already_ok.append(f"passport: '{owner_name}' tenancy already matches metadata.id")
 
-    # --- apply ---
     if not dry_run:
         if registry_dirty:
             _write_json(registry_path, registry_data)
@@ -475,8 +368,6 @@ def provision_git_auth(target: Path, dry_run: bool = False) -> Dict[str, Any]:
     if verify_failures:
         logger.warning("[git-auth] Verification failed after repair: %s", "; ".join(verify_failures))
 
-    # Granting a citizen git write is worth an audit trail — who, where, and
-    # exactly what was changed to make it true.
     json_handler.log_operation(
         "git_auth_provision",
         {

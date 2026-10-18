@@ -3,13 +3,10 @@
 # Description: Tests for doctor's home, owner-seating, preflight and citizen-count rows
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight and the drone count."""
-# The home and the seating lane of `aipass doctor`, split out of test_doctor.py
-# on 2026-10-08 (fleet green, oversize_test_file).
-
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
@@ -34,21 +31,14 @@ from aipass.aipass.apps.modules.doctor import (
 from aipass.aipass.tests.support_doctor import _home_at
 
 
-# ---------------------------------------------------------------------------
-# _check_global_aipass_home tests (#688)
-# ---------------------------------------------------------------------------
-
-
 class TestCheckGlobalAipassHome:
     """Tests for _check_global_aipass_home doctor check."""
 
     @staticmethod
     def _global_rows():
-        """The global-settings rows, reached through check_identity, the Identity group (leg 6).
+        """The global-settings rows, reached through check_identity, the Identity group.
 
-        Edges: HOME is each test's scratch dir (_home_at), and no registry is found, so
-        the group stops before the registry, passport and owner rows. Only the two
-        labels this check writes are returned.
+        No registry is found, so the group stops before the registry, passport and owner rows.
         """
         with patch("aipass.aipass.apps.modules.doctor._find_registry", return_value=None):
             rows = check_identity()
@@ -120,19 +110,11 @@ class TestCheckGlobalAipassHome:
         assert "~/.claude/settings.json" in results[0].detail
 
 
-# ---------------------------------------------------------------------------
-# _check_owner_seating / _fix_owner_seating tests (DPLAN-0239 P3+P5)
-# ---------------------------------------------------------------------------
-
-
 class TestCheckOwnerSeating:
     """Tests for owner/identity detection via sync-registry --check.
 
-    Reached through check_identity, the Identity group doctor runs (leg 6). Edges stood
-    in for: the registry found is a tmp one with one branch (so the group reaches the
-    owner rows), and the two reads of the live provider settings under the home
-    (_check_global_aipass_home, _configured_aipass_home) answer nothing. Each test
-    patches the sync-registry run itself. Only the owner rows are read.
+    Through check_identity: a tmp registry with one branch reaches the owner rows, and
+    the two reads of the live provider settings answer nothing.
     """
 
     @pytest.fixture(autouse=True)
@@ -234,12 +216,7 @@ class TestCheckOwnerSeating:
 class TestFixOwnerSeating:
     """Tests for owner/identity repair via sync-registry --fix.
 
-    Reached through run_doctor(fix=True), the --fix run (leg 6). Every other edge of
-    that run is stood in for where doctor resolves it: the seven groups answer
-    nothing, and the three fix steps that write the live provider settings
-    (check_provider_manifest, reconcile_stale_deny, check_wire_verify) answer nothing.
-    The groups run_doctor would print are recorded instead of printed; each test
-    patches the sync-registry run itself and reads the owner rows of Identity.
+    Through run_doctor(fix=True): the other groups and the live-settings fix steps answer nothing.
     """
 
     @pytest.fixture(autouse=True)
@@ -300,11 +277,6 @@ class TestFixOwnerSeating:
         assert results[0].glyph == GLYPH_WARN
 
 
-# =============================================================================
-# TestRunDoctorPreflight
-# =============================================================================
-
-
 class TestRunDoctorPreflight:
     """Tests for run_doctor_preflight — doctor-before-hello (round-2 addendum 2)."""
 
@@ -352,18 +324,10 @@ class TestRunDoctorPreflight:
         assert error_count == 1
 
 
-# =============================================================================
-# TestDroneCitizenCount — the row must explain its own number
-# =============================================================================
-
-
 class TestDroneCitizenCount:
     """`drone systems` lists addressable SYSTEMS; the registry lists CITIZENS.
 
-    Those are different sets — `@git` is routed by drone but has no branch
-    directory and no passport — so the two counts legitimately differ. Two
-    numbers disagreeing on a health screen with no explanation is a false
-    alarm generator; two independent readers tripped on it the same day.
+    `@git` is routed by drone but has no passport, so the counts legitimately differ.
     """
 
     @staticmethod
@@ -372,14 +336,9 @@ class TestDroneCitizenCount:
 
     @staticmethod
     def _run(stdout, registry_names):
-        """The drone row, reached through run_doctor, first row of its Services group (leg 6).
+        """The drone row, reached through run_doctor, first row of its Services group.
 
-        Edges stood in for: `drone systems` (and the pytest collect that follows it in
-        Services) answer the stubbed run, the registry names are given, the other six
-        groups answer nothing, and the rest of Services that reads the live provider
-        settings or the home (check_provider_manifest, check_wire_verify,
-        reconcile_stale_deny, check_admin_lane) answers nothing. The groups are
-        recorded instead of printed.
+        Every other group, and each Services row reading live settings or the home, answers nothing.
         """
         import subprocess as _sp
 
@@ -444,39 +403,24 @@ class TestDroneCitizenCount:
         assert "more" in row.detail
 
     def test_description_text_containing_an_at_sign_is_not_counted(self) -> None:
-        """Counting lines-with-@ counted prose; count NAMES at line start.
-
-        The original row counted any line containing '@', so a description
-        mentioning '@drone' would inflate the citizen count.
-        """
+        """Counting lines-with-@ counted prose; count NAMES at line start."""
         stdout = "  @aipass    Concierge — talks to @drone and @spawn for routing\n"
         row = self._run(stdout, ["aipass"])
 
         assert row.detail == "1 citizens"
 
 
-# =============================================================================
-# TestHomeAgreement — the two AIPASS_HOME rows must be compared, not just printed
-# =============================================================================
-
-
 class TestHomeAgreement:
     """Doctor prints the active tree and Claude Code's tree on adjacent lines.
 
-    Until now it never compared them. A second install to a different home
-    leaves terminal tooling pointed at tree 1 while Claude Code's env and every
-    hook command point at tree 2 — two registries, two citizen_id sets — and
-    doctor showed both facts side by side without ever saying they disagreed.
+    A second install can leave terminal tooling and Claude Code's hooks on different trees.
     """
 
     @staticmethod
     def _run(active, configured):
-        """The agreement rows, reached through check_identity, the Identity group doctor runs (leg 6).
+        """The agreement rows, reached through check_identity, the Identity group doctor runs.
 
-        Edges stood in for: no registry is found (so the active tree is AIPASS_HOME from
-        the environment, set here), Claude Code's tree comes from _configured_aipass_home
-        (it reads the live provider settings), and _check_global_aipass_home answers
-        nothing (it reads the same live file). Only the pair rows are returned.
+        No registry, so the active tree is AIPASS_HOME; both live-settings reads are stood in for.
         """
         mod = "aipass.aipass.apps.modules.doctor"
         with (
@@ -536,11 +480,10 @@ class TestHomeAgreement:
     def test_a_pair_that_cannot_be_compared_is_one_warn_row(self, tmp_path) -> None:
         """A home that cannot be resolved is one WARN row saying so, never silence or a traceback.
 
-        Silence (the empty list) reads as agreement. resolve on a symlink loop raises
-        RuntimeError up to Python 3.12 and answers the loop on 3.13, and a platform may
-        refuse the link itself: the test asks both inside itself and says which row follows.
+        Silence reads as agreement. resolve on a symlink loop raises RuntimeError up to 3.12
+        and answers on 3.13, so the test asks inside itself which row follows.
         Mutant: the catch narrowed to OSError -> red on 3.10 to 3.12 (RuntimeError escapes).
-        Mutant: the catch answers [] again (the shape of HEAD) -> red at the row assert.
+        Mutant: the catch answers [] again -> red at the row assert.
         """
         log = logging.getLogger(__name__)
         other = tmp_path / "tree"

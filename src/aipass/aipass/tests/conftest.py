@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
 # Version: 1.4.0
 # Created: 2026-05-04
-# Modified: 2026-10-10
+# Modified: 2026-10-17
 #
 # CHANGELOG (Max 5 entries):
 #   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
@@ -21,11 +21,7 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import patch
 
-# The seam must exist at IMPORT time, not only inside the autouse fixture: the
-# repo-root conftest guard refuses to import a branch's json shim while
-# AIPASS_TEST_LOG_DIR is unset (1081 errors under `-c pyproject.toml --rootdir=.`
-# on 2026-09-06). Sixteen branches set it here; this one set it per-test only
-# and passed in CI solely because a sibling conftest had already set it.
+# At import time: the repo-root conftest guard refuses to import a json shim while it is unset.
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
@@ -40,21 +36,8 @@ from aipass.cli.apps.modules import display
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     """Redirect this branch's json writes into a temp dir.
 
-    autouse=True on purpose: the shim's names write into the real ``aipass_json/``
-    unless the seam is set, so a test that forgets to redirect pollutes the
-    branch. The guard belongs on every test, not on the ones that remember.
-
-    The service recomputes its directory on every call, so setting the variable
-    here -- after import -- still takes effect. The sandbox is MEASURED off the
-    shim rather than spelled out, so it cannot drift from what the service does.
-
-    Returns:
-        The sandbox directory the handler now writes into.
-    """
-    # Own subdirectory on purpose: the service spells the sandbox
-    # <seam>/<branch>/<branch>_json, so a seam AT tmp_path would create
-    # tmp_path/aipass/ in every test and collide with a test that builds a
-    # directory of its own branch's name (backup hit it first, 2026-09-03).
+    Autouse: without the seam the shim writes into the real ``aipass_json/``."""
+    # Own subdir: a seam AT tmp_path makes tmp_path/aipass/, colliding with branch-named test dirs.
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -65,20 +48,7 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
 def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
     """Point the user profile at a temp dir for EVERY test in this branch.
 
-    Not belt-and-braces — it closes a live-state leak found 2026-08-27:
-    test_init_flow injects a MagicMock at
-    sys.modules["aipass.aipass.apps.modules.profile"], but
-    ``from ...modules import profile`` resolves the attribute already set on
-    the parent package whenever another test file imported the real module
-    first. The mock is then silently bypassed and the profile stage writes the
-    REAL store. test_help_flag + test_init_flow together rewrote the live
-    profile to null defaults; either file alone was clean, which is why no
-    single-file run ever caught it.
-
-    Autouse and unconditional because the leak is an ORDERING effect: any test
-    that reaches profile code through an unmocked path is a candidate, and
-    naming them one by one only holds until the next import order changes.
-    """
+    Autouse: import order can bypass a sys.modules profile mock and write the live store."""
     store_dir = tmp_path_factory.mktemp("profile_store")
     with (
         patch.object(profile_mod, "_PROFILE_JSON", store_dir / "user_profile.json"),
@@ -91,13 +61,7 @@ def isolate_profile_store(tmp_path_factory) -> Generator[Path, None, None]:
 def tools_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Set PATH to one tmp directory holding an executable stub per name given.
 
-    shutil.which reads PATH, so the product's own lookup answers for real and
-    nothing of the stdlib is patched (fleet green leg 8). No names: an empty
-    directory, so every lookup answers None. Where the platform keeps PATHEXT
-    (Windows), which only finds a name carrying one of its extensions, so the
-    stub takes the first; the platform decides that, inside the test.
-    Returns the directory.
-    """
+    shutil.which answers for real; under PATHEXT (Windows) each stub takes its first extension."""
 
     def put(*names: str) -> Path:
         bin_dir = tmp_path / "path_bin"
@@ -142,9 +106,7 @@ class _HeaderEvents:
 @pytest.fixture(autouse=True)
 def header_events(monkeypatch: pytest.MonkeyPatch) -> _HeaderEvents:
     """cli's header() fires cli_header_displayed on the real trigger bus, which has a
-    live handler, and display caches the trigger it loaded in _TRIGGER. A test that
-    prints through the real console must not fire it, so every test gets a recorder
-    in that slot; a test about a header asserts the title off .calls."""
+    live handler, so every test gets a recorder in display's cached _TRIGGER (assert off .calls)."""
     events = _HeaderEvents()
     monkeypatch.setattr(display, "_TRIGGER", events)
     monkeypatch.setattr(display, "_TRIGGER_LOADED", True)

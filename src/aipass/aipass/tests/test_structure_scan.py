@@ -3,12 +3,10 @@
 # Description: Tests for doctor structure scanner (DPLAN-0177)
 # Version: 1.2.4
 # Created: 2026-05-14
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
-
-# Agent detection, placement, pollution, registry.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/handlers/structure_scan/structure_scanner.py parses and imports
@@ -34,10 +32,6 @@ from aipass.aipass.apps.modules.doctor import run_doctor
 from aipass.aipass.shared.registry_discovery import find_registry
 
 
-# =============================================================================
-# Helpers
-# =============================================================================
-
 _DOCTOR = "aipass.aipass.apps.modules.doctor"
 _OTHER_GROUPS = (
     "_check_system",
@@ -50,7 +44,7 @@ _OTHER_GROUPS = (
 
 
 def _structure_via_doctor() -> list:
-    """The Structure group as run_doctor prints it (leg 6: the public door, not the private name).
+    """The Structure group as run_doctor prints it (the public door, not the private name).
 
     The six other groups are stubbed where doctor resolves them, and _print_doctor_groups
     is replaced by a recorder, so only the structure scan runs and nothing is printed.
@@ -96,11 +90,6 @@ def _make_registry(tmp_path: Path, branches: list) -> Path:
     return reg
 
 
-# =============================================================================
-# TestFindProjectRoot
-# =============================================================================
-
-
 class TestFindProjectRoot:
     def test_finds_by_registry(self, tmp_path: Path) -> None:
         """Finds project root via *_REGISTRY.json."""
@@ -121,11 +110,6 @@ class TestFindProjectRoot:
         """Returns None when no markers found."""
         result = find_project_root(tmp_path)
         assert result is None
-
-
-# =============================================================================
-# TestScanAgents
-# =============================================================================
 
 
 class TestScanAgents:
@@ -152,7 +136,7 @@ class TestScanAgents:
         """A passport inside dropbox/ or .archive/ is not an agent; the live one beside them is.
 
         Red before the cure: a branch copied into a dropbox was reported as an agent.
-        Mutant (fleet green leg 3): "dropbox" -> "not_dropbox" in _SCAN_SKIP_DIRS reddens this.
+        Mutant: "dropbox" -> "not_dropbox" in _SCAN_SKIP_DIRS reddens this.
         """
         _make_agent(tmp_path, "live", "uuid-l")
         _make_agent(tmp_path, "copied", "uuid-c", subdir="dropbox")
@@ -162,8 +146,6 @@ class TestScanAgents:
     def test_a_project_under_a_directory_named_dropbox_still_shows_its_agents(self, tmp_path: Path) -> None:
         """Only directories inside the project are skipped; the project's own parents never are.
 
-        Red before the cure: the skip names were checked against the absolute path, so a
-        project anywhere under a directory named dropbox showed no agents.
         Mutant: the skip check back to the absolute passport_path.parts -> red.
         """
         project = tmp_path / "dropbox" / "proj"
@@ -180,11 +162,6 @@ class TestScanAgents:
         _make_agent(tmp_path, "agent1", "my-uuid-123")
         agents = scan_agents(tmp_path)
         assert agents[0].registry_id == "my-uuid-123"
-
-
-# =============================================================================
-# TestCheckPlacement
-# =============================================================================
 
 
 class TestCheckPlacement:
@@ -227,18 +204,10 @@ class TestCheckPlacement:
         assert issues[0].agent_name == "stray"
 
 
-# =============================================================================
-# TestProjectCitizenResidency
-# =============================================================================
-
-
 class TestProjectCitizenResidency:
     """A registered citizen of a project under projects/ is measured at ITS OWN root.
 
-    The scanner warned once per scan for every such citizen (28 for aipass_site
-    since 2026-08-28, escalated by @trigger 2026-09-15) because it only ever knew
-    the framework's src/. Residency — the project registry listing the citizen — is
-    what makes the placement legitimate, so that is what the scanner now reads.
+    Residency (the project registry listing the citizen) makes the placement legitimate.
     """
 
     @staticmethod
@@ -311,13 +280,8 @@ class TestProjectCitizenResidency:
         assert issues == []
 
 
-# =============================================================================
-# TestDetectPackageNames
-# =============================================================================
-
-
 class TestDetectPackageNames:
-    """Package detection read through check_placement, its one caller (fleet green leg 3).
+    """Package detection read through check_placement, its one caller.
 
     A detected package set shows as which src/<name>/ agents are flagged as outside it;
     an empty set flags nothing.
@@ -333,14 +297,14 @@ class TestDetectPackageNames:
     def test_no_pyproject(self, tmp_path: Path) -> None:
         """No pyproject.toml declares no package, so no agent is flagged.
 
-        Mutant (fleet green leg 3): the no-pyproject `return set()` -> `return {"other"}` -> red.
+        Mutant: the no-pyproject `return set()` -> `return {"other"}` -> red.
         """
         assert self._flagged(tmp_path, "myagent") == []
 
     def test_hatch_packages(self, tmp_path: Path) -> None:
         """Detects package from hatch build config: "src/aipl" names package aipl.
 
-        Mutant (fleet green leg 3): `name = Path(pkg).name` -> `name = pkg` -> red.
+        Mutant: `name = Path(pkg).name` -> `name = pkg` -> red.
         """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
@@ -352,7 +316,7 @@ class TestDetectPackageNames:
     def test_setuptools_packages(self, tmp_path: Path) -> None:
         """Detects package from setuptools config.
 
-        Mutant (fleet green leg 3): `names.add(pkg)` -> `pass` -> red.
+        Mutant: `names.add(pkg)` -> `pass` -> red.
         """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
@@ -364,7 +328,7 @@ class TestDetectPackageNames:
     def test_corrupt_pyproject(self, tmp_path: Path) -> None:
         """Corrupt TOML declares no package, so no agent is flagged.
 
-        Mutant (fleet green leg 3): the parse-error `return set()` -> `return {"other"}` -> red.
+        Mutant: the parse-error `return set()` -> `return {"other"}` -> red.
         """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("not valid toml {{{", encoding="utf-8")
@@ -373,16 +337,11 @@ class TestDetectPackageNames:
     def test_pyproject_without_packages(self, tmp_path: Path) -> None:
         """A wheel target with no packages key declares no package, so no agent is flagged.
 
-        Mutant (fleet green leg 3): hatch `.get("packages", [])` -> `.get("packages", ["src/x"])` -> red.
+        Mutant: hatch `.get("packages", [])` -> `.get("packages", ["src/x"])` -> red.
         """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text('[tool.hatch.build.targets.wheel]\nsources = ["src"]\n', encoding="utf-8")
         assert self._flagged(tmp_path, "myagent") == []
-
-
-# =============================================================================
-# TestPackageAwarePlacement
-# =============================================================================
 
 
 class TestPackageAwarePlacement:
@@ -427,7 +386,7 @@ class TestPackageAwarePlacement:
     def test_no_pyproject_unchanged(self, tmp_path: Path) -> None:
         """Without pyproject, src/<agent>/ still passes (original behavior).
 
-        Premise added 2026-09-27: a pyproject ABOVE the project root, declaring
+        Premise: a pyproject ABOVE the project root, declaring
         another package, is not the project's and must not be read.
         """
         (tmp_path / "pyproject.toml").write_text(
@@ -451,18 +410,11 @@ class TestPackageAwarePlacement:
         assert issues == []
 
 
-# =============================================================================
-# TestDetectPollution
-# =============================================================================
-
-
 class TestDetectPollution:
     def test_no_duplicates(self, tmp_path: Path) -> None:
         """Distinct branch names produce no pollution hits, even sharing a registry_id.
 
-        citizenship.registry_id is intentionally shared by every citizen in a
-        healthy install (spawn's fix_owner_identity shared-project-credential
-        model) — it must never be the pollution key.
+        Every citizen of a healthy install shares registry_id, so it is never the pollution key.
         """
         _make_agent(tmp_path, "a", "uuid-shared")
         _make_agent(tmp_path, "b", "uuid-shared", subdir="pkg")
@@ -492,11 +444,6 @@ class TestDetectPollution:
         agents = scan_agents(tmp_path)
         hits = detect_pollution(agents)
         assert hits == []
-
-
-# =============================================================================
-# TestRegistryConsistency
-# =============================================================================
 
 
 class TestRegistryConsistency:
@@ -541,11 +488,6 @@ class TestRegistryConsistency:
         assert issues[0].problem == "missing"
 
 
-# =============================================================================
-# TestFindRegistry
-# =============================================================================
-
-
 class TestFindRegistry:
     def test_finds_registry(self, tmp_path: Path) -> None:
         """Shared find_registry finds *_REGISTRY.json from start_path."""
@@ -557,11 +499,7 @@ class TestFindRegistry:
     def test_absence_returns_none_not_a_cwd_guess(self, tmp_path: Path) -> None:
         """Absence is reported as None — never as a path the caller might trust.
 
-        The old last resort returned ``Path.cwd() / "AIPASS_REGISTRY.json"``:
-        a guess about where the caller happens to stand, dressed as a fact
-        about the machine.  A consumer that skips the ``.exists()`` guard --
-        or a consumer like @spawn's ``load_registry``, which mints a fresh
-        ``metadata.id`` for a path it is handed -- acts on that guess.
+        A guessed cwd path is acted on by a consumer like @spawn's ``load_registry``.
         """
         isolated = tmp_path / "no_registry"
         isolated.mkdir()
@@ -572,9 +510,7 @@ class TestFindRegistry:
     ) -> None:
         """The mutant that matters: cwd's registry must not answer for start_path.
 
-        This is the exact defect.  The caller asked about ``isolated``; a cwd
-        that happens to hold a registry made the old code answer with *that*
-        file, discarding the question.  Restoring the fallback makes this red.
+        Restoring a cwd fallback makes this red.
         """
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
@@ -599,17 +535,11 @@ class TestFindRegistry:
     def test_env_var_still_wins_and_need_not_exist(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """AIPASS_REGISTRY is an explicit instruction, not a discovery result.
 
-        An operator who names a path is not guessing, so this one path is
-        returned unchecked -- and it stays a Path, never None.
+        Returned unchecked, and it stays a Path, never None.
         """
         target = tmp_path / "declared" / "AIPASS_REGISTRY.json"
         monkeypatch.setenv("AIPASS_REGISTRY", str(target))
         assert find_registry(start_path=tmp_path) == target
-
-
-# =============================================================================
-# TestCheckPyproject
-# =============================================================================
 
 
 class TestCheckPyproject:
@@ -625,11 +555,6 @@ class TestCheckPyproject:
         result = check_pyproject(tmp_path)
         assert result["found"] is False
         assert result["path"] == ""
-
-
-# =============================================================================
-# TestCheckRootArtifacts
-# =============================================================================
 
 
 class TestCheckRootArtifacts:
@@ -697,7 +622,7 @@ class TestCheckRootArtifacts:
     def test_venv_flagged_when_aipass_home_not_provided(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Without aipass_home, .venv still flags as info (no special-casing possible).
 
-        Premise added 2026-09-27: the environment names this root as AIPASS_HOME,
+        Premise: the environment names this root as AIPASS_HOME,
         and the scan still does not sniff it — only the argument counts.
         """
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
@@ -705,11 +630,6 @@ class TestCheckRootArtifacts:
         hits = check_root_artifacts(tmp_path)
         assert len(hits) == 1
         assert hits[0].severity == "info"
-
-
-# =============================================================================
-# TestCheckStructureIntegration
-# =============================================================================
 
 
 class TestCheckStructureIntegration:
@@ -767,9 +687,8 @@ class TestCheckStructureIntegration:
     def test_no_toml_parser_is_unknown_and_says_so(self, tmp_path: Path, monkeypatch) -> None:
         """No tomllib and no tomli (Python 3.10 without it) is one WARN row naming the missing parser.
 
-        The stub stands where the product looks: the import runs at call time, so
-        sys.modules holding None for both names is what an interpreter without them answers.
-        Mutant: the no-parser `return None` -> `return set()` (the shape of HEAD) -> red at the row assert.
+        The import runs at call time, so sys.modules holding None for both is a missing parser.
+        Mutant: the no-parser `return None` -> `return set()` -> red at the row assert.
         """
         (tmp_path / "pyproject.toml").write_text('[tool.setuptools]\npackages = ["mypackage"]\n', encoding="utf-8")
         monkeypatch.setitem(sys.modules, "tomllib", None)

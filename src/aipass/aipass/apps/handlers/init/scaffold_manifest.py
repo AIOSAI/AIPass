@@ -3,28 +3,15 @@
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
 # Version: 1.0.2
 # Created: 2026-09-09
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Scaffold manifest — which AIPass version wrote which file, and its hash.
 
-WHY THIS FILE EXISTS. ``update_project`` used to overwrite every managed file
-whose content differed from the template, which cannot tell "the template moved
-on" from "the project edited this file". The live case that forced it: Vera
-replaced Vera-Studio's ``tier1_navmap.md`` with the studio's own map, and an
-update would have silently put AIPass's roster map back (DPLAN-0334/0335).
-
-THE CONFFILE RULE, named after dpkg's. A managed file is overwritten only when
-nobody has touched it since AIPass wrote it -- proven by its hash still matching
-the manifest -- or when it is absent. Otherwise it is KEPT and the template is
-written beside it as ``<name>.aipass-new`` for the manager to diff.
-
-THE MANIFEST IS A CONTRACT, NOT A CACHE. ``@hooks``' ``release_notice`` handler
-reads ``aipass_version`` out of it to decide whether a project is behind, so the
-three keys below are fixed by DPLAN-0335 and may not be renamed without telling
-them. Anything else in the document is ignored by both readers.
-
-RULES (inherited from bootstrap.py): pure Python, no module/prax/cli imports.
+Conffile rule (dpkg's): overwrite a managed file only when absent or its hash still
+matches the manifest; otherwise keep it and write ``<name>.aipass-new`` beside it.
+Its keys are a contract (@hooks release_notice reads ``aipass_version``). Imported by
+bootstrap.py, so pure Python: no module/prax/cli imports.
 """
 
 import fnmatch
@@ -36,48 +23,28 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# =============================================================================
-# CONSTANTS
-# =============================================================================
-
-#: Where the manifest lives inside a project. Tracked on purpose -- it is the
-#: record of what AIPass wrote, so it belongs in the project's history.
 MANIFEST_REL: Path = Path(".aipass") / "scaffold_manifest.json"
 
-#: Suffix for the template written beside a file the project has edited.
 NEW_SUFFIX: str = ".aipass-new"
 
-#: Backup root inside the project. One timestamped directory per apply.
 BACKUP_REL: Path = Path(".aipass") / ".backup"
 
-#: Files created once and NEVER rewritten. They exist to be filled in by the
-#: project, so a template refresh would delete the manager's actual content.
-#: Deliberately NOT the same list as the managed files -- a seed is scaffolding
-#: that stops being ours the moment it is written.
+#: Created once, never rewritten: a refresh would delete the manager's content.
 SEED_FILES: tuple = ("CLAUDE.md", "AGENTS.md")
 
-#: Hook handlers retired from the framework. The union merge in
-#: ``_merge_hooks_json`` can add a handler but never remove one, so a handler
-#: dropped from the template lives on in every project that already had it.
-#: This list is the removal side, applied on update and reported.
+#: ``_merge_hooks_json`` only adds handlers; this list is the removal side.
 RETIRED_HOOK_HANDLERS: tuple = ("auto_watchdog",)
 
-#: Owner-owned ignore file at the project root. AIPass never creates or edits
-#: it -- it exists so a project can say "this file is mine now" up front,
-#: rather than discovering after the fact that an update wanted it.
 IGNORE_NAME: str = ".updateignore"
 
 
 class UpdateIgnoreUnreadable(Exception):
     """The project's ``.updateignore`` is there but cannot be read.
 
-    Not the same answer as no file: an owner who wrote one has claimed files, and
-    an update that reads the claim as empty would overwrite them. The update
-    refuses and doctor says so in one row (fleet green leg 5, aipass's decision).
+    Not the same as no file: reading the claim as empty would overwrite claimed files.
     """
 
 
-#: Plan verdicts. A file carries exactly one.
 ACTION_CREATE: str = "create"
 ACTION_UPDATE: str = "update"
 ACTION_CURRENT: str = "current"
@@ -85,55 +52,24 @@ ACTION_KEPT_LOCAL: str = "kept-local"
 ACTION_RETIRE: str = "retire"
 ACTION_SKIPPED: str = "skipped"
 
-# NOTE: there is deliberately no PENDING_ACTIONS set here. "Would this write
-# something?" cannot be answered from the verdict alone -- a kept-local file
-# whose sidecar already matches the template writes nothing -- so the plan
-# derives pending from the writes it actually queued, never from the label.
-
-
-# =============================================================================
-# HASHING
-# =============================================================================
+# No PENDING_ACTIONS set: a kept-local verdict may write nothing; count queued writes.
 
 
 def sha256_text(text: str) -> str:
-    """Hash text as UTF-8 bytes.
-
-    THE MANIFEST HASHES BYTES WRITTEN, NOT STRINGS COMPARED. Every managed file
-    is written with ``encoding="utf-8"``, so hashing the encoded form is the
-    only spelling that matches what lands on disk.
-    """
+    """Hash text as UTF-8 bytes."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def write_text_lf(path: Path, content: str) -> None:
     """Write a scaffold file with LF endings on every platform.
 
-    THE ONE WRITER FOR EVERY MANAGED FILE, and the reason is the manifest.
-    ``Path.write_text`` defaults to ``newline=None``, which on Windows
-    translates every ``\n`` to ``\r\n`` on the way to disk. The manifest then
-    holds a hash of the LF string while the plan compares a hash of the CRLF
-    bytes — two hashes of "the same file" that can never agree, so a freshly
-    initialised project reported ``prep.md`` as needing an update forever
-    (PR #761, windows-setup, 2026-09-09).
-
-    Pinning the newline makes bytes on disk equal ``content.encode("utf-8")``
-    everywhere, which is what lets one hash answer for all three OSes — and it
-    makes the ``.aipass-new`` sidecar and the backup copy byte-comparable
-    across a team that is not all on the same platform. Same shape as the
-    cp1252 class RPLAN-0004 gated with PLW1514: the platform default silently
-    changes bytes, and str-vs-bytes reasoning diverges from there.
+    The one writer for managed files: Windows' default CRLF makes the manifest hash never match.
     """
     path.write_text(content, encoding="utf-8", newline="\n")
 
 
 def hash_file(path: Path) -> str | None:
-    """Hash a file's bytes, or None when it is absent or unreadable.
-
-    UNREADABLE READS AS ABSENT ON PURPOSE. The caller's next move for both is
-    the same -- it cannot prove the project left the file alone -- and a raise
-    here would turn a permissions oddity into a failed update.
-    """
+    """Hash a file's bytes, or None when it is absent or unreadable."""
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except (OSError, ValueError) as exc:
@@ -141,16 +77,10 @@ def hash_file(path: Path) -> str | None:
         return None
 
 
-# =============================================================================
-# VERSION
-# =============================================================================
-
-
 def installed_version() -> str:
     """The AIPass version running right now, or 'unknown' if it cannot be read.
 
-    Imported lazily: this handler is stdlib-only by contract, and a scaffold
-    plan must still compute on a tree where the package will not import.
+    Imported lazily: the plan must still compute where the package will not import.
     """
     try:
         import aipass
@@ -161,11 +91,6 @@ def installed_version() -> str:
         return "unknown"
 
 
-# =============================================================================
-# MANIFEST I/O
-# =============================================================================
-
-
 def manifest_path(target: Path) -> Path:
     """Absolute path to *target*'s scaffold manifest."""
     return Path(target) / MANIFEST_REL
@@ -174,10 +99,7 @@ def manifest_path(target: Path) -> Path:
 def read_manifest(target: Path) -> dict:
     """Read the manifest, or an empty document when absent or unparseable.
 
-    A CORRUPT MANIFEST MUST READ AS ABSENT, NOT AS EMPTY-BUT-VALID. Both return
-    ``{}`` here, and that is the safe direction: with no recorded hash every
-    managed file falls to the backfill arm, where anything differing from the
-    template is KEPT rather than overwritten.
+    Corrupt reads as absent: with no recorded hash, a differing file is kept, never overwritten.
     """
     path = manifest_path(target)
     try:
@@ -203,16 +125,7 @@ def stamped_version(target: Path) -> str | None:
 
 
 def write_manifest(target: Path, files: dict, version: str | None = None) -> Path:
-    """Write the manifest recording *files* and the version that wrote them.
-
-    Args:
-        target: Project root.
-        files: ``rel path (posix) -> sha256`` for every managed file ON DISK.
-        version: Override for the stamped version; defaults to the installed one.
-
-    Returns:
-        The manifest path.
-    """
+    """Write the manifest recording *files* and the version that wrote them."""
     path = manifest_path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
     document = {
@@ -224,28 +137,10 @@ def write_manifest(target: Path, files: dict, version: str | None = None) -> Pat
     return path
 
 
-# =============================================================================
-# THE CONFFILE RULE
-# =============================================================================
-
-
 def decide(current: str | None, template: str | None, recorded: str | None) -> tuple:
     """Decide what an update may do to one managed file.
 
-    Args:
-        current: sha256 of the file on disk, or None when absent.
-        template: sha256 of the content the template would write, or None when
-            the template is unavailable (no AIPASS_HOME, missing source file).
-        recorded: sha256 the manifest says AIPass last wrote, or None.
-
-    Returns:
-        ``(action, reason)``.
-
-    THE ORDER OF THE ARMS IS THE RULE. Absent is decided before provenance,
-    because a file that is not there cannot have been edited. Provenance is
-    decided before content, because "the project changed it" outranks "the
-    template moved on" -- getting those two the other way round is exactly the
-    bug that would have overwritten Vera's navmap.
+    Arm order is the rule: absent, provenance, content; swapping the last two overwrites edits.
     """
     if template is None:
         return ACTION_CURRENT, "no template available - nothing to compare"
@@ -257,25 +152,13 @@ def decide(current: str | None, template: str | None, recorded: str | None) -> t
                 return ACTION_CURRENT, "matches template"
             return ACTION_UPDATE, "unmodified since AIPass wrote it"
         return ACTION_KEPT_LOCAL, "local edits"
-    # Backfill: no manifest entry, so provenance is unknown.
     if current == template:
         return ACTION_CURRENT, "matches template (adopted into manifest)"
     return ACTION_KEPT_LOCAL, "unknown provenance"
 
 
 def read_ignore(target: Path) -> list:
-    """Patterns from *target*'s ``.updateignore``, or [] when it is absent.
-
-    Same fashion as ``.gitignore`` and ``.backupignore``: one pattern per line,
-    ``#`` comments, blank lines ignored. Negation (``!``) is deliberately not in
-    v1 -- an ignore file whose meaning depends on line order is a support
-    burden, and nobody has asked for it yet.
-
-    Raises:
-        UpdateIgnoreUnreadable: the file is there but cannot be read or decoded.
-            Callers: bootstrap.update_project (the update refuses before any
-            write) and doctor's Scaffold group (one row says so).
-    """
+    """Patterns from *target*'s ``.updateignore``, or [] when it is absent."""
     path = Path(target) / IGNORE_NAME
     try:
         raw = path.read_text(encoding="utf-8")
@@ -295,10 +178,7 @@ def read_ignore(target: Path) -> list:
 def is_ignored(rel: str, patterns: list) -> bool:
     """True when *rel* (a posix path relative to the project root) is owner-protected.
 
-    A trailing slash means a directory and everything under it. A pattern with
-    no slash also matches a bare filename at any depth, which is what a manager
-    writing ``tier1_navmap.md`` means -- requiring the full ``.aipass/`` prefix
-    for the common case would make the file a trap.
+    A slashless pattern matches a bare filename at any depth, as a manager means it.
     """
     name = rel.rsplit("/", 1)[-1]
     for pattern in patterns:
@@ -322,18 +202,13 @@ def sidecar_path(path: Path) -> Path:
 def disabled_path(path: Path) -> Path:
     """Where a retired managed file is renamed to.
 
-    RENAME, NEVER UNLINK (the owner, DPLAN-0264): a retired file the manager can
-    still see is a decision they can reverse; a deleted one is a surprise.
+    Rename, never unlink: a retired file the manager can still see is reversible.
     """
     return path.with_name(f"{path.stem}(disabled){path.suffix}")
 
 
 def retired_handlers_in(hooks: dict) -> list:
-    """Retired handler names present in a project's hooks document, sorted.
-
-    Returns ``event.handler`` strings so a report names where each one sits --
-    one handler can be wired under more than one event.
-    """
+    """Retired handler names present in a project's hooks document, sorted."""
     found: list = []
     for event, handlers in hooks.items():
         if not isinstance(handlers, dict):

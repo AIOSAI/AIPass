@@ -3,35 +3,15 @@
 # Description: Safely unpack a verified baud phone tarball into staging, then swap it into place
 # Version: 1.0.0
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Unpack the phone bundle safely and swap it into place (FPLAN-0587).
 
-THE SAFETY FILTER
------------------
-Every member is judged before a single byte is written. Refused: absolute
-names, ``..``, backslashes, symlinks, hardlinks, devices and fifos, any
-directory other than ``assets/`` (and anything beneath it) at the root, a file
-inside such a directory. Required: ``phone.html`` at the root and an ``assets/``
-directory. That is exactly the shape baud's release lane packs
-(``tar -C app/dist-phone ... -czf <archive> .``) and exactly what @api's face.py
-can serve, so anything else is either a broken release or a hostile one.
-
-Files are written by this code, not by ``tarfile.extract``: the bytes are
-copied, and no mode bits, owner or timestamps come from the archive.
-
-THE SWAP
---------
-Extraction lands in ``.<dest>.staging`` beside dest, the marker
-(``.baud-phone.json``) is written into staging LAST, and only then
-dest -> ``<dest>.prev``, staging -> dest, prev dropped. A failure before the swap
-leaves the old install untouched; a failure in the swap puts prev back.
-
-What this refuses to replace: a dest that exists, is not empty, and carries no
-marker. That is somebody's directory, not an install this command made, and
-moving it aside and dropping it would delete their files.
+Files are copied by this code, never ``tarfile.extract``: no mode bits, owner or
+timestamps come from the archive. A non-empty dest with no marker is someone's
+directory and is never replaced.
 """
 
 from __future__ import annotations
@@ -78,15 +58,7 @@ def _member_path(member: tarfile.TarInfo) -> PurePosixPath | None:
 def validate_members(members: List[tarfile.TarInfo]) -> List[Tuple[PurePosixPath, tarfile.TarInfo]]:
     """Judge every member against the phone-bundle shape.
 
-    Args:
-        members: The archive's members, in archive order.
-
-    Returns:
-        (relative path, member) for everything to extract, the root entry dropped.
-
-    Raises:
-        UnpackError: The first member that breaks the shape, or a missing
-            phone.html / assets/.
+    The shape baud's release lane packs and @api's face.py serves; anything else is broken or hostile.
     """
     plan: List[Tuple[PurePosixPath, tarfile.TarInfo]] = []
     has_entry = False
@@ -120,18 +92,7 @@ def validate_members(members: List[tarfile.TarInfo]) -> List[Tuple[PurePosixPath
 
 
 def extract_bundle(tarball: Path, target: Path) -> int:
-    """Validate the whole archive, then write its files under `target`.
-
-    Args:
-        tarball: A .tar.gz already verified against SHA256SUMS.
-        target: A directory that must not exist yet.
-
-    Returns:
-        The number of files written.
-
-    Raises:
-        UnpackError: Unreadable archive or a refused member (nothing written).
-    """
+    """Validate the whole archive, then write its files under `target`."""
     try:
         with tarfile.open(tarball, "r:gz") as archive:
             plan = validate_members(archive.getmembers())
@@ -166,12 +127,7 @@ def _drop_dir(path: Path, why: str) -> None:
 
 
 def check_dest(dest: Path) -> None:
-    """Refuse a dest this command must not replace.
-
-    Raises:
-        UnpackError: dest (or a leftover prev) is a file, a link, or someone
-            else's non-empty directory.
-    """
+    """Refuse a dest this command must not replace."""
     for path, label in ((dest, "the install directory"), (prev_path(dest), "a leftover previous install")):
         if path.is_symlink() or (path.exists() and not path.is_dir()):
             raise UnpackError(f"Refused: {path} ({label}) exists and is not a plain directory.")
@@ -204,17 +160,7 @@ def swap_in(staging: Path, dest: Path) -> None:
 def install_bundle(tarball: Path, dest: Path, record: dict[str, Any]) -> int:
     """Extract into staging beside dest, write the marker, then swap it in.
 
-    Args:
-        tarball: A verified phone tarball.
-        dest: The install directory (created if absent).
-        record: The marker content: tag, sha256, installed_at, source.
-
-    Returns:
-        The number of bundle files installed.
-
-    Raises:
-        UnpackError: Refused dest, refused member, unwritable marker.
-        OSError: The filesystem failed under the swap (the old install is restored).
+    The marker lands last, so a staging dir without one never becomes dest.
     """
     check_dest(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)

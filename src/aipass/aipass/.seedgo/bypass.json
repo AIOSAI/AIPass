@@ -151,7 +151,7 @@
     {
       "file": "apps/aipass.py",
       "standard": "logged_fallback",
-      "lines": [340, 368],
+      "lines": [290, 315],
       "reason": "main() returns a process exit code. 1 is the failure code at every return that carries it (crash, unknown command, @target, import failure); success is 0 through resolve_exit, and a refusal is 2. The caller is the shell, and it tells failure from success. The crash also goes to stderr through error() and its traceback to the log (_log_crash, which never raises from the log). Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13."
     },
     {
@@ -163,54 +163,54 @@
     {
       "file": "apps/modules/install.py",
       "standard": "logged_fallback",
-      "lines": [169, 265, 728],
-      "reason": "169: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:201). 265: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 728: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them."
+      "lines": [123, 201, 619],
+      "reason": "123: _clear_stale_lock answers whether the lock is now free. FileNotFoundError means another process removed it first, so it IS free (True is the fact); an unlink that fails returns False and refuses (caller acquire, install.py:148). 201: _pid_alive on POSIX, a PermissionError from signal 0 means the process exists under another user, so True is the answer; an unknown is None. 619: run_install's Ctrl-C at home resolution returns 1, the documented code for nothing installed; handle_command passes it to sys.exit, and no caller branches on cancel versus failure. Re-read in fleet green leg 7 (aipass's decision); lines re-pinned 2026-10-13 after DPLAN-0408 moved them."
     },
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [168, 629],
-      "reason": "168: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:362) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 629: _registry_citizen_names's one caller (drone row, doctor.py:695) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:376). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them)."
+      "lines": [161, 583],
+      "reason": "161: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:336) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 583: _registry_citizen_names's one caller (drone row, doctor.py:640) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:376). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them)."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
       "standard": "logged_fallback",
-      "lines": [132],
-      "reason": "resolve_token answers None for 'no token found', and every path without a token answers the same: no GITHUB_TOKEN, no gh, gh that gives none. Its one caller (fetch.py:240, the token_provider default) then fetches unauthenticated, and a refused fetch raises FetchError there. A gh that will not run is one more way of having no token. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [97],
+      "reason": "resolve_token answers None for 'no token found', and every path without a token answers the same: no GITHUB_TOKEN, no gh, gh that gives none. Its one caller (fetch.py:208, the token_provider default) then fetches unauthenticated, and a refused fetch raises FetchError there. A gh that will not run is one more way of having no token. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
-      "lines": [283],
-      "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:533, doctor scaffold group:1148) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [166],
+      "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:448, doctor scaffold group:1062) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "logged_fallback",
-      "lines": [126],
-      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as non-POSIX or no /proc entry, and its one caller (detect_shell, system_detector.py:149) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [87],
+      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as non-POSIX or no /proc entry, and its one caller (detect_shell, system_detector.py:100) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "apps/handlers/sandbox_check/sandbox_checker.py",
       "standard": "logged_fallback",
-      "lines": [146],
-      "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:214) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [114],
+      "reason": "_find_srt_resolver is a probe: None is 'resolver not found', the same answer as a missing spec or file, and its one caller (check_srt_resolvable, sandbox_checker.py:166) reports the resolver as not found on None. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "tests/test_bootstrap_update.py",
       "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [511] rule left the line convicted). The one patch is at _windows_newline_world, line 110 (moved with it from test_bootstrap.py:511 in the 2026-10-08 split). _windows_newline_world manufactures the one platform behaviour Linux cannot produce: write_text translating LF to CRLF when newline is unset (PR #761's windows-setup red). Asserting on disk alone would pass on Linux whatever the writer does, so the pin needs the translation. A product seam would exist for this test alone (every writer goes through write_text_lf already). monkeypatch restores Path.write_text at teardown. Fleet green leg 7 (aipass's decision)."
+      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [511] rule left the line convicted). The one patch is at _windows_newline_world, line 94 (moved with it from test_bootstrap.py:511 in the 2026-10-08 split). _windows_newline_world manufactures the one platform behaviour Linux cannot produce: write_text translating LF to CRLF when newline is unset (PR #761's windows-setup red). Asserting on disk alone would pass on Linux whatever the writer does, so the pin needs the translation. A product seam would exist for this test alone (every writer goes through write_text_lf already). monkeypatch restores Path.write_text at teardown. Fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "tests/test_registry_case_sweep.py",
       "standard": "stdlib_patch",
-      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [73] rule left the line convicted). The one patch is at case_insensitive_fs, line 73. case_insensitive_fs emulates a case-folding filesystem (Windows, default macOS) by widening Path.glob, which a Linux host cannot produce on disk; host_folds_case asks the real host as well, so both answers are pinned. A seam in registry_discovery would exist for the test alone: no product caller hands a glob in. monkeypatch restores Path.glob at teardown. Fleet green leg 7 (aipass's decision)."
+      "reason": "File-wide because the stdlib_patch checker passes no line (measured leg 7: a lines [73] rule left the line convicted). The one patch is at case_insensitive_fs, line 44. case_insensitive_fs emulates a case-folding filesystem (Windows, default macOS) by widening Path.glob, which a Linux host cannot produce on disk; host_folds_case asks the real host as well, so both answers are pinned. A seam in registry_discovery would exist for the test alone: no product caller hands a glob in. monkeypatch restores Path.glob at teardown. Fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "tests/test_new_project.py",
       "standard": "through_the_command",
-      "lines": [30],
-      "reason": "Ruling (c), fleet green leg 7: _git_init's one public caller, create_project (new_project/__init__.py:360), runs it after writing the whole project and its registry; the private call pins the contract (main and dev at mint, HEAD on dev, dev cut from the birth commit, an existing repo refused) with only git running, under tmp."
+      "lines": [27],
+      "reason": "Ruling (c), fleet green leg 7: _git_init's one public caller, create_project (new_project/__init__.py:303), runs it after writing the whole project and its registry; the private call pins the contract (main and dev at mint, HEAD on dev, dev cut from the birth commit, an existing repo refused) with only git running, under tmp."
     },
     {
       "file": "tests/test_aipass_main.py",
@@ -221,7 +221,7 @@
     {
       "file": "tests/test_install.py",
       "standard": "through_the_command",
-      "lines": [22, 261, 1351, 1383],
+      "lines": [22, 246, 1322, 1354],
       "reason": "Ruling (c), fleet green leg 7: run_install, the one public door, clones the repo (_clone_repo), runs setup.sh (_run_setup), fixes ownership (_check_and_fix_owner), fetches baud (_install_phone_face), runs doctor (_run_doctor_preflight) and launches the chat (_end_in_chat, which prompts _ask_permission_mode and builds _build_install_prompt); _resolve_home and _looks_like_aipass_tree prompt and probe before the clone; _registry_user_name and _print_next_steps sit behind the chat launch. Every helper is pinned with the far side stubbed (lines re-pinned 2026-10-15, DPLAN-0409 C3). _resolve_source (--source) is a pure check before the clone, also pinned through run_install. 261: _pid_alive's Windows tasklist branch is unreachable from acquire_install_lock on a POSIX host; it is handed platform and runner instead."
     },
     {
@@ -253,8 +253,8 @@
     {
       "file": "shared/project_home.py",
       "standard": "log_visibility",
-      "lines": [25],
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 25 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
+      "lines": [21],
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 21 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
     }
   ]
 }

@@ -3,14 +3,12 @@
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
 # Version: 1.1.4
 # Created: 2026-08-28
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/admin_lane.py."""
-# The rules this file exists to hold: the row NEVER errors (a dark lane is a
-# valid install), it NEVER names a ceremony command when the lane is dark (doctor
-# must not push), and it reports PRESENCE only — it must never grow into a second
-# implementation of @devpulse's five-leg contract.
+# The row never errors, never names a ceremony command when dark, and reports presence
+# only, never a second implementation of @devpulse's contract.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that admin_lane.py and the modules it imports parse and import
@@ -30,11 +28,6 @@ from aipass.aipass.apps.handlers.admin_lane import (
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 
 
-# ---------------------------------------------------------------------------
-# Builders
-# ---------------------------------------------------------------------------
-
-
 def build_world(
     root: Path,
     *,
@@ -46,8 +39,7 @@ def build_world(
 ) -> Path:
     """Lay out a registry + devpulse cert, one knob per observable fact.
 
-    Declarative and re-callable: each call fully restates the world, so a test
-    may build several states in a row from one tmp_path.
+    Each call fully restates the world, so one tmp_path can hold several states in a row.
     """
     holder_dir = root / "src" / "aipass" / ADMIN_HOLDER
     holder_dir.mkdir(parents=True, exist_ok=True)
@@ -97,11 +89,6 @@ def world(tmp_path, monkeypatch):
     return _build
 
 
-# ---------------------------------------------------------------------------
-# State observation
-# ---------------------------------------------------------------------------
-
-
 def test_all_four_facts_present_reads_lit(world):
     """The fully-run ceremony reports lit."""
     world()
@@ -142,9 +129,7 @@ def test_plain_cert_with_no_privileges_block_is_dark(world):
 def test_any_single_missing_fact_reads_partial(world, knob):
     """A half-run ceremony is named, not rounded to lit or dark.
 
-    Parameterized across every leg because rounding a partial lane UP to lit is
-    the dangerous direction — it would tell a human they are done when the
-    real verify still refuses.
+    Every leg: rounding UP to lit tells a human they are done while verify still refuses.
     """
     world(**{knob: False})
 
@@ -207,16 +192,10 @@ def test_admin_flag_on_another_citizen_is_ignored(world, tmp_path):
     assert admin_lane_state()["registry_flag"] is False
 
 
-# ---------------------------------------------------------------------------
-# The doctor row — informational, never a nag
-# ---------------------------------------------------------------------------
-
-
 def test_row_never_errors_in_any_state(world):
     """THE rule: a dark or partial lane is not a doctor error, ever.
 
-    _print_doctor_groups counts any glyph that is neither PASS nor WARN as an
-    error, so a wrong glyph here would turn a valid install red.
+    _print_doctor_groups counts any glyph but PASS or WARN as an error.
     """
     for kwargs in (
         {},
@@ -289,17 +268,8 @@ def test_row_shape_matches_doctor_contract(world):
     assert rows[0][0] == "admin lane"
 
 
-# ---------------------------------------------------------------------------
-# Boundaries — this module observes, it does not adjudicate
-# ---------------------------------------------------------------------------
-
-
 def test_never_reimplements_the_signature_check():
-    """No HMAC here. The contract has one home (@devpulse) and must keep it.
-
-    A doctor that recomputed the signature would be a second implementation of
-    a security contract, free to drift from the real one.
-    """
+    """No HMAC here. The contract has one home (@devpulse) and must keep it, or drift."""
     source = Path(admin_lane.__file__).read_text(encoding="utf-8")
     code = "\n".join(line for line in source.splitlines() if not line.strip().startswith("#"))
 
@@ -310,16 +280,12 @@ def test_never_reimplements_the_signature_check():
 def test_never_reads_key_material(world, tmp_path):
     """Presence only — the key file's CONTENT is never opened.
     Mutant `key = KEY_PATH.is_file()` -> `... and bool(KEY_PATH.read_text(encoding="utf-8"))` goes red.
-    Mutant (fleet green leg 3): `... and bool(KEY_PATH.read_bytes())` goes red too — the mode-000 file
-    refuses a binary open, which the undecodable bytes alone let pass. That holds only on POSIX for a
-    non-root user: root opens a mode-000 file, and Windows has no such mode, so there the read_bytes
-    mutant passes and only the text-read mutant goes red."""
+    Mutant `... and bool(KEY_PATH.read_bytes())` goes red only on POSIX for a non-root user,
+    where the mode-000 file refuses a binary open."""
     world()  # sets admin_lane.KEY_PATH to this tmp path before admin_lane_state runs
     key_path = tmp_path / "fake_home" / ".aipass" / "admin_grant.key"
-    # Material no text read can decode: any read of it as text raises instead of passing.
+    # Undecodable, so any text read raises; mode 000 on POSIX refuses a binary one too.
     key_path.write_bytes(b"\xff\xfe\x00 not utf-8 \x80")
-    # On POSIX the file is also unreadable (mode 000), so ANY open raises, binary included.
-    # Presence (stat) needs no read permission.  Windows has no such mode; the bytes stand alone there.
     lock = os.name == "posix"
     if lock:
         key_path.chmod(0)

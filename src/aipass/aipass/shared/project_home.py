@@ -3,16 +3,12 @@
 # Description: Shared AIPass-home detection, project-path validation, and settings content
 # Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
 
-Shared across every command that scaffolds or inspects an AIPass project
-(`aipass init`, `aipass new`, `aipass adopt`), so there is exactly one
-source of truth per helper — no per-command copies to drift apart.
-
-Dependency-free: uses only stdlib. Importable before drone/prax exist.
+One copy per helper for init, new and adopt. Stdlib only: importable before drone/prax exist.
 """
 
 import importlib.util
@@ -45,16 +41,10 @@ def is_throwaway_path(path: str | Path) -> bool:
 
 
 def _detect_aipass_home() -> str | None:
-    """Detect the AIPass installation root from the aipass package location.
-
-    Returns the parent of the src/ directory (the repo root).
-    Returns None if detection fails.
-    """
+    """Detect the AIPass installation root from the aipass package location."""
     try:
         spec = importlib.util.find_spec("aipass")
         if spec and spec.origin:
-            # aipass/__init__.py lives at src/aipass/__init__.py
-            # parent = src/aipass/, parent.parent = src/, parent.parent.parent = AIPass root
             return str(Path(spec.origin).resolve().parent.parent.parent)
     except Exception as exc:
         logger.info("AIPASS_HOME detection skipped: %s", exc)
@@ -64,17 +54,8 @@ def _detect_aipass_home() -> str | None:
 def _claude_settings() -> str:
     """Generate .claude/settings.json — permissions only, no machine-local paths.
 
-    Hooks are NOT wired at the project level. All AIPass hooks
-    (prompt injection, identity, email, pre-compact, edit gates) fire
-    from provider settings (~/.claude/settings.json), installed by
-    setup.sh. Provider hooks use CWD-walking patterns that work from
-    any directory in any project.
-
-    AIPASS_HOME is a machine-local absolute path — it never belongs in this
-    tracked file. It goes in .claude/settings.local.json instead, which is
-    gitignored and merged over tracked settings by Claude Code natively.
-    See claude_local_settings().
-    """
+    No hooks (provider settings carry them) and no AIPASS_HOME: it is machine-local, so it
+    goes in the gitignored settings.local.json (claude_local_settings)."""
     data: dict = {
         "permissions": {
             "deny": [
@@ -90,39 +71,24 @@ def _claude_settings() -> str:
 def claude_md_excludes(aipass_home: str) -> list[str]:
     """Absolute paths of the host CLAUDE.md files a nested project must fence out.
 
-    Claude Code loads CLAUDE.md from every ancestor directory regardless of git
-    boundaries, so a project nested under ``<host>/projects/<name>`` inherits
-    the host root CLAUDE.md and .claude/CLAUDE.md unless excluded.
-
-    Public as the one definition of the fence: claude_local_settings writes it and
-    find_fenceless_projects checks for it (aipass's decision, fleet green leg 4).
-    """
+    Claude Code loads every ancestor CLAUDE.md regardless of git. The one definition of the
+    fence: claude_local_settings writes it, find_fenceless_projects checks it."""
     home = Path(aipass_home)
-    # Forward slashes on every platform — settings files carry POSIX-style
-    # paths, and Windows Path.__str__ would emit backslashes here.
+    # as_posix: settings files carry POSIX paths on every platform.
     return [(home / "CLAUDE.md").as_posix(), (home / ".claude" / "CLAUDE.md").as_posix()]
 
 
 def _normalize_exclude(entry: str) -> str:
     """Separator-insensitive form for comparing claudeMdExcludes entries.
 
-    A fence written by hand (or by an older build) with backslashes must still
-    count as present on Windows — normalize both sides before comparing, but
-    never rewrite user-authored values.
-    """
+    A backslash fence written by hand must still count; user-authored values are never rewritten."""
     return entry.replace("\\", "/")
 
 
 def claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
     """Generate .claude/settings.local.json — machine-local env (gitignored).
 
-    When *nested* is True (target lives under ``<host>/projects/<name>``),
-    also emits ``claudeMdExcludes`` fencing out the host's ancestor CLAUDE.md
-    files — see ``claude_md_excludes``.
-
-    Public for its callers outside this module: handlers/init/bootstrap.py (scaffold
-    and update), handlers/new_project/__init__.py and handlers/new_project/adopt.py.
-    """
+    *nested* (under ``<host>/projects/<name>``) also emits ``claudeMdExcludes``."""
     data: dict = {"env": {"AIPASS_HOME": aipass_home}}
     if nested:
         data["claudeMdExcludes"] = claude_md_excludes(aipass_home)
@@ -132,12 +98,7 @@ def claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
 def merge_local_settings(existing: dict, generated: dict) -> dict:
     """Merge generated .claude/settings.local.json content into existing (retrofit-safe).
 
-    Unions ``env`` and ``claudeMdExcludes`` rather than overwriting, so a
-    hand-edited or previously-written file is never clobbered.
-
-    Public for its caller outside this module: handlers/init/bootstrap.py's retrofit
-    of an existing settings.local.json.
-    """
+    Unions ``env`` and ``claudeMdExcludes``, so a hand-edited file is never clobbered."""
     merged = dict(existing)
 
     merged_env = {**existing.get("env", {}), **generated.get("env", {})}
@@ -159,14 +120,8 @@ def merge_local_settings(existing: dict, generated: dict) -> dict:
 def _enroll_project(target: Path) -> bool | None:
     """Enroll a project in the trusted-project registry (DPLAN-0244).
 
-    Skips throwaway paths (temp dirs, Claude Code scratchpads) so ephemeral
-    test/pytest directories never bloat the registry (GH-712).
-    Lazy import to keep this module free of prax/module-level deps.
-
-    Answers True when enrolled, False when skipped or refused, and None when
-    hooks' trust registry cannot be imported (a clone before install): the
-    caller can tell 'unavailable' from 'refused' and say so.
-    """
+    True enrolled, False skipped (throwaway path) or refused, None when hooks' registry
+    cannot be imported (a clone before install), so the caller can say 'unavailable'."""
     if is_throwaway_path(target):
         logger.info("Skipping trust enrollment for throwaway path: %s", target)
         return False
@@ -186,12 +141,7 @@ def _enroll_project(target: Path) -> bool | None:
 def is_projects_child(target: Path) -> bool:
     """True if *target* is ``<host>/projects/<name>`` — a valid nested project path.
 
-    The host is identified by having a ``*_REGISTRY.json`` in the grandparent
-    of target (i.e. target's parent is named ``projects``).
-
-    Raises RuntimeError naming the host when its listing cannot be read: that
-    is not a 'no', and init and adopt catch RuntimeError and print it.
-    """
+    An unreadable host raises RuntimeError, not a 'no': init and adopt catch it and print it."""
     resolved = target.resolve()
     if resolved.parent.name != "projects":
         return False
@@ -206,10 +156,7 @@ def is_projects_child(target: Path) -> bool:
 def find_fenceless_projects(aipass_home: str) -> list[Path]:
     """Nested ``<aipass_home>/projects/<name>`` dirs missing the CLAUDE.md ancestor fence.
 
-    A project is nested if it has a ``*_REGISTRY.json``. It's fenceless if its
-    ``.claude/settings.local.json`` is missing, unparseable, or lacks the
-    ``claudeMdExcludes`` entries from ``claude_md_excludes``.
-    """
+    Fenceless: ``.claude/settings.local.json`` missing, unparseable, or lacking the excludes."""
     projects_dir = Path(aipass_home) / "projects"
     if not projects_dir.is_dir():
         return []

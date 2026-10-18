@@ -3,15 +3,12 @@
 # Description: The rows of `aipass doctor --cross-os`, built for doctor to print
 # Version: 1.0.0
 # Created: 2026-09-29
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Cross-OS pre-flight rows for `aipass doctor --cross-os`.
 
-Moved out of apps/modules/doctor.py on 2026-09-29 (fleet green leg 5, aipass's
-decision) to give doctor.py room under its line cap. The rows are built here and
-doctor only prints them: run_cross_os and run_cross_os_record stay in doctor.
-No answer and no printed line changed in the move.
+The rows are built here and doctor only prints them.
 """
 
 from __future__ import annotations
@@ -45,10 +42,7 @@ class CrossOsRow(NamedTuple):
 def cross_os_gap_rows() -> List[CrossOsRow]:
     """OS-gap cross-reference rows (slice 1): tracked gaps for this platform.
 
-    Machine pre-flight — surfaces OS-specific gaps from tests/CROSS_OS_TESTING.md
-    for this box. Never claims the checklist's human green. WARN per gap, a single
-    PASS when none apply, a single WARN when the registry can't be read (never
-    silent).
+    Never claims the checklist's human green; an unreadable registry is a WARN, never silent.
     """
     platform_name = sys.platform
     try:
@@ -88,19 +82,14 @@ def cross_os_gap_rows() -> List[CrossOsRow]:
 def preflight_row(label: str, result: PreflightResult, remediation: str) -> CrossOsRow:
     """Map a non-mutating PreflightResult to a labelled pre-flight row.
 
-    ok -> PASS, else FAIL. The detail is always prefixed 'pre-flight:' so a row
-    can never be mistaken for the checklist's human acceptance green.
+    The 'pre-flight:' prefix keeps a row from passing for the checklist's human green.
     """
     glyph = GLYPH_PASS if result.ok else GLYPH_FAIL
     return CrossOsRow(f"{label} (pre-flight)", glyph, f"pre-flight: {result.detail}", "" if result.ok else remediation)
 
 
 def e2e_row(result: PreflightResult) -> CrossOsRow:
-    """Map the heavy e2e PreflightResult to a row (PASS/FAIL/WARN).
-
-    ok -> PASS. Un-runnable infra cases (dir missing, no pytest, timeout) -> WARN.
-    Real test failures -> FAIL.
-    """
+    """Map the heavy e2e PreflightResult to a row (PASS/FAIL/WARN)."""
     if result.ok:
         glyph, remediation = GLYPH_PASS, ""
     elif result.detail.startswith(E2E_UNRUNNABLE_PREFIX):
@@ -114,10 +103,7 @@ def e2e_row(result: PreflightResult) -> CrossOsRow:
 def check_cross_os(run_e2e: bool = False) -> List[CrossOsRow]:
     """Cross-OS pre-flight group (Layer-3-lite): gap cross-reference + machine routes.
 
-    Combines the slice-1 OS-gap rows with the non-mutating routing / --version /
-    hookstatus probes (Phase 4 / 1.3 / 6.3). None of these wake a citizen. When
-    ``run_e2e`` is set, also runs the heavy Phase-2 e2e suite. Every row is
-    labelled pre-flight and still needs the human Layer-3 pass.
+    None of these wake a citizen; every row still needs the human Layer-3 pass.
     """
     results = cross_os_gap_rows()
 
@@ -144,8 +130,7 @@ def check_cross_os(run_e2e: bool = False) -> List[CrossOsRow]:
 def record_path_arg(args: list[str]) -> str | None:
     """Extract the optional PATH value following ``--record`` (None if absent).
 
-    ``--record`` may stand alone (default path) or be followed by a path; a
-    following token that starts with ``-`` is another flag, not the path.
+    A following token that starts with ``-`` is another flag, not the path.
     """
     if "--record" not in args:
         return None

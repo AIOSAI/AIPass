@@ -3,15 +3,12 @@
 # Description: Detect and fix stale rules in provider settings
 # Version: 1.2.0
 # Created: 2026-06-05
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """provider_reconcile — detect and fix stale rules in ~/.claude/settings.json.
 
-The fix backs the file up and leaves a receipt through ``settings_backup`` (door
-``reconcile-stale-deny``, FPLAN-0645); a failed backup raises and nothing is written.
-``plan_stale_deny`` computes the removal without writing, so the doctor can show it
-and ask first (FPLAN-0646).
+The fix backs up through ``settings_backup``; a failed backup raises and nothing is written.
 """
 
 from __future__ import annotations
@@ -37,9 +34,7 @@ GLYPH_WARN = "[yellow]![/yellow]"
 def plan_stale_deny(settings_path: Optional[Path] = None, base: Optional[dict] = None) -> Optional[SettingsPlan]:
     """The stale rm deny rules a fix would remove, computed without writing; None when there are none.
 
-    *base* is the settings as another plan would leave them (the doctor chains the
-    wire plan first, so this removal lands on top of it); default: the file as it is.
-    *settings_path* defaults to the personal settings file (the seam is for the test).
+    *base* is the settings as another plan leaves them (the doctor chains the wire plan first).
     """
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
@@ -70,10 +65,7 @@ def plan_stale_deny(settings_path: Optional[Path] = None, base: Optional[dict] =
 def reconcile_stale_deny(fix: bool = False) -> list:
     """Detect and optionally remove stale rm deny rules from provider settings.
 
-    Returns list of (label, glyph, detail, remediation) tuples matching
-    doctor.CheckResult shape — imported as tuples to avoid circular import.
-    With *fix*, the removal is backed up first and the row's detail names the
-    backup and the receipt; ``SettingsBackupError`` propagates unwritten.
+    Returns CheckResult-shaped tuples (no import: circular); SettingsBackupError propagates.
     """
     results: list = []
     settings_path = Path.home() / ".claude" / "settings.json"

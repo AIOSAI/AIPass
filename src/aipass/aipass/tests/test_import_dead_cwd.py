@@ -3,42 +3,14 @@
 # Description: Pins every aipass module against an unreadable working directory
 # Version: 1.2.3
 # Created: 2026-08-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests that apps/aipass.py and every module beneath it import without reading a dead working directory."""
 
-# No module in this branch may read the working directory to import.
-#
-# THE MECHANISM (measured on the Windows CI gate 2026-08-31, @memory's finding)
-# ----------------------------------------------------------------------------
-# ``ntpath.realpath`` computes ``os.getcwd()`` UNCONDITIONALLY — on its first
-# lines, before it checks whether the path is even absolute — and
-# ``Path.resolve()`` routes through it.  So on Windows every
-# ``Path(__file__).resolve()`` reached while a module is being imported is an
-# import-time working-directory read, and a process whose cwd was deleted (or
-# sits on a disconnected share) cannot import the module at all.
-#
-# ``posixpath.realpath`` skips ``getcwd`` for an absolute path, which is why this
-# was invisible on Linux for as long as it existed.  These pins inject the
-# Windows behaviour as a CONDITION rather than a platform, so they run red on
-# this host: ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then
-# ``os.getcwd`` is denied.
-#
-# THE DISCRIMINATOR IS *REACHED AT IMPORT*, NOT *WRITTEN AT MODULE SCOPE*
-# -----------------------------------------------------------------------
-# A ``resolve()`` inside a function still counts when import-time code calls that
-# function — including a default argument evaluated during import.  A grep for
-# module-level assignments would miss those, so the pin imports every module in
-# the tree and lets the interpreter decide what is reached.
-#
-# WHY A CHILD PROCESS
-# -------------------
-# The injection has to land before any ``aipass`` module is imported, or a module
-# that already cached ``os.path.realpath`` would be measured against the real
-# one.  Other branches' import-time code is held CONSTANT by preloading it in the
-# healthy world first: their dead-cwd cure is their own build, and this file
-# measures aipass's sites only.
+# Windows ntpath.realpath (behind Path.resolve) always reads os.getcwd(); posixpath does not, so
+# a child process injects that condition and denies cwd before importing every module: what
+# counts is any resolve() reached at import, a default argument included.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — each module's own logic; see tests/test_read.py
@@ -53,34 +25,24 @@ from pathlib import Path
 
 BRANCH_ROOT = Path(__file__).resolve().parents[1]
 
-#: Cross-branch modules this tree imports. Preloaded in the healthy world so a
-#: red here is always an aipass site. (Found by grepping ``from aipass.<other>``
-#: across apps/ and shared/ — see the module docstring.)
+#: Cross-branch modules this tree imports, preloaded healthy so a red here is always an aipass site.
 _FOREIGN = [
     "aipass.prax",
     "aipass.prax.apps.modules.logger",
     "aipass.cli.apps.modules",
-    # hooks' door to trust_registry (DPLAN-0404 leg 8: trust.py and project_home
-    # import it, no longer hooks' handlers). It pulls hooks' own json_handler, whose
-    # module-level Path(__file__).resolve() is the same species at
-    # hooks/.../json_handler.py:30. Reported to @hooks 2026-08-31; their site, their
-    # build. Preloading it keeps this pin measuring aipass — drop it when hooks is cured.
+    # Its hooks json_handler resolves Path(__file__) at module scope; drop this when hooks is cured.
     "aipass.hooks.apps.modules.door_trust_registry",
     "aipass.trigger.apps.modules.core",
 ]
 
-#: dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
-#: 09-27, 20:42).  docs.local is untracked scratch, never shipped — aipass's
-#: decision, fleet green leg 3.
+#: Sandboxes nothing looks into, and docs.local (untracked scratch, never shipped).
 _SKIP_PARTS = {"dropbox", ".archive", ".backup", "__pycache__", "docs.local", "tests", "logs"}
 
 
 def _branch_modules(root: Path = BRANCH_ROOT) -> list[str]:
     """Every importable ``aipass.aipass.*`` module name, found on disk.
 
-    Named by walking files rather than by ``pkgutil``, because ``pkgutil``
-    imports as it walks — the very thing under test.  *root* is the live tree
-    by default; the walk's skip pin hands it a tmp_path tree instead.
+    Walks files, not ``pkgutil``: pkgutil imports as it walks, the very thing under test.
     """
     names: list[str] = []
     for py in sorted(root.rglob("*.py")):
@@ -177,21 +139,13 @@ class TestEveryModuleImportsWithoutTheWorkingDirectory:
         assert not any(".tests" in name or ".archive" in name for name in modules)
 
     def test_the_walk_never_enters_a_sandbox_or_scratch(self, tmp_path: Path) -> None:
-        """A planted module in each skipped directory is never named; the live one beside them is.
-
-        Red before the cure: docs.local/ held devpulse's fleet tools and the sweep
-        tried to import them as ``aipass.aipass.docs.local...``.
-        """
+        """A planted module in each skipped directory is never named; the live one beside them is."""
         for skipped in ("dropbox", ".archive", "__pycache__", "docs.local"):
             (tmp_path / skipped).mkdir()
             (tmp_path / skipped / "planted.py").write_text("x = 1\n", encoding="utf-8")
         (tmp_path / "live.py").write_text("x = 1\n", encoding="utf-8")
         assert _branch_modules(tmp_path) == ["aipass.aipass.live"]
 
-
-# ---------------------------------------------------------------------------
-# the guard specifically — inspect.stack() needs the filesystem
-# ---------------------------------------------------------------------------
 
 _REALPATH_DENIED_WORLD = """
 import os, sys, importlib
@@ -234,17 +188,7 @@ except Exception as exc:
 class TestTheImportGuardWalksFramesWithoutTheFilesystem:
     """``inspect.stack()`` builds a FrameInfo per frame.
 
-    For a frozen-importlib frame the filename does not exist on disk, so
-    ``getsourcefile`` falls through to ``getmodule()`` — whose module-scanning
-    loop calls ``os.path.realpath`` OUTSIDE the ``try`` that wraps
-    ``getabsfile``.  On POSIX the equivalent raise happens earlier, inside
-    ``getabsfile``'s ``abspath`` → ``getcwd``, where ``inspect`` catches it.  On
-    Windows ``ntpath.abspath`` succeeds and the unguarded ``realpath`` runs.
-
-    So the Windows-faithful denial on this host is of ``os.path.realpath``, not
-    of ``os.getcwd``: a getcwd denial alone is green against the defective
-    guard, because posixpath skips getcwd for absolute paths (@ai_mail's
-    instrument note, 2026-08-31).
+    For a frozen frame getmodule() calls realpath outside inspect's try, so deny realpath, not getcwd.
     """
 
     def test_inspect_stack_raises_in_this_world(self) -> None:
@@ -257,27 +201,17 @@ class TestTheImportGuardWalksFramesWithoutTheFilesystem:
         assert "GUARD_OK" in out, f"the import guard needs the filesystem to run:\n{out}"
 
 
-# ---------------------------------------------------------------------------
-# the structural ban -- inspect.stack() must be unwritable in this tree
-# ---------------------------------------------------------------------------
-
 GUARD = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
 
-#: Directories the ban does not police: retired code and the pin's own fixtures.
-#: dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
-#: 09-27, 20:42).  docs.local is untracked scratch, never shipped — aipass's
-#: decision, fleet green leg 3.
+#: Directories the ban does not police: sandboxes, untracked scratch and the pin's own fixtures.
 _BAN_SKIP = {"dropbox", ".archive", ".backup", "__pycache__", "docs.local", "tests", "logs"}
 
 
 def _inspect_stack_calls(source: str) -> list[int]:
     """Line numbers of every ``inspect.stack(...)`` CALL in *source*.
 
-    Structural, never a string search.  The cured guard's own docstring names
-    ``inspect.stack()`` while explaining why it is gone, and a spelling ban
-    would convict the explanation — the file would have to stop saying what it
-    learned in order to pass.  An ``ast.Call`` whose func is an ``Attribute``
-    named ``stack`` on a ``Name`` ``inspect`` is the defect and nothing else is.
+    Structural, never a string search: the cured guard's docstring names it, and a
+    spelling ban would convict the explanation.
     """
     lines: list[int] = []
     for node in ast.walk(ast.parse(source)):
@@ -310,12 +244,8 @@ def _banned_sites(root: Path = BRANCH_ROOT) -> tuple[list[str], int]:
 class TestNoInspectStackSurvives:
     """A behavioural pin cannot reach every branch of the guard.
 
-    @trigger measured this fleet-wide and @canary reproduced it: the DELETED
-    second ``inspect.stack()`` walk lived in the guard's ``caller_file is None``
-    branch, which no import-shaped world can enter — ``apps/__init__`` always
-    supplies a real-file frame.  Restoring that walk leaves every behavioural
-    test green (canary: 30 of 31 passed, only their AST ban died).  So the
-    unreachable branch needs a structural pin or it is not pinned at all.
+    The ``caller_file is None`` branch is unreachable from an import, so a restored
+    inspect.stack() there would leave every behavioural test green.
     """
 
     def test_the_guard_contains_no_inspect_stack_call(self) -> None:

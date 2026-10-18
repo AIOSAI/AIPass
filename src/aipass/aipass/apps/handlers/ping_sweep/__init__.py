@@ -3,16 +3,13 @@
 # Description: Verify registered branches respond via test-convention email
 # Version: 1.0.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-10-17
 # =============================================
 
 """
 ping_sweep — verify each registered branch responds.
 
-Sends test-convention emails and waits for ack replies.
-The AIPASS-TEST token protocol is recognized by ai_mail's daemon
-(handlers/dispatch/test_token.py); branches with a running daemon
-will auto-ack. Branches without a daemon time out — that's expected.
+ai_mail's daemon auto-acks the AIPASS-TEST token; a branch with no daemon times out, as expected.
 """
 
 from __future__ import annotations
@@ -79,10 +76,7 @@ def _aipass_inbox_path() -> Path:
 def _send_test_email(branch: str, body: str) -> bool:
     """Send test email to branch via drone. Returns True on success.
 
-    Runs drone with cwd=aipass branch root so ai_mail's branch detection
-    resolves the sender as @aipass (it requires a .trinity/passport.json
-    in the working dir). Without this, the wrapper's cwd is the AIPass
-    project root and every send fails with BRANCH DETECTION FAILED.
+    cwd is the aipass branch root: ai_mail detects the sender from .trinity/passport.json there.
     """
     try:
         result = subprocess.run(
@@ -113,7 +107,6 @@ def _wait_for_ack(branch: str, timeout: int) -> str:
     """
     Poll aipass inbox for an ack reply from branch.
     Returns 'ack' | 'timeout'.
-    Auto-ack requires the target branch's ai_mail daemon to be running.
     """
     deadline = time.time() + timeout
     inbox_path = _aipass_inbox_path()

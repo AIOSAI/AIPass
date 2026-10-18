@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.4.1
 # Created: 2026-07-05
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -56,17 +56,9 @@ _BUS = "aipass.trigger.apps.modules.core.trigger"
 def phone_face_step_stays_offline():
     """No test in this file runs the real Phone face + baud-cli step, or reaches the network.
 
-    The leak this closes, measured 2026-09-14: once a baud release carried the phone
-    bundle, TestThrowawayGate.test_force_flag_overrides ran run_install with step 4
-    unpatched, fetched 'latest' with the seat's gh token, installed into the real
-    ~/.aipass/baud and pointed the live host api at it. install_best_effort is stubbed
-    for every test (the step's own tests patch it again), and a network call fails at
-    teardown: the step is best-effort and swallows exceptions, so a raise inside it
-    would pass silently.
-
-    The phone print's reader (_phone_print, FPLAN-0642 slice B) is stubbed too: once a
-    test answers True for the face, the real reader would run this host's tailscale and
-    probe its live @api server. tests/test_baud_phone.py pins the reader itself.
+    Unstubbed, step 4 installs into the real ~/.aipass/baud and points the live api at it.
+    A network call fails at teardown: the step swallows exceptions, so a raise would pass.
+    The phone print's reader is stubbed too, or it probes this host's tailscale and @api.
     """
     with (
         patch("aipass.aipass.apps.modules.baud.install_best_effort", return_value=False) as step,
@@ -115,10 +107,7 @@ class TestResolveHome:
     def test_non_interactive_defaults(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """From an ordinary directory, non-interactive still falls back to DEFAULT_HOME.
 
-        cwd is pinned explicitly here. It was implicit before 2026-09-07 and the
-        test only passed because the runner happened to sit somewhere that did
-        not matter -- once cwd became load-bearing (FPLAN-0492 wave 6) the
-        unstated dependency turned into a failure.
+        cwd is pinned explicitly: it is load-bearing.
         """
         monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
@@ -127,9 +116,7 @@ class TestResolveHome:
     def test_non_interactive_honours_an_aipass_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Standing in an AIPass tree, a headless install targets THAT tree.
 
-        The defect this pins (banked from the passport 2.0 train): running
-        `aipass install --non-interactive` inside a checkout installed into
-        ~/AIPass instead, silently ignoring where the user was standing.
+        Pins: a headless install inside a checkout went to ~/AIPass instead.
         """
         (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -231,9 +218,7 @@ class TestInstallLock:
     def test_holder_of_unknown_liveness_is_never_stolen(self, tmp_path: Path) -> None:
         """A probe that cannot tell (None) is not a dead holder: the lock stays, and the refusal says so.
 
-        Before 2026-09-28 a failed probe answered True, a guess dressed as "alive", and the
-        refusal claimed another install was running. aipass's decision, fleet green leg 3:
-        unknown is its own answer, never stolen, and named in the refusal.
+        Unknown is its own answer, never a guess of "alive".
         Mutant: `if _retry and alive is False:` -> `if _retry and not alive:` -> red.
         """
         home = tmp_path / "AIPass"
@@ -288,9 +273,6 @@ class TestCloneRepo:
     def test_success(self, tmp_path: Path, tools_on_path) -> None:
         """A zero-exit git clone returns success, and clones exactly once. PATH holds a git.
 
-        A branch read-back follows the clone, so this pins the CLONE call
-        rather than the total call count — the old assert_called_once() was
-        asserting an implementation detail, not the behaviour it named.
         The argv handed to git is pinned whole: a shallow clone of the public repo into home.
         Mutant: `"--depth", "1", ` dropped from the clone argv -> red.
         """
@@ -553,10 +535,7 @@ class TestRunInstall:
     def test_dry_run_is_side_effect_free(self, tmp_path: Path) -> None:
         """Dry-run walks all steps, the phone face included, with no subprocess and no network.
 
-        It also takes no install lock: a dry run writes nothing, so it has nothing
-        to guard (aipass's decision, fleet green leg 2). The home sits under tmp_path so the
-        lock's directory is observable; before, the real home's parent was mkdir'd
-        and its real .AIPass.install.lock created and removed.
+        It takes no install lock: a dry run writes nothing, so it has nothing to guard.
         Mutant: dry run takes the install lock again -> red.
         """
         home = tmp_path / "parent" / "AIPass"
@@ -575,14 +554,9 @@ class TestRunInstall:
     def test_aborts_when_clone_fails(self, tmp_path: Path) -> None:
         """A failed fetch aborts before the setup step runs.
 
-        The throwaway gate is passed, so the run takes the lock and reaches the clone
-        itself; before, it stopped at the gate and the setup assert could not fail.
-        Three guards stand past the clone: the autouse fixture phone_face_step_stays_offline
-        (the phone step is stubbed, the network refused), a home that does not exist
-        (tmp_path / "AIPass" is never made), and a stdin that is not a terminal (pytest's).
-        Mutant (fleet green leg 5, run): the clone failure's `return 1` -> `return 0` -> red at rc.
-        Mutant, reasoned and never run: `return 1` removed — the run would go on past the
-        clone behind those guards alone.
+        The throwaway gate is passed, so the run reaches the clone itself.
+        Guards past the clone: the offline fixture, a home never made, a non-terminal stdin.
+        Mutant: the clone failure's `return 1` -> `return 0` -> red at rc.
         """
         home = tmp_path / "AIPass"
         with (
@@ -1315,10 +1289,7 @@ class TestCheckAndFixOwner:
 class TestClonedBranchIsNamed:
     """A reinstall clones the repo DEFAULT branch, not the one you stand on.
 
-    From a `dev` tree you silently get a `main` tree back. The clone target is
-    deliberately unchanged (install is the fresh-machine bootstrap and usually
-    runs where no checkout exists) — but it must no longer be silent about
-    which branch landed.
+    The clone target stays the default branch on purpose; it must say which branch landed.
     """
 
     @staticmethod

@@ -3,36 +3,12 @@
 # Description: Admin-lane state reporting for doctor — read-only, never a verdict
 # Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-09-28
+# Modified: 2026-10-17
 # =============================================
 
 """Admin-lane state for ``aipass doctor`` (DPLAN-0319 train, the owner's ruling).
 
-Reports whether this machine's admin lane is LIT or DARK, and nothing more.
-
-WHY THIS ONLY REPORTS PRESENCE, NEVER VALIDITY
-----------------------------------------------
-The admin grant is a signed contract with five legs (@devpulse's
-``admin_grant.py`` is its single reference implementation, FPLAN-0401):
-verified caller · cert path from the registry · cert content · HMAC-SHA256
-signature · registry ``admin: true``. Only devpulse can pass leg 1, and the
-signature check needs the key.
-
-This module deliberately does NOT re-implement any of that. It observes three
-cheap, non-secret FACTS — key file present, cert carries a privileges block and
-a signature, registry entry carries ``admin: true`` — and reports them as lane
-state. A doctor that re-derived the verdict would be a second implementation of
-a security contract, free to drift from the real one and to disagree with it in
-the direction that matters. The authoritative answer has one home and doctor
-points at it: ``drone @devpulse admin_grant verify``.
-
-Nothing here reads key MATERIAL — only whether the file exists. No cross-branch
-import: devpulse owns that module, and an importer of it would make every
-consumer share its import graph.
-
-A DARK LANE IS A VALID INSTALL. AIPass runs fine with no admin grant; admin
-actions simply refuse (fail closed). So this never reports an error and never
-pushes the ceremony — it names the doc and stops.
+Reports presence, never validity: the verdict's one home is ``drone @devpulse admin_grant verify``.
 """
 
 from __future__ import annotations
@@ -46,22 +22,18 @@ from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
 
-# Doctor's glyph vocabulary. Imported rather than redefined so a glyph change
-# in the UI handler cannot leave this row rendering in a stale style.
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS
 
 _LABEL = "admin lane"
 _MODULE_NAME = "admin_lane"
 
-#: The one seat. Not parameterizable — admin is bolted to devpulse by ruling
-#: (DPLAN-0288), and there is no transfer ceremony to make this a variable.
+#: Not a parameter: admin is bolted to devpulse and no transfer ceremony exists.
 ADMIN_HOLDER = "devpulse"
 
 #: Per-machine signing key. Lives outside every repo, so a clone never gets it.
 KEY_PATH = Path.home() / ".aipass" / "admin_grant.key"
 
-#: Where the human-facing ceremony is written down. Doctor names this, never
-#: the ceremony commands themselves — lighting the lane is a human decision.
+#: Doctor names the doc, never the ceremony commands: lighting the lane is a human decision.
 DOC_HINT = "Optional — see aipass/docs/admin_setup.md"
 
 
@@ -79,9 +51,7 @@ class _Unreadable(Exception):
 def _read_json(path: Path) -> dict | None:
     """Read a JSON object from *path*; None when absent, _Unreadable when unreadable.
 
-    Quiet on absence: a missing cert is the ordinary fresh-install state. An
-    unreadable one raises so the row can name it; None would report its legs
-    as missing (aipass's decision, fleet green leg 3).
+    Unreadable raises so the row can name it; None would report its legs as missing.
     """
     if not path.is_file():
         return None
@@ -111,11 +81,7 @@ def _holder_entry() -> dict | None:
 
 
 def _holder_cert() -> dict | None:
-    """Read the admin holder's birth certificate, resolved via the registry.
-
-    The path comes from the registry entry, never from a guess about layout —
-    the same rule the real contract's leg 2 follows.
-    """
+    """Read the admin holder's birth certificate, resolved via the registry."""
     entry = _holder_entry()
     if entry is None:
         return None
@@ -128,17 +94,8 @@ def _holder_cert() -> dict | None:
 def admin_lane_state() -> dict:
     """Observe the three lane facts. Returns a dict, prints nothing.
 
-    Returns:
-        ``{"key": bool, "granted": bool, "signed": bool, "registry_flag": bool,
-        "state": "lit" | "dark" | "partial", "unreadable": [path, ...]}``
-
-        ``unreadable`` names a registry or cert that exists but could not be
-        read. Its facts count as absent, so check_admin_lane still lists them
-        as missing, then names the unreadable file beside them.
-
-        - ``lit``     — all three facts present (verify still belongs to devpulse)
-        - ``dark``    — none present; the ordinary fresh-install state
-        - ``partial`` — some present: a half-run ceremony, worth naming
+    ``state`` is lit (all present), dark (none) or partial; an ``unreadable`` file's
+    facts count as absent.
     """
     key = KEY_PATH.is_file()
     unreadable: List[str] = []
@@ -155,8 +112,7 @@ def admin_lane_state() -> dict:
     try:
         entry = _holder_entry()
     except _Unreadable as exc:
-        # _holder_cert read the registry first, so an unreadable registry is named
-        # above already; the except stays so a second read never escapes as a crash.
+        # Already named above by _holder_cert; caught so a second read never crashes.
         logger.info("[admin_lane] registry already named unreadable: %s", exc)
         entry = None
     registry_flag = bool(entry and entry.get("admin") is True)
@@ -186,15 +142,7 @@ def _missing_legs(status: dict) -> str:
 
 
 def check_admin_lane() -> List[Tuple[str, str, str, str]]:
-    """Doctor row for the admin lane — informational, never an error.
-
-    Always GLYPH_PASS: a dark lane is a correct, fail-closed install, and a lit
-    one is equally fine. Doctor's job here is to end the silence, not to grade.
-    The remediation column names the DOC, never a ceremony command.
-
-    Returns:
-        One ``(label, glyph, detail, remediation)`` tuple, doctor's row shape.
-    """
+    """Doctor row for the admin lane — informational, never an error (a dark lane fails closed)."""
     status = admin_lane_state()
     state = status["state"]
 
@@ -211,8 +159,7 @@ def check_admin_lane() -> List[Tuple[str, str, str, str]]:
         detail = f"{detail}; could not read: {', '.join(status['unreadable'])}"
 
     logger.info("[admin_lane] state=%s", state)
-    # Facts only — the audit trail records WHICH legs were observed, never key
-    # material and never the certificate's signature value.
+    # Facts only: never key material, never the certificate's signature value.
     json_handler.log_operation(
         "check_admin_lane",
         data={k: v for k, v in status.items()},

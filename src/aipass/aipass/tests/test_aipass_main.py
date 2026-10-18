@@ -3,7 +3,7 @@
 # Description: Tests for aipass.py entry point / CLI main
 # Version: 1.4.5
 # Created: 2026-05-12
-# Modified: 2026-10-13
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""
@@ -39,23 +39,14 @@ from aipass.aipass.apps.aipass import (
 _ENCODING = "utf-8"
 
 
-# =============================================================================
-# TestDiscoverModules
-# =============================================================================
-
-
 class TestDiscoverModules:
     """Tests for the discover_modules function."""
 
     def test_returns_list(self) -> None:
         """discover_modules returns the live module set, not merely a list.
 
-        The isinstance got company 2026-09-08 (v5 assertion_shape): on its own
-        it was equally true of the empty list a broken MODULES_DIR returns.
-        Measured on this tree the same day: 11 modules, and the COMMANDs are
-        read off the modules themselves so a new one joins the pin by existing.
-        The loaded set is pinned to the public files on disk, so a module that
-        silently fails to load is named rather than counted.
+        An isinstance alone is true of the empty list a broken MODULES_DIR returns; the
+        set is pinned to the public files on disk, so a module that fails to load is named.
         Mutant: `if hasattr(module, "handle_command"):` -> `if hasattr(module, "handle_cmd"):` -> red.
         """
         modules_dir = Path(modules_pkg.__file__).parent
@@ -72,9 +63,7 @@ class TestDiscoverModules:
     def test_modules_have_handle_command(self) -> None:
         """Every discovered module has a handle_command callable."""
         modules = discover_modules()
-        # THE FLOOR (v5 unentered_assert, 2026-09-08). An empty MODULES_DIR
-        # made this a silent pass: the body never ran and the run said so
-        # nowhere. 11 measured on this tree the same day.
+        # The floor: an empty MODULES_DIR would pass the loop below without running it.
         assert len(modules) >= 11, f"discover_modules found {len(modules)} - the loop below proves nothing"
         for mod in modules:
             assert hasattr(mod, "handle_command")
@@ -135,11 +124,6 @@ class TestDiscoverModules:
         assert result == []
 
 
-# =============================================================================
-# TestRouteCommand
-# =============================================================================
-
-
 class TestRouteCommand:
     """Tests for the route_command function."""
 
@@ -184,11 +168,6 @@ class TestRouteCommand:
 
         with pytest.raises(RuntimeError, match="crash"):
             route_command("cmd", [], [mod])
-
-
-# =============================================================================
-# TestResolveVersion
-# =============================================================================
 
 
 class TestResolveVersion:
@@ -262,11 +241,6 @@ class TestResolveVersion:
         version = self._version_out(capsys).removeprefix("aipass ").strip()
         assert version not in ("unknown", "0.1.0")
         assert version.count(".") == 2
-
-
-# =============================================================================
-# TestMain
-# =============================================================================
 
 
 class TestMain:
@@ -356,9 +330,7 @@ class TestMain:
     def test_trailing_help_after_positional_shows_help(self) -> None:
         """`aipass trust <path> --help` prints help — it must NOT run the verb.
 
-        Regression (APLAN-0018): the guard only inspected args[0] of the
-        remainder, so a trailing --help fell through to the module and
-        executed a write — `trust <dir> --help` enrolled the directory.
+        A guard reading only args[0] let `trust <dir> --help` enroll the directory.
         """
         mod = MagicMock()
         mod.handle_command.return_value = True
@@ -677,17 +649,10 @@ class TestMain:
         assert "Unknown command" not in out
 
 
-# =============================================================================
-# TestHelpAgreesWithCode
-# =============================================================================
-
-
 class TestHelpAgreesWithCode:
     """print_help against the verbs the dispatcher actually routes.
 
-    The README carried a hand-typed command table for months and was the only
-    witness to three of these; the table is gone (FPLAN-0616), so the page can
-    no longer cover for a help line that disagrees with the code.
+    The README no longer carries a command table, so nothing else catches help that disagrees.
     """
 
     @staticmethod

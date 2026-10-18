@@ -3,18 +3,10 @@
 # Description: Tests for shared/project_home.py — CLAUDE.md ancestor fence helpers
 # Version: 1.2.0
 # Created: 2026-07-31
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for shared/project_home.py and the CLAUDE.md ancestor-fence helpers it drives."""
-
-# Covers claude_md_excludes(), claude_local_settings(nested=...),
-# merge_local_settings() (retrofit-safe union merge — the critical
-# idempotency function, exercised directly here rather than only through
-# callers), and find_fenceless_projects() (doctor's nested-project scan).
-#
-# All file operations use tmp_path to stay fully isolated from the live
-# filesystem.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
@@ -38,17 +30,11 @@ from aipass.aipass.shared.project_home import (
 )
 
 
-# ---------------------------------------------------------------------------
-# is_projects_child: an unreadable host is an error, not a 'no' (fleet green)
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX mode bits; root reads any directory")
 def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
     """A host whose listing is denied (mode 0o300: enter, never list) cannot say
     whether the target is its projects/ child. The error names the host, where a
     False sent init and adopt down the not-a-child path with the wrong reason.
-    The mode is restored on every path.
 
     Mutant: the OSError arm returns False again -> red.
     """
@@ -63,11 +49,6 @@ def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
         host.chmod(0o755)
 
 
-# ---------------------------------------------------------------------------
-# claude_md_excludes
-# ---------------------------------------------------------------------------
-
-
 def test_claude_md_excludes_returns_host_and_dot_claude_paths(tmp_path):
     """Returns the two absolute paths a nested project must fence out.
 
@@ -80,11 +61,6 @@ def test_claude_md_excludes_returns_host_and_dot_claude_paths(tmp_path):
         f"{home}/CLAUDE.md",
         f"{home}/.claude/CLAUDE.md",
     ]
-
-
-# ---------------------------------------------------------------------------
-# claude_local_settings
-# ---------------------------------------------------------------------------
 
 
 def test_claude_local_settings_default_omits_excludes(tmp_path):
@@ -104,11 +80,6 @@ def test_claude_local_settings_nested_adds_excludes(tmp_path):
         f"{home}/CLAUDE.md",
         f"{home}/.claude/CLAUDE.md",
     ]
-
-
-# ---------------------------------------------------------------------------
-# merge_local_settings — retrofit-safe union merge
-# ---------------------------------------------------------------------------
 
 
 def test_merge_local_settings_adds_excludes_to_env_only_existing(tmp_path):
@@ -227,11 +198,6 @@ def test_merge_local_settings_empty_existing(tmp_path):
     merged = merge_local_settings({}, generated)
 
     assert merged == generated
-
-
-# ---------------------------------------------------------------------------
-# find_fenceless_projects
-# ---------------------------------------------------------------------------
 
 
 def _make_nested(projects_dir: Path, name: str, registry: bool = True) -> Path:

@@ -3,12 +3,10 @@
 # Description: Tests for aipass profile Phase 3
 # Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/profile.py and the handlers it drives."""
-
-# Phase 3 (FPLAN-0188).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/modules/profile.py parses and imports
@@ -32,18 +30,11 @@ from aipass.aipass.apps.modules.profile import (
 )
 
 
-# =============================================================================
-# Fixtures
-# =============================================================================
-
-
 @pytest.fixture
 def tmp_store(tmp_path):
     """Patch BOTH profile paths into tmp_path and yield the store path.
 
-    The legacy path is patched too, not just the store: an unpatched
-    _LEGACY_LOCAL_JSON still points at the real .trinity/local.json, so a
-    defaults test would read the live profile and pass for the wrong reason.
+    An unpatched _LEGACY_LOCAL_JSON would let a defaults test read the live profile.
     """
     store = tmp_path / "aipass_json" / "user_profile.json"
     store.parent.mkdir(parents=True)
@@ -57,8 +48,7 @@ def tmp_store(tmp_path):
 class _CtrlCStdin(io.StringIO):
     """A stdin the user presses Ctrl-C on: input() reads it and gets KeyboardInterrupt.
 
-    Stands where the other clear tests put their StringIO, so the product's own
-    input() runs and nothing process-wide is replaced.
+    The product's own input() runs; nothing process-wide is replaced.
     """
 
     def readline(self, size: int | None = -1) -> str:
@@ -80,11 +70,6 @@ def tmp_store_with_data(tmp_store):
     return tmp_store
 
 
-# =============================================================================
-# TestLiveStoreIsolation
-# =============================================================================
-
-
 class TestLiveStoreIsolation:
     """The suite must never write the branch's real profile store."""
 
@@ -93,10 +78,7 @@ class TestLiveStoreIsolation:
     ) -> None:
         """conftest's autouse guard has redirected both profile paths, seen through `aipass profile`.
 
-        A legacy "user" section planted in the guard's temp local.json is what the
-        command shows, so the legacy read is the temp one; the store write the
-        first read makes is recorded, never performed, so even a broken guard
-        writes nothing live. The live store is spelled from the module's file.
+        The legacy read is the guard's temp file; the store write is recorded, never performed.
         """
         live_store = Path(profile_mod.__file__).parents[2] / "aipass_json" / "user_profile.json"
         (isolate_profile_store / "local.json").write_text(
@@ -121,27 +103,18 @@ class TestLiveStoreIsolation:
         assert json.loads(written.read_text(encoding="utf-8"))["profile"]["name"] == "IsolationProbe"
 
 
-# =============================================================================
-# TestGetUserProfile
-# =============================================================================
-
-
 class TestWriteDurability:
     """The two behaviours the hand-rolled writer carried, kept after the refactor.
 
-    Both tests force a REAL failure inside json_handler.write_json (its retried
-    replace raises) rather than stubbing write_json to False -- stubbing the
-    handler would measure only this module's signalling and would pass even if
-    the underlying save stopped being atomic.
+    A REAL failure inside write_json, not a stub returning False: a stub would pass even if
+    the save stopped being atomic.
     """
 
     @staticmethod
     def _fail_the_replace():
         """Patch the json service's replace step to raise, as a full disk would.
 
-        Through prax's package path, the seam prax published for this test
-        (DPLAN-0404): the fence refuses a foreign import of its handlers, and
-        the private _replace_with_retry this patched by its handler path is gone.
+        Through prax's package path: the fence refuses a foreign import of its handlers.
         """
         return patch(
             "aipass.prax.json_handler.replace_with_retry",
@@ -161,9 +134,7 @@ class TestWriteDurability:
     def test_oserror_mid_write_leaves_the_store_byte_intact(self, tmp_store) -> None:
         """A failed save must not half-write or truncate the previous profile.
 
-        The bus is patched where it lives, so the failure's event never reaches
-        the real trigger bus; the one fire is asserted with its arguments.
-        Mutant 2026-09-28: the fired path str(_PROFILE_JSON) -> str(_LEGACY_LOCAL_JSON) reddens this.
+        Mutant: the fired path str(_PROFILE_JSON) -> str(_LEGACY_LOCAL_JSON) reddens this.
         """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Original", "os": "Linux"})
@@ -201,9 +172,7 @@ class TestWriteDurability:
     def test_write_failure_raises_instead_of_answering_false(self, tmp_store) -> None:
         """json_handler answers False; save_profile must not pass that off as success.
 
-        What it adds to its neighbours: the FIRST save, with no store on disk yet. The failure
-        still raises and fires, and leaves no store behind that a later read would take for a
-        profile. The bus is patched where it lives; the one fire is asserted with its arguments.
+        The FIRST save, no store on disk yet: it raises, fires, and leaves no store behind.
         """
         assert not tmp_store.exists()
         with (
@@ -220,11 +189,7 @@ class TestWriteDurability:
     def test_trigger_fires_on_write_failure(self, tmp_store) -> None:
         """The write-failure event fires under its true name, with the payload kept.
 
-        Renamed from ``file_deleted`` on 2026-09-07: the event fires on a failed
-        write, never on a deletion. @trigger delivers the old name as a
-        deprecated alias for one release, so this asserts the NEW name -- the
-        alias is trigger's contract to keep, not a second name for this module
-        to emit.
+        Never the old ``file_deleted``: that alias is trigger's to keep, not this module's to emit.
         """
         with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             with self._fail_the_replace():
@@ -248,12 +213,7 @@ class TestWriteDurability:
         mock_trigger.fire.assert_not_called()
 
     def test_module_does_no_direct_file_operations(self) -> None:
-        """The seedgo modules rule, pinned here so it cannot regress silently.
-
-        Line 81's mkdir was the CI blocker on PR 743; json.dump sat behind it in
-        the same writer and would have surfaced as the next failure once the
-        mkdir went, because the audit reports only the first violation it finds.
-        """
+        """The seedgo modules rule, pinned here so it cannot regress silently."""
         source = Path(profile_mod.__file__).read_text(encoding="utf-8")
         body = [line for line in source.splitlines() if line.strip() and not line.strip().startswith("#")]
         for forbidden in (".mkdir(", ".write_text(", ".read_text(", "json.dump(", "json.load("):
@@ -267,19 +227,14 @@ class TestRoundTrip:
     def test_save_then_read_round_trips(self, tmp_store) -> None:
         """Real json_handler, no mocks: the store is not clobbered by logging.
 
-        Red before the rename off profile_data.json -- ensure_module_jsons
-        regenerated that name as its own managed "data" file and the profile
-        came back as {created, last_updated}.
+        ensure_module_jsons regenerates <module>_data.json, so the store must not use that name.
         """
         save_profile({f: f"kept_{f}" for f in USER_FIELDS})
         assert get_user_profile()["name"] == "kept_name"
         assert json.loads(tmp_store.read_text(encoding="utf-8"))["profile"]["os"] == "kept_os"
 
     def test_store_name_is_outside_the_managed_triplet(self, isolate_profile_store) -> None:
-        """The filename must not collide with <module>_{config,data,log}.json.
-
-        Read off the file a save actually writes (2026-09-27), not the constant.
-        """
+        """The filename must not collide with <module>_{config,data,log}.json."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "NameProbe"})
         written = {p.name for p in isolate_profile_store.iterdir() if p.is_file()}
@@ -337,12 +292,7 @@ class TestGetUserProfile:
         assert get_user_profile()["name"] == "Store"
 
     def test_returns_empty_dict_on_corrupt_file(self, tmp_store) -> None:
-        """Corrupt JSON degrades to the full field set, every value None.
-
-        Value pin added 2026-09-08 (v5 assertion_shape): a dict was true of
-        every degraded return, including one carrying a stale profile read
-        from somewhere else.
-        """
+        """Corrupt JSON degrades to the full field set, every value None."""
         tmp_store.write_text("NOT JSON", encoding="utf-8")
         result = get_user_profile()
         assert isinstance(result, dict)
@@ -351,12 +301,7 @@ class TestGetUserProfile:
     def test_all_user_fields_present(self, tmp_store) -> None:
         """All USER_FIELDS keys are present in returned profile.
 
-        The loop became a set comparison 2026-09-08 (v5 unentered_assert): an
-        empty USER_FIELDS made the old body a silent pass, and the set says the
-        same thing without a branch to not enter.
-        Premise added 2026-09-27: a store written before the other fields
-        existed, so the fill-in answers, not the defaults path.
-        Mutant: get_user_profile returns the stored dict as is (no fill-in) -> red.
+        A store predating the other fields. Mutant: stored dict returned as is (no fill-in) -> red.
         """
         tmp_store.write_text(json.dumps({"profile": {"name": "Bob"}}), encoding="utf-8")
         result = get_user_profile()
@@ -368,11 +313,6 @@ class TestGetUserProfile:
             "install_method": None,
             "first_seen": None,
         }
-
-
-# =============================================================================
-# TestSaveProfile
-# =============================================================================
 
 
 class TestSaveProfile:
@@ -393,11 +333,8 @@ class TestSaveProfile:
 
     def test_logs_operation(self, tmp_store) -> None:
         """json_handler.log_operation is called on save."""
-        # THE ATTRIBUTE, NOT THE MODULE. Patching the whole shim handed this
-        # unit a MagicMock that invents log_operation, so the assertion below
-        # held even with the real name gone: measured 2026-09-08, this test
-        # stayed green after log_operation was renamed in the shim. Patching
-        # one hop down makes patch() itself raise the day the name moves.
+        # Patch the attribute, not the shim: a MagicMock shim invents log_operation, so a
+        # rename would stay green; patch() itself raises the day the name moves.
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation") as mock_log:
             save_profile({"name": "Test"})
         # Mutant: log_operation("profile_save", ...) -> ("profile_saved", ...) -> red.
@@ -412,48 +349,23 @@ class TestSaveProfile:
         assert deep_path.exists()
 
 
-# =============================================================================
-# TestPrintIntrospection
-# =============================================================================
-
-
 class TestPrintIntrospection:
     def test_does_not_raise(self, tmp_store, capsys) -> None:
         """print_introspection renders through the REAL console without raising.
 
-        KEPT, not merged, on 2026-09-07 (DPLAN-0323 contested band). It was
-        proposed as redundant against test_outputs_field_names below, and it is
-        not: that sibling PATCHES the console, so Rich never renders and a
-        malformed markup tag reaches nothing. This test does not patch, so it is
-        the only place real Rich rendering of this function is exercised.
-
-        Mutation-proved before the ruling: closing the tag as
-        `[bold cyan]aipass profile[/nonexistent_style_mutation]` fails THIS test
-        and leaves the sibling green. Merging would have deleted the only
-        coverage of a whole class of defect.
-
-        The oracle added 2026-09-08 (v5 no_oracle): "did not raise" was the
-        whole claim and it was invisible to a reader. Reading the REAL rendered
-        text keeps the property this test exists for -- nothing is patched, so
-        Rich still renders -- and now says what the render has to contain.
+        The only test where Rich really renders this function: a malformed markup tag
+        fails here and leaves the console-patched sibling green.
         """
         print_introspection()
         rendered = capsys.readouterr().out
-        # THE HEADER, NOT MERELY THE SUBSTRING. A bare `"aipass profile" in
-        # rendered` survived a mutation that renamed the header outright,
-        # because the set-hint at the bottom carries the same three words
-        # (measured 2026-09-08). The first rendered line is the header.
+        # The first line, not a substring: the set-hint carries the same three words.
         lines = [line.strip() for line in rendered.splitlines() if line.strip()]
         assert lines[0] == "aipass profile"
         for field in USER_FIELDS:
             assert field in rendered, f"{field} is missing from the rendered table"
 
     def test_outputs_field_names(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: set-hint line dropped -> red.
-
-        Console no longer patched (mock_console, 2026-09-27): the header, every
-        field row in USER_FIELDS order, and the set-hint are read off stdout.
-        """
+        """Mutant: set-hint line dropped -> red."""
         print_introspection()
         out, _err = capsys.readouterr()
         lines = [line.strip() for line in out.splitlines() if line.strip()]
@@ -463,11 +375,6 @@ class TestPrintIntrospection:
         assert "Use 'aipass profile set <field> <value>' to update." in out
 
 
-# =============================================================================
-# TestPrintHelp
-# =============================================================================
-
-
 class TestPrintHelp:
     def test_prints_something(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Mutant: FIELDS line dropped from help -> red."""
@@ -475,11 +382,6 @@ class TestPrintHelp:
         out, _err = capsys.readouterr()
         assert "aipass profile — user memory read/write" in out
         assert "FIELDS: " + ", ".join(USER_FIELDS) in out
-
-
-# =============================================================================
-# TestHandleCommand
-# =============================================================================
 
 
 class TestHandleCommand:
@@ -555,10 +457,6 @@ class TestHandleCommand:
         """A wrong confirmation clears nothing, so it must not exit 0.
 
         Mutant: its Cancelled error() dropped -> red (stderr read).
-
-        Rewritten 2026-09-07 (FPLAN-0492 wave 6). This asserted `result is True`
-        -- the assertion that PINNED the defect: the user asked for a clear, the
-        clear did not happen, and the command reported success anyway.
         """
         before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
         with patch("sys.stdin", io.StringIO("nope\n")):
@@ -589,10 +487,6 @@ class TestHandleCommand:
         """A PIPED clear has no stdin to confirm on: refuse, never report success.
 
         Mutant: its Cancelled error() dropped -> red (stderr read).
-
-        This is the row canary's sweep named directly -- `aipass profile clear`
-        in a pipe hit EOFError, printed Cancelled and exited 0 while the profile
-        sat untouched, so a script could not tell a clear from a no-op.
         """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Kept", "os": "Linux"})
@@ -609,10 +503,7 @@ class TestHandleCommand:
     def test_clear_yes_clears_a_piped_store_without_asking(self, tmp_store) -> None:
         """The pipe's own door is `clear --yes`: the same empty stdin with the flag clears the
         store on disk without asking, so a script that means it can.
-
-        Moved out of test_clear_eof_error on 2026-09-28, one behaviour per test.
-        Mutant 2026-09-28: the skip-confirm flags `("--yes", "-y")` became `("-y",)`, so --yes no
-        longer skips the prompt, and this test went red.
+        Mutant: the skip-confirm flags `("--yes", "-y")` -> `("-y",)` -> red.
         """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Kept", "os": "Linux"})

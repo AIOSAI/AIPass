@@ -3,12 +3,11 @@
 # Description: Kernel sandbox prerequisite checks for aipass doctor
 # Version: 1.0.2
 # Created: 2026-06-10
-# Modified: 2026-09-29
+# Modified: 2026-10-17
 # =============================================
 
 """Sandbox prerequisite checker — detects bwrap, node, srt, rg, broker.
 
-Returns plain dicts with facts about sandbox readiness.
 No Rich markup — display concerns belong to the UI layer.
 """
 
@@ -28,12 +27,7 @@ from aipass.aipass.apps.handlers.json import json_handler
 
 
 def check_sandbox_flag() -> Dict[str, Any]:
-    """Check AIPASS_SANDBOX_ENABLED env var state.
-
-    Returns:
-        enabled: bool
-        raw_value: str — the raw env value (empty if unset)
-    """
+    """Check AIPASS_SANDBOX_ENABLED env var state."""
     raw = os.environ.get("AIPASS_SANDBOX_ENABLED", "")
     enabled = raw.lower() in ("1", "true", "yes")
     json_handler.log_operation("sandbox_check_flag", {"enabled": enabled, "raw": raw})
@@ -41,12 +35,7 @@ def check_sandbox_flag() -> Dict[str, Any]:
 
 
 def check_bwrap_present() -> Dict[str, Any]:
-    """Check if bubblewrap (bwrap) binary is on PATH.
-
-    Returns:
-        found: bool
-        path: str | None — resolved path if found
-    """
+    """Check if bubblewrap (bwrap) binary is on PATH."""
     path = shutil.which("bwrap")
     json_handler.log_operation("sandbox_check_bwrap_present", {"found": bool(path)})
     return {"found": bool(path), "path": path}
@@ -56,11 +45,6 @@ def check_bwrap_functional() -> Dict[str, Any]:
     """Run a trivial bwrap sandbox to verify it actually works.
 
     Catches AppArmor/userns restrictions that make bwrap present but blocked.
-
-    Returns:
-        ok: bool
-        detail: str — success message or error detail
-        sysctl_value: str | None — kernel.apparmor_restrict_unprivileged_userns on failure
     """
     bwrap = shutil.which("bwrap")
     if not bwrap:
@@ -111,12 +95,7 @@ def _read_userns_sysctl() -> str | None:
 
 
 def check_node_present() -> Dict[str, Any]:
-    """Check if node binary is on PATH.
-
-    Returns:
-        found: bool
-        path: str | None — resolved path if found
-    """
+    """Check if node binary is on PATH."""
     path = shutil.which("node")
     json_handler.log_operation("sandbox_check_node", {"found": bool(path)})
     return {"found": bool(path), "path": path}
@@ -125,19 +104,8 @@ def check_node_present() -> Dict[str, Any]:
 def _find_srt_resolver(find_spec: Callable[[str], Any] = importlib.util.find_spec) -> Path | None:
     """Locate _srt_resolve.mjs inside the sibling aipass.hooks branch.
 
-    Uses importlib.util.find_spec so no absolute/hardcoded path is baked in —
-    this works regardless of where the repo is checked out. aipass.hooks is a
-    namespace package (no __init__.py required) so find_spec still resolves
-    it via submodule_search_locations.
-
-    Args:
-        find_spec: importlib.util.find_spec by default. A seam for the tests,
-            handed down by check_srt_resolvable: a missing or relocated hooks
-            package without replacing importlib.util process-wide.
-
-    Returns:
-        Path to the resolver script if aipass.hooks is importable and the
-        file exists on disk, else None.
+    find_spec (a test seam) keeps the path checkout-independent; aipass.hooks is a
+    namespace package, so it resolves via submodule_search_locations.
     """
     try:
         spec = find_spec("aipass.hooks")
@@ -158,11 +126,7 @@ def _find_srt_resolver(find_spec: Callable[[str], Any] = importlib.util.find_spe
 
 
 def _srt_install_hint() -> str:
-    """Build an install hint that names the actual npm global prefix.
-
-    Falls back to the plain install command if npm isn't available or the
-    prefix query fails — still a valid hint, just less specific.
-    """
+    """Build an install hint that names the actual npm global prefix."""
     plain = "npm install -g @anthropic-ai/sandbox-runtime"
     npm = shutil.which("npm")
     if not npm:
@@ -188,20 +152,8 @@ def _srt_install_hint() -> str:
 def check_srt_resolvable(find_spec: Callable[[str], Any] = importlib.util.find_spec) -> Dict[str, Any]:
     """Check if @anthropic-ai/sandbox-runtime is resolvable via node.
 
-    Delegates to _srt_resolve.mjs (owned by the hooks branch) for resolution —
-    it tries npm_config_prefix, `npm root -g`, and known global node_modules
-    locations in order, which correctly handles layouts where node's own
-    install prefix differs from npm's global prefix (Debian/Ubuntu, official
-    node Docker images). See DPLAN-0279.
-
-    Args:
-        find_spec: importlib.util.find_spec by default, handed to the resolver
-            lookup. A seam for the tests; product callers pass nothing.
-
-    Returns:
-        found: bool
-        path: str | None — resolved entry path if found
-        install_hint: str — npm install command if missing
+    Delegates to the hooks branch's _srt_resolve.mjs, which handles node and npm
+    global prefixes that differ (Debian/Ubuntu, node Docker images).
     """
     node = shutil.which("node")
     if not node:
@@ -245,12 +197,7 @@ def check_srt_resolvable(find_spec: Callable[[str], Any] = importlib.util.find_s
 
 
 def check_rg_present() -> Dict[str, Any]:
-    """Check if ripgrep (rg) is available — matches hooks' fallback logic.
-
-    Returns:
-        found: bool
-        path: str | None — resolved path if found
-    """
+    """Check if ripgrep (rg) is available — matches hooks' fallback logic."""
     rg = shutil.which("rg")
     if rg:
         json_handler.log_operation("sandbox_check_rg", {"found": True, "path": rg})
@@ -267,15 +214,7 @@ def check_rg_present() -> Dict[str, Any]:
 
 
 def check_broker_alive(repo_root: Path | None = None) -> Dict[str, Any]:
-    """Check if the broker daemon socket is accepting connections.
-
-    Args:
-        repo_root: Project root containing .ai_central/. Auto-detected if None.
-
-    Returns:
-        alive: bool
-        detail: str — status message
-    """
+    """Check if the broker daemon socket is accepting connections."""
     sock_path = _find_broker_socket(repo_root)
     if sock_path is None:
         json_handler.log_operation("sandbox_check_broker", {"alive": False, "reason": "socket_not_found"})
@@ -323,9 +262,7 @@ def _find_broker_socket(repo_root: Path | None) -> Path | None:
 def is_linux(platform: str | None = None) -> bool:
     """Return True if running on Linux.
 
-    ``platform`` is the sys.platform to read (None means this process's). It is
-    handed in for the tests, which ask about darwin and win32 without replacing
-    sys.platform process-wide; doctor, the one caller, passes nothing (fleet green leg 4).
+    ``platform`` is a test seam; None reads sys.platform.
     """
     platform = sys.platform if platform is None else platform
     return platform.startswith("linux")

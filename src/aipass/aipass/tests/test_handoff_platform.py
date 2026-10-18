@@ -3,7 +3,7 @@
 # Description: Tests for handoff_platform handler
 # Version: 1.1.6
 # Created: 2026-05-12
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -37,11 +37,6 @@ from aipass.aipass.apps.modules.handoff import handle_command
 _ENCODING = "utf-8"
 
 
-# =============================================================================
-# TestBuildCliCmd
-# =============================================================================
-
-
 class TestBuildCliCmd:
     """Tests for build_cli_cmd()."""
 
@@ -62,11 +57,6 @@ class TestBuildCliCmd:
     def test_other_cli(self) -> None:
         """Other CLI names are returned as-is with default variant."""
         assert build_cli_cmd("codex", "default") == "codex"
-
-
-# =============================================================================
-# TestBuildManualCommand
-# =============================================================================
 
 
 class TestBuildManualCommand:
@@ -91,11 +81,6 @@ class TestBuildManualCommand:
         assert "--dangerously-skip-permissions" in result
 
 
-# =============================================================================
-# TestReturnPathBreadcrumb
-# =============================================================================
-
-
 class TestReturnPathBreadcrumb:
     """Tests for return_path_breadcrumb()."""
 
@@ -118,11 +103,6 @@ class TestReturnPathBreadcrumb:
         """Different cwd values are reflected verbatim in the breadcrumb."""
         cwd = str(tmp_path / "a" / "b" / "c")
         assert f"cd {cwd} " in return_path_breadcrumb(cwd)
-
-
-# =============================================================================
-# TestFindTerminalEmulator (tested via launch_terminal internals)
-# =============================================================================
 
 
 class TestFindTerminalEmulator:
@@ -208,11 +188,6 @@ class TestFindTerminalEmulator:
         assert "Opened your agent in a new terminal window." in out
 
 
-# =============================================================================
-# TestLaunchTerminal
-# =============================================================================
-
-
 class TestLaunchTerminal:
     """Tests for launch_terminal()."""
 
@@ -283,11 +258,6 @@ class TestLaunchTerminal:
                 assert launch_terminal("claude", "test", str(tmp_path)) is False
 
 
-# =============================================================================
-# TestLaunchTmux
-# =============================================================================
-
-
 def _path_with(monkeypatch, tmp_path, *names: str) -> None:
     """PATH holds only a tmp bin dir with these executables, so shutil.which answers from it."""
     bin_dir = tmp_path / "bin"
@@ -343,11 +313,6 @@ class TestLaunchTmux:
             assert launch_tmux("claude", "test", str(tmp_path)) is False
 
 
-# =============================================================================
-# TestLaunchWt
-# =============================================================================
-
-
 class TestLaunchWt:
     """Tests for launch_wt()."""
 
@@ -387,11 +352,6 @@ class TestLaunchWt:
             assert launch_wt("claude", "test", str(tmp_path)) is False
 
 
-# =============================================================================
-# TestLaunchInline
-# =============================================================================
-
-
 def _inline_which(
     cli_path: str | None = "/usr/bin/claude",
     bash_path: str | None = "/bin/bash",
@@ -408,10 +368,7 @@ def _inline_which(
 class TestLaunchInline:
     """Tests for launch_inline() — shell-wrapped exec with a return-path breadcrumb.
 
-    ``launch_inline`` ends in ``execvp`` (process replacement), so every test hands
-    in three recorders for which, chdir and execvp through its seam and patches
-    nothing of os or shutil (fleet green leg 4): a real chdir or execvp would move
-    the run or replace the test process itself.
+    Every test hands in recorders for which, chdir and execvp: a real execvp replaces the test process.
     """
 
     @staticmethod
@@ -455,10 +412,8 @@ class TestLaunchInline:
     def test_shell_command_includes_breadcrumb_after_cli(self, tmp_path) -> None:
         """Breadcrumb (cd + claude --continue) prints via printf after the CLI invocation.
 
-        The breadcrumb holds spaces and `&&`, so the command must end with it as one
-        shell-quoted word: unquoted, the shell runs `cd <proj>` and `claude --continue`
-        itself instead of printing them.
-        Mutant (fleet green leg 5): `shlex.quote(breadcrumb)` -> `breadcrumb` -> red at the endswith assert.
+        Unquoted, the shell would run the breadcrumb's `cd` and `claude` instead of printing them.
+        Mutant: `shlex.quote(breadcrumb)` -> `breadcrumb` -> red at the endswith assert.
         """
         proj = str(tmp_path / "proj")
         _, execvp = self._launch(proj)
@@ -494,14 +449,8 @@ class TestLaunchInline:
         _, execvp = self._launch(str(tmp_path / "proj"), prompt="hi $(whoami) && rm -rf /")
         _, argv = execvp.call_args[0]
         shell_cmd = argv[2]
-        # shlex.join quotes the whole argv — the dangerous substring must appear
-        # wrapped in quotes, not as bare, executable shell syntax.
+        # shlex.join quotes the argv: the dangerous substring appears quoted, never bare.
         assert "'hi $(whoami) && rm -rf /'" in shell_cmd
-
-
-# =============================================================================
-# TestLaunchHandoff
-# =============================================================================
 
 
 class TestLaunchHandoff:
@@ -559,14 +508,7 @@ class TestLaunchHandoff:
 
 
 class TestHandoffCommandRefusal:
-    """The `aipass handoff launch` refusal seam.
-
-    Lives here rather than in a file of its own: the test-write gate refuses new
-    test files, and this is the existing home of handoff coverage. Added
-    2026-09-07 (FPLAN-0492 wave 6) -- canary's sweep named handoff.py:152 as a
-    refusal that exited 0, and it had NO test at all, so nothing pinned either
-    the old outcome or the new one.
-    """
+    """The `aipass handoff launch` refusal seam."""
 
     def test_help_names_what_bare_prints(self, capsys) -> None:
         """Bare `aipass handoff` prints this usage; status is `--info`.
@@ -585,9 +527,7 @@ class TestHandoffCommandRefusal:
     def test_unknown_cli_refuses_non_zero(self) -> None:
         """An unrecognised CLI launches nothing, so it cannot exit 0.
 
-        Note the invocation: the refusal is reachable only through `--cli <bad>`.
-        A bare positional is discarded by _parse_launch_args, which leaves the
-        default 'claude' in place and launches normally.
+        Only `--cli <bad>` reaches the refusal: a bare positional is discarded for the default.
         """
         with patch("aipass.aipass.apps.modules.handoff.error") as err:
             with patch("aipass.aipass.apps.modules.handoff.do_handoff") as did:

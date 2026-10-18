@@ -3,29 +3,14 @@
 # Description: Machine pre-flight Run Record generator for the cross-OS checklist
 # Version: 1.0.0
 # Created: 2026-07-02
-# Modified: 2026-07-02
+# Modified: 2026-10-17
 # =============================================
 
 """Cross-OS Run Record generator — Layer-3-lite machine pre-flight DRAFT.
 
-Emits a text Run Record block modelled on the "## Run Record" fenced template in
-``tests/CROSS_OS_TESTING.md`` (that block is the format source-of-truth). The
-block is *constructed in code* rather than string-substituted into the parsed
-template on purpose: the load-bearing invariant here is the machine/human
-boundary — the machine fills ONLY what it can prove (env facts + the
-non-mutating pre-flight rows) and every human-only row (clean install,
-interactive init, daemons, audible sound, PTY, per-branch matrix, overall
-verdict, commit, tester) is left blank or marked ``— human``. Constructing the
-block gives exact control over that boundary; substituting values line-by-line
-into the free-text template would be brittle and could silently tick a human row.
-
-Env facts are detected with stdlib (``platform`` / ``os``) directly — the same
-detection ``system_detector`` performs — because the seedgo cross-handler rule
-forbids this handler importing another handler.
-
-A machine can NEVER claim the checklist's human green ("you watched it work on
-that OS"). This artifact is explicitly a pre-flight DRAFT that a person must
-complete by running the real Layer-3 acceptance pass.
+Format source: the "## Run Record" block in tests/CROSS_OS_TESTING.md. Built in code, not
+substituted into the template, so the machine fills only what it proves and never ticks a human row.
+Env facts use stdlib directly: the cross-handler rule forbids importing system_detector.
 """
 
 from __future__ import annotations
@@ -49,14 +34,11 @@ from aipass.aipass.apps.handlers.cross_os.preflight import (
 )
 from aipass.aipass.apps.handlers.json import json_handler
 
-# Marker glyphs for the record. Match the doc's Run Record block, which uses the
-# ✅ / ❌ emoji rather than the terminal ✓ / ✗ glyphs.
+# The doc's Run Record block uses these emoji, not the terminal ✓ / ✗ glyphs.
 _PASS = "✅"
 _FAIL = "❌"
-# Un-ticked human box — a person must still run and mark the real pass.
 _HUMAN = "⬜ — human"
 
-# Horizontal rule used by the doc's Run Record block.
 _RULE = "─────────────────────────────────────────────"
 
 
@@ -70,11 +52,7 @@ def _os_name() -> str:
 
 
 def _resolve_aipass_home() -> str:
-    """Resolve AIPASS_HOME from the env, else the discovered registry parent.
-
-    Returns "" (blank) if neither is available — a blank row is honest; we never
-    invent a path.
-    """
+    """Resolve AIPASS_HOME from the env, else the discovered registry parent; "" over an invented path."""
     home = os.environ.get("AIPASS_HOME", "").strip()
     if home:
         return home
@@ -100,9 +78,7 @@ def _env_lines() -> List[str]:
         f"Python       : {platform.python_version()}",
         f"Shell / term : {shell_name} / {term}",
         f"AIPASS_HOME  : {_resolve_aipass_home()}",
-        # Commit stays blank — no git here; a human fills it (hint inline).
         "Commit (drone @git log -1) :            ← fill via drone @git log -1",
-        # Tester stays blank (human); Date is machine-knowable.
         f"Tester       :            Date : {today}",
     ]
 
@@ -122,7 +98,6 @@ def _phase2_line(run_heavy_e2e: bool) -> str:
     if result.ok:
         return f"{label} {_verdict(True)}   notes: {result.detail}"
     if result.detail.startswith(E2E_UNRUNNABLE_PREFIX):
-        # Infra could not run the suite — WARN-ish, not a proven fail.
         return f"{label} ⚠️ could not run (machine)   notes: {result.detail}"
     return f"{label} {_verdict(False)}   notes: {result.detail}"
 
@@ -133,32 +108,21 @@ def _phase_lines(run_heavy_e2e: bool) -> List[str]:
     hooks = check_hookstatus()
 
     return [
-        # Phase 0 — the machine captured the env above, so this is proven.
         f"Phase 0 env capture .......... {_verdict(True)}   notes: captured above",
-        # Phase 1 — clean install (setup.sh / .venv) is pre-init + human.
         f"Phase 1 clean install ........ {_HUMAN}   notes:",
         _phase2_line(run_heavy_e2e),
-        # Phase 3 — real scaffold + interactive init is human (PTY).
         f"Phase 3 aipass init .......... {_HUMAN}   notes:",
-        # Phase 4 — drone routing is non-mutating and machine-provable.
+        # Machine rows are only the non-mutating ones; daemons (Phase 5) mutate, so stay human.
         f"Phase 4 drone routing ........ {_verdict(routing.ok)}   notes: {routing.detail}",
-        # Phase 5 — daemons (os.kill / start_new_session) are mutating + human.
         f"Phase 5 daemons .............. {_HUMAN}   notes:",
-        # Phase 6 — hookstatus config renders (machine); audible sound is human.
         f"Phase 6 hooks + sound ........ {_verdict(hooks.ok)} hookstatus; 🔊 sound {_HUMAN}   notes: {hooks.detail}",
-        # Phase 7 — interactive PTY layer is human-only.
         f"Phase 7 interactive .......... {_HUMAN}   notes:",
-        # Per-branch smoke matrix is a human pass.
         f"Per-branch matrix (13) ....... {_HUMAN}   reds:",
     ]
 
 
 def _watch_lines(platform_name: str) -> List[str]:
-    """Build the tracked-gap watch-item lines for this platform.
-
-    Reads the live gap registry; on any registry error, degrades to a single
-    note line (never crashes the record — it is primarily an env artifact).
-    """
+    """Build the tracked-gap watch-item lines for this platform; a registry error is one note line."""
     lines = ["Watch items (tracked cross-OS gaps for this platform):"]
     try:
         gaps = gaps_for_platform(platform_name)
@@ -177,12 +141,7 @@ def _watch_lines(platform_name: str) -> List[str]:
 
 
 def build_run_record(run_heavy_e2e: bool = False, platform_name: str | None = None) -> str:
-    """Build the full machine pre-flight Run Record text block.
-
-    Auto-fills the env header + the machine-provable phase rows (0/4/6, plus 2
-    when ``run_heavy_e2e``); leaves every human-only row blank/marked. The output
-    mirrors the "## Run Record" template in tests/CROSS_OS_TESTING.md.
-    """
+    """Build the full machine pre-flight Run Record text block."""
     plat = platform_name or sys.platform
 
     header = [
@@ -214,16 +173,7 @@ def default_record_path() -> Path:
 
 
 def generate_run_record(path: str | None = None, run_heavy_e2e: bool = False) -> Path:
-    """Build and write the Run Record; return the written path.
-
-    Args:
-        path: Destination file (``--record`` value). If None, a sensible default
-            in CWD is used.
-        run_heavy_e2e: When True, run and record the heavy Phase-2 e2e result.
-
-    Raises:
-        RunRecordError: if the file cannot be written (OSError) — never crashes.
-    """
+    """Build and write the Run Record; return the written path. OSError becomes RunRecordError."""
     content = build_run_record(run_heavy_e2e=run_heavy_e2e)
     target = Path(path) if path else default_record_path()
     try:

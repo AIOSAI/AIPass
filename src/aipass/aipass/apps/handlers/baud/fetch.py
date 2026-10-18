@@ -3,46 +3,15 @@
 # Description: Fetch a baud phone-bundle release: public download first, then the token API route
 # Version: 1.0.0
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Fetch the phone bundle and its SHA256SUMS from a baud release (FPLAN-0587).
 
-Two doors, tried in order:
-
-1. The public release download, ``github.com/AIOSAI/baud/releases/download/<tag>/<asset>``.
-   Works once the repo is public; answers 404 while it is private.
-2. With a token (``GITHUB_TOKEN``, else the gh CLI's stored token when gh is on
-   PATH), the GitHub API: read the release record, find each asset's API url,
-   download it with ``Accept: application/octet-stream``.
-
-No token and a 404 is reported as what it is: the repo is private or the asset
-is missing. The message names ``--from``.
-
-The headless binary ``baud-cli-<tag>-linux-x86_64`` (FPLAN-0589) rides the same
-door and the same tag, and is optional: on a platform releases do not build for
-it is never asked for, and a release that does not carry it delivers the face
-alone (``FetchedRelease.binary`` is None).
-
-WHY "latest" RESOLVES THE TAG FIRST
------------------------------------
-The tarball's asset name carries the tag (``baud-phone-<tag>.tar.gz``), so
-``releases/latest/download/<asset>`` cannot name it without already knowing the
-tag. The public door follows ``releases/latest``'s redirect to
-``releases/tag/<tag>``; the API door reads ``tag_name``. Both files are then
-fetched from that ONE tag, so a release published mid-fetch cannot pair one
-tag's tarball with another tag's SHA256SUMS.
-
-WHY THE TOKEN IS AN UNREDIRECTED HEADER
----------------------------------------
-The API answers an asset download with a redirect to a signed storage URL on
-another host. urllib copies ordinary headers onto the redirected request, which
-would hand the token to that host (and make the signed URL refuse the double
-auth). ``add_unredirected_header`` keeps it on the api.github.com hop only.
-The token is never logged and never printed.
-
-stdlib urllib only: no new dependency.
+Doors in order: the public release download (404 while the repo is private), then with a
+token the GitHub API. "latest" resolves to one tag first, so a release published mid-fetch
+cannot pair one tag's tarball with another's SHA256SUMS. stdlib urllib only.
 """
 
 from __future__ import annotations
@@ -106,8 +75,7 @@ def phone_asset_name(tag: str) -> str:
 def validate_tag(tag: str) -> str:
     """Return `tag` when it is a safe release tag, else raise FetchError.
 
-    A tag becomes part of a file name and a URL path, so anything outside
-    letters, digits, dot, dash and underscore is refused (no ``..``, no ``/``).
+    A tag becomes part of a file name and a URL path: no ``..``, no ``/``.
     """
     if tag == LATEST or (_TAG_SHAPE.match(tag) and ".." not in tag):
         return tag
@@ -115,10 +83,7 @@ def validate_tag(tag: str) -> str:
 
 
 def resolve_token() -> str | None:
-    """A GitHub token from GITHUB_TOKEN, else from the gh CLI, else None.
-
-    Never logs the token or gh's output: only whether one was found.
-    """
+    """A GitHub token from GITHUB_TOKEN, else from the gh CLI, else None. Never logged."""
     env_token = os.environ.get("GITHUB_TOKEN", "").strip()
     if env_token:
         return env_token
@@ -150,7 +115,10 @@ def _public_request(url: str) -> urllib.request.Request:
 
 
 def _api_request(url: str, token: str, accept: str) -> urllib.request.Request:
-    """An api.github.com request whose token never follows a redirect."""
+    """An api.github.com request whose token never follows a redirect.
+
+    Asset downloads redirect to a signed URL on another host; urllib would copy an ordinary header there.
+    """
     if not url.startswith(_API_HOST_PREFIX):
         raise FetchError(f"Refusing to send a token to a non-API url: {url}")
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": _USER_AGENT})
@@ -241,17 +209,7 @@ def fetch_release(
 ) -> FetchedRelease:
     """Download the phone tarball and SHA256SUMS for `tag` into `workdir`.
 
-    Args:
-        tag: A release tag, or "latest".
-        workdir: An existing directory the two files land in.
-        token_provider: Returns a GitHub token or None (seam for tests).
-
-    Returns:
-        The fetched release.
-
-    Raises:
-        FetchError: Offline, private repo without a token, missing asset, or
-            any other refusal. The message is printable and names --from.
+    Every refusal is a FetchError whose message is printable and names --from.
     """
     validate_tag(tag)
     hint = "Or install from a file: aipass baud install --from <tarball> --sums <SHA256SUMS.txt>"

@@ -3,17 +3,11 @@
 # Description: Structure remediation report for aipass doctor --fix
 # Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 doctor_fix — structure remediation report for aipass doctor --fix
-
-Generates remediation items from structure scan results and formats
-them as human-readable text or machine-readable JSON with exact
-`drone @spawn repair` commands.
-
-Run: aipass doctor --fix [--json]
 """
 
 from __future__ import annotations
@@ -39,11 +33,6 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
 )
 
 
-# =============================================================================
-# TYPES
-# =============================================================================
-
-
 class RemediationItem(NamedTuple):
     """Single remediation suggestion with severity and spawn command."""
 
@@ -51,11 +40,6 @@ class RemediationItem(NamedTuple):
     category: str
     description: str
     fix_command: str
-
-
-# =============================================================================
-# PROJECT NAME DETECTION
-# =============================================================================
 
 
 def detect_project_name(project_root: Path) -> str:
@@ -66,11 +50,6 @@ def detect_project_name(project_root: Path) -> str:
         if name:
             return name
     return project_root.name.lower()
-
-
-# =============================================================================
-# REMEDIATION GENERATION
-# =============================================================================
 
 
 def _build_pollution_items(agents: list, project: str) -> List[RemediationItem]:
@@ -133,9 +112,8 @@ def _build_root_artifact_items(project_root: Path, project: str) -> List[Remedia
     for hit in check_root_artifacts(project_root):
         severity = "info" if hit.severity == "info" else "warning"
         if hit.name == ".venv":
-            # Wired hooks reference AIPASS_HOME/.venv/bin/python3 by absolute path —
-            # --relocate-root would move it and break every hook. Not implemented
-            # in spawn repair for this reason; surface a manual-review note instead.
+            # Hooks call AIPASS_HOME/.venv/bin/python3 by absolute path, so spawn repair
+            # has no --relocate-root for it.
             fix_command = "Manual review only — relocating .venv breaks hooks wired to AIPASS_HOME/.venv/bin/python3"
         else:
             fix_command = f"drone @spawn repair @{project} --relocate-root {hit.name} --apply"
@@ -178,11 +156,6 @@ def generate_remediation(project_root: Path) -> List[RemediationItem]:
     return items
 
 
-# =============================================================================
-# TEXT FORMATTING
-# =============================================================================
-
-
 def format_text_report(items: List[RemediationItem], project_name: str) -> str:
     """Format remediation items as plain text."""
     if not items:
@@ -202,18 +175,13 @@ def format_text_report(items: List[RemediationItem], project_name: str) -> str:
     return "\n".join(lines)
 
 
-# =============================================================================
-# JSON FORMATTING
-# =============================================================================
-
-
 def format_json_report(
     items: List[RemediationItem], project_name: str, provider_settings: Optional[dict] = None
 ) -> str:
     """Format remediation items as JSON for spawn consumption.
 
     *provider_settings*, when given, is the settings plan (planned lines, diff,
-    ``applied``) and rides under its own key (FPLAN-0646).
+    ``applied``) and rides under its own key.
     """
     report: dict = {
         "project": project_name,
@@ -235,10 +203,6 @@ def format_json_report(
         report["provider_settings"] = provider_settings
     return json.dumps(report, indent=2)
 
-
-# =============================================================================
-# RICH OUTPUT
-# =============================================================================
 
 _LINE_STYLES = {
     "[CRITICAL]": "bold red",
@@ -292,11 +256,6 @@ def print_json_report(project_root: Path, provider_settings: Optional[dict] = No
     return len(items)
 
 
-# =============================================================================
-# OUTPUT FORMATTING
-# =============================================================================
-
-
 def print_introspection() -> None:
     """Display module info for doctor_fix."""
     console.print()
@@ -310,21 +269,8 @@ def print_introspection() -> None:
     console.print()
 
 
-# =============================================================================
-# COMMAND HANDLER
-# =============================================================================
-
-
 def handle_command(command: str, args: list[str]) -> bool:
-    """Handle command routing. Helper module — no standalone commands.
-
-    Args:
-        command: Command name.
-        args: Additional arguments.
-
-    Returns:
-        True if handled, False otherwise.
-    """
+    """Handle command routing. Helper module — no standalone commands."""
     if command != "doctor_fix":
         return False
 

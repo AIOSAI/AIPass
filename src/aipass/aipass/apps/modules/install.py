@@ -3,50 +3,11 @@
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
 # Version: 1.5.1
 # Created: 2026-07-05
-# Modified: 2026-10-15
+# Modified: 2026-10-17
 # =============================================
 
 """
 aipass install — one-command bootstrap of the whole framework
-
-The missing half of `pip install aipass`. pip lands the *code* in site-packages;
-this command materializes a working, writable AIPass home and wires it up:
-
-    1. Resolve where AIPass should live (default ~/AIPass; --here / --path to steer).
-    2. Fetch the framework there (git clone of the public repo) if not already present.
-    3. Run the canonical setup.sh (venv, editable install, provider-hook wiring, binaries).
-    4. Install the phone face and baud-cli: @baud's phone bundle and headless binary
-       from a release, pointed at by @api's host server (``aipass baud install``).
-       BEST-EFFORT: offline, a private repo or no token is one honest line plus the
-       retry command, and the install carries on (FPLAN-0587, FPLAN-0589). No
-       baud-cli build for this platform lands the face alone. --no-baud skips it.
-       --baud-tag TAG pins the release (aipass baud install --tag), checked before
-       the clone; a stamped install.sh passes its own. With the face in, the
-       install's last print is the phone: URL, bind, server (started detached
-       when no boot unit runs it), guide, then on a terminal a pause for Enter and
-       the pairing QR when the server answers on a tailnet bind, else the pair
-       command; --non-interactive never mints (FPLAN-0642, DPLAN-0406, DPLAN-0407).
-    5. End in a conversation: the @aipass concierge opens in this terminal with the
-       install report in hand (interactive default; --no-chat to skip). Project
-       creation is NOT part of install — the concierge points users at
-       `aipass init run` for that, whenever they're ready.
-
-Each step prints a Step k/N progress header. Streaming subprocesses (git, setup.sh)
-show a header + their own output + a result line — no spinner (the two renderers
-fight, per ui/progress.activity_spinner).
-
-Usage:
-    aipass install                       # interactive, ends in a welcome chat
-    aipass install --non-interactive     # CI/headless (~/AIPass), no chat, no pairing QR
-    aipass install --no-chat             # install the engine only, skip the chat
-    aipass install --no-baud             # skip the phone face + baud-cli step
-    aipass install --baud-tag v0.2.1     # that baud release, not the latest
-    aipass install --path ~/tools/aipass # explicit home
-    aipass install --source ~/src/AIPass # this checkout's committed HEAD (or a URL)
-    aipass install --here                # install into the current directory
-    aipass install --chat-only           # skip the build, just the welcome chat
-                                          # (used by setup.sh's own tail)
-    aipass install --dry-run             # walk all steps, no clone/setup/launch
 """
 
 from __future__ import annotations
@@ -72,7 +33,6 @@ from aipass.aipass.shared.registry_discovery import registries_in
 COMMAND = "install"
 TOTAL_STEPS = 5
 REPO_URL = "https://github.com/AIOSAI/AIPass.git"
-# --source values taken as given (DPLAN-0408); anything else is a local checkout path.
 _URL_PREFIXES = ("https://", "http://", "ssh://", "git://", "file://", "git@")
 DEFAULT_HOME = Path.home() / "AIPass"
 
@@ -112,12 +72,8 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     if env_home and _looks_like_aipass_tree(Path(env_home).expanduser()):
         return Path(env_home).expanduser().resolve()
     if non_interactive:
-        # Standing INSIDE an AIPass tree and asking for a headless install meant
-        # ~/AIPass until 2026-09-07 (FPLAN-0492 wave 6): the interactive path
-        # offers the prompt where a user can answer with the tree they are in,
-        # and the headless path silently targeted somewhere else. Only an actual
-        # AIPass tree is honoured here, so a bootstrap run from an unrelated
-        # directory still lands on DEFAULT_HOME exactly as before.
+        # The cwd counts only when it is an AIPass tree: a headless run from an
+        # unrelated directory still lands on DEFAULT_HOME.
         cwd = Path.cwd().resolve()
         if _looks_like_aipass_tree(cwd):
             logger.info("[install] non-interactive: cwd is an AIPass tree, using %s", cwd)
@@ -130,9 +86,7 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
 def install_lock_path(home: Path) -> Path:
     """The lock guarding one install of `home`.
 
-    Lives in the PARENT, not in `home`: on a fresh machine `home` does not exist
-    until the clone lands, and a lock that only appears after the risky step is
-    no lock at all.
+    Lives in the parent: on a fresh machine `home` does not exist until the clone lands.
     """
     return home.parent / f".{home.name}.install.lock"
 
@@ -178,15 +132,8 @@ def _clear_stale_lock(lock: Path, holder_pid: str) -> bool:
 def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     """Claim the install lock for `home`, or return None if another run holds it.
 
-    Refuses by NAMING the lock and its holder rather than dying somewhere deep
-    in a half-finished clone, which is what a second concurrent install used to
-    do (FPLAN-0492 wave 6). A lock whose pid is gone is stale and is taken over,
-    announced -- a crashed install must not wedge the machine forever.
-
-    Public with install_lock_path and release_install_lock: the lock is a unit
-    this module exists to keep (one install per home, never stolen on an unknown
-    holder), with a contract of its own. Caller: run_install, which takes and
-    drops it (aipass's decision, fleet green leg 4).
+    A lock whose pid is proven gone is taken over, announced: a crashed install
+    must not wedge the machine. An unknown holder is never stolen from.
     """
     lock = install_lock_path(home)
     try:
@@ -200,8 +147,7 @@ def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
         if _retry and alive is False:
             if not _clear_stale_lock(lock, holder_pid):
                 return None
-            # _retry=False: one takeover only, so two racing installs that both
-            # see the same stale lock cannot ping-pong clearing each other.
+            # One takeover only, so two racing installs cannot ping-pong clearing each other.
             return acquire_install_lock(home, _retry=False)
         holder = f", held by pid {holder_pid}" if holder_pid else ""
         if holder_pid and alive is None:
@@ -229,19 +175,9 @@ def _pid_alive(
 ) -> bool | None:
     """True when `pid` names a live process, False when it is gone, on POSIX and on Windows.
 
-    ``platform_name`` and ``runner`` exist for the test: it hands in "win32" and a
-    tasklist that raises, rather than patching sys.platform and subprocess.run for
-    the whole process. The defaults are sys.platform and subprocess.run, read at
-    call time, so every caller runs as before.
-
-    None when the Windows probe itself fails: the caller cannot know, so it must
-    not steal the lock, and names the doubt in its refusal (aipass's decision,
-    fleet green leg 3; the probe used to answer True, a guess dressed as "alive").
-
-    signal 0 is a POSIX-only probe: on Windows os.kill TERMINATES the target
-    whatever the signal, so a liveness check written that way would kill an
-    unrelated process that happened to reuse the pid. On POSIX a PermissionError
-    IS the answer: the process exists, owned by someone else.
+    ``platform_name`` and ``runner`` are test seams, defaulting at call time.
+    None when the Windows probe fails: the caller must not steal the lock on it.
+    Never os.kill(pid, 0) on Windows: it terminates the target whatever the signal.
     """
     run = subprocess.run if runner is None else runner
     if (platform_name is None and sys.platform == "win32") or platform_name == "win32":
@@ -284,14 +220,8 @@ def release_install_lock(lock: Path | None) -> None:
 def _announce_cloned_branch(home: Path) -> None:
     """Print which branch actually landed. Never raises — naming is a courtesy.
 
-    The clone takes the repo's DEFAULT branch, which is NOT necessarily the one
-    the user is standing in: running this from a ``dev`` checkout hands back a
-    ``main`` tree, silently. Changing the target would be wrong (install is the
-    fresh-machine bootstrap and usually runs where no checkout exists), so the
-    fix is to stop being silent about it.
-
-    The name is READ BACK from the new clone rather than assumed, so this line
-    cannot drift from reality if the repo's default branch ever changes.
+    The clone takes the repo's default branch, not the one the caller stands in;
+    the name is read back from the clone so it cannot drift.
     """
     try:
         proc = subprocess.run(
@@ -318,11 +248,8 @@ class SourceRefused(ValueError):
 def _resolve_source(source: str | None) -> str:
     """What to fetch: REPO_URL by default, a URL as given, a local checkout as its file:// URI.
 
-    A local path goes through file:// so ``--depth 1`` holds: only the committed
-    HEAD of that checkout crosses, never its working tree (DPLAN-0408, the install
-    sandbox). A relative path is taken from the current directory. Raises
-    SourceRefused for an empty value, a missing path, a file, or a directory with no
-    ``.git``, never a silent fall back to the public repo.
+    A local path goes through file:// so ``--depth 1`` holds: only the committed HEAD
+    crosses, never the working tree. A bad value raises, never falls back to the public repo.
     """
     if source is None:
         return REPO_URL
@@ -345,9 +272,7 @@ def _clone_repo(
 ) -> bool:
     """git clone ``source`` (the public AIPass repo by default, _resolve_source) into `home`. True on success.
 
-    *which* is ``shutil.which`` when None, resolved at call time. A seam, and the reason
-    is the test: test_install's clone tests answer "git is on PATH" here instead of
-    patching shutil for the whole process (fleet green leg 6). No product caller hands it.
+    *which* is a test seam: ``shutil.which`` when None, resolved at call time.
     """
     if which is None:
         which = shutil.which
@@ -367,8 +292,7 @@ def _clone_repo(
         if proc.returncode == 0:
             _announce_cloned_branch(home)
             return True
-        # The user's line before the log line: a log home that cannot be written
-        # must not be the last word on a failed clone (container proof, 2026-10-13).
+        # The user's line first: an unwritable log home must not swallow the last word.
         warning(f"git clone failed (exit {proc.returncode}) — git's own message is above. Check the network and retry.")
         logger.warning("[install] git clone exited %s", proc.returncode)
     except subprocess.TimeoutExpired as exc:
@@ -382,15 +306,11 @@ def _run_setup(
 ) -> bool:
     """Run the repo's setup.sh (venv + editable install + hook wiring + binaries).
 
-    ``non_interactive`` (--non-interactive) closes setup.sh's stdin and exports
-    AIPASS_NON_INTERACTIVE=1: setup.sh asks with ``[ -t 0 ]`` (is_interactive), and
-    install.sh hands this process the user's tty, so without it a run told it was
-    non-interactive still asked for a git identity (container proof, 2026-10-13).
+    ``non_interactive`` closes stdin and exports AIPASS_NON_INTERACTIVE=1: install.sh
+    hands this process the user's tty, so setup.sh's ``[ -t 0 ]`` alone would still prompt.
     """
     setup = home / "setup.sh"
-    # --no-chat: install owns the welcome-chat ending (_end_in_chat) — without it,
-    # setup.sh's own chat ending would launch (and exit-replace this process) twice.
-    # --no-symlink / --force-symlink (#660) pass through to setup.sh's CLI-symlink guard.
+    # --no-chat: install owns the chat ending; setup.sh's own would launch a second one.
     setup_args = ["bash", str(setup), "--no-chat"]
     if no_symlink:
         setup_args.append("--no-symlink")
@@ -456,15 +376,8 @@ def _registry_user_name(home: Path) -> str:
 def _build_install_prompt(home: Path, bins: dict, doctor_action_items: list[str] | None = None) -> str:
     """Compose the authored first prompt for the post-install @aipass chat.
 
-    Enriched with whatever setup.sh learned about the machine (round-2 install
-    UX, a0f2351e/43ff5873): the user's name (persisted in the registry, so it
-    survives independent of this one run) and any ACTION NEEDED items / a
-    skipped git identity, passed through env vars by setup.sh's own
-    ``--chat-only`` handoff. Also enriched with the doctor preflight verdict
-    (round-2 addendum 2, the owner's ruling: doctor runs before hello, and a
-    still-broken hook wiring is P1 — passed in as ``doctor_action_items`` so
-    it leads the machine-still-needs list). Composition stays here, in this
-    one function.
+    The env vars come from setup.sh's ``--chat-only`` handoff; ``doctor_action_items``
+    lead the still-needs list because broken hook wiring is P1.
     """
     parts = [f"Fresh AIPass install completed at {home}."]
     for name, path in bins.items():
@@ -503,10 +416,7 @@ def _print_next_steps(home: Path) -> None:
 def _ask_permission_mode() -> str:
     """Ask how the concierge session should run. Returns a launch flag_variant.
 
-    The repo ships ``defaultMode: acceptEdits`` in ``.claude/settings.json``, so
-    a plain launch asks before system-changing commands. The stranger deserves
-    the choice up front instead of inheriting it silently; any non-answer
-    (Enter, Ctrl-C, EOF) keeps the safe default.
+    Any non-answer (Enter, Ctrl-C, EOF) keeps the repo's acceptEdits default.
     """
     console.print("How should the concierge session run?")
     console.print("  [cyan]1.[/cyan] Accept edits [dim](default — asks before system-changing commands)[/dim]")
@@ -521,11 +431,9 @@ def _ask_permission_mode() -> str:
 
 
 def _run_doctor_preflight() -> list[str]:
-    """Run 'aipass doctor --fix' before the concierge says hello (the owner's ruling,
-    round-2 addendum 2): heals what it can, then reports what's still broken.
+    """Run 'aipass doctor --fix' before the concierge says hello: heal, then report what's still broken.
 
-    Hook wiring is P1 — a still-broken result is printed as a loud, highlighted
-    top line, and returned so ``_build_install_prompt`` leads with it too.
+    Broken hook wiring is printed loud and returned so the prompt leads with it.
     """
     from aipass.aipass.apps.modules.doctor import run_doctor_preflight
 
@@ -550,18 +458,13 @@ def _end_in_chat(
 ) -> None:
     """End the install in a conversation with the @aipass concierge (TTY only).
 
-    Project creation is NOT part of install — ``aipass init run`` stays a
-    separate, later step; the concierge points users there when they're ready.
-    ``launch_inline`` replaces this process and never returns when it fires.
-    ``last_print`` is the phone print: the owner ruled nothing follows it on the
-    scripted (--no-chat) path, so every ending calls it last, before a launch.
+    ``launch_inline`` replaces this process and never returns; ``last_print`` (the
+    phone print) is the last output on every ending, so each calls it before a launch.
     """
     _print_next_steps(home)
     finish = last_print if last_print is not None else (lambda: None)
 
-    # The doctor preflight runs INSIDE the chat path below, so every early
-    # return here skips it. The owner's ruling (FPLAN-0492 wave 6): a skipped
-    # preflight is announced with the command that runs it -- never silent.
+    # Every early return skips the preflight below, so each names the command that runs it.
     if no_chat:
         console.print("[dim]Skipped the welcome chat (--no-chat). Run 'claude' in this directory anytime.[/dim]")
         warning("Health check skipped with the chat — run 'aipass doctor --fix' to check hook wiring.")
@@ -594,13 +497,7 @@ def _end_in_chat(
 
 
 def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) -> bool:
-    """The Phone face step: best-effort, so its outcome never fails the install.
-
-    ``baud_tag`` is --baud-tag, already validated, handed on as aipass baud install --tag.
-
-    Returns:
-        True when the face was installed and pointed (or the dry-run walked it).
-    """
+    """The Phone face step: best-effort, so its outcome never fails the install."""
     if no_baud:
         console.print("[dim]Skipped the phone face and baud-cli (--no-baud). Install later: aipass baud install[/dim]")
         return False
@@ -612,8 +509,7 @@ def _install_phone_face(dry_run: bool, no_baud: bool, baud_tag: str = LATEST) ->
 def _phone_print(dry_run: bool, face_installed: bool, non_interactive: bool = False) -> Callable[[], None] | None:
     """The phone facts read now; the bind, the boot unit, the server and the print run last (FPLAN-0642, DPLAN-0407).
 
-    None: no face, nothing to say. ``non_interactive`` (what install.sh runs) never
-    mints a pairing code: install.sh owns the terminal, the pause and the pair.
+    ``non_interactive`` never mints a pairing code: install.sh owns the terminal and the pair.
     """
     if not face_installed:
         return None
@@ -665,9 +561,7 @@ def run_chat_only(
 ) -> int:
     """End-in-chat only — no clone/setup/verify. Used by setup.sh's own tail.
 
-    setup.sh already built the environment in bash; this just resolves the
-    home it built and reuses ``_build_install_prompt``/``launch_inline`` so
-    the welcome chat is composed in exactly one place.
+    Reuses ``_end_in_chat`` so the welcome chat is composed in exactly one place.
     """
     try:
         home = _resolve_home(path, here, non_interactive)
@@ -695,9 +589,7 @@ def run_install(
 ) -> int:
     """Run the 5-step one-command install. Returns 0 on success, 1 on failure.
 
-    ``baud_tag`` (--baud-tag) and ``source`` (--source) are checked before anything is
-    cloned: a bad tag or a path that is no checkout is refused with 2, the
-    bad-usage code, so nothing was attempted.
+    A bad ``baud_tag`` or ``source`` is refused with 2 (bad usage) before anything is cloned.
     """
     console.print()
     console.print("[bold cyan]AIPass — one-command install[/bold cyan]")
@@ -716,7 +608,6 @@ def run_install(
         error(f"--source refused: {exc}")
         return 2
 
-    # Step 1 — resolve + fetch the framework home
     console.print()
     console.print(render_step_header(1, TOTAL_STEPS, "Preparing AIPass home"))
     try:
@@ -740,11 +631,8 @@ def run_install(
             return 1
         logger.warning("[install] --force-global-home override: proceeding with throwaway home %s", home)
 
-    # Claimed before the first mutating step (clone) and dropped before the
-    # welcome chat: _end_in_chat's launch_inline REPLACES this process and never
-    # returns, so a release after it would never run and would wedge the home.
-    # A dry run takes no lock: it writes nothing, so it has nothing to guard,
-    # and must not mkdir the home's parent or touch a real lock file.
+    # Released before the chat: launch_inline replaces this process, so a later
+    # release never runs and wedges the home. A dry run writes nothing and takes no lock.
     install_lock = None if dry_run else acquire_install_lock(home)
     if install_lock is None and not dry_run:
         return 1
@@ -758,7 +646,6 @@ def run_install(
         else:
             success(f"AIPass downloaded to {home}")
 
-        # Step 2 — build the environment via setup.sh
         console.print()
         console.print(render_step_header(2, TOTAL_STEPS, "Building environment"))
         if not _run_setup(
@@ -768,29 +655,24 @@ def run_install(
             return 1
         success("Environment ready")
 
-        # Step 3 — verify the binaries landed
         console.print()
         console.print(render_step_header(3, TOTAL_STEPS, "Verifying install"))
         bins = _verify_binaries(home) if not dry_run else {"drone": "dry-run", "aipass": "dry-run"}
 
-        # Owner/identity retro-trigger — check and self-heal via spawn
         if not dry_run:
             _check_and_fix_owner(home)
     finally:
         release_install_lock(install_lock)
 
-    # Step 4 — the phone face, best-effort: its result is reported, never fatal
     console.print()
     console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
     face_installed = _install_phone_face(dry_run, no_baud, baud_tag)
     phone_print = _phone_print(dry_run, face_installed, non_interactive)
 
-    # Step 5 — end in a welcome chat (no project creation — see module docstring)
     console.print()
     console.print(render_step_header(5, TOTAL_STEPS, "Welcome"))
 
-    # Log BEFORE exec — launch_inline (inside _end_in_chat) replaces the process
-    # and never returns when it fires.
+    # Log before _end_in_chat: its launch_inline replaces the process and never returns.
     json_handler.log_operation(
         "aipass_install",
         {
@@ -841,7 +723,6 @@ def print_help() -> None:
     console.print("[dim]With a phone face installed, the install starts the server when no boot unit runs it,[/dim]")
     console.print("[dim]then waits for Enter and shows the pairing QR. No QR (--non-interactive, or no server[/dim]")
     console.print("[dim]on a tailnet bind): drone @api host-api pair phone --scope operate[/dim]")
-    # aipass's decision, fleet green leg 2: a dry run writes nothing, so it takes no lock.
     console.print("[dim]A dry run takes no install lock, so it can preview beside a live install.[/dim]")
     console.print()
 
@@ -860,8 +741,7 @@ def print_introspection() -> None:
 def _flag_value(args: list[str], flag: str) -> str | None:
     """A value flag in either spelling: ``--flag value`` or ``--flag=value`` (DPLAN-0409 C3).
 
-    None: the flag is absent. "": present with no value (``--flag`` last, or
-    ``--flag=``), which the caller refuses rather than reading as the default.
+    None: absent. "": present with no value, which the caller refuses rather than defaulting.
     """
     prefix = f"{flag}="
     for idx, arg in enumerate(args):
@@ -884,7 +764,6 @@ def handle_command(command: str, args: list[str]) -> bool:
         print_introspection()
         return True
 
-    # `aipass install` runs directly; `run` is accepted as an optional verb.
     run_args = args[1:] if args and args[0] == "run" else args
 
     non_interactive = "--non-interactive" in run_args
@@ -896,10 +775,9 @@ def handle_command(command: str, args: list[str]) -> bool:
     force_symlink = "--force-symlink" in run_args
     no_baud = "--no-baud" in run_args
     path = _flag_value(run_args, "--path") or None
-    # A --baud-tag with no value reaches validate_tag as "" and is refused there, as any bad tag is.
+    # A valueless --baud-tag or --source reaches its validator as "" and is refused there.
     baud_tag = _flag_value(run_args, "--baud-tag")
     baud_tag = LATEST if baud_tag is None else baud_tag
-    # The same for --source: a valueless one is refused, never read as the public repo.
     source = _flag_value(run_args, "--source")
 
     if chat_only:

@@ -3,24 +3,13 @@
 # Description: 10-stage guided first-run setup — aipass init command
 # Version: 1.3.5
 # Created: 2026-04-16
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 aipass init — guided first-run setup
 
-10 resumable stages. State persists to .aipass/init_progress.json.
-Ctrl-C at any stage resumes next time from that stage.
-
-Usage:
-    aipass init                          # show progress / introspection
-    aipass init run                      # interactive
-    aipass init run --non-interactive    # CI/headless, all defaults
-    aipass init run --name YourName --cli claude
-    aipass init run --dry-run            # walk all 10 stages, no destructive ops
-                                         #   - skips drone @spawn create (stage 6)
-                                         #   - skips tmux/wt handoff (stage 9)
-                                         #   - does NOT write .aipass/init_progress.json
+10 resumable stages. State persists to .aipass/init_progress.json; --dry-run writes none.
 """
 
 from __future__ import annotations
@@ -77,11 +66,7 @@ def _get_local_json_path() -> Path:
 
 
 def _resolve_package_dir() -> str | None:
-    """Find the src/<package>/ path in CWD project.
-
-    Looks for a directory under src/ that contains an __init__.py.
-    Returns the relative path like 'src/my_project' or None if not found.
-    """
+    """Find the src/<package>/ path in CWD project."""
     src_dir = Path.cwd() / "src"
     if not src_dir.is_dir():
         return None
@@ -92,25 +77,19 @@ def _resolve_package_dir() -> str | None:
 
 
 CLI_CHOICES = ["claude", "codex", "other"]
-# Flag variants for CLI launch — these are user-facing config values, not code-level flags
 FLAG_CHOICES = ["default", "skip-permissions"]
 STYLE_CHOICES = ["building-my-own-project", "improving-aipass", "just-exploring"]
 
 TEMPLATE_EMPTY = "empty project"
 TEMPLATE_AIPASS = "aipass_framework"
 TEMPLATE_CHOICES = [TEMPLATE_EMPTY, TEMPLATE_AIPASS]
-# first_agent, ping_sweep, handoff, done — skipped for empty (non-framework) projects
 AIPASS_SPECIFIC_STAGES = {6, 7}
 
 
-# --- LOCAL JSON HELPERS ---
 def _read_local_json() -> dict | None:
     """Read the init progress file: {} when absent or empty, None when unreadable.
 
-    None is the failure answer and the success path never returns it, so a
-    caller can tell "no progress yet" from "progress exists but cannot be
-    read". Until 2026-09-28 both answered {} and a corrupt file read as a fresh
-    start with no word to the user. aipass's decision, fleet green leg 3.
+    None is the failure answer, so a corrupt file never reads as a silent fresh start.
     """
     local_json = _get_local_json_path()
     if not local_json.exists() or local_json.stat().st_size == 0:
@@ -124,13 +103,7 @@ def _read_local_json() -> dict | None:
 
 
 def _fire_profile_write_failed(path: str) -> None:
-    """Fire the write-failure trigger event, ignoring an absent trigger branch.
-
-    Named for the failed write, not the cleanup: the deletion of the temp file
-    is a consequence of the failure, not the event worth signalling. Was
-    ``file_deleted`` until 2026-09-07; @trigger has since retired that old
-    name, so only ``profile_write_failed`` is delivered.
-    """
+    """Fire the write-failure trigger event, ignoring an absent trigger branch."""
     try:
         from aipass.trigger.apps.modules.core import trigger
 
@@ -142,17 +115,8 @@ def _fire_profile_write_failed(path: str) -> None:
 def _write_local_json(data: dict) -> None:
     """Write the init progress file through the fleet json service.
 
-    The service's save is atomic -- temp file, fsync, then a retried replace --
-    and it unlinks its own temp file on any exception, which is the durability
-    the hand-rolled mkstemp/json.dump/os.replace writer provided, kept. The
-    directory is still created here: the progress file lives in the USER's
-    project (``cwd/.aipass/``), not in this branch's json dir, so nothing else
-    guarantees the parent exists on a fresh machine.
-
-    What the service does NOT do is raise: it answers False and logs. Callers
-    of this writer are written against OSError, and a silently-failed save
-    would make a lost init stage look exactly like a saved one, so the False is
-    turned back into the OSError -- the same shape ``profile.py`` settled on.
+    The parent is made here: the file lives in the user's project, not this branch's json dir.
+    The service answers False instead of raising; callers expect OSError, so it is raised.
     """
     local_json = _get_local_json_path()
     local_json.parent.mkdir(parents=True, exist_ok=True)
@@ -166,17 +130,8 @@ def _write_local_json(data: dict) -> None:
 def _get_test_write_policy_path() -> Path:
     """Resolve the test-write policy file from the project root, cwd as fallback.
 
-    The policy belongs to the PROJECT — @hooks' gate walks UP to find it — so a
-    path keyed on bare cwd stamps a shadow copy into whatever directory the caller
-    happened to stand in. Measured twice in the framework tree, where a suite run
-    from a branch directory created src/aipass/aipass/.aipass/test_write_policy.json
-    beside the real root one (removed by DPLAN-0337 R5, recreated 2026-09-15).
-    A second policy up the tree is not harmless: it is the file the gate reads
-    first, so a stale copy quietly outranks the fleet's live ruling.
-
-    The registry IS the project boundary (find_registry: env var, then walk up from
-    cwd). No registry means a fresh install that has not been seated yet — there,
-    cwd is the project root by definition, so the old behaviour is the fallback.
+    @hooks' gate walks up to find it, so a copy keyed on bare cwd shadows the real one.
+    The registry is the project boundary; with none yet, cwd is the project root.
     """
     registry = find_registry()
     if registry is not None:
@@ -184,15 +139,9 @@ def _get_test_write_policy_path() -> Path:
     return Path.cwd() / ".aipass" / "test_write_policy.json"
 
 
-# The fleet default, verbatim from @hooks 2026-09-07 (they own the format; the
-# shape was confirmed against their live file and their validator before this
-# landed). Their reader consumes exactly three keys -- agent_test_writing,
-# allow, block_test_edits -- and ignores the rest, which are documentary.
-#
-# agent_test_writing is the STRING "off", never a boolean: their validator
-# refuses true/false. allow is ALWAYS empty here: it is the canary-exemption
-# list and entries land there only by an owner/devpulse ruling, so an init that
-# pre-seeded one would grant an exemption nobody granted.
+# @hooks owns this format and reads only agent_test_writing, allow, block_test_edits.
+# agent_test_writing is the STRING "off" (their validator refuses booleans); allow stays
+# empty: only an owner ruling grants an exemption.
 _TEST_WRITE_POLICY_DEFAULT = {
     "_comment": (
         "Test-write policy — read by aipass.hooks handlers/security/testwrite_gate.py. "
@@ -220,19 +169,8 @@ _TEST_WRITE_POLICY_DEFAULT = {
 def _stamp_test_write_policy(dry_run: bool = False) -> bool:
     """Write the test-write policy on a fresh install. True when a file was written.
 
-    CREATE-ONLY, never clobber (@hooks' explicit call): an existing policy may
-    hold a deliberate local flip -- a branch in ``allow[]``, or the gate switched
-    on for a trial -- and re-running init must not silently repeal a ruling.
-
-    Not a security fix, and worth stating plainly because the framing invites the
-    opposite reading: @hooks' gate already fails CLOSED when this file is absent,
-    so test creation is refused either way. What the stamp buys is a readable,
-    flippable state -- ``drone @hooks testwrite`` prints OFF instead of refusing,
-    and a human edits a field instead of authoring a file from an error message.
-
-    Written through the json service, which is atomic: a half-written policy is
-    malformed JSON, and @hooks' gate fails closed on THAT too, refusing test
-    creation machine-wide until someone repairs it.
+    Create-only: an existing policy may hold a deliberate local flip that init must not repeal.
+    Not a security fix (the gate fails closed without it); it makes the state readable.
     """
     policy = _get_test_write_policy_path()
     if policy.exists():
@@ -272,15 +210,11 @@ def _get_last_completed_stage() -> int:
 
 
 def _save_stage(stage: int, stage_data: dict | None = None, dry_run: bool = False) -> None:
-    """Persist stage completion to local.json setup_progress.
-
-    When dry_run=True the call is a no-op (pure read flow).
-    """
+    """Persist stage completion to local.json setup_progress."""
     if dry_run:
         logger.info("[init_flow] dry-run: skipping _save_stage(%d)", stage)
         return
-    # An unreadable file (None) is replaced by a fresh record: its content is
-    # already lost to the reader, and run_init warned when it read progress.
+    # An unreadable file is replaced: run_init already warned when it read progress.
     data = _read_local_json()
     if data is None:
         data = {}
@@ -334,7 +268,6 @@ def _choose(msg: str, choices: List[str], default: str | None = None) -> str:
         cli_error("Invalid choice.")
 
 
-# --- STAGE FUNCTIONS ---
 def stage_1_welcome(dry_run: bool = False) -> Dict[str, Any]:
     """Print welcome banner and greeting."""
     console.print()
@@ -365,9 +298,7 @@ def stage_1_welcome(dry_run: bool = False) -> Dict[str, Any]:
 def _print_os_gap_heads_up() -> None:
     """Print tracked cross-OS gaps that apply to this OS (machine pre-flight, not a guarantee).
 
-    Lightweight: one doc read + parse. Failures are non-fatal — init must not
-    crash here. This is NOT the human acceptance pass; it just surfaces tracked
-    gaps at the moment the user is on the box.
+    Failures are non-fatal: init must not crash here.
     """
     try:
         from aipass.aipass.apps.handlers.cross_os import CrossOsGapError, gaps_for_platform
@@ -658,8 +589,7 @@ def stage_7_ping_sweep(dry_run: bool = False) -> Dict[str, Any]:
         _save_stage(7, {"results": {}, "skipped": True}, dry_run=dry_run)
         return {"ping_results": {}}
 
-    # Standalone projects can't ping agents via drone (drone only knows AIPass's registry).
-    # Only attempt ping if we're inside the AIPass source tree.
+    # drone only knows AIPass's registry, so standalone projects cannot ping.
     aipass_registry = _BRANCH_ROOT.parent / "AIPASS_REGISTRY.json"
     if not aipass_registry.exists():
         if len(branches) == 1:
@@ -861,31 +791,20 @@ def stage_10_done(accumulated: Dict[str, Any] | None = None, dry_run: bool = Fal
     return {}
 
 
-# --- MAIN RUNNER ---
 def _preflight_check(*, allow_projects_child: bool = False) -> str | None:
-    """Return an error message if CWD is unsafe for init, else None.
-
-    When *allow_projects_child* is True, the nested-project check is skipped
-    if CWD is ``<host>/projects/<name>``.
-    """
+    """Return an error message if CWD is unsafe for init, else None."""
     cwd = Path.cwd()
-    # Block if inside an agent directory
     if (cwd / ".trinity" / "passport.json").is_file():
         return (
             "This directory is an agent branch (has .trinity/passport.json).\n"
             "Agents are managed by 'drone @spawn', not 'aipass init'."
         )
-    # Early exit: if CWD is a valid <host>/projects/<name>, skip nesting check
     if allow_projects_child:
         from aipass.aipass.apps.handlers.init.bootstrap import is_projects_child
 
         if is_projects_child(cwd):
             return None
-    # Block if inside an existing AIPass project (registry above us).
-    # Walking up to the filesystem root can hit ancestors that can't be
-    # enumerated or stat'd — e.g. locked Windows system entries at the drive
-    # root (pagefile.sys) raise OSError. Skip those rather than crash; on
-    # POSIX everything up to / is readable so behaviour is unchanged there.
+    # Locked Windows entries at the drive root (pagefile.sys) raise OSError: skip, never crash.
     for parent in [cwd] + list(cwd.parents):
         try:
             entries = list(parent.iterdir())
@@ -924,22 +843,17 @@ def run_init(
 ) -> int:
     """Run the 10-stage init flow; the return is the command's exit code.
 
-    0 when every stage ran (or setup was already complete), 1 when the
-    pre-flight refused, 130 when the user paused it with Ctrl-C -- the shell's
-    interrupt code, so a pause is never read as a finished init; the progress
-    file keeps the resume. 130 was 0 until 2026-09-28: aipass's decision,
-    fleet green leg 3.
+    0 done, 1 pre-flight refused, 130 paused with Ctrl-C (the shell's interrupt code,
+    so a pause never reads as a finished init).
     """
     if not sys.stdin.isatty():
         non_interactive = True
 
-    # Pre-flight: refuse to run inside existing projects or agent dirs
     err = _preflight_check()
     if err:
         cli_error(str(err))
         return 1
 
-    # Template selection — before scaffold
     if template is None:
         if non_interactive:
             template = TEMPLATE_EMPTY
@@ -950,7 +864,6 @@ def run_init(
                 default=TEMPLATE_EMPTY,
             )
 
-    # Ensure scaffold exists — only for aipass_framework
     cwd = Path.cwd()
     if template == TEMPLATE_AIPASS and not registries_in(cwd):
         from aipass.aipass.apps.handlers.init.bootstrap import init_project
@@ -962,7 +875,6 @@ def run_init(
         else:
             console.print("[yellow]\\[dry-run][/yellow] would create project scaffold")
 
-    # In dry-run we ignore on-disk progress so the full flow always walks.
     last_done = 0 if dry_run else _get_last_completed_stage()
 
     if last_done >= TOTAL_STAGES:
@@ -1023,7 +935,6 @@ def run_init(
     return 0
 
 
-# --- INTROSPECTION + HELP ---
 def print_introspection() -> None:
     """Show module info and current setup progress."""
     progress = _get_setup_progress()
@@ -1071,7 +982,6 @@ def print_help() -> None:
     console.print()
 
 
-# --- COMMAND HANDLER ---
 def _handle_init_scaffold(args: list[str]) -> int:
     """Handle `aipass init [target] [name]` — instant project scaffold."""
     from aipass.aipass.apps.handlers.init.bootstrap import init_project
@@ -1083,7 +993,6 @@ def _handle_init_scaffold(args: list[str]) -> int:
         success(f"Project initialized at {target}")
         console.print()
 
-        # Find the package directory to show in guidance
         package_dir = None
         for child in (target / "src").iterdir():
             if child.is_dir() and (child / "__init__.py").is_file():
@@ -1112,12 +1021,7 @@ def _handle_init_scaffold(args: list[str]) -> int:
 
 
 def _run_git_auth_provisioning(target: Path, dry_run: bool = False) -> int:
-    """Provision the project for manager-class git; print every repair.
-
-    Returns 0 when the four owner-tier conditions hold (or already held), 1 when
-    the run refused. A refusal is not a crash — it names what a human must add,
-    and nothing was written.
-    """
+    """Provision the project for manager-class git; print every repair."""
     from aipass.aipass.apps.handlers.init.git_auth import GitAuthRefusal, provision_git_auth
 
     console.print()
@@ -1150,13 +1054,10 @@ def _run_git_auth_provisioning(target: Path, dry_run: bool = False) -> int:
         for item in result["verify_failures"]:
             console.print(f"  - {item}")
 
-    # No log_operation on this path — the handler already recorded exactly what
-    # it wrote; a second entry here would only duplicate it.
+    # No log_operation here: the handler already recorded what it wrote.
     return 0 if dry_run or result["verified"] else 1
 
 
-#: Plan glyphs, one per action. The column is fixed-width so a manager can
-#: scan the left edge for "what would change" without reading the reasons.
 _PLAN_GLYPHS: dict = {
     "create": ("+", "green"),
     "update": ("~", "yellow"),
@@ -1170,13 +1071,11 @@ _PLAN_GLYPHS: dict = {
 def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
     """Print the scaffold plan — the same block whether previewing or applying.
 
-    Apply prints the plan too, on purpose: what a manager pasted for a go and
-    what actually ran must be readable as the same thing.
+    What a manager pasted for a go and what actually ran must read as the same thing.
     """
     files = result.get("files") or []
     handlers = result.get("handlers") or []
     if not files and not handlers:
-        # A caller (or a test) handed us the legacy shape — fall back to counts.
         updated = result.get("updated_files", [])
         if updated:
             success(f"Updated {len(updated)} file(s):")
@@ -1215,8 +1114,6 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
 
     console.print("")
     if result.get("stamp_pending"):
-        # On apply the stamp has already been written by the time this prints;
-        # "pending" there would be a lie in the one block that is the receipt.
         state = "pending" if dry_run else "written"
         console.print(f"  [yellow]stamp[/yellow]   {stamped} → {result.get('aipass_version', '?')} {state}")
     if result.get("trust_reenrol"):
@@ -1230,10 +1127,7 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
     if protected:
         console.print(f"  [blue]owner[/blue]   {len(protected)} file(s) protected by .updateignore")
 
-    # Count what would be WRITTEN, not what carries a non-current label: a kept
-    # file whose sidecar is already there changes nothing, and a summary that
-    # said otherwise while the exit code said 0 would just teach people to
-    # stop reading one of them.
+    # Count writes, not non-current labels: a kept file whose sidecar exists changes nothing.
     changed = [e for e in files if e.get("writes")]
     console.print(
         f"\n  {len(changed)} of {len(files)} file(s) {verb}, {len(files) - len(changed) - len(protected)} unchanged."
@@ -1241,8 +1135,6 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
 
     kept = [e for e in files if e["action"] == "kept-local"]
     if kept:
-        # A kept file stays kept on every future run until someone resolves it,
-        # so the plan has to say how — otherwise the warning becomes furniture.
         console.print(
             f"  [dim]{len(kept)} file(s) kept: your copy stands. Diff it against the .aipass-new"
             " beside it; delete yours to take the template.[/dim]"
@@ -1252,10 +1144,7 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
 def _handle_init_update(args: list[str]) -> int:
     """Handle `aipass init update [target] [--dry-run] [--json]`.
 
-    Exit codes are the contract the ritual leans on (DPLAN-0335):
-    ``--dry-run`` exits 0 when the scaffold is current and 2 when anything is
-    pending, so a manager — or a script — can tell "nothing to do" from
-    "there is a plan to read" without parsing the output.
+    Exit-code contract: ``--dry-run`` exits 0 when current and 2 when anything is pending.
     """
     from aipass.aipass.apps.handlers.init.bootstrap import update_project
 
@@ -1272,21 +1161,14 @@ def _handle_init_update(args: list[str]) -> int:
         return 1
 
     if as_json:
-        # print_json, not print(): rich emits valid JSON with no markup
-        # interpretation and no line wrapping, so a pipe gets a parseable
-        # document while a terminal still gets it highlighted.
+        # print_json, not print(): no markup or wrapping, so a pipe gets parseable JSON.
         console.print_json(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         _print_scaffold_plan(result, dry_run=dry_run)
 
     if dry_run:
-        # Nothing above this line wrote a byte. git-auth is planned only too,
-        # so the whole command stays a read.
         if not as_json:
             if result.get("stamp_only"):
-                # DPLAN-0337 R1: no file would change, only the manifest's record
-                # of the version — so the manager's next move is the apply
-                # itself, not a message asking permission for it.
                 console.print(
                     "[dim]Preview only — nothing written. Stamp only: no file would change, "
                     f"so no go is needed. Run: aipass init update {target}[/dim]"
@@ -1294,13 +1176,8 @@ def _handle_init_update(args: list[str]) -> int:
             else:
                 console.print("[dim]Preview only — nothing written. Apply needs the owner's or devpulse's go.[/dim]")
         if as_json:
-            # Under --json stdout is exactly one JSON document: a manager's agent
-            # pipes it into a parser (docs/scaffold_update.md reads stamp_only off
-            # it). The git-auth plan still prints, to stderr, rather than being
-            # dropped: a refusal there is the only place its fix is named, and the
-            # exit code alone cannot say what to add. aipass's decision, fleet
-            # green leg 3. The console resolves sys.stdout at each print, so the
-            # redirect carries success() and the plan lines with it.
+            # Under --json stdout is exactly one JSON document; the git-auth plan goes to
+            # stderr, since a refusal there is the only place its fix is named.
             with contextlib.redirect_stdout(sys.stderr):
                 auth_rc = _run_git_auth_provisioning(target, dry_run=True)
         else:
@@ -1315,7 +1192,6 @@ def _handle_init_update(args: list[str]) -> int:
         elif "trust_enrolled" in result and result["trust_enrolled"] is None:
             # None is project_home's 'registry unavailable', distinct from a refusal.
             warning(f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}' once AIPass is installed.")
-        # Owner/identity check + heal via the frozen sync-registry contract
         try:
             check_proc = subprocess.run(
                 ["drone", "@spawn", "sync-registry", "--check"],
@@ -1350,9 +1226,8 @@ def _handle_init_update(args: list[str]) -> int:
         cli_error(f"Update failed: {exc}")
         return 1
 
-    # Last, so it wins: sync-registry above may migrate a legacy citizen_class,
-    # and the owner's class must end up 'manager' for drone to grant git. Outside
-    # the try so a git-auth fault is never reported as a scaffold-update failure.
+    # Last, so it wins over sync-registry's class migration; outside the try so a
+    # git-auth fault never reads as a scaffold-update failure.
     return _run_git_auth_provisioning(target)
 
 
@@ -1442,13 +1317,11 @@ def handle_command(command: str, args: list[str]) -> bool:
         sys.exit(result)
         return True
 
-    # Template name as positional arg
     if args[0] in TEMPLATE_CHOICES:
         result = run_init(template=args[0])
         sys.exit(result)
         return True
 
-    # Positional args = target path and/or project name for scaffold
     err = _preflight_check()
     if err:
         cli_error(str(err))
@@ -1458,10 +1331,7 @@ def handle_command(command: str, args: list[str]) -> bool:
 
 
 if __name__ == "__main__":
-    # Windows terminals/pipes default to cp1252, which can't encode the Unicode
-    # Rich emits (✓/✗, box-drawing). Reconfigure live streams to UTF-8 in place
-    # so a direct `python -m ...init_flow` run doesn't crash printing its banner.
-    # Guarded to win32 — mirrors apps/aipass.py (S190 / gap #1).
+    # Windows streams default to cp1252, which cannot encode Rich's glyphs; mirrors apps/aipass.py.
     if sys.platform == "win32":
         os.environ.setdefault("PYTHONUTF8", "1")
         for _stream in (sys.stdout, sys.stderr):

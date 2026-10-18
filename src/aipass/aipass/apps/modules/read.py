@@ -3,21 +3,13 @@
 # Description: aipass read — render a branch README in the terminal
 # Version: 1.1.0
 # Created: 2026-08-07
-# Modified: 2026-08-08
+# Modified: 2026-10-17
 # =============================================
 
 """
 aipass read — view any branch's README, rendered, straight from the live file.
 
-The depth step behind `aipass help`: help answers with matched sections,
-read shows the whole document. Content is never cached — every invocation
-reads the current file via the readme_map handler.
-
-Usage:
-    aipass read              # list branches with a README
-    aipass read drone        # render drone's README
-    aipass read @drone       # @-prefix tolerated
-    aipass read --help
+Never cached: every invocation reads the current file.
 """
 
 from __future__ import annotations

@@ -3,14 +3,10 @@
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
 # Version: 1.2.5
 # Created: 2026-07-15
-# Modified: 2026-10-08
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
-
-# Tests trust/revoke CLI commands and init auto-enrollment.
-# All tests use tmp dirs + AIPASS_TRUST_REGISTRY so they never
-# touch the real ~/.aipass registry.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/modules/trust.py parses and imports
@@ -43,15 +39,10 @@ def _isolate_registry(tmp_path, monkeypatch):
 
     One setting through hooks' public seam: every verb and trust.py's prune
     resolve door_trust_registry.registry_path() per call, which reads
-    AIPASS_TRUST_REGISTRY (DPLAN-0404 follow-up).
+    AIPASS_TRUST_REGISTRY.
     """
     fake_registry = tmp_path / "trusted_projects.json"
     monkeypatch.setenv("AIPASS_TRUST_REGISTRY", str(fake_registry))
-
-
-# ---------------------------------------------------------------------------
-# trust_registry direct tests
-# ---------------------------------------------------------------------------
 
 
 def test_enroll_project(tmp_path):
@@ -111,11 +102,6 @@ def test_is_trusted_hash_mismatch(tmp_path):
 
     hooks_file.write_text('{"hooks_enabled": false, "modified": true}', encoding="utf-8")
     assert is_trusted(str(project)) is False
-
-
-# ---------------------------------------------------------------------------
-# trust CLI module tests
-# ---------------------------------------------------------------------------
 
 
 def test_trust_command_enrolls(tmp_path):
@@ -182,11 +168,6 @@ def test_trust_not_a_directory(tmp_path):
     fake.write_text("hi", encoding="utf-8")
     assert handle_command("trust", [str(fake)]) is True
     assert is_trusted(str(fake)) is False
-
-
-# ---------------------------------------------------------------------------
-# init enrollment tests
-# ---------------------------------------------------------------------------
 
 
 def _throwaway_except(keep: Path):
@@ -275,7 +256,7 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
 
 
 def test_init_project_skips_trust_enrollment_for_a_throwaway_path(tmp_path, monkeypatch):
-    """init_project refuses to enroll a pytest/temp-dir path (GH-712 leak fix).
+    """init_project refuses to enroll a pytest/temp-dir path.
 
     Mutant: project_home `if is_throwaway_path(target):` -> `if False:` reddens this test.
     """
@@ -374,11 +355,6 @@ def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(
     assert result["trust_enrolled"] is None
 
 
-# ---------------------------------------------------------------------------
-# trust prune
-# ---------------------------------------------------------------------------
-
-
 def test_prune_removes_stale_entries(tmp_path):
     """aipass trust prune drops entries whose project path no longer exists."""
     live = tmp_path / "live"
@@ -405,7 +381,7 @@ def test_prune_removes_stale_entries(tmp_path):
 def test_enroll_is_idempotent(tmp_path):
     """Enrolling the same project twice leaves exactly ONE entry, not a duplicate.
 
-    setup.sh enrolls the repo it installs on every run (compass #221), so a
+    setup.sh enrolls the repo it installs on every run, so a
     re-install must refresh the existing entry rather than grow the registry.
     """
     project = tmp_path / "reinstalled"
@@ -442,13 +418,7 @@ def test_enroll_missing_hooks_json_leaves_registry_intact(tmp_path):
     assert is_trusted(str(bare)) is False
 
 
-# ---------------------------------------------------------------------------
-# setup.sh install-time enrollment (compass #221)
-#
-# These run the REAL bash lines lifted out of setup.sh — not a paraphrase —
-# with SCRIPT_DIR/VENV_PYTHON supplied and $HOME redirected at a tmp dir so
-# the registry written is a throwaway one.
-# ---------------------------------------------------------------------------
+# These run the REAL bash lines lifted out of setup.sh, with $HOME at a tmp dir.
 
 _ENROLL_ANCHOR = 'echo "Enrolling this install in the hook trust registry ..."'
 

@@ -3,20 +3,13 @@
 # Description: Verify a baud phone tarball against a sha256sum-format SHA256SUMS file
 # Version: 1.0.0
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-10-17
 # =============================================
 
 """
 Verify the phone tarball, and the baud-cli binary beside it (FPLAN-0589), against
-the release's one SHA256SUMS (FPLAN-0587).
-
-``SHA256SUMS.txt`` is ``sha256sum`` output: one line per file, ``<64 hex>`` then a
-space, then a space (text mode) or ``*`` (binary mode), then the name. baud's
-release lane writes it with ``sha256sum <name> | tee -a``.
-
-Two refusals, never a warning: no line for the tarball (an unverifiable bundle
-is not installed), and a digest mismatch (a downloaded file is deleted on the
-spot so nothing later can pick it up by mistake).
+the release's one SHA256SUMS. No line for the file and a digest mismatch both refuse,
+never warn; a mismatched download is deleted so nothing later picks it up.
 """
 
 from __future__ import annotations
@@ -37,22 +30,7 @@ class VerifyError(Exception):
 
 
 def parse_sums(text: str) -> dict[str, str]:
-    """Map file name -> lowercase sha256 from sha256sum-format text.
-
-    Lines that are not in sha256sum format are skipped (logged): they cannot
-    vouch for any file, and the caller still needs its own exact line. A name
-    listed twice with two different digests is refused, because either answer
-    would be a guess.
-
-    Args:
-        text: The SHA256SUMS file content.
-
-    Returns:
-        Name to digest. A leading ``./`` on a name is dropped.
-
-    Raises:
-        VerifyError: One name carries two different digests.
-    """
+    """Map file name -> lowercase sha256 from sha256sum-format text."""
     sums: dict[str, str] = {}
     for number, raw in enumerate(text.splitlines(), 1):
         line = raw.rstrip()
@@ -84,17 +62,7 @@ def sha256_file(path: Path) -> str:
 def verify_tarball(tarball: Path, sums_file: Path, delete_on_mismatch: bool) -> str:
     """Check `tarball` (or any release file: the baud-cli binary too) against its line in `sums_file`.
 
-    Args:
-        tarball: The file to verify. Its file name is the line looked up.
-        sums_file: A sha256sum-format file.
-        delete_on_mismatch: True for a download (removed on mismatch); False for
-            a file the user handed over with --from, which is theirs to keep.
-
-    Returns:
-        The verified digest.
-
-    Raises:
-        VerifyError: Unreadable sums, no line for the tarball, or a mismatch.
+    delete_on_mismatch is False for a file handed over with --from: it is the user's to keep.
     """
     try:
         text = sums_file.read_text(encoding="utf-8")
