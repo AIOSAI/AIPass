@@ -3,23 +3,12 @@
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
 # Version: 2.0.3
 # Created: 2026-04-16
-# Modified: 2026-10-04
+# Modified: 2026-10-17
 # =============================================
 
 """Google Drive client.
 
-Core Drive v3 client routed through the @api gateway.  Handles
-authentication, folder creation/lookup, and file discovery.
-Never uses console-OAuth -- all auth flows through
-``aipass.api.apps.modules.google_client``.
-
-Lock pattern ported from GOLD (drive_sync_client.py):
-- get_or_create_backup_folder has NO lock (always called inside
-  project_folder's lock).
-- get_or_create_project_folder wraps its ENTIRE body in
-  _folder_cache_lock (cache check + backup-folder-ensure + search +
-  create).
-- get_or_create_nested_folder wraps the entire path walk in the lock.
+All auth flows through ``aipass.api.apps.modules.google_client``; never console-OAuth.
 """
 
 from __future__ import annotations
@@ -61,14 +50,10 @@ class DriveClient:
         self.file_tracker: dict[str, dict] = {}
         self.last_error: str | None = None
 
-    # -- properties ----------------------------------------------------------
-
     @property
     def drive_service(self) -> Any:
         """Return thread-local service if set, otherwise main service."""
         return getattr(self._thread_local, "service", None) or self._drive_service
-
-    # -- auth ----------------------------------------------------------------
 
     def authenticate(self) -> bool:
         """Authenticate through the @api gateway."""
@@ -98,9 +83,7 @@ class DriveClient:
             return True
         except Exception as exc:
             self.last_error = str(exc)
-            # Distinguish the structural "not installed" failure (actionable,
-            # needs a human to run pip install) from transient auth/network
-            # errors — only the former escalates to ERROR for medic to catch.
+            # Only "not installed" (a human must pip install) is ERROR for medic; auth/network is transient.
             if "libraries not installed" in self.last_error:
                 logger.error(f"[backup] Drive sync unavailable: {exc}")
             else:
@@ -110,8 +93,6 @@ class DriveClient:
                 {"success": False, "error": self.last_error},
             )
             return False
-
-    # -- low-level API -------------------------------------------------------
 
     def _api_call(self, request: Any, max_retries: int = 3) -> Any:
         """Execute a Google API request with retry."""
@@ -131,15 +112,10 @@ class DriveClient:
         """Build an isolated Drive service for the current thread."""
         return get_drive_service(thread_safe=True)  # type: ignore[misc]
 
-    # -- folder ops ----------------------------------------------------------
-
     def _verify_folder_id(self, folder_id: str) -> bool | None:
-        """Check that a folder exists and is not trashed.
+        """Check that a folder exists and is not trashed; None when Drive could not be asked.
 
-        True: Drive says it exists and is not trashed. False: Drive says it is
-        trashed. None: Drive could not be asked (no service, no answer, or the
-        request raised). Every caller reads None like False and searches again;
-        the searches refuse to create on no answer.
+        Callers read None like False and search again; the searches refuse to create on no answer.
         """
         if not self.drive_service:
             return None
@@ -156,10 +132,8 @@ class DriveClient:
     def get_or_create_backup_folder(self) -> str | None:
         """Get or create the root 'AIPass Backups' folder.
 
-        NO lock — always called inside get_or_create_project_folder's lock
-        (or single-threaded during pre-resolve).  Matches GOLD's pattern.
+        Takes no lock: callers hold _folder_cache_lock (or run single-threaded); locking here deadlocks.
         """
-        # Short-circuit: verify cached ID
         if self.backup_folder_id:
             if self._verify_folder_id(self.backup_folder_id):
                 return self.backup_folder_id
@@ -168,7 +142,6 @@ class DriveClient:
         if not self.drive_service:
             return None
 
-        # Search for existing
         query = f"name='{BACKUP_FOLDER_NAME}' and mimeType='{FOLDER_MIME}' and trashed=false"
         try:
             request = self.drive_service.files().list(
@@ -194,7 +167,6 @@ class DriveClient:
             logger.warning(f"Failed to search for backup folder: {exc}")
             return None
 
-        # Create new
         try:
             metadata = {"name": BACKUP_FOLDER_NAME, "mimeType": FOLDER_MIME}
             request = self.drive_service.files().create(body=metadata, fields="id")
@@ -205,8 +177,7 @@ class DriveClient:
             new_id: str = result["id"]
             self.backup_folder_id = new_id
 
-            # Conditional tracker reset (GOLD pattern):
-            # old drive_ids point to dead files under the old root folder
+            # A new root means every tracked drive_id points at a file under the old root.
             old_count = len(self.file_tracker)
             if old_count > 0:
                 self.file_tracker.clear()
@@ -220,7 +191,6 @@ class DriveClient:
                     },
                 )
 
-            # Verify accessible
             if not self._verify_folder_id(new_id):
                 self.last_error = f"Backup folder {new_id} created but not accessible"
                 self.backup_folder_id = None
@@ -238,25 +208,18 @@ class DriveClient:
         return None
 
     def get_or_create_project_folder(self, project_name: str) -> str | None:
-        """Get or create a project subfolder under AIPass Backups.
-
-        Lock covers cache check + backup-folder-ensure + search + create
-        to prevent duplicate folders (GOLD's pattern).
-        """
+        """Get or create a project subfolder; the lock spans check, search and create so threads make no duplicates."""
         with self._folder_cache_lock:
-            # Cache check with verify
             if project_name in self.project_folder_cache:
                 folder_id = self.project_folder_cache[project_name]
                 if self._verify_folder_id(folder_id):
                     return folder_id
                 del self.project_folder_cache[project_name]
 
-            # Ensure backup folder (no deadlock: backup_folder has no lock)
             backup_folder_id = self.get_or_create_backup_folder()
             if not backup_folder_id:
                 return None
 
-            # Search
             query = (
                 f"name='{project_name}' "
                 f"and mimeType='{FOLDER_MIME}' "
@@ -286,7 +249,6 @@ class DriveClient:
                 logger.warning(f"Failed to search for project folder '{project_name}': {exc}")
                 return None
 
-            # Create
             try:
                 metadata = {
                     "name": project_name,
@@ -332,11 +294,7 @@ class DriveClient:
         parent_id: str,
         folder_path: str,
     ) -> str | None:
-        """Create a nested folder hierarchy segment by segment.
-
-        Lock covers entire walk — full-path + per-segment caching with
-        verify (GOLD's pattern).
-        """
+        """Create a nested folder hierarchy segment by segment, the whole walk under the lock."""
         if not folder_path or folder_path == ".":
             return parent_id
 
@@ -375,8 +333,6 @@ class DriveClient:
             self.project_folder_cache[cache_key] = current_parent
             return current_parent
 
-    # -- file ops ------------------------------------------------------------
-
     def _find_existing_file(
         self,
         filename: str,
@@ -396,6 +352,3 @@ class DriveClient:
         except Exception as exc:
             logger.info(f"Failed to find file {filename}: {exc}")
         return None
-
-
-# =============================================

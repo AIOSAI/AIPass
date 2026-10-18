@@ -3,14 +3,12 @@
 # Description: Prune module — lists, and with --apply removes, stored copies the ignore spec now matches
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Prune Module — stored copies of paths the ignore spec now matches.
 
-``prune <root>`` lists them per top-level directory, per store, with counts and
-bytes, and deletes nothing. ``prune <root> --apply`` deletes them. See
-docs/store_cleanup.md.
+Reference: docs/store_cleanup.md
 """
 
 import os
@@ -77,15 +75,7 @@ def show_listing(project_root: str, found: dict, applying: bool) -> None:
 
 
 def run_prune(project_root: str, apply: bool = False) -> bool:
-    """List the stored copies the ignore spec now matches, and delete them when ``apply``.
-
-    Args:
-        project_root: Absolute path to the project root.
-        apply: Delete what was listed. Without it nothing is touched.
-
-    Returns:
-        True when the listing (and any deletion) completed without an error.
-    """
+    """List the stored copies the ignore spec now matches, and delete them when ``apply``."""
     if not Path(project_root).is_dir():
         error(f"Project path is not a directory: {project_root}")
         return False
@@ -140,8 +130,6 @@ def handle_command(command: str, args: list) -> bool:
     run_prune(str(resolve_caller_path(positional[0])), apply="--apply" in args)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

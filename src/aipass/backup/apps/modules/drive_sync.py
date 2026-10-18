@@ -3,24 +3,13 @@
 # Description: Drive sync module — uploads the snapshot store to Google Drive
 # Version: 2.4.0
 # Created: 2026-04-17
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
 
-Scans the snapshot store, checks the tracker for changes, and uploads
-new or modified files via the Drive upload engine, under
-<BACKUP_FOLDER_NAME>/<project>/snapshot/. The versioned store never leaves the
-machine (DPLAN-0411); what an earlier versioned sync put on Drive is left there.
-
-Flow: auth → store path → scan → ignore + never-leaves filter → set aside a
-tracker from another lane → tracker filter → headroom (planned bytes against
-the account's free space; refuse before the first upload) → upload_batch,
-which saves the tracker every 50 files → save tracker.
-The whole run announces itself in ``.backup/running/drive_sync.json`` and turns
-SIGTERM into a stop: the uploads not yet started never go, the tracker is
-saved, and the stopped line ends the run (DPLAN-0412).
-No pre-resolve — workers create folders on demand via the client's lock pattern.
+No pre-resolve: workers create Drive folders on demand through the client's lock.
+Reference: docs/drive_sync.md
 """
 
 import os
@@ -86,20 +75,7 @@ def _planned_bytes(files: list[Path]) -> int:
 
 
 def _weigh_headroom(client, needed: int) -> str | None:
-    """Weigh the run against the account's free space, before the first upload.
-
-    Prints the run's headroom line when the run fits. ``free`` is the quota's
-    limit minus its usage, never below zero (Drive can report usage over the
-    limit). An account that reports no limit passes, and the line says so.
-
-    Args:
-        client: The authenticated DriveClient the upload will use.
-        needed: Bytes this run is about to upload.
-
-    Returns:
-        None when the run may go ahead, else the one sentence that refuses it:
-        too little room, or a quota that could not be read.
-    """
+    """Weigh the run against the account's free space, before the first upload."""
     from aipass.backup.apps.handlers.drive.quota import read_quota
 
     quota = read_quota(client)
@@ -108,6 +84,7 @@ def _weigh_headroom(client, needed: int) -> str | None:
     if quota["limit"] is None:
         console.print(f"Drive: {_human_bytes(needed)} to upload, no storage limit reported", markup=False)
         return None
+    # Drive can report usage over the limit.
     free = max(quota["limit"] - quota["usage"], 0)
     if needed > free:
         return f"Drive has {_human_bytes(free)} free; this run needs {_human_bytes(needed)}. Nothing uploaded."
@@ -125,22 +102,7 @@ def run_drive_sync(
 ) -> dict:
     """Run Drive sync -- upload the snapshot store to Google Drive.
 
-    Args:
-        project_root: Absolute path to the project.
-        project_name: Override project name (defaults to dir name).
-        note: Note attached to uploads.
-        force: Force re-upload of all files.
-        show_panels: Show rich CLI output.
-        verb: What was invoked, for the running file: drive_sync, or all.
-
-    Returns:
-        Dict with success, uploaded, failed, skipped, held_back,
-        bytes_uploaded, duration, location, total keys. Once there is
-        something to upload it also carries bytes_planned. A run refused by
-        the headroom check (too little room, or an unreadable quota) has
-        success False, error set to the sentence it printed as its last
-        stdout line, and error_shown True, so a caller does not print it twice.
-        A run stopped by request has stopped True and success False.
+    A headroom refusal returns error_shown True: its sentence is already the run's last stdout line.
     """
     with catch_sigterm(), LaneProgress(project_root, PRIMARY_COMMAND, verb) as running:
         return _drive_sync_run(project_root, project_name, note, force, show_panels, verb, running)
@@ -182,7 +144,6 @@ def _drive_sync_run(
         "error": None,
     }
 
-    # 1. Authenticate
     client = DriveClient()
     if not client.authenticate():
         result["error"] = client.last_error or "Drive authentication failed"
@@ -190,7 +151,6 @@ def _drive_sync_run(
         logger.warning(f"[backup] Drive sync auth failed: {result['error']}")
         return result
 
-    # 2. Build snapshot store path
     store_path = build_snapshot_path(project_root)
     result["location"] = str(store_path)
     if not store_path.exists():
@@ -199,8 +159,7 @@ def _drive_sync_run(
         logger.warning(f"[backup] {result['error']}")
         return result
 
-    # 3. Scan store and re-filter through .backupignore (legacy stores may
-    #    contain files swept in before an ignore rule was added).
+    # Re-filter through .backupignore: legacy stores hold files swept in before a rule was added.
     spec = load_spec(str(project_root))
     raw_files = [f for f in store_path.rglob("*") if f.is_file()]
     kept = [f for f in raw_files if not is_ignored(str(f.relative_to(store_path)), spec)]
@@ -208,8 +167,7 @@ def _drive_sync_run(
     if ignored_count:
         logger.info(f"[backup] Drive sync: filtered {ignored_count} ignored files from store")
 
-    # 3b. The never-leaves floor, a spec of its own so .backupignore cannot
-    #     negate it. The snapshot keeps these files; Drive never gets them.
+    # The never-leaves floor is its own spec, so .backupignore cannot negate it.
     all_files, result["held_back"] = hold_back(kept, store_path)
     if result["held_back"]:
         logger.info(f"[backup] Drive sync: held back {result['held_back']} files the never-leaves floor matches")
@@ -223,12 +181,10 @@ def _drive_sync_run(
             console.print("[dim]No files found in snapshot store.[/dim]")
         return result
 
-    # 4. Resolve project name
     if not project_name:
         project_name = Path(project_root).name
 
-    # 5. Load tracker + filter. A tracker from the versioned era is moved
-    #    aside first: its keys name versioned-store paths.
+    # A tracker from the versioned era is moved aside first: its keys name versioned-store paths.
     set_aside_foreign_tracker(project_root)
     tracker = load_tracker(project_root)
     if force:
@@ -246,10 +202,7 @@ def _drive_sync_run(
             console.print(f"[green]All {len(all_files)} files up to date.[/green]")
         return result
 
-    # 5b. Headroom (DPLAN-0412): weigh what is about to leave against the
-    #     account's free space. A run that cannot fit, or a quota that cannot
-    #     be read, uploads nothing; its sentence is the run's last stdout line
-    #     and mark_command_failed() makes the verb (drive_sync, or all) exit 2.
+    # Headroom: a run that cannot fit, or an unreadable quota, uploads nothing and exits 2.
     planned = _planned_bytes(files_to_upload)
     result["bytes_planned"] = planned
     refusal = _weigh_headroom(client, planned)
@@ -268,7 +221,6 @@ def _drive_sync_run(
 
     running.plan(len(files_to_upload), bytes_total=planned)
 
-    # 6. Upload with progress
     progress_fn = None
     progress = None
     task = None
@@ -315,12 +267,9 @@ def _drive_sync_run(
     result["success"] = batch_result.get("success", False)
     result["duration"] = time.time() - start
 
-    # 7. Save tracker
     save_tracker(project_root, tracker)
 
-    # 7b. Stopped by request: what went is tracked (saved just above), no
-    #     changelog entry (lanes.drive_sync.last means a run that completed),
-    #     and the stopped line is the last word.
+    # Stopped: what went is tracked, but no changelog entry (lanes.drive_sync.last means a completed run).
     if batch_result.get("stopped"):
         result["stopped"] = True
         result["success"] = False
@@ -335,10 +284,7 @@ def _drive_sync_run(
         )
         return result
 
-    # 8. One changelog entry per run that uploaded cleanly, the shape snapshot
-    #    and versioned write; status --json reads the Drive lane's last run
-    #    from it. A run with a failed upload, or with nothing to upload,
-    #    writes none -- the snapshot lane's rule for a run that copied nothing.
+    # One changelog entry per clean run; status --json reads the Drive lane's last run from it.
     if result["success"]:
         run = BackupResult(
             mode=PRIMARY_COMMAND,
@@ -379,11 +325,8 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
@@ -407,8 +350,6 @@ def handle_command(command: str, args: list) -> bool:
     )
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

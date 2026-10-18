@@ -3,7 +3,7 @@
 # Description: Version restore — reconstruct files from baseline + diffs
 # Version: 1.0.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-10-17
 # =============================================
 
 """Restore handler — reconstruct file versions from baseline + diffs."""
@@ -18,13 +18,9 @@ from ..audit import trail
 
 
 def _stored_file(file_folder: Path) -> Path | None:
-    """Return the current version stored inside a file-folder.
+    """Return the current version stored inside a file-folder: the one non-baseline file.
 
-    The folder name is NOT always the file name: the path builder shortens a
-    name over 50 characters to name[:30]_md5[:8] for the FOLDER while the file
-    inside keeps its full name. Reading the folder instead of echoing its name
-    covers both layouts. The current version is the only file in there that is
-    not a baseline -- diffs live one level down in <name>_diffs/.
+    The folder name is not always the file name: the path builder shortens names over 50 chars.
     """
     if not file_folder.is_dir():
         return None
@@ -40,10 +36,7 @@ def _stored_file(file_folder: Path) -> Path | None:
 
 
 def list_versions(file_folder: Path) -> list[dict]:
-    """List all versions available for a file-folder.
-
-    Returns list of dicts with 'timestamp', 'path', 'type' (baseline/diff/current).
-    """
+    """List all versions (baseline, current, diffs) available for a file-folder."""
     versions = []
     if not file_folder.is_dir():
         return versions
@@ -51,16 +44,13 @@ def list_versions(file_folder: Path) -> list[dict]:
     current = _stored_file(file_folder)
     name = current.name if current is not None else file_folder.name
 
-    # Find baseline
     for f in file_folder.iterdir():
         if f.is_file() and "-baseline-" in f.name:
             versions.append({"timestamp": "baseline", "path": f, "type": "baseline"})
 
-    # Find current
     if current is not None:
         versions.append({"timestamp": "current", "path": current, "type": "current"})
 
-    # Find diffs
     diff_dir = file_folder / f"{name}_diffs"
     if diff_dir.is_dir():
         for diff_file in sorted(diff_dir.glob(f"{name}_v*.diff")):
@@ -79,15 +69,7 @@ def list_versions(file_folder: Path) -> list[dict]:
 
 
 def restore_file(file_folder: Path, output_path: Path) -> bool:
-    """Restore the current version of a file from the versioned store.
-
-    Args:
-        file_folder: The file-folder in the versioned store.
-        output_path: Where to write the restored file.
-
-    Returns:
-        True if restoration succeeded.
-    """
+    """Restore the current version of a file from the versioned store; True on success."""
     current = _stored_file(file_folder)
 
     if current is None:
@@ -101,6 +83,3 @@ def restore_file(file_folder: Path, output_path: Path) -> bool:
     trail.log_operation("restore_file", {"source": str(current), "output": str(output_path)})
     logger.info(f"[restore] Restored {name} to {output_path}")
     return True
-
-
-# =============================================

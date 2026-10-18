@@ -3,7 +3,7 @@
 # Description: Tests for the drive_* command modules, the settings verb and the suite-wide Drive seal
 # Version: 2.0.4
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
@@ -24,28 +24,8 @@ from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync, settings
 
-# What is not pinned here, and where it is. Two run_* verbs reach a REAL Google
-# account: run_drive_check builds a DriveClient (drive_check.py:58-62) and
-# run_drive_sync authenticates one (drive_sync.py:104-105). run_drive_clear
-# overwrites the local tracker for real (handlers/drive/tracker.py:192-206),
-# run_drive_stats only reads it (drive_stats.py:55-65), and settings has no run_*.
-# Every test below that passes an argument a run_* could act on first replaces
-# that run_* with a recorder; for the two that dial, conftest's autouse
-# sealed_google_edge stands behind the recorder (TestSuiteWideDriveSeal).
-# The run_* pipelines run against a mocked Drive client in test_drive_pipeline.py.
-# The project_root routes of drive_sync and drive_stats (drive_sync's --note and
-# --project included) and settings' NotImplementedError on any argument other
-# than help, --help or -h are pinned in test_cli_routing.py.
-#
-# The consoles are NOT mocked, and do not need to be: aipass.cli.apps.modules.console
-# IS display.CONSOLE, a real Rich console printing to sys.stdout, and error()/warning()
-# write to display.err_console on sys.stderr — capsys reads both, and conftest.py
-# already pins both widths to 200 for the session.
-
-
-# ---------------------------------------------------------------------------
-# the seal itself — what stands between this file and the real account
-# ---------------------------------------------------------------------------
+# run_drive_check and run_drive_sync reach a REAL Google account and run_drive_clear deletes the tracker:
+# every test that passes an argument a run_* could act on replaces that run_* with a recorder first.
 
 
 class TestSuiteWideDriveSeal:
@@ -62,11 +42,6 @@ class TestSuiteWideDriveSeal:
             drive_client.api_call_with_retry(lambda: None)
 
 
-# ---------------------------------------------------------------------------
-# drive_sync — the routing a user actually types
-# ---------------------------------------------------------------------------
-
-
 class TestDriveSyncRouting:
     """`drone @backup drive_sync ...` — what the router does before the upload."""
 
@@ -79,10 +54,7 @@ class TestDriveSyncRouting:
         assert "Handlers: drive/client, drive/upload, drive/tracker" in out
         assert err == ""
 
-    # `is False`, not a bool check: a module that answered True to every verb
-    # would swallow every other module's command. Printing nothing is half the
-    # claim: a module that declines must also stay silent, or the router's next
-    # candidate prints under this one's output.
+    # A module that claimed every verb would swallow the others; one that declines must also stay silent.
     def test_drive_sync_declines_a_verb_that_is_not_its_own(self, capsys) -> None:
         """An unclaimed verb returns False, silently, so the router keeps asking."""
         assert drive_sync.handle_command("nonexistent", []) is False
@@ -90,11 +62,6 @@ class TestDriveSyncRouting:
         out, err = capsys.readouterr()
         assert out == ""
         assert err == ""
-
-
-# ---------------------------------------------------------------------------
-# drive_check — the module whose run verb is a live auth
-# ---------------------------------------------------------------------------
 
 
 class TestDriveCheckRouting:
@@ -118,24 +85,16 @@ class TestDriveCheckRouting:
         assert out == ""
         assert err == ""
 
-    # The three pins below are the ARGUMENT guard, not the command guard above.
-    # The command guard only screens args the router never sends here; these
-    # screen what a user actually types after `drone @backup drive_check`.
-    # The recorder on run_drive_check IS the oracle: it is a lambda, so a verb
-    # that reaches it records instead of authenticating, and an empty list is
-    # the proof that no OAuth round trip was attempted. Never replace it with a
-    # bare call-through -- that turns a typo pin into a live Drive auth.
+    # The argument guard. The recorder on run_drive_check is the oracle: never make it a
+    # call-through, that turns a typo pin into a live Drive auth.
 
     def test_an_unknown_verb_is_refused_on_stderr_and_never_dials_drive(self, capsys, monkeypatch) -> None:
         """A typo is named back to the user, not answered with a real Google auth."""
         dialled: list = []
         monkeypatch.setattr(drive_check, "run_drive_check", lambda *a, **k: dialled.append((a, k)))
 
-        # True, not False: route_command stops at the first module that claims
-        # the command, so returning False here sends the operator the router's
-        # own "Unknown command: drive_check" -- naming the command that DOES
-        # exist instead of the verb that does not. error() marks the process
-        # failed, so True still exits non-zero.
+        # True, not False: False makes the router say "Unknown command: drive_check" instead of naming
+        # the bad verb. error() marks the process failed, so True still exits non-zero.
         assert drive_check.handle_command(drive_check.PRIMARY_COMMAND, ["statuss"]) is True
 
         out, err = capsys.readouterr()
@@ -167,11 +126,6 @@ class TestDriveCheckRouting:
         assert capsys.readouterr().err == ""
 
 
-# ---------------------------------------------------------------------------
-# drive_stats — tracker statistics
-# ---------------------------------------------------------------------------
-
-
 class TestDriveStatsRouting:
     """`drone @backup drive_stats ...` — the route before a tracker is read."""
 
@@ -183,11 +137,6 @@ class TestDriveStatsRouting:
         assert "drive_stats Module" in out
         assert "Handlers: drive/tracker" in out
         assert err == ""
-
-
-# ---------------------------------------------------------------------------
-# drive_clear — the destructive one
-# ---------------------------------------------------------------------------
 
 
 class TestDriveClearRouting:
@@ -202,13 +151,7 @@ class TestDriveClearRouting:
         assert "Handlers: drive/tracker (requires --force)" in out
         assert err == ""
 
-    # --force is the arming switch of the branch's one destructive verb, so it
-    # is pinned AT THE SEAM: run_drive_clear is replaced by a recorder, and
-    # what the recorder was handed is the flag's whole effect. A call-through
-    # would reach clear_all for real, which is why this test never lets
-    # handle_command past the recorder. conftest's autouse sealed_google_edge
-    # stands behind the recorder, so a route that slips past it raises instead
-    # of dialling (TestSuiteWideDriveSeal above is the pin on that).
+    # --force arms the one destructive verb, so it is pinned at the recorder: a call-through clears for real.
     def test_force_arms_the_clear_and_the_same_command_without_it_does_not(
         self,
         tmp_path,
@@ -227,16 +170,9 @@ class TestDriveClearRouting:
         assert drive_clear.handle_command(drive_clear.PRIMARY_COMMAND, [str(tmp_path)]) is True
 
         out, err = capsys.readouterr()
-        # Both rows, in order: the ONLY difference between them is the flag, so
-        # a parse that hardcodes force -- in either direction -- fails here.
         assert armed == [(str(tmp_path), True), (str(tmp_path), False)], f"the flag did not reach the verb: {armed!r}"
         assert out == "", f"the route printed instead of delegating: {out!r}"
         assert err == ""
-
-
-# ---------------------------------------------------------------------------
-# settings — one live key, and a deferred UI that must never look like it worked
-# ---------------------------------------------------------------------------
 
 
 class TestSettingsStub:

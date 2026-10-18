@@ -3,7 +3,7 @@
 # Description: Snapshot copy strategy — mirror destination tree with cleanup
 # Version: 3.2.1
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Snapshot copy handler — mirror destination tree with cleanup."""
@@ -47,14 +47,9 @@ def _copy_single_file(
     dest_path: Path,
     errors: list[str],
 ) -> int:
-    """Copy a single file to the snapshot destination, returning bytes copied.
-
-    Skips unchanged files (same mtime), handles read-only targets.
-    Returns bytes copied (0 if skipped or errored).
-    """
+    """Copy a single file to the snapshot destination; bytes copied, or -1 when unchanged or refused."""
     target = str(dest_path / rel_path)
 
-    # Long-path guard: Windows' MAX_PATH only (path/builder.py)
     if exceeds_max_path(target):
         logger.warning(f"Path too long (>260 chars), skipping: {rel_path}")
         errors.append(f"{rel_path}: path too long (>260 chars)")
@@ -63,7 +58,6 @@ def _copy_single_file(
     target_path = Path(target)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Skip if target exists and has same mtime
     if target_path.exists():
         if _should_skip_mtime(abs_path, target):
             return -1  # signal: skipped, unchanged
@@ -91,27 +85,9 @@ def copy_snapshot(
     on_progress=None,
     on_file=None,
 ) -> dict:
-    """Copy files into a snapshot destination with mirror-delete.
-
-    The stop flag (handlers/state/stop_flag.py) is read before each file: a
-    stop lets the file in flight finish and starts no other.
-
-    Args:
-        files: List of (absolute_path, relative_path) tuples.
-        dest: Absolute destination directory path.
-        project_root: Project root for cleanup source reference.
-        on_progress: Optional no-argument callback after each file.
-        on_file: Optional callback after each file with (relative_path,
-            bytes_copied, ok); the running file's writer.
-
-    Returns:
-        Dict with files_copied, bytes_copied, errors, files_deleted, and
-        files_done (files gone through) and stopped (True when the stop flag
-        ended the loop early).
-    """
+    """Copy files into a snapshot destination with mirror-delete; a stop finishes the file in flight, starts no other."""
     dest_path = Path(os.path.realpath(dest))
 
-    # Mirror-delete: remove snapshot files whose source is gone
     files_deleted = 0
     if dest_path.exists():
         files_deleted = _run_mirror_cleanup(dest_path, project_root)
@@ -165,6 +141,3 @@ def copy_snapshot(
         },
     )
     return result
-
-
-# =============================================

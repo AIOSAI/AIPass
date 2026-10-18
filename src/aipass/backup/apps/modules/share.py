@@ -3,7 +3,7 @@
 # Description: Share module — single-file Drive upload with shareable link
 # Version: 1.1.1
 # Created: 2026-07-01
-# Modified: 2026-10-02
+# Modified: 2026-10-17
 # =============================================
 
 """Share Module — upload a single file to Drive and return a shareable link."""
@@ -56,18 +56,7 @@ def print_help():
 
 
 def run_share(file_path: str, *, public: bool = False) -> dict:
-    """Upload a single file to Drive and return a shareable link.
-
-    Authenticates via @api, uploads (or reuses existing), sets a
-    share permission, and prints the webViewLink as the last line.
-
-    Args:
-        file_path: Path to the file to share.
-        public: If True, anyone-with-link; else restricted to owner.
-
-    Returns:
-        Result dict with success, link, file_id, error.
-    """
+    """Upload a single file to Drive and return a shareable link."""
     from aipass.backup.apps.handlers.drive.client import DriveClient
     from aipass.backup.apps.handlers.drive.share import share_file
 
@@ -124,19 +113,14 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    # Screen the WHOLE sequence, not just args[0]. This module has a
-    # standalone __main__ entry that never reaches the router's help
-    # normalisation, so a trailing flag used to fall through and run the
-    # verb for real. Bare "help" stays first-position-only: later
-    # positions are user values (filenames), not flags.
+    # Screen every arg: the standalone __main__ skips the router's help normalisation.
+    # Bare "help" is first-position only; later args are user values.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_help()
         return True
 
-    # Separate flags from operands before picking the path. `share --public f.pdf`
-    # is the ordinary shell form, and args[0] used to hand "--public" to run_share
-    # as the filename — which authenticates against the real Drive account before
-    # anything discovers the path is a flag.
+    # Split flags from operands: `share --public f.pdf` must not hand "--public" to run_share
+    # as the filename, which authenticates against the real Drive before the path is checked.
     public = "--public" in args
     operands = [arg for arg in args if not arg.startswith("--")]
 
@@ -150,8 +134,6 @@ def handle_command(command: str, args: list) -> bool:
     run_share(operands[0], public=public)
     return True
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:

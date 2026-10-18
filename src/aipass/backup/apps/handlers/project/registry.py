@@ -3,14 +3,10 @@
 # Description: Project registry handler — load/register/lookup backup projects
 # Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-09-03
+# Modified: 2026-10-17
 # =============================================
 
-"""Project registry handler.
-
-Tracks registered backup projects (name -> absolute path) in the central
-backup project registry stored at backup_json/project_registry.json.
-"""
+"""Project registry handler."""
 
 from pathlib import Path
 
@@ -22,18 +18,8 @@ REGISTRY_PATH = branch_root(__file__, 3) / "backup_json" / "project_registry.jso
 
 
 def _read_registry() -> dict:
-    """Read the registry document.
-
-    Returns:
-        The document, or an empty one when the registry does not exist yet.
-
-    Raises:
-        InvalidDocument: The registry is present but unreadable, or is not a
-            JSON object. This is the one read in the branch that MUST NOT
-            degrade to an empty dict: register_project writes back what it
-            read, so an empty answer here replaces every registration in the
-            file with the single project being added.
-    """
+    """Read the registry document."""
+    # MUST NOT degrade to {}: register_project writes back what it read, wiping every other registration.
     data = json_handler.read_json(REGISTRY_PATH)
     if data is None:
         if REGISTRY_PATH.exists():
@@ -45,27 +31,14 @@ def _read_registry() -> dict:
 
 
 def load_project_registry() -> dict:
-    """Load the project registry from disk.
-
-    Returns:
-        Dict mapping project name to project metadata.
-    """
+    """Load the project registry from disk."""
     projects = _read_registry().get("projects", {})
     trail.log_operation("project_registry_loaded", {"count": len(projects)})
     return projects
 
 
 def register_project(name: str, path: str) -> bool:
-    """Register a new backup project.
-
-    Args:
-        name: Project identifier (unique).
-        path: Absolute path to the project root.
-
-    Returns:
-        True when the project was added or updated, False when the registry
-        could not be written.
-    """
+    """Register a new backup project."""
     data = _read_registry()
     if "projects" not in data:
         data["projects"] = {}
@@ -82,14 +55,7 @@ def register_project(name: str, path: str) -> bool:
 
 
 def lookup_project(name: str) -> str | None:
-    """Resolve a project name to its filesystem path.
-
-    Args:
-        name: Registered project identifier.
-
-    Returns:
-        Absolute path string or None when not registered.
-    """
+    """Resolve a project name to its filesystem path."""
     projects = load_project_registry()
     entry = projects.get(name)
     if entry:
@@ -101,6 +67,3 @@ def lookup_project(name: str) -> str | None:
 def list_projects() -> dict:
     """Return all registered projects."""
     return load_project_registry()
-
-
-# =============================================

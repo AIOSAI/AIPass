@@ -3,21 +3,13 @@
 # Description: Drive upload tracker — mtime+size dedup for file sync
 # Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Drive upload tracker.
 
-Maintains a persistent mapping of local file paths to Drive metadata
-(file ID, mtime, size) so repeat syncs can skip unchanged files.
-Tracker is stored at ``<project>/.backup/drive_tracker.json``.
-
-The document is stamped with the lane it tracks (``"_lane": "snapshot"``).
-Until DPLAN-0411 the Drive lane uploaded the versioned store, and those
-trackers carry no stamp: their keys are versioned-store paths, so a snapshot
-sync reading one would skip nothing it should and update ids it must not.
-set_aside_foreign_tracker moves such a tracker to drive_tracker.versioned.json
-beside it -- kept, never deleted -- so the snapshot lane starts fresh.
+An unstamped tracker keys versioned-store paths, wrong for the snapshot lane:
+set_aside_foreign_tracker moves it aside (kept, never deleted).
 """
 
 from __future__ import annotations
@@ -31,10 +23,8 @@ from ..audit import trail
 from ..json import json_handler
 
 TRACKER_FILENAME = "drive_tracker.json"
-# Where a tracker from another lane is kept once the snapshot lane takes over.
 SET_ASIDE_FILENAME = "drive_tracker.versioned.json"
-# The top-level key naming the lane a tracker answers for, and the one lane
-# that leaves the machine. Every other key in the document is a file entry.
+# Every key but LANE_KEY is a file entry.
 LANE_KEY = "_lane"
 DRIVE_LANE = "snapshot"
 
@@ -47,18 +37,9 @@ def _tracker_path(project_root: str) -> Path:
 
 
 def load_tracker(project_root: str) -> dict:
-    """Load tracker from .backup/drive_tracker.json.
+    """Load tracker from .backup/drive_tracker.json, without the lane stamp.
 
-    The lane stamp is not a file entry and is left out of the answer; it is
-    written back by save_tracker.
-
-    Returns:
-        Dict keyed by relative file path with metadata values.
-
-    Raises:
-        InvalidDocument: The tracker exists but cannot be read as a JSON
-            object. An empty tracker would re-upload the whole store AND let
-            the next save_tracker overwrite the unreadable document.
+    Unreadable raises: an empty answer would re-upload all and let save overwrite it.
     """
     path = _tracker_path(project_root)
     data = json_handler.read_json(path)
@@ -77,13 +58,7 @@ def load_tracker(project_root: str) -> dict:
 
 
 def save_tracker(project_root: str, tracker: dict) -> None:
-    """Save tracker to .backup/drive_tracker.json, stamped with DRIVE_LANE.
-
-    Raises:
-        WriteFailed: The tracker could not be written. A sync whose tracker
-            never landed re-uploads every file next run, so it is surfaced
-            rather than counted as a success.
-    """
+    """Save tracker to .backup/drive_tracker.json, stamped with DRIVE_LANE; WriteFailed on failure."""
     path = _tracker_path(project_root)
     if not json_handler.write_json(path, {LANE_KEY: DRIVE_LANE, **tracker}):
         raise json_handler.WriteFailed(f"Drive tracker write failed: {path}")
@@ -94,19 +69,9 @@ def save_tracker(project_root: str, tracker: dict) -> None:
 
 
 def set_aside_foreign_tracker(project_root: str) -> Path | None:
-    """Move a tracker that does not answer for DRIVE_LANE out of the way.
+    """Move a non-empty tracker that does not answer for DRIVE_LANE out of the way.
 
-    A tracker whose stamp is absent or names another lane, and which holds at
-    least one entry, is renamed to SET_ASIDE_FILENAME beside it. An empty one
-    (drive_clear leaves ``{}``) has nothing to keep and stays where it is.
-
-    Returns:
-        The set-aside path when a tracker was moved, else None.
-
-    Raises:
-        InvalidDocument: The tracker exists but cannot be read as a JSON object.
-        WriteFailed: SET_ASIDE_FILENAME already exists. Overwriting it would
-            delete the tracker an earlier run kept, so the sync stops instead.
+    An existing SET_ASIDE_FILENAME raises WriteFailed: overwriting it deletes an earlier kept tracker.
     """
     path = _tracker_path(project_root)
     data = json_handler.read_json(path)
@@ -144,20 +109,9 @@ def check_needs_upload(
     local_file: Path,
     backup_root: Path,
 ) -> bool:
-    """Check if a file needs upload (new or mtime/size changed).
+    """Check if a file needs upload (new or mtime/size changed); local only, no API calls.
 
-    Pure local check -- no API calls.
-
-    Args:
-        tracker: Current tracker dict.
-        local_file: Absolute path to the local file.
-        backup_root: Root directory for computing relative paths.
-
-    Returns:
-        True if the file is new or has changed since last sync. Also True when
-        the file cannot be made relative to backup_root or cannot be stat'ed:
-        the upload that follows names the real failure, where False would skip
-        the file on every run without a word.
+    True when the path is foreign or unstatable: the upload names the failure, False would skip it silently.
     """
     try:
         rel_key = str(local_file.relative_to(backup_root))
@@ -188,14 +142,7 @@ def update_entry(
     backup_root: Path,
     drive_file_id: str,
 ) -> None:
-    """Update tracker entry after successful upload.
-
-    Args:
-        tracker: Tracker dict (mutated in place).
-        local_file: Absolute path to the uploaded file.
-        backup_root: Root directory for computing relative paths.
-        drive_file_id: Drive file ID assigned to the uploaded resource.
-    """
+    """Update tracker entry (in place) after successful upload."""
     try:
         rel_key = str(local_file.relative_to(backup_root))
     except ValueError:
@@ -221,15 +168,7 @@ def update_entry(
 
 
 def clean_tracker(tracker: dict, existing_files: set) -> list[str]:
-    """Remove entries for files that no longer exist.
-
-    Args:
-        tracker: Tracker dict (mutated in place).
-        existing_files: Set of relative file paths that still exist.
-
-    Returns:
-        List of removed keys.
-    """
+    """Remove entries (in place) for files that no longer exist; return the removed keys."""
     stale = [k for k in tracker if k not in existing_files]
     for key in stale:
         del tracker[key]
@@ -242,11 +181,7 @@ def clean_tracker(tracker: dict, existing_files: set) -> list[str]:
 
 
 def get_stats(tracker: dict) -> dict:
-    """Return tracker statistics.
-
-    Returns:
-        Dict with total count and sample entries.
-    """
+    """Return tracker statistics: total count and sample entries."""
     total = len(tracker)
     sample = dict(list(tracker.items())[:5]) if tracker else {}
     return {
@@ -256,11 +191,7 @@ def get_stats(tracker: dict) -> dict:
 
 
 def clear_all(project_root: str) -> bool:
-    """Clear entire tracker file.
-
-    Returns:
-        True if cleared successfully.
-    """
+    """Clear entire tracker file; True if cleared."""
     path = _tracker_path(project_root)
     if not json_handler.write_json(path, {}):
         logger.warning(f"Failed to clear tracker at {path}")
@@ -270,6 +201,3 @@ def clear_all(project_root: str) -> bool:
         {"project_root": project_root},
     )
     return True
-
-
-# =============================================

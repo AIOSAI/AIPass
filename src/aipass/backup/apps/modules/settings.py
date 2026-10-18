@@ -3,15 +3,10 @@
 # Description: Settings module — sets a project's drive_sync on or off; the settings UI is deferred
 # Version: 0.2.0
 # Created: 2026-04-17
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Settings Module — one live key, drive_sync, written through the project config handler.
-
-``settings drive_sync on|off <project_path|@name>`` switches whether ``all``
-runs the Drive step for a project. Every other setting still refuses: the
-settings UI is deferred (Phase 3).
-"""
+"""Settings Module — one live key, drive_sync, written through the project config handler."""
 
 import os
 import sys
@@ -55,15 +50,7 @@ def print_help():
 
 
 def set_drive_sync(args: list) -> bool:
-    """Write drive_sync for one project and print the new value.
-
-    Args:
-        args: The words after ``drive_sync``: ``on|off`` and the project.
-
-    Returns:
-        True when the value was written. A refusal calls error(), which
-        makes the exit non-zero.
-    """
+    """Write drive_sync for one project and print the new value."""
     if len(args) != 2 or args[0] not in ("on", "off"):
         error(DRIVE_SYNC_USAGE)
         return False
@@ -109,11 +96,8 @@ def handle_command(command: str, args: list) -> bool:
         set_drive_sync(args[1:])
         return True
 
-    # Say it out loud, and REFUSE. Returning True here printed a warning and
-    # exited 0 -- indistinguishable from a settings UI that opened and closed,
-    # which is the one thing a deferred command must never look like
-    # (refusal sweep 2026-09-07). Raising reaches route_command's handler in
-    # apps/backup.py, which names the module and the reason and exits 1.
+    # Refuse, never return True: a deferred command must not look like a UI that opened and closed.
+    # The raise reaches route_command's handler in apps/backup.py, which names the reason and exits 1.
     logger.warning(f"[backup] {MODULE_NAME} stub invoked with args={args} — awaiting Phase 3")
     trail.log_operation(f"{MODULE_NAME}_stub_invoked", {"args": args})
     raise NotImplementedError(
@@ -121,8 +105,6 @@ def handle_command(command: str, args: list) -> bool:
         "the settings UI is deferred (Phase 3). Edit .backup/config.json in the project directly for anything else."
     )
 
-
-# =============================================
 
 if __name__ == "__main__":
     if len(sys.argv) == 1:

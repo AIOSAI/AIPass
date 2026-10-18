@@ -3,14 +3,10 @@
 # Description: Project setup handler — scaffold .backup/ directory in target
 # Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-09-22
+# Modified: 2026-10-17
 # =============================================
 
-"""Project setup handler.
-
-Creates the ``.backup/`` scaffold (config, snapshots/, logs/)
-inside a target project path, and a ``.backupignore`` at the project root.
-"""
+"""Project setup handler."""
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,12 +20,7 @@ _TEMPLATE_PATH = branch_root(__file__, 3) / "templates" / "backupignore.template
 
 
 def _build_backupignore() -> str:
-    """Read the seed .backupignore content from the template file.
-
-    Raises:
-        FileNotFoundError: If the template is missing.
-        OSError: If the template cannot be read.
-    """
+    """Read the seed .backupignore content from the template file."""
     if not _TEMPLATE_PATH.exists():
         raise FileNotFoundError(f"Seed template missing: {_TEMPLATE_PATH} — cannot create a safe .backupignore")
     return _TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -49,16 +40,7 @@ DEFAULT_CONFIG = {
 
 
 def create_backup_dir(project_path: str) -> Path | None:
-    """Create the ``.backup/`` scaffold inside a project path.
-
-    Args:
-        project_path: Absolute filesystem path to the target project.
-
-    Returns:
-        Path to the created ``.backup/`` directory, or None on failure --
-        including a config that could not be written, which used to be
-        reported as a successful setup.
-    """
+    """Create the ``.backup/`` scaffold inside a project path; None on failure, config write included."""
     root = Path(project_path)
     if not root.is_dir():
         trail.log_operation("setup_failed", {"project_path": project_path, "reason": "not a directory"})
@@ -90,14 +72,9 @@ def create_backup_dir(project_path: str) -> Path | None:
 
     ignore_path = builder.build_ignore_path(project_path)
     if not ignore_path.exists():
-        # Build the content BEFORE opening the destination: opening first
-        # truncated it, so a missing template left a zero-byte .backupignore
-        # that the exists() guard above then never reseeded.
+        # Read before writing: a missing template must not leave a zero-byte file exists() never reseeds.
         content = _build_backupignore()
         ignore_path.write_text(content, encoding="utf-8")
 
     trail.log_operation("setup_complete", {"project_path": project_path})
     return backup_dir
-
-
-# =============================================

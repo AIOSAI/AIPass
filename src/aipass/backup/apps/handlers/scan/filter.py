@@ -3,14 +3,10 @@
 # Description: Post-walk path filtering against ignore/whitelist/size rules
 # Version: 2.0.0
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-10-17
 # =============================================
 
-"""Path filter.
-
-Applies a pathspec ignore spec, whitelist entries, and an upper size bound
-to a list of candidate paths produced by the walker.
-"""
+"""Path filter."""
 
 import os
 
@@ -29,17 +25,7 @@ def filter_paths(
     whitelist: list[str],
     max_size_mb: int,
 ) -> list[tuple[str, str]]:
-    """Filter candidate paths for inclusion in a backup.
-
-    Args:
-        paths: List of (absolute_path, relative_path) tuples from the walker.
-        spec: Compiled PathSpec from load_spec().
-        whitelist: Whitelist entries that override ignore matches.
-        max_size_mb: Maximum per-file size in megabytes; larger files are skipped.
-
-    Returns:
-        Filtered list of (absolute_path, relative_path) tuples to back up.
-    """
+    """Filter (absolute, relative) candidate paths for a backup; a whitelisted path skips the size bound too."""
     max_bytes = max_size_mb * 1024 * 1024
     result = []
     skipped = 0
@@ -71,6 +57,3 @@ def filter_paths(
         {"total": len(paths), "included": len(result), "skipped": skipped},
     )
     return result
-
-
-# =============================================

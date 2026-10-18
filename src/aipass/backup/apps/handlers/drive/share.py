@@ -3,15 +3,10 @@
 # Description: Drive sharing — upload + permission + shareable link retrieval
 # Version: 1.0.0
 # Created: 2026-07-01
-# Modified: 2026-07-01
+# Modified: 2026-10-17
 # =============================================
 
-"""Drive file sharing.
-
-Uploads a single file to Drive (under ``AIPass Backups/Shared``),
-sets a read permission, and retrieves a shareable webViewLink.
-Idempotent: reuses an existing file if one is found by name.
-"""
+"""Drive file sharing."""
 
 from __future__ import annotations
 
@@ -42,16 +37,9 @@ def _get_authenticated_email(client: DriveClient) -> str | None:
 
 
 def _revoke_public_access(client: DriveClient, file_id: str) -> bool:
-    """Delete every ``anyone`` permission standing on *file_id*.
+    """Delete every ``anyone`` permission on *file_id*: a reused file may carry an earlier ``--public`` share.
 
-    ``upload_for_share`` reuses a file it finds by name, so a restricted share
-    can land on a file an earlier ``--public`` run opened to the web.  Creating
-    the user permission does not close that door; only deleting the ``anyone``
-    permission does.
-
-    Returns ``True`` when the file is known to carry no ``anyone`` permission.
-    ``False`` when Drive could not be asked, or a delete failed — the caller
-    must refuse rather than report a file as restricted on a guess.
+    True only when the file is known to carry none; on False the caller must refuse, not guess restricted.
     """
     try:
         request = client.drive_service.permissions().list(  # type: ignore[union-attr]
@@ -86,12 +74,7 @@ def upload_for_share(
     local_file: Path,
     note: str = "",
 ) -> str | None:
-    """Upload a file for sharing.  Returns the Drive file ID or ``None``.
-
-    Idempotent: checks the ``Shared`` project folder first and reuses an
-    existing file (matched by name) instead of re-uploading.  Falls back
-    to :func:`upload_single_file` for the actual upload.
-    """
+    """Upload a file for sharing, reusing one of the same name in ``Shared``; the Drive file ID or None."""
     folder_id = client.get_or_create_project_folder(SHARE_PROJECT_NAME)
     if not folder_id:
         return None
@@ -122,15 +105,9 @@ def set_share_permission(
     *,
     public: bool = False,
 ) -> str | None:
-    """Set a read permission on *file_id*.
+    """Set a read permission on *file_id*; the permission ID, or None on failure.
 
-    *public* ``False`` (default): restricted to the authenticated user
-    (``type=user``, ``role=reader``), and any ``anyone`` permission an earlier
-    public share left on the file is revoked first — otherwise "restricted" is
-    a word printed over a file the web can still read.
-    ``True``: anyone with the link (``type=anyone``, ``role=reader``).
-
-    Returns the permission ID, or ``None`` on failure.
+    Restricted revokes any ``anyone`` permission first, or the web could still read a file called restricted.
     """
     if public:
         body: dict[str, Any] = {"type": "anyone", "role": "reader"}
@@ -160,10 +137,7 @@ def set_share_permission(
 
 
 def get_share_link(client: DriveClient, file_id: str) -> str | None:
-    """Retrieve the shareable link for *file_id*.
-
-    Prefers ``webViewLink``; falls back to ``webContentLink``.
-    """
+    """Retrieve the shareable link for *file_id*."""
     try:
         request = client.drive_service.files().get(  # type: ignore[union-attr]
             fileId=file_id,
@@ -186,11 +160,7 @@ def share_file(
     public: bool = False,
     note: str = "",
 ) -> dict[str, Any]:
-    """Upload, share, and return a link — the complete pipeline.
-
-    Returns a dict with ``success``, ``link``, ``file_id``, and
-    ``error`` keys.
-    """
+    """Upload, share, and return a link — the complete pipeline."""
     local_file = Path(local_file).resolve()
 
     if not local_file.is_file():
@@ -239,6 +209,3 @@ def share_file(
     )
 
     return {"success": True, "link": link, "file_id": file_id, "error": None}
-
-
-# =============================================

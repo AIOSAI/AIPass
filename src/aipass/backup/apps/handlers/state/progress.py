@@ -3,26 +3,13 @@
 # Description: Running-lane progress files — .backup/running/<lane>.json, written by the lane, read by status and stop
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Running-lane progress files (DPLAN-0412).
+"""Running-lane progress files.
 
-One file per lane in flight, ``<project>/.backup/running/<lane>.json``, written
-by the lane itself whoever started it (phone, terminal, daemon). The document
-is the backup door contract's ``running`` entry exactly
-(src/aipass/devpulse/docs.local/backup_door_contract.md, "running"); this file
-names its fields and does not retype the shape.
-
-The writer, :class:`LaneProgress`, writes the entry with ``progress`` null as
-soon as the lane knows it is running, rewrites it from the lane's per-file
-callback at most once a second on :func:`now`, and removes it on close. Every
-write goes through the json service's ``write_json``, which stages a temp file
-beside the target and renames it over, so a reader never sees half a document.
-
-The reader, :func:`read_running`, lists the entries whose process is alive and
-removes the rest: a pid that is gone, a zombie, or a pid that now belongs to a
-process younger than the lane (a recycled pid) is stale.
+The document is the backup door contract's ``running`` entry exactly
+(src/aipass/devpulse/docs.local/backup_door_contract.md); do not reshape it here.
 """
 
 import os
@@ -46,10 +33,7 @@ WORK_LANES = ("snapshot", "versioned", "drive_sync")
 
 
 def now() -> float:
-    """The clock the progress files read: seconds since the epoch.
-
-    One name so a test can move time instead of sleeping through it.
-    """
+    """The clock the progress files read; one name so a test can move time instead of sleeping."""
     return time.time()
 
 
@@ -64,17 +48,7 @@ def running_dir(project_root: str) -> Path:
 
 
 class LaneProgress:
-    """The one writer of a lane's running file.
-
-    Use as a context manager around the lane's run: entering writes the entry
-    (``progress`` null), leaving removes the file on every exit path.
-
-    Args:
-        project_root: The project the lane works on.
-        lane: The work being done: snapshot, versioned or drive_sync.
-        verb: What was invoked: the lane's own name, or ``all``.
-        clock: Seconds-since-epoch source; :func:`now` when None.
-    """
+    """The one writer of a lane's running file; as a context manager, removes it on every exit path."""
 
     def __init__(self, project_root: str, lane: str, verb: str, clock: Callable[[], float] | None = None) -> None:
         self.project_root = project_root
@@ -101,12 +75,7 @@ class LaneProgress:
         self._write(moment)
 
     def plan(self, total: int, bytes_total: int | None = None) -> None:
-        """The lane knows its total: progress becomes counts at zero.
-
-        Args:
-            total: Files the lane will go through.
-            bytes_total: Planned bytes, or None when the lane does not know.
-        """
+        """The lane knows its total: progress becomes counts at zero."""
         self.entry["progress"] = {
             "done": 0,
             "total": total,
@@ -119,13 +88,7 @@ class LaneProgress:
         self._maybe_write()
 
     def file_done(self, current: str, nbytes: int = 0, ok: bool = True) -> None:
-        """Count one finished file; rewrite the file if a second has passed.
-
-        Args:
-            current: The file's path as the lane names it.
-            nbytes: Bytes this file copied or uploaded (0 when unchanged).
-            ok: False when the file failed.
-        """
+        """Count one finished file; rewrite the file if a second has passed."""
         counts = self.entry["progress"]
         if counts is None:
             # A callback before plan() is a lane bug; count nothing rather than invent a total.
@@ -147,9 +110,7 @@ class LaneProgress:
     def _write(self, moment: float) -> None:
         """Write the entry atomically, into a store that already exists.
 
-        Never scaffolds: a lane refused for a missing root must not leave a
-        ``.backup/`` behind. A failed write is logged and the run goes on: the
-        file reports the work, it is not the work.
+        Never scaffolds: a lane refused for a missing root must not leave a ``.backup/`` behind.
         """
         self._last_write = moment
         if not backup_root(self.project_root).is_dir():
@@ -178,18 +139,9 @@ def _remove_stale(path: Path, reason: str) -> None:
 
 
 def read_running(project_root: str) -> list[dict]:
-    """The lanes in flight for a project, the contract's ``running`` list.
+    """The lanes in flight for a project, the contract's ``running`` list; stale files are removed.
 
-    A file whose process is not a live lane (gone, a zombie, or a pid younger
-    than the lane) is stale: left out and removed. So is a file that is not a
-    JSON object, which no lane writes. Nothing is created: a root with no
-    store reads ``[]``.
-
-    Args:
-        project_root: The project root.
-
-    Returns:
-        One entry per live lane, in WORK_LANES order.
+    Stale: not a JSON object, or its pid is gone, a zombie, or younger than the lane (recycled).
     """
     folder = running_dir(project_root)
     if not folder.is_dir():
@@ -209,6 +161,3 @@ def read_running(project_root: str) -> list[dict]:
             continue
         listed.append(entry)
     return listed
-
-
-# =============================================

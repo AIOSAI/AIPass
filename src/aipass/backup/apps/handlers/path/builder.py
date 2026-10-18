@@ -3,15 +3,10 @@
 # Description: Destination path builders for snapshot, versioned, and drive modes
 # Version: 2.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""Path builder handler.
-
-Computes destination paths for backup modes. Every local path is under the
-target project's .backup/ directory except .backupignore, which sits in the
-project root; build_drive_path names a remote Drive path, not a local one.
-"""
+"""Path builder handler."""
 
 import os
 from pathlib import Path
@@ -20,9 +15,8 @@ from ..audit import trail
 
 BACKUP_DIR = ".backup"
 
-#: Windows' MAX_PATH. POSIX enforces its own limits (1024 on macOS, 4096 on
-#: Linux): an over-long path there is the OS's OSError, which each lane records,
-#: so a 260 guard on POSIX only kept real files out of the store.
+#: Windows' MAX_PATH only: on POSIX an over-long path is the OS's OSError, which each lane records,
+#: and a 260 guard there only kept real files out of the store.
 _MAX_PATH = 260 if os.name == "nt" else None
 
 
@@ -77,13 +71,7 @@ def build_versioned_file_path(
     project_root: str,
     rel_path: str,
 ) -> Path:
-    """Build the file-folder target path for a versioned file.
-
-    Layout:
-        root-level file: <store>/root/<name>/<name>
-        nested file: <store>/<parent>/<name>/<name>
-        name >50 chars: <parent>/<name[:30]_md5[:8]>/<name>
-    """
+    """Build the file-folder target path for a versioned file."""
     import hashlib
 
     store = build_versioned_store(project_root)
@@ -103,38 +91,9 @@ def build_versioned_file_path(
 
 
 def build_drive_path(project_root: str, file: str) -> Path:
-    """Drive destination for one snapshot-store-relative file, as a single path.
-
-    This is a REMOTE path, not a local one: it names the folder hierarchy the
-    Drive lane creates, which the lane itself only ever holds as folder ids.
-    Read off the shipped sync, in the order the ids are resolved:
-
-        drive/client.py      the root folder, BACKUP_FOLDER_NAME
-        drive/upload.py      the project folder, named by the caller;
-                             run_drive_sync defaults that name to the
-                             project directory's own name
-        drive/upload.py      the lane folder (drive_sync passes DRIVE_LANE,
-                             "snapshot"), then rel_path.parent, one nested
-                             folder a segment
-        drive/upload.py      the create body's "name", the file's leaf
-
-    Layout (DPLAN-0411: only the snapshot store leaves the machine):
-        <BACKUP_FOLDER_NAME>/<project dir name>/snapshot/<rel_path>
-
-    Args:
-        project_root: Absolute path to the project.
-        file: Path of the file relative to the snapshot store -- the same
-            key drive/tracker.py records it under.
-
-    Returns:
-        The Drive-side path of the file.
-    """
-    # No name shortening here: the snapshot mirror keeps every name as the
-    # project has it, and nothing under handlers/drive/ hashes a name.
+    """Drive destination for one snapshot-store-relative file, as a single path."""
+    # REMOTE: mirrors the folders drive/client.py and drive/upload.py create; no name shortening on Drive.
     from ..drive.client import BACKUP_FOLDER_NAME
     from ..drive.tracker import DRIVE_LANE
 
     return Path(BACKUP_FOLDER_NAME) / Path(project_root).name / DRIVE_LANE / file
-
-
-# =============================================

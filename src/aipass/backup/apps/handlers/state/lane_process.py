@@ -3,26 +3,14 @@
 # Description: The lane's process seen from outside — alive, really a backup lane for this root, and how to end it
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
-"""A running lane's process, seen from another process (DPLAN-0412).
+"""A running lane's process, seen from another process (DPLAN-0412)."""
 
-Read through psutil, already a dependency of the package, so the same code
-answers on Linux, macOS and Windows; nothing here reads ``/proc`` itself.
-
-Two guards stand between a running file and a signal:
-
-* :func:`live_lane` — the pid is alive, not a zombie, and the process started
-  no later than the lane did. A process younger than the lane's
-  ``started_at`` holds a recycled pid: the lane it named is gone.
-* :func:`lane_for_root` — the process's command line is a backup lane for
-  this root: backup's entry point, then the verb the file names, then this
-  root (as given, or a registered name that resolves to it).
-
-On Windows, psutil's terminate is TerminateProcess: the lane gets no SIGTERM
-handler run, so its running file is left for the next reader to clear.
-"""
+# psutil, never /proc, so the same code answers on Linux, macOS and Windows.
+# Two guards before any signal: live_lane (alive, not a zombie, not a recycled pid) and lane_for_root.
+# On Windows terminate is TerminateProcess: no SIGTERM handler runs, so the running file is left behind.
 
 from datetime import datetime
 from pathlib import Path
@@ -34,11 +22,9 @@ from aipass.prax import logger
 from ..audit import trail
 from ..project.registry import list_projects, lookup_project
 
-#: Seconds a lane's process may appear to start after its started_at: the
-#: instant is written in whole seconds, after the interpreter came up.
+#: started_at is written in whole seconds after the interpreter came up, so the process may look younger.
 STARTED_SLACK_SECONDS = 2.0
 
-#: How long kill() is given to take the process after the polite wait.
 KILL_WAIT_SECONDS = 5.0
 
 ENTRY_SCRIPT = "backup.py"
@@ -47,14 +33,7 @@ LEGACY_VERB = "backup"
 
 
 def open_process(pid: int) -> psutil.Process | None:
-    """The one seam to the process table: the process for a pid, or None when there is none.
-
-    Args:
-        pid: A process id read off a running file.
-
-    Returns:
-        psutil's handle, or None when no such process exists.
-    """
+    """The one seam to the process table: the process for a pid, or None when there is none."""
     try:
         return psutil.Process(pid)
     except (psutil.NoSuchProcess, ValueError) as exc:
@@ -72,15 +51,8 @@ def _started_epoch(entry: dict) -> float | None:
 
 
 def live_lane(entry: dict) -> psutil.Process | None:
-    """The live process a running entry names, or None when the entry is stale.
-
-    Args:
-        entry: A running file's document.
-
-    Returns:
-        The process, when its pid is alive, not a zombie, and no younger than
-        the lane; else None.
-    """
+    """The live process a running entry names, or None when the entry is stale."""
+    # A process younger than the lane's started_at holds a recycled pid: the lane it named is gone.
     pid = entry.get("pid")
     started = _started_epoch(entry)
     if not isinstance(pid, int) or started is None:
@@ -122,20 +94,7 @@ def _names_root(words: list[str], verb: str, project_root: str) -> bool:
 
 
 def cmdline_is_lane(cmdline: list[str], verb: str, project_root: str) -> bool:
-    """True when a command line is backup running ``verb`` for ``project_root``.
-
-    Backup's entry point (``.../backup.py`` or ``-m aipass.backup.apps.backup``),
-    then the verb, then the root; the legacy ``backup <root>`` form counts for
-    snapshot, versioned and all.
-
-    Args:
-        cmdline: The process's argv.
-        verb: The verb the running file names.
-        project_root: The root the running file lives under.
-
-    Returns:
-        Whether the process may be signalled for that lane.
-    """
+    """True when a command line is backup running ``verb`` for ``project_root``."""
     for index, word in enumerate(cmdline):
         if Path(word).name != ENTRY_SCRIPT and word != ENTRY_MODULE:
             continue
@@ -150,16 +109,7 @@ def cmdline_is_lane(cmdline: list[str], verb: str, project_root: str) -> bool:
 
 
 def lane_for_root(proc: psutil.Process, entry: dict, project_root: str) -> str | None:
-    """Refuse to signal a process that is not this root's lane.
-
-    Args:
-        proc: The live process the entry names.
-        entry: The running file's document.
-        project_root: The root the stop was asked for.
-
-    Returns:
-        None when the process is the lane; else the reason it is not signalled.
-    """
+    """Refuse to signal a process that is not this root's lane."""
     try:
         cmdline = proc.cmdline()
     except psutil.AccessDenied as exc:
@@ -172,15 +122,7 @@ def lane_for_root(proc: psutil.Process, entry: dict, project_root: str) -> str |
 
 
 def end_process(proc: psutil.Process, wait_seconds: float) -> str:
-    """SIGTERM, wait, SIGKILL after; reap either way.
-
-    Args:
-        proc: The lane's process, already through both guards.
-        wait_seconds: How long SIGTERM is given before SIGKILL.
-
-    Returns:
-        "terminated" when it went on SIGTERM, "killed" when it took SIGKILL.
-    """
+    """SIGTERM, wait, SIGKILL after; reap either way."""
     try:
         proc.terminate()
         proc.wait(timeout=wait_seconds)
@@ -204,6 +146,3 @@ def _kill(proc: psutil.Process) -> None:
         logger.info(f"[backup] lane process: already gone on kill: {exc}")
     except psutil.TimeoutExpired as exc:
         logger.warning(f"[backup] lane process: {proc.pid} not reaped after SIGKILL: {exc}")
-
-
-# =============================================
