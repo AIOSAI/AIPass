@@ -7,7 +7,7 @@ Provides consistent terminal output — headers, success/error/warning messages,
 section breaks, and operation templates — so every branch looks the same without
 duplicating Rich formatting code.
 **Module:** `aipass.cli`
-**Version:** 2.3.1
+**Version:** 2.3.2
 
 ## Quick Start
 
@@ -116,7 +116,7 @@ the live importers, grep the tree rather than trusting a number written here.
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-18
 
 ---
 
