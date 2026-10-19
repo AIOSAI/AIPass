@@ -306,10 +306,10 @@ The installer also writes a layer outside the project. Remove all of it to erase
 Use spawn's delete command to cleanly archive and deregister:
 
 ```bash
-drone @spawn delete @agent_name          # asks for confirmation; --yes skips it
+drone @spawn delete @agent_name --retire   # asks for confirmation; --yes skips it
 ```
 
-This copies the agent's directory to `.archive/deleted_branches/` (minus `.venv`, `.git`, caches), removes it from the registry, then deletes the original. The fleet's own core agents (spawn, drone, devpulse, the registry owner) refuse deletion, and so does any agent whose passport says it is registered: set `citizenship.registered` to `false` in its `.trinity/passport.json` first, then delete.
+This copies the agent's directory to `.archive/deleted_branches/` (minus `.venv`, `.git`, caches), removes it from the registry, then deletes the original. The fleet's own core agents (spawn, drone, devpulse, the registry owner) refuse deletion. Every agent you create is registered, and a plain `delete` refuses it too: `--retire` is the door, and the archived copy of its passport records that it was retired.
 
 </details>
 
