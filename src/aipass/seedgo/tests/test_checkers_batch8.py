@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.0.6
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
@@ -1082,3 +1082,72 @@ def test_no_dangerous_flags_bypass_rule(tmp_path):
 
     result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"), bypass_rules=bypass_rules)
     assert result["passed"] is True
+
+
+# -- prose lines: docstrings and comment lines are never read as code --------
+
+
+def test_no_dangerous_flags_reads_code_after_a_docstring_quoting_the_other_delimiter(tmp_path):
+    lines = _lines('"""Quotes \'\'\' in prose."""\ncmd = "--dangerously-skip-permissions"\n')
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
+    assert result["message"].startswith("Dangerous permission bypass flags on lines [2]")
+
+
+def test_no_dangerous_flags_reads_a_triple_quoted_literal_in_code(tmp_path):
+    lines = _lines('cmd = """--dangerously-skip-permissions"""\n')
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
+    assert result["message"].startswith("Dangerous permission bypass flags on lines [1]")
+
+
+def test_no_dangerous_flags_ignores_flag_words_in_a_docstring_holding_the_other_delimiter(tmp_path):
+    lines = _lines('"""\n\'\'\'\nUse --dangerously-skip-permissions never.\n"""\nx = 1\n')
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
+    assert result["passed"] is True
+
+
+def test_no_raw_file_handler_ignores_a_one_line_docstring_naming_it(tmp_path):
+    lines = _lines('"""Never logging.FileHandler("x.log") here."""\nimport logging\n')
+    result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
+    assert result["passed"] is True
+
+
+def test_no_raw_file_handler_ignores_a_multi_line_docstring_naming_it(tmp_path):
+    lines = _lines('def f():\n    """Avoid\n    logging.FileHandler("x.log")\n    """\n    return 1\n')
+    result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
+    assert result["passed"] is True
+
+
+def test_no_raw_stream_handler_ignores_a_docstring_naming_it(tmp_path):
+    content = '"""\nlogging.StreamHandler() beside system_logs.\n"""\nimport logging\n'
+    result = check_no_raw_stream_handler(_lines(content), str(tmp_path / "fake/path.py"), content)
+    assert result["passed"] is True
+
+
+def test_error_not_user_input_reads_code_after_a_docstring_quoting_the_other_delimiter(tmp_path):
+    lines = _lines('"""Quotes \'\'\' in prose."""\nlogger.error("Unknown command: %s", cmd)\n')
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
+    assert result["message"].startswith("ERROR level used for user input on lines [2]")
+
+
+def test_error_not_user_input_reads_a_triple_quoted_literal_in_code(tmp_path):
+    lines = _lines('logger.error("""Unknown command: %s""", cmd)\n')
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
+    assert result["message"].startswith("ERROR level used for user input on lines [1]")
+
+
+def test_constant_naming_reads_the_line_opening_a_triple_quoted_literal():
+    result = check_constant_naming('bad_name = """\nbody\n"""\n')
+    assert result is not None
+    assert result["message"] == "Non-UPPER_CASE constants: bad_name"
+
+
+def test_constant_naming_never_reads_a_literal_body_as_an_assignment():
+    result = check_constant_naming('TEXT = """\nfoo = 1\n"""\n')
+    assert result is not None
+    assert result["passed"] is True
+
+
+def test_constant_naming_reads_code_after_a_docstring_holding_the_other_delimiter():
+    result = check_constant_naming("'''\n\"\"\"\n'''\nlower_x = 1\n")
+    assert result is not None
+    assert result["message"] == "Non-UPPER_CASE constants: lower_x"

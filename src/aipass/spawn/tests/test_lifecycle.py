@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, sync-registry)
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -115,6 +115,25 @@ def mock_registry(repo_root, mock_branch):
     reg_path = repo_root / "AIPASS_REGISTRY.json"
     reg_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
     return reg_path
+
+
+def _register_citizen(repo_root):
+    """Give mock_branch the passport every mint writes: citizenship.registered true."""
+    branch = repo_root / "src" / "aipass" / "test_api"
+    passport = {
+        "branch_info": {"branch_name": "test_api"},
+        "citizenship": {"registered": True, "registry_id": "keep-me"},
+    }
+    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport, indent=2) + "\n", encoding="utf-8")
+    return branch
+
+
+def _passport(branch):
+    return json.loads((branch / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+
+
+def _registry_names(registry_path):
+    return [b["name"] for b in json.loads(registry_path.read_text(encoding="utf-8"))["branches"]]
 
 
 class TestDeleteBranch:
@@ -1032,6 +1051,76 @@ class TestHandleDelete:
             result = handle_delete(["--yes", "@spawn"])
 
         assert result == 1
+
+    def test_an_active_citizen_is_refused_without_retire_and_named_the_flag(self, capsys, repo_root, mock_registry):
+        branch = _register_citizen(repo_root)
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            result = handle_delete(["--yes", "@test_api"])
+
+        assert result == 1
+        assert "--retire" in "".join(capsys.readouterr())
+        assert _passport(branch)["citizenship"]["registered"] is True
+        assert "TEST_API" in _registry_names(mock_registry)
+
+    def test_retire_archives_deregisters_and_the_archived_passport_says_unregistered(self, repo_root, mock_registry):
+        branch = _register_citizen(repo_root)
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            result = handle_delete(["--retire", "--yes", "@test_api"])
+
+        assert result == 0
+        assert not branch.exists()
+        assert "TEST_API" not in _registry_names(mock_registry)
+        (archive,) = (repo_root / ".archive" / "deleted_branches").iterdir()
+        archived = _passport(archive)
+        assert archived["citizenship"]["registered"] is False
+        assert archived["citizenship"]["registry_id"] == "keep-me"
+
+    @pytest.mark.parametrize("target", ["spawn", "owner"])
+    def test_retire_never_opens_the_floor_or_the_registry_owner(self, capsys, repo_root, mock_registry, target):
+        # The floor target gets a real directory, so only the protection layer can stop it.
+        branch = _register_citizen(repo_root)
+        if target == "owner":
+            reg = json.loads(mock_registry.read_text(encoding="utf-8"))
+            next(b for b in reg["branches"] if b["name"] == "TEST_API")["owner"] = True
+            mock_registry.write_text(json.dumps(reg, indent=2), encoding="utf-8")
+        else:
+            branch = repo_root / "src" / "aipass" / "spawn"
+            (branch / ".trinity").mkdir(parents=True)
+        name = "@spawn" if target == "spawn" else "@test_api"
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            result = handle_delete(["--retire", "--yes", name])
+
+        assert result == 1
+        assert "protected" in "".join(capsys.readouterr())
+        assert branch.exists()
+        assert not (repo_root / ".archive").exists()
+
+    def test_retire_dry_run_writes_nothing(self, repo_root, mock_registry):
+        branch = _register_citizen(repo_root)
+        registry_before = mock_registry.read_text(encoding="utf-8")
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            result = handle_delete(["--retire", "--dry-run", "@test_api"])
+
+        assert result == 0
+        assert _passport(branch)["citizenship"]["registered"] is True
+        assert mock_registry.read_text(encoding="utf-8") == registry_before
+        assert not (repo_root / ".archive").exists()
+
+    def test_retire_keeps_the_confirmation_prompt(self, repo_root, mock_registry, monkeypatch):
+        branch = _register_citizen(repo_root)
+        monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            result = handle_delete(["--retire", "@test_api"])
+
+        assert result == 1
+        assert _passport(branch)["citizenship"]["registered"] is True
+        assert "TEST_API" in _registry_names(mock_registry)
+        assert not (repo_root / ".archive").exists()
 
     def test_failed_dry_run_prints_no_raw_markup(self, capsys, repo_root, mock_registry):
         """The failure line must not leak literal Rich tags.

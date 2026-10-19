@@ -107,7 +107,7 @@ class TestGitChangesMatchesTheDesktopCard:
 
 
 class TestGitChangesCoalescesTheStampede:
-    """The 2026-09-07 cure: one screen's worth of cards costs one exec per
+    """One screen's worth of cards costs one exec per
     distinct question, not one per card."""
 
     # N concurrent subprocesses fight over one machine, so the cure is single-flight plus TTL, not a longer timeout.
@@ -225,7 +225,7 @@ class TestGitChangesCoalescesTheStampede:
         assert host_git._changes._entries == {}, "a failure must never be stored as an answer"
 
     def test_callers_queued_behind_a_failed_flight_share_its_failure(self, fake_repo: dict) -> None:
-        """The half of the promise nothing pinned, measured false 2026-09-25."""
+        """Callers queued behind a failed flight share its failure instead of each running their own exec."""
         # refusals.py does not remember a timeout, so without sharing, N queued callers cost N serial 30s execs.
         callers = 8
         arrivals = []

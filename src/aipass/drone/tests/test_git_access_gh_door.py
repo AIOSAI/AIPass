@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-10-16
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py and the gh passthrough verbs of apps/modules/git_module.py."""
@@ -391,6 +391,30 @@ class TestRepoDoorRefusals:
 class TestRepoDoorHappyPath:
     """The admin seat reads, commits, pushes and tags a real repo with a real origin."""
 
+    def test_the_door_record_lands_in_aipass_and_nothing_new_in_the_target_repo(
+        self, door_world: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the ledger follows the caller's directory — a project's own .ai_central gets AIPass's audit."""
+        ext = door_world["ext"]
+        (ext / "EXT_REGISTRY.json").write_text("{}", encoding="utf-8")
+        before = sorted(p.relative_to(ext) for p in ext.rglob("*") if ".git" not in p.parts)
+        monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
+        monkeypatch.setenv("AIPASS_HOME", str(door_world["root"]))
+        monkeypatch.chdir(ext)
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            handle_command("status", ["--repo", str(ext)])
+
+        after = sorted(p.relative_to(ext) for p in ext.rglob("*") if ".git" not in p.parts)
+        assert after == before
+        [row] = [
+            json.loads(line)
+            for line in (door_world["root"] / ".ai_central" / "git_repo_door.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        assert (row["verb"], row["repo"]) == ("status", str(ext.resolve()))
+
     def test_the_admin_lands_a_release_in_an_external_repo(self, door_world: dict[str, Path], tmp_path: Path) -> None:
         root, ext, origin = door_world["root"], door_world["ext"], door_world["origin"]
         seed = _git(ext, "rev-parse", "HEAD")
@@ -562,14 +586,47 @@ class TestRepoDoorFetchAndSync:
         assert _git(ext, "rev-parse", "origin/main") == head, "nothing was fetched"
         assert (ext / "README.md").read_text(encoding="utf-8") == "edited\n"
 
-    def test_a_branch_with_no_upstream_is_refused_by_name(self, door_world: dict[str, Path]) -> None:
+    def test_no_configured_upstream_compares_against_origin_by_name_and_writes_no_config(
+        self, door_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the by-name lookup removed — a branch created locally beside origin/main is refused."""
         ext = door_world["ext"]
+        config = (ext / ".git" / "config").read_text(encoding="utf-8")
+        remote = _remote_commit(door_world, "upstream.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("fetch", ["--repo", "projects/ext"])
+
+        assert result["stdout"] == (
+            f"Fetched origin in {ext.resolve()}.\n"
+            f"'main' against origin/main{repo_door.BY_NAME_NOTE}: ahead 0, behind 1.\n"
+            "Behind: on origin/main, not here (newest first):\n"
+            f"  {remote[:7]} remote upstream.txt"
+        )
+        assert (ext / ".git" / "config").read_text(encoding="utf-8") == config
+
+    def test_sync_fast_forwards_onto_origin_by_name_when_none_is_configured(self, door_world: dict[str, Path]) -> None:
+        ext = door_world["ext"]
+        remote = _remote_commit(door_world, "upstream.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("sync", ["--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0
+        assert _git(ext, "rev-parse", "HEAD") == remote
+
+    def test_a_branch_with_neither_an_upstream_nor_an_origin_twin_is_refused_by_name(
+        self, door_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the by-name ref unverified — git is asked to compare against a ref that does not exist."""
+        ext = door_world["ext"]
+        _git(ext, "checkout", "-q", "-b", "solo")
 
         with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
             result = handle_command("fetch", ["--repo", "projects/ext"])
 
         expected = repo_door.REFUSE_NO_UPSTREAM.format(
-            verb="fetch", branch="main", repo=ext.resolve(), fetched="origin"
+            verb="fetch", branch="solo", repo=ext.resolve(), fetched="origin"
         )
         assert result == {"stdout": "", "stderr": expected, "exit_code": 1}
 
@@ -601,7 +658,8 @@ class TestRepoDoorFetchAndSync:
 
     def test_help_names_fetch_and_sync_on_the_door(self) -> None:
         text = get_help()
-        assert "  fetch | sync | merge-upstream  --repo <path>\n" in text
+        assert "  fetch | sync  --repo <path>\n  merge-upstream  --repo <path> [--theirs <path> ...]\n" in text
+        assert repo_door.REFUSE_THEIRS_NO_PATH in text and repo_door.REFUSE_MERGE_ARGS in text
         assert (
             repo_door.REFUSE_DIVERGED.format(
                 branch="<branch>", upstream="<upstream>", repo="<repo>", ahead="<n>", behind="<m>"
@@ -620,6 +678,105 @@ def _same_line_on_both_sides(world: dict[str, Path]) -> None:
     _git(other, "push", "-q", "origin", "main")
     (world["ext"] / "README.md").write_text("ours\n", encoding="utf-8")
     _git(world["ext"], "commit", "-q", "-am", "local readme")
+
+
+def _conflict_in(world: dict[str, Path], *names: str) -> tuple[str, str]:
+    """Seed each file, then change its one line on origin and locally: the merge conflicts on every one.
+
+    Returns (local HEAD, origin HEAD).
+    """
+    ext, other = world["ext"], world["origin"].parent / "other"
+    for name in names:
+        (ext / name).parent.mkdir(parents=True, exist_ok=True)
+        (ext / name).write_text("base\n", encoding="utf-8")
+    _git(ext, "add", *names)
+    _git(ext, "commit", "-q", "-m", "seed")
+    _git(ext, "push", "-q", "origin", "main")
+    _git(other.parent, "clone", "-q", "-b", "main", str(world["origin"]), str(other))
+    for repo, side in ((other, "theirs"), (ext, "ours")):
+        for name in names:
+            (repo / name).write_text(f"{side}\n", encoding="utf-8")
+        _git(repo, "commit", "-q", "-am", side)
+    _git(other, "push", "-q", "origin", "main")
+    return _git(ext, "rev-parse", "HEAD"), _git(other, "rev-parse", "HEAD")
+
+
+class TestRepoDoorMergeUpstreamTheirs:
+    """--theirs: listed conflicts take the upstream's side and the merge completes; anything else aborts."""
+
+    def test_listed_conflicts_take_theirs_and_complete_one_merge_commit_of_both_parents(
+        self, door_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: checkout --ours for --theirs — the merge completes and keeps the local side."""
+        ext, origin = door_world["ext"], door_world["origin"]
+        local, remote = _conflict_in(door_world, "app/package.json", "app/package-lock.json")
+        paths = ["app/package.json", "app/package-lock.json"]
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext", "--theirs", *paths])
+
+        merge = _git(ext, "rev-parse", "HEAD")
+        assert result["exit_code"] == 0, result
+        assert f"merge commit {merge[:7]}" in result["stdout"]
+        assert "Took origin/main's side for:\n  app/package.json\n  app/package-lock.json" in result["stdout"]
+        assert f"HEAD is now {merge[:7]}." in result["stdout"]
+        assert _git(ext, "log", "-1", "--format=%P") == f"{local} {remote}"
+        assert [(ext / p).read_text(encoding="utf-8") for p in paths] == ["theirs\n", "theirs\n"]
+        assert _git(ext, "status", "--porcelain") == ""
+        assert _git(origin, "rev-parse", "main") == remote, "merge-upstream never pushes"
+        [record] = _ledger(tmp_path)
+        assert (record["head_after"], record["theirs_taken"]) == (merge, paths)
+
+    def test_an_unlisted_conflict_aborts_and_names_every_conflicted_path(self, door_world: dict[str, Path]) -> None:
+        """Mutant: the subset check is any() — the listed path is taken and the unlisted one committed with markers."""
+        ext = door_world["ext"]
+        local, _ = _conflict_in(door_world, "app/package.json", "app/package-lock.json")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext", "--theirs", "app/package.json"])
+
+        refusal = repo_door.REFUSE_CONFLICT.format(branch="main", upstream="origin/main", repo=ext.resolve())
+        named = "\n  app/package-lock.json (not in --theirs)\n  app/package.json"
+        assert result == {"stdout": "", "stderr": refusal + named, "exit_code": 1}
+        assert _git(ext, "rev-parse", "HEAD") == local
+        assert _git(ext, "status", "--porcelain") == ""
+        assert not (ext / ".git" / "MERGE_HEAD").exists()
+
+    def test_a_listed_path_that_did_not_conflict_is_reported_not_needed(self, tracked_world: dict[str, Path]) -> None:
+        """Mutant: the subset check is set equality — the unconflicted listed path aborts the merge."""
+        ext = tracked_world["ext"]
+        _same_line_on_both_sides(tracked_world)
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("merge-upstream", ["--repo", "projects/ext", "--theirs", "README.md", "docs/x.md"])
+
+        assert result["exit_code"] == 0, result
+        assert "Took origin/main's side for:\n  README.md\n" in result["stdout"]
+        assert "Not needed (did not conflict):\n  docs/x.md\n" in result["stdout"]
+        assert (ext / "README.md").read_text(encoding="utf-8") == "theirs\n"
+
+    def test_the_flag_without_a_path_and_a_path_outside_the_repo_are_refused_before_fetching(
+        self, tracked_world: dict[str, Path]
+    ) -> None:
+        """Mutant: the no-path check removed — a bare --theirs merges as if it were absent."""
+        ext = tracked_world["ext"]
+        head = _git(ext, "rev-parse", "HEAD")
+        _remote_commit(tracked_world, "upstream.txt")
+        door = ["--repo", "projects/ext"]
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            bare = handle_command("merge-upstream", [*door, "--theirs"])
+            slash = handle_command("merge-upstream", [*door, "--theirs", "/etc/hosts"])
+            above = handle_command("merge-upstream", [*door, "--theirs", "app/../../x"])
+            inside = handle_command("merge-upstream", [*door, "--theirs", str(ext / "README.md")])
+
+        assert bare == {"stdout": "", "stderr": repo_door.REFUSE_THEIRS_NO_PATH, "exit_code": 1}
+        assert slash["stderr"] == repo_door.REFUSE_THEIRS_OUTSIDE.format(path="/etc/hosts", repo=ext.resolve())
+        assert above["stderr"] == repo_door.REFUSE_THEIRS_OUTSIDE.format(path="app/../../x", repo=ext.resolve())
+        assert inside["stderr"] == repo_door.REFUSE_THEIRS_OUTSIDE.format(
+            path=str(ext / "README.md"), repo=ext.resolve()
+        )
+        assert _git(ext, "rev-parse", "origin/main") == head, "nothing was fetched"
 
 
 class TestRepoDoorMergeUpstream:
@@ -722,7 +879,7 @@ class TestRepoDoorMergeUpstream:
             extra = handle_command("merge-upstream", ["origin/main", "--repo", "projects/ext"])
 
         assert aipass["stderr"] == repo_door.REFUSE_AIPASS.format(path=str(target))
-        assert extra["stderr"] == repo_door.REFUSE_NO_ARGS.format(verb="merge-upstream")
+        assert extra["stderr"] == repo_door.REFUSE_MERGE_ARGS
 
 
 # ===========================================================================

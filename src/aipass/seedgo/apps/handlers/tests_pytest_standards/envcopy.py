@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """The scratch environment a suite is measured inside. Law M10 made concrete.
@@ -13,6 +13,7 @@ No suite runs in place. <env>/src goes ahead of the editable install's .pth, or
 symlinked sibling writes through. The exclude set is part of the contract.
 """
 
+import fnmatch
 import os
 import shutil
 import subprocess
@@ -23,7 +24,12 @@ from typing import List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.tests_pytest_standards.diff_scope import DiffScope, read_scope
+from aipass.seedgo.apps.handlers.tests_pytest_standards.diff_scope import (
+    DiffScope,
+    DiffScopeError,
+    caller_home,
+    read_scope,
+)
 
 #: Never copied; each entry is large or live enough to change what the lane costs.
 RSYNC_EXCLUDES: Tuple[str, ...] = (
@@ -39,6 +45,12 @@ RSYNC_EXCLUDES: Tuple[str, ...] = (
     # excluded by pattern because the settled json is part of the tree.
     ".*_*.tmp",
 )
+
+#: Repo-root directories whose tracked files suites read by path (bootstrap, cross_os).
+ROOT_DIRS: Tuple[str, ...] = (".aipass", "tests")
+
+TRACKED_QUERY: Tuple[str, ...] = ("drone", "@git", "tracked")
+TRACKED_TIMEOUT_SECONDS = 120
 
 #: 24 = files vanished mid-transfer (the tree moved), not a partial copy. Tolerated,
 #: not ignored: stderr is recorded in `vanished_during_copy`.
@@ -82,6 +94,9 @@ class EnvSpec:
     #: `host_repo` when a banked fixture borrows the running checkout's siblings.
     sibling_basis: str = SIBLINGS_FROM_OWN_ROOT
 
+    root_files: List[str] = field(default_factory=list)
+    root_basis: str = ""
+
     #: On the spec because the spec is the only thing `nominate()` receives.
     execution_groups: List[str] = field(default_factory=list)
 
@@ -107,6 +122,9 @@ class EnvSpec:
             "copied_siblings": list(self.copied_siblings),
             "symlinked_siblings": list(self.symlinked_siblings),
             "sibling_basis": self.sibling_basis,
+            "root_dirs": list(ROOT_DIRS),
+            "root_files": list(self.root_files),
+            "root_basis": self.root_basis,
             "m10_complete": self.m10_complete,
             "excludes": list(RSYNC_EXCLUDES),
             "vanished_during_copy": list(self.vanished_during_copy),
@@ -233,6 +251,61 @@ def sibling_source(repo_root: Path, target_name: str) -> Tuple[Path, str]:
     )
 
 
+def _root_candidates(repo_root: Path) -> List[Path]:
+    """The root's own files and every file under ROOT_DIRS, excludes left out."""
+    found = [entry for entry in repo_root.iterdir() if entry.is_file()]
+    for name in ROOT_DIRS:
+        tree = repo_root / name
+        if tree.is_dir():
+            found += [path for path in tree.rglob("*") if path.is_file() and not _excluded(path, tree)]
+    return sorted(found)
+
+
+def _excluded(path: Path, tree: Path) -> bool:
+    """Whether any part of *path* below *tree* is an RSYNC_EXCLUDES name."""
+    return any(fnmatch.fnmatch(part, pattern) for part in path.relative_to(tree).parts for pattern in RSYNC_EXCLUDES)
+
+
+def tracked_root_files(repo_root: Path) -> Tuple[List[str], str]:
+    """The root files a fresh clone holds, repo-relative, and how they were chosen.
+
+    Only tracked files: an ignored one (the registry, `.aipass/alerts.json`) is this machine's
+    state. No `.git` means no clone to mirror, and says so.
+    """
+    if not (repo_root / ".git").exists():
+        return [], f"no .git at {repo_root}, so no repo-root file was copied"
+    candidates = _root_candidates(repo_root)
+    if not candidates:
+        return [], f"{repo_root} holds no root file"
+
+    try:
+        result = subprocess.run(
+            [*TRACKED_QUERY, *(str(path) for path in candidates)],
+            capture_output=True,
+            text=True,
+            cwd=str(caller_home()),
+            timeout=TRACKED_TIMEOUT_SECONDS,
+        )
+    except (subprocess.TimeoutExpired, OSError, DiffScopeError) as exc:
+        raise EnvError(f"the tracked root files of {repo_root} could not be read: {type(exc).__name__}: {exc}") from exc
+    if result.returncode != 0:
+        raise EnvError(f"the tracked root files of {repo_root} could not be read: {result.stderr.strip()[:300]}")
+
+    tracked = {line.split(None, 1)[1].strip() for line in result.stdout.splitlines() if line.startswith("tracked ")}
+    chosen = [rel for rel in (path.relative_to(repo_root).as_posix() for path in candidates) if rel in tracked]
+    return chosen, f"{len(chosen)} of {len(candidates)} repo-root file(s) are tracked and were copied"
+
+
+def _copy_root_files(repo_root: Path, env_root: Path) -> Tuple[List[str], str]:
+    """Copy the tracked root files beside `src/`, mode kept: the launcher's tests run it."""
+    chosen, basis = tracked_root_files(repo_root)
+    for rel in chosen:
+        destination = env_root / rel
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo_root / rel, destination)
+    return chosen, basis
+
+
 def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bool) -> dict:
     """Mirror the `src/aipass/<name>` layout inside the scratch env."""
     src_dir = env_root / "src" / "aipass"
@@ -250,6 +323,7 @@ def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bo
         shutil.copy2(root_conftest, env_root / "conftest.py")
 
     copied, symlinked, warnings = _place_siblings(real_src, src_dir, target.name, symlink)
+    root_files, root_basis = _copy_root_files(repo_root, env_root)
     target_copy = src_dir / target.name
     target_warning = rsync(target, target_copy)
     if target_warning is not None:
@@ -265,6 +339,8 @@ def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bo
         "symlinked_siblings": symlinked,
         "sibling_basis": sibling_basis,
         "vanished_during_copy": warnings,
+        "root_files": root_files,
+        "root_basis": root_basis,
     }
 
 
@@ -365,6 +441,8 @@ def build_env(
         copied_siblings=built["copied_siblings"],
         symlinked_siblings=built["symlinked_siblings"],
         sibling_basis=built.get("sibling_basis", SIBLINGS_FROM_OWN_ROOT),
+        root_files=built.get("root_files", []),
+        root_basis=built.get("root_basis", "a plain target has no repo root"),
         vanished_during_copy=built.get("vanished_during_copy", []),
         execution_groups=normalise_execution_groups(execution_groups),
         diff_scope=scope,

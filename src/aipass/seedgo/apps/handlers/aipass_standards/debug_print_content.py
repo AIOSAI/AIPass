@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: debug_print_content.py
 # Description: Debug Print Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -32,7 +32,7 @@ def get_debug_print_standards() -> str:
         "  Scans every .py file for bare [dim]print([/dim] calls that are NOT:",
         "",
         "  [green]Excluded automatically:[/green]",
-        "  - Inside docstrings (triple-quoted regions)",
+        "  - Inside docstrings, or in the body of a multi-line string literal",
         "  - On comment lines ([dim]# print(...)[/dim])",
         "  - In doctest / interactive examples ([dim]>>> print(...)[/dim])",
         '  - Inside [dim]if __name__ == "__main__":[/dim] blocks',

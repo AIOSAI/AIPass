@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_ux_check.py
 # Description: CLI UX Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-17
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -14,6 +14,7 @@ help and introspection output.
 """
 
 import ast
+import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -23,6 +24,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
+
+_RICH_TAG = re.compile(r"\[/?[^\[\]]*\]")
 
 
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
@@ -340,28 +343,52 @@ def _check_usage_section(help_func: Optional[ast.FunctionDef], filename: str) ->
     }
 
 
+def _is_print_call(node: ast.Call) -> bool:
+    """``print(...)``, or ``.print(...)`` on a receiver named ``console``."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id == "print"
+    if not (isinstance(func, ast.Attribute) and func.attr == "print"):
+        return False
+    receiver = func.value
+    return (isinstance(receiver, ast.Name) and receiver.id == "console") or (
+        isinstance(receiver, ast.Attribute) and receiver.attr == "console"
+    )
+
+
+def _literal_text(node: ast.expr) -> str:
+    """The literal text of a string argument; an f-string contributes its constant parts."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        return "".join(str(part.value) for part in node.values if isinstance(part, ast.Constant))
+    return ""
+
+
+def _printed_headings(func_node: ast.FunctionDef) -> List[str]:
+    """Each string a print call inside ``func_node`` prints, Rich markup and outer whitespace removed."""
+    texts = [
+        _literal_text(arg)
+        for node in ast.walk(func_node)
+        if isinstance(node, ast.Call) and _is_print_call(node)
+        for arg in node.args
+    ]
+    return [_RICH_TAG.sub("", text).strip() for text in texts]
+
+
 def _check_examples_section(help_func: Optional[ast.FunctionDef], filename: str) -> Dict:
-    """Check 7: print_help contains an Examples section."""
-    if help_func is None:
+    """Check 7: print_help prints a heading that starts with Examples; a docstring or unprinted string is not one."""
+    if help_func is not None and any(text.lower().startswith("examples") for text in _printed_headings(help_func)):
         return {
             "name": "examples_section",
-            "passed": False,
-            "message": "print_help() must include an Examples section",
+            "passed": True,
+            "message": f"print_help() in {filename} prints an Examples heading",
         }
-
-    strings = _collect_string_constants(help_func)
-    for s in strings:
-        if "example" in s.lower():
-            return {
-                "name": "examples_section",
-                "passed": True,
-                "message": f"print_help() in {filename} includes an Examples section",
-            }
 
     return {
         "name": "examples_section",
         "passed": False,
-        "message": "print_help() must include an Examples section",
+        "message": "print_help() must print an Examples heading",
     }
 
 

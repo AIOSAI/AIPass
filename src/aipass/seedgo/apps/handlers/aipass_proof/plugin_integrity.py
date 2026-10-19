@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plugin_integrity.py
 # Description: Verify core audit modules don't hardcode standard names
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Plugin Integrity Proof -- Verify plugin architecture stays clean.
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 
 # Modules whose hardcoded refs are cosmetic (display layer, not routing).
@@ -264,31 +265,16 @@ def _scan_file_regex(
     lines = source.splitlines()
 
     findings: list[dict[str, str | int]] = []
-    in_docstring = False
-    docstring_delim: str | None = None
+    try:
+        prose = classify(source).text_only
+    except UnparseableSource as exc:
+        logger.info("plugin_integrity: %s unparseable, only # lines are prose: %s", file_path.name, exc)
+        prose = hash_lines(source)
 
     for lineno, line in enumerate(lines, start=1):
+        if lineno in prose:
+            continue
         stripped = line.strip()
-
-        # Track triple-quoted docstrings (simple heuristic)
-        for delim in ('"""', "'''"):
-            count = stripped.count(delim)
-            if in_docstring:
-                if delim == docstring_delim and count >= 1:
-                    in_docstring = False
-                    docstring_delim = None
-                continue
-            if count == 1:
-                in_docstring = True
-                docstring_delim = delim
-                break
-
-        if in_docstring:
-            continue
-
-        if stripped.startswith("#"):
-            continue
-
         code_part = line.split("#")[0] if "#" in line else line
 
         for sn in standard_names:

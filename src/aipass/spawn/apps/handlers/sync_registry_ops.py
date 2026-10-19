@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -482,13 +482,14 @@ def fix_owner_identity(registry_path=None, dry_run=False):
     """Reconcile owner + identity in the sealed registry.
 
     Each action is idempotent. Never moves a seated owner: ``owner_wrong_branch`` is for a human.
+    Returns ``actions`` and ``applied``, plus ``error`` when there is no registry to reconcile.
     """
     if registry_path is None:
         registry_path = find_registry()
     if registry_path is None:
         reason = "no *_REGISTRY.json found above the current directory"
         logger.error("[registry-check] %s", reason)
-        return {"clean": False, "owner": None, "owner_uid": "", "issues": [{"flag": "no_registry", "detail": reason}]}
+        return {"actions": [], "applied": False, "error": reason}
     registry_path = Path(registry_path)
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))

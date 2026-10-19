@@ -48,7 +48,7 @@ PATCH_PUMP_LOGGER = "aipass.api.apps.handlers.host.pump.logger"
 
 @pytest.fixture
 def handed_hook(quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> Iterator[Any]:
-    """The preexec_fn open_attach hands Popen, read off a recorder (api, fleet green leg 8)."""
+    """The preexec_fn open_attach hands Popen, read off a recorder."""
     # _spawn_pty closes the slave end itself; the master belongs to the session and is closed here.
     master, slave = os.pipe()
     handed: dict = {}
@@ -134,6 +134,17 @@ class TestTheCommandIsTheDesktopsCommand:
         assert not host_attach.valid_monitor_target("SEEDGO")
         assert not host_attach.valid_monitor_target("a b")
         assert not host_attach.valid_monitor_target("../etc")
+
+    def test_the_argv_builders_refuse_a_name_they_cannot_pass_safely(self) -> None:
+        """The builders hold the fence themselves, so no caller can hand Popen an unfenced name."""
+        for build in (host_attach.client_command, host_attach.attach_only_command):
+            with pytest.raises(host_attach.AttachRefused):
+                build(";")
+        with pytest.raises(host_attach.AttachRefused):
+            host_attach.monitor_command("seedgo; rm -rf /")
+
+        assert host_attach.client_command("0")[4] == "0"
+        assert host_attach.monitor_command("seedgo,cli")[-1] == "seedgo,cli"
 
     def test_the_watch_command_is_the_desktops_command(self) -> None:
         """`drone @prax monitor run <target>` — pty.rs `monitor_create`'s exact
@@ -655,7 +666,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
 
 
 class TestARoomThatEndsClosesItsSocketWith4000:
-    """DPLAN-0414 C-C: the phone tells "room ended" from "server hung up" by the close code alone."""
+    """The phone tells "room ended" from "server hung up" by the close code alone."""
 
     def test_an_empty_read_closes_the_socket_with_4000_room_ended(self) -> None:
         """The room's PTY reads empty: the socket is closed 4000 "room ended", the session hung up once."""

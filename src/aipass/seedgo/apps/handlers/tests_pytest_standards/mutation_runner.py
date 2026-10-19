@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mutation_runner.py
 # Description: runs the target's pytest and reads the verdict out of its output
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """The pytest subprocess, and everything read back out of what it printed.
@@ -46,6 +46,9 @@ TERMINAL_WIDTH_VAR = "COLUMNS"
 TERMINAL_WIDTH_VALUE = "300"
 
 DEFAULT_BASELINE_TIMEOUT_SECONDS = 900
+
+#: Enough for the exception class and its first clause; the nodeid is never cut.
+FAILING_MESSAGE_CHARS = 240
 
 PYTEST_EXIT_OK = 0
 
@@ -142,6 +145,16 @@ def _passing_nodeids(stdout: str) -> Tuple[str, ...]:
     return tuple(found)
 
 
+def _failing_nodeids(stdout: str) -> Tuple[Tuple[str, str], ...]:
+    """Every `(nodeid, message)` pytest reported as FAILED or ERROR, in report order."""
+    found = []
+    for line in stdout.splitlines():
+        match = SHORT_SUMMARY_PATTERN.match(line.strip())
+        if match is not None:
+            found.append((match.group("nodeid"), (match.group("detail") or "").strip()[:FAILING_MESSAGE_CHARS]))
+    return tuple(found)
+
+
 def _detail_from_summary(lines: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
     """The crash message and nodeid from the first FAILED/ERROR summary line."""
     for line in lines:
@@ -218,6 +231,7 @@ def _baseline_from_run(run: SuiteRun, timeout_seconds: int) -> BaselineResult:
         elapsed_seconds=run.elapsed_seconds,
         returncode=run.returncode,
         refusal_reason=refusal,
+        failing=_failing_nodeids(run.stdout),
     )
 
 

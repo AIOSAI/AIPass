@@ -391,7 +391,7 @@ class TestAFailedWriteLeavesNothingBehind:
 
 
 class TestTheCorpusForcedTwoFixes:
-    """Both ruled by the conformance corpus (FPLAN-0438 R3), both red first."""
+    """Both ruled by the conformance corpus, both red first."""
 
     def test_a_parent_that_is_a_file_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
         """

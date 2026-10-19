@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.3.2
+# Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -281,6 +281,32 @@ class TestCheckCrossBranchImports:
             "passed": True,
             "message": "No cross-branch handler imports detected",
         }
+
+
+class TestEncapsulationReadsImportLinesOnly:
+    """The three import scans read code lines; docstrings, comments and string bodies hold no import."""
+
+    _PATH = ("seedgo", "apps", "modules", "a.py")
+
+    def test_an_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
+        lines = _lines('"""Doc opens\nand closes here."""\nfrom flow.apps.handlers.plan.validator import X\n')
+        result = check_cross_branch_imports(lines, tmp_path.joinpath(*self._PATH).as_posix(), "seedgo")
+        assert result["message"] == "Line 3: flow.apps.handlers imported (use modules entry point)"
+
+    def test_an_import_named_in_a_docstring_past_the_other_delimiter_is_prose(self, tmp_path):
+        lines = _lines('def f():\n    """Doc.\n    \'\'\'\n    from flow.apps.handlers.plan import X\n    """\n')
+        result = check_cross_branch_imports(lines, tmp_path.joinpath(*self._PATH).as_posix(), "seedgo")
+        assert result["passed"] is True
+
+    def test_a_fixture_string_body_naming_an_import_is_not_one(self, tmp_path):
+        lines = _lines('SOURCE = """\nfrom apps.handlers.other import X\n"""\n')
+        path = tmp_path.joinpath("seedgo", "apps", "handlers", "mine", "a.py").as_posix()
+        assert check_cross_package_imports(lines, path, "mine")["passed"] is True
+
+    def test_a_direct_import_after_a_docstring_closing_mid_line_is_read(self, tmp_path):
+        lines = _lines('"""Doc opens\nand closes here."""\nfrom seedgo.apps.handlers.plan.validator import X\n')
+        result = check_direct_handler_imports(lines, tmp_path.joinpath("seedgo", "apps", "x.py").as_posix())
+        assert result["message"] == "Line 3: Handler imported directly (use module entry point)"
 
 
 class TestTestsAreKinToTheirOwnBranchOnly:

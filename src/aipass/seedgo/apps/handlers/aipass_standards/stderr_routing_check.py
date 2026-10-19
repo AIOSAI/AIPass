@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stderr_routing_check.py
 # Description: Stderr Routing Standards Checker
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-13
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -14,10 +14,11 @@ Reference: stderr_routing.md
 
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import AbstractSet, Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 
 # APPLIES_TO: stream choice is a product decision.
@@ -74,8 +75,13 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         }
 
     filename = path.name
+    try:
+        prose = classify(content).text_only
+    except UnparseableSource as exc:
+        logger.info("stderr_routing: unparseable, comment lines only skipped: %s", exc)
+        prose = hash_lines(content)
 
-    error_prints = _find_error_prints(lines, module_path, bypass_rules)
+    error_prints = _find_error_prints(lines, prose, module_path, bypass_rules)
     if error_prints:
         checks.append(
             {
@@ -89,7 +95,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             {"name": "Error output routing", "passed": True, "message": "No error-like console.print() with red markup"}
         )
 
-    warning_prints = _find_warning_prints(lines, module_path, bypass_rules)
+    warning_prints = _find_warning_prints(lines, prose, module_path, bypass_rules)
     if warning_prints:
         checks.append(
             {
@@ -107,7 +113,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             }
         )
 
-    custom_stderr = _find_custom_stderr_console(lines, module_path, bypass_rules)
+    custom_stderr = _find_custom_stderr_console(lines, prose, module_path, bypass_rules)
     if custom_stderr:
         checks.append(
             {
@@ -168,20 +174,11 @@ def _has_any_output(content: str) -> bool:
     return "console.print(" in content or "err_console.print(" in content
 
 
-def _in_skip_context(line: str, in_docstring: bool, in_main_block: bool) -> bool:
-    """Check if we should skip this line."""
-    stripped = line.strip()
-    if in_docstring or in_main_block:
-        return True
-    if stripped.startswith("#"):
-        return True
-    return False
-
-
-def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | None) -> List[int]:
+def _find_error_prints(
+    lines: List[str], prose: AbstractSet[int], module_path: str, bypass_rules: list | None
+) -> List[int]:
     """Find console.print() calls with red markup containing error-like content."""
     violations = []
-    in_docstring = False
     in_main_block = False
     main_block_indent = 0
 
@@ -203,11 +200,7 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
         if in_main_block and stripped and current_indent <= main_block_indent:
             in_main_block = False
 
-        for quote in ('"""', "'''"):
-            if line.count(quote) % 2 == 1:
-                in_docstring = not in_docstring
-
-        if _in_skip_context(line, in_docstring, in_main_block):
+        if i in prose or in_main_block:
             continue
 
         if "console.print(" not in stripped:
@@ -230,10 +223,11 @@ def _find_error_prints(lines: List[str], module_path: str, bypass_rules: list | 
     return violations
 
 
-def _find_warning_prints(lines: List[str], module_path: str, bypass_rules: list | None) -> List[int]:
+def _find_warning_prints(
+    lines: List[str], prose: AbstractSet[int], module_path: str, bypass_rules: list | None
+) -> List[int]:
     """Find console.print() calls with yellow markup containing warning-like content."""
     violations = []
-    in_docstring = False
     in_main_block = False
     main_block_indent = 0
 
@@ -252,11 +246,7 @@ def _find_warning_prints(lines: List[str], module_path: str, bypass_rules: list 
         if in_main_block and stripped and current_indent <= main_block_indent:
             in_main_block = False
 
-        for quote in ('"""', "'''"):
-            if line.count(quote) % 2 == 1:
-                in_docstring = not in_docstring
-
-        if _in_skip_context(line, in_docstring, in_main_block):
+        if i in prose or in_main_block:
             continue
 
         if "console.print(" not in stripped:
@@ -278,21 +268,18 @@ def _find_warning_prints(lines: List[str], module_path: str, bypass_rules: list 
     return violations
 
 
-def _find_custom_stderr_console(lines: List[str], module_path: str, bypass_rules: list | None) -> List[int]:
+def _find_custom_stderr_console(
+    lines: List[str], prose: AbstractSet[int], module_path: str, bypass_rules: list | None
+) -> List[int]:
     """Find custom Console(stderr=True) creation — should use err_console import."""
     violations = []
-    in_docstring = False
 
     stderr_pattern = re.compile(r"Console\s*\(.*stderr\s*=\s*True", re.IGNORECASE)
 
     for i, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        for quote in ('"""', "'''"):
-            if line.count(quote) % 2 == 1:
-                in_docstring = not in_docstring
-
-        if in_docstring or stripped.startswith("#"):
+        if i in prose:
             continue
 
         if is_bypassed(module_path, "stderr_routing", line=i, bypass_rules=bypass_rules):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
@@ -255,6 +255,22 @@ API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"
         assert result["score"] == 0
         assert [c["message"] for c in result["checks"]] == ["Cannot read the file, so it was not scanned for keys"]
 
+    def test_a_key_in_a_triple_quoted_literal_in_code_is_found(self, tmp_path: Path) -> None:
+        # The same FAKE/synthetic sk-or-v1-... fixture key, not a real credential.
+        code = 'API_KEY = """sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"""\n'
+        result = check_hardcoded_key(_write(tmp_path, "literal_keys.py", code))
+        assert [c["message"] for c in result["checks"] if not c["passed"]] == ["Found 1 hardcoded key(s) on lines 1"]
+
+    def test_a_key_inside_a_multi_line_docstring_is_prose(self, tmp_path: Path) -> None:
+        code = '"""Shape:\n    API_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"\n"""\nx = 1\n'
+        result = check_hardcoded_key(_write(tmp_path, "doc_keys.py", code))
+        assert result["score"] == 100
+
+    def test_a_key_after_a_docstring_quoting_the_other_delimiter_is_found(self, tmp_path: Path) -> None:
+        code = '"""Quotes \'\'\' in prose."""\nAPI_KEY = "sk-or-v1-9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e"\n'
+        result = check_hardcoded_key(_write(tmp_path, "after_doc_keys.py", code))
+        assert [c["message"] for c in result["checks"] if not c["passed"]] == ["Found 1 hardcoded key(s) on lines 2"]
+
 
 class TestHelpText:
     def test_help_text_clean_passes(self, tmp_path: Path) -> None:
@@ -290,6 +306,24 @@ def print_help():
         bypass = [{"file": "bypass_help.py", "standard": "help_text"}]
         result = check_help_text(fp, bypass_rules=bypass)
         assert result["score"] == 100
+
+    def test_a_python_command_in_a_one_line_docstring_is_prose(self, tmp_path: Path) -> None:
+        code = 'def f():\n    """Run python3 tools/x.py first."""\n    return 1\n'
+        assert check_help_text(_write(tmp_path, "doc_one.py", code))["passed"] is True
+
+    def test_a_python_command_in_a_multi_line_docstring_is_prose(self, tmp_path: Path) -> None:
+        code = 'def f():\n    """Help.\n\n    Run python3 tools/x.py first.\n    """\n    return 1\n'
+        assert check_help_text(_write(tmp_path, "doc_multi.py", code))["passed"] is True
+
+    def test_an_inline_comment_after_a_mixed_delimiter_docstring_is_not_help_text(self, tmp_path: Path) -> None:
+        code = "'''Uses \"\"\" in prose.'''\nx = 1  # see python3 tools/x.py\n"
+        result = check_help_text(_write(tmp_path, "mixed.py", code))
+        assert result["passed"] is True
+
+    def test_a_triple_quoted_help_literal_body_is_read(self, tmp_path: Path) -> None:
+        code = 'HELP = """\nRun python3 tools/x.py now.\n"""\n'
+        result = check_help_text(_write(tmp_path, "literal_help.py", code))
+        assert "on line 2 " in result["checks"][0]["message"]
 
 
 class TestImports:

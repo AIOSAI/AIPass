@@ -313,7 +313,7 @@ def header_fires_nowhere(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 @pytest.fixture(autouse=True)
 def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
-    """Clear the fleet snapshot cache around every test (DPLAN-0305)."""
+    """Clear the fleet snapshot cache around every test."""
     # read_snapshot caches and coalesces execs: a case counting execs would count its neighbour's cached answer.
     _fleet.reset_snapshot_cache()
     yield
@@ -322,7 +322,7 @@ def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def _no_remembered_git_refusals_between_tests() -> Generator[None, None, None]:
-    """Forget every remembered git refusal around each test (@trigger, 2026-08-19)."""
+    """Forget every remembered git refusal around each test."""
     # The 60s refusal memory outlives a suite: one refusal would silence every later test on the lane, still green.
     _refusals._reset_refusals()
     yield
@@ -331,7 +331,7 @@ def _no_remembered_git_refusals_between_tests() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True)
 def _no_leaked_pump_reservations() -> Generator[None, None, None]:
-    """Give the attach lane's thread count back after every test (DPLAN-0305)."""
+    """Give the attach lane's thread count back after every test."""
     # Spawn-only tests hold a pump slot they never hang up; production's release is pinned by its own tests.
     yield
     _attach._PUMP_SLOTS = threading.BoundedSemaphore(_attach.PUMP_WORKERS)

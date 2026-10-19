@@ -3,7 +3,7 @@
 # Description: Batch 3 tests for 8 seedgo checker handlers
 # Version: 1.1.1
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
@@ -181,6 +181,40 @@ class TestLogVisibilityCheck:
 
         assert result["score"] == 100
         assert result["passed"] is True
+
+
+class TestLogStructureAndVisibilityReadCodeLinesOnly:
+    """Both checkers judge code lines through the shared prose_lines helper; docstrings are prose."""
+
+    def test_a_log_path_inside_a_multi_line_docstring_body_is_not_a_finding(self, tmp_path):
+        content = 'def f():\n    """Writes nothing.\n\n    Example: "/var/log/app.log"\n    """\n    return 1\n'
+        result = log_structure_check.check_module(_write_temp_py(tmp_path, "doc_path.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["No hardcoded log paths"]["passed"] is True
+
+    def test_a_log_path_on_a_code_line_opening_with_a_triple_quoted_literal_is_found(self, tmp_path):
+        content = 'PATHS = [\n    """/var/app.log""",\n]\n'
+        result = log_structure_check.check_module(_write_temp_py(tmp_path, "lit_path.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["No hardcoded log paths"]["message"] == "Hardcoded log paths on lines: [2]"
+
+    def test_a_get_logger_after_a_raw_prefixed_docstring_is_named_by_its_line(self, tmp_path):
+        content = 'r"""Doc.\n\nBody.\n"""\nimport logging\nmylog = logging.getLogger(__name__)\n'
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "raw_doc.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["message"].startswith("stdlib getLogger() on lines [6] ")
+
+    def test_get_logger_named_in_a_raw_prefixed_docstring_body_is_not_a_finding(self, tmp_path):
+        content = 'r"""Doc.\n\nNever calls logging.getLogger( itself.\n"""\nx = 1\n'
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "raw_prose.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["passed"] is True
+
+    def test_a_get_logger_on_a_line_opening_with_a_triple_quoted_literal_is_found(self, tmp_path):
+        content = 'import logging\nmylog = (\n    """prefix""" and logging.getLogger("x")\n)\n'
+        result = log_visibility_check.check_module(_write_temp_py(tmp_path, "lit_get.py", content))
+        rows = {c["name"]: c for c in result["checks"]}
+        assert rows["Prax logger imported"]["message"].startswith("stdlib getLogger() on lines [3] ")
 
 
 class TestMetaCheck:

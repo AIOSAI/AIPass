@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reads.py
 # Description: Host API Read Handler — file and directory reads behind the name fence
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -13,6 +13,7 @@ Reference: docs/host_api.md
 No deny-list, by ruling: a read-scope token can read ~/.ssh.
 """
 
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,7 +24,7 @@ import aipass.drone as drone
 
 MAX_READ_BYTES = 512 * 1024
 
-# A cap hit is flagged, not refused: an over-full directory still browses.
+# A cap hit is flagged, not refused: an over-full directory still browses, a page at a time by offset.
 MAX_DIR_ENTRIES = 400
 
 # Kept in step by name with NOISE_DIRS in @baud's lib.rs.
@@ -279,8 +280,22 @@ def read_file(branch: str, file: str, project: str = "", root: str = "") -> Dict
     return answer
 
 
-def list_dir(branch: str = "", dir: str = "", project: str = "", root: str = "") -> Dict[str, Any]:
-    """List one directory level under a named root — the phone's file browser."""
+def _dir_offset(raw: Any) -> int:
+    """The page start: a whole number, never negative. A str is what the route passes."""
+    if isinstance(raw, bool):
+        raise ReadRefused("offset must be a whole number")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ReadRefused("offset must be a whole number") from None
+    if value < 0:
+        raise ReadRefused("offset must not be negative")
+    return value
+
+
+def list_dir(branch: str = "", dir: str = "", project: str = "", root: str = "", offset: Any = 0) -> Dict[str, Any]:
+    """List one directory level under a named root — the phone's file browser, a page at a time."""
+    start = _dir_offset(offset)
     floor = resolve_root(root or ROOT_BRANCH, branch, project)
     target = _fence(floor, dir) if dir.strip() else floor
 
@@ -307,11 +322,18 @@ def list_dir(branch: str = "", dir: str = "", project: str = "", root: str = "")
         )
 
     entries.sort(key=lambda entry: (not entry["is_dir"], entry["name"].lower()))
-    truncated = len(entries) > MAX_DIR_ENTRIES
-    if truncated:
-        entries = entries[:MAX_DIR_ENTRIES]
+    total = len(entries)
+    entries = entries[start : start + MAX_DIR_ENTRIES]
+    truncated = start + len(entries) < total
 
-    audit: Dict[str, Any] = {"branch": branch, "dir": dir or ".", "entries": len(entries), "truncated": truncated}
+    audit: Dict[str, Any] = {
+        "branch": branch,
+        "dir": dir or ".",
+        "entries": len(entries),
+        "truncated": truncated,
+        "offset": start,
+        "total": total,
+    }
     if root:
         audit["root"] = root
     json_handler.log_operation("host_api_dir_list", audit)
@@ -321,6 +343,8 @@ def list_dir(branch: str = "", dir: str = "", project: str = "", root: str = "")
         "dir": dir,
         "entries": entries,
         "truncated": truncated,
+        "offset": start,
+        "total": total,
         # The root's path, not the listed directory's: entry paths are already
         # root-relative, so walking with `dir` would double it on the face's join.
         "floor": str(floor),
@@ -354,13 +378,17 @@ def _fence(root: Path, file: str) -> Path:
     if ".." in parts:
         raise ReadRefused("File name may not contain '..'")
 
-    resolved = (root / candidate).resolve()
+    base = os.path.realpath(root)
+    real = os.path.realpath(os.path.join(base, candidate))
+    if real == base:
+        return root
 
-    # Only a post-resolution check catches a symlink pointing out of the root.
-    if resolved != root and root not in resolved.parents:
+    # Only a post-resolution check catches a symlink out; realpath plus startswith is the guard CodeQL reads.
+    if not real.startswith(base + os.sep):
         logger.warning("[host_api] fence blocked a read outside %s: %r", root, file)
         raise ReadRefused("File resolves outside the root")
 
+    resolved = Path(real)
     if not resolved.exists():
         raise ReadRefused(f"No such file: {file!r}")
 

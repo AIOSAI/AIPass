@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-07-11
-# Modified: 2026-09-29
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
@@ -612,6 +612,17 @@ class TestFixDryRunFullyReadOnly:
             handle_sync_registry(["--fix", "--dry-run"])
 
         assert reg.read_text(encoding="utf-8") == original
+
+    def test_fix_with_no_registry_refuses_on_stderr_instead_of_raising(self, tmp_path, monkeypatch, capsys):
+        """Pins the KeyError 'actions': the no-registry answer came back check-shaped."""
+        from unittest.mock import patch
+
+        monkeypatch.chdir(tmp_path)
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=None):
+            result = handle_sync_registry(["--fix", "--dry-run"])
+
+        assert result == 1
+        assert "no *_REGISTRY.json found" in capsys.readouterr().err
 
 
 class TestUnifiedOwnerHeuristic:

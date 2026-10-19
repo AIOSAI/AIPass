@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mutation_shapes.py
 # Description: the records every stage of a gutting campaign exchanges
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """The record shapes a gutting campaign hands from one stage to the next.
@@ -94,6 +94,9 @@ class BaselineResult:
     returncode: Optional[int]
     refusal_reason: Optional[str] = None
 
+    #: `(nodeid, message)` per FAILED/ERROR summary line: a red baseline names what was red.
+    failing: Tuple[Tuple[str, str], ...] = ()
+
     def to_document(self) -> dict:
         """The baseline as a plain record."""
         return {
@@ -106,6 +109,7 @@ class BaselineResult:
             "elapsed_seconds": round(self.elapsed_seconds, 3),
             "returncode": self.returncode,
             "refusal_reason": self.refusal_reason,
+            "failing": [{"nodeid": nodeid, "message": message} for nodeid, message in self.failing],
         }
 
 

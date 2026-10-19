@@ -460,7 +460,7 @@ def test_handle_command_call_no_args_shows_error(mock_header, mock_jh, mock_erro
 @patch(f"{_MOD}.keys", autospec=True)
 @patch(f"{_MOD}.header")
 def test_list_models_fetch_failure(mock_header, mock_keys, mock_models, mock_error):
-    """When fetch_models_from_api raises, the error names the reason (api, fleet green leg 3)."""
+    """When fetch_models_from_api raises, the error names the reason."""
     mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
     mock_models.ModelsUnavailable = _MODELS_UNAVAILABLE
     mock_models.fetch_models_from_api.side_effect = _MODELS_UNAVAILABLE("status 503")
@@ -521,7 +521,7 @@ def test_an_unreadable_secrets_file_is_named_not_shrugged_at(mock_header, mock_j
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.header")
 def test_make_call_shows_the_reason_when_the_secrets_file_is_unreadable(mock_header, mock_error):
-    """make_call shows the KeyUnavailable that get_response lets through (api, fleet green leg 11)."""
+    """make_call shows the KeyUnavailable that get_response lets through."""
     unreadable = _KEY_UNAVAILABLE("The secrets file could not be read (refused)")
     with patch.object(openrouter_client.client, "get_response", side_effect=unreadable):
         openrouter_client.make_call(["What is AI?", "--model", "test/model"])
@@ -599,7 +599,7 @@ def test_create_client_raises_with_the_sdk_reason(mock_openai_cls):
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.header")
 def test_make_call_shows_the_reason_when_openrouter_is_unavailable(mock_header, mock_error):
-    """make_call, get_response's one live caller, shows the raised reason (api, fleet green leg 10)."""
+    """make_call, get_response's one live caller, shows the raised reason."""
     unavailable = openrouter_client.client.OpenRouterUnavailable("OpenRouter client could not be created: refused")
     with patch.object(openrouter_client.client, "get_response", side_effect=unavailable):
         openrouter_client.make_call(["What is AI?", "--model", "test/model"])

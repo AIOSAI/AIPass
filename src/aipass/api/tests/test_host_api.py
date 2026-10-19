@@ -397,7 +397,7 @@ class TestIssueTokenCommand:
 
 
 class TestDetachStatusAndStop:
-    """The CLI half of the serve-flap fix (@baud/@devpulse, 2026-08-19)."""
+    """The CLI half of the serve-flap fix."""
 
     @pytest.fixture
     def detachable(self):
@@ -554,7 +554,7 @@ class TestDetachStatusAndStop:
     def test_status_says_it_cannot_tell_rather_than_inventing_an_absence(
         self, store: Path, quiet_module: dict, detachable
     ) -> None:
-        """The 2026-08-27 ruling, at the surface an operator reads."""
+        """Status prints that it cannot tell when the supervisor is silent, never "No server is running"."""
         detachable.server_state.return_value = {
             "state": "unknown",
             "record": None,
@@ -1114,7 +1114,7 @@ class TestCrossBranchApi:
         assert host_config.FACE_DIR_KEY not in stored
 
     def test_set_bind_stores_the_bind_and_reports_what_it_replaced(self, store: Path) -> None:
-        """FPLAN-0642: the installer writes the bind in-process, same store as set-config."""
+        """The installer writes the bind in-process, same store as set-config."""
         with patch(PATCH_CONFIG_LOGGER):
             result = host_api_module.set_bind("127.0.0.1", 9100)
             config = host_config.load_config()

@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @memory
 # Version: 1.3.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -149,8 +149,14 @@ def print_help():
     console.print("  [cyan]--type TYPE[/cyan]        Filter by memory type (observations, local)")
     console.print("  [cyan]--n N[/cyan]              Number of results (default: 5)")
     console.print()
-    console.print("  [bold]Example:[/bold]")
+    console.print("-" * 70)
+    console.print()
+
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
+    console.print()
     console.print('    [dim]drone @memory search "registry bugs" --branch SEEDGO --n 10[/dim]')
+    console.print("    [dim]drone @memory todo backlog[/dim]")
+    console.print("    [dim]drone @memory lint[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -218,7 +224,7 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
 
 
 def main() -> int:
-    """Main entry point; exit 0 success, 1 unroutable, 2 routed but refused (handle_command True means handled, not worked)."""
+    """Main entry point; exit 0 success, 1 unroutable, 2 routed but refused (True means handled, not worked)."""
     reset_command_state()
 
     args = sys.argv[1:]

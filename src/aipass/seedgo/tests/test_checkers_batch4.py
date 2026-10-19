@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
@@ -95,6 +95,32 @@ class TestStderrRoutingCheck:
         result = stderr_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
+
+
+@patch("aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_check.json_handler")
+class TestStderrRoutingReadsCodeLinesOnly:
+    """The three stderr scans judge code lines; docstring lines are prose."""
+
+    def _failed(self, tmp_path: Path, source: str) -> list:
+        py_file = tmp_path / "subject.py"
+        _write_file(py_file, source)
+        return [c["message"] for c in stderr_check_module(str(py_file))["checks"] if not c["passed"]]
+
+    def test_an_error_print_after_a_one_line_docstring_holding_the_other_delimiter_is_found(self, mock_json, tmp_path):
+        source = 'def f():\n    """Quotes \'\'\' here."""\n    console.print("[red]Error: the config failed to load now[/red]")\n'
+        assert self._failed(tmp_path, source) == [
+            "subject.py: 1 error print(s) on lines [3] — use error() or fatal() instead"
+        ]
+
+    def test_an_error_print_inside_a_docstring_past_the_other_delimiter_is_prose(self, mock_json, tmp_path):
+        source = 'def f():\n    """Doc.\n    \'\'\'\n    console.print("[red]Error: the config failed to load now[/red]")\n    """\n'
+        assert self._failed(tmp_path, source) == []
+
+    def test_a_stderr_console_on_a_line_opening_a_triple_quoted_literal_is_found(self, mock_json, tmp_path):
+        source = 'def f():\n    return Console(stderr=True), """\n    usage\n    """\n'
+        assert self._failed(tmp_path, source) == [
+            "subject.py: Custom Console(stderr=True) on lines [2] — import err_console from aipass.cli.apps.modules"
+        ]
 
 
 @patch("aipass.seedgo.apps.handlers.aipass_standards.todo_check.json_handler")

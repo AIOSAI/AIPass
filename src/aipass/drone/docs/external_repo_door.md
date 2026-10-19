@@ -28,8 +28,10 @@ tag, fetch, sync, merge-upstream, and the read side of gh's `run`.
    directory, be a git top level, and not be AIPass: refused if `AIPASS_REGISTRY.json` sits at its
    top level, or if it is the caller's own root (a clean clone has no registry).
 
-Every exit writes one line to `.ai_central/git_repo_door.jsonl`, beside the deletion log — caller,
-cwd, verb, args, repo, HEAD before and after, exit code — **refusals included**.
+Every exit writes one line to AIPass's own `.ai_central/git_repo_door.jsonl` — caller, cwd, verb,
+args, repo, HEAD before and after, exit code, the paths `--theirs` took — **refusals included**. The
+AIPass home anchors it, never the caller's cwd, so a door use leaves nothing in the repo it served.
+`AIPASS_DELETION_LOG` moves it beside that log instead.
 
 ---
 
@@ -55,7 +57,13 @@ upstream. A diverged branch, with commits on both sides, is refused with both li
 no rebase, no merge commit, no stash, no reset. Diverged is the owner's call. This is not AIPass's
 own `sync` or `smart-sync`, which keep their dev-branch behaviour, and `--repo` on the AIPass repo is
 refused as it is for every door verb. Both verbs take no other arguments, and both refuse a
-detached HEAD or a branch with no upstream by name.
+detached HEAD by name.
+
+**The upstream.** `fetch`, `sync` and `merge-upstream` read the same stand: the branch's
+configured upstream, or, when none is configured (a branch created locally never gets
+`branch.<name>.remote`), `origin/<branch>` compared by name, which the stand line marks
+`(by name; none configured)`. `.git/config` is never written. A branch with neither is refused by
+name.
 
 **`merge-upstream` is the cure for diverged.** A project's branch diverges as a matter of course
 when PRs are merged on GitHub while this seat commits locally. It refuses a tracked change first, with sync's words, then fetches. Behind only, it
@@ -64,6 +72,16 @@ fast-forwards as sync does. Nothing behind, it says there is nothing to merge. D
 conflict is read (`git diff --name-only --diff-filter=U`), then `git merge --abort` puts HEAD, index
 and tree back as they were, and the refusal names the conflicted paths: resolving is the owner's, by
 hand. It never rebases, resets, stashes or pushes; push is its own verb.
+
+**`--theirs <path> ...` takes the upstream's side for named files.** `drone @git merge-upstream
+--repo <path> --theirs app/package.json app/package-lock.json` runs the same checks and the same
+merge. When every conflicted path is listed, each gets `git checkout --theirs` and `git add`, and
+`git commit --no-edit` completes the merge with git's own message: one merge commit with both
+parents. The answer names the paths taken and the new HEAD. When any conflicted path is unlisted,
+the merge is aborted as above and the refusal names every conflicted path, marking the unlisted
+ones `(not in --theirs)`. A listed path that did not conflict is reported as not needed, never an
+error. Paths are repo-relative: a bare `--theirs`, a leading slash, or a path resolving outside the
+repo is refused before anything is fetched. Nothing is forced and nothing is pushed.
 
 **`tracked` and `untrack` take a file back out of the index**, such as one a catch-all commit swept
 in and a soft reset left staged. Through the door both verbs run the handler they run at home, rooted at the named repo: paths are repo-relative, a tracked file leaves

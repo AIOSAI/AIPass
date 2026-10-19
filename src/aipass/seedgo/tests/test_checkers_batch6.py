@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch6.py
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-10-08
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""
@@ -770,6 +770,30 @@ class TestCheckVersionFlag:
         result = cli_flags_check.check_version_flag(lines, str(tmp_path / "branch" / "apps" / "branch.py"), bypass)
         assert result["passed"] is True
         assert "Bypassed" in result["message"]
+
+
+class TestVersionFlagReadsCodeLinesOnly:
+    """check_version_flag counts a flag on a code line, never one named in a docstring."""
+
+    def _check(self, tmp_path, source: str) -> dict:
+        path = str(tmp_path / "branch" / "apps" / "branch.py")
+        return cli_flags_check.check_version_flag(source.split("\n"), path, None)
+
+    def test_a_flag_on_a_line_carrying_a_triple_quoted_help_is_found(self, tmp_path):
+        result = self._check(tmp_path, 'parser.add_argument("--version", help="""Show the version.""")\n')
+        assert result["message"] == "Found version flag handling on line 1"
+
+    def test_a_flag_after_a_one_line_docstring_holding_the_other_delimiter_is_found(self, tmp_path):
+        source = 'def main(args):\n    """Quotes \'\'\' here."""\n    return \'--version\' in args\n'
+        assert self._check(tmp_path, source)["message"] == "Found version flag handling on line 3"
+
+    def test_a_quoted_flag_in_a_docstring_after_the_other_delimiter_is_not_handling(self, tmp_path):
+        source = 'def main():\n    """Usage.\n    \'\'\'\n    Pass \'--version\' to print it.\n    """\n'
+        assert self._check(tmp_path, source)["passed"] is False
+
+    def test_a_source_that_does_not_parse_fails_rather_than_trust_a_quoted_flag(self, tmp_path):
+        result = self._check(tmp_path, "def main(:\n    return '--version'\n")
+        assert result["message"].startswith("Source does not parse")
 
 
 # ===========================================================================

@@ -37,7 +37,7 @@ The pattern: `#\s*logger\.(error|warning|warn|info|exception|critical|debug)\s*\
 
 ### Exclusions
 
-- **Docstrings:** Triple-quoted regions are tracked and skipped. Documented examples inside docstrings do not trigger false positives.
+- **Docstrings:** Docstring lines, read from the parse tree, and the body lines of a multi-line string literal are skipped. Documented examples inside docstrings do not trigger false positives.
 - **`__init__.py`:** Package init files are skipped entirely.
 - **Non-.py files:** Only `.py` files are scanned.
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch10.py
 # Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-06-18
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -183,21 +183,30 @@ class TestInDocstring:
     """Tests for docstring detection."""
 
     def test_single_line_docstring(self, tmp_path):
-        """A one-line docstring opens no block: neither it nor the line after is inside."""
+        """A one-line docstring is prose and opens no block: only the line after it is read."""
         lines = ['"""Docstring at /home/someone/a."""', 'x = "/home/someone/y"']
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
-        assert said.startswith("2 hardcoded path(s): L1: POSIX home path ("), said
-        assert "L2: POSIX home path (" in said, said
+        assert said.startswith("1 hardcoded path(s): L2: POSIX home path ("), said
 
     def test_multiline_docstring(self, tmp_path):
-        lines = ['"""', "/home/someone/inside", '"""', "/home/someone/outside"]
+        lines = ['"""', "/home/someone/inside", '"""', 'x = "/home/someone/outside"']
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
         assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
 
     def test_single_quote_docstring(self, tmp_path):
-        lines = ["'''", "/home/someone/inside", "'''", "/home/someone/outside"]
+        lines = ["'''", "/home/someone/inside", "'''", 'x = "/home/someone/outside"']
         said = _scanned(tmp_path, "\n".join(lines) + "\n")
         assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
+
+    def test_a_docstring_quoting_the_other_delimiter_opens_no_block(self, tmp_path):
+        lines = ['"""Quotes \'\'\' in prose."""', 'x = "/home/someone/y"']
+        said = _scanned(tmp_path, "\n".join(lines) + "\n")
+        assert said.startswith("1 hardcoded path(s): L2: POSIX home path ("), said
+
+    def test_a_triple_quoted_literal_in_code_is_read(self, tmp_path):
+        lines = ['X = """', "/home/someone/inside", '"""']
+        said = _scanned(tmp_path, "\n".join(lines) + "\n")
+        assert said.startswith("1 hardcoded path(s): L2: POSIX home path ("), said
 
 
 #

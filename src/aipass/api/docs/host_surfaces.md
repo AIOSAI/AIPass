@@ -153,6 +153,7 @@ a real tmux client: scrollback, colour, cursor position and full-screen programs
 because nobody reimplements them. There is no capture-and-repaint polling — a repaint
 shows a picture that updates, an attach shows the room. `-A` is
 attach-*or-create*, so a phone and a desk never land in two rooms with one agent's name.
+A room name outside `[A-Za-z0-9_-]`, or opening with `-`, is refused before tmux runs.
 
 **A room born here matches one born at the desk.** The attach command chains `set-option -t
 <room> mouse on` and `set-option -w -t <room> window-size smallest` — @baud's measured

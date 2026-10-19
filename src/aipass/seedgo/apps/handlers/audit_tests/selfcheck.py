@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: selfcheck.py
 # Description: the harness's verdict on itself - the 16 instrument checks
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -13,6 +13,7 @@ Every check is published whether it passes or fails, never gated silently; a
 check bound to an unbuilt group reports `not_applicable` with the group's name.
 """
 
+import re
 from typing import Dict, List, Optional
 
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -25,6 +26,9 @@ NOT_APPLICABLE = "not_applicable"
 FAILURE_SUMMARY_PREFIXES: tuple = ("FAILED ", "ERROR ")
 
 MAX_NAMED_FAILURES = 5
+
+#: The totals line ends the run, so it survives a tail that has lost the first summary lines.
+FAILURE_TOTAL_PATTERN = re.compile(r"\b(\d+) (?:failed|errors?)\b")
 
 #: Checks that cannot run until their group does.
 GROUP_BOUND: Dict[int, str] = {
@@ -203,10 +207,22 @@ def _failing_units(run: dict, returncode: Optional[int]) -> str:
             "summary out of it"
         )
 
+    reported = _reported_failures(tail)
     named = ", ".join(nodeids[:MAX_NAMED_FAILURES])
-    if len(nodeids) > MAX_NAMED_FAILURES:
-        return f". Failing: {named}, and {len(nodeids) - MAX_NAMED_FAILURES} more"
-    return f". Failing: {named}"
+    rest = max(len(nodeids), reported) - min(len(nodeids), MAX_NAMED_FAILURES)
+    clause = f". Failing: {named}, and {rest} more" if rest else f". Failing: {named}"
+    if reported > len(nodeids):
+        clause += f" ({reported - len(nodeids)} of them before the captured tail, so unnamed here)"
+    return clause
+
+
+def _reported_failures(tail: str) -> int:
+    """Failed plus errored, from the last pytest totals line in the tail; 0 when none is there."""
+    for line in reversed(tail.splitlines()):
+        found = FAILURE_TOTAL_PATTERN.findall(line)
+        if found and " in " in line:
+            return sum(int(amount) for amount in found)
+    return 0
 
 
 def _gate_rows(hygiene: dict, run: dict) -> List[dict]:

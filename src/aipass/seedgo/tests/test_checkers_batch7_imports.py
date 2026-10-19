@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_imports.py
 # Description: imports_check sub-functions and rulings (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/imports_check.py."""
@@ -51,6 +51,22 @@ class TestFilterDocstrings:
         lines = _lines("import os\nimport sys\n")
         result = filter_docstrings(lines)
         assert len([ln for ln in result if ln.strip()]) == 2
+
+
+class TestFilterDocstringsBlanksProseAndStringBodiesOnly:
+    """filter_docstrings blanks docstrings and string bodies; every code line survives."""
+
+    def test_a_def_sharing_its_line_with_a_one_line_docstring_survives(self):
+        out = filter_docstrings(_lines('import os\ndef f(): """Doc."""\n'))
+        assert out[1] == 'def f(): """Doc."""'
+
+    def test_a_docstring_past_the_other_delimiter_stays_blank(self):
+        out = filter_docstrings(_lines('"""Doc.\n\'\'\'\nAIPASS_ROOT lives here\n"""\nimport os\n'))
+        assert out[2] == "\n"
+
+    def test_a_line_opening_a_triple_quoted_literal_is_code(self):
+        out = filter_docstrings(_lines('import os\nX = os.environ["AIPASS_ROOT"] + """\nbody\n"""\n'))
+        assert out[1:4] == ['X = os.environ["AIPASS_ROOT"] + """', "\n", "\n"]
 
 
 class TestFindImportSectionEnd:

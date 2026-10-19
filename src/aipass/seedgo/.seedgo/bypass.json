@@ -234,26 +234,26 @@
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "hardcoded_path",
-      "lines": [52, 57, 67, 72, 77, 82, 87, 97, 102, 107, 125, 132, 140, 149, 161, 167, 187, 193, 198, 602, 604, 672, 678, 684, 686, 687, 688, 1263, 1265, 1266, 1268, 1298, 1311, 1312, 1313, 1319, 1323, 1332, 1342, 1349, 1370, 1389, 1424, 1435, 1455, 1488, 1492],
+      "lines": [52, 57, 67, 72, 77, 82, 87, 97, 102, 107, 125, 132, 140, 149, 161, 167, 187, 192, 197, 202, 207, 611, 613, 681, 695, 696, 697, 1272, 1274, 1275, 1277, 1307, 1320, 1321, 1322, 1328, 1332, 1341, 1351, 1358, 1379, 1398, 1433, 1444, 1464, 1497, 1501],
       "reason": "Test input, not paths the tests use: the hardcoded_path and literal-path cases hold home-path strings (/home/<user>/, /Users/carol/, C:\\Users\\...) as checker input. Line-level; replaces the no-standard rule removed 2026-09-25 (survey row #12). Lines re-pinned in fleet green leg 15 and again 2026-10-04 (one import added above them): the list is _scan_file's own answer for the file, every hit a fixture. Extended 2026-10-04 (dispatch 79b012ed item 4) with _scan_file's answer for the appended developer_home classes (L1601 on): that standard's own inputs. Extended leg 19 (L1838, L1842): the docstring-table pins' inputs."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "developer_home",
-      "lines": [1263, 1264, 1265, 1266, 1268, 1269, 1298, 1302, 1332, 1342, 1344, 1349, 1370, 1375, 1389, 1393, 1424, 1429, 1435, 1455, 1462],
+      "lines": [1272, 1273, 1274, 1275, 1277, 1278, 1307, 1311, 1341, 1351, 1353, 1358, 1379, 1384, 1398, 1402, 1433, 1438, 1444, 1464, 1471],
       "reason": "The standard's own inputs, not anybody's home: the developer_home classes (L1601 on) write each home spelling with an invented login into tmp_path files for the checker, the tree runner, the checklist and the verb to convict. The list is developer_home's own scan_text answer for the file, computed by calling it (2026-10-04, dispatch 79b012ed item 4)."
     },
     {
       "file": "tests/test_checkers_batch10.py",
       "standard": "windows_compat",
-      "lines": [1322],
+      "lines": [1331],
       "reason": "A control, not a path the test touches: '/tmp/pytest-of-.../x' is a string written into a tmp_path file to pin that a pytest temp path is not a home path (developer_home, 2026-10-04); nothing opens it."
     },
     {
       "file": "tests/test_checkers_batch8.py",
       "standard": "permission_flags",
-      "lines": [1039, 1066, 1078],
-      "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them."
+      "lines": [1039, 1052, 1066, 1078, 1091, 1097, 1103],
+      "reason": "Test input (fleet green leg 15; re-pinned 10-08 from 1182/1209/1221, the file grew above them): 'cmd = \"--dangerously-skip-permissions\"' and its sibling are strings written into tmp files as the permission_flags checker's own input; no command is ever built from them. Extended 2026-10-18: 1052 and the prose-lines pins' inputs (1091, 1097, 1103) are line-list fixtures, code once a docstring toggle stopped hiding them."
     },
     {
       "file": "tests/test_aipass_standards.py",
@@ -324,7 +324,7 @@
     {
       "file": "tests/test_audit_tests_lane_adapter.py",
       "standard": "through_the_command",
-      "lines": [472],
+      "lines": [593],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split, re-pinned after the fire_canary tests): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -342,7 +342,7 @@
     {
       "file": "tests/test_coverage_arch_checklist.py",
       "standard": "through_the_command",
-      "lines": [592],
+      "lines": [617],
       "reason": "Fleet green leg 15 (line moved by devpulse's landing edit, which imports the checklist scope helpers from their public home in verdicts): architecture_check._relative_spelling is fed PureWindowsPath so the Windows spelling is pinned on any host; check_module would ask the host's own Path. Named in the leg 15 reply to @devpulse."
     },
     {
@@ -354,7 +354,7 @@
     {
       "file": "tests/test_coverage_proof_diagnostics.py",
       "standard": "through_the_command",
-      "lines": [907, 925],
+      "lines": [920, 938],
       "reason": "No public route (fleet green leg 15): diagnostics_check._discover_pack_configs is reached only with pyright on PATH. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -532,7 +532,7 @@
     {
       "file": "apps/handlers/aipass_standards/cli_check.py",
       "standard": "logged_fallback",
-      "lines": [51, 180],
+      "lines": [52, 190],
       "reason": "The checker is wrong on these lines (fleet green leg 14): each failure answer is the STRICT answer. An unparseable file gets no console-import window (86) and no stderr-directed print lines (317), so it keeps every finding; ignorance never buys an exemption, as the comment at 86 says."
     },
     {
@@ -556,13 +556,13 @@
     {
       "file": "apps/handlers/aipass_proof/plugin_integrity.py",
       "standard": "logged_fallback",
-      "lines": [209],
+      "lines": [210],
       "reason": "The checker is wrong on this line (fleet green leg 15): an unparseable file gives the AST lane no findings, but scan() runs _scan_file_regex on the same file beside it, so the file is still judged; the AST lane only filters docstrings and display strings more precisely. The parse failure is logged."
     },
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [319],
+      "lines": [316],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
@@ -618,6 +618,30 @@
       "standard": "logged_fallback",
       "lines": [980],
       "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
+    },
+    {
+      "file": "tests/test_checkers_batch3.py",
+      "standard": "permission_flags",
+      "lines": [357, 373],
+      "reason": "Test input (2026-10-18): 'CMD = \"--dangerously-skip-permissions\"' sits in textwrap.dedent fixture strings written to tmp files as the permission_flags checker's own input; a triple-quoted literal is code since the prose-lines helper, so the old toggle no longer hides them. No command is built from them."
+    },
+    {
+      "file": "tests/test_checkers_batch3.py",
+      "standard": "hardcoded_path",
+      "lines": [111],
+      "reason": "Test input (2026-10-18): '/home/user/myapp.log' sits in a textwrap.dedent fixture string written to a tmp file as the log_structure checker's own input; read as code since the prose-lines helper. The file never opens it."
+    },
+    {
+      "file": "tests/test_checkers_batch2.py",
+      "standard": "hardcoded_key",
+      "lines": [227, 242, 260, 265, 270],
+      "reason": "Test input (2026-10-18): the FAKE patterned sk-or-v1-... key is the hardcoded_key checker's own fixture, written to tmp files; lines 227 and 242 sit in triple-quoted fixture strings, code since the prose-lines helper, and 260/265/270 are that helper's pins. Not a credential."
+    },
+    {
+      "file": "apps/handlers/aipass_standards/permission_flags_content.py",
+      "standard": "permission_flags",
+      "lines": [35, 36, 37, 38, 45, 47, 56],
+      "reason": "Documentation, not code (2026-10-18): a standard's page is one triple-quoted string, and these lines quote the prohibited flags as the anti-pattern the standard names. The old docstring toggle hid the page body; a string literal in code is code since the prose-lines helper."
     }
   ],
   "notes": {

@@ -3,7 +3,7 @@
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-16
+# Modified: 2026-10-17
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -378,7 +378,7 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
 
 @fastapi_required
 class TestTheBackupDoorAnswersThroughTheRealApp:
-    """POST /v1/backup/run and /cancel, GET /v1/backup/job and /status, wired (DPLAN-0411, DPLAN-0412)."""
+    """POST /v1/backup/run and /cancel, GET /v1/backup/job and /status, wired."""
 
     @pytest.fixture
     def backup(self, store: Path, seated: Path, monkeypatch: Any):
@@ -488,6 +488,9 @@ class TestTheBackupDoorAnswersThroughTheRealApp:
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "job_unknown"
+        # The body carries the fixed sentence, never the exception's own text (CodeQL stack-trace-exposure).
+        assert response.json()["error"]["message"] == host_backup.JOB_UNKNOWN
+        assert "b7f3c2" not in response.text
 
     def test_status_passes_backup_through_with_the_running_list(self, backup: Any, seated: Path) -> None:
         api, read, operate, router, _ = backup
@@ -642,7 +645,7 @@ _DOOR_FAILED = {"code": "machine_door_failed", "message": host_machine.PROCESSES
 
 @fastapi_required
 class TestTheMachineProcessesRoute:
-    """GET /v1/machine/processes (DPLAN-0414 C-B): the skill's dict verbatim, refused exactly as /v1/machine."""
+    """GET /v1/machine/processes: the skill's dict verbatim, refused exactly as /v1/machine."""
 
     @pytest.fixture
     def processes(self, store: Path):

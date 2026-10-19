@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_path_check.py
 # Description: Hardcoded Absolute Path Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-06-18
-# Modified: 2026-10-06
+# Modified: 2026-10-18
 # =============================================
 
 """Hardcoded Absolute Path Standards Checker Handler."""
@@ -15,6 +15,7 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, hash_lines, prose_lines
 
 # APPLIES_TO: Windows CI runs the suite, so /home/... in a test breaks the build.
 APPLIES_TO = "everywhere"
@@ -34,31 +35,6 @@ _ALL_PATTERNS = [
     (_DASH_MACOS, "dash-encoded macOS home"),
 ]
 
-_COMMENT_RE = re.compile(r"^\s*#")
-_DOCSTRING_DELIMITERS = ('"""', "'''")
-
-
-def _docstring_states(lines: list[str]) -> list[bool]:
-    """Whether each line falls inside a docstring, one pass over the file.
-
-    A delimiter counted twice or more on a stripped line changes nothing;
-    counted once, it flips the state, and the state after a line is that
-    line's answer. Read once per file (seedgo, fleet green leg 19): the
-    per-line walk from line 0 it replaces was 146503 calls of one audit.
-    """
-    states: list[bool] = []
-    in_ds = False
-    for line in lines:
-        stripped = line.strip()
-        for delim in _DOCSTRING_DELIMITERS:
-            count = stripped.count(delim)
-            if count >= 2:
-                continue
-            if count == 1:
-                in_ds = not in_ds
-        states.append(in_ds)
-    return states
-
 
 def _scan_file(content: str) -> list[tuple[int, str, str]]:
     """Scan content for hardcoded home paths.
@@ -66,14 +42,15 @@ def _scan_file(content: str) -> list[tuple[int, str, str]]:
     Returns list of (line_number, description, matched_text).
     """
     violations: list[tuple[int, str, str]] = []
-    lines = content.split("\n")
-    in_docstring = _docstring_states(lines)
+    try:
+        prose = prose_lines(content)
+    except UnparseableSource as exc:
+        logger.info("hardcoded_path: unparseable, only # lines are prose: %s", exc)
+        prose = hash_lines(content)
 
-    for idx, line in enumerate(lines):
+    for idx, line in enumerate(content.split("\n")):
         lineno = idx + 1
-        if _COMMENT_RE.match(line):
-            continue
-        if in_docstring[idx]:
+        if lineno in prose:
             continue
         for pattern, desc in _ALL_PATTERNS:
             match = pattern.search(line)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_ux.py
 # Description: Tests for cli_ux_check.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-07-17
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_ux_check.py — CLI UX house pattern detection."""
@@ -261,6 +261,30 @@ def test_missing_examples_section(tmp_path):
     checks = {c["name"]: c["passed"] for c in result["checks"]}
     assert checks["examples_section"] is False
     assert checks["usage_section"] is True
+
+
+def _examples_row(tmp_path, help_body: str) -> bool:
+    source = GOOD_ENTRY.replace(
+        '    console.print("[yellow]Examples:[/yellow]")\n    console.print("  drone @branch do-stuff")\n', help_body
+    )
+    result = check_module(_entry_file(tmp_path, source))
+    return {c["name"]: c["passed"] for c in result["checks"]}["examples_section"]
+
+
+def test_examples_named_only_in_the_docstring_fails_the_examples_row(tmp_path):
+    assert _examples_row(tmp_path, '    """Usage, commands and examples."""\n') is False
+
+
+def test_an_unprinted_examples_constant_fails_the_examples_row(tmp_path):
+    assert _examples_row(tmp_path, '    heading = "Examples:"\n') is False
+
+
+def test_a_printed_examples_heading_under_rich_markup_passes(tmp_path):
+    assert _examples_row(tmp_path, '    console.print("\\n[bold cyan]EXAMPLES:[/bold cyan]")\n') is True
+
+
+def test_a_line_that_merely_mentions_an_example_is_no_heading(tmp_path):
+    assert _examples_row(tmp_path, '    console.print("Run it, for example: drone @branch go")\n') is False
 
 
 def test_internal_modules_detected(tmp_path):

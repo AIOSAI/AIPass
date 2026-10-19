@@ -43,7 +43,7 @@ The checker avoids false positives through multiple filters:
 **Not flagged:**
 
 - **Comment lines** -- lines starting with `#`
-- **Docstring regions** -- triple-quoted blocks are tracked and skipped
+- **Docstrings** -- the first-statement string of a module, class or function, every line; a triple-quoted literal in code is scanned like any other string
 - **Placeholder values** -- strings containing: `your_key`, `xxx`, `example`, `placeholder`, `abc123`, `test`, `fake`, `dummy`, `sample`, `...`, `changeme`, `<`, `>`
 - **Placeholder suffixes** -- strings ending with: `-here`, `-example`, `-test`, `-xxx`, `-placeholder`, `-demo`, `-key`, `-secret`, `-value`
 - **Example context** -- lines containing words like `example`, `template`, `placeholder`, `sample`, `demo`

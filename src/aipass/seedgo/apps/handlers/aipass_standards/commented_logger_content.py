@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commented_logger_content.py
 # Description: Commented Logger Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -40,8 +40,8 @@ def get_commented_logger_standards() -> str:
         "  The regex detects [dim]# logger.<level>([/dim] where level is one of:",
         "  error, warning, warn, info, exception, critical, debug.",
         "",
-        "  [yellow]Docstrings are skipped[/yellow] -- triple-quoted regions are tracked and",
-        "  excluded so documented examples do not trigger false positives.",
+        "  [yellow]Docstrings are skipped[/yellow] -- docstring lines and multi-line string bodies",
+        "  are excluded so documented examples do not trigger false positives.",
         "",
         "[bold cyan]VIOLATIONS:[/bold cyan]",
         "  Any commented-out logger call outside a docstring is a violation.",

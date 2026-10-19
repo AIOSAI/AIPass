@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_host_roots.py
 # Description: Tests for the roots roster and the widened name fence
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
-"""Tests for apps/handlers/host/reads.py's four-kind name fence and the /v1/roots route."""
+"""Tests for apps/handlers/host/reads.py's four-kind name fence, /v1/dir paging and the /v1/roots route."""
 
 # Each root that resolves is paired with a test that the containment under it still refuses.
 # A read-scope token reads ~/.ssh by the owner's FULLY OPEN ruling; the suite reads it on purpose.
@@ -234,7 +234,7 @@ class TestKindsThatNameNothingRefuseAName:
     """
 
     def test_a_nameless_root_may_name_itself(self, world: dict) -> None:
-        """THE CARVE-OUT (@devpulse's ruling, 2026-08-18), measured not guessed.
+        """THE CARVE-OUT, measured not guessed.
 
         @baud's picker sends `name: root.name || root.kind` (PhoneApp.tsx), so the wire
         carries branch=home&root=home; that name is accepted, any OTHER stays refused.
@@ -378,7 +378,7 @@ class TestReadsStandingOnARoot:
 
 
 class TestAbsentRootIsTodaysAnswerPlusTheFloor:
-    """The no-regression pin, RE-FROZEN once and deliberately.
+    """The no-regression pin, RE-FROZEN deliberately: floor, then offset and total.
 
     A whole-key-set assertion, so no further key can arrive unannounced.
     """
@@ -387,7 +387,7 @@ class TestAbsentRootIsTodaysAnswerPlusTheFloor:
         """One key added, every other key and value untouched."""
         result = host_reads.list_dir("demo")
 
-        assert set(result) == {"branch", "dir", "entries", "truncated", "floor"}
+        assert set(result) == {"branch", "dir", "entries", "truncated", "offset", "total", "floor"}
         assert result["branch"] == "demo"
         assert result["floor"] == str(world["branch"].resolve())
 
@@ -451,6 +451,65 @@ class TestTheFloorTravels:
         result = host_reads.read_file("", "notes/day.md", root=host_reads.ROOT_HOME)
 
         assert (Path(result["floor"]) / result["file"]).read_text(encoding="utf-8") == "# day"
+
+
+@pytest.fixture
+def crowded(world: dict) -> dict:
+    """1059 entries under home, 937 files and 122 dirs, plus a noise dir the filter drops."""
+    big = world["home"] / "big"
+    big.mkdir()
+    for n in range(122):
+        (big / f"d{n:04d}").mkdir()
+    for n in range(937):
+        (big / f"f{n:04d}.txt").write_text("x", encoding="utf-8")
+    (big / "node_modules").mkdir()
+    names = [f"d{n:04d}" for n in range(122)] + [f"f{n:04d}.txt" for n in range(937)]
+    return {**world, "names": names}
+
+
+def _page(offset: Any) -> dict:
+    return host_reads.list_dir(root=host_reads.ROOT_HOME, dir="big", offset=offset)
+
+
+class TestDirPaging:
+    """GET /v1/dir pages by offset under the 400 cap, with the total @baud's 'show more' row counts."""
+
+    def test_the_first_page_is_400_of_the_filtered_total_and_says_more(self, crowded: dict) -> None:
+        page = _page(0)
+
+        assert [entry["name"] for entry in page["entries"]] == crowded["names"][:400]
+        assert (page["offset"], page["total"], page["truncated"]) == (0, 1059, True)
+
+    def test_pages_join_into_the_whole_sorted_listing_and_the_last_says_done(self, crowded: dict) -> None:
+        pages = [_page(start) for start in (0, 400, 800)]
+
+        assert [entry["name"] for page in pages for entry in page["entries"]] == crowded["names"]
+        assert [page["truncated"] for page in pages] == [True, True, False]
+        assert len(pages[2]["entries"]) == 259
+
+    @pytest.mark.parametrize("offset", [1059, 1200])
+    def test_an_offset_at_or_past_the_total_answers_empty_with_the_total(self, crowded: dict, offset: int) -> None:
+        page = _page(offset)
+
+        assert (page["entries"], page["total"], page["truncated"], page["offset"]) == ([], 1059, False, offset)
+
+    def test_a_listing_under_the_cap_is_one_page_at_offset_zero(self, world: dict) -> None:
+        page = host_reads.list_dir(root=host_reads.ROOT_HOME)
+
+        assert (page["offset"], page["total"], page["truncated"]) == (0, len(page["entries"]), False)
+
+    @pytest.mark.parametrize("offset", ["-1", "abc", "1.5", "", True])
+    def test_a_negative_or_non_integer_offset_is_refused(self, crowded: dict, offset: Any) -> None:
+        with pytest.raises(host_reads.ReadRefused):
+            _page(offset)
+
+    def test_the_audit_line_carries_offset_and_total(self, crowded: dict) -> None:
+        _page("400")
+
+        crowded["audit"].log_operation.assert_called_once()
+        event, audit = crowded["audit"].log_operation.call_args.args
+        assert event == "host_api_dir_list"
+        assert (audit["offset"], audit["total"], audit["entries"], audit["truncated"]) == (400, 1059, 400, True)
 
 
 class TestTheRoster:
@@ -680,7 +739,7 @@ class TestRootRoutes:
         ).json()
 
         assert body["floor"] == str(world["home"].resolve())
-        assert set(body) == {"branch", "dir", "entries", "truncated", "root", "floor"}
+        assert set(body) == {"branch", "dir", "entries", "truncated", "offset", "total", "root", "floor"}
 
     def test_an_unknown_root_is_400_in_the_envelope(self, client: Any, world: dict) -> None:
         """A refused root comes back as the one error shape, and the face
@@ -740,4 +799,28 @@ class TestRootRoutes:
         )
 
         assert response.status_code == 200
-        assert set(response.json()) == {"branch", "dir", "entries", "truncated", "floor"}
+        assert set(response.json()) == {"branch", "dir", "entries", "truncated", "offset", "total", "floor"}
+
+    def test_offset_reaches_the_route_and_pages(self, client: Any, crowded: dict) -> None:
+        api, raw = client
+
+        body = api.get(
+            "/v1/dir",
+            params={"root": "home", "dir": "big", "offset": "800"},
+            headers={"Authorization": f"Bearer {raw}"},
+        ).json()
+
+        assert (body["offset"], body["total"], body["truncated"], len(body["entries"])) == (800, 1059, False, 259)
+
+    @pytest.mark.parametrize("offset", ["-1", "abc"])
+    def test_a_bad_offset_is_400_read_refused_not_422(self, client: Any, crowded: dict, offset: str) -> None:
+        api, raw = client
+
+        response = api.get(
+            "/v1/dir",
+            params={"root": "home", "dir": "big", "offset": offset},
+            headers={"Authorization": f"Bearer {raw}"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "read_refused"

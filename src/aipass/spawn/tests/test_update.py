@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -956,6 +956,27 @@ class TestUpdateAll:
         assert "test_branch" in branch_names
         assert "other_branch" in branch_names
         assert "spawn" not in branch_names
+
+    def test_a_class_filtered_run_turns_an_unreadable_passport_into_a_failed_row(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        """Pins the abort: the class read sat outside the per-branch try, so one bad passport ended the run."""
+        broken = tmp_path / "broken_branch"
+        (broken / ".trinity").mkdir(parents=True)
+        (broken / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        reg = json.loads(mock_registry.read_text(encoding="utf-8"))
+        reg["branches"].insert(0, {"name": "BROKEN_BRANCH", "path": "broken_branch", "status": "active"})
+        mock_registry.write_text(json.dumps(reg, indent=2) + "\n", encoding="utf-8")
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            results = {r["branch"]: r for r in update_all(citizen_class="specialist")}
+
+        assert results["broken_branch"]["success"] is False
+        assert "passport.json" in results["broken_branch"]["errors"][0]
+        assert results["test_branch"]["success"] is True
 
 
 class TestHandleUpdate:

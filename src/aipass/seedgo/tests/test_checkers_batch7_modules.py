@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_modules.py
 # Description: modules_check sub-functions and the door shape (split from test_checkers_batch7.py)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/modules_check.py."""
@@ -21,6 +21,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.modules_check import (
     check_no_direct_file_ops,
     check_thin_orchestration,
 )
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 from aipass.seedgo.tests.support_checkers_batch7 import _lines
 
 pytestmark = pytest.mark.usefixtures("_pin_bypass_log")
@@ -286,6 +287,91 @@ class TestAOneLineDocstringHidesNothing:
         assert result is not None
         assert result["passed"] is False
         assert "line 6: " in result["message"]
+
+
+class TestProseLinesSortsDocstringsAndCommentsFromCode:
+    """The shared helper every line-based checker reads: docstrings and comment lines are prose."""
+
+    def test_a_one_line_docstring_is_prose_and_the_next_line_is_code(self):
+        kinds = classify('"""Doc."""\nx = 1\n')
+        assert (1 in kinds.prose, 2 in kinds.code) == (True, True)
+
+    def test_every_line_of_a_multi_line_docstring_is_prose(self):
+        kinds = classify('def f():\n    """Open.\n\n    Body.\n    """\n    return 1\n')
+        assert sorted(kinds.docstrings) == [2, 3, 4, 5]
+        assert 6 in kinds.code
+
+    def test_the_other_delimiter_inside_a_docstring_closes_nothing(self):
+        kinds = classify("def f():\n    '''Uses \"\"\".\n    \"\"\"\n    Body.\n    '''\n    return 1\n")
+        assert sorted(kinds.docstrings) == [2, 3, 4, 5]
+
+    def test_a_triple_quoted_literal_in_code_is_code_and_its_body_is_marked(self):
+        kinds = classify('X = """\nbody\n"""\nprint("""inline""")\n')
+        assert kinds.prose == frozenset()
+        assert sorted(kinds.string_bodies) == [2, 3]
+
+    def test_text_only_adds_string_bodies_to_prose_and_keeps_the_opening_line_code(self):
+        kinds = classify('# c\nX = """\nbody\n"""\n')
+        assert sorted(kinds.text_only) == [1, 3, 4]
+
+    def test_a_comment_line_is_prose_and_an_inline_comment_leaves_code(self):
+        kinds = classify("# note\nx = 1  # inline\n")
+        assert (sorted(kinds.comments), 2 in kinds.code) == ([1], True)
+
+    def test_a_docstring_sharing_its_def_line_leaves_that_line_code(self):
+        kinds = classify('def f(): """Doc."""\n')
+        assert 1 in kinds.code
+
+    def test_a_source_that_does_not_parse_raises_rather_than_answer_all_code(self):
+        with pytest.raises(UnparseableSource):
+            classify("def broken(:\n")
+
+
+class TestModulesReadsCodeLinesOnly:
+    """check_handle_command and check_no_direct_file_ops judge code lines, never docstrings."""
+
+    def test_a_handle_command_named_only_in_a_docstring_is_missing(self):
+        content = "'''\n\"\"\"\ndef handle_command(command, args) -> bool: is the shape.\n'''\n"
+        result = check_handle_command(content)
+        assert result is not None
+        assert result["passed"] is False
+
+    def test_a_handle_command_def_carrying_a_triple_quoted_default_is_found(self):
+        content = 'def handle_command(command: str, args: list, doc: str = """x""") -> bool:\n    return True\n'
+        result = check_handle_command(content)
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_the_other_delimiter_in_a_docstring_does_not_end_it(self):
+        content = (
+            'def f(p):\n    """Quotes with\n    \'\'\'\n    and names p.read_text( in prose.\n    """\n    return p\n'
+        )
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_a_write_wrapping_a_triple_quoted_literal_is_a_file_operation(self):
+        content = 'def save(p):\n    p.write_text("""body""")\n'
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["message"].startswith("Module has direct file operations: line 2: ")
+
+    def test_a_quoted_open_skips_only_the_open_finding_and_the_read_is_still_named(self):
+        content = 'def f(p):\n    x = "open(" if p.read_text() else 0\n'
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["message"].endswith("(use json_handler instead)")
+
+    def test_a_file_op_inside_a_string_literal_body_is_text_not_a_call(self):
+        content = 'TEMPLATE = """\nwith open(path) as f:\n"""\n'
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_a_source_that_does_not_parse_fails_handle_command(self):
+        result = check_handle_command("def handle_command(command, args) -> bool\n")
+        assert result is not None
+        assert result["message"].startswith("Source does not parse")
 
 
 # -- check_no_business_logic -------------------------------------------------

@@ -12,6 +12,7 @@
 Reference: docs/host_surfaces.md. Detach is SIGHUP and the room survives: nothing here may kill a session."""
 
 import os
+import re
 import shutil
 import signal
 import struct
@@ -43,6 +44,11 @@ except ImportError as e:  # pragma: no cover - Windows only
 ROOM_PREFIX = "baud-"
 
 TMUX_BINARY = "tmux"
+
+# A lone ';' is tmux's command separator, '-' opens an option, '.' and ':' are target syntax.
+ROOM_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
+
+MONITOR_TARGET = re.compile(r"[a-z0-9_,-]+")
 
 MONITOR_BINARY = "drone"
 
@@ -128,12 +134,8 @@ def shell_room_name(project: str, branch: str = "") -> str:
 
 
 def valid_monitor_target(target: str) -> bool:
-    """
-    Charset fence for a watch target — MIRRORED from `valid_monitor_target`
-    in @baud's pty.rs, character for character."""
-    return bool(target) and all(
-        ch.islower() and ch.isascii() or ch.isdigit() and ch.isascii() or ch in "_-," for ch in target
-    )
+    """Charset fence for a watch target — MIRRORED from `valid_monitor_target` in @baud's pty.rs, exactly."""
+    return MONITOR_TARGET.fullmatch(target) is not None
 
 
 def monitor_command(target: str = "") -> List[str]:
@@ -142,6 +144,8 @@ def monitor_command(target: str = "") -> List[str]:
     desktop's monitor pane runs, minus its login shell; empty target means every branch, never `run all`."""
     command = ["drone", "@prax", "monitor", "run"]
     if target:
+        if not MONITOR_TARGET.fullmatch(target):
+            raise AttachRefused(f"Not a monitor target: {target!r}")
         command.append(target)
     return command
 
@@ -154,6 +158,8 @@ def attach_command(branch: str, scope: str = "") -> List[str]:
 def client_command(room: str) -> List[str]:
     """The tmux client argv for a NAMED room — the shared tail of every attach.
     Every chained command carries its own -t: without one, set-option hits tmux's current session and exits 0."""
+    if not ROOM_NAME.fullmatch(room):
+        raise AttachRefused(f"Not a room name: {room!r}")
     return [
         TMUX_BINARY,
         "new-session",
@@ -179,6 +185,8 @@ def client_command(room: str) -> List[str]:
 def attach_only_command(room: str) -> List[str]:
     """The tmux client argv for a room this server must NOT create (DPLAN-0327).
     For `outside_room`: creating a name someone else chose mints an empty session the desktop owns."""
+    if not ROOM_NAME.fullmatch(room):
+        raise AttachRefused(f"Not a room name: {room!r}")
     return [
         TMUX_BINARY,
         "attach-session",

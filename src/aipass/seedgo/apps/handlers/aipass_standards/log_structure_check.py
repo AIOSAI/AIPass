@@ -1,16 +1,12 @@
 # =================== AIPass ====================
 # Name: log_structure_check.py
 # Description: Log Structure Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-06
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
-"""
-Log Structure Standards Checker Handler
-
-Reference: log_structure.md
-"""
+"""Log Structure Standards Checker Handler; the prose is log_structure.md."""
 
 import re
 from datetime import datetime
@@ -19,6 +15,7 @@ from typing import Dict
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, hash_lines, prose_lines
 
 # APPLIES_TO: message format is a product decision.
 APPLIES_TO = "production"
@@ -26,10 +23,7 @@ AUDIT_SCOPE = "all_files"
 
 
 def _find_branch_root(file_path: Path) -> Path:
-    """Walk up from file to find branch root (directory containing apps/).
-
-    Falls back to the file's parent when no ``apps/`` directory is found within 10 levels.
-    """
+    """The nearest ancestor holding ``apps/`` within 10 levels, else the file's parent."""
     current = file_path.resolve().parent
     for _ in range(10):  # Safety limit
         if (current / "apps").is_dir():
@@ -84,12 +78,17 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {"passed": passed, "checks": checks, "score": score, "standard": "LOG_STRUCTURE"}
 
     lines = content.split("\n")
+    try:
+        prose = prose_lines(content)
+    except UnparseableSource as exc:
+        logger.info("log_structure: unparseable, every non-# line read as code: %s", exc)
+        prose = hash_lines(content)
 
     abs_log_issues = []
     for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
+        if i in prose:
             continue
+        stripped = line.strip()
         if re.search(r'["\'][/\\](?:home|tmp|var|etc)[/\\].*\.log', stripped):
             abs_log_issues.append(i)
 
@@ -105,9 +104,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     home_log_issues = []
     for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
+        if i in prose:
             continue
+        stripped = line.strip()
         if re.search(r"/home/\w+", stripped) and ("log" in stripped.lower() or "LOG" in stripped):
             home_log_issues.append(i)
 

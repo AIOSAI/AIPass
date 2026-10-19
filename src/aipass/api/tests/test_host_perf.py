@@ -567,7 +567,7 @@ def full_pump(monkeypatch: pytest.MonkeyPatch) -> list:
 
 
 class TestThePumpPoolIsBoundedOutLoud:
-    """The silent failure this replaces (DPLAN-0305 Audit 2, finding 9)."""
+    """The pump pool is capped, and a session past the cap is refused in words, never hung silent."""
 
     # Each socket parks a thread in os.read for life; asyncio's default pool filled and the next socket hung blank.
 

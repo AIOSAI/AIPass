@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -147,6 +147,10 @@ def _handle_fix(registry_path, dry_run=False) -> int:
     except Exception as exc:
         logger.error(f"[sync-registry] Fix error: {exc}")
         error(str(exc))
+        return 1
+
+    if result.get("error"):
+        error(f"Owner/identity fix: {result['error']}")
         return 1
 
     actions = result["actions"]

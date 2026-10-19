@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_flags_check.py
 # Description: CLI Flags Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from typing import Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: entry-point flags; a test file has no --help.
 APPLIES_TO = "production"
@@ -99,40 +100,18 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "CLI_FLAGS"}
 
 
-def _get_non_code_lines(lines: List[str]) -> set:
-    """Build a set of line numbers that are inside docstrings or comments.
-    A line with an even count of triple-quote delimiters is self-contained; odd counts toggle.
-    """
-    skip: set = set()
-    in_docstring = False
-
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        triple_double = stripped.count('"""')
-        triple_single = stripped.count("'''")
-        total_triple = triple_double + triple_single
-
-        if total_triple > 0 and total_triple % 2 == 1:
-            in_docstring = not in_docstring
-            skip.add(i)
-            continue
-        elif total_triple > 0 and total_triple % 2 == 0:
-            skip.add(i)
-            continue
-
-        if in_docstring or stripped.startswith("#"):
-            skip.add(i)
-
-    return skip
-
-
 def check_version_flag(lines: List[str], file_path: str, bypass_rules: list | None = None) -> Dict:
     """Check that the entry point supports --version / -V flag."""
     if is_bypassed(file_path, "cli_flags", None, bypass_rules):
         return {"name": "--version flag support", "passed": True, "message": "Bypassed by bypass rules"}
 
-    skip_lines = _get_non_code_lines(lines)
+    # A flag named in a docstring or inside help text's string body is not flag handling.
+    try:
+        kinds = classify("\n".join(lines))
+    except UnparseableSource as exc:
+        logger.info("cli_flags: --version unread, unparseable: %s", exc)
+        return {"name": "--version flag support", "passed": False, "message": f"Source does not parse: {exc}"}
+    skip_lines = kinds.prose | kinds.string_bodies
 
     version_patterns = [
         r"""['"]--version['"]""",

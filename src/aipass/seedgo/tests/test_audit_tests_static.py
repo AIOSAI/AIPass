@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_static.py
 # Description: tests for the static nominator tier, harness selfcheck and cache stamp
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/ nominators and apps/handlers/audit_tests/selfcheck.py, cache, render."""
@@ -1025,6 +1025,16 @@ class TestSelfCheck:
 
     def test_a_failing_suite_fails_the_control_check(self):
         assert 4 in [row["check"] for row in _harness(run={"returncode": 1})["checks"] if row["status"] == "fail"]
+
+    def test_the_control_check_counts_failures_the_tail_window_lost(self):
+        tail = "FAILED t.py::a - AssertionError\nFAILED t.py::b - OSError\n== 4 failed, 10 passed in 1.0s =="
+        (row,) = [r for r in _harness(run={"returncode": 1, "stdout_tail": tail})["checks"] if r["check"] == 4]
+        assert "Failing: t.py::a, t.py::b, and 2 more (2 of them before the captured tail" in row["detail"]
+
+    def test_a_tail_holding_every_failure_names_them_with_no_remainder(self):
+        tail = "FAILED t.py::a - AssertionError\n== 1 failed, 10 passed in 1.0s =="
+        (row,) = [r for r in _harness(run={"returncode": 1, "stdout_tail": tail})["checks"] if r["check"] == 4]
+        assert row["detail"].endswith("Failing: t.py::a")
 
     def test_an_empty_blind_list_fails_check_fourteen(self):
         block = _harness(

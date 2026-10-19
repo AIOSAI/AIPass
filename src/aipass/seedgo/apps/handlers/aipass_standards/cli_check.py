@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """CLI Standards Checker Handler"""
@@ -11,11 +11,12 @@
 import ast
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import AbstractSet, Dict, List, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: a test file is not a branch's CLI surface.
@@ -154,6 +155,15 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "CLI"}
 
 
+def _prose(content: str) -> AbstractSet[int]:
+    """Prose and string-body lines; a source that does not parse keeps every line but ``#`` ones."""
+    try:
+        return classify(content).text_only
+    except UnparseableSource as exc:
+        logger.info("cli: unparseable, only # lines are prose: %s", exc)
+        return hash_lines(content)
+
+
 def _console_print_in_string(line: str, stripped: str) -> bool:
     before_pattern = line.split("console.print(")[0]
     single_quotes = before_pattern.count("'")
@@ -197,8 +207,7 @@ def check_handler_separation(content: str) -> Dict:
     lines = content.split("\n")
     stderr_prints = _stderr_directed_print_lines(content)
 
-    in_docstring = False
-    docstring_marker: Optional[str] = None
+    prose = _prose(content)
     console_print_lines = []
     cli_import_lines = []
     print_lines = []
@@ -207,6 +216,8 @@ def check_handler_separation(content: str) -> Dict:
     main_block_indent = 0
 
     for i, line in enumerate(lines, 1):
+        if i in prose:
+            continue
         stripped = line.strip()
         current_indent = len(line) - len(line.lstrip()) if line.strip() else 0
 
@@ -219,31 +230,6 @@ def check_handler_separation(content: str) -> Dict:
             in_main_block = False
 
         if in_main_block:
-            continue
-
-        # Only the marker that opened a docstring block can close it; the other is content.
-        triple_double = line.count('"""')
-        triple_single = line.count("'''")
-        if in_docstring:
-            closer = triple_double if docstring_marker == '"""' else triple_single
-            if closer % 2 == 1:
-                in_docstring = False
-                docstring_marker = None
-            continue
-        if triple_double % 2 == 1:
-            in_docstring = True
-            docstring_marker = '"""'
-            continue
-        if triple_single % 2 == 1:
-            in_docstring = True
-            docstring_marker = "'''"
-            continue
-        # Even count (e.g. \"\"\"text\"\"\") is a complete docstring on one line:
-        # no state change, but the line is still not code.
-        if triple_double >= 2 or triple_single >= 2:
-            continue
-
-        if in_docstring or stripped.startswith("#"):
             continue
 
         if "console.print(" in stripped:
@@ -324,6 +310,7 @@ def check_print_usage(
 ) -> Optional[Dict]:
     """Check for bare print() statements (should use console.print() instead)"""
     console_line = _console_import_line(content)
+    prose = _prose(content)
     print_lines = []
     parser_print_help_lines = []
     format_help_lines = []
@@ -333,6 +320,8 @@ def check_print_usage(
     main_block_indent = 0
 
     for i, line in enumerate(lines, 1):
+        if i in prose:
+            continue
         stripped = line.strip()
         current_indent = len(line) - len(line.lstrip()) if line.strip() else 0
 
@@ -345,9 +334,6 @@ def check_print_usage(
             in_main_block = False
 
         if in_main_block:
-            continue
-
-        if stripped.startswith("#"):
             continue
 
         if is_bypassed(module_path, "cli", line=i, bypass_rules=bypass_rules):

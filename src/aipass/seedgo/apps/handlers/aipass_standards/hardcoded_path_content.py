@@ -39,7 +39,7 @@ def get_hardcoded_path_standards() -> str:
         "",
         "[bold cyan]FALSE-POSITIVE GUARDS:[/bold cyan]",
         "  - [dim]# comments[/dim] are skipped (line-level)",
-        "  - [dim]Docstrings[/dim] are skipped (triple-quote blocks)",
+        "  - [dim]Docstrings[/dim] are skipped; a triple-quoted literal in code is scanned",
         "  - [dim]__init__.py[/dim] files are skipped",
         "  - [dim]Test files[/dim] are NOT skipped by default -- use line-level bypass",
         "    for test fixtures that must assert on literal path strings",

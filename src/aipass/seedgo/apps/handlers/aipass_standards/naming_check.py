@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: naming_check.py
 # Description: Naming Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -20,6 +20,7 @@ from typing import Dict, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # APPLIES_TO: snake_case and column-0 constants are the house style everywhere.
 APPLIES_TO = "everywhere"
@@ -240,18 +241,17 @@ def check_constant_naming(content: str) -> Optional[Dict]:
     # Column 0 only: local variables are always indented.
     constants = []
     bad_constants = []
-    in_multiline_string = False
+    try:
+        kinds = classify(content)
+        # A string literal's continuation lines are its text, never a column-0 assignment.
+        skip = kinds.prose | kinds.string_bodies
+    except UnparseableSource as exc:
+        logger.info("naming: unparseable, only # lines are prose: %s", exc)
+        skip = hash_lines(content)
 
-    for line in content.split("\n"):
+    for lineno, line in enumerate(content.split("\n"), 1):
         stripped = line.strip()
-
-        for delimiter in ('"""', "'''"):
-            if delimiter in stripped:
-                count = stripped.count(delimiter)
-                if count % 2 == 1:
-                    in_multiline_string = not in_multiline_string
-
-        if in_multiline_string:
+        if lineno in skip:
             continue
 
         if line and (line[0] == " " or line[0] == "\t"):

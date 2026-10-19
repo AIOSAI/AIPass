@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -46,6 +46,7 @@ def print_help():
     console.print("  [green]update[/green] <class> --all --apply  Update all branches of a class")
     console.print("  [green]create[/green] @existing              Adopt a directory that already carries a passport")
     console.print("  [green]delete[/green] <@branch> --yes        Archive and deregister (omit --yes to confirm)")
+    console.print("  [green]delete[/green] <@branch> --retire     Retire a registered citizen (floor and owner refuse)")
     console.print("  [green]sync-registry[/green]                 Report registry against filesystem (read-only)")
     console.print("  [green]sync-registry[/green] --fix           Rebuild tracking, register strays, repair ids")
     console.print(
@@ -97,6 +98,7 @@ def print_help():
     console.print("  [green]--only[/green]      Restrict to one branch (migrate-passports, export-seeds)")
     console.print("  [green]--confirm[/green]   Execute a passport migration or seed export (preview by default)")
     console.print("  [green]--yes[/green]       Skip the delete confirmation prompt")
+    console.print("  [green]--retire[/green]    Let delete through for a registered citizen")
     console.print("  [green]--json[/green]      Machine-readable output (sync-registry --check)")
     console.print("  [green]--version[/green]   Print the version string")
     console.print()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.1.1
+# Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -16,7 +16,10 @@
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
+
+import pytest
 
 from aipass.seedgo.apps.handlers.audit_tests import adapters, m10
 from aipass.seedgo.apps.handlers.tests_pytest_standards import (
@@ -25,6 +28,8 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     envcopy,
     envdiff,
     gutting,
+    mutation_runner,
+    mutation_shapes,
     nominators,
     statement_deletion,
     unread_redirect_check as R,
@@ -348,6 +353,122 @@ class TestEnvLayout:
 
     def test_a_plain_target_has_no_repo_root(self, tmp_path):
         assert envcopy.detect_layout(tmp_path)[1] is None
+
+
+class TestRootFiles:
+    """A suite reading the launcher or `.aipass/` by path needs the clone's root, never its machine state."""
+
+    def _repo(self, tmp_path):
+        """A repo root with a launcher, an ignored registry and a declared directory."""
+        (tmp_path / ".git").mkdir(parents=True)
+        (tmp_path / "aipass").write_text("#!/bin/sh\n", encoding="utf-8")
+        (tmp_path / "aipass").chmod(0o755)
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".aipass" / "__pycache__").mkdir(parents=True)
+        (tmp_path / ".aipass" / "project_hooks.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".aipass" / "alerts.json").write_text("[]", encoding="utf-8")
+        (tmp_path / ".aipass" / "__pycache__" / "x.pyc").write_bytes(b"")
+        (tmp_path / "projects").mkdir()
+        (tmp_path / "projects" / "big.bin").write_bytes(b"")
+        return tmp_path
+
+    def _answer(self, monkeypatch, caller, stdout, returncode=0):
+        """Stand in for `drone @git tracked` and the caller seat it runs from; rsync still runs.
+
+        The caller is resolved before drone runs, from a gitignored passport a clean checkout lacks.
+        """
+        asked = []
+        real_run = envcopy.subprocess.run
+
+        def _run(command, **kwargs):
+            if tuple(command[:3]) != envcopy.TRACKED_QUERY:
+                return real_run(command, **kwargs)
+            assert kwargs["cwd"] == str(caller)
+            asked.extend(command)
+            return envcopy.subprocess.CompletedProcess(command, returncode, stdout, "refused")
+
+        monkeypatch.setattr(envcopy, "caller_home", lambda: caller)
+        monkeypatch.setattr(envcopy.subprocess, "run", _run)
+        return asked
+
+    def test_only_tracked_root_files_are_copied_and_the_launcher_keeps_its_mode(self, tmp_path, monkeypatch):
+        repo = self._repo(tmp_path / "repo")
+        for name in ("t", "prax"):
+            (repo / "src" / "aipass" / name / "tests").mkdir(parents=True)
+        plugin = tmp_path / "plugin.py"
+        plugin.write_text("", encoding="utf-8")
+        asked = self._answer(
+            monkeypatch,
+            tmp_path / "seat",
+            "tracked    aipass\nignored    AIPASS_REGISTRY.json\n"
+            "tracked    .aipass/project_hooks.json\nignored    .aipass/alerts.json\n",
+        )
+
+        spec = envcopy.build_env(repo / "src" / "aipass" / "t", tmp_path / "env", plugin)
+
+        env = spec.env_root
+        assert spec.to_document()["root_files"] == [".aipass/project_hooks.json", "aipass"]
+        assert spec.root_basis == "2 of 4 repo-root file(s) are tracked and were copied"
+        assert os.access(env / "aipass", os.X_OK)
+        assert not (env / "AIPASS_REGISTRY.json").exists() and not (env / ".aipass" / "alerts.json").exists()
+        assert not any("projects" in part or "__pycache__" in part for part in asked)
+
+    def test_a_root_with_no_git_copies_nothing_and_says_why(self, tmp_path, monkeypatch):
+        asked = self._answer(monkeypatch, tmp_path / "seat", "tracked    aipass\n")
+        (tmp_path / "aipass").write_text("", encoding="utf-8")
+
+        chosen, basis = envcopy.tracked_root_files(tmp_path)
+
+        assert chosen == [] and asked == []
+        assert basis.startswith("no .git at ")
+
+    def test_an_unreadable_tracked_answer_refuses_the_env(self, tmp_path, monkeypatch):
+        self._answer(monkeypatch, tmp_path / "seat", "", returncode=3)
+
+        with pytest.raises(envcopy.EnvError, match="could not be read: refused"):
+            envcopy.tracked_root_files(self._repo(tmp_path / "repo"))
+
+    def test_a_checkout_with_no_caller_seat_refuses_the_env_before_drone_runs(self, tmp_path, monkeypatch):
+        asked = self._answer(monkeypatch, tmp_path / "seat", "tracked    aipass\n")
+
+        def _no_seat():
+            raise envcopy.DiffScopeError("no passport above the handler, so drone has no caller")
+
+        monkeypatch.setattr(envcopy, "caller_home", _no_seat)
+
+        with pytest.raises(envcopy.EnvError, match="could not be read: DiffScopeError: no passport above"):
+            envcopy.tracked_root_files(self._repo(tmp_path / "repo"))
+        assert asked == []
+
+
+class TestRedBaselineNamesItsFailures:
+    """A refused baseline that names no test sends its reader to rebuild the sandbox."""
+
+    def _target(self, tmp_path, body):
+        """A one-file suite the baseline really runs."""
+        (tmp_path / "test_t.py").write_text(body, encoding="utf-8")
+        return mutation_shapes.SuiteTarget(
+            python=Path(sys.executable),
+            cwd=tmp_path,
+            pythonpath=str(tmp_path),
+            test_arg="test_t.py",
+            target_copy=tmp_path,
+        )
+
+    def test_every_failed_and_errored_nodeid_is_recorded_with_its_message(self, tmp_path):
+        body = "def test_ok():\n    pass\n\ndef test_a():\n    raise FileNotFoundError('env/aipass')\n"
+
+        base = mutation_runner.baseline(self._target(tmp_path, body), timeout_seconds=120)
+
+        assert base.green is False and base.passed == 1
+        assert base.to_document()["failing"] == [
+            {"nodeid": "test_t.py::test_a", "message": "FileNotFoundError: env/aipass"}
+        ]
+
+    def test_a_green_baseline_records_no_failure(self, tmp_path):
+        base = mutation_runner.baseline(self._target(tmp_path, "def test_ok():\n    pass\n"), timeout_seconds=120)
+
+        assert base.green is True and base.to_document()["failing"] == []
 
 
 class TestM10Completeness:

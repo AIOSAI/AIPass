@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
-# Version: 2.3.1
+# Version: 2.3.2
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from rich import box
 
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -151,6 +151,15 @@ def print_help() -> None:
     console.print("  [green]drone @cli demo[/green]                        [dim]# Runs the display demo[/dim]")
     console.print("  [green]drone @cli --version[/green]                   [dim]# Print the version[/dim]")
     console.print("  [green]drone @cli --help[/green]                      [dim]# This help message[/dim]")
+    console.print()
+    console.print("\u2500" * 70)
+    console.print()
+
+    console.print("[bold cyan]EXAMPLES:[/bold cyan]")
+    console.print()
+    console.print("  [green]drone @cli display demo[/green]                [dim]# See every message style[/dim]")
+    console.print("  [green]drone @cli templates demo[/green]              [dim]# See the operation templates[/dim]")
+    console.print("  [green]drone @cli display --help[/green]              [dim]# The display API reference[/dim]")
     console.print()
     console.print("\u2500" * 70)
     console.print()

@@ -126,8 +126,8 @@
     {
       "file": "apps/modules/delete.py",
       "standard": "logged_fallback",
-      "lines": [85],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): handle_command answers an exit code, 0 success and 1 failure (docstring). The other return 1 the checker counts as success (line 63) is the no-argument refusal, reported by warning('Usage: ...') and the usage lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+      "lines": [93],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): handle_command answers an exit code, 0 success and 1 failure (docstring). The other return 1 the checker counts as success (line 69) is the no-argument refusal, reported by warning('Usage: ...') and the usage lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/grant_admin.py",

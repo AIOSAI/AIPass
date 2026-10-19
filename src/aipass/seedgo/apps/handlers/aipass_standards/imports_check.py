@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -20,6 +20,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 # APPLIES_TO: ordering and grouping read the same in a test file. The prax
 # logger sub-rule is the one exception and gates itself below.
@@ -123,66 +124,21 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "IMPORTS"}
 
 
-def _opening_marker(stripped: str, in_docstring: bool, docstring_marker: Optional[str]) -> str:
-    """Which triple quote this line is actually using.
-
-    WHICHEVER COMES FIRST: a ``'''`` block whose content begins with ``\"\"\"`` is measured against its own
-    opening marker, or the block is left un-blanked and its payload read as imports.
-    """
-    if in_docstring and docstring_marker:
-        # Inside a block only its OWN marker can close it; the other is content.
-        return docstring_marker
-    double = stripped.find('"""')
-    single = stripped.find("'''")
-    if double == -1:
-        return "'''"
-    if single == -1:
-        return '"""'
-    return '"""' if double < single else "'''"
-
-
-def _process_docstring_marker(stripped, in_docstring, docstring_marker):
-    marker = _opening_marker(stripped, in_docstring, docstring_marker)
-    marker_count = stripped.count(marker)
-
-    if not in_docstring:
-        if marker_count >= 2:
-            return True, in_docstring, docstring_marker
-        elif marker_count == 1:
-            return True, True, marker
-    else:
-        if marker == docstring_marker and marker_count >= 1:
-            return True, False, None
-
-    return False, in_docstring, docstring_marker
-
-
 def filter_docstrings(lines: List[str]) -> List[str]:
-    """Blank out docstring lines, PRESERVING every line's position.
+    """Blank out docstring and string-body lines, PRESERVING every line's position.
 
     Blanked, not skipped: every check on the result reports an index into this list as a file line,
-    so compacting it would send each one to the wrong line.
+    so compacting it would send each one to the wrong line. A fixture string's ``import x`` body is
+    blanked too, since it is no import; a source that does not parse is returned unblanked.
     """
-    filtered_lines = []
-    in_docstring = False
-    docstring_marker = None
-
-    for line in lines:
-        stripped = line.strip()
-
-        if '"""' in stripped or "'''" in stripped:
-            skip, in_docstring, docstring_marker = _process_docstring_marker(stripped, in_docstring, docstring_marker)
-            if skip:
-                filtered_lines.append("\n")
-                continue
-
-        if in_docstring:
-            filtered_lines.append("\n")
-            continue
-
-        filtered_lines.append(line)
-
-    return filtered_lines
+    source = "\n".join(line[:-1] if line.endswith("\n") else line for line in lines)
+    try:
+        kinds = classify(source)
+    except UnparseableSource as exc:
+        logger.info("imports: unparseable, no line blanked: %s", exc)
+        return list(lines)
+    blank = kinds.docstrings | kinds.string_bodies
+    return ["\n" if i in blank else line for i, line in enumerate(lines, 1)]
 
 
 def find_import_section_end(lines: List[str]) -> int:

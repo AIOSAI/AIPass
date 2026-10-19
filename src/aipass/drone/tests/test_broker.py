@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.7
+# Version: 2.0.8
 # Created: 2026-06-09
-# Modified: 2026-10-07
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -718,6 +718,40 @@ class TestIdentity:
         else:
             mode = running_broker._secret_path.stat().st_mode
             assert stat.S_IMODE(mode) == 0o600
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX: Windows refuses to replace a file another handle holds")
+    def test_a_reader_holding_the_old_secret_file_never_sees_the_new_secret(self, broker: BrokerDaemon) -> None:
+        """Mutant: the secret written in place — the old file's open handle reads the new secret."""
+        broker._secret_path.write_bytes(b"old-secret")
+        broker._secret_path.chmod(0o644)
+        with open(broker._secret_path, "rb") as held:
+            thread = broker.start_background()
+            try:
+                assert held.read() == b"old-secret"
+                assert broker._secret_path.read_bytes() == broker._secret
+                assert stat.S_IMODE(broker._secret_path.stat().st_mode) == 0o600
+            finally:
+                broker.stop()
+                thread.join(timeout=3)
+
+    def test_the_secret_reaches_no_log_and_leaves_no_staged_copy(
+        self, broker: BrokerDaemon, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the secret logged at generation — its hex lands in the prax line."""
+        lines: list[str] = []
+        monkeypatch.setattr(broker_daemon.logger, "info", lambda msg, *args: lines.append(msg % args if args else msg))
+        thread = broker.start_background()
+        try:
+            secret = broker._secret_path.read_bytes()
+        finally:
+            broker.stop()
+            thread.join(timeout=3)
+
+        audit = broker.audit_path.read_text(encoding="utf-8") if broker.audit_path.exists() else ""
+        logged = "\n".join(lines) + audit
+        assert lines, "the generation line was not captured, so this pin proves nothing"
+        assert secret.hex() not in logged and repr(secret) not in logged
+        assert [p.name for p in broker._secret_path.parent.iterdir() if p.name.startswith(".test_secret")] == []
 
     def test_secret_changes_across_restarts(self, tmp_path: Path, repo_root: Path) -> None:
         """Secret is regenerated on each daemon start."""

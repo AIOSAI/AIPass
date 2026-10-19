@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -18,6 +18,7 @@ from typing import Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
 # APPLIES_TO: logging in key operations is a product decision.
 APPLIES_TO = "production"
@@ -188,24 +189,15 @@ def _check_local_filehandler(lines: List[str], file_path: str, bypass_rules: lis
 def _find_pattern_lines(lines: List[str], pattern: str, file_path: str, bypass_rules: list | None = None) -> List[int]:
     """Find lines matching a pattern, excluding docstrings and comments."""
     violation_lines = []
-    in_docstring = False
-    docstring_char = None
+    source = "\n".join(lines)
+    try:
+        prose = classify(source).text_only
+    except UnparseableSource as exc:
+        logger.info("log_visibility: unparseable, every non-# line read as code: %s", exc)
+        prose = hash_lines(source)
 
     for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        if not in_docstring:
-            if stripped.startswith('"""') or stripped.startswith("'''"):
-                docstring_char = stripped[:3]
-                if stripped.count(docstring_char) == 1:
-                    in_docstring = True
-                continue
-        else:
-            if docstring_char and docstring_char in stripped:
-                in_docstring = False
-            continue
-
-        if stripped.startswith("#"):
+        if i in prose:
             continue
 
         if re.search(pattern, line):

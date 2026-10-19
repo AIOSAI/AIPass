@@ -26,7 +26,7 @@ virtualenv into an archive.
 
 ---
 
-## Delete refuses protected branches, and every live citizen is protected
+## Delete refuses protected branches; `--retire` is the door for a live citizen
 
 `is_protected()` guards three layers, any one sufficient:
 
@@ -34,9 +34,15 @@ virtualenv into an archive.
 2. A registry entry carrying `owner: true`.
 3. A passport with `citizenship.registered: true`.
 
-Since `create` writes `registered: true`, a branch is protected from the moment it exists.
-There is no force flag: retiring a citizen means clearing that passport flag first, which
-is a deliberate, visible act rather than an argument on a command line.
+Since `create` writes `registered: true`, a branch is protected from the moment it exists,
+and a plain `delete` refuses it, naming the flag that retires it.
+
+`drone @spawn delete @branch --retire` clears layer 3 only: layers 1 and 2 still refuse, and
+the confirmation prompt still runs unless `--yes` is given. After the archive is written, the
+ARCHIVED passport is rewritten with `citizenship.registered: false`, then the branch is
+deregistered and its directory removed. The live passport is never edited: if the archive or
+that rewrite fails, the branch stays whole, registered and protected. `--retire --dry-run`
+previews and writes nothing.
 
 The infrastructure and active-citizen refusals both exit non-zero. The registry-owner
 layer is **unreachable in the live fleet** — the only entry carrying `owner: true`
@@ -52,4 +58,4 @@ clean up mail or plans that named the branch. Those live with the branches that 
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-18

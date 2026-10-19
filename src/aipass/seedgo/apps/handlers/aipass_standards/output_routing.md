@@ -26,7 +26,8 @@ Detects `console.print()` or `err_console.print()` calls containing status indic
 
 ### Exclusions
 
-- Lines inside docstrings (triple-quoted regions)
+- Docstring lines (the string first statement of a module, class or function), read from the parse tree
+- The body lines of a multi-line string literal: data, never a call
 - Comment lines (`# ...`)
 - `__init__.py` files
 - Test files (`test_*.py`, `*_test.py`, `conftest.py`)

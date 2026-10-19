@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_level_check.py
 # Description: Log Level Hygiene Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -14,9 +14,10 @@ Reference: log_level.md
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import AbstractSet, Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # APPLIES_TO: level choice is a product decision.
@@ -90,30 +91,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "LOG_LEVEL"}
 
 
-def _get_non_code_lines(lines: List[str]) -> set:
-    """Build a set of line numbers that are inside docstrings or comments."""
-    skip: set = set()
-    in_docstring = False
-
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-
-        triple_double = stripped.count('"""')
-        triple_single = stripped.count("'''")
-        total_triple = triple_double + triple_single
-
-        if total_triple > 0 and total_triple % 2 == 1:
-            in_docstring = not in_docstring
-            skip.add(i)
-            continue
-        elif total_triple > 0 and total_triple % 2 == 0:
-            skip.add(i)
-            continue
-
-        if in_docstring or stripped.startswith("#"):
-            skip.add(i)
-
-    return skip
+def _get_non_code_lines(lines: List[str]) -> AbstractSet[int]:
+    """Prose and string-body lines; a source that does not parse keeps every line but ``#`` ones."""
+    source = "\n".join(lines)
+    try:
+        return classify(source).text_only
+    except UnparseableSource as exc:
+        logger.info("log_level: unparseable, only # lines are prose: %s", exc)
+        return hash_lines(source)
 
 
 def _matches_user_input_pattern(line_lower: str, patterns: List[str]) -> bool:
