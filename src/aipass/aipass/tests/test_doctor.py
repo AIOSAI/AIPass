@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor: the command, the run and the provider checks
 # Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-15
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -16,6 +16,7 @@
 
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -54,6 +55,43 @@ from aipass.aipass.tests.support_doctor import _home_at
 def clean_env(monkeypatch):
     """Remove AIPASS_HOME from environment."""
     monkeypatch.delenv("AIPASS_HOME", raising=False)
+
+
+def _seat_home(tmp_path, monkeypatch, *, venv: bool = True, via: str = "settings"):
+    """An install home under tmp_path named by the user's settings.json or the env; returns (home, venv python).
+
+    The user's home is tmp_path/user, entered with _home_at by the caller.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    venv_python = home / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if venv:
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("", encoding="utf-8")
+    claude = tmp_path / "user" / ".claude"
+    claude.mkdir(parents=True)
+    monkeypatch.delenv("AIPASS_HOME", raising=False)
+    if via == "settings":
+        settings = {"env": {"AIPASS_HOME": str(home)}}
+        (claude / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    elif via == "env":
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+    return home, venv_python
+
+
+def _doctor_with_only_pytest_collect(monkeypatch, run, args, capsys) -> str:
+    """Run `aipass doctor` with every group and row but pytest collect stubbed; returns stdout."""
+    mod = "aipass.aipass.apps.modules.doctor"
+    for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
+        monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+    for name in ("_check_scaffold", "_check_sandbox", "_check_drone_systems", "check_wire_verify"):
+        monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+    monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
+    monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+    monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+    with patch(f"{mod}.json_handler", autospec=True), patch(f"{mod}.subprocess.run", side_effect=run):
+        assert handle_command("doctor", args) is True
+    return capsys.readouterr().out
 
 
 class _Stdin(io.StringIO):
@@ -141,31 +179,25 @@ class TestDoctorHandleCommand:
     ) -> None:
         """--verbose prints the collect errors behind 'collection issues'; the plain run does not.
 
-        _BRANCH_ROOT is tmp_path, so the real pytest subprocess collects a path
-        that is not there and fails with its own ERROR line; every other group
-        and sub-check is stubbed, so nothing reads live state.
+        The home's venv python is a stub file the runner swaps for this interpreter, so a real
+        pytest collects a src/aipass/ that is not under the tmp home and prints its own ERROR line.
         Mutant: `... if verbose)` -> `... if False)` (verbose ignored again) -> red.
         Mutant: `"--collect-only", "-q"]` -> `"-q"]` (pytest handed a real run) -> red.
         """
-        mod = "aipass.aipass.apps.modules.doctor"
-        monkeypatch.setattr(f"{mod}._BRANCH_ROOT", tmp_path)
-        for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
-            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
-        for name in ("_check_scaffold", "_check_sandbox", "_check_drone_systems", "check_wire_verify"):
-            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
-        monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
-        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
-        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
-        with (
-            patch(f"{mod}.json_handler", autospec=True),
-            patch(f"{mod}.subprocess.run", wraps=subprocess.run) as run,
-        ):
-            assert handle_command("doctor", args) is True
-        out = capsys.readouterr().out
+        home, home_python = _seat_home(tmp_path, monkeypatch)
+        calls: list[list[str]] = []
+        real_run = subprocess.run  # bound now: the patch replaces subprocess.run itself
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            real = [sys.executable, *argv[1:]] if argv[0] == str(home_python) else argv
+            return real_run(real, **kwargs)
+
+        with _home_at(tmp_path / "user"):
+            out = _doctor_with_only_pytest_collect(monkeypatch, run, args, capsys)
         assert "collection issues" in out
         assert ("file or directory not found" in out) is shown
-        handed = [sys.executable, "-m", "pytest", "src/aipass/", "--collect-only", "-q"]
-        assert handed in [c.args[0] for c in run.call_args_list]
+        assert [str(home_python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"] in calls
 
     def test_unreadable_updateignore_is_one_scaffold_row(self, tmp_path, monkeypatch, capsys) -> None:
         """An .updateignore that is there but cannot be read: doctor says so in one Scaffold row.
@@ -194,6 +226,70 @@ class TestDoctorHandleCommand:
         assert ".updateignore" in out
         assert "is there but cannot be read" in out
         assert "scaffold manifest" not in out  # one row: the drift report is not guessed without the claims
+
+
+class TestPytestCollect:
+    """The pytest collect row runs the install home's venv python at the home, never sys.executable."""
+
+    @pytest.mark.parametrize("via", ["settings", "env"])
+    def test_runs_the_home_venv_python_with_cwd_at_the_home(self, via, tmp_path, monkeypatch, capsys) -> None:
+        """On the pipx route sys.executable has no pytest and no src/ beside it: the pipx 2.8.22 false warn.
+
+        Mutant: argv[0] `str(python)` -> `sys.executable` -> red. Mutant: `cwd=str(home)` -> `cwd=None` -> red.
+        Mutant: the env fallback `or os.environ.get(...)` dropped -> red on via=env.
+        """
+        home, home_python = _seat_home(tmp_path, monkeypatch, via=via)
+        calls: list[tuple[list[str], object]] = []
+
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs.get("cwd")))
+            return subprocess.CompletedProcess(argv, 0, "tests/test_a.py::test_one\n", "")
+
+        with _home_at(tmp_path / "user"):
+            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
+        assert calls == [([str(home_python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"], str(home))]
+        assert "1 tests collected" in out
+
+    def test_a_home_without_a_venv_says_so_and_runs_nothing(self, tmp_path, monkeypatch, capsys) -> None:
+        """Mutant: the `.is_file()` guard removed -> red (the runner is called, the row says collection issues)."""
+        home, _ = _seat_home(tmp_path, monkeypatch, venv=False)
+        calls: list[list[str]] = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            raise FileNotFoundError(argv[0])
+
+        with _home_at(tmp_path / "user"):
+            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
+        assert calls == []
+        assert f"no venv at home ({home})" in " ".join(out.split())
+        assert "collection issues" not in out
+
+    def test_no_home_set_says_so_and_runs_nothing(self, tmp_path, monkeypatch, capsys) -> None:
+        """Mutant: the not-set return removed -> red (Path('') runs, the row never names the cause)."""
+        _seat_home(tmp_path, monkeypatch, via="none")
+        calls: list[list[str]] = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 1, "", "")
+
+        with _home_at(tmp_path / "user"):
+            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
+        assert calls == []
+        assert "AIPASS_HOME not set" in out
+
+    def test_a_home_venv_without_pytest_is_named_not_collection_issues(self, tmp_path, monkeypatch, capsys) -> None:
+        """Mutant: the `No module named pytest` arm removed -> red."""
+        _seat_home(tmp_path, monkeypatch)
+
+        def run(argv, **kwargs):
+            return subprocess.CompletedProcess(argv, 1, "", f"{argv[0]}: No module named pytest\n")
+
+        with _home_at(tmp_path / "user"):
+            out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
+        assert "pytest not installed in the home venv" in out
+        assert "collection issues" not in out
 
 
 # =============================================================================

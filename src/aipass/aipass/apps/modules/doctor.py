@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -14,7 +14,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 from rich.markup import escape
@@ -655,49 +654,62 @@ def _check_drone_systems() -> List[CheckResult]:
     return results
 
 
+def _home_venv_python(home: Path) -> Path:
+    """The home's venv interpreter: .venv/Scripts/python.exe on Windows, else .venv/bin/python."""
+    if os.name == "nt":
+        return home / ".venv" / "Scripts" / "python.exe"
+    return home / ".venv" / "bin" / "python"
+
+
+def _check_pytest_collect(verbose: bool) -> List[CheckResult]:
+    """Collect the install home's suite with the home's own venv, cwd at the home.
+
+    Never sys.executable: on the pipx route that is pipx's venv, with no pytest and no src/ beside it.
+    """
+    home_val = _configured_aipass_home() or os.environ.get("AIPASS_HOME", "")
+    if not home_val:
+        fix = "Set env.AIPASS_HOME in ~/.claude/settings.json (aipass install does)"
+        return [CheckResult("pytest collect", GLYPH_WARN, "AIPASS_HOME not set", fix)]
+    home = Path(home_val)
+    python = _home_venv_python(home)
+    if not python.is_file():
+        fix = f"Run ./setup.sh in {home} to create it"
+        return [CheckResult("pytest collect", GLYPH_WARN, f"no venv at home ({home})", fix)]
+    try:
+        proc = subprocess.run(
+            [str(python), "-m", "pytest", "src/aipass/", "--collect-only", "-q"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            cwd=str(home),
+        )
+    except FileNotFoundError as exc:
+        logger.warning("[doctor] home venv python would not run: %s", exc)
+        return [CheckResult("pytest collect", GLYPH_WARN, f"venv python will not run ({python})", "")]
+    except subprocess.TimeoutExpired as exc:
+        logger.warning("[doctor] pytest collect timed out: %s", exc)
+        fix = "Run manually: pytest src/aipass/ --collect-only -q — may just be a slow/shared-CPU environment"
+        return [CheckResult("pytest collect", GLYPH_WARN, "timed out (90s)", fix)]
+    lines = [ln.replace("[", r"\[") for ln in (proc.stdout + proc.stderr).splitlines()]  # markup-escaped
+    if proc.returncode == 0:
+        collected = [ln for ln in lines if "<" in ln or "::" in ln]
+        detail = f"{len(collected)} tests collected" if collected else "ok"
+        return [CheckResult("pytest collect", GLYPH_PASS, detail, "")]
+    if "No module named pytest" in proc.stderr:
+        fix = f"{python} -m pip install pytest"
+        return [CheckResult("pytest collect", GLYPH_WARN, "pytest not installed in the home venv", fix)]
+    # --verbose: pytest's ERROR lines (else its last line) under the row
+    errs = [ln for ln in lines if ln.startswith("ERROR")] or lines[-1:]
+    detail = "collection issues" + "".join(f"\n      {ln}" for ln in errs[:_MAX_NAMED_EXTRAS] if verbose)
+    return [CheckResult("pytest collect", GLYPH_WARN, detail, "Run pytest to diagnose")]
+
+
 def _check_services(verbose: bool = False) -> List[CheckResult]:
     """Run Services group checks."""
     results: List[CheckResult] = []
 
     results.extend(_check_drone_systems())
-
-    try:
-        repo_root = None
-        for parent in _BRANCH_ROOT.parents:
-            if (parent / "src").exists() and (parent / "pyproject.toml").exists():
-                repo_root = parent
-                break
-        cwd = str(repo_root) if repo_root else str(_BRANCH_ROOT)
-
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "src/aipass/", "--collect-only", "-q"],
-            capture_output=True,
-            text=True,
-            timeout=90,
-            cwd=cwd,
-        )
-        lines = [ln.replace("[", r"\[") for ln in (proc.stdout + proc.stderr).splitlines()]  # markup-escaped
-        if proc.returncode == 0:
-            collected = [ln for ln in lines if "<" in ln or "::" in ln]
-            detail = f"{len(collected)} tests collected" if collected else "ok"
-            results.append(CheckResult("pytest collect", GLYPH_PASS, detail, ""))
-        else:  # --verbose: pytest's ERROR lines (else its last line) under the row
-            errs = [ln for ln in lines if ln.startswith("ERROR")] or lines[-1:]
-            detail = "collection issues" + "".join(f"\n      {ln}" for ln in errs[:_MAX_NAMED_EXTRAS] if verbose)
-            results.append(CheckResult("pytest collect", GLYPH_WARN, detail, "Run pytest to diagnose"))
-    except FileNotFoundError as exc:
-        logger.warning("[doctor] pytest not found: %s", exc)
-        results.append(CheckResult("pytest collect", GLYPH_WARN, "pytest not found", "pip install pytest"))
-    except subprocess.TimeoutExpired as exc:
-        logger.warning("[doctor] pytest collect timed out: %s", exc)
-        results.append(
-            CheckResult(
-                "pytest collect",
-                GLYPH_WARN,
-                "timed out (90s)",
-                "Run manually: pytest src/aipass/ --collect-only -q — may just be a slow/shared-CPU environment",
-            )
-        )
+    results.extend(_check_pytest_collect(verbose))
 
     manifest_checks = check_provider_manifest()
     results.extend(manifest_checks)

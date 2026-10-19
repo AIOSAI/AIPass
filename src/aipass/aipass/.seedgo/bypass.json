@@ -169,8 +169,8 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [161, 583],
-      "reason": "161: _configured_aipass_home's one caller (_check_home_agreement, doctor.py:336) skips the comparison on \"\"; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 583: _registry_citizen_names's one caller (drone row, doctor.py:640) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:376). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them)."
+      "lines": [160, 582],
+      "reason": "160: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:335) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 582: _registry_citizen_names's one caller (drone row, doctor.py:639) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:349). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them)."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
@@ -182,7 +182,7 @@
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
       "lines": [166],
-      "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:448, doctor scaffold group:1062) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision)."
+      "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:448, doctor scaffold group:1074) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision)."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
@@ -227,7 +227,7 @@
     {
       "file": "tests/test_doctor.py",
       "standard": "through_the_command",
-      "lines": [31],
+      "lines": [32],
       "reason": "Ruling (c), fleet green leg 7: _doctor_wire's public callers, run_doctor --fix (fix_provider_settings) and check_provider_manifest with a yes at the prompt, write the provider settings (~/.claude/settings.json); its verify, merge and reconcile rows are pinned on a tmp settings file with the wire stubbed, and the FPLAN-0646 ask tests run through run_doctor and handle_command, reading the module only for its message constants. The module is private because the CLI never routes to it (discover_modules skips it). Re-pinned 2026-10-15 (FPLAN-0646: import re moved it 30 -> 31)."
     },
     {
