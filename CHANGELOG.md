@@ -9,6 +9,16 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **README: the reference-fleet note said you do not run these agents; two of them work for you** (`README.md`). The NOTE under The reference fleet is a TIP naming devpulse as the admin seat (talk a project through before creating it, solve a problem, setup help; dispatches any agent on the machine, edits and runs git across projects) and aipass as the machine's concierge (setup, updates, installs, machine problems), each with the `claude` door in its folder; the other sixteen maintain AIPass. The install paragraph splits in two and leads its second sentence with the server BAUD starts; the clone block is labelled for people working on AIPass itself; Why AIPass moves above How it works so the reason comes before the mechanics. The owner's correction, relayed by Vera Studio with its read of the page on main.
+
+### Fixed
+
+- **`aipass doctor` said "collection issues" on every pipx install** (@aipass, `modules/doctor.py` 1.3.1; seven pins red-first in `tests/test_doctor.py`; suite 1291 to 1297). The pytest row ran `sys.executable -m pytest` from a parent of the package: on the pipx route that is pipx's venv, with no pytest and no `src/` beside it, so a clean install reported a fault it did not have while the clone's own venv collected 25353 tests. The row now runs the install home's venv python with cwd at the home, and says which it lacks when it cannot: no home set, no venv at the home, pytest not installed there. Found by the v2.8.22 fresh-container proof.
+
 ## [2026-10-19] — v2.8.22: a diagram kit and the How it works picture drawn from the code, RPLAN for research of any kind, the repo's GitHub chores through the door, a read token could switch on the relay
 
 ### Added

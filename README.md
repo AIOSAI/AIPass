@@ -45,7 +45,9 @@ pipx install aipass
 aipass install
 ```
 
-The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, adds BAUD, the phone face, with its server on your machine (`--no-baud` skips that), runs a health check, and ends with the AIPass concierge on screen, greeting you and saying what your machine still needs. From a clone instead (this route skips the phone step):
+The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, runs a health check, and ends with the AIPass concierge on screen, greeting you and saying what your machine still needs. It also starts a server on your machine for BAUD, the phone face; `--no-baud` skips that.
+
+To work on AIPass itself, install from a clone instead (this route skips the phone step):
 
 ```bash
 git clone https://github.com/AIOSAI/AIPass.git && cd AIPass && ./aipass install
@@ -74,6 +76,16 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
 <p align="center">
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/baud-agent.png" alt="An agent's card in BAUD: what it is doing, its mail, plans and todos" width="240">
 </p>
+
+## Why AIPass
+
+When the task gets complex, you become the coordinator. You copy context between tools, dispatch work by hand, and keep track of who is doing what.
+
+Many multi-agent setups give each agent its own sandbox or worktree. One agent can't see what another just built, and when the task ends, the agent is gone.
+
+That's not a team. That's a room full of people wearing headphones.
+
+In AIPass, agents are citizens. Each has an identity, a memory that survives the session, a mailbox, and a home directory, on the same filesystem as you and each other. Hooks and gates decide who may write what. Switch projects, come back a week later, and nothing has to be explained again.
 
 ## How it works
 
@@ -120,16 +132,6 @@ An agent's identity is a file it can read, `.trinity/passport.json`, trimmed her
 
 **No index.** Nothing indexes your codebase. An agent finds its way the way a new colleague does: the bus, the owning agent's README, and its own memory of what it did last time.
 
-## Why AIPass
-
-When the task gets complex, you become the coordinator. You copy context between tools, dispatch work by hand, and keep track of who is doing what.
-
-Many multi-agent setups give each agent its own sandbox or worktree. One agent can't see what another just built, and when the task ends, the agent is gone.
-
-That's not a team. That's a room full of people wearing headphones.
-
-In AIPass, agents are citizens. Each has an identity, a memory that survives the session, a mailbox, and a home directory, on the same filesystem as you and each other. Hooks and gates decide who may write what. Switch projects, come back a week later, and nothing has to be explained again.
-
 ## What you get
 
 The boring stuff works. One human and these agents built it, and use it every day to build AIPass itself and [BAUD](https://github.com/AIOSAI/baud).
@@ -173,8 +175,14 @@ No cloud accounts, no external services — everything to clean up is on your ma
 
 ## The reference fleet
 
-> [!NOTE]
-> You do not run these agents in your own project. They maintain AIPass itself, and their services (mail, plans, memory, gates) are what your agents call.
+> [!TIP]
+> Two of these agents work for you directly.
+>
+> **devpulse** is the admin seat. Run `claude` in `src/aipass/devpulse` in your AIPass folder (`~/AIPass` by default) to talk a project through before you create it, solve a problem, or get help with setup. It can dispatch any agent on your machine, your project managers included, and edit files and run git across projects.
+>
+> **aipass** is the concierge for the machine itself: setup, updates and installs, and machine problems like a wifi connection that keeps dropping or a fan that never stops. Run `claude` in `src/aipass/aipass`.
+>
+> The other sixteen maintain AIPass, and your agents call their services (mail, plans, memory, gates) without you running them.
 
 AIPass ships with 18 agents. Each has its own README and a `docs/` folder under [src/aipass](https://github.com/AIOSAI/AIPass/tree/main/src/aipass).
 
@@ -183,7 +191,7 @@ AIPass ships with 18 agents. Each has its own README and a `docs/` folder under 
 
 ```
 devpulse (orchestrator: the one you talk to)
-   ├── aipass   : concierge and onboarding (init, doctor, profile)
+   ├── aipass   : concierge: setup, updates, machine problems (init, doctor)
    ├── drone    : command routing and @agent resolution
    ├── seedgo   : quality standards, checked across all agents
    ├── prax     : monitoring, logs, runaway-log detection
