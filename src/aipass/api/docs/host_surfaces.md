@@ -197,7 +197,8 @@ branch is a real answer, not the bug that killed a live session. `drone @prax mo
 with nothing after it watches every branch — the desktop's default pane — and names no
 session to take over. The fence is mirrored from their `pty.rs` character for character
 and still refuses the empty string; whether a target was *named at all* is a different
-question, asked once before the fence is consulted. @prax also documents `run all` for the
+question, asked once before the fence is consulted. A target starting with `-` is refused besides:
+past the fence it would reach drone as a flag, and `--relay` starts the Telegram relay. @prax also documents `run all` for the
 same thing; this lane deliberately does not use it — the desktop's argv is what is mirrored.
 
 **The bearer rides `Sec-WebSocket-Protocol`, never the query string.** A browser cannot set

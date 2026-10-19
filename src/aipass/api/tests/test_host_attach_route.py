@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach_route.py
 # Description: Tests for the attach route and its seats — opening, socket auth, watches, outside rooms, the ping
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for the WS /v1/room/attach route in apps/handlers/host/server.py and open_attach/open_monitor in attach.py."""
@@ -441,16 +441,20 @@ class TestGlobalMissionControlIsReachable:
 
     @pytest.mark.parametrize(
         "garbage",
-        ["seedgo; rm -rf /", "SEEDGO", "a b", "../etc", "seedgo && curl evil", "$(whoami)", "run all"],
+        ["seedgo; rm -rf /", "SEEDGO", "a b", "../etc", "seedgo && curl evil", "$(whoami)", "run all", "--relay", "-x"],
     )
     def test_garbage_is_still_refused_before_anything_spawns(self, quiet: Any, garbage: str, monkeypatch) -> None:
         """Making absence reachable must not make anything ELSE reachable."""
         # PTY_AVAILABLE forced so the FENCE answers on every platform; the platform gate stands in front of it.
         monkeypatch.setattr(host_attach, "PTY_AVAILABLE", True)
+        # No drone on PATH: the fence must answer before the PATH check, not lean on the argv builder behind it.
+        which = MagicMock(return_value=None)
+        monkeypatch.setattr(host_attach.shutil, "which", which)
         with patch.object(host_attach.subprocess, "Popen") as spawn:
             with pytest.raises(host_attach.AttachRefused):
                 host_attach.open_monitor(garbage)
 
+        which.assert_not_called()
         spawn.assert_not_called()
 
     def test_a_pty_less_platform_is_refused_in_words_before_the_fence(self, quiet: Any) -> None:

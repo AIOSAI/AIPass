@@ -174,8 +174,8 @@
     {
       "file": "tests/test_host_attach_pump.py",
       "standard": "through_the_command",
-      "lines": [365],
-      "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9). Moved with the test from test_host_attach.py:716 in the oversize split (api, 2026-10-08). Line moved 529 -> 531 with DPLAN-0414 C-C's asyncio and pump imports, 531 -> 354 in the comment sweep (2026-10-17), 354 -> 365 with the argv-builder fence test (2026-10-17)."
+      "lines": [366],
+      "reason": "kwargs['preexec_fn'] is host_attach._acquire_controlling_tty: the identity IS the claim (open_attach hands Popen this very hook), so the name must be read; kept under compass 481 and accepted in leg 8 (api, fleet green leg 9). Moved with the test from test_host_attach.py:716 in the oversize split (api, 2026-10-08). Line moved 529 -> 531 with DPLAN-0414 C-C's asyncio and pump imports, 531 -> 354 in the comment sweep (2026-10-17), 354 -> 365 with the argv-builder fence test (2026-10-17), 365 -> 366 with the --relay vector (2026-10-19)."
     },
     {
       "file": "tests/test_host_lifetime.py",
@@ -262,8 +262,8 @@
     {
       "file": "tests/test_host_attach_route.py",
       "standard": "through_the_command",
-      "lines": [734],
-      "reason": "_acquire_controlling_tty's off-POSIX refusal is reached by no caller (all sit behind PTY_AVAILABLE) and runs in a forked child; its injected defaults are the only way in. HELD since leg 8 (api, fleet green leg 11). Moved with the test from test_host_attach.py:2274 in the oversize split (api, 2026-10-08). Ruled bypass by devpulse 2026-10-10 (3ef9df96): the alternative to a refusal there is None() raised inside a forked child, so a private-helper unit test is the only way to pin it. Line drifted 1016 -> 1020, 1020 -> 722 in the comment sweep (2026-10-17), 722 -> 734 with the room-name fence test (2026-10-17)."
+      "lines": [738],
+      "reason": "_acquire_controlling_tty's off-POSIX refusal is reached by no caller (all sit behind PTY_AVAILABLE) and runs in a forked child; its injected defaults are the only way in. HELD since leg 8 (api, fleet green leg 11). Moved with the test from test_host_attach.py:2274 in the oversize split (api, 2026-10-08). Ruled bypass by devpulse 2026-10-10 (3ef9df96): the alternative to a refusal there is None() raised inside a forked child, so a private-helper unit test is the only way to pin it. Line drifted 1016 -> 1020, 1020 -> 722 in the comment sweep (2026-10-17), 722 -> 734 with the room-name fence test (2026-10-17), 734 -> 738 with the option-shaped watch target pin (2026-10-19)."
     },
     {
       "file": "tests/test_host_perf.py",

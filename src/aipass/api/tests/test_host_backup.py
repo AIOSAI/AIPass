@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_backup.py
 # Description: Tests for the host API's backup door — runs, cancels, jobs and status (DPLAN-0411, DPLAN-0412)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/handlers/host/backup.py."""
@@ -268,18 +268,34 @@ class TestStopRun:
         assert door.route_command.call_args.kwargs == {"timeout": host_backup.CANCEL_TIMEOUT_SECONDS}
 
     @pytest.mark.parametrize(
-        ("stdout", "stderr"),
-        [("drive_sync is not running for AIPass\n", ""), ("", "drive_sync is not running for AIPass\n")],
+        "stdout", ["drive_sync is not running for AIPass\n", "drive_sync is not running for AIPass\nsecond line\n"]
     )
-    def test_a_stop_that_exits_non_zero_is_not_running_with_its_line_verbatim(
-        self, door: Any, stdout: str, stderr: str
-    ) -> None:
-        door.route_command.return_value = _result(stdout, exit_code=1, stderr=stderr, command="stop")
+    def test_a_stop_that_exits_non_zero_is_not_running_with_its_first_stdout_line(self, door: Any, stdout: str) -> None:
+        door.route_command.return_value = _result(
+            stdout, exit_code=1, stderr="Traceback (most recent call last):\n", command="stop"
+        )
 
         with pytest.raises(host_backup.NotRunning) as not_running:
             host_backup.stop_run("AIPASS", "drive_sync")
 
         assert str(not_running.value) == "drive_sync is not running for AIPass"
+
+    def test_a_not_running_line_is_capped(self, door: Any) -> None:
+        door.route_command.return_value = _result("x" * 5000, exit_code=1, command="stop")
+
+        with pytest.raises(host_backup.NotRunning) as not_running:
+            host_backup.stop_run("AIPASS", "drive_sync")
+
+        assert str(not_running.value) == "x" * host_backup.MAX_LINE_CHARS
+
+    def test_a_failed_stop_with_only_stderr_is_unavailable_never_not_running(self, door: Any) -> None:
+        crash = 'Traceback (most recent call last):\n  File "/home/x/stop.py", line 9\nKeyError: pid\n'
+        door.route_command.return_value = _result("", exit_code=1, stderr=crash, command="stop")
+
+        with pytest.raises(host_backup.VerbUnavailable) as unavailable:
+            host_backup.stop_run("AIPASS", "drive_sync")
+
+        assert "Traceback" not in str(unavailable.value)
 
     def test_backup_unreachable_on_stop_is_unavailable(self, door: Any) -> None:
         door.route_command.side_effect = drone.RoutingError("Branch not found: @backup")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach_pump.py
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
@@ -140,8 +140,9 @@ class TestTheCommandIsTheDesktopsCommand:
         for build in (host_attach.client_command, host_attach.attach_only_command):
             with pytest.raises(host_attach.AttachRefused):
                 build(";")
-        with pytest.raises(host_attach.AttachRefused):
-            host_attach.monitor_command("seedgo; rm -rf /")
+        for target in ("seedgo; rm -rf /", "--relay"):
+            with pytest.raises(host_attach.AttachRefused):
+                host_attach.monitor_command(target)
 
         assert host_attach.client_command("0")[4] == "0"
         assert host_attach.monitor_command("seedgo,cli")[-1] == "seedgo,cli"
