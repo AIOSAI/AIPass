@@ -30,7 +30,7 @@
     {
       "from": "owner", "to": "manager", "style": "dashed", "accent": "green", "route": "bottom",
       "label": "drone @ai_mail reply",
-      "labels": [{"text": "lands in the inbox;\nthe watchdog surfaces it", "at": "end"}]
+      "labels": [{"text": "lands in the manager's inbox;\nthe dispatch row closes", "at": "end"}]
     }
   ],
   "footers": ["every command goes through one bus", "every tool write passes the gates"],
