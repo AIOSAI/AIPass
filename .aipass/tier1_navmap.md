@@ -72,10 +72,11 @@ Always reply to dispatches — reply auto-closes. No silent completions.
 
 Plans carry context so you don't have to. Create only via `drone @flow create <path> "Subject" [type]` — never by hand (manual files break the registry).
 
- - DPLAN — dev plan. Thinking, brainstorming, architecture. Before building.
- - FPLAN — flow plan, the default. Building and executing. `master` template = multi-phase, spawns sub-FPLANs.
- - PPLAN — playbook. A throwaway run stamped from a reusable SOP template. Operating the system, not changing it.
- - `drone @flow templates` lists every type, live.
+ - DPLAN — dev plan: thinking, architecture, before building.
+ - FPLAN — flow plan, the default: building. `master` = multi-phase, spawns sub-FPLANs.
+ - PPLAN — playbook: a throwaway run of a reusable SOP. Operating the system, not changing it.
+ - RPLAN — research: a trace of our own code, a study of an external repo, a measurement. The brief, the report path and the verdict live in it.
+ - APLAN — autonomous work, an audit or a night shift. CPLAN capture, TDPLAN team dev. `drone @flow templates` lists all seven, live.
 
 # Sub-agents
 
