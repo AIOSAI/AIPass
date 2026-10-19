@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
 # Modified: 2026-10-18
 # =============================================
@@ -372,17 +372,22 @@ class TestRootFiles:
         (tmp_path / "projects" / "big.bin").write_bytes(b"")
         return tmp_path
 
-    def _answer(self, monkeypatch, stdout, returncode=0):
-        """Stand in for `drone @git tracked`, recording what it was asked; rsync still runs."""
+    def _answer(self, monkeypatch, caller, stdout, returncode=0):
+        """Stand in for `drone @git tracked` and the caller seat it runs from; rsync still runs.
+
+        The caller is resolved before drone runs, from a gitignored passport a clean checkout lacks.
+        """
         asked = []
         real_run = envcopy.subprocess.run
 
         def _run(command, **kwargs):
             if tuple(command[:3]) != envcopy.TRACKED_QUERY:
                 return real_run(command, **kwargs)
+            assert kwargs["cwd"] == str(caller)
             asked.extend(command)
             return envcopy.subprocess.CompletedProcess(command, returncode, stdout, "refused")
 
+        monkeypatch.setattr(envcopy, "caller_home", lambda: caller)
         monkeypatch.setattr(envcopy.subprocess, "run", _run)
         return asked
 
@@ -394,6 +399,7 @@ class TestRootFiles:
         plugin.write_text("", encoding="utf-8")
         asked = self._answer(
             monkeypatch,
+            tmp_path / "seat",
             "tracked    aipass\nignored    AIPASS_REGISTRY.json\n"
             "tracked    .aipass/project_hooks.json\nignored    .aipass/alerts.json\n",
         )
@@ -408,7 +414,7 @@ class TestRootFiles:
         assert not any("projects" in part or "__pycache__" in part for part in asked)
 
     def test_a_root_with_no_git_copies_nothing_and_says_why(self, tmp_path, monkeypatch):
-        asked = self._answer(monkeypatch, "tracked    aipass\n")
+        asked = self._answer(monkeypatch, tmp_path / "seat", "tracked    aipass\n")
         (tmp_path / "aipass").write_text("", encoding="utf-8")
 
         chosen, basis = envcopy.tracked_root_files(tmp_path)
@@ -417,10 +423,22 @@ class TestRootFiles:
         assert basis.startswith("no .git at ")
 
     def test_an_unreadable_tracked_answer_refuses_the_env(self, tmp_path, monkeypatch):
-        self._answer(monkeypatch, "", returncode=3)
+        self._answer(monkeypatch, tmp_path / "seat", "", returncode=3)
 
         with pytest.raises(envcopy.EnvError, match="could not be read: refused"):
-            envcopy.tracked_root_files(self._repo(tmp_path))
+            envcopy.tracked_root_files(self._repo(tmp_path / "repo"))
+
+    def test_a_checkout_with_no_caller_seat_refuses_the_env_before_drone_runs(self, tmp_path, monkeypatch):
+        asked = self._answer(monkeypatch, tmp_path / "seat", "tracked    aipass\n")
+
+        def _no_seat():
+            raise envcopy.DiffScopeError("no passport above the handler, so drone has no caller")
+
+        monkeypatch.setattr(envcopy, "caller_home", _no_seat)
+
+        with pytest.raises(envcopy.EnvError, match="could not be read: DiffScopeError: no passport above"):
+            envcopy.tracked_root_files(self._repo(tmp_path / "repo"))
+        assert asked == []
 
 
 class TestRedBaselineNamesItsFailures:

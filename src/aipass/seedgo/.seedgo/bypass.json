@@ -324,7 +324,7 @@
     {
       "file": "tests/test_audit_tests_lane_adapter.py",
       "standard": "through_the_command",
-      "lines": [575],
+      "lines": [593],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split, re-pinned after the fire_canary tests): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
