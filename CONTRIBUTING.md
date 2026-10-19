@@ -20,6 +20,7 @@ Changes under `src/aipass/spawn/templates/` also need the template registry rege
 - Tests: `pytest` (4,900+ tests across the project)
 - Quality: AIPass uses its own standards system ([seedgo](src/aipass/seedgo/README.md)) for automated audits
 - Run `./aipass install --no-chat` to bootstrap the full environment without launching the welcome chat (contributors work in the engine repo itself)
+- To work on AIPass itself, run `claude` in `src/aipass/devpulse`, the orchestrator that plans and dispatches the work; it holds the repo's git write
 
 ## Questions?
 

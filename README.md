@@ -18,7 +18,7 @@
 <p align="center">For Claude Code users who want their agents to remember last week, hand each other work, and build in the repos they already have.</p>
 
 <p align="center">
-  <a href="https://github.com/AIOSAI/AIPass/actions/workflows/ci.yml"><img alt="Tests" src="https://github.com/AIOSAI/AIPass/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/AIOSAI/AIPass/actions/workflows/ci.yml"><img alt="Tests" src="https://github.com/AIOSAI/AIPass/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://pypi.org/project/aipass/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/aipass?color=007ec6"></a>
   <a href="https://github.com/AIOSAI/AIPass/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-007ec6"></a>
 </p>
@@ -45,7 +45,7 @@ pipx install aipass
 aipass install
 ```
 
-The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, runs a health check, and ends with the AIPass concierge on screen, greeting you and saying what your machine still needs. From a clone instead:
+The first line puts two commands on your PATH, `aipass` and `drone`. The second clones AIPass into `~/AIPass` (`--path` to choose), builds its environment, sets up the 18 agents, adds BAUD, the phone face, with its server on your machine (`--no-baud` skips that), runs a health check, and ends with the AIPass concierge on screen, greeting you and saying what your machine still needs. From a clone instead (this route skips the phone step):
 
 ```bash
 git clone https://github.com/AIOSAI/AIPass.git && cd AIPass && ./aipass install
@@ -55,7 +55,7 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
 
 ## Start here
 
-1. **Make a project, or adopt one you have.** `aipass new` builds a new project around a resident manager agent and makes the first commit. `aipass init run`, run inside a directory you already have anywhere on disk, does a guided setup. Both end in a conversation with your new agent.
+1. **Make a project, or adopt one you have.** `aipass new` builds a new project around a resident manager agent, makes the first commit, and ends in a conversation with that agent. `aipass init run`, run inside a directory you already have, does a guided setup and ends with `claude` open in it; its `aipass_framework` template adds the first agent on the way.
 
    ```bash
    aipass new my-project --template python   # New project: scaffold, resident manager agent, first commit
@@ -94,7 +94,7 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
 
 **One bus.** `drone @agent command [args]` reaches any agent. You use it, and agents use it to reach each other.
 
-**One citizen shape.** Every agent, yours and the reference fleet, has the same layout. Know one and you know them all:
+**One citizen shape.** Every agent, yours and the reference fleet, has the same layout. Know one and you know them all. The main parts:
 
 ```
 src/my_project/<agent>/
@@ -143,11 +143,11 @@ The boring stuff works. One human and these agents built it, and use it every da
 - **Mail and dispatch.** Agents send each other tasks and results, and wake whoever they are waiting on.
 - **Plans that carry context.** Work is written down as a plan, so whoever picks it up knows why it exists and where it stands.
 - **Gates.** Hooks decide which agent may [edit which files](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/edit_gate.md). Git goes through [one door](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/hooks/docs/git_gate.md). Raw deletes are refused.
-- **Works in your own repos.** A directory outside the AIPass tree can call the fleet right away. For the fleet to send work to it, declare it once with `drone @memory roots add <path>`.
+- **Works in your own repos.** A project that holds an agent calls the fleet right away. For the fleet to send work to it, declare it once with `drone @memory roots add <path>`.
 - **Standards audits.** AIPass's own 18 agents are audited in CI on every change against [one written standard](https://github.com/AIOSAI/AIPass/blob/main/src/aipass/seedgo/docs/aipass_standards.md); `drone @seedgo audit` runs the same checks on yours.
 - **Logs and backups.** Every agent logs to its own place, and runaway logs are caught. Local snapshots you can restore from, with optional Google Drive sync.
-- **The daemon.** A scheduler runs recurring jobs, and each agent owns its own schedule.
-- **Everything local.** Memory and mail are files on your machine. Nothing leaves it except what Claude Code itself sends to Anthropic, unless you turn on an outside API with your own keys.
+- **The daemon.** `drone @daemon install-timer` starts a scheduler for recurring jobs, and each agent owns its own schedule.
+- **Everything local.** Memory and mail are files on your machine. Nothing leaves it except what Claude Code itself sends to Anthropic, unless you turn on an outside API or Drive sync with your own keys. The phone face serves on your own tailnet, and the first memory search downloads its small embedding model once.
 
 ## What install changes
 
@@ -156,20 +156,20 @@ The boring stuff works. One human and these agents built it, and use it every da
 
 Install builds the environment, puts `aipass` and `drone` on your PATH, and sets up the 18 agents. It runs a health check that fixes what it can. In an interactive shell it ends in a conversation with the AIPass concierge, which greets you and walks you through what your machine still needs. On the way it may ask for your git identity (only if it is not set globally), your name, and whether the session should ask before system-changing commands. A non-interactive shell finishes with defaults and no prompts, and skips both the health check and the conversation; `--no-chat` skips them in any shell.
 
-Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw `git commit`, `push`, `reset`, `rebase` or `config`, no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, resumes that agent's seat. It sets `git config --global pull.rebase true` when it sets your git identity. It installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing. On Linux, `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
+Install changes a few things outside the repo, and you should know what. It adds AIPass deny rules to your user-level Claude Code settings (no raw git writes: `commit`, `push`, `reset`, `rebase`, `merge`, `config` and the destructive `checkout`, `restore`, `stash` and `branch` forms; no reading `~/.secrets/`), and these apply to every Claude Code project on the machine. It merges its hooks with any you already have. It adds a `claude` shell function that, inside an agent directory, boots that agent's seat, attaching to it if one is already live. It sets `git config --global pull.rebase true` when it sets your git identity. On Linux it installs the `@anthropic-ai/sandbox-runtime` npm package if it is missing; macOS runs without the sandbox. On Linux, `sudo` may ask once to place the `/usr/local/bin` symlinks. Re-running install rebuilds `.venv`. The list below names every file it touches.
 
 The installer writes a layer outside the project. Remove all of it to erase AIPass completely:
 
-- `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `env.CLAUDE_CODE_DISABLE_AGENT_VIEW`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and one `ask` rule (edits under `~/.claude/`). Nothing of AIPass changes this file unseen: every write first drops a dated copy under `~/.claude/.backup/settings/` and a line in the `receipts.jsonl` beside it naming which door wrote; `aipass doctor --fix` lists the changes with a diff and asks once before writing (`--yes` for scripts), and the installer's own preflight writes once, with a receipt. Also `~/.claude/commands/memo.md`.
+- `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `env.CLAUDE_CODE_DISABLE_AGENT_VIEW`, `includeGitInstructions: false`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and one `ask` rule (edits under `~/.claude/`). Nothing of AIPass changes this file unseen: every write first drops a dated copy under `~/.claude/.backup/settings/` and a line in the `receipts.jsonl` beside it naming which door wrote; `aipass doctor --fix` lists the changes with a diff and asks once before writing (`--yes` for scripts), and the installer's own preflight writes once, with a receipt. Also `~/.claude/commands/memo.md`.
 - `~/.claude/.backup/settings/` — those dated copies and the receipts ledger.
 - `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`.
-- Your shell rc (`.bashrc`/`.zshrc`/`.bash_profile`): a PATH line, `AIPASS_HOME` and `PYTHONUTF8` exports, and the `claude()` boot-shim function between the `AIPass boot shim` markers.
-- `~/.aipass/` — cross-project state: the fleet registry, trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), Telegram bot state (the Telegram skill is retired and switched off, but its state lands here if you turn it on).
+- Your shell rc (`.bashrc`, `.zshrc` or `.bash_profile`): an `AIPASS_HOME` export, a PATH line where the commands went to `~/.local/bin`, and the `claude()` boot-shim function between the `AIPass boot shim` markers in `.bashrc` and `.zshrc`.
+- `~/.aipass/` — cross-project state: the trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), Telegram bot state (the Telegram skill is retired and switched off, but its state lands here if you turn it on).
 - `~/.secrets/aipass/` if seeded.
 - `git config --global pull.rebase true`, set only if install also set your identity.
 - Only if a `codex` binary was on PATH at install: `~/.codex/config.toml` is rewritten.
-- Only if you ran `drone @daemon install-timer`: a systemd user timer, removed by `drone @daemon uninstall-timer`.
-- Only if the phone step ran (the fuller `aipass install`, which BAUD's installer uses): the host API's bind in `~/.secrets/aipass/host_api/config.json`, the hashes of pairing codes in `~/.secrets/aipass/host_api/pairings.json` once one is minted, and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
+- Only if you ran `drone @daemon install-timer`: a systemd user timer, with its `daemon-tick.log` under `~/.aipass/`, removed by `drone @daemon uninstall-timer`.
+- Unless you pass `--no-baud`, `aipass install` sets up the host API (the `./aipass install` clone route skips this step): its bind in `~/.secrets/aipass/host_api/config.json`, token and pairing files beside it (pairing codes are stored as hashes once one is minted), and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
 - macOS only, when no Python 3.10+ is found and an existing Homebrew cannot provide one: a `uv`-managed interpreter under `~/.local/`. Linux with no Python 3.10+ stops the install and says so.
 
 No cloud accounts, no external services — everything to clean up is on your machine.
@@ -246,7 +246,7 @@ Linux is the daily platform. macOS runs the full suite in CI on Python 3.12 and 
 - [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it (Pro, Max, Team or Enterprise)
 - Linux or macOS (both tested in CI). On Windows, use [WSL2](https://learn.microsoft.com/windows/wsl/install) and install inside it: AIPass then runs as the Linux program CI tests. Native Windows and Git Bash are not tested in CI; the code keeps its Windows paths but nothing proves them.
 - `sudo` access optional (Linux uses it for `/usr/local/bin` symlinks — falls back to `~/.local/bin` without it; macOS never asks)
-- Node.js + npm optional (install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later)
+- Node.js + npm optional (on Linux, install uses them to add the `@anthropic-ai/sandbox-runtime` kernel sandbox; without them the sandbox is reported as optional and not set up, AIPass runs without it, and `aipass doctor` says how to add it later; macOS skips the sandbox)
 - API keys / OAuth optional (OpenRouter, Google — only for optional add-on integrations)
 
 </details>
@@ -309,7 +309,7 @@ Use spawn's delete command to cleanly archive and deregister:
 drone @spawn delete @agent_name          # asks for confirmation; --yes skips it
 ```
 
-This copies the agent's directory to `.archive/deleted_branches/` (minus `.venv`, `.git`, caches), removes it from the registry, then deletes the original. The fleet's own core agents (spawn, drone, devpulse, the registry owner) refuse deletion.
+This copies the agent's directory to `.archive/deleted_branches/` (minus `.venv`, `.git`, caches), removes it from the registry, then deletes the original. The fleet's own core agents (spawn, drone, devpulse, the registry owner) refuse deletion, and so does any agent whose passport says it is registered: set `citizenship.registered` to `false` in its `.trinity/passport.json` first, then delete.
 
 </details>
 
@@ -333,7 +333,7 @@ This works because AIPass runs Claude Code as an **official subprocess** — the
 
 Claude Code is proprietary but officially supports hooks and subprocess usage.
 
-> API keys are only needed for the optional OpenRouter integration (the OpenAI SDK is used as its transport; there is no separate OpenAI provider). For server/automated deployments, API key authentication is recommended per [Anthropic's guidance](https://code.claude.com/docs/en/legal-and-compliance).
+> API keys are only needed for the optional OpenRouter integration (the OpenAI SDK is its transport; nothing calls OpenAI itself). For server/automated deployments, API key authentication is recommended per [Anthropic's guidance](https://code.claude.com/docs/en/legal-and-compliance).
 
 </details>
 
