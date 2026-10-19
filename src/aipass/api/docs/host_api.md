@@ -74,7 +74,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/files?branch=&file=&project=&root=` | read | Name by NAME, file relative to the root; 512KB cap **refuses**, never trims. `root` = `branch`\|`home`\|`project`\|`aipass`, absent = branch. Answers carry `floor` — the root's absolute path, so a copy-path button can paste into a terminal. Any project |
 | `GET /v1/dir?branch=&dir=&project=&root=&offset=` | read | One directory level, the phone's file browser. Same optional `root`; `branch` carries the name WITHIN that kind — and a kind that names nothing may name *itself* (`branch=home&root=home`), any other name refused. Answers carry `floor`, and `floor` + an entry's path is that entry's real location. Pages of 400 from `offset` (int ≥ 0, default 0, else 400 `read_refused`); `total` counts past the noise filter, `truncated` while `offset` + page < `total`, past the end `[]`; audited |
 | `GET /v1/diff?branch=&staged=&project=&path=&grain=&ref=` | read | One patch, through `drone @git`, never raw. `path` = ONE file (refused, not trimmed, over 512KB), branch-local at `branch` grain; one the worktree patch lacks comes from the index (`staged: true`). `grain` = `branch`\|`repo`; `ref` = a commit. Any project |
-| `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repository. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name** |
+| `GET /v1/git-changes?branch=&project=&grain=` | read | Changed files. `branch` grain (default) = @baud's desktop card contract; `repo` grain = the whole repo. The answer names its grain. `rows[]` carries git's own two-column code per path, untracked included **by name**. `repo` grain adds `root`, the `/v1/roots` root its paths open under, matched by resolved path: `{kind: aipass, name: null}` for this server's repo, `{kind: project, name}` for a census project, else `null` |
 | `GET /v1/git-log?branch=&project=&limit=` | read | Recent commits — sha + subject. **Always repo grain.** `limit` 1–50, outside is refused, never clamped |
 | `GET /v1/commit?branch=&ref=&project=` | read | One commit: author, date, subject, message, files with ± counts. Its patch rides on `/v1/diff` |
 | `GET /v1/git-remote?branch=&project=` | read | The repository's remote, for link-cards out to the forge. `url` as configured (password redacted), `web` browsable or `null`, `remote` names which one answered. No remote: 200, all three `null` |
@@ -158,14 +158,12 @@ contract is theirs, read from their tree rather than invented here:
 -- .`. Two consequences are reproduced deliberately. **Tracked files only** — a
 brand-new module does not move a card's badge, because `diff HEAD` cannot see a
 file git has never seen; counting it here would make the phone disagree with the
-desktop about the same branch at the same moment, with the phone being wrong.
+desktop about the same branch at the same moment.
 And **branch-local names**, because every `src/aipass` branch shares one repo and
 a repo-relative row would push the part that differs off a phone screen.
 
-`untracked` rides alongside as a separate count, never folded into theirs.
-Matching a contract is not a reason to discard something already measured —
-@baud's own argument for their whole-project total is that a count hiding a new
-module reads as false calm, and that does not stop being true here.
+`untracked` rides alongside as a separate count, never folded into theirs: a
+count hiding a new module reads as false calm.
 
 **It reads drone's document, never its screen.** Git is drone-only, servers
 included, so the lane shells `drone @git status --json` and reads

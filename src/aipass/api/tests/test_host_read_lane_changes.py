@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_changes.py
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
@@ -32,6 +32,7 @@ from aipass.api.tests.support_host_read_lane import GIT_STATUS_ALL_STDOUT, GIT_S
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_CACHE_LOGGER = "aipass.api.apps.handlers.host.read_cache.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
+PATCH_READS_LOGGER = "aipass.api.apps.handlers.host.reads.logger"
 
 # Every case here calls read_git_changes, which answers from its cache.
 pytestmark = pytest.mark.usefixtures("_clean_git_changes_cache")
@@ -574,6 +575,67 @@ class TestRepoGrainChanges:
                 host_git.read_git_changes("demo", grain="REPOSITORY")
 
         assert mock_run.call_count == 0
+
+    def _rooted(self, fake_repo: dict, repository: Path, census_rows: list) -> Any:
+        (repository / ".git").mkdir(exist_ok=True)
+        census = {"projects": census_rows, "generated_at": "", "error": None}
+        with patch.object(host_fleet, "list_projects", return_value=census):
+            with patch.object(subprocess, "run", return_value=self._completed()):
+                return host_git.read_git_changes("demo", grain="repo")
+
+    def test_the_servers_own_repo_is_the_aipass_root_even_when_the_census_lists_it(self, fake_repo: dict) -> None:
+        anchor = {"name": "FAKEREPO", "root": str(fake_repo["root"])}
+
+        result = self._rooted(fake_repo, fake_repo["root"], [anchor])
+
+        assert result["root"] == {"kind": "aipass", "name": None}
+
+    def test_a_census_projects_directory_is_the_project_root_by_its_census_name(self, fake_repo: dict) -> None:
+        nested = {"name": "BAUD", "root": str(fake_repo["branch"])}
+
+        result = self._rooted(fake_repo, fake_repo["branch"], [nested])
+
+        assert result["root"] == {"kind": "project", "name": "BAUD"}
+
+    def test_a_nested_foreign_tree_names_no_root(self, fake_repo: dict) -> None:
+        listed = {"name": "BAUD", "root": str(fake_repo["root"] / "elsewhere")}
+
+        result = self._rooted(fake_repo, fake_repo["root"] / "src", [listed])
+
+        assert result["root"] is None
+
+    def test_a_census_root_that_only_prefixes_the_repo_is_not_its_root(self, fake_repo: dict) -> None:
+        above = {"name": "ABOVE", "root": str(fake_repo["root"] / "src")}
+        stem = {"name": "STEM", "root": str(fake_repo["branch"])[:-1]}
+
+        result = self._rooted(fake_repo, fake_repo["branch"], [above, stem])
+
+        assert result["root"] is None
+
+    def test_no_repository_above_the_branch_names_no_root(self, fake_repo: dict) -> None:
+        with patch.object(subprocess, "run", return_value=self._completed()):
+            result = host_git.read_git_changes("demo", grain="repo")
+
+        assert result["root"] is None
+
+    def test_a_census_that_cannot_answer_is_unavailable_never_no_root(self, fake_repo: dict) -> None:
+        (fake_repo["branch"] / ".git").mkdir()
+        gone = host_fleet.FleetUnavailable("census gated")
+
+        with patch.object(host_fleet, "list_projects", side_effect=gone), patch(PATCH_READS_LOGGER) as log:
+            with patch.object(subprocess, "run", return_value=self._completed()):
+                with pytest.raises(host_reads.ReadUnavailable):
+                    host_git.read_git_changes("demo", grain="repo")
+
+        log.warning.assert_called_once()
+
+    def test_branch_grain_carries_no_root(self, fake_repo: dict) -> None:
+        (fake_repo["root"] / ".git").mkdir()
+
+        with patch.object(subprocess, "run", return_value=self._completed(GIT_STATUS_STDOUT)):
+            result = host_git.read_git_changes("demo")
+
+        assert "root" not in result
 
 
 # Columns are index-then-worktree: 'A ' and ' M' are DIFFERENT answers that collapse if either is stripped.

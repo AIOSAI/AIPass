@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reads.py
 # Description: Host API Read Handler — file and directory reads behind the name fence
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-10-18
+# Modified: 2026-10-19
 # =============================================
 
 """
@@ -237,6 +237,34 @@ def list_roots() -> Dict[str, Any]:
     json_handler.log_operation("host_api_roots_roster", {"roots": len(roots), "dropped": len(dropped)})
 
     return {"roots": roots}
+
+
+def published_root_of(directory: Path) -> Optional[Dict[str, Any]]:
+    """
+    The /v1/roots root a directory IS, by resolved-path equality, never a prefix.
+
+    aipass first, as in list_roots: an anchor census row that is the seat publishes as aipass.
+    None when it is neither. A census that cannot answer raises: None would claim "neither".
+    """
+    resolved = directory.resolve()
+    if resolved == repo_root().resolve():
+        return {"kind": ROOT_AIPASS, "name": None}
+
+    from aipass.api.apps.handlers.host import fleet as host_fleet
+
+    try:
+        census = host_fleet.list_projects()
+    except host_fleet.FleetUnavailable as e:
+        logger.warning("[host_api] no census to name the root of %s: %s", resolved, e)
+        raise ReadUnavailable(str(e)) from e
+
+    for row in census.get("projects") or []:
+        name = str(row.get("name", "")).strip()
+        listed = str(row.get("root", "")).strip()
+        if name and listed and Path(listed).resolve() == resolved:
+            return {"kind": ROOT_PROJECT, "name": name}
+
+    return None
 
 
 def read_file(branch: str, file: str, project: str = "", root: str = "") -> Dict[str, Any]:

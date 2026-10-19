@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_reads.py
 # Description: Host API Git Read Handler — the patch, the change list, the log, one commit
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-17
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """
@@ -29,6 +29,7 @@ from aipass.api.apps.handlers.host.reads import (
     GRAINS,
     ReadRefused,
     ReadUnavailable,
+    published_root_of,
     repo_root,
     repository_of,
     resolve_branch_root,
@@ -308,7 +309,7 @@ def _read_git_changes_uncached(branch: str, project: str = "", grain: str = "") 
         {"branch": branch, "grain": grain, "count": len(files), "untracked": untracked},
     )
 
-    return {
+    answer = {
         "branch": branch,
         "grain": grain,
         "files": files,
@@ -316,6 +317,12 @@ def _read_git_changes_uncached(branch: str, project: str = "", grain: str = "") 
         "untracked": untracked,
         "rows": rows,
     }
+    if grain == GRAIN_REPO:
+        # The files root repo-relative paths open under; branch grain's are branch-relative.
+        repository = repository_of(root.resolve())
+        answer["root"] = published_root_of(repository) if repository is not None else None
+
+    return answer
 
 
 def _changed_files(document: Dict[str, Any], root: Optional[Path]) -> Any:

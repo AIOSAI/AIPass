@@ -292,8 +292,8 @@
     {
       "file": "tests/test_host_read_lane_changes.py",
       "standard": "through_the_command",
-      "lines": [154, 155, 225, 233, 255, 279],
-      "reason": "The git-changes ReadCache (host_git._changes): its stored entry aged past the TTL (154, 155), its entries and failures inspected after a refusal and a recovery (225, 279), and its single-flight lock counted (233, 255). An inspection between tests is not a route the product has, and a public one would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12). Moved with the tests from test_host_read_lane.py:890, 891, 1001, 1017, 1041, 1072 in the oversize split; the clear around each case (153, 155) went to conftest.py with its fixture (api, 2026-10-08). Lines moved 210/211/321/337/361/392 -> 154/155/225/233/255/279 in the comment sweep (2026-10-17)."
+      "lines": [155, 156, 226, 234, 256, 280],
+      "reason": "The git-changes ReadCache (host_git._changes): its stored entry aged past the TTL (154, 155), its entries and failures inspected after a refusal and a recovery (225, 279), and its single-flight lock counted (233, 255). An inspection between tests is not a route the product has, and a public one would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12). Moved with the tests from test_host_read_lane.py:890, 891, 1001, 1017, 1041, 1072 in the oversize split; the clear around each case (153, 155) went to conftest.py with its fixture (api, 2026-10-08). Lines moved 210/211/321/337/361/392 -> 154/155/225/233/255/279 in the comment sweep (2026-10-17); 154/155/225/233/255/279 -> 155/156/226/234/256/280 with the PATCH_READS_LOGGER constant (2026-10-19)."
     },
     {
       "file": "tests/conftest.py",
