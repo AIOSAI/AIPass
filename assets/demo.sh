@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The README demo: three read-only drone commands, typed at a fake prompt.
-# Recorded with: asciinema rec -c ./tape.sh demo.cast ; rendered with agg.
+# Recorded with: asciinema rec -c ./demo.sh demo.cast ; rendered with agg.
+# Runs from the orchestrator's seat, found relative to this file, so drone reads a passport.
 set -u
-cd /home/patrick/Projects/AIPass/src/aipass/devpulse
+cd "$(dirname "$(readlink -f "$0")")/../src/aipass/devpulse"
 
 prompt() { printf '\033[1;32m$\033[0m '; }
 
