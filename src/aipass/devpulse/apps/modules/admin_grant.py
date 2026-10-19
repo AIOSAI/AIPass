@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_grant.py
 # Description: Admin grant module — birth-cert privilege ceremony CLI (FPLAN-0401)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -11,7 +11,7 @@ Admin grant ceremony — keygen, mint, verify the birth-cert admin privilege.
 """
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, error
+from aipass.cli.apps.modules import console, error
 from aipass.devpulse.apps.handlers.json import json_handler
 
 from aipass.devpulse.apps.handlers.owner.admin_grant import (
@@ -20,8 +20,6 @@ from aipass.devpulse.apps.handlers.owner.admin_grant import (
     mint_grant,
     verify_admin_grant,
 )
-
-console = err_console
 
 HELP_TEXT = """\
 [bold cyan]admin_grant[/bold cyan] — birth-cert admin privilege ceremony (DPLAN-0288)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: attach.py
 # Description: Host API Attach Handler — a real PTY running a tmux client, for the phone
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 # pyright: reportOptionalMemberAccess=false
 # fcntl/pty/termios are None off POSIX; every use sits behind PTY_AVAILABLE, which the checker cannot narrow.
@@ -138,13 +138,18 @@ def valid_monitor_target(target: str) -> bool:
     return MONITOR_TARGET.fullmatch(target) is not None
 
 
+def _option_shaped(target: str) -> bool:
+    """A leading '-' reaches drone as a flag, not a branch: `--relay` would start the Telegram relay."""
+    return target.startswith("-")
+
+
 def monitor_command(target: str = "") -> List[str]:
     """
     The watch argv: `drone @prax monitor run <target>` — the exact command the
     desktop's monitor pane runs, minus its login shell; empty target means every branch, never `run all`."""
     command = ["drone", "@prax", "monitor", "run"]
     if target:
-        if not MONITOR_TARGET.fullmatch(target):
+        if not MONITOR_TARGET.fullmatch(target) or _option_shaped(target):
             raise AttachRefused(f"Not a monitor target: {target!r}")
         command.append(target)
     return command
@@ -325,7 +330,7 @@ def open_monitor(target: str = "", cwd: Optional[Path] = None) -> AttachSession:
     cleaned = target.strip().lstrip("@")
 
     # Absence is asked here, before the fence: folding "" into the mirrored fence would break the mirror.
-    if cleaned and not valid_monitor_target(cleaned):
+    if cleaned and (not valid_monitor_target(cleaned) or _option_shaped(cleaned)):
         raise AttachRefused(f"Not a monitor target: {target!r}")
 
     if not shutil.which(MONITOR_BINARY):

@@ -77,35 +77,30 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
 
 ## How it works
 
-```text
- you ── plain words ──► manager agent  (one per project, the seat that writes this project's git)
-                              │
-                              ├─ drone @flow create       ──► a plan that carries the context
-                              └─ drone @ai_mail dispatch  ──► mail + wake
-                                                                  │
-                                                                  ▼
-                        owning agent  ◄── its README + its .trinity memory
-                              │
-                              └─ does the work, reports back by mail
-
- every call goes through one bus:   drone @agent command [args]
- every write passes the gates:      hooks decide who may write what
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/diagrams/how_it_works.png" width="900" alt="One task's round trip: you talk to a manager agent from a terminal seat or the phone; it dispatches through ai_mail; the owning agent wakes in its own folder with its prompt, its memory, its dashboard and the task mail; its reply lands back in the manager's inbox; every tool write passes the hooks gates.">
+</p>
 
 **One bus.** `drone @agent command [args]` reaches any agent. You use it, and agents use it to reach each other.
+
+**One memory each.** The owning agent wakes in its own folder with its own prompt, its `.trinity/` memory, a refreshed dashboard and the task mail. Nobody re-explains context. The longer story goes in a plan (`drone @flow create`) that the manager writes and names in the mail.
 
 **One citizen shape.** Every agent, yours and the reference fleet, has the same layout. Know one and you know them all. The main parts:
 
 ```
 src/my_project/<agent>/
-├── .trinity/           # Identity + memory (persists across sessions)
-├── .ai_mail.local/     # Mailbox (receives tasks, sends results)
-├── .aipass/            # Branch prompt (how this agent introduces itself)
-├── apps/               # Entry point → modules → handlers
-├── artifacts/          # Birth certificate + agent-produced files
-├── logs/               # Per-agent logs
-├── tests/              # The agent's own test suite
-└── README.md           # Domain knowledge (read on startup)
+├── .trinity/              # Passport + memory: sessions, learnings, todos, observations; overflow rolls to @memory
+├── .ai_mail.local/        # Mailbox: inbox, sent, deleted
+├── .aipass/               # Branch prompt: the agent's standing instructions, injected by hooks
+├── apps/                  # Entry point → modules → handlers
+├── docs/                  # Reference pages, tracked
+├── docs.local/            # Scratch and research, not tracked
+├── dropbox/               # Inbound drop: files other agents hand over
+├── artifacts/             # Birth certificate + files the agent produces
+├── logs/                  # The agent's own logs
+├── tests/                 # The agent's own test suite
+├── DASHBOARD.local.json   # One status glance: mail, plans, todos; refreshed before every wake
+└── README.md              # The page for people; agents use `drone @<agent> --help`
 ```
 
 An agent's identity is a file it can read, `.trinity/passport.json`, trimmed here to the lines that matter:

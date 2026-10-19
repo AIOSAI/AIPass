@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: storage.py
 # Description: JSON persistence layer for feedback inbox
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-11
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -53,13 +53,9 @@ def load_inbox() -> dict:
         with open(inbox_path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
+        # Never answer an empty inbox here: the next save would overwrite the real one.
         logger.error(f"[FEEDBACK] Failed to load inbox: {e}")
-        return {
-            "mailbox": "feedback",
-            "total_messages": 0,
-            "unread_count": 0,
-            "messages": [],
-        }
+        raise RuntimeError(f"feedback inbox unreadable at {inbox_path}: {e}") from e
 
 
 def save_inbox(data: dict) -> None:
@@ -73,6 +69,7 @@ def save_inbox(data: dict) -> None:
             f.write("\n")
     except OSError as e:
         logger.error(f"[FEEDBACK] Failed to save inbox: {e}")
+        raise
 
 
 def generate_id() -> str:

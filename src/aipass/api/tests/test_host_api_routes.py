@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -562,6 +562,18 @@ class TestTheBackupDoorAnswersThroughTheRealApp:
 
         assert response.status_code == 404
         assert response.json()["error"] == {"code": "not_running", "message": "nothing running for AIPass"}
+
+    def test_cancel_never_answers_backups_stderr(self, backup: Any) -> None:
+        api, _, operate, router, _ = backup
+        crash = 'Traceback (most recent call last):\n  File "/home/x/stop.py", line 9\nKeyError: pid\n'
+        router.route_command.return_value = MagicMock(exit_code=1, stdout="", stderr=crash)
+
+        response = api.post("/v1/backup/cancel", json={"project": "AIPASS", "lane": "all"}, headers=operate)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert (error["code"], error["message"]) == ("verb_unavailable", host_denials.SENTENCES["verb_unavailable"])
+        assert "Traceback" not in response.text and "stop.py" not in response.text
 
     def test_cancel_with_backup_unreachable_is_503_with_a_ref(self, backup: Any) -> None:
         api, _, operate, router, _ = backup

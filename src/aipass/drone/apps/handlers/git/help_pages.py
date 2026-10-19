@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-04
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -17,11 +17,27 @@ from __future__ import annotations
 
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import (
+    alerts_handler,
     commit_handler,
+    gh_chores,
+    label_handler,
     merge_main_handler,
     release_handler,
     repo_door,
     untrack_handler,
+)
+
+
+def _printed(*texts: str) -> str:
+    """Refusal texts as a help page lists them, one indented line each."""
+    return "".join(f"    {text}\n" for text in texts)
+
+
+_CHORE_REFUSALS = _printed(
+    gh_chores.REFUSE_NO_GH.format(verb="<verb>"),
+    gh_chores.REFUSE_NO_GITHUB.format(verb="<verb>", repo="<repo>"),
+    gh_chores.REFUSE_TIMEOUT.format(verb="<verb>", seconds=gh_chores.GH_TIMEOUT, slug="<owner/name>"),
+    gh_chores.REFUSE_GH_FAILED.format(verb="<verb>", slug="<owner/name>", reason="<reason>"),
 )
 
 
@@ -107,6 +123,63 @@ def page(command: str | None = None) -> str:
                 )
             )
             + "  Example: drone @git release list --since v2.8.16\n"
+            "\n"
+            "git release edit <tag> [--repo <path>] — Rewrite a release's notes [owner]\n"
+            "  The notes become the CHANGELOG.md block whose '## [' header carries the tag,\n"
+            "  up to the next header, '---' lines dropped: publish.yml's rule, so v2.8.2 never\n"
+            f"  claims v2.8.20. Over {release_handler.NOTES_CAP:,} characters it is cut on an entry and\n"
+            "  points at the full block. Prints the old and new lengths; runs gh release edit\n"
+            "  <tag> --notes-file. The repo is the one you stand in, its OWNER/NAME read from\n"
+            "  origin; --repo <path> is the admin door. One ledger row per use. Refused:\n"
+            + _printed(
+                release_handler.REFUSE_EDIT_USAGE,
+                release_handler.REFUSE_NO_CHANGELOG.format(repo="<repo>"),
+                release_handler.REFUSE_NO_SECTION.format(tag="<tag>"),
+                release_handler.REFUSE_NOT_PUBLISHED.format(tag="<tag>", slug="<owner/name>"),
+            )
+            + _CHORE_REFUSALS
+            + "  Example: drone @git release edit v2.8.20\n"
+        )
+    if command == "label":
+        return (
+            "git label list [--json] — The repo's GitHub labels [global]\n"
+            "git label create <name> [--color hex] [--description text] — Create one [owner]\n"
+            "  The repo is the one you stand in, OWNER/NAME read from its origin;\n"
+            "  --repo <path> is the admin door. create checks first, names compared without\n"
+            "  case: a label already there is reported present, exit 0, nothing sent.\n"
+            "  One ledger row per create. Refused, exactly as printed:\n"
+            + _printed(
+                label_handler.REFUSE_SUB.format(sub="<sub>"),
+                label_handler.REFUSE_NO_NAME,
+                label_handler.REFUSE_COLOR.format(color="<color>"),
+                label_handler.REFUSE_LIST_ARGS,
+            )
+            + _CHORE_REFUSALS
+            + "  Example: drone @git label create ci --color 0e8a16 --description 'CI'\n"
+        )
+    if command == "alerts":
+        return (
+            "git alerts list [--state open|dismissed|all] [--json] — Code-scanning alerts [global]\n"
+            "  One row each: number, rule id, severity, state, file:line. Default state: open.\n"
+            "git alerts dismiss <number> --reason false_positive|wont_fix|used_in_tests\n"
+            "    --comment 'text' — Dismiss an open alert [owner]\n"
+            "  The comment is required and goes to GitHub with the reason; the ledger row\n"
+            f"  carries number, reason and comment. GitHub takes {alerts_handler.COMMENT_CAP} comment characters.\n"
+            "  Through gh api /repos/OWNER/NAME/code-scanning/alerts; the repo is the one you\n"
+            "  stand in, --repo <path> the admin door. Refused, exactly as printed:\n"
+            + _printed(
+                alerts_handler.REFUSE_SUB.format(sub="<sub>"),
+                alerts_handler.REFUSE_STATE.format(state="<state>"),
+                alerts_handler.REFUSE_LIST_ARGS,
+                alerts_handler.REFUSE_NUMBER,
+                alerts_handler.REFUSE_REASON.format(reason="<reason>"),
+                alerts_handler.REFUSE_NO_COMMENT,
+                alerts_handler.REFUSE_LONG_COMMENT.format(length="<n>", cap=alerts_handler.COMMENT_CAP),
+                alerts_handler.REFUSE_NO_ALERT.format(slug="<owner/name>", number="<n>"),
+                alerts_handler.REFUSE_NOT_OPEN.format(number="<n>", slug="<owner/name>", state="<state>"),
+            )
+            + _CHORE_REFUSALS
+            + "  Example: drone @git alerts dismiss 12 --reason false_positive --comment 'why'\n"
         )
     if command == "export":
         return (
@@ -238,6 +311,8 @@ def page(command: str | None = None) -> str:
         "  run list|view|watch    gh run reads (view <id> --log | --log-failed)\n"
         "  workflow list|view     gh workflow reads\n"
         "  release list           Published releases and their notes (release --help)\n"
+        "  label list             The repo's GitHub labels (label --help)\n"
+        "  alerts list [--state S]  The repo's code-scanning alerts (alerts --help)\n"
         "Owner (the repo's registry owner: devpulse in AIPass):\n"
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
         "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
@@ -258,10 +333,14 @@ def page(command: str | None = None) -> str:
         "  issue <write>          gh issue create, close, comment, ... (issue --help)\n"
         "  run <write>            gh run rerun, cancel, delete, download\n"
         "  workflow <write>       gh workflow run, enable, disable\n"
+        "  release edit <tag>     Rewrite a release's notes with its CHANGELOG.md block\n"
+        "  label create <name>    Create a repo label; one already there is reported present\n"
+        "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
         "  A gh subcommand in neither list is refused, never passed to gh.\n"
-        "  An external project's manager, from its own seat, runs: commit,\n"
-        "  untrack, checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp,\n"
-        "  tag, issue <write>, run <write>, workflow <write>. The rest refuse there.\n"
+        "  An external project's manager, from its own seat, runs: commit, untrack,\n"
+        "  checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp, tag, issue\n"
+        "  <write>, run <write>, workflow <write>, release <write>, label <write>,\n"
+        "  alerts <write>. The rest refuse there.\n"
         "\n"
         "RAW GIT READS AND THEIR TWINS (raw git is blocked for agents; use these):\n"
         "  git log -n 5 -- <path>   drone @git log 5 <path>  (deleted path: after --)\n"
@@ -280,6 +359,9 @@ def page(command: str | None = None) -> str:
         "  gh run list|view|watch     drone @git run list|view|watch\n"
         "  gh workflow list|view      drone @git workflow list|view\n"
         "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n"
+        "  gh release edit <tag>      drone @git release edit <tag>  (notes from CHANGELOG.md)\n"
+        "  gh label list|create       drone @git label list | label create <name>\n"
+        "  gh api .../code-scanning/alerts  drone @git alerts list | alerts dismiss <n>\n"
         "  Paths are read against your directory first, then the repo root.\n"
         "  No twin yet: git diff <range> -- <path> (use show <sha>). Ask @drone.\n"
         "\n" + repo_door.help_block() + "\n"

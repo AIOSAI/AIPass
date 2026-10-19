@@ -3,7 +3,7 @@
 # Description: Tests for feedback storage — load, save, generate_id, directory creation
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/feedback/storage.py."""
@@ -76,16 +76,24 @@ class TestLoadInbox:
         assert result["total_messages"] == 1
         assert result["messages"][0]["id"] == "abcd1234"
 
-    def test_handles_corrupt_json(self, mock_feedback_dir):
-        """Should return empty inbox when JSON is corrupt."""
+    def test_corrupt_json_raises_and_leaves_the_file(self, mock_feedback_dir):
+        """A corrupt inbox is an error naming the path, never an empty inbox the next save would overwrite."""
         mock_feedback_dir.mkdir(parents=True, exist_ok=True)
         inbox_path = mock_feedback_dir / "inbox.json"
         with open(inbox_path, "w", encoding="utf-8") as f:
             f.write("{invalid json!!!")
 
-        result = storage.load_inbox()
-        assert result["total_messages"] == 0
-        assert result["messages"] == []
+        with pytest.raises(RuntimeError, match=str(inbox_path)):
+            storage.load_inbox()
+        assert inbox_path.read_text(encoding="utf-8") == "{invalid json!!!"
+
+    def test_save_failure_raises(self, mock_feedback_dir):
+        """An inbox that cannot be written is an OSError to the caller, not a logged shrug."""
+        mock_feedback_dir.mkdir(parents=True, exist_ok=True)
+        (mock_feedback_dir / "inbox.json").mkdir()
+
+        with pytest.raises(OSError):
+            storage.save_inbox({"mailbox": "feedback", "total_messages": 0, "unread_count": 0, "messages": []})
 
 
 class TestSaveInbox:

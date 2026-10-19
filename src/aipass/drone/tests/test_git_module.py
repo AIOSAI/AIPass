@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
-# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack and release
-# Version: 1.5.0
+# Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
+# Version: 1.6.0
 # Created: 2026-04-21
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -23,7 +23,7 @@ import pytest
 
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers import module_registry_handler
-from aipass.drone.apps.handlers.git import release_handler, untrack_handler
+from aipass.drone.apps.handlers.git import alerts_handler, label_handler, release_handler, untrack_handler
 from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.drone.apps.handlers.git.pr_handler import create_pr
@@ -36,7 +36,7 @@ from aipass.drone.apps.modules.git_module import (
 from aipass.drone.tests.support_git_module import _done
 from aipass.trigger.apps.modules import core as trigger_core
 
-from .conftest import make_owner_project
+from .conftest import GITHUB_SLUG, chore_ledger, github_stand_in, make_owner_project
 
 
 # ===========================================================================
@@ -1297,3 +1297,202 @@ class TestReleaseList:
         assert release_handler.REFUSE_PRIVATE.format(repo="<repo>") in get_help("release")
         assert "  release list           Published releases and their notes (release --help)\n" in text
         assert "  gh release list|view       drone @git release list [--repo O/N] [--since TAG]\n" in text
+
+
+# ===========================================================================
+# label and alerts: the repo's GitHub labels and code-scanning alerts, owner tier to write
+# ===========================================================================
+
+_SLUG = GITHUB_SLUG
+_LABELS = f"label list --repo {_SLUG} --limit 1000 --json name,color,description"
+
+
+def _chore(command: str, args: list[str], answers: dict[str, object], calls: list) -> dict:
+    with patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=github_stand_in(answers, calls)):
+        return handle_command(command, args)
+
+
+class TestLabel:
+    """label list reads the repo's labels; label create sends one only when it is not already there."""
+
+    def test_list_prints_one_row_per_label_for_a_seat_that_owns_nothing(self, builder_seat: Path) -> None:
+        labels = [{"name": "bug", "color": "d73a4a", "description": "Broken"}, {"name": "ci", "color": "0e8a16"}]
+
+        result = _chore("label", ["list"], {_LABELS: labels}, [])
+        as_json = _chore("label", ["list", "--json"], {_LABELS: labels}, [])
+
+        assert result == {"stdout": "bug  #d73a4a  Broken\nci  #0e8a16", "stderr": "", "exit_code": 0}
+        assert json.loads(as_json["stdout"]) == {"ok": True, "github": _SLUG, "count": 2, "labels": labels}
+
+    def test_create_sends_a_missing_label_with_its_color_and_description_and_records_it(
+        self, aipass_github: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: the color's # kept — gh is handed '#0E8A16' and GitHub refuses it."""
+        calls: list = []
+        create = f"label create ci --repo {_SLUG} --color 0e8a16 --description CI and actions"
+        answers = {_LABELS: [{"name": "bug", "color": "d73a4a"}], create: ""}
+
+        result = _chore(
+            "label", ["create", "ci", "--color", "#0E8A16", "--description", "CI and actions"], answers, calls
+        )
+
+        assert result == {"stdout": f"Created label 'ci' on github.com/{_SLUG}.", "stderr": "", "exit_code": 0}
+        assert calls[-1][0] == [
+            "label",
+            "create",
+            "ci",
+            "--repo",
+            _SLUG,
+            "--color",
+            "0e8a16",
+            "--description",
+            "CI and actions",
+        ]
+        [record] = chore_ledger(tmp_path)
+        assert (record["outcome"], record["label"], record["color"]) == ("written", "ci", "0e8a16")
+
+    def test_a_label_already_there_in_any_case_is_reported_present_and_nothing_is_sent(
+        self, aipass_github: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: the name compared with case — 'CI' is created beside 'ci' and gh refuses the duplicate."""
+        calls: list = []
+
+        result = _chore("label", ["create", "CI"], {_LABELS: [{"name": "ci", "color": "0e8a16"}]}, calls)
+
+        assert result == {
+            "stdout": f"Label 'ci' is already present on github.com/{_SLUG} (#0e8a16); nothing changed.",
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert [argv[:2] for argv, _ in calls] == [["label", "list"]]
+        assert chore_ledger(tmp_path)[0]["outcome"] == "unchanged"
+
+    def test_a_bad_color_and_a_missing_name_are_refused_before_gh(self, aipass_github: Path) -> None:
+        calls: list = []
+
+        color = _chore("label", ["create", "ci", "--color", "green"], {}, calls)
+        nameless = _chore("label", ["create", "--color", "0e8a16"], {}, calls)
+
+        assert color["stderr"] == label_handler.REFUSE_COLOR.format(color="green")
+        assert nameless["stderr"] == label_handler.REFUSE_NO_NAME
+        assert calls == []
+
+    def test_create_from_a_seat_that_owns_nothing_is_refused_before_gh(self, builder_seat: Path) -> None:
+        """Mutant: create left out of the write list — the global tier creates labels."""
+        calls: list = []
+
+        result = _chore("label", ["create", "ci"], {}, calls)
+
+        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert calls == []
+
+
+_ALERTS = f"api repos/{_SLUG}/code-scanning/alerts?per_page=100&page=1"
+_ALERT_12 = {
+    "number": 12,
+    "state": "open",
+    "rule": {"id": "py/clear-text-logging-sensitive-data", "severity": "error", "security_severity_level": "high"},
+    "most_recent_instance": {"location": {"path": "src/aipass/api/apps/x.py", "start_line": 40}},
+}
+
+
+class TestAlerts:
+    """alerts list reads code-scanning alerts; alerts dismiss closes an open one with its reason and comment."""
+
+    def test_list_prints_number_rule_severity_state_and_place_one_row_each(self, builder_seat: Path) -> None:
+        """Mutant: the state query dropped — dismissed alerts are listed as if open."""
+        calls: list = []
+
+        result = _chore("alerts", ["list"], {f"{_ALERTS}&state=open": [_ALERT_12]}, calls)
+        everything = _chore("alerts", ["list", "--state", "all", "--json"], {_ALERTS: [_ALERT_12]}, [])
+
+        assert result == {
+            "stdout": "#12  py/clear-text-logging-sensitive-data  high  open  src/aipass/api/apps/x.py:40",
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert json.loads(everything["stdout"])["alerts"] == [
+            {
+                "number": 12,
+                "rule": "py/clear-text-logging-sensitive-data",
+                "severity": "high",
+                "state": "open",
+                "path": "src/aipass/api/apps/x.py",
+                "line": 40,
+            }
+        ]
+
+    def test_dismiss_sends_the_reason_in_githubs_words_with_the_comment_and_records_both(
+        self, aipass_github: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: the flag's word sent as is — GitHub refuses dismissed_reason=false_positive."""
+        calls: list = []
+        path = f"repos/{_SLUG}/code-scanning/alerts/12"
+        patch_call = (
+            f"api -X PATCH {path} -f state=dismissed -f dismissed_reason=false positive "
+            "-f dismissed_comment=token_id is an id, not a secret"
+        )
+        answers = {f"api {path}": _ALERT_12, patch_call: {}}
+
+        result = _chore(
+            "alerts",
+            ["dismiss", "12", "--reason", "false_positive", "--comment", "token_id is an id, not a secret"],
+            answers,
+            calls,
+        )
+
+        assert result["exit_code"] == 0, result
+        assert result["stdout"] == (
+            f"Dismissed alert #12 (py/clear-text-logging-sensitive-data) on github.com/{_SLUG} "
+            "as false_positive: token_id is an id, not a secret"
+        )
+        assert " ".join(calls[-1][0]) == patch_call
+        [record] = chore_ledger(tmp_path)
+        assert (record["number"], record["reason"], record["comment"]) == (
+            12,
+            "false_positive",
+            "token_id is an id, not a secret",
+        )
+
+    @pytest.mark.parametrize(
+        ("args", "refusal"),
+        [
+            (["12", "--reason", "wont_fix"], alerts_handler.REFUSE_NO_COMMENT),
+            (["12", "--reason", "wont_fix", "--comment", "   "], alerts_handler.REFUSE_NO_COMMENT),
+            (["12", "--reason", "meh", "--comment", "x"], alerts_handler.REFUSE_REASON.format(reason="meh")),
+            (["twelve", "--reason", "wont_fix", "--comment", "x"], alerts_handler.REFUSE_NUMBER),
+        ],
+    )
+    def test_a_dismissal_without_a_comment_or_a_known_reason_is_refused_by_name_before_gh(
+        self, aipass_github: Path, args: list[str], refusal: str
+    ) -> None:
+        """Mutant: the comment check removed — an alert is dismissed with no reason on GitHub's side."""
+        calls: list = []
+
+        result = _chore("alerts", ["dismiss", *args], {}, calls)
+
+        assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
+        assert calls == []
+
+    def test_an_alert_that_is_not_open_is_refused_and_nothing_is_patched(self, aipass_github: Path) -> None:
+        calls: list = []
+        dismissed = {**_ALERT_12, "state": "dismissed"}
+
+        result = _chore(
+            "alerts",
+            ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"],
+            {f"api repos/{_SLUG}/code-scanning/alerts/12": dismissed},
+            calls,
+        )
+
+        assert result["stderr"] == alerts_handler.REFUSE_NOT_OPEN.format(number="12", slug=_SLUG, state="dismissed")
+        assert [argv[1] for argv, _ in calls] == [f"repos/{_SLUG}/code-scanning/alerts/12"]
+
+    def test_dismiss_from_a_seat_that_owns_nothing_is_refused_before_gh(self, builder_seat: Path) -> None:
+        """Mutant: dismiss left out of the write list — the global tier dismisses alerts."""
+        calls: list = []
+
+        result = _chore("alerts", ["dismiss", "12", "--reason", "wont_fix", "--comment", "x"], {}, calls)
+
+        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert calls == []

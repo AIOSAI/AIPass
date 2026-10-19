@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-30
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -44,6 +44,8 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "run",
             "workflow",
             "release",
+            "label",
+            "alerts",
             "branches",
             "tag-list",
         ],
@@ -70,6 +72,9 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "issue-write",
             "run-write",
             "workflow-write",
+            "release-write",
+            "label-write",
+            "alerts-write",
         ],
         "description": "Write operations — the project's own manager only",
     },
@@ -99,6 +104,13 @@ GH_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
     "workflow": {"read": ("list", "view"), "write": ("disable", "enable", "run")},
 }
 
+# drone's own GitHub chores, gated the same way; an unknown subcommand is the handler's to refuse.
+CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "release": {"read": ("list",), "write": ("edit",)},
+    "label": {"read": ("list",), "write": ("create",)},
+    "alerts": {"read": ("list",), "write": ("dismiss",)},
+}
+
 
 def gh_access_key(command: str, args: list[str]) -> str | None:
     """The tier key a gh passthrough asks the gate for, or None when its subcommand is unknown.
@@ -108,7 +120,7 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     """
     if not args:
         return command
-    table = GH_SUBCOMMANDS[command]
+    table = GH_SUBCOMMANDS.get(command) or CHORE_SUBCOMMANDS[command]
     if args[0] in table["read"]:
         return command
     if args[0] in table["write"]:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, read the store
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """
@@ -66,12 +66,18 @@ JOB_UNKNOWN = (
 )
 
 
+# @backup's not-running line is one short sentence; anything longer is not that line.
+MAX_LINE_CHARS = 300
+
+STOP_FAILED = "@backup stop exited non-zero with nothing on stdout"
+
+
 class JobUnknown(Exception):
     """No job by that id on this server: never started, dropped after an hour, or lost to a restart."""
 
 
 class NotRunning(Exception):
-    """@backup's stop exited non-zero: nothing of that lane is running for the project. Carries its line."""
+    """@backup's stop exited non-zero: nothing of that lane is running for the project. Carries its first stdout line."""
 
 
 class StatusJsonMissing(VerbUnavailable):
@@ -280,7 +286,13 @@ def stop_run(project: str, lane: str) -> Dict[str, Any]:
         raise VerbUnavailable(f"{BACKUP} stop could not be run: {e}") from e
 
     if result.exit_code != 0:
-        line = (result.stdout or "").strip() or (result.stderr or "").strip()
+        # stdout only: @backup prints its not-running line there, and stderr can be a traceback.
+        line = ((result.stdout or "").strip().splitlines() or [""])[0][:MAX_LINE_CHARS]
+        if not line:
+            logger.error(
+                "[host_api] backup %s stop for %s exited %s: %s", lane, project, result.exit_code, result.stderr
+            )
+            raise VerbUnavailable(STOP_FAILED)
         logger.info("[host_api] backup %s stop for %s exited %s: %s", lane, project, result.exit_code, line)
         raise NotRunning(line)
 

@@ -31,7 +31,7 @@
     {
       "standard": "through_the_command",
       "file": "tests/test_watchdog_registry.py",
-      "lines": [498, 499],
+      "lines": [500, 512, 513],
       "reason": "The default store location is the contract (next to the code that owns it, from any cwd). Its public routes, register() and wake_in() with no store named, write the live .watchdog/ of the seat running the suite, which the conftest seal exists to prevent (2026-09-27, a test armed a real wire). The test carries live_default_store and only resolves the path."
     },
     {
@@ -85,8 +85,8 @@
     {
       "standard": "logged_fallback",
       "file": "apps/handlers/watchdog/registry.py",
-      "lines": [174, 256, 261, 265],
-      "reason": "Liveness, as agent.py: an unreadable /proc status is not proof of a zombie (174), a Windows check that cannot run answers alive (256), ProcessLookupError is the answer dead (261), PermissionError means the process exists (265). A wrong 'alive' costs a slower reap; a wrong 'dead' would drop a live watch."
+      "lines": [174, 217, 220],
+      "reason": "Liveness, as agent.py: an unreadable /proc status is not proof of a zombie, ps answers (174); ProcessLookupError is the answer absent (217); PermissionError means the process exists, another user's (220). A probe that cannot run raises (is_pid_alive on Windows), never assumes alive. A wrong 'alive' costs a slower reap; a wrong 'dead' would drop a live watch."
     },
     {
       "standard": "logged_fallback",

@@ -207,6 +207,48 @@ gh failure are each refused with the reason. Pinned by `TestReleaseList` in
 
 ---
 
+## The GitHub chores — `release edit`, `label`, `alerts`
+
+Three verbs run a repo's GitHub chores through gh. Each reads the repo the caller stands in and
+takes its OWNER/NAME from that repo's `origin`, never from an argument, so a write lands on the
+repo whose ownership the gate checked. The write subcommands are owner tier, keyed
+`release-write`, `label-write` and `alerts-write`: devpulse in AIPass, a project's manager in its
+own repo. `--repo <path>` is the external-repo door, admin seat only. The reads are global.
+
+| Verb | Tier | Runs |
+|------|------|------|
+| `release edit <tag>` | owner | `gh release edit <tag> --notes-file -` |
+| `label list [--json]` | global | `gh label list --json name,color,description` |
+| `label create <name> [--color hex] [--description text]` | owner | `gh label create` |
+| `alerts list [--state open\|dismissed\|all] [--json]` | global | `gh api repos/OWNER/NAME/code-scanning/alerts` |
+| `alerts dismiss <n> --reason R --comment 'text'` | owner | `gh api -X PATCH .../code-scanning/alerts/<n>` |
+
+**`release edit`** rewrites a published release's notes with the CHANGELOG.md block for its tag,
+by publish.yml's rule: the block whose `## [` header carries the tag between non-version
+characters (so v2.8.2 never claims v2.8.20), up to the next header, `---` lines dropped. Over
+120,000 characters it is cut on an entry boundary and ends with a pointer at the full block, since
+GitHub refuses a body over 125,000. It refuses a tag no header carries and a tag that is not a
+published release, prints the old and new note lengths, and sends nothing when the notes already
+match.
+
+**`label create`** reads the labels first and compares names without case, as GitHub does: a
+label already there is reported present, exit 0, and nothing is sent. `--color` takes six hex
+digits, with or without `#`.
+
+**`alerts dismiss`** requires `--comment`, which goes to GitHub with the reason, so every
+dismissal says why there; a missing or blank comment is refused by name, as is one over GitHub's
+280 characters. `--reason` takes `false_positive`, `wont_fix` or `used_in_tests`, sent in GitHub's
+words. Only an open alert is dismissed. `alerts list` prints number, rule id, severity, state and
+`file:line`, one row each.
+
+Every write subcommand writes one line to AIPass's own `.ai_central/git_gh_writes.jsonl`, a no-op
+included: caller, verb, repo, OWNER/NAME, outcome (`written` or `unchanged`), and the verb's own
+fields (tag and both lengths; label, color and description; number, rule, reason and comment).
+Through the door the door's own ledger records the use as well. Pinned by `TestReleaseEdit`,
+`TestLabel`, `TestAlerts` and `TestChoresThroughTheDoor` in `tests/test_git_access_gh_door.py`.
+
+---
+
 ## Related
 
 - [git_access.md](git_access.md) — who may run which verb

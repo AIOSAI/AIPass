@@ -44,10 +44,10 @@ ai_mail's wake-back spawns a new headless process and can never inject into a li
 
 ## Dead-monitor backstop
 
-A dispatch whose monitor died — host reboot, OOM, kill — can never report, so the receiver announces it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once (no agent is polled, no process is armed) and pushes one line per dispatch of yours whose monitor is gone: `monitor_alive` false (ai_mail records the monitor's pid and checks `/proc` at read time — a death is announced within one cadence, wording "its monitor (pid N) is gone before the hard timeout"), or past `expected_by` (ai_mail's hard timeout — a live monitor cannot overrun it). `monitor_alive` is tri-state; `None` (a row that never learned a pid) keeps the overdue rule only:
+A dispatch whose monitor died — host reboot, OOM, kill — can never report, so the receiver announces it: at sign-in and every 5 minutes it reads `@ai_mail`'s dispatch register once (no agent is polled, no process is armed) and pushes one line per dispatch of yours whose monitor is gone: `monitor_alive` false (ai_mail records the monitor's pid and checks `/proc` at read time — a death is announced within one cadence, wording "its monitor (pid N) is gone before the hard timeout"), or past `expected_by` (ai_mail's hard timeout for the attempt). Overdue is not proof of death: ai_mail retries a dispatch up to three times with a fresh timeout each attempt, so an overdue row is often a live monitor part way through attempt 2, and the line says so. `monitor_alive` is tri-state; `None` (a row that never learned a pid) keeps the overdue rule only:
 
 ```
-DEAD @prax [70da6e9c] dispatched 09-07 12:00 "..." — no completion by 09-07 14:00, the hard timeout: its monitor died (reboot, OOM, kill). Re-dispatch in continue mode.
+DEAD @prax [70da6e9c] dispatched 09-07 12:00 "..." — no completion by 09-07 14:00, the hard timeout. Nothing here checked whether its monitor is alive, and ai_mail retries a dispatch up to three times with a fresh timeout each attempt, so an overdue row is often a live monitor part way through attempt 2. Check the service and the dispatch log first: re-dispatching over a running retry doubles the work.
 ```
 
 Each death is announced once ever (cursor `devpulse_json/wire_dead_cursor.json`), so a re-sign-in never repeats one — and a one-shot does not exit on a death it already announced. `drone @devpulse watchdog status` shows the same rows on demand as "Dispatches overdue".
@@ -59,7 +59,7 @@ Each death is announced once ever (cursor `devpulse_json/wire_dead_cursor.json`)
 
 ## Crash coverage needs nothing running
 
-Every dispatch is registered at send time with an `expected_by` taken from dispatch_monitor's hard timeout. An entry past that with no completion means the monitor *died* — a fact about a file, true whether or not anything is looking. `watchdog status` reads it.
+Every dispatch is registered at send time with an `expected_by` taken from dispatch_monitor's hard timeout. An entry past that with no completion is overdue — a fact about a file, true whether or not anything is looking: the monitor died, or it is on a later attempt with a fresh timeout. `monitor_alive` false is the death; overdue alone is a prompt to look before re-dispatching. `watchdog status` reads both.
 
 ## No detection daemon
 
@@ -67,4 +67,4 @@ Every dispatch is registered at send time with an `expected_by` taken from dispa
 
 ## Stall detection on one long job
 
-`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. Under background Bash its per-line events land in the task's output file and are read when it exits, so it does not need the Monitor tool. It is not the sign-in: `watchdog agent` wires with no `baseline --once` armed leave every completion queued as `MISSED` while the statusline reads `idle`, so the verb says at arm time whether this session holds a sign-in wire, and names it. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.
+`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 300 s of JSONL silence with no in-flight tool; 120 s false-fired on every long response and compaction) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. Under background Bash its per-line events land in the task's output file and are read when it exits, so it does not need the Monitor tool. It is not the sign-in: `watchdog agent` wires with no `baseline --once` armed leave every completion queued as `MISSED` while the statusline reads `idle`, so the verb says at arm time whether this session holds a sign-in wire, and names it. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.

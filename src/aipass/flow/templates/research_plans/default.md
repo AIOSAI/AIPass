@@ -1,28 +1,29 @@
 # {plan_number}: {subject}
 
-Tag: research, external-repo, {tag}
+Tag: research, {tag}
 
-> One-line summary: what this repo/project does + why we're looking
+> One-line summary: what is studied + the question the research answers
 
 ---
 
 ## What is an RPLAN?
 
-Research Plans (RPLANs) are **studying external work** -- analyzing repos, packages, libraries, projects to extract patterns, ideas, lessons that could benefit AIPass.
+Research Plans (RPLANs) hold **research of any kind** -- work whose output is understanding, not code. An RPLAN is the artifact that makes research recoverable next session.
 
 **This is for:**
-- Analyzing external repo or pip package
-- Documenting architecture, patterns, design decisions found
-- Identifying what AIPass could learn or adapt
-- Recording honest assessments -- what's good, what's not, what's relevant
-- Preserving research so you don't repeat it next session
+- Tracing our own code -- following a flow, a dispatch path, a bug to its source
+- Studying an external repo or pip package -- architecture, patterns, design decisions
+- Comparing approaches, tools, or implementations side by side
+- Measuring something -- timings, sizes, counts, behavior under load
+- Recording honest assessments -- what holds up, what does not, what matters
+- Preserving research so it is not repeated next session
 
 **This is NOT for:**
-- Building code -- that's FPLAN
-- Planning AIPass features -- that's DPLAN (create one if research inspires build)
-- Quick glances -- if takes 5 minutes, just note in memories
+- Building code -- that is an FPLAN
+- Designing a feature -- that is a DPLAN (create one when research inspires a build)
+- Quick glances -- if it takes 5 minutes, a note in memories is enough
 
-**RPLANs live in external repo's root directory**, not in branch. When you revisit that repo later, research is right there waiting. RPLAN is artifact that makes research recoverable.
+**Where an RPLAN lives:** internal research lives in the branch doing the research. When the subject is an external checkout, the RPLAN lives in that external repo's root directory, so the research is right there on the next visit.
 
 **Never trim RPLAN.** Raw findings, dead ends, "this looked promising but wasn't" -- all valuable. Future you will thank past you.
 
@@ -32,21 +33,21 @@ Research Plans (RPLANs) are **studying external work** -- analyzing repos, packa
 
 | Field | Value |
 |-------|-------|
-| **Repo/Package** | Name + source URL |
-| **Installed via** | pip install / git clone / both |
-| **Version analyzed** | Version number or commit hash |
-| **License** | License type + notable restrictions |
-| **Language** | Primary language(s) |
-| **Size** | Approximate LOC or file count |
-| **Local path** | Where it lives on disk |
+| **Subject** | Repo, package, or our own area (name + URL or path) |
+| **Version or commit analyzed** | Version number or commit hash |
+| **Question** | What the research must answer |
+| **Method** | Read-only rules followed, sub-agents used and what each covered |
+| **Brief** | Path to the brief given to sub-agents |
+| **Report** | Path to the report(s) returned |
+| **Spot-checks** | What the plan's owner verified directly from its own seat |
 
 ## What It Does
 
-High-level description. What problem does it solve? Who is it for? How does it work conceptually?
+High-level description of the subject. What problem does it solve? Who is it for? How does it work conceptually? For an internal trace, what the traced flow is meant to do.
 
 ## Architecture
 
-How codebase structured. Key directories, entry points, data flow. Include tree or diagram if helpful.
+How the subject is structured. Key directories, entry points, data flow, call paths. Include a tree or diagram when it helps.
 
 ```
 project/
@@ -62,48 +63,48 @@ Each significant file reviewed:
 ### filename.py (LOC count)
 - **Purpose:** What it does
 - **Core pattern:** Main approach or algorithm
-- **What's clever:** Notable design decisions
-- **AIPass relevance:** How this could inform our work
+- **What's notable:** Design decisions, clever or questionable
+- **Relevance:** How this informs the question
 - **Gotchas:** Limitations or issues noticed
 
-*(Repeat each file worth documenting)*
+*(Repeat for each file worth documenting)*
 
-## Patterns Worth Adopting
+## Findings
 
-What did we find AIPass could learn? Be specific -- not "their memory is good" but "they use prefix-indexed keys like AGENT:id:STATE:type for O(k) queries, which could improve our ChromaDB tagging."
+What the research found. Be specific -- not "their memory is good" but "they use prefix-indexed keys like AGENT:id:STATE:type for O(k) queries, which could improve our ChromaDB tagging." A finding is whatever the research turned up: a pattern worth adopting, a bug, a gap, a measurement, a confirmed behavior.
 
-| Pattern | Where Found | AIPass Application | Priority |
-|---------|-------------|-------------------|----------|
-| Example pattern | file.py | How we'd use it | High/Med/Low |
+| Finding | Where | What it changes | Priority |
+|---------|-------|-----------------|----------|
+| Example finding | file.py:line | What it means for us or what it fixes | High/Med/Low |
 
 ## Patterns to Avoid
 
-What we should NOT copy? Bad practices, overcomplicated approaches, things that don't fit our architecture.
+What not to copy or repeat. Bad practices, overcomplicated approaches, things that do not fit our architecture.
 
 ## Honest Assessment
 
-- **What they do better than us:**
-- **What we do better than them:**
-- **Overlap AIPass:**
-- **Key differentiator:**
+- **What works well:**
+- **What does not:**
+- **Overlap with AIPass:**
+- **Key differentiator or root cause:**
 
 ## Next Steps
 
-- [ ] Create DPLAN if any patterns worth building
+- [ ] Create a DPLAN or FPLAN for any finding worth building or fixing
 - [ ] Note findings in relevant branch memories
-- [ ] Share relevant branches via dispatch if applicable
+- [ ] Share with relevant branches via dispatch if applicable
 
 ## Relationships
-- **Related DPLANs:** Link any design plans this research inspired
-- **Related branches:** Which AIPass branches would benefit
-- **Discovered via:** How we found this project (recommendation, search, dependency, etc.)
+- **Related plans:** Design or build plans this research informs or inspired
+- **Related branches:** Which AIPass branches are affected or benefit
+- **Discovered via:** How the subject came up (recommendation, search, dependency, incident, etc.)
 
 ## Notes
 Session notes, raw observations, things noticed during research
 
 ## Listen (TTS-friendly summary)
 
-Write a plain English summary of this research here. No markdown, no symbols, no tables, no code blocks, no asterisks, no bullet points. Just natural sentences that can be read aloud by a text to speech tool. Cover what the project is, what we found interesting, and what AIPass could learn from it.
+Write a plain English summary of this research here. No markdown, no symbols, no tables, no code blocks, no asterisks, no bullet points. Just natural sentences that can be read aloud by a text to speech tool. Cover what was studied, what the research found, and what it changes for AIPass.
 
 ---
 *Created: {today}*

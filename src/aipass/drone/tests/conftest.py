@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -18,9 +18,10 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import json
 import logging
 import shutil
+import subprocess
 import sys
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
 import pytest
 
@@ -257,3 +258,65 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+_REAL_RUN = subprocess.run
+GITHUB_SLUG = "AIOSAI/AIPass"
+
+
+def github_stand_in(answers: dict[str, object], calls: list[tuple[list[str], str | None]]):
+    """gh answering from *answers*, keyed by its argv after 'gh'; any other gh call is GitHub's 404. git is real.
+
+    Patching any module's ``subprocess.run`` swaps the one shared function, so git must pass through.
+    """
+
+    def run(argv: list[str], *args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        if argv[0] != "gh":
+            return _REAL_RUN(argv, *args, **kwargs)
+        calls.append((list(argv[1:]), kwargs.get("input")))
+        answer = answers.get(" ".join(argv[1:]))
+        if answer is None:
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="gh: Not Found (HTTP 404)")
+        return subprocess.CompletedProcess(argv, 0, stdout=answer if isinstance(answer, str) else json.dumps(answer))
+
+    return run
+
+
+def chore_ledger(tmp_path: Path) -> list[dict]:
+    """The GitHub chore records, read from beside the test's isolated deletion log."""
+    path = tmp_path / "git_gh_writes.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+@pytest.fixture()
+def aipass_github(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An AIPass root whose origin is github.com/AIOSAI/AIPass, standing in devpulse's seat; returns the root.
+
+    Git reads no host config and stops at tmp_path; the caller env is cleared so the seat decides who calls.
+    """
+    (tmp_path / "gitconfig").write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.pathsep.join(sorted({str(tmp_path), str(tmp_path.resolve())})))
+    for name in ("AIPASS_BRANCH_NAME", "AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE"):
+        monkeypatch.delenv(name, raising=False)
+    root = tmp_path / "aipass"
+    seat = make_owner_project(root, branch_dir=root / "src" / "aipass" / "devpulse")
+    for argv in (["init", "-q", "-b", "main"], ["remote", "add", "origin", f"https://github.com/{GITHUB_SLUG}.git"]):
+        _REAL_RUN(["git", *argv], cwd=root, check=True, capture_output=True, text=True)
+    monkeypatch.chdir(seat)
+    return root
+
+
+@pytest.fixture()
+def builder_seat(aipass_github: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A citizen of the same project who owns nothing, standing in its own branch."""
+    seat = aipass_github / "src" / "aipass" / "seedgo"
+    (seat / ".trinity").mkdir(parents=True)
+    (seat / ".trinity" / "passport.json").write_text(
+        json.dumps({"branch_info": {"branch_name": "seedgo"}}), encoding="utf-8"
+    )
+    monkeypatch.chdir(seat)
+    return seat
