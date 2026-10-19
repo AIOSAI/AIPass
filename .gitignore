@@ -212,3 +212,9 @@ src/aipass/*/.seedgo/ratchet/
 # (DPLAN-0332 catch-up lane) and by ai_mail's interactive lane. A runtime record
 # per machine, never a tracked file — it names live PIDs and fire instants.
 **/.daemon/last_wake_prompt.txt
+
+# The repo-root diagram kit ships (specs, builder, its README); every other
+# tools/ directory stays branch-local scratch under the blanket ignore above.
+!/tools/
+/tools/*
+!/tools/diagrams/

@@ -1,0 +1,38 @@
+{
+  "title": "HOW IT WORKS",
+  "subtitle": "one task's round trip: you ask one manager, the agent that owns the code replies",
+  "canvas": [1600, 900],
+  "nodes": [
+    {"id": "you", "kind": "tile", "icon": "person", "label": "you", "x": 60, "y": 400},
+    {"id": "terminal", "kind": "tile", "icon": "terminal", "label": "terminal seat", "x": 220, "y": 260},
+    {"id": "phone", "kind": "tile", "icon": "phone", "label": "phone room", "x": 220, "y": 540},
+    {"id": "manager", "kind": "hub", "icon": "agent", "label": "MANAGER AGENT", "caption": "one per project,\nthe seat with its git", "x": 400, "y": 380, "w": 350, "h": 128},
+    {"id": "mail", "kind": "tile", "icon": "envelope", "label": "ai_mail", "x": 860, "y": 200},
+    {"id": "owner", "kind": "hub", "icon": "sparkle", "label": "OWNING AGENT", "caption": "wakes in its own folder,\nheadless, resumed", "x": 1000, "y": 380, "w": 350, "h": 128},
+    {"id": "gates", "kind": "tile", "icon": "shield", "label": "hooks\nthe gates", "x": 1500, "y": 400, "accent": "green"},
+    {"id": "prompt", "kind": "tile", "icon": "document", "label": ".aipass\nprompt", "x": 1096, "y": 600},
+    {"id": "memory", "kind": "tile", "icon": "database", "label": ".trinity\nmemory", "x": 1216, "y": 600},
+    {"id": "dashboard", "kind": "tile", "icon": "dashboard", "label": "dashboard", "x": 1336, "y": 600},
+    {"id": "task", "kind": "tile", "icon": "inbox", "label": "the task\nmail", "x": 1456, "y": 600}
+  ],
+  "edges": [
+    {"from": "you", "to": "terminal"},
+    {"from": "you", "to": "phone"},
+    {"from": "terminal", "to": "manager"},
+    {"from": "phone", "to": "manager"},
+    {"from": "manager", "to": "mail", "from_side": "top", "to_side": "left", "label": "drone @ai_mail dispatch"},
+    {"from": "mail", "to": "owner", "from_side": "right", "to_side": "top", "label": "mail + wake"},
+    {"from": "owner", "to": "gates", "accent": "green", "label": "every tool write"},
+    {"from": "prompt", "to": "owner", "from_side": "top", "to_side": "bottom"},
+    {"from": "memory", "to": "owner", "from_side": "top", "to_side": "bottom"},
+    {"from": "dashboard", "to": "owner", "from_side": "top", "to_side": "bottom"},
+    {"from": "task", "to": "owner", "from_side": "top", "to_side": "bottom"},
+    {
+      "from": "owner", "to": "manager", "style": "dashed", "accent": "green", "route": "bottom",
+      "label": "drone @ai_mail reply",
+      "labels": [{"text": "lands in the inbox;\nthe watchdog surfaces it", "at": "end"}]
+    }
+  ],
+  "footers": ["every command goes through one bus", "every tool write passes the gates"],
+  "decor": {"traces": true, "pulse": true, "grid": true}
+}
