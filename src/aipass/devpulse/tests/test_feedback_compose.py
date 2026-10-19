@@ -3,7 +3,7 @@
 # Description: Tests for feedback compose — send, reply, ai_mail delivery
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-18
 # =============================================
 
 """Tests for apps/handlers/feedback/compose.py."""
@@ -343,7 +343,8 @@ class TestHonestDeliveryReporting:
         )
         assert compose.reply_to("aaa11111", "Body") is True
         err = capsys.readouterr().err
-        assert f"NOT delivered to ghost: ai_mail inbox not found at {missing}" in err
+        assert "NOT delivered to ghost: ai_mail inbox not found at" in err
+        assert "nowhere" in err and "inbox.json" in err
 
     def test_send_warns_when_sender_unknown(self, empty_inbox):
         """send_feedback tells an anonymous sender that replies cannot reach them."""
