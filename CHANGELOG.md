@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Four devpulse strings and a swallowed write, found by the comment sweep** (@devpulse, `modules/compass.py` 1.0.3, `modules/admin_grant.py` 1.2.1, `handlers/feedback/storage.py` 1.0.1, `docs/watchdog.md`, `.seedgo/bypass.json`; two pins; suite 545). `docs/watchdog.md` claimed a row past `expected_by` meant its monitor died and that a live monitor could not overrun the timeout; ai_mail retries a dispatch up to three times with a fresh timeout each attempt, so the doc now says what the wire's own DEAD line says: overdue is a prompt to look, `monitor_alive` false is the death. Compass's unknown-id refusals pointed at `compass list`, a verb that does not exist; they name `query` and `stats`. The feedback inbox store logged an OSError on save and returned as if written, and answered an empty inbox for a corrupt or unreadable file, which the next save would have overwritten; both raise now, the load naming the path, and the file is left as found. `admin_grant` printed its help, status and introspection to stderr (`console = err_console` since birth), so a pipe saw nothing; they go to stdout, refusals stay on stderr through `error()`. Two bypass pins re-pointed at the lines their reasons describe (`registry.py` 217/220, `test_watchdog_registry.py` 500/512/513); the Windows "cannot run answers alive" clause is gone because that probe raises.
+
 ## [2026-10-18] — v2.8.21: the README rewritten around a 17-second demo, the phone's Files screen pages, the repo door merges a diverged project by name, the ratchet measures from a real checkout, CodeQL at zero
 
 ### Added

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-06-16
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """
@@ -401,7 +401,7 @@ def _handle_rate(sub_args: List[str]) -> bool:
         # error, not warning: warning() skips mark_command_failed(), so a chained next step would run.
         error(
             f"No decision with id {decision_id} — nothing changed.",
-            suggestion="Run 'compass list' to see the ids that exist.",
+            suggestion='compass query "<words>" shows ids (each hit carries its #id); compass stats counts them.',
         )
     return True
 
@@ -435,7 +435,7 @@ def _handle_archive(sub_args: List[str]) -> bool:
         # error, not warning: warning() skips mark_command_failed(), so a chained next step would run.
         error(
             f"No decision with id {decision_id} — nothing changed.",
-            suggestion="Run 'compass list' to see the ids that exist.",
+            suggestion='compass query "<words>" shows ids (each hit carries its #id); compass stats counts them.',
         )
     return True
 
@@ -473,7 +473,7 @@ def _handle_note(sub_args: List[str]) -> bool:
         # error, not warning: warning() skips mark_command_failed(), so a chained next step would run.
         error(
             f"No decision with id {decision_id} — nothing changed.",
-            suggestion="Run 'compass list' to see the ids that exist.",
+            suggestion='compass query "<words>" shows ids (each hit carries its #id); compass stats counts them.',
         )
     return True
 
