@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
-# Description: Tests for the gh passthrough verbs and the external-repo door (--repo)
-# Version: 1.6.0
+# Description: Tests for the gh passthrough verbs, release edit and the external-repo door (--repo)
+# Version: 1.7.0
 # Created: 2026-10-08
-# Modified: 2026-10-18
+# Modified: 2026-10-19
 # =============================================
 
-"""Tests for apps/handlers/git/repo_door.py and the gh passthrough verbs of apps/modules/git_module.py."""
+"""Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — subprocess.run; gh is stubbed, git runs only in the tmp_path repos of the door tests
@@ -26,10 +26,10 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
     GIT_ACCESS_TIERS,
     verify_git_access,
 )
-from aipass.drone.apps.handlers.git import repo_door, untrack_handler
+from aipass.drone.apps.handlers.git import release_handler, repo_door, untrack_handler
 from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
-from .conftest import make_owner_project
+from .conftest import GITHUB_SLUG, chore_ledger, github_stand_in, make_owner_project
 
 
 # ===========================================================================
@@ -1198,3 +1198,188 @@ class TestRepoDoorTrackedAndUntrack:
     def test_help_names_both_verbs_on_the_door(self) -> None:
         assert "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>" in get_help()
         assert "tracked" in repo_door.DOOR_VERBS and "untrack" in repo_door.DOOR_VERBS
+
+
+# ===========================================================================
+# release edit and the chores through the door: the owner tier's GitHub chores
+# ===========================================================================
+
+_SLUG = GITHUB_SLUG
+_CHANGELOG = (
+    "# Changelog\n\n"
+    "## [Unreleased]\n\n- **next** not shipped\n\n---\n\n"
+    "## [2026-10-17] — v2.8.20: the comments say why\n\n- **fix** one\n---\n- **fix** two\n\n"
+    "## [2026-09-01] — v2.8.2: the old one\n\n- **old** entry\n"
+)
+_V2820 = "## [2026-10-17] — v2.8.20: the comments say why\n\n- **fix** one\n- **fix** two\n\n"
+
+
+def _chore(command: str, args: list[str], answers: dict[str, object], calls: list) -> dict:
+    with patch("aipass.drone.apps.modules.git_module.subprocess.run", side_effect=github_stand_in(answers, calls)):
+        return handle_command(command, args)
+
+
+@pytest.fixture()
+def released_root(aipass_github: Path) -> Path:
+    """aipass_github with a CHANGELOG.md whose blocks sit under [Unreleased], v2.8.20 and v2.8.2."""
+    (aipass_github / "CHANGELOG.md").write_text(_CHANGELOG, encoding="utf-8")
+    return aipass_github
+
+
+class TestReleaseEdit:
+    """release edit: the tag's own CHANGELOG block becomes the release's notes, by publish.yml's rule."""
+
+    def test_the_owner_rewrites_the_notes_with_the_tags_block_and_prints_both_lengths(
+        self, released_root: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: every header keeps the block — [Unreleased] and v2.8.2 ship as v2.8.20's notes."""
+        calls: list = []
+        answers = {
+            f"api repos/{_SLUG}/releases/tags/v2.8.20": {"tag_name": "v2.8.20", "body": "## [Unreleased]"},
+            f"release edit v2.8.20 --repo {_SLUG} --notes-file -": "",
+        }
+
+        result = _chore("release", ["edit", "v2.8.20"], answers, calls)
+
+        assert result == {
+            "stdout": f"Release v2.8.20 of github.com/{_SLUG}: notes rewritten from CHANGELOG.md, 15 -> {len(_V2820)} characters.",
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert calls[-1] == ([*"release edit v2.8.20 --repo".split(), _SLUG, "--notes-file", "-"], _V2820)
+        [record] = chore_ledger(tmp_path)
+        assert (record["verb"], record["caller"], record["tag"], record["old_length"], record["new_length"]) == (
+            "release edit",
+            "devpulse",
+            "v2.8.20",
+            15,
+            len(_V2820),
+        )
+
+    def test_v2_8_2_never_claims_v2_8_20s_block(self, released_root: Path) -> None:
+        """Mutant: the trailing boundary dropped from the header match — v2.8.2 takes v2.8.20's block too."""
+        calls: list = []
+        answers = {
+            f"api repos/{_SLUG}/releases/tags/v2.8.2": {"tag_name": "v2.8.2", "body": ""},
+            f"release edit v2.8.2 --repo {_SLUG} --notes-file -": "",
+        }
+
+        _chore("release", ["edit", "v2.8.2"], answers, calls)
+
+        assert calls[-1][1] == "## [2026-09-01] — v2.8.2: the old one\n\n- **old** entry\n"
+
+    def test_a_block_over_the_cap_is_cut_on_an_entry_and_points_at_the_full_block(self, released_root: Path) -> None:
+        """Mutant: the cut is taken at the cap itself — the last entry is sliced mid-line."""
+        entry = "- **entry** " + "x" * 988 + "\n"
+        big = "## [2026-10-19] — v9.9.9: big\n\n" + entry * 130
+        (released_root / "CHANGELOG.md").write_text(big, encoding="utf-8")
+        calls: list = []
+        answers = {
+            f"api repos/{_SLUG}/releases/tags/v9.9.9": {"tag_name": "v9.9.9", "body": ""},
+            f"release edit v9.9.9 --repo {_SLUG} --notes-file -": "",
+        }
+
+        _chore("release", ["edit", "v9.9.9"], answers, calls)
+
+        notes = calls[-1][1]
+        body, pointer = notes.split("\n\n---\n\n")
+        assert len(notes) <= release_handler.NOTES_CAP
+        assert body.endswith("x" * 988) and len(body.splitlines()) - 2 == body.count("- **entry**")
+        assert pointer == (
+            f"*Release notes truncated: the full block is {len(big):,} characters and GitHub caps a release "
+            "body at 125,000. The complete entry is `## [2026-10-19] — v9.9.9: big…` in "
+            f"[CHANGELOG.md](https://github.com/{_SLUG}/blob/v9.9.9/CHANGELOG.md).*\n"
+        )
+
+    def test_a_tag_no_header_carries_and_a_tag_with_no_published_release_are_refused_and_nothing_is_edited(
+        self, released_root: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: the release check skipped — gh release edit is sent for a tag GitHub never published."""
+        calls: list = []
+
+        no_block = _chore("release", ["edit", "v7.0.0"], {}, calls)
+        unpublished = _chore("release", ["edit", "v2.8.20"], {}, calls)
+
+        assert no_block["stderr"] == release_handler.REFUSE_NO_SECTION.format(tag="v7.0.0")
+        assert unpublished["stderr"] == release_handler.REFUSE_NOT_PUBLISHED.format(tag="v2.8.20", slug=_SLUG)
+        assert [argv[0] for argv, _ in calls] == ["api"]
+        assert chore_ledger(tmp_path) == []
+
+    def test_a_seat_that_does_not_own_the_repo_is_refused_before_gh(self, builder_seat: Path) -> None:
+        """Mutant: edit left out of the write list — the global tier lets a builder rewrite a release."""
+        calls: list = []
+
+        result = _chore("release", ["edit", "v2.8.20"], {}, calls)
+
+        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert calls == []
+
+
+class TestChoresThroughTheDoor:
+    """--repo <path> runs a chore on the external repo's own GitHub, for the admin seat only."""
+
+    def test_the_admin_creates_a_label_on_the_external_repos_github_and_both_ledgers_say_so(
+        self, github_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: the door hands the chore the AIPass root — the label lands on AIPass's GitHub."""
+        calls: list = []
+        answers = {
+            "label list --repo AIOSAI/ext --limit 1000 --json name,color,description": [],
+            "label create ci --repo AIOSAI/ext": "",
+        }
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = _chore("label", ["create", "ci", "--repo", "projects/ext"], answers, calls)
+
+        assert result == {"stdout": "Created label 'ci' on github.com/AIOSAI/ext.", "stderr": "", "exit_code": 0}
+        [door] = _ledger(tmp_path)
+        [chore] = chore_ledger(tmp_path)
+        assert (door["verb"], door["outcome"], chore["github"], chore["caller"]) == (
+            "label",
+            "ran",
+            "AIOSAI/ext",
+            "@devpulse",
+        )
+
+    def test_release_edit_takes_the_external_repos_own_changelog(self, github_world: dict[str, Path]) -> None:
+        ext = github_world["ext"]
+        (ext / "CHANGELOG.md").write_text("## [1.0.0] — v1.0.0: ext\n\n- **ext** only\n", encoding="utf-8")
+        calls: list = []
+        answers = {
+            "api repos/AIOSAI/ext/releases/tags/v1.0.0": {"tag_name": "v1.0.0", "body": ""},
+            "release edit v1.0.0 --repo AIOSAI/ext --notes-file -": "",
+        }
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = _chore("release", ["edit", "v1.0.0", "--repo", "projects/ext"], answers, calls)
+
+        assert result["exit_code"] == 0, result
+        assert calls[-1][1] == "## [1.0.0] — v1.0.0: ext\n\n- **ext** only\n"
+
+    def test_a_chore_without_the_admin_grant_is_refused_and_gh_is_never_called(
+        self, github_world: dict[str, Path]
+    ) -> None:
+        calls: list = []
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=False):
+            result = _chore(
+                "alerts",
+                ["dismiss", "1", "--reason", "wont_fix", "--comment", "x", "--repo", "projects/ext"],
+                {},
+                calls,
+            )
+
+        assert result["exit_code"] == 1 and "admin" in result["stderr"]
+        assert calls == []
+
+    def test_release_list_keeps_repo_as_githubs_owner_name(self, aipass_github: Path) -> None:
+        """Mutant: every release --repo sent to the door — release list --repo AIOSAI/AIPass is refused as a path."""
+        calls: list = []
+        answers = {
+            "api repos/AIOSAI/AIPass": {"private": False},
+            "api repos/AIOSAI/AIPass/releases?per_page=100&page=1": [],
+        }
+
+        result = _chore("release", ["list", "--repo", "AIOSAI/AIPass"], answers, calls)
+
+        assert result == {"stdout": "No published releases of github.com/AIOSAI/AIPass.", "stderr": "", "exit_code": 0}

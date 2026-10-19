@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-09-13
-# Modified: 2026-10-18
+# Modified: 2026-10-19
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -48,6 +48,9 @@ DOOR_VERBS = (
     "sync",
     "merge-upstream",
     "run",
+    "release",
+    "label",
+    "alerts",
 )
 
 # gh's run, read side only; rerun, cancel, delete and download stay home-only.
@@ -728,16 +731,21 @@ def gh_run_args(args: list[str], repo_root: Path) -> tuple[list[str], str]:
     return [*args, REPO_FLAG, slug], ""
 
 
-def ledger_path() -> Path:
-    """Where door records are kept: AIPass's own .ai_central, never the repo the door served.
+def home_ledger(name: str) -> Path:
+    """A drone ledger in AIPass's own .ai_central, never in the repo a command served.
 
     The caller's cwd may be that repo, so the home anchors it; ``AIPASS_DELETION_LOG`` still wins.
     """
     home = resolve_aipass_home().path
     if home is None:
-        logger.warning("git repo door: no AIPass home found; the ledger goes to the temp directory")
+        logger.warning("git: no AIPass home found; the %s ledger goes to the temp directory", name)
         home = Path(tempfile.gettempdir())
-    return ledger_beside(LEDGER_NAME, home)
+    return ledger_beside(name, home)
+
+
+def ledger_path() -> Path:
+    """Where door records are kept."""
+    return home_ledger(LEDGER_NAME)
 
 
 def record_use(

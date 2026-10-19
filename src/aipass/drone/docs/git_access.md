@@ -16,8 +16,8 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 
 | Tier | Who | What it covers |
 |------|-----|----------------|
-| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, and the `gh` reads |
-| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, and the `gh` writes |
+| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, and the `gh` reads |
+| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, and the `gh` writes |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:
 `citizen_class: manager`, registry tenancy, an entry carrying `owner: true`, and path-binding of

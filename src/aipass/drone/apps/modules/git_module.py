@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-03-17
-# Modified: 2026-10-18
+# Modified: 2026-10-19
 # =============================================
 
 """
@@ -30,6 +30,8 @@ from aipass.drone.apps.handlers.git import (
     tracked_handler,
     untrack_handler,
     release_handler,
+    label_handler,
+    alerts_handler,
     export_handler,
     show_handler,
     blame_handler,
@@ -69,6 +71,8 @@ _COMMANDS = (
     "run",
     "workflow",
     "release",
+    "label",
+    "alerts",
     "commit",
     "untrack",
     "checkout",
@@ -88,9 +92,14 @@ _COMMANDS = (
     "issue-write",
     "run-write",
     "workflow-write",
+    "release-write",
+    "label-write",
+    "alerts-write",
 )
 
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
+# drone's own GitHub chores; a write is '<command>-write' at the gate, as for the passthroughs.
+_CHORE_COMMANDS = ("release", "label", "alerts")
 
 # gh's default `issue view` requests projectCards, which the API now rejects;
 # pinned --json fields never request it.
@@ -175,11 +184,12 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
     # The external-repo door is decided BEFORE the tier gate: a flag aimed at another
     # repo must never fall through and run in the standing one. On gh passthroughs and
-    # release, --repo OWNER/NAME is gh's own; only `run` naming a directory is the door's.
+    # release list, --repo OWNER/NAME is gh's own; `run` naming a directory and release edit are the door's.
     repo_flag = repo_door.extract_repo_flag(args)
     if repo_flag.present and (
         command not in (*_GH_PASSTHROUGH_COMMANDS, "release")
         or (command == "run" and repo_door.run_aims_at_door(repo_flag, lock_handler.find_repo_root()))
+        or (command == "release" and repo_flag.args[:1] == ["edit"])
     ):
         return _handle_repo_door(command, repo_flag)
 
@@ -199,6 +209,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             )
             return {"stdout": "", "stderr": message, "exit_code": 1}
         cmd = gh_key
+    elif command in _CHORE_COMMANDS:
+        cmd = gh_access_key(command, args) or command
     try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
@@ -222,8 +234,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_blame(args)
     if command == "tracked":
         return _handle_tracked(args)
-    if command == "release":
-        return release_handler.release_command(args)
+    if command in _CHORE_COMMANDS:
+        return _handle_chore(command, args, None, caller)
     if command == "export":
         return _handle_export(args)
     if command == "remote":
@@ -322,7 +334,10 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         return _refuse_repo_door(verdict, flag, verb, target.refusal)
 
     head_before = repo_door.head_sha(target.root)
-    result = _run_door_verb(command, flag.args, target.root)
+    if command in _CHORE_COMMANDS:
+        result = _handle_chore(command, flag.args, target.root, verdict.caller)
+    else:
+        result = _run_door_verb(command, flag.args, target.root)
     taken = result.pop("theirs_taken", [])
     repo_door.record_use(
         caller=verdict.caller,
@@ -338,6 +353,18 @@ def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
         theirs_taken=taken,
     )
     return result
+
+
+def _handle_chore(command: str, args: list[str], repo_root: Path | None, caller: str) -> dict:
+    """release, label or alerts against the GitHub repo of *repo_root*, else the standing repo."""
+    if command == "release" and args[:1] != ["edit"]:
+        return release_handler.release_command(args)
+    root = repo_root or lock_handler.find_repo_root()
+    if command == "label":
+        return label_handler.label_command(args, root, caller)
+    if command == "alerts":
+        return alerts_handler.alerts_command(args, root, caller)
+    return release_handler.edit_command(args[1:], root, caller)
 
 
 def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
