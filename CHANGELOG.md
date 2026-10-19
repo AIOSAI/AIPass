@@ -23,6 +23,10 @@ PyPI version — not the changelog header.
 
 ### Changed
 
+- **The README demo is a 17-second recording of three bus commands, and the logo has a light variant** (`assets/demo.gif` 181 KB, 1021x605, 70 frames, replacing a 4.2 MB, 90-second Claude-session capture whose frames showed the owner's hostname and a session URL; `assets/demo.sh`, the script that types the three commands at a fake prompt, recorded with asciinema 2.4 and rendered with agg 1.8 in the github-dark theme; `assets/logo-light.png`, logo.png inverted, for a `<picture>` light source). The commands: `drone systems`, `drone @memory search` finding a lesson an agent kept a month ago, `drone @seedgo audit aipass @cli` at 100. The README that embeds them is drafted and waits on the owner's read.
+
+- **CONTRIBUTING.md says stable** (line 3; it said "in beta" while the README, the status badge and the PyPI classifier said stable).
+
 - **One prose-skipper sorts docstrings from code for every line-based checker** (@seedgo, `handlers/aipass_standards/prose_lines.py` 1.0.0, 21 checkers migrated, 77 pins; suite 6066 to 6143). Twenty-one checkers each carried their own docstring toggle and the toggles disagreed, so the audit's 100 depended on which one a file happened to meet. The helper names docstring lines through `ast` (the string-constant first statement of a module, class or function; a docstring sharing its `def` line leaves that line code), comment-only lines and multi-line literal bodies through `tokenize`, and calls every other string literal code. Unparseable source raises, never an all-code answer: checkers fall back to `#` lines as the only prose they can name, and `modules` and `cli_flags` fail their row instead, since a `def` named only in a docstring must not pass. `cli_ux`'s Examples row needs a printed string starting with `examples` once Rich markup is stripped; a docstring or an unprinted constant never counts. Fleet audit after: 15 of 18 at 100; cli and memory surfaced a real Examples gap each (a help page with the word only in its docstring, a singular `Example:` heading), both cured the same night.
 
 ### Fixed

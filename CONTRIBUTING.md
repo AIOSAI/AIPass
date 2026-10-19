@@ -1,6 +1,6 @@
 # Contributing to AIPass
 
-AIPass is in beta, built by a solo developer working with an AI team. Contributions are welcome.
+AIPass is stable and built by a solo developer working with an AI team. Contributions are welcome.
 
 ## Before You Start
 
