@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.3.1
+# Version: 2.3.2
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -278,6 +278,21 @@ def update_branch(
     )
 
 
+def _failed_row(branch: str, exc: Exception, dry_run: bool) -> dict:
+    """The result row of a branch update_all could not update."""
+    return {
+        "branch": branch,
+        "success": False,
+        "additions": 0,
+        "renames": 0,
+        "updates": 0,
+        "pruned": 0,
+        "skipped_py": 0,
+        "errors": [str(exc)],
+        "dry_run": dry_run,
+    }
+
+
 def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | None = None) -> list[dict]:
     """Update all branches from AIPASS_REGISTRY.json, skipping spawn itself, optionally by class."""
     registry_path = find_registry()
@@ -304,7 +319,12 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
         if citizen_class:
             branch_dir = _resolve_branch_path(lower_name)
             if branch_dir and branch_dir.is_dir():
-                actual_class = _read_citizen_class(branch_dir)
+                try:
+                    actual_class = _read_citizen_class(branch_dir)
+                except (OSError, ValueError) as exc:
+                    logger.error("[update] Cannot read the class of %s: %s", name, exc)
+                    results.append(_failed_row(lower_name, exc, dry_run))
+                    continue
                 if actual_class != citizen_class:
                     if trace:
                         logger.info("[update] Skipping %s (class=%s, filter=%s)", name, actual_class, citizen_class)
@@ -318,19 +338,7 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
             results.append(result)
         except Exception as exc:
             logger.error("[update] Error updating %s: %s", name, exc)
-            results.append(
-                {
-                    "branch": lower_name,
-                    "success": False,
-                    "additions": 0,
-                    "renames": 0,
-                    "updates": 0,
-                    "pruned": 0,
-                    "skipped_py": 0,
-                    "errors": [str(exc)],
-                    "dry_run": dry_run,
-                }
-            )
+            results.append(_failed_row(lower_name, exc, dry_run))
 
     return results
 

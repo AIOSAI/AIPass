@@ -17,7 +17,7 @@ registry agreeing with the filesystem.
 drone @spawn create /path/to/my_agent --role "Analyst" --purpose "Data reports"
 drone @spawn update @my_agent              # preview; --apply executes
 drone @spawn sync-registry                 # registry against filesystem
-drone @spawn delete @my_agent --dry-run    # preview a retirement
+drone @spawn delete @my_agent --retire --dry-run   # preview retiring a citizen
 ```
 
 ---
@@ -32,8 +32,8 @@ drone @spawn delete @my_agent --dry-run    # preview a retirement
 - **Updates branches from the template.** Preview-only until `--apply`. Missing files are
   added, JSON is deep-merged, `.py` is skipped by design, markdown is compared and reported
   but never written, and a branch's own `.updateignore` is honoured before every other rule.
-- **Retires citizens.** Archive the whole tree including its memories, then deregister — and
-  refuse outright while the passport still says the citizen is registered.
+- **Retires citizens.** Archive the whole tree including its memories, then deregister. A
+  registered citizen goes only with `--retire`, which archives its passport as unregistered.
 - **Keeps the registry true.** Scan, repair, relocate, and migrate passports to the current
   schema; each write-capable lane previews first and needs an explicit flag to act.
 - **Owns the birth shape.** The template is the source of truth for what a citizen is, and a
@@ -142,7 +142,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-18
 
 ---
 [← Back to AIPass](../../../README.md)

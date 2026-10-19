@@ -24,7 +24,7 @@ Full surface is `drone @spawn --help`; the bare `drone @spawn` lists the live mo
 drone @spawn create <path> --role R --purpose P   # mint (add --dry-run to preview)
 drone @spawn update @branch                       # preview; --apply executes
 drone @spawn update specialist --all --apply      # every branch of a class
-drone @spawn delete @branch --dry-run             # preview a retirement
+drone @spawn delete @branch --retire --dry-run    # preview retiring a citizen
 drone @spawn sync-registry --check                # read-only owner/identity health
 drone @spawn regenerate-registry                  # after ANY template file change
 drone @spawn migrate-passports                    # fleet schema 2.0, preview by default
@@ -94,5 +94,5 @@ tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools
  - `update` cannot run against spawn itself — the lane executes in this process and imports the shim at module level
  - `handlers/__init__.py` refuses cross-branch imports; other branches come through `apps/modules/`
  - Don't delete: rename `name(disabled).py` or move to a sibling `.archive/`, and mail @devpulse delete requests
- - `delete` has no force flag — clear `citizenship.registered` first, deliberately
+ - A registered citizen deletes only with `--retire`; the floor and the registry owner never do
  - A refusal must never exit 0: every routed command passes through the exit seam in `spawn.py`

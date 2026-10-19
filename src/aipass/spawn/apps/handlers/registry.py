@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -32,10 +32,11 @@ _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
 ADMIN_BRANCH = "devpulse"
 
 
-def is_protected(branch_name, branch_dir=None, registry_path=None):
+def is_protected(branch_name, branch_dir=None, registry_path=None, count_passport=True):
     """Check if a branch is protected from deletion and pollution cleanup.
 
     Any one layer protects: the hardcoded floor, the registry owner flag, or a registered passport.
+    count_passport=False asks the floor and owner layers only (retirement clears the passport layer).
     Returns (protected, reason)."""
     name_lower = branch_name.lower()
 
@@ -59,7 +60,7 @@ def is_protected(branch_name, branch_dir=None, registry_path=None):
     except (OSError, ValueError, KeyError) as exc:
         logger.info("[is_protected] Registry lookup failed for %s: %s", branch_name, exc)
 
-    if branch_dir is not None:
+    if count_passport and branch_dir is not None:
         passport_path = Path(branch_dir) / ".trinity" / "passport.json"
         if passport_path.is_file():
             try:

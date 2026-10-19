@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete.py
 # Description: Branch deletion — thin CLI layer for archive and deregister
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-18
 # =============================================
 
 """Delete orchestrator for branch lifecycle management."""
@@ -47,23 +47,30 @@ def handle_command(command: str, args: list) -> bool:
 def handle_delete(args: list[str]) -> int:
     """Parse args and execute delete; returns exit code (0=success, 1=failure)."""
     if "--help" in args or "-h" in args:
-        console.print("[bold cyan]Usage:[/bold cyan] drone @spawn delete <@branch> [--yes] [--dry-run]")
+        console.print("[bold cyan]Usage:[/bold cyan] drone @spawn delete <@branch> [--retire] [--yes] [--dry-run]")
         console.print()
         console.print("  [green]@branch[/green]    Branch to archive and deregister")
+        console.print(
+            "  [green]--retire[/green]   Retire an active citizen: its archived passport reads registered false"
+        )
         console.print("  [green]--yes[/green]      Skip confirmation prompt")
         console.print("  [green]--dry-run[/green]  Preview what would happen without changes")
         return 0
 
     if not args:
-        warning("Usage: drone @spawn delete <@branch> [--yes] [--dry-run]")
+        warning("Usage: drone @spawn delete <@branch> [--retire] [--yes] [--dry-run]")
         console.print()
         console.print("  [green]@branch[/green]    Branch to archive and deregister")
+        console.print(
+            "  [green]--retire[/green]   Retire an active citizen: its archived passport reads registered false"
+        )
         console.print("  [green]--yes[/green]      Skip confirmation prompt")
         console.print("  [green]--dry-run[/green]  Preview what would happen without changes")
         return 1
 
     dry_run = "--dry-run" in args
     skip_confirm = "--yes" in args
+    retire = "--retire" in args
 
     targets = [a for a in args if not a.startswith("--")]
 
@@ -78,6 +85,7 @@ def handle_delete(args: list[str]) -> int:
             branch_name,
             confirm=not skip_confirm,
             dry_run=dry_run,
+            retire=retire,
         )
     except Exception as exc:
         logger.error(f"[delete] Unexpected error deleting {branch_name}: {exc}")
@@ -109,6 +117,9 @@ def _print_summary(result: dict, dry_run: bool) -> None:
         console.print(f"  Archive: {archive_path}")
 
     console.print(f"  Registry updated: {result.get('registry_updated', False)}")
+    if success and result.get("retired"):
+        verb = "would read" if dry_run else "reads"
+        console.print(f"  Retired: the archived passport {verb} citizenship.registered false")
 
     err_msg = result.get("error", "")
     if err_msg:
