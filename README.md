@@ -81,25 +81,6 @@ Install adds AIPass hooks and deny rules to your user-level Claude Code settings
   <img src="https://raw.githubusercontent.com/AIOSAI/AIPass/main/assets/diagrams/how_it_works.png" width="900" alt="One task's round trip: you talk to a manager agent from a terminal seat or the phone; it dispatches through ai_mail; the owning agent wakes in its own folder with its prompt, its memory, its dashboard and the task mail; its reply lands back in the manager's inbox; every tool write passes the hooks gates.">
 </p>
 
-<details>
-<summary>Text version</summary>
-
-```text
- you ── terminal seat or phone room ──► manager agent  (one per project, the seat with its git)
-                                              │
-                                              └─ drone @ai_mail dispatch ──► mail + wake
-                                                                               │
-                                                                               ▼
-                       owning agent  ◄── wakes in its own folder: its prompt, its .trinity memory,
-                                              │                   its dashboard, the task mail
-                                              └─ drone @ai_mail reply ──► the manager's inbox
-
- every command goes through one bus:   drone @agent command [args]
- every tool write passes the gates:    hooks decide who may write what
-```
-
-</details>
-
 **One bus.** `drone @agent command [args]` reaches any agent. You use it, and agents use it to reach each other.
 
 **One memory each.** The owning agent wakes in its own folder with its own prompt, its `.trinity/` memory, a refreshed dashboard and the task mail. Nobody re-explains context. The longer story goes in a plan (`drone @flow create`) that the manager writes and names in the mail.
