@@ -3,7 +3,7 @@
 # Description: Tests for the key/value store - drone @canary kv, its JSON form, its file and its refusals
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/modules/kv.py and the kv store it drives."""
@@ -591,6 +591,15 @@ def test_bare_kv_prints_the_usage_and_exits_zero(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "kv Module" in out
     assert "set KEY VALUE" in out
+
+
+def test_the_help_page_names_what_bare_kv_prints(monkeypatch, capsys):
+    """Bare kv prints the short map, so the help line for it must not say 'this page'."""
+    assert _run(monkeypatch, ["kv", "--help"]) == 0
+
+    line = next(text for text in capsys.readouterr().out.splitlines() if "No arguments" in text)
+    assert "short map" in line
+    assert "this page" not in line
 
 
 @pytest.mark.parametrize("form", ["--help", "-h", "help"])

@@ -3,7 +3,7 @@
 # Description: Store command - drone @canary kv FILE set|get|delete|list keeps pairs between runs
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Key/value store: a pair written in one run, read back in the next.
@@ -58,7 +58,7 @@ def print_help() -> None:
     console.print("  [green]drone @canary kv FILE delete KEY[/green]      Remove the pair; prints nothing")
     console.print("  [green]drone @canary kv FILE list[/green]            Every pair as KEY<tab>VALUE, sorted")
     console.print("  [green]drone @canary kv --json FILE list[/green]     The same pairs as one JSON object")
-    console.print("  [green]drone @canary kv[/green]                      No arguments: this page, exit 0")
+    console.print("  [green]drone @canary kv[/green]                      No arguments: the short map, exit 0")
     console.print()
 
     console.print("[yellow]The store:[/yellow]")
