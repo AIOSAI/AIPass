@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.1.1
-# Description: Tests for context_gauge prompt handler (guard per context window since 1.1.0)
+# Version: 1.2.0
+# Description: Tests for context_gauge prompt handler (guard per window since 1.1.0; real model window since 1.2.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-09-27
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -12,7 +12,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/prompt/context_gauge.py parses and imports
 # seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the guard directory
-# seedgo: no-test-needed(documentation) — the module docstring's account of the trigger ratio
+# seedgo: no-test-needed(documentation) — the module docstring's account of the trigger
 
 import json
 from unittest.mock import patch
@@ -27,15 +27,22 @@ MODULE = "aipass.hooks.apps.handlers.prompt.context_gauge"
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 
-def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0):
+@pytest.fixture(autouse=True)
+def no_user_settings(tmp_path, monkeypatch):
+    """The user-level settings file moves under tmp_path and stays absent, so no live window leaks in."""
+    monkeypatch.setattr(context_window, "user_settings_path", lambda: tmp_path / "home" / "user_settings.json")
+
+
+def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, model=""):
     entry = {
         "type": "assistant",
         "message": {
+            "model": model,
             "usage": {
                 "input_tokens": input_tokens,
                 "cache_read_input_tokens": cache_read,
                 "cache_creation_input_tokens": cache_creation,
-            }
+            },
         },
     }
     path.write_text(json.dumps(entry), encoding="utf-8")
@@ -58,7 +65,7 @@ class TestContextGaugeHandle:
     def test_fires_nudge_at_80_percent_of_trigger(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
-        # trigger = 200000 * 0.9 = 180000; 80% of that = 144000
+        # trigger = 200000 - 33000 = 167000; 80% of that = 133600
         _write_transcript(transcript, cache_read=145_000)
 
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
@@ -66,20 +73,20 @@ class TestContextGaugeHandle:
         assert result["exit_code"] == 0
         assert "CONTEXT GAUGE" in result["stdout"]
         assert "/prep" in result["stdout"]
-        assert "compact fires soon" not in result["stdout"]
+        assert "Compact fires soon" not in result["stdout"]
         assert result["sound"] == "context gauge"
 
     def test_fires_escalate_at_95_percent_of_trigger(self, tmp_path, monkeypatch):
         monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "200000")
         transcript = tmp_path / "t.jsonl"
-        # 95% of 180000 trigger = 171000
+        # 95% of 167000 trigger = 158650
         _write_transcript(transcript, cache_read=175_000)
 
         with patch(f"{MODULE}._GUARD_DIR", tmp_path):
             result = handle({"session_id": "s-escalate", "transcript_path": str(transcript), "cwd": str(tmp_path)})
         assert result["exit_code"] == 0
         assert "CONTEXT GAUGE" in result["stdout"]
-        assert "compact fires soon" in result["stdout"]
+        assert "Compact fires soon" in result["stdout"]
         assert result["sound"] == "context gauge"
 
     def test_fires_once_per_threshold_per_session(self, tmp_path, monkeypatch):
@@ -121,6 +128,50 @@ class TestContextGaugeHandle:
         monkeypatch.setattr(context_window, "read_latest_usage", _boom)
         result = context_gauge.handle({"session_id": "s-err", "transcript_path": str(tmp_path / "x.jsonl")})
         assert result == {"stdout": "", "exit_code": 0}
+
+
+class TestGaugeMeasuresTheRealWindow:
+    def test_a_1m_model_at_230k_is_silent(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, cache_read=230_000, model="claude-opus-5-5")
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle({"session_id": "s-1m", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+        assert result == {"stdout": "", "exit_code": 0}
+
+    def test_a_200k_model_at_230k_escalates(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, cache_read=230_000, model="claude-haiku-5-5")
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle({"session_id": "s-200k", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+        assert "Compact fires soon" in result["stdout"]
+        assert "~230k of 200k context (115%, as the status line counts it); auto-compact at ~167k." in result["stdout"]
+
+    def test_the_printed_percent_is_fill_over_window(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        transcript = tmp_path / "t.jsonl"
+        _write_transcript(transcript, cache_read=150_000, model="claude-haiku-5-5")
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle({"session_id": "s-pct", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+        assert result["stdout"].startswith(
+            "CONTEXT GAUGE: ~150k of 200k context (75%, as the status line counts it); auto-compact at ~167k. "
+        )
+        assert "Compact fires soon" not in result["stdout"]
+
+    def test_a_1m_model_nudges_at_80_percent_of_its_own_trigger(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+        transcript = tmp_path / "t.jsonl"
+        # trigger = 1000000 - 33000 = 967000; 80% of that = 773600
+        _write_transcript(transcript, cache_read=800_000, model="claude-opus-5-5")
+
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle({"session_id": "s-1m-nudge", "transcript_path": str(transcript), "cwd": str(tmp_path)})
+        assert "~800k of 1000k context (80%, as the status line counts it); auto-compact at ~967k." in result["stdout"]
+        assert "Compact fires soon" not in result["stdout"]
 
 
 class TestGaugeGuardIsPerWindow:
