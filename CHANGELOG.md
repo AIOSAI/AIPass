@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-19] — v2.8.23: the phone's settings sheet reaches an external project's citizen, the context gauge measures the model's real window, doctor's pytest row on a pipx install, the README's two-agents TIP
 
 ### Changed
 
