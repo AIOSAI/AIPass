@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_settings.py
 # Description: Host API settings handler — the desktop's gear rules, held in Python
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
@@ -110,6 +110,18 @@ class TestAgentSettings:
         assert document["permissions"] == {"allow": ["Bash"]}
         assert view["model"] == "sonnet"
         assert view["auto_compact_window"] == 350_000
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX mode bits; Windows has none to keep")
+    def test_a_write_keeps_the_files_mode(self, tmp_path) -> None:
+        """The staged file is born 0600; the replaced file must keep the mode it had."""
+        path = agent_file(tmp_path)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"model": "opus"}), encoding="utf-8")
+        path.chmod(0o664)
+
+        host_settings.write_agent_settings(tmp_path, {"auto_compact_window": 300_000})
+
+        assert path.stat().st_mode & 0o777 == 0o664
 
     def test_null_removes_and_absent_touches_nothing(self, tmp_path) -> None:
         """The three-state contract in one write."""

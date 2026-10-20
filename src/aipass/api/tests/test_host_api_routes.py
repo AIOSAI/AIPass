@@ -240,8 +240,53 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
 
         assert response.status_code == 200
         assert response.json() == owned
-        resolver.assert_called_once_with("demo")
+        resolver.assert_called_once_with("demo", "")
         reader.assert_called_once_with(resolver.return_value)
+
+    def _external_citizen(self, tmp_path: Path) -> Path:
+        """vera's branch in another project, with keys the door does not own."""
+        vera = tmp_path / "Vera-Studio" / "src" / "vera_studio" / "vera"
+        (vera / ".claude").mkdir(parents=True)
+        owned_by_others = {"model": "opus", "permissions": {"allow": ["Bash(ls)"]}, "enabledMcpjsonServers": ["x"]}
+        (vera / ".claude" / "settings.local.json").write_text(json.dumps(owned_by_others), encoding="utf-8")
+        return vera
+
+    def test_agent_settings_reads_an_external_projects_citizen(self, routed: Any, tmp_path: Path) -> None:
+        api, read_raw, _ = routed
+        vera = self._external_citizen(tmp_path)
+
+        with patch.object(host_fleet, "resolve_branch", return_value={"name": "vera", "path": str(vera)}) as census:
+            response = api.get(
+                "/v1/agent-settings",
+                params={"branch": "vera", "project": "VERA-STUDIO"},
+                headers={"Authorization": f"Bearer {read_raw}"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["model"] == "opus"
+        census.assert_called_once_with("VERA-STUDIO", "vera")
+
+    def test_agent_settings_writes_an_external_projects_citizen_and_keeps_its_other_keys(
+        self, routed: Any, tmp_path: Path
+    ) -> None:
+        api, _, operate_raw = routed
+        vera = self._external_citizen(tmp_path)
+
+        with patch.object(host_fleet, "resolve_branch", return_value={"name": "vera", "path": str(vera)}):
+            response = api.post(
+                "/v1/agent-settings",
+                json={"branch": "vera", "project": "VERA-STUDIO", "patch": {"auto_compact_window": 300_000}},
+                headers={"Authorization": f"Bearer {operate_raw}"},
+            )
+
+        assert response.status_code == 200
+        written = json.loads((vera / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+        assert written == {
+            "model": "opus",
+            "permissions": {"allow": ["Bash(ls)"]},
+            "enabledMcpjsonServers": ["x"],
+            "autoCompactWindow": 300_000,
+        }
 
     def test_agent_settings_refuses_a_patch_that_is_not_an_object(self, routed: Any) -> None:
         """
