@@ -145,11 +145,6 @@
       "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
       "timeout": 10
     },
-    "auto_watchdog": {
-      "enabled": false,
-      "handler": "aipass.hooks.apps.handlers.lifecycle.auto_watchdog.handle",
-      "matcher": "Bash"
-    },
     "post_compact_regrounding": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.post_compact_regrounding.handle",

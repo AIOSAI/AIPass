@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: settings.py
 # Description: Host API Settings Handler — the desktop's two gears, served
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """
@@ -15,6 +15,7 @@ A file that exists but is not a JSON object refuses reads AND writes.
 
 import json
 import os
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -62,8 +63,7 @@ def read_object(path: Path) -> Dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        # The only OSError that reads as blank. NotADirectoryError must not join
-        # it: a file where a directory belongs is a broken tree (rust refuses too).
+        # The only OSError that reads as blank; NotADirectoryError is a broken tree (rust refuses too).
         logger.debug("[host_api] no settings file at %s yet — reading as blank", path)
         return {}
     except OSError as e:
@@ -97,6 +97,9 @@ def _replace_through_a_staged_file(directory: Path, path: Path, document: Dict[s
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(document, handle, indent=2, ensure_ascii=False)
             handle.write("\n")
+        if path.exists():
+            # mkstemp makes the staged file 0600: the rename would carry that over the file's own mode.
+            os.chmod(staged, stat.S_IMODE(path.stat().st_mode))
         os.replace(staged, path)
     # BaseException: an interrupt mid-write leaves the same orphan.
     except BaseException:
@@ -105,10 +108,7 @@ def _replace_through_a_staged_file(directory: Path, path: Path, document: Dict[s
 
 
 def write_atomically(path: Path, document: Dict[str, Any]) -> None:
-    """
-    Replace a settings file in one step: temp file in the SAME directory (so
-    the rename stays on one filesystem and is atomic), then rename over.
-    """
+    """Replace a settings file in one step: staged in the SAME directory, so the rename is atomic."""
     directory = path.parent
     try:
         directory.mkdir(parents=True, exist_ok=True)
@@ -120,16 +120,12 @@ def write_atomically(path: Path, document: Dict[str, Any]) -> None:
 
 def _reads_as_a_token_count(value: Any) -> bool:
     """Whether a stored value can be shown on the window dial."""
-    # Unsigned like the desktop's as_u64; zero reads (only the write refuses it).
-    # bool is excluded because a Python bool is also an int.
+    # Unsigned like the desktop's as_u64; zero reads (only the write refuses it); a bool is an int, so excluded.
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def agent_settings_view(document: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    The three owned keys as the API shape. Wrong-typed values read as null —
-    the desktop's own rule (`as_str`/`as_bool`/`as_u64`).
-    """
+    """The three owned keys as the API shape; wrong-typed values read null (the desktop's as_str/as_bool/as_u64)."""
     model = document.get(KEY_MODEL)
     enabled = document.get(KEY_AUTO_COMPACT_ENABLED)
     window = document.get(KEY_AUTO_COMPACT_WINDOW)

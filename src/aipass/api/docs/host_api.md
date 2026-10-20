@@ -84,7 +84,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
 | `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and nine sections (cpu, load, memory, swap, temp, fan, network, processes, battery), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache; a fresh server's first read shows cpu and network `warming`. An absent reading is a **200** with its section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: code in `error.reason`, detail in the host log) or its door failed (`machine_door_failed`). No parameters; any is a 400 |
 | `GET /v1/machine/processes?limit=20` | read | @skills' `machine_processes(limit)`, **verbatim**. A real ~0.5 s CPU sample, uncached: ask on open, never poll. `limit` as sent (the skill clamps); not a number is a 400. Refusals as `/v1/machine` |
-| `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`, the skill's code and sentence) is a **200** — the phone draws it unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape (a boolean `ok`, a `locked` key, the two agreeing). Takes no parameters — any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
+| `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`) is a **200**, drawn unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape. No parameters; any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
 | `POST /v1/memory-config/set-default` | operate | `{type, count}` — the default only. **Does not reach any branch** |
@@ -97,8 +97,8 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `POST /v1/backup/cancel` | operate | `{project, lane}` → `drone @backup stop <root> <lane>`. **200** `{project, lane, stopped, message}`, stop's line. Nothing running: **404** `not_running`, @backup's first stdout line; none: **503**, stderr logged |
 | `GET /v1/backup/job?id=` | read | One job, `running`/`done`/`stopped` (exit 130)/`failed`, `summary` the output's tail. Forgotten: **404** `job_unknown` |
 | `GET /v1/backup/status?project=&sizes=` | read | `drone @backup status --json` passed through; each `running` entry gains `job` (this server's id, else `null`). No `--json` on this machine: **503** |
-| `GET /v1/agent-settings?branch=` | read | One branch's three owned claude settings — an absent key reads `null` |
-| `POST /v1/agent-settings` | operate | Patch those three. Three-state by JSON's nature: absent touches nothing, `null` removes, a value sets |
+| `GET /v1/agent-settings?branch=&project=` | read | One branch's three owned claude settings; an absent key reads `null`. `project` names a census project's citizen, absent = the seat |
+| `POST /v1/agent-settings` | operate | `{branch, project?, patch}`. Three-state: absent touches nothing, `null` removes, a value sets; the file keeps its mode |
 | `GET /v1/baud-settings` | read | BAUD's own document for the seat, whole and opaque |
 | `POST /v1/baud-settings` | operate | Shallow-merge into it — `null` removes, a nested object replaces |
 | `GET /v1/hooks-sound` | read | @hooks' mute switch, read live through their own `is_muted()` |

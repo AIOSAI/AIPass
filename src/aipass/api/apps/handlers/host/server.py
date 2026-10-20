@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.6
+# Version: 1.1.7
 # Created: 2026-08-14
-# Modified: 2026-10-18
+# Modified: 2026-10-19
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -760,11 +760,12 @@ def create_app() -> Any:
     @app.get("/v1/agent-settings")
     def agent_settings_read(
         branch: str,
+        project: str = "",
         record: dict = Depends(require_scope("read")),
     ) -> dict:
-        """One branch's three owned claude settings — absent keys read null."""
+        """One branch's three owned claude settings — absent keys read null. No project = the seat."""
         try:
-            return host_settings.read_agent_settings(host_reads.resolve_branch_root(branch))
+            return host_settings.read_agent_settings(host_reads.resolve_branch_root(branch, project))
         except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
             raise _logged_denial(e, 400, "settings_refused") from e
         except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:
@@ -780,11 +781,12 @@ def create_app() -> Any:
         an absent field touches nothing, null removes, a value sets.
         """
         branch = str(payload.get("branch", ""))
+        project = str(payload.get("project") or "")
         patch = payload.get("patch")
         if not isinstance(patch, dict):
             raise _deny(400, "settings_refused", "the patch must be a JSON object")
         try:
-            return host_settings.write_agent_settings(host_reads.resolve_branch_root(branch), patch)
+            return host_settings.write_agent_settings(host_reads.resolve_branch_root(branch, project), patch)
         except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
             raise _logged_denial(e, 400, "settings_refused") from e
         except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:

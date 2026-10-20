@@ -1,15 +1,17 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Calm heads-up to run /prep as auto-compact approaches (UserPromptSubmit, DPLAN-0253), once per window
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-10-17
+# Modified: 2026-10-19
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
-The guard is keyed per context window, not per session: a session id outlives every compaction."""
+The guard is keyed per context window, not per session: a session id outlives every compaction.
+The window is the one Claude Code really runs for the transcript's model; the trigger is its
+auto-compact point (window - 33k), and the printed percent is fill over window, as the status line shows."""
 
 import importlib
 import os
@@ -19,7 +21,6 @@ from pathlib import Path
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
-_TRIGGER_RATIO = 0.9
 _NUDGE_THRESHOLD_PCT = 80
 _ESCALATE_THRESHOLD_PCT = 95
 
@@ -70,14 +71,18 @@ def handle(hook_data: dict) -> dict:
 
         fill = context_window.context_fill_tokens(usage)
         cwd = hook_data.get("cwd", "") or str(Path.cwd())
-        window = context_window.resolve_compact_window(cwd)
-        trigger = window * _TRIGGER_RATIO
+        model = context_window.read_latest_model(transcript_path)
+        window_size = context_window.resolve_compact_window(cwd, model)
+        trigger = context_window.compact_threshold(window_size)
         if trigger <= 0:
             return {"stdout": "", "exit_code": 0}
 
         pct = fill / trigger * 100
-        fill_k = fill // 1000
-        trigger_k = int(trigger) // 1000
+        used = round(fill / window_size * 100)
+        head = (
+            f"CONTEXT GAUGE: ~{fill // 1000}k of {window_size // 1000}k context "
+            f"({used}%, as the status line counts it); auto-compact at ~{trigger // 1000}k."
+        )
 
         window = _window_key(hook_data)
 
@@ -89,7 +94,7 @@ def handle(hook_data: dict) -> dict:
             )
             return {
                 "stdout": (
-                    f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — compact fires soon. "
+                    f"{head} Compact fires soon. "
                     "Run /prep now if anything is unbanked (just do it, no need to ask), "
                     "then carry on — recovery injection handles the rest."
                 ),
@@ -104,7 +109,7 @@ def handle(hook_data: dict) -> dict:
             )
             return {
                 "stdout": (
-                    f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — heads up, auto-compact "
+                    f"{head} Heads up, auto-compact "
                     "is coming. Run /prep at the next natural breakpoint (just do it, no need "
                     "to ask). Compact is survivable by design — keep working calmly."
                 ),
