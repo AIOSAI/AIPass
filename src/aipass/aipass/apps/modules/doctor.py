@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-16
 # Modified: 2026-10-21
 # =============================================
@@ -879,34 +879,33 @@ def _check_structure() -> List[CheckResult]:
 
 
 def _check_sandbox() -> List[CheckResult]:
-    """Run Sandbox group checks — kernel sandbox prerequisites."""
-    results: List[CheckResult] = []
+    """Run Sandbox group checks — kernel sandbox prerequisites, only when the flag is on.
 
+    Off, the hook gates do the containing, so a missing prerequisite is no finding: one PASS row.
+    """
+    flag = check_sandbox_flag()
+    if not flag["enabled"]:
+        setting = f"={flag['raw_value']}" if flag["raw_value"] else " unset"
+        return [
+            CheckResult("sandbox", GLYPH_PASS, f"off (AIPASS_SANDBOX_ENABLED{setting}); prerequisites not checked", "")
+        ]
+
+    results: List[CheckResult] = []
     if not is_linux():
         results.append(CheckResult("sandbox", GLYPH_PASS, "kernel sandbox: Linux-only, not checked", ""))
         return results
 
-    flag = check_sandbox_flag()
-    flag_on = flag["enabled"]
-    flag_label = "ON" if flag_on else "OFF"
-    results.append(CheckResult("sandbox flag", GLYPH_PASS, f"AIPASS_SANDBOX_ENABLED={flag_label}", ""))
+    results.append(CheckResult("sandbox flag", GLYPH_PASS, "AIPASS_SANDBOX_ENABLED=ON", ""))
 
     def _sev(ok: bool) -> str:
-        if ok:
-            return GLYPH_PASS
-        return GLYPH_FAIL if flag_on else GLYPH_WARN
-
-    def _suffix(ok: bool) -> str:
-        if ok or flag_on:
-            return ""
-        return " (inert — flag is off)"
+        return GLYPH_PASS if ok else GLYPH_FAIL
 
     bwrap = check_bwrap_present()
     results.append(
         CheckResult(
             "bwrap",
             _sev(bwrap["found"]),
-            bwrap["path"] or "not found" + _suffix(bwrap["found"]),
+            bwrap["path"] or "not found",
             "" if bwrap["found"] else "sudo apt install bubblewrap",
         )
     )
@@ -920,7 +919,7 @@ def _check_sandbox() -> List[CheckResult]:
             CheckResult(
                 "bwrap functional",
                 _sev(func["ok"]),
-                detail + _suffix(func["ok"]),
+                detail,
                 "",
             )
         )
@@ -930,7 +929,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "node",
             _sev(node["found"]),
-            node["path"] or "not found" + _suffix(node["found"]),
+            node["path"] or "not found",
             "" if node["found"] else "Install Node.js: https://nodejs.org/",
         )
     )
@@ -940,7 +939,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "srt (@anthropic-ai/sandbox-runtime)",
             _sev(srt["found"]),
-            srt["path"] or "not found" + _suffix(srt["found"]),
+            srt["path"] or "not found",
             "" if srt["found"] else srt["install_hint"],
         )
     )
@@ -950,7 +949,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "rg (ripgrep)",
             _sev(rg["found"]),
-            rg["path"] or "not found" + _suffix(rg["found"]),
+            rg["path"] or "not found",
             "" if rg["found"] else "sudo apt install ripgrep  (or static binary to ~/.local/bin/rg)",
         )
     )
@@ -961,7 +960,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "broker daemon",
             _sev(broker["alive"]),
-            broker["detail"] + _suffix(broker["alive"]),
+            broker["detail"],
             "",
         )
     )

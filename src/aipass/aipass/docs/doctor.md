@@ -31,7 +31,10 @@ One pass produces seven groups, in this order:
   hook handlers for the project you are standing in. This is the group that
   tells you a scaffold update is owed; see
   [`scaffold_update.md`](scaffold_update.md).
-- **Sandbox** — sandbox and containment detection
+- **Sandbox** — with `AIPASS_SANDBOX_ENABLED` off (the default; the hook gates
+  do the containing), one PASS row and no prerequisite is checked. On, the
+  kernel sandbox prerequisites — bwrap and whether it runs, node, srt, rg, the
+  broker daemon — each a row, a missing one a FAIL; Linux only
   ([`apps/handlers/sandbox_check/`](../apps/handlers/sandbox_check)).
 
 An `admin lane` row (`lit` / `dark` / `partial`) rides in the report as well.
