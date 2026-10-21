@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reader.py
 # Description: Leaderboard file reader - "name count" lines to ranked totals, or a named refusal
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-10-20
 # =============================================
 
 """Read a plain-text leaderboard and rank it.
@@ -11,6 +11,7 @@
 Reference: docs/top_module.md.
 """
 
+import re
 from pathlib import Path
 from typing import Dict, List, NoReturn, Tuple
 
@@ -18,6 +19,9 @@ from aipass.canary.apps.handlers.json import json_handler
 
 # ASCII only: int() also accepts other scripts' digits (int("\u0663") is 3), a number nobody typed.
 DIGITS = frozenset("0123456789")
+
+# Not str.split(): that also splits on a no-break space, which is data inside a name.
+SEPARATOR = re.compile(r"[ \t]+")
 
 FIELDS_PER_ROW = 2
 
@@ -55,7 +59,7 @@ def parse_n(text: str) -> int:
 
 def _parse_row(path: Path, number: int, line: str) -> Tuple[str, int]:
     """Parse one non-blank line into a (name, count) pair, or refuse it by line number."""
-    fields = line.split()
+    fields = SEPARATOR.split(line.strip())
     if len(fields) != FIELDS_PER_ROW:
         _refuse(f"{path}: line {number} is not exactly a name and an integer count ({len(fields)} fields)")
 

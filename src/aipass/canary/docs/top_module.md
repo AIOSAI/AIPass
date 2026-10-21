@@ -16,8 +16,9 @@ the same every run rather than merely stable within one.
 Plain UTF-8 text. Every non-blank line is a name, whitespace, and an integer
 count.
 
-- **A row is exactly two fields:** `alice 12`. The split is on any whitespace,
-  so a tab between them reads the same as a space.
+- **A row is exactly two fields:** `alice 12`. The split is on a run of spaces
+  or tabs, so a tab between them reads the same as a space. A no-break space is
+  data inside a name, not a separator: the same ruling the align module makes.
 - **Leading and trailing whitespace is ignored,** and blank or whitespace-only
   lines are skipped — but they still count toward the line number a refusal
   names, so the number matches what an editor shows.
