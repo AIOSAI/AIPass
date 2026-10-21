@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Changed
+
+- **AGENTS.md is the one instruction file; CLAUDE.md retired on the host** (DPLAN-0418 wave 1; `AGENTS.md`, `.claude/AGENTS.md`). Claude Code reads `AGENTS.md` natively since v2.1.277 whenever no `CLAUDE.md` sits in the working directory or above it, and every other coding agent reads the same file. The root `CLAUDE.md` moves into `AGENTS.md` byte for byte (the old `AGENTS.md`, written for Codex, had drifted: it still sent agents to `README.md` at startup); the culture file moves to `.claude/AGENTS.md`; the stale `src/aipass/backup/CLAUDE.md`, a revive-template leftover with a raw `git status` line, goes too, since under AGENTS.md-only it would have been the only file @backup read. The three retired files stay in place as `CLAUDE(disabled).md`. Proved with a fresh session from a branch directory: both `AGENTS.md` paths loaded, no `CLAUDE.md`, the README rule and the culture present. Still to land: `aipass init`/`adopt` mint `AGENTS.md` alone and the nested-project fence names it (@aipass), the watch and exempt lists at @prax and @seedgo, and each project repo's own switch.
+
 ### Fixed
 
 - **`drone @canary top` refused a name holding a no-break space as a three-field row** (@canary, `handlers/leaderboard/reader.py` 1.1.0, `docs/top_module.md`; one pin red-first in `tests/test_top.py` 1.3.0; suite 397 to 398). The reader split rows with `str.split()`, which also splits on U+00A0 and every other Unicode whitespace, so `ann<nbsp>lee 4` read as three fields and the file was refused. The split is now a run of spaces or tabs, the same separator `align` uses; a no-break space is data inside a name. Side effect, accepted: a form feed or vertical tab no longer separates a row either, which matches `align` since it was built. The doc no longer says "any whitespace". @canary's rounds, DPLAN-0340 pad item B2.
