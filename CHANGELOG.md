@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **`drone @canary top` refused a name holding a no-break space as a three-field row** (@canary, `handlers/leaderboard/reader.py` 1.1.0, `docs/top_module.md`; one pin red-first in `tests/test_top.py` 1.3.0; suite 397 to 398). The reader split rows with `str.split()`, which also splits on U+00A0 and every other Unicode whitespace, so `ann<nbsp>lee 4` read as three fields and the file was refused. The split is now a run of spaces or tabs, the same separator `align` uses; a no-break space is data inside a name. Side effect, accepted: a form feed or vertical tab no longer separates a row either, which matches `align` since it was built. The doc no longer says "any whitespace". @canary's rounds, DPLAN-0340 pad item B2.
+
 ## [2026-10-19] — v2.8.23: the phone's settings sheet reaches an external project's citizen, the context gauge measures the model's real window, doctor's pytest row on a pipx install, the README's two-agents TIP
 
 ### Changed
