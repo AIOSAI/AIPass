@@ -117,7 +117,9 @@ testpaths = ["tests", "src"]
 # customized) so scaffolding dirs (.aipass, .trinity, .seedgo, ...) are never
 # recursed for tests — prevents conftest module-name collisions like a bundled
 # skill's .aipass/.../tests/conftest.py clashing with a branch's tests/conftest.py.
-norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project"]
+# docs.local and dropbox are untracked scratch and inbound relays; the test files
+# they hold are snapshots, never a suite, and they import nothing on the path.
+norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project", "docs.local", "dropbox"]
 # Telegram is retired (the owner, 2026-09-14 and 2026-10-11: the code stays in
 # place, disabled, and nothing scans it). Every file or directory whose name
 # carries "telegram" is left out of collection: the skill lib under
