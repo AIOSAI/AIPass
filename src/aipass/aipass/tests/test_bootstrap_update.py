@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-10-21
 # =============================================
@@ -418,6 +418,45 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
         (host / ".claude" / "AGENTS.md").as_posix(),
     ]
     assert str(local_settings_path) in result["updated_files"]
+    entry = next(e for e in result["files"] if e["path"] == ".claude/settings.local.json")
+    assert entry["reason"] == ("merge adds claudeMdExcludes CLAUDE.md, .claude/CLAUDE.md, AGENTS.md, .claude/AGENTS.md")
+
+
+def _plan_reason_for(tmp_path, monkeypatch, existing: dict) -> str:
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    claude_dir = target / ".claude"
+    claude_dir.mkdir()
+    text = json.dumps(existing, indent=2).replace("{host}", host.as_posix()) + "\n"
+    (claude_dir / "settings.local.json").write_text(text, encoding="utf-8")
+    result = bootstrap.update_project(target, apply=False)
+    return next(e for e in result["files"] if e["path"] == ".claude/settings.local.json")["reason"]
+
+
+def test_update_plan_names_only_the_agents_md_pair_when_env_already_holds_the_home(tmp_path, monkeypatch):
+    """The fixed 'merge adds AIPASS_HOME' every project read while only the AGENTS.md pair was added."""
+    existing = {
+        "env": {"AIPASS_HOME": str(tmp_path / "host")},
+        "claudeMdExcludes": ["{host}/CLAUDE.md", "{host}/.claude/CLAUDE.md"],
+    }
+    reason = _plan_reason_for(tmp_path, monkeypatch, existing)
+    assert reason == "merge adds claudeMdExcludes AGENTS.md, .claude/AGENTS.md"
+
+
+def test_update_plan_names_the_env_key_and_the_fence_when_both_grow(tmp_path, monkeypatch):
+    reason = _plan_reason_for(
+        tmp_path, monkeypatch, {"claudeMdExcludes": ["{host}/CLAUDE.md", "{host}/.claude/CLAUDE.md"]}
+    )
+    assert reason == "merge adds AIPASS_HOME; adds claudeMdExcludes AGENTS.md, .claude/AGENTS.md"
+
+
+def test_update_plan_names_a_moved_home_as_changed_not_added(tmp_path, monkeypatch):
+    fenced = ["{host}/CLAUDE.md", "{host}/.claude/CLAUDE.md", "{host}/AGENTS.md", "{host}/.claude/AGENTS.md"]
+    reason = _plan_reason_for(
+        tmp_path, monkeypatch, {"env": {"AIPASS_HOME": "an-older-home"}, "claudeMdExcludes": fenced}
+    )
+    assert reason == "merge changes AIPASS_HOME"
 
 
 def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monkeypatch):

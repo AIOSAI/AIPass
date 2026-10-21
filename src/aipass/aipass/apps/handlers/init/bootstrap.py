@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-14
 # Modified: 2026-10-21
 # =============================================
@@ -28,6 +28,7 @@ from aipass.aipass.shared.project_home import (
     _claude_settings,
     _detect_aipass_home,
     _enroll_project,
+    _normalize_exclude,
     agents_md_seed,
     merge_local_settings,
     is_projects_child,
@@ -369,6 +370,30 @@ def init_project(
     }
 
 
+def _local_settings_reason(existing: dict, merged: dict, aipass_home: str) -> str:
+    """The plan line for a settings.local.json merge: the env keys and fence entries it adds or changes.
+
+    Fence entries are named relative to the home (``AGENTS.md``, ``.claude/AGENTS.md``)."""
+    old_env, new_env = existing.get("env", {}), merged.get("env", {})
+    clauses = []
+    added_env = [key for key in new_env if key not in old_env]
+    changed_env = [key for key in new_env if key in old_env and old_env[key] != new_env[key]]
+    if added_env:
+        clauses.append("adds " + ", ".join(added_env))
+    if changed_env:
+        clauses.append("changes " + ", ".join(changed_env))
+    home_prefix = _normalize_exclude(aipass_home).rstrip("/") + "/"
+    present = {_normalize_exclude(e) for e in existing.get("claudeMdExcludes", [])}
+    added_fence = [
+        entry.removeprefix(home_prefix)
+        for entry in map(_normalize_exclude, merged.get("claudeMdExcludes", []))
+        if entry not in present
+    ]
+    if added_fence:
+        clauses.append("adds claudeMdExcludes " + ", ".join(added_fence))
+    return "merge " + "; ".join(clauses)
+
+
 def _read_text(path: Path) -> str | None:
     """Read a text file, or None when it is absent or not decodable as UTF-8."""
     try:
@@ -528,7 +553,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
                     ".claude/settings.local.json",
                     local_path,
                     sm.ACTION_UPDATE,
-                    "merge adds AIPASS_HOME",
+                    _local_settings_reason(existing, merged, aipass_home),
                     merged_content,
                 )
             else:
