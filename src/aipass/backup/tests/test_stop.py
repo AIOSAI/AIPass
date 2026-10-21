@@ -3,7 +3,7 @@
 # Description: Tests for the stop verb and the lane side of a stop: the SIGTERM flag, the stopped line, exit 130
 # Version: 1.0.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/stop.py and the lane side it signals: snapshot, versioned, all and drive_sync stopping."""
@@ -157,6 +157,7 @@ class TestASnapshotStopsBetweenFiles:
         worker.start()
         worker.join(timeout=60)
 
+        assert not worker.is_alive()
         assert len(results) == 1 and results[0].files_copied == 5
 
 
@@ -215,23 +216,30 @@ class TestADriveRunStops:
         instance.authenticate.return_value = True
         instance.last_error = None
         instance._api_call.return_value = {"storageQuota": {"usage": "0", "limit": str(10**12)}}
+        # MagicMock builds children unlocked; three upload threads racing on _thread_local break its __bool__.
+        instance._thread_local = threading.local()
+        instance._build_thread_service.return_value = "service"
         monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
         sent: list[str] = []
+        counting = threading.Lock()
 
         def _upload(client, local_file, project_name, backup_root, note="", lane_folder=""):
             """Track the file as a real upload would; the 60th delivers SIGTERM."""
-            sent.append(local_file.name)
+            # Three threads append: unlocked, no thread may see 60, or others start uploads before the flag rises.
+            with counting:
+                sent.append(local_file.name)
+                if len(sent) == 60:
+                    _sigterm()
             client.file_tracker[str(local_file.relative_to(backup_root))] = {"drive_id": "id"}
-            if len(sent) == 60:
-                _sigterm()
             return True
 
         monkeypatch.setattr(drive_upload, "upload_single_file", _upload)
 
-        assert _main(["drive_sync", str(project)]) == 130
+        code = _main(["drive_sync", str(project)])
 
         # Three workers: the files already in flight when the flag rose may finish, nothing after.
         assert 60 <= len(sent) <= 62
+        assert code == 130
         out = capsys.readouterr().out.splitlines()
         assert out[-1].startswith(f"stopped by request: {len(sent)} of 120 files, ")
         saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
