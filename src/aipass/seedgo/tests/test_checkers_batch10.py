@@ -3,7 +3,7 @@
 # Description: Tests for hardcoded_path, developer_home, startup_budget, the ratchets, router_assert, oversize_test_file
 # Version: 1.6.0
 # Created: 2026-06-18
-# Modified: 2026-10-18
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
@@ -914,6 +914,7 @@ class TestRatchetScope:
         """Every exemption in the brief, each at a path that really takes it."""
         exempt = [
             ".claude/CLAUDE.md",
+            ".claude/AGENTS.md",
             "CHANGELOG.md",
             "src/aipass/flow/CHANGELOG.md",
             "src/aipass/flow/docs/DPLAN-0350_names.md",
@@ -934,6 +935,7 @@ class TestRatchetScope:
         """A near miss of an exempt path is an ordinary file and is read."""
         near = [
             "CLAUDE.md",
+            "AGENTS.md",
             "src/aipass/probe/.claude/settings.json",
             "src/aipass/seedgo/tests/test_checkers_batch11.py",
             "src/aipass/skills/tools/suspended.md",

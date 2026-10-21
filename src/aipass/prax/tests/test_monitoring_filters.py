@@ -3,7 +3,7 @@
 # Description: Unit tests for monitoring_filters.py
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/monitoring/monitoring_filters.py."""
@@ -131,6 +131,12 @@ class TestGetPriority:
         """CLAUDE.md should have critical priority."""
 
         result = get_priority(tmp_path / "CLAUDE.md", "modified")
+        assert result == "critical"
+
+    def test_agents_md_is_critical(self, tmp_path):
+        """AGENTS.md carries the same instructions, so the same priority."""
+
+        result = get_priority(tmp_path / "AGENTS.md", "modified")
         assert result == "critical"
 
     def test_py_deletion_is_high(self, tmp_path):

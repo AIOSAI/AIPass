@@ -3,7 +3,7 @@
 # Description: Monitoring Filter Patterns
 # Version: 1.1.0
 # Created: 2025-11-23
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Monitoring Filter Patterns"""
@@ -131,6 +131,7 @@ MONITOR_ALWAYS_PATTERNS = [
     "*.py",
     "README.md",
     "CLAUDE.md",
+    "AGENTS.md",
     "*.local.md",
     ".vscode/settings.json",
     ".vscode/settings.local.json",
@@ -154,6 +155,7 @@ HIGHLIGHT_PATTERNS = {
     "critical": [
         "*.id.json",  # Branch identity - system core
         "CLAUDE.md",  # System instructions
+        "AGENTS.md",  # System instructions, the one file since DPLAN-0418
         ".gitignore",  # Version control rules
         "*_config.json deletion",  # Config deletion is critical
     ],
