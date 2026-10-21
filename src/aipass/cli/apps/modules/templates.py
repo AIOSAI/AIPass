@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: CLI Templates Module — reusable operation output patterns
-# Version: 0.3.2
+# Version: 0.3.3
 # Created: 2025-11-12
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -82,20 +82,17 @@ def print_help():
     CONSOLE.print("  [dim]See docs/display_api.md[/dim]")
     CONSOLE.print()
 
-    CONSOLE.print("[bold]Commands: templates, demo, --help[/bold]")
+    CONSOLE.print("[bold]Commands: templates, templates demo, --help[/bold]")
     CONSOLE.print()
 
 
 def handle_command(command: str, args: List[str]) -> bool:
-    """Handle 'templates' and 'demo' commands"""
-    if command not in ("templates", "demo"):
+    """Handle the 'templates' command; a bare 'demo' belongs to display alone."""
+    if command != "templates":
         return False
     # command holds our own name, so position 0 comes from args.
     if wants_help(None, args):
         print_help()
-        return True
-    if command == "demo":
-        run_demo()
         return True
     if not args:
         print_introspection()

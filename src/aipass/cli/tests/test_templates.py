@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates.py
 # Description: The templates module — operation_start, operation_complete, routing, demo
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-24
-# Modified: 2026-10-04
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
@@ -35,10 +35,10 @@ class TestHandleCommandRouting:
     """Tests for handle_command dispatch logic."""
 
     @patch.object(templates, "run_demo")
-    def test_demo_command_calls_run_demo(self, mock_run_demo):
+    def test_bare_demo_is_declined_and_runs_nothing(self, mock_run_demo):
         result = templates.handle_command("demo", [])
-        mock_run_demo.assert_called_once()
-        assert result is True
+        mock_run_demo.assert_not_called()
+        assert result is False
 
     @patch.object(templates, "print_introspection")
     def test_templates_no_args_calls_introspection(self, mock_introspection):
@@ -96,12 +96,12 @@ class TestHandleCommandRouting:
 
     @patch.object(templates, "run_demo")
     @patch.object(templates, "print_help")
-    def test_demo_as_command_with_help_flag_prints_help(self, mock_help, mock_run_demo):
-        """`drone @cli demo --help` — verb arrives in command, flag in args."""
+    def test_bare_demo_help_is_declined_and_prints_nothing(self, mock_help, mock_run_demo):
+        """`drone @cli demo --help` belongs to display, so templates leaves it alone."""
         result = templates.handle_command("demo", ["--help"])
-        mock_help.assert_called_once()
+        mock_help.assert_not_called()
         mock_run_demo.assert_not_called()
-        assert result is True
+        assert result is False
 
     def test_templates_unknown_subcommand_refusal_names_the_token(self, capsys):
         """`templates bogus` is refused by name, and the refusal trips the exit flag."""
