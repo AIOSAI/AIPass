@@ -3,7 +3,7 @@
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
 # Version: 1.3.0
 # Created: 2026-09-19
-# Modified: 2026-10-20
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/top.py and the leaderboard reader it drives."""
