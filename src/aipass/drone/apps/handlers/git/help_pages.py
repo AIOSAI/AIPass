@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-10-04
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -23,6 +23,7 @@ from aipass.drone.apps.handlers.git import (
     label_handler,
     merge_main_handler,
     release_handler,
+    restore_handler,
     repo_door,
     untrack_handler,
 )
@@ -92,6 +93,30 @@ def page(command: str | None = None) -> str:
             "  missing (not on disk, not tracked) or outside (not in this repo).\n"
             "  A path is read against your directory first, then the repo root.\n"
             "  Example: drone @git tracked docs/plan.md logs/run.log\n"
+        )
+    if command == "restore":
+        return (
+            "git restore [--source <ref>] <path ...> — Files back to a commit [owner]\n"
+            "  The twin of git restore --staged --worktree: each named tracked file, index\n"
+            "  included, returns to HEAD's content, or to <ref>'s with --source (a sha, or\n"
+            "  a ref such as 9fc0e3b5^). A directory means the tracked files under it. Each\n"
+            "  path is read as tracked reads it. Every path is checked before any file is\n"
+            "  touched. Prints each file put back with its source, and the count, or\n"
+            "  'nothing to restore'; untracked files are left in place and listed. Never on\n"
+            "  main, never deletes, no force flag. One row per call in AIPass's\n"
+            "  .ai_central/git_restores.jsonl. Refused, exactly as printed:\n"
+            + _printed(
+                restore_handler.USAGE,
+                restore_handler.REFUSE_GLOB.format(path="<path>"),
+                restore_handler.REFUSE_FLAG.format(arg="<flag>"),
+                restore_handler.REFUSE_NO_SOURCE,
+                restore_handler.REFUSE_SOURCE.format(ref="<ref>"),
+                restore_handler.REFUSE_MAIN,
+                restore_handler.REFUSE_OUTSIDE.format(path="<path>", repo="<repo>"),
+                restore_handler.REFUSE_MISSING.format(path="<path>"),
+                restore_handler.REFUSE_NOT_AT_SOURCE.format(path="<path>", source="<ref>"),
+            )
+            + "  Example: drone @git restore --source 9fc0e3b5^ apps/handlers/git/show_handler.py\n"
         )
     if command == "untrack":
         return (
@@ -316,6 +341,7 @@ def page(command: str | None = None) -> str:
         "Owner (the repo's registry owner: devpulse in AIPass):\n"
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
         "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
+        "  restore [--source <ref>] <path ...>  Tracked files back to HEAD or <ref>\n"
         "  checkout <main|dev>    Switch branches\n"
         "  pr <desc>              Push current branch and create PR to main\n"
         "  dev-pr <desc>          Push dev and create PR to main\n"
@@ -338,9 +364,9 @@ def page(command: str | None = None) -> str:
         "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
         "  A gh subcommand in neither list is refused, never passed to gh.\n"
         "  An external project's manager, from its own seat, runs: commit, untrack,\n"
-        "  checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp, tag, issue\n"
-        "  <write>, run <write>, workflow <write>, release <write>, label <write>,\n"
-        "  alerts <write>. The rest refuse there.\n"
+        "  restore, checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp,\n"
+        "  tag, issue <write>, run <write>, workflow <write>, release <write>, label\n"
+        "  <write>, alerts <write>. The rest refuse there.\n"
         "\n"
         "RAW GIT READS AND THEIR TWINS (raw git is blocked for agents; use these):\n"
         "  git log -n 5 -- <path>   drone @git log 5 <path>  (deleted path: after --)\n"
@@ -355,6 +381,7 @@ def page(command: str | None = None) -> str:
         "  git rev-list --count a...b       drone @git status --all  (ahead/behind origin)\n"
         "  git log origin/dev..HEAD         drone @git log origin/dev..HEAD\n"
         "  git archive <ref> | tar -x       drone @git export <ref> <dir>\n"
+        "  git restore -s <ref> -- <p>      drone @git restore --source <ref> <p>\n"
         "  gh issue list|view|status  drone @git issue list|view|status\n"
         "  gh run list|view|watch     drone @git run list|view|watch\n"
         "  gh workflow list|view      drone @git workflow list|view\n"

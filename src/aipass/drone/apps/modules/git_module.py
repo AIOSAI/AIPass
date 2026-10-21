@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-03-17
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -30,6 +30,7 @@ from aipass.drone.apps.handlers.git import (
     tracked_handler,
     untrack_handler,
     release_handler,
+    restore_handler,
     label_handler,
     alerts_handler,
     export_handler,
@@ -75,6 +76,7 @@ _COMMANDS = (
     "alerts",
     "commit",
     "untrack",
+    "restore",
     "checkout",
     "sync",
     "merge-main",
@@ -254,6 +256,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_commit(args)
     if command == "untrack":
         return _handle_untrack(args)
+    if command == "restore":
+        return restore_handler.restore(lock_handler.find_repo_root(), caller_cwd(), args, caller)
     if command == "checkout":
         return _handle_checkout(args)
     if command == "sync":
@@ -373,6 +377,8 @@ def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
         return _handle_status(args, repo_root=repo_root)
     if command == "diff":
         return _handle_diff(args, repo_root=repo_root)
+    if command == "show":
+        return _handle_show(args, repo_root=repo_root)
     if command == "log":
         return _handle_log(args, repo_root=repo_root)
     if command == "commit":
@@ -1002,7 +1008,7 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     }
 
 
-def _handle_show(args: list[str]) -> dict:
+def _handle_show(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the show subcommand (global tier).
 
     Repo-wide by design — see show_handler for why it is not branch-scoped.
@@ -1020,7 +1026,7 @@ def _handle_show(args: list[str]) -> dict:
 
     ref = args[0]
     path = args[1] if len(args) > 1 else None
-    result = show_handler.show_object(ref, path)
+    result = show_handler.show_object(ref, path, repo_root=repo_root)
 
     if as_json:
         return _json_document(

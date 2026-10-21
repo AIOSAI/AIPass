@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: show_handler.py
 # Description: Git show handler — read repository history at a commit
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Git show handler — read repository history at a commit.
@@ -14,10 +14,14 @@ Global read tier and NOT branch-scoped like status/diff/log: its use is auditing
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
+
+# A local read: a minute is a hang, not a slow answer (the external-repo door's rule too).
+SHOW_TIMEOUT = 60
 
 
 def _rejects_as_flag(token: str) -> bool:
@@ -25,8 +29,8 @@ def _rejects_as_flag(token: str) -> bool:
     return not token or token.startswith("-")
 
 
-def show_object(ref: str, path: str | None = None) -> dict:
-    """Show a commit, or with repo-relative *path* the file's contents at that commit."""
+def show_object(ref: str, path: str | None = None, repo_root: Path | None = None) -> dict:
+    """Show a commit, or with repo-relative *path* the file's contents at that commit, in *repo_root*."""
     if _rejects_as_flag(ref):
         msg = f"Refusing ref that git would read as a flag: {ref!r}"
         logger.warning(msg)
@@ -38,7 +42,7 @@ def show_object(ref: str, path: str | None = None) -> dict:
         return {"success": False, "content": "", "message": msg}
 
     target = f"{ref}:{path}" if path else ref
-    repo_root = find_repo_root()
+    repo_root = repo_root if repo_root is not None else find_repo_root()
 
     try:
         result = subprocess.run(
@@ -46,6 +50,7 @@ def show_object(ref: str, path: str | None = None) -> dict:
             capture_output=True,
             text=True,
             cwd=str(repo_root),
+            timeout=SHOW_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.error("git show failed: %s", exc)

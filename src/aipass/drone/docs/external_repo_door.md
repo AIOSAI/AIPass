@@ -5,8 +5,8 @@
 **Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
-door, held by @devpulse's admin grant. Fifteen verbs take
-`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, tracked, commit, untrack, push,
+door, held by @devpulse's admin grant. Sixteen verbs take
+`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, show, log, tracked, commit, untrack, push,
 tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub chores `release edit`,
 `label` and `alerts` (see [git_interface.md](git_interface.md)), aimed at the repo's own origin.
 `release list` keeps `--repo` as GitHub's OWNER/NAME.
@@ -23,7 +23,7 @@ tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub ch
    the repo you stand in. A project manager standing in its own repo is refused by name.
 2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the
    standing repo.
-3. **Which verb** — anything outside the fifteen is refused. `issue`, `workflow` and `release list`
+3. **Which verb** — anything outside the sixteen is refused. `issue`, `workflow` and `release list`
    never reach the door: their `--repo OWNER/NAME` names a GitHub repo, not a path. `run` reaches it
    only when the value names a directory (see below); `release edit` always does.
 4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a

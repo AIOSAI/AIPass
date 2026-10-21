@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_handlers.py
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -242,7 +242,7 @@ class TestShowCommandRouting:
             mock_show.return_value = {"success": True, "content": "file body", "message": "ok"}
             result = handle_command("show", ["abc1234", "some/path.py"])
 
-        mock_show.assert_called_once_with("abc1234", "some/path.py")
+        mock_show.assert_called_once_with("abc1234", "some/path.py", repo_root=None)
         assert result["exit_code"] == 0
         assert result["stdout"] == "file body"
 

@@ -120,6 +120,26 @@ run through the external-repo door (`--repo <path>`, admin seat, paths repo-rela
 its ledger; see [external_repo_door.md](external_repo_door.md)). Pinned by `TestUntrack` in
 `tests/test_git_module.py`, against a real repo.
 
+## `restore` — named tracked files back to a commit, never a deletion
+
+`drone @git restore [--source <ref>] <path ...>` is the door to
+`git restore --source <ref> --staged --worktree`, owner tier, beside `untrack`. Without `--source`
+the target is HEAD; the ref may be a sha or an expression such as `9fc0e3b5^`. Each named file
+returns to that commit's content, index included. A directory means the tracked files under it.
+Paths are classified as `tracked` classifies them, and every path is checked before any file is
+touched: one refusal stops the whole call. `.`, `./` and any path holding `*`, `?` or `[` are
+refused by name, as are a path outside the repo, one neither tracked nor on disk, a ref that names
+no commit, and any flag but `--source`. There is no force flag. A file tracked now but absent at the
+source is refused, because restoring it would delete it, and deletion belongs to `drone rm`. The
+verb refuses on `main`.
+
+It prints each file it put back with its source, then the count, or `nothing to restore` when every
+named path already matches. Untracked files under a named path are left alone and listed as
+`untracked, left in place: <path>`. Every call, refusals included, writes one row to AIPass's
+`.ai_central/git_restores.jsonl`: timestamp, caller, cwd, repo, source, the paths asked for, and
+the paths restored and left, or the refusal. Pinned by `TestRestore` in
+`tests/test_git_access_gh_door.py`, against a real repo.
+
 ---
 
 ## The `--all` pre-commit lane

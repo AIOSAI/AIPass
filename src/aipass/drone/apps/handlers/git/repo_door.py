@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-09-13
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -38,6 +38,7 @@ REPO_FLAG = "--repo"
 DOOR_VERBS = (
     "status",
     "diff",
+    "show",
     "log",
     "tracked",
     "commit",
@@ -165,7 +166,8 @@ def help_block() -> str:
     lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
     return (
         "External-repo door — admin seat only (DPLAN-0344):\n"
-        "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
+        "  status | diff [--staged] | show <ref> [path] | log [count] | commit <msg> [--all | files]\n"
+        "  | push | tag <name>  --repo <path>\n"
         "  fetch | sync  --repo <path>\n"
         "  merge-upstream  --repo <path> [--theirs <path> ...]\n"
         "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>  (paths repo-relative)\n"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-30
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -56,6 +56,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
         "commands": [
             "commit",
             "untrack",
+            "restore",
             "checkout",
             "sync",
             "merge-main",

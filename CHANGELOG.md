@@ -9,6 +9,21 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`drone @git restore [--source <ref>] <path ...>`: named tracked files back to HEAD or a commit, never a deletion** (@drone; `handlers/git/restore_handler.py` 1.0.0, `modules/git_module.py` 1.12.0, `plugins/devpulse_ops/auth.py` 1.7.0, `handlers/git/help_pages.py` 1.6.0, `docs/git_interface.md`; 14 pins in `tests/test_git_access_gh_door.py` 1.8.0 against a real repo; suite 1725 to 1740; 11 mutants red). Owner tier beside `untrack`, the door to `git restore --staged --worktree`. Explicit paths or a directory; `.`, globs, main, a path outside the repo and any flag but `--source` are refused by name, so there is no force flag. A file tracked now but absent at the source is refused, since restoring it would delete it and deletion stays `drone rm`'s. Untracked files are left in place and listed. One row per call, refusals included, in `.ai_central/git_restores.jsonl`. Built for RPLAN-0007's replay runs, which put a branch's files back between arms.
+- **`drone @git show <ref> [path] --repo <path>` through the external-repo door** (@drone; `handlers/git/repo_door.py` 1.9.0, `handlers/git/show_handler.py` 1.1.0, `docs/external_repo_door.md`; one door pin, 2 mutants red). Sixteen door verbs now; a commit in a project repo reads as a patch instead of a tree walk. `show` carries a 60 s timeout on every route.
+
+### Changed
+
+- **The merge playbook bumps the version and dates the CHANGELOG before the push** (`flow/templates/playbook_plans/merge.md`). CI runs once on the final state; a bump committed after green was a second full run for nothing (the owner, 2026-10-21). Pre-flight now starts the local audit gate in the background first, since it takes over twenty minutes and grows with the fleet; section 7 verifies the versions and never bumps.
+
+### Fixed
+
+- **seedgo's dead-cwd guard convicted a parallel worker's `.ruff_cache`** (@seedgo; `tests/test_import_dead_cwd.py` 1.2.1; 80 green in the file under `-n 4`, suite 6153). The module's litter detector diffed the repo root, which every xdist worker shares, and a fresh CI checkout has no `.ruff_cache` until the first parallel ruff call mints one mid-module (macOS lane, PR #799 run 2). The children now run in a room the module owns under `tmp_path_factory`, the guard diffs that room, and a mutant child that writes a relative file still errors the module by name.
+
 ## [2026-10-21] — v2.8.24: AGENTS.md is the one instruction file on the host and in every project, doctor's sandbox-off row and Claude Code version row, pytest skips scratch dirs, the init update plan line, canary's no-break space, cli's bare demo
 
 ### Changed
