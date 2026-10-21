@@ -1,18 +1,14 @@
 # =================== AIPass ====================
 # Name: scaffold_manifest.py
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
-"""Scaffold manifest — which AIPass version wrote which file, and its hash.
-
-Conffile rule (dpkg's): overwrite a managed file only when absent or its hash still
-matches the manifest; otherwise keep it and write ``<name>.aipass-new`` beside it.
-Its keys are a contract (@hooks release_notice reads ``aipass_version``). Imported by
-bootstrap.py, so pure Python: no module/prax/cli imports.
-"""
+"""Scaffold manifest: which AIPass version wrote which file, and its hash. Conffile rule (dpkg's):
+overwrite a managed file only when absent or unedited, else write ``<name>.aipass-new`` beside it.
+Keys are a contract (@hooks release_notice reads ``aipass_version``); pure Python, bootstrap imports it."""
 
 import fnmatch
 import hashlib
@@ -30,7 +26,7 @@ NEW_SUFFIX: str = ".aipass-new"
 BACKUP_REL: Path = Path(".aipass") / ".backup"
 
 #: Created once, never rewritten: a refresh would delete the manager's content.
-SEED_FILES: tuple = ("CLAUDE.md", "AGENTS.md")
+SEED_FILES: tuple = ("AGENTS.md",)
 
 #: ``_merge_hooks_json`` only adds handlers; this list is the removal side.
 RETIRED_HOOK_HANDLERS: tuple = ("auto_watchdog",)
@@ -41,8 +37,7 @@ IGNORE_NAME: str = ".updateignore"
 class UpdateIgnoreUnreadable(Exception):
     """The project's ``.updateignore`` is there but cannot be read.
 
-    Not the same as no file: reading the claim as empty would overwrite claimed files.
-    """
+    Not the same as no file: reading the claim as empty would overwrite claimed files."""
 
 
 ACTION_CREATE: str = "create"
@@ -63,8 +58,7 @@ def sha256_text(text: str) -> str:
 def write_text_lf(path: Path, content: str) -> None:
     """Write a scaffold file with LF endings on every platform.
 
-    The one writer for managed files: Windows' default CRLF makes the manifest hash never match.
-    """
+    The one writer for managed files: Windows' default CRLF makes the manifest hash never match."""
     path.write_text(content, encoding="utf-8", newline="\n")
 
 
@@ -80,8 +74,7 @@ def hash_file(path: Path) -> str | None:
 def installed_version() -> str:
     """The AIPass version running right now, or 'unknown' if it cannot be read.
 
-    Imported lazily: the plan must still compute where the package will not import.
-    """
+    Imported lazily: the plan must still compute where the package will not import."""
     try:
         import aipass
 
@@ -99,8 +92,7 @@ def manifest_path(target: Path) -> Path:
 def read_manifest(target: Path) -> dict:
     """Read the manifest, or an empty document when absent or unparseable.
 
-    Corrupt reads as absent: with no recorded hash, a differing file is kept, never overwritten.
-    """
+    Corrupt reads as absent: with no recorded hash, a differing file is kept, never overwritten."""
     path = manifest_path(target)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -140,8 +132,7 @@ def write_manifest(target: Path, files: dict, version: str | None = None) -> Pat
 def decide(current: str | None, template: str | None, recorded: str | None) -> tuple:
     """Decide what an update may do to one managed file.
 
-    Arm order is the rule: absent, provenance, content; swapping the last two overwrites edits.
-    """
+    Arm order is the rule: absent, provenance, content; swapping the last two overwrites edits."""
     if template is None:
         return ACTION_CURRENT, "no template available - nothing to compare"
     if current is None:
@@ -178,8 +169,7 @@ def read_ignore(target: Path) -> list:
 def is_ignored(rel: str, patterns: list) -> bool:
     """True when *rel* (a posix path relative to the project root) is owner-protected.
 
-    A slashless pattern matches a bare filename at any depth, as a manager means it.
-    """
+    A slashless pattern matches a bare filename at any depth, as a manager means it."""
     name = rel.rsplit("/", 1)[-1]
     for pattern in patterns:
         if pattern.endswith("/"):
@@ -202,8 +192,7 @@ def sidecar_path(path: Path) -> Path:
 def disabled_path(path: Path) -> Path:
     """Where a retired managed file is renamed to.
 
-    Rename, never unlink: a retired file the manager can still see is reversible.
-    """
+    Rename, never unlink: a retired file the manager can still see is reversible."""
     return path.with_name(f"{path.stem}(disabled){path.suffix}")
 
 

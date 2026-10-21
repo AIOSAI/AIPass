@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-05-14
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
@@ -750,10 +750,11 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
             results = _structure_via_doctor()
-        fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
+        fence_results = [r for r in results if r.label.startswith("instruction fence")]
         assert len(fence_results) == 1
         assert fence_results[0].glyph == GLYPH_WARN
-        assert fence_results[0].label == "CLAUDE.md fence: nested-app"
+        assert fence_results[0].label == "instruction fence: nested-app"
+        assert "AGENTS.md" in fence_results[0].detail
 
     def test_all_nested_projects_fenced_reported_pass(self, tmp_path: Path) -> None:
         """A correctly-fenced nested project produces a single PASS CheckResult."""
@@ -771,6 +772,8 @@ class TestCheckStructureIntegration:
                     "claudeMdExcludes": [
                         str(tmp_path / "CLAUDE.md"),
                         str(tmp_path / ".claude" / "CLAUDE.md"),
+                        str(tmp_path / "AGENTS.md"),
+                        str(tmp_path / ".claude" / "AGENTS.md"),
                     ],
                 }
             ),
@@ -781,7 +784,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
             results = _structure_via_doctor()
-        fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
+        fence_results = [r for r in results if r.label.startswith("instruction fence")]
         assert len(fence_results) == 1
         assert fence_results[0].glyph == GLYPH_PASS
-        assert fence_results[0].label == "CLAUDE.md fence"
+        assert fence_results[0].label == "instruction fence"

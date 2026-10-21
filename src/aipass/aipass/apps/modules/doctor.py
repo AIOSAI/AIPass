@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-16
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -64,6 +64,7 @@ from aipass.aipass.apps.modules._doctor_wire import (
     settings_fix_report,
 )
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
+    detect_claude_code,
     detect_cpu,
     detect_git,
     detect_install_method,
@@ -82,6 +83,8 @@ from aipass.aipass.apps.handlers.ui.progress import (
 )
 
 COMMAND = "doctor"
+
+AGENTS_MD_MIN_CLAUDE = (2, 1, 277)
 
 # module_file, not resolve(): import-time cwd read on Windows (module_root).
 _BRANCH_ROOT = module_file(__file__).parents[2]
@@ -145,7 +148,28 @@ def _check_system() -> List[CheckResult]:
     method = detect_install_method()
     results.append(CheckResult("install", GLYPH_PASS, method, ""))
 
+    results.append(_claude_code_row())
+
     return results
+
+
+def _claude_code_row() -> CheckResult:
+    """The `claude code` row: projects carry their instructions in AGENTS.md only.
+
+    No claude on PATH is a plain row, since AIPass runs under other CLIs too.
+    """
+    claude = detect_claude_code()
+    if not claude["found"]:
+        return CheckResult("claude code", GLYPH_PASS, "not on PATH", "")
+    version = claude["version"]
+    if version is None:
+        return CheckResult("claude code", GLYPH_WARN, f"version unreadable: {claude['raw']!r}", "")
+    shown = ".".join(str(part) for part in version)
+    if version >= AGENTS_MD_MIN_CLAUDE:
+        return CheckResult("claude code", GLYPH_PASS, shown, "")
+    return CheckResult(
+        "claude code", GLYPH_WARN, shown, "Claude Code reads AGENTS.md from v2.1.277: run 'claude update'"
+    )
 
 
 def _configured_aipass_home() -> str:
@@ -834,22 +858,22 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("pyproject.toml", GLYPH_WARN, "missing", "Create pyproject.toml for pip packaging"))
 
-    # CLAUDE.md ancestor fence — nested projects/<name> must exclude the host's
-    # CLAUDE.md + .claude/CLAUDE.md, or Claude Code inherits them via ancestor walk.
+    # Nested projects/<name> must exclude the host's AGENTS.md and CLAUDE.md pairs,
+    # or Claude Code inherits them through the ancestor walk.
     if aipass_home:
         fenceless = find_fenceless_projects(aipass_home)
         if fenceless:
             for proj in fenceless:
                 results.append(
                     CheckResult(
-                        f"CLAUDE.md fence: {proj.name}",
+                        f"instruction fence: {proj.name}",
                         GLYPH_WARN,
-                        "missing claudeMdExcludes",
+                        "claudeMdExcludes misses the host AGENTS.md",
                         f"Run 'aipass init update {proj}'",
                     )
                 )
         else:
-            results.append(CheckResult("CLAUDE.md fence", GLYPH_PASS, "all nested projects fenced", ""))
+            results.append(CheckResult("instruction fence", GLYPH_PASS, "all nested projects fenced", ""))
 
     return results
 

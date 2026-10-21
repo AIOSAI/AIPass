@@ -13,7 +13,8 @@ prints is something another owner could be asked directly.
 
 One pass produces seven groups, in this order:
 
-- **System** — OS, shell, Python, RAM, CPU, install method
+- **System** — OS, shell, Python, RAM, CPU, install method, and the Claude Code
+  version (AGENTS.md is read from v2.1.277; below it the row warns)
   ([`apps/handlers/system_detect/`](../apps/handlers/system_detect)).
 - **Identity** — `AIPASS_HOME`, the registry and its shape, `hooks.json`, the
   passport's role, and the registry's record of the owner (repaired through
@@ -22,7 +23,9 @@ One pass produces seven groups, in this order:
   pytest collection, the provider manifest rows (hooks, env vars, permission
   rules, the settings scalars), the wire verification and stale deny rules.
 - **Community** — the mailbox is readable and `dropbox/` is writable.
-- **Structure** — agent placement and stray-file detection
+- **Structure** — agent placement, stray-file detection, and the instruction
+  fence: every nested `projects/<name>` excludes the host's `AGENTS.md` and
+  `CLAUDE.md` pairs through `claudeMdExcludes`
   ([`apps/handlers/structure_scan/`](../apps/handlers/structure_scan)).
 - **Scaffold** — the stamped scaffold version, tier0 drift, missing and retired
   hook handlers for the project you are standing in. This is the group that

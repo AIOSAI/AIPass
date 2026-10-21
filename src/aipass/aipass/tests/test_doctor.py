@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-16
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -290,6 +290,53 @@ class TestPytestCollect:
             out = _doctor_with_only_pytest_collect(monkeypatch, run, [], capsys)
         assert "pytest not installed in the home venv" in out
         assert "collection issues" not in out
+
+
+class TestClaudeCodeRow:
+    """The System group's claude code row: Claude Code reads AGENTS.md from v2.1.277."""
+
+    def _system_out(self, tmp_path, monkeypatch, capsys, stdout: str | None) -> str:
+        mod = "aipass.aipass.apps.modules.doctor"
+        for name in ("check_identity", "_check_community", "_check_structure", "_check_scaffold", "_check_sandbox"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        # git sits beside claude so the System group carries no FAIL row and doctor exits 0.
+        for name in ("git", "claude") if stdout is not None else ("git",):
+            stub = tmp_path / (f"{name}.exe" if os.name == "nt" else name)
+            stub.write_text("", encoding="utf-8")
+            stub.chmod(0o755)
+        monkeypatch.setenv("PATH", str(tmp_path))
+
+        def run(argv, **kwargs):
+            if argv[1:] == ["--version"] and "git" in os.path.basename(argv[0]):
+                return subprocess.CompletedProcess(argv, 0, "git version 2.43.0\n", "")
+            return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+        detector = "aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run"
+        with patch(f"{mod}.json_handler", autospec=True), patch(detector, side_effect=run):
+            handle_command("doctor", [])
+        return " ".join(capsys.readouterr().out.split())
+
+    @pytest.mark.parametrize("version", ["2.1.277", "2.1.1000", "3.0.0"])
+    def test_at_or_past_2_1_277_passes(self, version, tmp_path, monkeypatch, capsys) -> None:
+        """Mutant: the tuple compare done on the version string -> red on 2.1.1000 ("2.1.1000" < "2.1.277")."""
+        out = self._system_out(tmp_path, monkeypatch, capsys, f"{version} (Claude Code)\n")
+        assert f"✓ claude code {version}" in out
+        assert "reads AGENTS.md" not in out
+
+    def test_below_2_1_277_warns_naming_agents_md(self, tmp_path, monkeypatch, capsys) -> None:
+        out = self._system_out(tmp_path, monkeypatch, capsys, "2.1.276 (Claude Code)\n")
+        assert "! claude code 2.1.276 Claude Code reads AGENTS.md from v2.1.277" in out
+
+    def test_not_on_path_is_a_plain_row(self, tmp_path, monkeypatch, capsys) -> None:
+        out = self._system_out(tmp_path, monkeypatch, capsys, None)
+        assert "✓ claude code not on PATH" in out
+
+    def test_unparseable_output_warns(self, tmp_path, monkeypatch, capsys) -> None:
+        out = self._system_out(tmp_path, monkeypatch, capsys, "Claude Code\n")
+        assert "! claude code version unreadable: 'Claude Code'" in out
 
 
 # =============================================================================

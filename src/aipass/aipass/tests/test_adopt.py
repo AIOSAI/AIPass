@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-07-20
-# Modified: 2026-09-28
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -230,7 +230,38 @@ def test_adopt_writes_claude_md_excludes_fence(host_env, tmp_path):
     assert settings.get("claudeMdExcludes") == [
         (Path(fake_home) / "CLAUDE.md").as_posix(),
         (Path(fake_home) / ".claude" / "CLAUDE.md").as_posix(),
+        (Path(fake_home) / "AGENTS.md").as_posix(),
+        (Path(fake_home) / ".claude" / "AGENTS.md").as_posix(),
     ]
+
+
+def test_adopt_mints_agents_md_from_the_host_template_and_no_claude_md(host_env):
+    host, target = host_env
+    (host / ".aipass").mkdir()
+    (host / ".aipass" / "project_AGENTS.md").write_text("# {name}\ntemplate\n", encoding="utf-8")
+    (host / ".aipass" / "project_CLAUDE.md").write_text("# {name}\nclaude\n", encoding="utf-8")
+    (host / "CLAUDE.md").write_text("host claude\n", encoding="utf-8")
+    with (
+        patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(host)),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+    ):
+        adopt_project(target, no_agent=True)
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "# EXISTING-SITE\ntemplate\n"
+    assert not (target / "CLAUDE.md").exists()
+
+
+def test_adopt_mints_the_host_root_agents_md_when_no_template(host_env):
+    host, target = host_env
+    (host / "AGENTS.md").write_text("host agents {name}\n", encoding="utf-8")
+    with (
+        patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=str(host)),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+    ):
+        adopt_project(target, no_agent=True)
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "host agents {name}\n"
+    assert not (target / "CLAUDE.md").exists()
 
 
 def test_adopt_no_agent_skips_spawn(host_env):

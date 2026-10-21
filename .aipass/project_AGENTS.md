@@ -9,7 +9,7 @@ On any greeting, silently run this sequence — no narration, no announcing step
 
  - Read: `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `README.md`
 
-Use drone commands for all operations. Never raw git, gh, or file access when drone provides it.
+Use drone commands for all operations. Never raw git, gh, file access, or python -m when drone provides it.
 
 # Memories
 

@@ -287,11 +287,11 @@ AIPass keeps agent state inside your project directory. To remove it:
 
 ```bash
 # Remove AIPass files from your project.
-# Warning: in a brought-your-own project, src/, README.md, CLAUDE.md, pyproject.toml
+# Warning: in a brought-your-own project, src/, README.md, AGENTS.md, pyproject.toml
 # and .gitignore may be partly or wholly YOURS (init never overwrites existing
 # files) — remove only what AIPass created and review the rest by hand.
 rm -rf .aipass/ .claude/ src/<project>/<agent>/     # the agent dir holds its own mailbox, memory, logs
-rm -f CLAUDE.md AGENTS.md README.md *_REGISTRY.json .gitignore pyproject.toml .venv
+rm -f AGENTS.md README.md *_REGISTRY.json .gitignore pyproject.toml .venv
 rm -f src/<project>/__init__.py src/<project>/tests/conftest.py   # init's package stub
 
 # If you ran the backup system, also remove its local state + the generated ignore file

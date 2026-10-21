@@ -42,8 +42,8 @@ conservatively: anything differing from the template is kept as
 `unknown provenance`, so the first update of an existing project overwrites
 nothing.
 
-Root `CLAUDE.md` and `AGENTS.md` are **seeds** — created once, never rewritten,
-because they exist to be filled in. Retired managed files are renamed
+Root `AGENTS.md` is the **seed** — created once, never rewritten,
+because it exists to be filled in. Retired managed files are renamed
 `<name>(disabled)`, never deleted.
 
 ## `.updateignore` — the owner decides what an update skips

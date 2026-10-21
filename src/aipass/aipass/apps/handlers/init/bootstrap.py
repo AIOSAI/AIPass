@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.0.3
+# Version: 2.1.0
 # Created: 2026-03-14
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -28,6 +28,7 @@ from aipass.aipass.shared.project_home import (
     _claude_settings,
     _detect_aipass_home,
     _enroll_project,
+    agents_md_seed,
     merge_local_settings,
     is_projects_child,
     is_throwaway_path,
@@ -48,7 +49,6 @@ _MANIFEST_TRACKED: tuple = (
     ".claude/settings.json",
     ".claude/settings.local.json",
     ".claude/commands/prep.md",
-    "CLAUDE.md",
     "AGENTS.md",
 )
 
@@ -278,25 +278,11 @@ def init_project(
         else:
             logger.info("hooks template not found at %s — skipping", template)
 
-    for md_name in ("CLAUDE.md", "AGENTS.md"):
+    for md_name in sm.SEED_FILES:
         dest = target / md_name
-        if dest.exists():
-            continue
-        template = Path(aipass_home) / ".aipass" / f"project_{md_name}" if aipass_home else None
-        if template and template.is_file():
-            content = template.read_text(encoding="utf-8").replace("{name}", name)
-            sm.write_text_lf(dest, content)
+        if not dest.exists():
+            sm.write_text_lf(dest, agents_md_seed(name, aipass_home))
             created.append(str(dest))
-        elif md_name == "AGENTS.md":
-            sm.write_text_lf(dest, sc.agents_md(name))
-            created.append(str(dest))
-        else:
-            source = Path(aipass_home) / md_name if aipass_home else None
-            if source and source.is_file():
-                sm.write_text_lf(dest, source.read_text(encoding="utf-8"))
-                created.append(str(dest))
-            else:
-                logging.getLogger(__name__).warning("Source %s not found at AIPASS_HOME, skipping", md_name)
 
     readme_md_path = target / "README.md"
     if not readme_md_path.exists():
@@ -381,22 +367,6 @@ def init_project(
         "created_files": created,
         "aipass_home": aipass_home,
     }
-
-
-def _seed_content(md_name: str, name: str, aipass_home: str | None) -> str | None:
-    """Content a seed file is created with, or None when no source is available.
-
-    Shared with update so a lost ``CLAUDE.md`` comes back as init would have minted it.
-    """
-    template = Path(aipass_home) / ".aipass" / f"project_{md_name}" if aipass_home else None
-    if template and template.is_file():
-        return template.read_text(encoding="utf-8").replace("{name}", name)
-    if md_name == "AGENTS.md":
-        return sc.agents_md(name)
-    source = Path(aipass_home) / md_name if aipass_home else None
-    if source and source.is_file():
-        return source.read_text(encoding="utf-8")
-    return None
 
 
 def _read_text(path: Path) -> str | None:
@@ -511,11 +481,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         if dest.exists():
             record(md_name, dest, sm.ACTION_CURRENT, "seed — never rewritten")
             continue
-        content = _seed_content(md_name, name, aipass_home)
-        if content is None:
-            logger.warning("Source %s not found at AIPASS_HOME, skipping", md_name)
-            continue
-        record(md_name, dest, sm.ACTION_CREATE, "seed absent", content)
+        record(md_name, dest, sm.ACTION_CREATE, "seed absent", agents_md_seed(name, aipass_home))
 
     # Merge files keep user values through the merge itself, so they are never "kept (local edits)".
     settings_path = claude_dir / "settings.json"
