@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-21] — v2.8.24: AGENTS.md is the one instruction file on the host and in every project, doctor's sandbox-off row and Claude Code version row, pytest skips scratch dirs, the init update plan line, canary's no-break space, cli's bare demo
 
 ### Changed
 
