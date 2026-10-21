@@ -3,7 +3,7 @@
 # Description: Integration tests for citizen class system
 # Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -474,8 +474,9 @@ class TestTemplateStructure:
         assert not (spawn_root / "templates" / "agent.template").exists()
 
     def test_citizen_template_has_no_claude_md(self):
-        """The template should NOT include CLAUDE.md — project root covers it."""
+        """The template should NOT include CLAUDE.md or AGENTS.md — project root covers it."""
         assert not (self._template() / "CLAUDE.md").exists()
+        assert not (self._template() / "AGENTS.md").exists()
 
     def test_citizen_template_has_local_prompt(self):
         """The template includes a non-empty local prompt."""
@@ -504,11 +505,12 @@ class TestAgentScaffoldContent:
     """Tests verifying created agents have useful content."""
 
     def test_created_agent_has_no_claude_md(self, tmp_path):
-        """Branches should NOT have CLAUDE.md — project root covers it."""
+        """Branches should NOT have CLAUDE.md or AGENTS.md — project root covers it."""
         target = tmp_path / "content_test"
         spawn_agent(str(target), role="Tester", purpose="Testing scaffold")
 
         assert not (target / "CLAUDE.md").exists()
+        assert not (target / "AGENTS.md").exists()
 
     def test_created_agent_local_prompt_has_content(self, tmp_path):
         """Created agent's local prompt should reference branch identity."""

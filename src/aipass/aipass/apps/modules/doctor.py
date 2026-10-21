@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.3.1
+# Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -64,6 +64,7 @@ from aipass.aipass.apps.modules._doctor_wire import (
     settings_fix_report,
 )
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
+    detect_claude_code,
     detect_cpu,
     detect_git,
     detect_install_method,
@@ -82,6 +83,8 @@ from aipass.aipass.apps.handlers.ui.progress import (
 )
 
 COMMAND = "doctor"
+
+AGENTS_MD_MIN_CLAUDE = (2, 1, 277)
 
 # module_file, not resolve(): import-time cwd read on Windows (module_root).
 _BRANCH_ROOT = module_file(__file__).parents[2]
@@ -145,7 +148,28 @@ def _check_system() -> List[CheckResult]:
     method = detect_install_method()
     results.append(CheckResult("install", GLYPH_PASS, method, ""))
 
+    results.append(_claude_code_row())
+
     return results
+
+
+def _claude_code_row() -> CheckResult:
+    """The `claude code` row: projects carry their instructions in AGENTS.md only.
+
+    No claude on PATH is a plain row, since AIPass runs under other CLIs too.
+    """
+    claude = detect_claude_code()
+    if not claude["found"]:
+        return CheckResult("claude code", GLYPH_PASS, "not on PATH", "")
+    version = claude["version"]
+    if version is None:
+        return CheckResult("claude code", GLYPH_WARN, f"version unreadable: {claude['raw']!r}", "")
+    shown = ".".join(str(part) for part in version)
+    if version >= AGENTS_MD_MIN_CLAUDE:
+        return CheckResult("claude code", GLYPH_PASS, shown, "")
+    return CheckResult(
+        "claude code", GLYPH_WARN, shown, "Claude Code reads AGENTS.md from v2.1.277: run 'claude update'"
+    )
 
 
 def _configured_aipass_home() -> str:
@@ -834,55 +858,54 @@ def _check_structure() -> List[CheckResult]:
     else:
         results.append(CheckResult("pyproject.toml", GLYPH_WARN, "missing", "Create pyproject.toml for pip packaging"))
 
-    # CLAUDE.md ancestor fence — nested projects/<name> must exclude the host's
-    # CLAUDE.md + .claude/CLAUDE.md, or Claude Code inherits them via ancestor walk.
+    # Nested projects/<name> must exclude the host's AGENTS.md and CLAUDE.md pairs,
+    # or Claude Code inherits them through the ancestor walk.
     if aipass_home:
         fenceless = find_fenceless_projects(aipass_home)
         if fenceless:
             for proj in fenceless:
                 results.append(
                     CheckResult(
-                        f"CLAUDE.md fence: {proj.name}",
+                        f"instruction fence: {proj.name}",
                         GLYPH_WARN,
-                        "missing claudeMdExcludes",
+                        "claudeMdExcludes misses the host AGENTS.md",
                         f"Run 'aipass init update {proj}'",
                     )
                 )
         else:
-            results.append(CheckResult("CLAUDE.md fence", GLYPH_PASS, "all nested projects fenced", ""))
+            results.append(CheckResult("instruction fence", GLYPH_PASS, "all nested projects fenced", ""))
 
     return results
 
 
 def _check_sandbox() -> List[CheckResult]:
-    """Run Sandbox group checks — kernel sandbox prerequisites."""
-    results: List[CheckResult] = []
+    """Run Sandbox group checks — kernel sandbox prerequisites, only when the flag is on.
 
+    Off, the hook gates do the containing, so a missing prerequisite is no finding: one PASS row.
+    """
+    flag = check_sandbox_flag()
+    if not flag["enabled"]:
+        setting = f"={flag['raw_value']}" if flag["raw_value"] else " unset"
+        return [
+            CheckResult("sandbox", GLYPH_PASS, f"off (AIPASS_SANDBOX_ENABLED{setting}); prerequisites not checked", "")
+        ]
+
+    results: List[CheckResult] = []
     if not is_linux():
         results.append(CheckResult("sandbox", GLYPH_PASS, "kernel sandbox: Linux-only, not checked", ""))
         return results
 
-    flag = check_sandbox_flag()
-    flag_on = flag["enabled"]
-    flag_label = "ON" if flag_on else "OFF"
-    results.append(CheckResult("sandbox flag", GLYPH_PASS, f"AIPASS_SANDBOX_ENABLED={flag_label}", ""))
+    results.append(CheckResult("sandbox flag", GLYPH_PASS, "AIPASS_SANDBOX_ENABLED=ON", ""))
 
     def _sev(ok: bool) -> str:
-        if ok:
-            return GLYPH_PASS
-        return GLYPH_FAIL if flag_on else GLYPH_WARN
-
-    def _suffix(ok: bool) -> str:
-        if ok or flag_on:
-            return ""
-        return " (inert — flag is off)"
+        return GLYPH_PASS if ok else GLYPH_FAIL
 
     bwrap = check_bwrap_present()
     results.append(
         CheckResult(
             "bwrap",
             _sev(bwrap["found"]),
-            bwrap["path"] or "not found" + _suffix(bwrap["found"]),
+            bwrap["path"] or "not found",
             "" if bwrap["found"] else "sudo apt install bubblewrap",
         )
     )
@@ -896,7 +919,7 @@ def _check_sandbox() -> List[CheckResult]:
             CheckResult(
                 "bwrap functional",
                 _sev(func["ok"]),
-                detail + _suffix(func["ok"]),
+                detail,
                 "",
             )
         )
@@ -906,7 +929,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "node",
             _sev(node["found"]),
-            node["path"] or "not found" + _suffix(node["found"]),
+            node["path"] or "not found",
             "" if node["found"] else "Install Node.js: https://nodejs.org/",
         )
     )
@@ -916,7 +939,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "srt (@anthropic-ai/sandbox-runtime)",
             _sev(srt["found"]),
-            srt["path"] or "not found" + _suffix(srt["found"]),
+            srt["path"] or "not found",
             "" if srt["found"] else srt["install_hint"],
         )
     )
@@ -926,7 +949,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "rg (ripgrep)",
             _sev(rg["found"]),
-            rg["path"] or "not found" + _suffix(rg["found"]),
+            rg["path"] or "not found",
             "" if rg["found"] else "sudo apt install ripgrep  (or static binary to ~/.local/bin/rg)",
         )
     )
@@ -937,7 +960,7 @@ def _check_sandbox() -> List[CheckResult]:
         CheckResult(
             "broker daemon",
             _sev(broker["alive"]),
-            broker["detail"] + _suffix(broker["alive"]),
+            broker["detail"],
             "",
         )
     )

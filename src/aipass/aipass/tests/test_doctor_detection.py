@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_detection.py
 # Description: Tests for doctor's system detection and progress helpers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/system_detect/system_detector.py and apps/handlers/ui/progress.py."""
@@ -19,6 +19,7 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.system_detect import system_detector
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
+    detect_claude_code,
     detect_cpu,
     detect_git,
     detect_os,
@@ -102,6 +103,35 @@ class TestDetectGit:
             mock_run.return_value = MagicMock(stdout="weird\n", returncode=0)
             result = detect_git()
         assert result["found"] is True
+
+
+class TestDetectClaudeCode:
+    def test_runs_the_resolved_path_and_parses_the_leading_version(self, tmp_path, monkeypatch) -> None:
+        """Mutant: argv[0] `claude_path` -> "claude" -> red (a bare name misses claude.cmd on Windows)."""
+        stub = _on_path(tmp_path, "claude")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="2.1.306 (Claude Code)\n", returncode=0)
+            result = detect_claude_code()
+        assert mock_run.call_args.args[0] == [str(stub), "--version"]
+        assert result == {"found": True, "raw": "2.1.306 (Claude Code)", "version": (2, 1, 306)}
+
+    def test_not_on_path_runs_nothing(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
+            result = detect_claude_code()
+        mock_run.assert_not_called()
+        assert result == {"found": False, "raw": "", "version": None}
+
+    def test_a_failed_run_is_found_with_no_version(self, tmp_path, monkeypatch) -> None:
+        _on_path(tmp_path, "claude")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch(
+            "aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run",
+            side_effect=OSError("exec format error"),
+        ):
+            result = detect_claude_code()
+        assert result == {"found": True, "raw": "", "version": None}
 
 
 class TestDetectRam:

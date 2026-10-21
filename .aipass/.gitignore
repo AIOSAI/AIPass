@@ -5,7 +5,6 @@
 !.gitignore
 !README.md
 !PROMPT_STYLE.md
-!project_CLAUDE.md
 !project_AGENTS.md
 !project_hooks.json
 !test_write_policy.json

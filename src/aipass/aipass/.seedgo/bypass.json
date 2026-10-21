@@ -169,8 +169,8 @@
     {
       "file": "apps/modules/doctor.py",
       "standard": "logged_fallback",
-      "lines": [160, 582],
-      "reason": "160: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:335) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 582: _registry_citizen_names's one caller (drone row, doctor.py:639) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:349). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them)."
+      "lines": [184, 606],
+      "reason": "184: _configured_aipass_home's two callers read \"\" as no setting: _check_home_agreement (doctor.py:359) skips the comparison, and the pytest collect row (_check_pytest_collect) falls back to the env AIPASS_HOME, then says not set; an unreadable settings.json already shows as its own FAIL row from _check_global_aipass_home on the line above, so the failure is on screen and the comparison has nothing to compare. 606: _registry_citizen_names's one caller (drone row, doctor.py:663) compares only when names exist; an unreadable registry is the registry row's FAIL ('corrupt JSON', doctor.py:373). Re-read in fleet green leg 7 (aipass's decision); re-pinned 2026-10-15 (FPLAN-0645: one import and the door keyword moved both lines); again 2026-10-15 (FPLAN-0646: the --yes import and the fix orchestration moved them). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: the claude code row and its constant moved both lines)."
     },
     {
       "file": "apps/handlers/baud/fetch.py",
@@ -181,14 +181,14 @@
     {
       "file": "apps/handlers/init/scaffold_manifest.py",
       "standard": "logged_fallback",
-      "lines": [166],
-      "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:448, doctor scaffold group:1074) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [157],
+      "reason": "read_ignore: a .updateignore that does not exist means no ignore patterns, which is the answer []. A file that is there but unreadable raises UpdateIgnoreUnreadable on the next line (fleet green leg 5), so its callers (bootstrap.update_project:418, doctor scaffold group:1098) never read an unreadable file as an empty one. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: docstring closings joined, the line moved up)."
     },
     {
       "file": "apps/handlers/system_detect/system_detector.py",
       "standard": "logged_fallback",
-      "lines": [87],
-      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as non-POSIX or no /proc entry, and its one caller (detect_shell, system_detector.py:100) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision)."
+      "lines": [110],
+      "reason": "_shell_from_parent_proc is a probe: None is 'not detected', the same answer as non-POSIX or no /proc entry, and its one caller (detect_shell, system_detector.py:123) keeps its 'unknown' value on None as documented. Re-read in fleet green leg 7 (aipass's decision). Re-pinned 2026-10-21 (DPLAN-0418 wave 2: detect_claude_code above it)."
     },
     {
       "file": "apps/handlers/sandbox_check/sandbox_checker.py",
@@ -253,8 +253,13 @@
     {
       "file": "shared/project_home.py",
       "standard": "log_visibility",
-      "lines": [21],
-      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 21 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
+      "lines": [23],
+      "reason": "2026-10-08, devpulse's ruling (fleet green, shared/ rows): the stdlib logging.getLogger on line 23 is the right logger for a pre-install file. aipass.prax is not importable when init first reads the project home, and @spawn imports this module into its own process."
+    },
+    {
+      "file": "shared/scaffold_content.py",
+      "standard": "help_text",
+      "reason": "agents_md() is the text of a project's AGENTS.md, not help text: its one python -m mention is the instruction 'Never raw git, gh, file access, or python -m when drone provides it', word for word the host's .aipass/project_AGENTS.md (DPLAN-0418). The row's cure, drone @branch instead, is what the sentence already tells the agent. 2026-10-21, aipass's decision."
     }
   ]
 }

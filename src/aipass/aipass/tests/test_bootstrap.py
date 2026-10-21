@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-05-04
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -83,7 +83,6 @@ def test_init_project_creates_all_expected_files(tmp_path):
 
     expected_files = [
         target / "DEMO_REGISTRY.json",
-        target / "CLAUDE.md",
         target / "AGENTS.md",
         target / "README.md",
         target / ".gitignore",
@@ -97,6 +96,7 @@ def test_init_project_creates_all_expected_files(tmp_path):
     for f in expected_files:
         assert f.exists(), f"Expected file not created: {f}"
     assert not (target / ".aipass" / "aipass_global_prompt.md").exists(), "Retired global prompt should NOT be seeded"
+    assert not (target / "CLAUDE.md").exists(), "AGENTS.md is the one instruction file"
 
     assert (target / "src" / "demo").is_dir(), "Expected src/demo/ package directory"
 
@@ -186,17 +186,57 @@ def test_init_project_no_local_prompt(tmp_path):
     assert not (target / ".aipass" / "aipass_local_prompt.md").exists()
 
 
-def test_init_project_claude_md_content(tmp_path):
-    """CLAUDE.md uses project template with name substitution."""
+def _host(tmp_path: Path, files: dict) -> Path:
+    host = tmp_path / "host"
+    for rel, text in files.items():
+        (host / rel).parent.mkdir(parents=True, exist_ok=True)
+        (host / rel).write_text(text, encoding="utf-8")
+    return host
+
+
+_ALL_SOURCES = {
+    ".aipass/project_AGENTS.md": "# {name}\ntemplate\n",
+    ".aipass/project_CLAUDE.md": "# {name}\nclaude template\n",
+    "AGENTS.md": "host agents {name}\n",
+    "CLAUDE.md": "host claude\n",
+}
+
+
+def test_init_mints_agents_md_from_the_host_template_and_no_claude_md(tmp_path, monkeypatch):
+    host = _host(tmp_path, _ALL_SOURCES)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
     target = tmp_path / "proj"
     target.mkdir()
 
     init_project(target, project_name="zeta")
 
-    md_path = target / "CLAUDE.md"
-    content = md_path.read_text(encoding="utf-8")
-    assert "# ZETA" in content
-    assert "Startup protocol" in content
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "# ZETA\ntemplate\n"
+    assert not (target / "CLAUDE.md").exists()
+
+
+def test_init_mints_the_host_root_agents_md_as_is_when_no_template(tmp_path, monkeypatch):
+    sources = {rel: text for rel, text in _ALL_SOURCES.items() if rel != ".aipass/project_AGENTS.md"}
+    host = _host(tmp_path, sources)
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    target = tmp_path / "proj"
+    target.mkdir()
+
+    init_project(target, project_name="zeta")
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "host agents {name}\n"
+    assert not (target / "CLAUDE.md").exists()
+
+
+def test_init_mints_the_generated_agents_md_when_the_host_has_neither(tmp_path, monkeypatch):
+    host = _host(tmp_path, {"CLAUDE.md": "host claude\n"})
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    target = tmp_path / "proj"
+    target.mkdir()
+
+    init_project(target, project_name="zeta")
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == sc.agents_md("ZETA")
+    assert not (target / "CLAUDE.md").exists()
 
 
 def test_init_project_rerunnable_blocked_by_guard(tmp_path):
@@ -351,8 +391,8 @@ def test_init_project_skips_existing_optional_files(tmp_path):
 
     assert len(result["created_files"]) >= 5
 
-    md_content = (target / "CLAUDE.md").read_text(encoding="utf-8")
-    assert md_content == "# Custom CLAUDE\n"
+    assert (target / "CLAUDE.md").read_text(encoding="utf-8") == "# Custom CLAUDE\n"
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "# Custom AGENTS\n"
 
 
 def test_init_project_no_overwrite(tmp_path):
@@ -366,8 +406,8 @@ def test_init_project_no_overwrite(tmp_path):
     with pytest.raises(RuntimeError, match="already an AIPass project"):
         init_project(target, project_name="safe")
 
-    claude_md = (target / "CLAUDE.md").read_text(encoding="utf-8")
-    assert "# SAFE" in claude_md
+    agents_md = (target / "AGENTS.md").read_text(encoding="utf-8")
+    assert "# SAFE" in agents_md
 
 
 def test_init_project_returns_dict(tmp_path):

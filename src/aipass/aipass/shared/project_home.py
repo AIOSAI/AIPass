@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-21
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
@@ -17,6 +17,8 @@ import logging
 import os
 import tempfile
 from pathlib import Path
+
+from aipass.aipass.shared.scaffold_content import agents_md
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +71,31 @@ def _claude_settings() -> str:
 
 
 def claude_md_excludes(aipass_home: str) -> list[str]:
-    """Absolute paths of the host CLAUDE.md files a nested project must fence out.
+    """Absolute POSIX paths of the host instruction files a nested project must fence out.
 
-    Claude Code loads every ancestor CLAUDE.md regardless of git. The one definition of the
-    fence: claude_local_settings writes it, find_fenceless_projects checks it."""
+    Claude Code loads every ancestor AGENTS.md and CLAUDE.md regardless of git; the CLAUDE.md
+    pair covers a host clone that still has one. claude_local_settings writes this fence."""
     home = Path(aipass_home)
-    # as_posix: settings files carry POSIX paths on every platform.
-    return [(home / "CLAUDE.md").as_posix(), (home / ".claude" / "CLAUDE.md").as_posix()]
+    return [
+        (home / "CLAUDE.md").as_posix(),
+        (home / ".claude" / "CLAUDE.md").as_posix(),
+        (home / "AGENTS.md").as_posix(),
+        (home / ".claude" / "AGENTS.md").as_posix(),
+    ]
+
+
+def agents_md_seed(name: str, aipass_home: str | None) -> str:
+    """A project's AGENTS.md text: ``.aipass/project_AGENTS.md`` with ``{name}`` filled,
+    else the host root ``AGENTS.md``, else the generated ``agents_md``."""
+    if aipass_home:
+        home = Path(aipass_home)
+        template = home / ".aipass" / "project_AGENTS.md"
+        if template.is_file():
+            return template.read_text(encoding="utf-8").replace("{name}", name)
+        host_file = home / "AGENTS.md"
+        if host_file.is_file():
+            return host_file.read_text(encoding="utf-8")
+    return agents_md(name)
 
 
 def _normalize_exclude(entry: str) -> str:
@@ -154,7 +174,7 @@ def is_projects_child(target: Path) -> bool:
 
 
 def find_fenceless_projects(aipass_home: str) -> list[Path]:
-    """Nested ``<aipass_home>/projects/<name>`` dirs missing the CLAUDE.md ancestor fence.
+    """Nested ``<aipass_home>/projects/<name>`` dirs missing the instruction-file ancestor fence.
 
     Fenceless: ``.claude/settings.local.json`` missing, unparseable, or lacking the excludes."""
     projects_dir = Path(aipass_home) / "projects"

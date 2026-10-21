@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-17
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -129,12 +129,13 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
 
 
 def _scaffold_aipass(target: Path, name: str) -> list[str]:
-    """Write AIPass scaffold files (tiers, hooks, CLAUDE.md, settings, .venv)."""
+    """Write AIPass scaffold files (tiers, hooks, AGENTS.md, settings, .venv)."""
     from aipass.aipass.shared.project_home import (
         claude_local_settings,
         _claude_settings,
         _detect_aipass_home,
         _enroll_project,
+        agents_md_seed,
         is_projects_child,
         is_throwaway_path,
     )
@@ -163,19 +164,10 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
             created.append(".aipass/hooks.json")
             _enroll_project(target)
 
-    for md_name in ("CLAUDE.md", "AGENTS.md"):
+    for md_name in sm.SEED_FILES:
         dest = target / md_name
-        if dest.exists():
-            continue
-        if aipass_home:
-            tmpl = Path(aipass_home) / ".aipass" / f"project_{md_name}"
-            if tmpl.is_file():
-                content = tmpl.read_text(encoding="utf-8").replace("{name}", reg)
-                sm.write_text_lf(dest, content)
-                created.append(md_name)
-                continue
-        if md_name == "AGENTS.md":
-            sm.write_text_lf(dest, sc.agents_md(reg))
+        if not dest.exists():
+            sm.write_text_lf(dest, agents_md_seed(reg, aipass_home))
             created.append(md_name)
 
     # .claude/settings.json — tracked, permissions only (no machine-local paths)

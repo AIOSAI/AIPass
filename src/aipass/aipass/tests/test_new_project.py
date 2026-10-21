@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.1.9
+# Version: 1.2.0
 # Created: 2026-07-17
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -252,9 +252,11 @@ def test_create_project_python_template(host_env, monkeypatch):
     assert (target / "src" / "pyapp" / "__init__.py").exists()
 
 
-def test_create_project_gets_claude_md_excludes_fence(host_env, monkeypatch):
+def test_create_project_gets_the_four_entry_fence_and_agents_md_alone(host_env, monkeypatch):
     """aipass new always creates under <host>/projects/<name> — nested fence must be written."""
     monkeypatch.chdir(host_env)
+    (host_env / ".aipass" / "project_AGENTS.md").write_text("# {name}\ntemplate\n", encoding="utf-8")
+    (host_env / ".aipass" / "project_CLAUDE.md").write_text("# {name}\nclaude\n", encoding="utf-8")
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
         patch(
@@ -271,7 +273,11 @@ def test_create_project_gets_claude_md_excludes_fence(host_env, monkeypatch):
     assert local_settings["claudeMdExcludes"] == [
         (host_env / "CLAUDE.md").as_posix(),
         (host_env / ".claude" / "CLAUDE.md").as_posix(),
+        (host_env / "AGENTS.md").as_posix(),
+        (host_env / ".claude" / "AGENTS.md").as_posix(),
     ]
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "# FENCED\ntemplate\n"
+    assert not (target / "CLAUDE.md").exists()
 
 
 def test_create_project_rejects_existing(host_env, monkeypatch):

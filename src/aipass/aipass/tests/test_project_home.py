@@ -1,18 +1,18 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
-# Description: Tests for shared/project_home.py — CLAUDE.md ancestor fence helpers
-# Version: 1.2.0
+# Description: Tests for shared/project_home.py — instruction-file ancestor fence helpers
+# Version: 1.3.0
 # Created: 2026-07-31
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
-"""Tests for shared/project_home.py and the CLAUDE.md ancestor-fence helpers it drives."""
+"""Tests for shared/project_home.py and the instruction-file ancestor-fence helpers it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 # seedgo: no-test-needed(covered_elsewhere) — is_throwaway_path, _detect_aipass_home, _claude_settings;
 # seedgo: no-test-needed(covered_elsewhere) — _enroll_project; see tests/test_trust.py, tests/test_doctor.py
-# seedgo: no-test-needed(covered_elsewhere) — and tests/test_bootstrap.py
+# seedgo: no-test-needed(covered_elsewhere) — and tests/test_bootstrap.py, which also covers agents_md_seed
 
 import json
 import os
@@ -28,6 +28,10 @@ from aipass.aipass.shared.project_home import (
     is_projects_child,
     merge_local_settings,
 )
+
+
+def _fence(home: str) -> list[str]:
+    return [f"{home}/CLAUDE.md", f"{home}/.claude/CLAUDE.md", f"{home}/AGENTS.md", f"{home}/.claude/AGENTS.md"]
 
 
 @pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX mode bits; root reads any directory")
@@ -49,8 +53,8 @@ def test_is_projects_child_raises_naming_the_host_it_could_not_read(tmp_path):
         host.chmod(0o755)
 
 
-def test_claude_md_excludes_returns_host_and_dot_claude_paths(tmp_path):
-    """Returns the two absolute paths a nested project must fence out.
+def test_claude_md_excludes_returns_the_host_claude_md_and_agents_md_pairs(tmp_path):
+    """Returns the four absolute paths a nested project must fence out.
 
     The product answers in POSIX form on every platform (settings files carry
     forward slashes), so home is built with as_posix() to match on Windows.
@@ -60,6 +64,8 @@ def test_claude_md_excludes_returns_host_and_dot_claude_paths(tmp_path):
     assert excludes == [
         f"{home}/CLAUDE.md",
         f"{home}/.claude/CLAUDE.md",
+        f"{home}/AGENTS.md",
+        f"{home}/.claude/AGENTS.md",
     ]
 
 
@@ -76,10 +82,7 @@ def test_claude_local_settings_nested_adds_excludes(tmp_path):
     home = (tmp_path / "AIPass").as_posix()
     data = json.loads(claude_local_settings(home, nested=True))
     assert data["env"] == {"AIPASS_HOME": home}
-    assert data["claudeMdExcludes"] == [
-        f"{home}/CLAUDE.md",
-        f"{home}/.claude/CLAUDE.md",
-    ]
+    assert data["claudeMdExcludes"] == _fence(home)
 
 
 def test_merge_local_settings_adds_excludes_to_env_only_existing(tmp_path):
@@ -91,10 +94,7 @@ def test_merge_local_settings_adds_excludes_to_env_only_existing(tmp_path):
     merged = merge_local_settings(existing, generated)
 
     assert merged["env"] == {"AIPASS_HOME": home}
-    assert merged["claudeMdExcludes"] == [
-        f"{home}/CLAUDE.md",
-        f"{home}/.claude/CLAUDE.md",
-    ]
+    assert merged["claudeMdExcludes"] == _fence(home)
 
 
 def test_merge_local_settings_is_idempotent(tmp_path):
@@ -120,15 +120,11 @@ def test_merge_local_settings_preserves_custom_excludes_entries(tmp_path):
 
     merged = merge_local_settings(existing, generated)
 
-    assert merged["claudeMdExcludes"] == [
-        "/custom/extra/CLAUDE.md",
-        f"{home}/CLAUDE.md",
-        f"{home}/.claude/CLAUDE.md",
-    ]
+    assert merged["claudeMdExcludes"] == ["/custom/extra/CLAUDE.md", *_fence(home)]
 
 
-def test_merge_local_settings_does_not_duplicate_existing_official_entries(tmp_path):
-    """Re-running the merge when the official entries are already present adds nothing twice (POSIX-form home)."""
+def test_merge_local_settings_adds_the_agents_md_pair_to_a_claude_md_fence_once(tmp_path):
+    """A fence of the CLAUDE.md pair alone gains the AGENTS.md pair; a second merge adds nothing."""
     home = (tmp_path / "AIPass").as_posix()
     existing = {
         "env": {"AIPASS_HOME": home},
@@ -140,11 +136,10 @@ def test_merge_local_settings_does_not_duplicate_existing_official_entries(tmp_p
     generated = json.loads(claude_local_settings(home, nested=True))
 
     merged = merge_local_settings(existing, generated)
+    again = merge_local_settings(merged, generated)
 
-    assert merged["claudeMdExcludes"] == [
-        f"{home}/CLAUDE.md",
-        f"{home}/.claude/CLAUDE.md",
-    ]
+    assert merged["claudeMdExcludes"] == _fence(home)
+    assert again["claudeMdExcludes"] == _fence(home)
 
 
 def test_merge_local_settings_generated_env_wins_on_conflict():
@@ -258,7 +253,7 @@ def test_find_fenceless_projects_missing_excludes_key(tmp_path):
 
 
 def test_find_fenceless_projects_partial_excludes(tmp_path):
-    """claudeMdExcludes present but missing one of the two expected entries is still fenceless."""
+    """claudeMdExcludes present but missing three of the four expected entries is still fenceless."""
     projects = tmp_path / "projects"
     proj = _make_nested(projects, "myapp")
     claude_dir = proj / ".claude"
@@ -275,8 +270,27 @@ def test_find_fenceless_projects_partial_excludes(tmp_path):
     assert find_fenceless_projects(str(tmp_path)) == [proj]
 
 
+def test_find_fenceless_projects_reports_a_project_fenced_against_claude_md_only(tmp_path):
+    """The CLAUDE.md pair alone leaves the host AGENTS.md pair inherited, so the project is fenceless."""
+    projects = tmp_path / "projects"
+    proj = _make_nested(projects, "myapp")
+    claude_dir = proj / ".claude"
+    claude_dir.mkdir()
+    home = tmp_path.as_posix()
+    (claude_dir / "settings.local.json").write_text(
+        json.dumps(
+            {
+                "env": {"AIPASS_HOME": home},
+                "claudeMdExcludes": [f"{home}/CLAUDE.md", f"{home}/.claude/CLAUDE.md"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert find_fenceless_projects(str(tmp_path)) == [proj]
+
+
 def test_find_fenceless_projects_correctly_fenced_is_excluded(tmp_path):
-    """A project with both expected claudeMdExcludes entries is not reported."""
+    """A project with all four expected claudeMdExcludes entries is not reported."""
     projects = tmp_path / "projects"
     proj = _make_nested(projects, "myapp")
     claude_dir = proj / ".claude"
@@ -294,7 +308,7 @@ def test_find_fenceless_projects_correctly_fenced_is_excluded(tmp_path):
 
 
 def test_find_fenceless_projects_extra_custom_excludes_still_passes(tmp_path):
-    """Extra hand-added exclude entries beyond the required two don't make a project fenceless."""
+    """Extra hand-added exclude entries beyond the required four don't make a project fenceless."""
     projects = tmp_path / "projects"
     proj = _make_nested(projects, "myapp")
     claude_dir = proj / ".claude"

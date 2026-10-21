@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-07-20
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -32,6 +32,7 @@ from aipass.aipass.shared.project_home import (
     _claude_settings,
     _detect_aipass_home,
     _enroll_project,
+    agents_md_seed,
     is_projects_child,
     is_throwaway_path,
 )
@@ -128,18 +129,8 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
             if not already_had_hooks and not dry_run:
                 _enroll_project(target)
 
-    for md_name in ("CLAUDE.md", "AGENTS.md"):
-        dest = target / md_name
-        if dest.exists():
-            continue
-        if aipass_home:
-            tmpl = Path(aipass_home) / ".aipass" / f"project_{md_name}"
-            if tmpl.is_file():
-                content = tmpl.read_text(encoding="utf-8").replace("{name}", reg)
-                _write_if_missing(dest, content, dry_run=dry_run, planned=files)
-                continue
-        if md_name == "AGENTS.md":
-            _write_if_missing(dest, sc.agents_md(reg), dry_run=dry_run, planned=files)
+    for md_name in sm.SEED_FILES:
+        _write_if_missing(target / md_name, agents_md_seed(reg, aipass_home), dry_run=dry_run, planned=files)
 
     claude_dir = target / ".claude"
     _write_if_missing(claude_dir / "settings.json", _claude_settings(), dry_run=dry_run, planned=files)

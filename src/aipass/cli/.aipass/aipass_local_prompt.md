@@ -71,7 +71,7 @@ These are the things that have actually broken here.
 
 # Verbs
 
- - Live top-level verbs include `display`, `templates`, `show` and a bare `demo`; `show` is an alias of `display`, and a bare `demo` resolves by module discovery order.
+ - Live top-level verbs include `display`, `templates`, `show` and a bare `demo`; `show` is an alias of `display`, and a bare `demo` belongs to display alone (templates declines it).
  - The entry point's help page is the reference. When a verb and the help page disagree, fix the help page and bump the entry point version.
 
 # Integration

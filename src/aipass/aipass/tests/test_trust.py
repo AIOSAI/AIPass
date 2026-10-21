@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.2.5
+# Version: 1.2.6
 # Created: 2026-07-15
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/trust.py and the handlers it drives."""
@@ -196,7 +196,7 @@ def test_init_project_enrolls(tmp_path, monkeypatch):
     aipass_dir.mkdir()
     template = aipass_dir / "project_hooks.json"
     template.write_text('{"hooks_enabled": true}', encoding="utf-8")
-    (aipass_home / "CLAUDE.md").write_text("# Test", encoding="utf-8")
+    (aipass_home / "AGENTS.md").write_text("# Test", encoding="utf-8")
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
         lambda: str(aipass_home),
@@ -229,7 +229,7 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
     aipass_dir.mkdir()
     template = aipass_dir / "project_hooks.json"
     template.write_text('{"hooks_enabled": true}', encoding="utf-8")
-    (aipass_home / "CLAUDE.md").write_text("# Test", encoding="utf-8")
+    (aipass_home / "AGENTS.md").write_text("# Test", encoding="utf-8")
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
         lambda: str(aipass_home),
@@ -297,7 +297,7 @@ def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
     aipass_dir.mkdir()
     template = aipass_dir / "project_hooks.json"
     template.write_text('{"hooks_enabled": true}', encoding="utf-8")
-    (aipass_home / "CLAUDE.md").write_text("# Test", encoding="utf-8")
+    (aipass_home / "AGENTS.md").write_text("# Test", encoding="utf-8")
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
         lambda: str(aipass_home),
@@ -336,7 +336,7 @@ def test_update_project_reports_none_when_the_trust_registry_cannot_be_imported(
     (aipass_home / ".aipass").mkdir(parents=True)
     template = aipass_home / ".aipass" / "project_hooks.json"
     template.write_text('{"hooks_enabled": true}', encoding="utf-8")
-    (aipass_home / "CLAUDE.md").write_text("# Test", encoding="utf-8")
+    (aipass_home / "AGENTS.md").write_text("# Test", encoding="utf-8")
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
         lambda: str(aipass_home),

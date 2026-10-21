@@ -1,6 +1,7 @@
 """system_detect — OS, shell, Python, RAM/CPU, install method detection."""
 
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
+    detect_claude_code,
     detect_cpu,
     detect_docker,
     detect_git,
@@ -14,6 +15,7 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
 )
 
 __all__ = [
+    "detect_claude_code",
     "detect_cpu",
     "detect_docker",
     "detect_git",

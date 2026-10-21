@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: system_detector.py
 # Description: Pure system detection logic for aipass doctor
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -68,6 +69,28 @@ def detect_git() -> Dict[str, Any]:
         logger.warning("[system_detector] git version check failed: %s", exc)
 
     return {"found": True, "version": version}
+
+
+def detect_claude_code() -> Dict[str, Any]:
+    """Return Claude Code availability, ``claude --version`` output and its leading x.y.z.
+
+    ``version`` is an int triple, or None when the command fails or prints no x.y.z.
+    """
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        return {"found": False, "raw": "", "version": None}
+
+    raw = ""
+    try:
+        # The resolved path, not "claude": on Windows it is claude.cmd, which a bare name misses.
+        result = subprocess.run([claude_path, "--version"], capture_output=True, text=True, timeout=10)
+        raw = result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[system_detector] claude --version failed: %s", exc)
+
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", raw)
+    version = tuple(int(part) for part in match.groups()) if match else None
+    return {"found": True, "raw": raw, "version": version}
 
 
 def _shell_from_parent_proc(os_name: str = os.name, getppid: Callable[[], int] = os.getppid) -> str | None:

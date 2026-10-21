@@ -40,18 +40,15 @@ the same content. We do **not** keep separate prompts per CLI. Only the *deliver
 | File | Stamps → | Notes |
 |---|---|---|
 | `project_hooks.json` | new project's `.aipass/hooks.json` | **REQUIRED** — without it a new project's hooks never fire. Mirrors the live wiring (tier0 + navmap enabled, global disabled). |
-| `project_CLAUDE.md` | new project's `CLAUDE.md` | the project's Claude Code instructions. |
+| `project_AGENTS.md` | new project's `AGENTS.md` | the one instruction file, read by Claude Code and every other coding agent; `{name}` filled. |
 | `project_global_prompt.md` | new project's `aipass_global_prompt.md` | **Legacy** — same retirement path as the global above (new projects ship tiers-only once Codex is migrated). |
-
-(`AGENTS.md` — Codex's equivalent of `CLAUDE.md` — is **generated** by `bootstrap.py`
-when no `project_AGENTS.md` template exists, so none is kept here.)
 
 ## What a new project gets (`aipass init`)
 
 `bootstrap.py` seeds a fresh project with the tiered system:
 - `tier0_kernel.md` + `tier1_navmap.md` → the prompt content (every runtime)
 - `hooks.json` (from `project_hooks.json`) → tier0 + navmap enabled, global disabled
-- `CLAUDE.md` (from `project_CLAUDE.md`) + a generated `AGENTS.md`
+- `AGENTS.md` (from `project_AGENTS.md`, else the host `AGENTS.md`, else generated)
 - `aipass_global_prompt.md` (from `project_global_prompt.md`) → legacy, retiring with the above
 
 `aipass init update` backfills the tier files + refreshes hooks for existing projects.

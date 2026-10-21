@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_integration.py
 # Description: Integration tests for CLI main() flow
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/cli.py main() and the package's cli_entry — the routed flow end to end."""
@@ -19,6 +19,7 @@ from aipass.cli import cli_entry
 from aipass.cli.apps import cli as cli_module
 from aipass.cli.apps.cli import main
 from aipass.cli.apps.modules import display
+from aipass.cli.apps.modules import templates
 
 from .conftest import make_capture_console
 
@@ -111,3 +112,15 @@ class TestMainFlow:
         ):
             cli_entry()
         assert exc_info.value.code == 0
+
+
+class TestBareDemo:
+    """A bare `demo` has one owner, whatever order the modules are discovered in."""
+
+    @pytest.mark.parametrize("order", [(templates, display), (display, templates)])
+    def test_bare_demo_runs_the_display_demo_and_not_the_templates_demo(self, capsys, order):
+        handled = cli_module.route_command("demo", [], list(order))
+        out, _err = capsys.readouterr()
+        assert handled is True
+        assert "CLI Display Module - Demo" in out
+        assert "CLI Templates Module - Demo" not in out

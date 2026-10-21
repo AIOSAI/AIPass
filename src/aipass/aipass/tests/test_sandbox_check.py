@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sandbox_check.py
 # Description: Tests for sandbox prerequisite checker and doctor integration
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-06-10
-# Modified: 2026-10-10
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -567,51 +567,59 @@ def _platform_is_linux(monkeypatch, answer: bool) -> list[str]:
     return asked
 
 
+def _prereqs_recorded(monkeypatch) -> list[str]:
+    """Every prerequisite check doctor could run, replaced by a recorder that answers 'absent'."""
+    called: list[str] = []
+
+    def absent(name: str, answer: dict):
+        def check(*_args, **_kwargs) -> dict:
+            called.append(name)
+            return answer
+
+        return check
+
+    missing = {"found": False, "path": None}
+    stubs = {
+        "check_bwrap_present": missing,
+        "check_bwrap_functional": {"ok": False, "detail": "x", "sysctl_value": None},
+        "check_node_present": missing,
+        "check_srt_resolvable": {**missing, "install_hint": "npm install -g ..."},
+        "check_rg_present": missing,
+        "check_broker_alive": {"alive": False, "detail": "not found"},
+        "find_project_root": None,
+    }
+    for name, answer in stubs.items():
+        monkeypatch.setattr(f"{_DOCTOR}.{name}", absent(name, answer))
+    return called
+
+
 class TestCheckSandboxDoctor:
-    """Mutants: doctor `if not is_linux():` -> `if not (is_linux() and is_linux()):` reddens the 7 Linux tests;
+    """Mutants: doctor `if not is_linux():` -> `if not (is_linux() and is_linux()):` reddens the 5 Linux tests;
     -> `if not is_linux() and not is_linux():` reddens test_non_linux_one_info_line."""
 
     def test_non_linux_one_info_line(self, monkeypatch):
         asked = _platform_is_linux(monkeypatch, False)
+        monkeypatch.setattr(
+            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
+        )
         results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         assert len(results) == 1
         assert "Linux-only" in results[0].detail
         assert results[0].glyph == GLYPH_PASS
 
-    def test_flag_off_missing_prereq_is_warn(self, monkeypatch):
-        monkeypatch.delenv("AIPASS_SANDBOX_ENABLED", raising=False)
+    def test_flag_set_but_off_names_its_value_and_checks_nothing(self, monkeypatch):
         asked = _platform_is_linux(monkeypatch, True)
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": False, "raw_value": ""}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_bwrap_present", lambda: {"found": False, "path": None}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_node_present", lambda: {"found": False, "path": None}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_srt_resolvable",
-            lambda: {"found": False, "path": None, "install_hint": "npm install -g ..."},
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_rg_present", lambda: {"found": False, "path": None}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_broker_alive",
-            lambda repo_root=None: {"alive": False, "detail": "not found"},
-        )
-        monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
+        monkeypatch.setattr(f"{_DOCTOR}.check_sandbox_flag", lambda: {"enabled": False, "raw_value": "false"})
+        called = _prereqs_recorded(monkeypatch)
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
-        # THE FLOOR (v5 unentered_assert, 2026-09-08). Six rows measured from
-        # the shell the same day with every prereq stubbed absent; an empty
-        # result made "no FAIL anywhere" true by vacuity.
-        assert len(results) >= 6, f"only {len(results)} rows - the loop below proves nothing"
-        for r in results:
-            assert r.glyph != GLYPH_FAIL, f"Flag OFF should not produce FAIL, got FAIL for {r.label}"
+
+        assert [(r.label, r.glyph, r.detail) for r in results] == [
+            ("sandbox", GLYPH_PASS, "off (AIPASS_SANDBOX_ENABLED=false); prerequisites not checked")
+        ]
+        assert called == []
+        assert asked == []
 
     def test_flag_on_missing_prereq_is_fail(self, monkeypatch):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "1")
@@ -685,7 +693,7 @@ class TestCheckSandboxDoctor:
     def test_bwrap_functional_skipped_when_not_present(self, monkeypatch):
         asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": False, "raw_value": ""}
+            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_bwrap_present", lambda: {"found": False, "path": None}
@@ -714,7 +722,7 @@ class TestCheckSandboxDoctor:
     def test_bwrap_functional_included_when_present(self, monkeypatch):
         asked = _platform_is_linux(monkeypatch, True)
         monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": False, "raw_value": ""}
+            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": True, "raw_value": "1"}
         )
         monkeypatch.setattr(
             "aipass.aipass.apps.modules.doctor.check_bwrap_present", lambda: {"found": True, "path": "/usr/bin/bwrap"}
@@ -777,40 +785,17 @@ class TestCheckSandboxDoctor:
         func_result = [r for r in results if r.label == "bwrap functional"][0]
         assert "apparmor_restrict_unprivileged_userns=1" in func_result.detail
 
-    def test_inert_suffix_when_flag_off(self, monkeypatch):
+    def test_flag_off_is_one_pass_row_with_no_warn_and_no_prereq_check(self, monkeypatch):
+        """Off, the hook gates contain: five inert WARN rows (bwrap, node, srt, rg, broker) were noise."""
         asked = _platform_is_linux(monkeypatch, True)
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_sandbox_flag", lambda: {"enabled": False, "raw_value": ""}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_bwrap_present", lambda: {"found": False, "path": None}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_node_present", lambda: {"found": False, "path": None}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_srt_resolvable",
-            lambda: {"found": False, "path": None, "install_hint": "npm install -g ..."},
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_rg_present", lambda: {"found": False, "path": None}
-        )
-        monkeypatch.setattr(
-            "aipass.aipass.apps.modules.doctor.check_broker_alive",
-            lambda repo_root=None: {"alive": False, "detail": "not found"},
-        )
-        monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
+        monkeypatch.setattr(f"{_DOCTOR}.check_sandbox_flag", lambda: {"enabled": False, "raw_value": ""})
+        called = _prereqs_recorded(monkeypatch)
 
         results = _sandbox_via_doctor()
-        assert asked == ["is_linux"]
-        missing_results = [r for r in results if r.glyph == GLYPH_WARN]
-        # THE FLOOR AND THE ESCAPE, BOTH (v5 unentered_assert + assertion_shape,
-        # 2026-09-08). Measured from the shell the same day: five WARN rows -
-        # bwrap, node, srt, rg, broker daemon - and NOT the sandbox flag row,
-        # which reads PASS when the flag is off. So the `or r.label ==
-        # "sandbox flag"` arm never once fired, and it acquitted every row it
-        # would have reached. Empty results made the loop vacuous on top.
-        assert len(missing_results) >= 5, f"only {len(missing_results)} WARN rows - the loop proves nothing"
-        assert "sandbox flag" not in [r.label for r in missing_results]
-        for r in missing_results:
-            assert "inert" in r.detail, f"Missing prereq {r.label} should show inert suffix"
+
+        assert [(r.label, r.glyph, r.detail, r.remediation) for r in results] == [
+            ("sandbox", GLYPH_PASS, "off (AIPASS_SANDBOX_ENABLED unset); prerequisites not checked", "")
+        ]
+        assert [r for r in results if r.glyph == GLYPH_WARN] == []
+        assert called == []
+        assert asked == []

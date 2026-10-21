@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_top.py
 # Description: Tests for the leaderboard reader - drone @canary top, its JSON form and its refusals
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/top.py and the leaderboard reader it drives."""
@@ -180,6 +180,13 @@ def test_a_non_ascii_name_survives_the_json_form(monkeypatch, capsys, tmp_path):
     assert _run(monkeypatch, ["top", "--json", "1", _board(tmp_path, "zoë 4\n")]) == 0
 
     assert json.loads(capsys.readouterr().out) == [{"name": "zoë", "count": 4}]
+
+
+def test_a_no_break_space_is_part_of_the_name_not_a_separator(monkeypatch, capsys, tmp_path):
+    """U+00A0 is data inside a field, the same ruling align makes; only space and tab separate."""
+    assert _run(monkeypatch, ["top", "--json", "1", _board(tmp_path, "ann lee 4\n")]) == 0
+
+    assert json.loads(capsys.readouterr().out) == [{"name": "ann lee", "count": 4}]
 
 
 BAD_ARGUMENTS = {

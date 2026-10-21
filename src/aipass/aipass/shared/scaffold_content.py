@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-22
-# Modified: 2026-07-21
+# Modified: 2026-10-21
 # =============================================
 
 """
 Scaffold Content — template generators for `aipass init`, `aipass new`, `aipass adopt`
 
 Pure string-returning functions that produce the content for each scaffold
-file (CLAUDE.md, AGENTS.md, .gitignore, etc.). Shared across every command
+file (AGENTS.md, .gitignore, etc.). Shared across every command
 that mints AIPass project files, so there is exactly one source of truth
 per template — no per-command copies to drift apart.
 
@@ -53,8 +53,7 @@ def readme_md(name: str) -> str:
         f"{name.lower()}/\n"
         f"  {name}_REGISTRY.json    # Agent registry\n"
         "  .aipass/                 # Prompts (injected per-turn)\n"
-        "  CLAUDE.md               # Claude Code instructions\n"
-        "  AGENTS.md               # Codex instructions\n"
+        "  AGENTS.md               # agent instructions\n"
         f"  src/{name.lower()}/              # Project package\n"
         "    <agent_name>/         # Created via aipass init agent\n"
         "```\n"
@@ -86,9 +85,11 @@ def readme_md(name: str) -> str:
 
 
 def agents_md(name: str) -> str:
-    """Generate AGENTS.md content — Codex equivalent of CLAUDE.md for projects."""
+    """Generate AGENTS.md content, word for word the host's .aipass/project_AGENTS.md."""
     return (
         f"# {name}\n"
+        "<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) "
+        "— the prompt format rules. -->\n"
         "\n"
         "Agent workspace powered by AIPass.\n"
         "\n"
@@ -100,7 +101,7 @@ def agents_md(name: str) -> str:
         " - Read: `.trinity/passport.json`, `.trinity/local.json`, "
         "`.trinity/observations.json`, `README.md`\n"
         "\n"
-        "Use drone commands for all operations. Never raw git, gh, or file access "
+        "Use drone commands for all operations. Never raw git, gh, file access, or python -m "
         "when drone provides it.\n"
         "\n"
         "# Memories\n"

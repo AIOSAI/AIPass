@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-18
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -369,7 +369,7 @@ def test_update_project_creates_missing_managed_dirs(tmp_path, monkeypatch, thro
     assert local_settings.exists() is not throwaway_home
     # tier0_kernel, tier1_navmap, hooks.json, settings.json, prep, plus settings.local.json for a real home
     assert len(result["updated_files"]) == (5 if throwaway_home else 6)
-    assert len(result["already_current"]) >= 2
+    assert str((target / "AGENTS.md").resolve()) in result["already_current"]
 
 
 def test_update_project_skipped_files_count(tmp_path):
@@ -411,8 +411,52 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
 
     data = json.loads(local_settings_path.read_text(encoding="utf-8"))
     assert data["env"]["AIPASS_HOME"] == str(host)
-    assert data["claudeMdExcludes"] == [(host / "CLAUDE.md").as_posix(), (host / ".claude" / "CLAUDE.md").as_posix()]
+    assert data["claudeMdExcludes"] == [
+        (host / "CLAUDE.md").as_posix(),
+        (host / ".claude" / "CLAUDE.md").as_posix(),
+        (host / "AGENTS.md").as_posix(),
+        (host / ".claude" / "AGENTS.md").as_posix(),
+    ]
     assert str(local_settings_path) in result["updated_files"]
+    entry = next(e for e in result["files"] if e["path"] == ".claude/settings.local.json")
+    assert entry["reason"] == ("merge adds claudeMdExcludes CLAUDE.md, .claude/CLAUDE.md, AGENTS.md, .claude/AGENTS.md")
+
+
+def _plan_reason_for(tmp_path, monkeypatch, existing: dict) -> str:
+    host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    claude_dir = target / ".claude"
+    claude_dir.mkdir()
+    text = json.dumps(existing, indent=2).replace("{host}", host.as_posix()) + "\n"
+    (claude_dir / "settings.local.json").write_text(text, encoding="utf-8")
+    result = bootstrap.update_project(target, apply=False)
+    return next(e for e in result["files"] if e["path"] == ".claude/settings.local.json")["reason"]
+
+
+def test_update_plan_names_only_the_agents_md_pair_when_env_already_holds_the_home(tmp_path, monkeypatch):
+    """The fixed 'merge adds AIPASS_HOME' every project read while only the AGENTS.md pair was added."""
+    existing = {
+        "env": {"AIPASS_HOME": str(tmp_path / "host")},
+        "claudeMdExcludes": ["{host}/CLAUDE.md", "{host}/.claude/CLAUDE.md"],
+    }
+    reason = _plan_reason_for(tmp_path, monkeypatch, existing)
+    assert reason == "merge adds claudeMdExcludes AGENTS.md, .claude/AGENTS.md"
+
+
+def test_update_plan_names_the_env_key_and_the_fence_when_both_grow(tmp_path, monkeypatch):
+    reason = _plan_reason_for(
+        tmp_path, monkeypatch, {"claudeMdExcludes": ["{host}/CLAUDE.md", "{host}/.claude/CLAUDE.md"]}
+    )
+    assert reason == "merge adds AIPASS_HOME; adds claudeMdExcludes AGENTS.md, .claude/AGENTS.md"
+
+
+def test_update_plan_names_a_moved_home_as_changed_not_added(tmp_path, monkeypatch):
+    fenced = ["{host}/CLAUDE.md", "{host}/.claude/CLAUDE.md", "{host}/AGENTS.md", "{host}/.claude/AGENTS.md"]
+    reason = _plan_reason_for(
+        tmp_path, monkeypatch, {"env": {"AIPASS_HOME": "an-older-home"}, "claudeMdExcludes": fenced}
+    )
+    assert reason == "merge changes AIPASS_HOME"
 
 
 def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monkeypatch):
@@ -463,11 +507,13 @@ def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, mo
         custom_entry,
         (host / "CLAUDE.md").as_posix(),
         (host / ".claude" / "CLAUDE.md").as_posix(),
+        (host / "AGENTS.md").as_posix(),
+        (host / ".claude" / "AGENTS.md").as_posix(),
     ]
 
 
-def test_update_project_never_rewrites_a_seed(tmp_path):
-    """Seeds exist to be filled in, so update leaves AGENTS.md and CLAUDE.md alone.
+def test_update_project_never_rewrites_the_agents_md_seed_or_a_project_claude_md(tmp_path):
+    """Seeds exist to be filled in; a project's own CLAUDE.md is its owner's to retire, not update's.
 
     No sidecar either: once a seed exists, a template to diff against is noise.
     """
@@ -483,11 +529,13 @@ def test_update_project_never_rewrites_a_seed(tmp_path):
     for seed_name in ("AGENTS.md", "CLAUDE.md"):
         seed = target / seed_name
         assert seed.read_text(encoding="utf-8") == f"# My own {seed_name}\n"
-        assert str(seed.resolve()) in result["already_current"]
         assert str(seed.resolve()) not in result["updated_files"]
         assert not seed.with_name(f"{seed_name}.aipass-new").exists()
-        entry = next(e for e in result["files"] if e["path"] == seed_name)
-        assert entry["reason"] == "seed — never rewritten"
+    agents = target / "AGENTS.md"
+    assert str(agents.resolve()) in result["already_current"]
+    entry = next(e for e in result["files"] if e["path"] == "AGENTS.md")
+    assert entry["reason"] == "seed — never rewritten"
+    assert not [e for e in result["files"] if e["path"] == "CLAUDE.md"]
 
 
 def test_update_project_creates_missing_agents_md(tmp_path):
@@ -505,6 +553,7 @@ def test_update_project_creates_missing_agents_md(tmp_path):
     assert str(agents_md.resolve()) in result["updated_files"]
     content = agents_md.read_text(encoding="utf-8")
     assert "# MISS" in content
+    assert not (target / "CLAUDE.md").exists()
 
 
 def test_update_project_agents_md_already_current(tmp_path):
