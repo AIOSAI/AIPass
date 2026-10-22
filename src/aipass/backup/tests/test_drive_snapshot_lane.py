@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_drive_snapshot_lane.py
 # Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor and Drive headroom
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-16
-# Modified: 2026-10-21
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
@@ -136,6 +136,27 @@ class TestTheLaneUploadsTheSnapshotStore:
         assert result["success"] is False
         assert result["error"] == f"Snapshot store not found: {project / '.backup' / 'snapshots'}"
         assert uploads == []
+        assert command_failed() is True
+
+    def test_a_failed_auth_prints_its_reason_as_the_last_line_and_fails_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The daemon and the host-api read the exit code and the stdout tail; a log line reaches neither.
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("a.txt",))
+        client = _offline_client(monkeypatch)
+        client.authenticate.return_value = False
+        client.last_error = "Google credential refresh failed, transient network error"
+
+        result = drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert result["success"] is False
+        assert uploads == []
+        assert command_failed() is True
+        last = capsys.readouterr().out.splitlines()[-1]
+        assert last == (
+            "Drive sync auth failed: Google credential refresh failed, transient network error. Nothing uploaded."
+        )
 
     def test_files_land_under_the_projects_snapshot_folder_on_drive(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

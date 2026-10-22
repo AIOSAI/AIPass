@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.6.0
+# Version: 2.6.1
 # Created: 2026-04-17
-# Modified: 2026-10-21
+# Modified: 2026-10-22
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -145,19 +145,27 @@ def _drive_sync_run(
         "error": None,
     }
 
+    # Both early refusals fail the command like the later ones: the daemon and the host-api
+    # read the exit code and the stdout tail, and a log line alone was reported as "passed".
     client = DriveClient()
     if not client.authenticate():
         result["error"] = client.last_error or "Drive authentication failed"
+        result["error_shown"] = True
         result["duration"] = time.time() - start
         logger.warning(f"[backup] Drive sync auth failed: {result['error']}")
+        console.print(f"Drive sync auth failed: {result['error']}. Nothing uploaded.", markup=False)
+        mark_command_failed()
         return result
 
     store_path = build_snapshot_path(project_root)
     result["location"] = str(store_path)
     if not store_path.exists():
         result["error"] = f"Snapshot store not found: {store_path}"
+        result["error_shown"] = True
         result["duration"] = time.time() - start
         logger.warning(f"[backup] {result['error']}")
+        console.print(f"{result['error']}. Nothing uploaded.", markup=False)
+        mark_command_failed()
         return result
 
     # Re-filter through .backupignore: legacy stores hold files swept in before a rule was added.

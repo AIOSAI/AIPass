@@ -180,6 +180,13 @@ command is marked failed, and the verb exits 2, like a headroom refusal. A
 tracker that cannot be checked is not trusted. Creating a new root folder
 never touches the tracker; the listing at run start is the only heal.
 
+The two refusals before the listing fail the run the same way: a failed
+authentication ends with `Drive sync auth failed: <reason>. Nothing uploaded.`
+and a project without a snapshot store with `Snapshot store not found: <path>.
+Nothing uploaded.` as the last stdout line, the command marked failed, exit 2.
+The daemon's job mail and the host API's job record read that exit and that
+line; a run that only logged its reason read as passed.
+
 ## The tracker answers for one lane
 
 `.backup/drive_tracker.json` records what has been uploaded, keyed by path
