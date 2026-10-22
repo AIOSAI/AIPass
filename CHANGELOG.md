@@ -18,6 +18,7 @@ PyPI version — not the changelog header.
 
 ### Changed
 
+- **AIPass's Drive upload is its own nightly job** (@backup; `.daemon/schedule.json`: `nightly-drive-aipass` at 05:45 with a 3600 s timeout; AIPass's `drive_sync` setting off, so `nightly-all` skips that step). Measured by hand on 2026-10-21: the Drive lane runs long and does not hang, about 58 files a minute whatever their size, so a full catch-up of 18,714 files is five hours and a normal night costs the files the snapshot changed (108 to 6,742 over four nights). Inside `nightly-all` that upload hit the 1800 s timeout two nights running and the lane never completed for AIPass. One hour covers about 3,500 changed files; a timeout saves the tracker and the next night sends only the rest. `nightly-all` stays at 05:00 / 1800 s, measured at 8.5 to 14 min without the upload, and its note now says catch-up is opt-in.
 - **The merge playbook bumps the version and dates the CHANGELOG before the push** (`flow/templates/playbook_plans/merge.md`). CI runs once on the final state; a bump committed after green was a second full run for nothing (the owner, 2026-10-21). Pre-flight now starts the local audit gate in the background first, since it takes over twenty minutes and grows with the fleet; section 7 verifies the versions and never bumps.
 
 ### Fixed
