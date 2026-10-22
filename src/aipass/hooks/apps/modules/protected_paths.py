@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -42,11 +42,15 @@ CONFIG = "the AIPass hook config (.aipass/hooks.json)"
 LIVE = "the promoted hook code (.live-*; drone @hooks promote writes it)"
 GIT_DATA = "the repository's git data (.git/; drone @git is the interface)"
 REGISTRY = "a sealed registry (*_REGISTRY.json; its owner's drone verbs write it)"
+SECRETS = "the secrets store (~/.secrets; no seat writes it, the admin seat included)"
+# Named to be refused, never opened: no seat writes under it (R7).
+_STORE = ".secrets"
 
 # Inside a directory, what marks it as holding a protected file (protected_within).
 _HELD_INSIDE = (
     (".claude", "the provider hook wiring and scripts (.claude/)"),
     (".git/hooks", "git's own hooks (.git/hooks/)"),
+    (_STORE, SECRETS),
 )
 
 
@@ -74,6 +78,8 @@ def _by_name(spelled: str) -> str | None:
     for pattern, what in _ANYWHERE:
         if pattern.search(spelled):
             return what
+    if _under(spelled, Path.home() / _STORE):
+        return SECRETS
     if spelled.casefold() == _spelled(Path.home() / ".aipass" / "trusted_projects.json").casefold():
         return TRUST
     home = aipass_home()

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.1.1
-# Description: Raw git and gh, GitHub API writes and credentials for every seat; protected file changes (PreToolUse)
+# Version: 5.2.0
+# Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -19,6 +19,7 @@ Reference: docs/git_gate.md
 import importlib
 import json
 import os
+import re
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -72,6 +73,8 @@ _HTTPIE_BODY_FLAGS = ("-f", "--form", "--multipart", "--raw")
 _SECRET_PROGRAMS = frozenset({"secret-tool", "kwallet-query"})
 _SECURITY_READS = frozenset({"find-generic-password", "find-internet-password", "dump-keychain"})
 _CREDENTIAL_FILES = ("gh/hosts.yml", ".git-credentials")
+# R7: a .secrets path segment with a slash or tilde beside it; a bare word ".secrets" is a pattern or prose.
+_STORE_WORD = re.compile(r"[/~]\.secrets(?![\w.-])|(?<![\w.-])\.secrets/")
 
 RAW_GIT_REFUSED = (
     "Raw git is refused for every seat, the admin seat included (the owner's ruling, 2026-10-04: "
@@ -119,6 +122,22 @@ CREDENTIAL_REFUSED = (
     "Seen: {what}.\n"
     "\n"
     "Nothing a seat does needs the token: drone @git holds it."
+)
+
+_SECRETS_HEAD = (
+    " the secrets store is refused for every seat, the admin seat included (the owner's rulings, 2026-09-02 and "
+    "2026-10-22: agents get actions, never values). Caller: {caller}.\n"
+    "Seen: {what}.\n"
+    "\n"
+)
+
+SECRETS_READ_REFUSED = (
+    "Reading" + _SECRETS_HEAD + "Nothing a seat does needs a value: @api holds them and performs the action. "
+    "drone @api --help lists the doors."
+)
+
+SECRETS_WRITE_REFUSED = (
+    "Writing" + _SECRETS_HEAD + "A new value is the owner's hand or an @api verb. drone @api --help lists the doors."
 )
 
 GITHUB_HTTP_REFUSED = (
@@ -274,6 +293,16 @@ def _credential_read(inv, reader) -> str:
     return reader.program_credential(inv)
 
 
+def _secrets_read(inv, reader) -> str:
+    """What names the secrets store in this program (R7), "" when nothing does; drone is the door."""
+    if inv.program == "drone":
+        return ""
+    for arg in inv.argv[1:]:
+        if _STORE_WORD.search(arg.replace("\\", "/")):
+            return f"a secrets store path ({arg})"
+    return reader.program_credential(inv, reader.SOURCE_SECRETS_SHAPES)
+
+
 def _flag_value(args, index: int, names: tuple[str, ...]) -> str | None:
     """The value of a flag in *names* at args[index] (next word, ``--x=v`` or ``-Xv``), None when it is not one."""
     arg = args[index]
@@ -328,7 +357,11 @@ def _httpie_write(program: str, args) -> str:
 
 
 def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
-    """R5 and R6, for every seat: git/gh from an interpreter, the gh credential, GitHub API writes."""
+    """R5, R6 and R7, for every seat: git/gh from an interpreter, the gh credential, GitHub writes, the store."""
+    store_seen = next((seen for inv in invocations if (seen := _secrets_read(inv, reader))), "")
+    if store_seen:
+        logger.warning("[HOOKS] git_gate: store read refused: %s", store_seen)
+        return _block(SECRETS_READ_REFUSED.format(caller=seat.named, what=store_seen))
     launches, reader_commands, writes = [], [], []
     for inv in invocations:
         launches.append(reader.program_launch(inv))
@@ -346,7 +379,10 @@ def _program_refusal(invocations: list, reader, seat: _Seat) -> dict | None:
 
 
 def _protected_refusal(path: str, what: str, lane: str, seat: _Seat) -> dict | None:
-    """The refusal for a change to a gate-switching file; None on the verified admin seat."""
+    """The refusal for a change to a gate-switching file; None on the verified admin seat, the store aside (R7)."""
+    if what == _protected_paths().SECRETS:
+        logger.warning("[HOOKS] git_gate: secrets store write refused: %s (%s) caller=%s", path, lane, seat.named)
+        return _block(SECRETS_WRITE_REFUSED.format(caller=seat.named, what=f"{path} ({lane})"))
     if seat.admin:
         logger.info("[HOOKS] git_gate: protected change ALLOWED for the admin seat: %s (%s)", path, lane)
         return None

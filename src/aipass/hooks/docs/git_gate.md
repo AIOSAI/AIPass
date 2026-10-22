@@ -15,7 +15,8 @@ The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to
 
 **What it blocks:** raw `git` and raw `gh`, read or write, for EVERY seat, the verified admin seat
 included; git or gh launched from inside a program, the gh credential, and GitHub API writes, for every
-seat too; and writes to the protected files off the admin seat (below).
+seat too; reading or writing the secrets store (R7), for every seat; and writes to the protected files
+off the admin seat (below).
 
 **If drone cannot do it, it cannot be done.** No seat runs git
 or gh raw: `modules/admin_seat`'s grant opens none of these lanes. A git refusal (`RAW_GIT_REFUSED`)
@@ -78,6 +79,39 @@ lookups, python `keyring.get_password`, `hosts.yml`, `.git-credentials`), and so
 sending a non-GET method or a body to `api.github.com` (`GITHUB_HTTP_REFUSED`: curl, wget, httpie, or
 an interpreter's request). A text gate cannot close this fully; `bash_writes.NOT_CAUGHT` says so, and
 the kernel sandbox ([sandbox.md](sandbox.md)) is the real boundary.
+
+**R7: the secrets store.** Agents get actions, never values (the owner's rulings, 2026-09-02: the admin
+seat changes any file except `.secrets` and sudo; 2026-10-22). Reading or writing `~/.secrets` is refused
+for EVERY seat, the verified admin seat included, on two lanes:
+
+- **Reads, in the R6 lane** (`_secrets_read`, `SECRETS_READ_REFUSED`, logged at warning). Refused: any
+  argv word, for any program, that names the store as a path — a `.secrets` segment with a slash or
+  tilde beside it (`~/.secrets`, `$HOME/.secrets/aipass/.env`, `/home/<user>/.secrets/`, `.secrets/aipass`),
+  `\` read as `/` (`_STORE_WORD`); and interpreter program text (`python -c`, a heredoc, a script file,
+  `node -e`, `perl -e`, every language the reader reads) that shows `.secrets`, `SECRETS_BASE`,
+  `aipass.api.apps.modules.secrets`, `aipass.api.apps.handlers.auth.secrets|keys|env` (dotted or
+  `from … import …`), `get_secret(`, `set_secret(`, `list_secrets(` or `get_api_key(`
+  (`shell_reader.SOURCE_SECRETS_SHAPES`, matched the way R6's credential shapes are). A bare word
+  `.secrets` with no slash or tilde is a grep pattern or prose and passes as an argv word:
+  `grep -rn ".secrets" src/aipass/backup` runs; inside interpreter text it does not.
+- **Writes, in the protected lane** (`protected_paths.SECRETS`, `SECRETS_WRITE_REFUSED`). Everything under
+  `~/.secrets` is protected, and a directory holding `.secrets` counts when it is deleted or moved whole.
+  The admin grant does not open it. A redirect into the store, and the Edit, Write, MultiEdit and
+  NotebookEdit tools on a store path, are refused; `cp`, `mv`, `chmod`, `tee`, `rm`, `shred` naming a
+  store path are refused already by the read lane's argv rule.
+
+**The door.** The program `drone` is exempt and nothing else is: `drone @api get-secret <provider> <slug>`
+(masked output) and every other `drone @api` route pass. A new value is the owner's own hand in their
+terminal, or an `@api` verb. The refusal names the caller and what was seen, and points at
+`drone @api --help`.
+
+**The second wall.** The owner's `~/.claude/settings.json` deny rules, which `aipass doctor` wires, refuse
+the plain readers (`cat ~/.secrets/…` and kin) before any hook runs. They are a list of command names;
+`python`, `grep`, `find`, `base64` and the rest pass them, and R7 is what refuses those. A text gate is
+not the whole boundary: a path assembled at run time (`"." + "secrets"`) is not seen, and the kernel
+sandbox ([sandbox.md](sandbox.md)) is the real one.
+
+**Reach.** `git_gate` ships in every project `aipass init` creates, so R7 runs in each of them too.
 
 **What it protects: the files that switch the gates.** `modules/protected_paths.py` names them, and
 `git_gate` refuses any change to one of them on the edit tools (NotebookEdit included) AND on the Bash
