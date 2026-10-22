@@ -256,10 +256,8 @@ nothing else: a run is `drone @backup <lane> <root>` (`--quiet` on every lane bu
 `drive_sync`, which has no such flag); a cancel is `drone @backup stop <root> <lane>`;
 status is `drone @backup status <root> --json [--sizes]`, passed through with `project`
 and `root` added.
-The root comes from the read lane's resolver, the seat in any case or a census name, so
-@backup is handed a path this server did not compose and never a `@name`. A status answer
-that is not one JSON object is a 503 saying `--json` is not on this machine; the Rich panel
-is never scraped.
+The root comes from the read lane's resolver (the seat or a census name), never a `@name`.
+A status answer that is not one JSON object is a 503; the Rich panel is never scraped.
 
 **A job is `{job, project, lane, state, started_at}`**; a finished one adds `finished_at`,
 `exit` (`null` when the lane never answered), `summary` and `error`. Refusals ride the
@@ -275,12 +273,14 @@ log line. Not a list of objects: 503.
 **Cancel never touches the job table.** `stop` runs on the request thread (60 s timeout,
 over @backup's 30 s wait); the job closes when its lane exits.
 
-**Start and poll, because a lane outlives a request.** A lane can take minutes and its
-timeout is 30 minutes, longer than a phone keeps a request open. So the run answers **202** with the job at once and runs the lane on a worker
-thread; the phone polls the job every few seconds. One job per project and lane runs at a
-time, the second a 400 naming who started first and when; different lanes overlap and
+**Start and poll, because a lane outlives a request.**
+The run answers **202** with the job at once and runs the lane on a worker thread; the phone polls the job every few seconds. One job per project and lane at a
+time (a second is a 400 naming the first); different lanes overlap and
 @backup's own locks decide the rest. `summary` is the last 600 characters of the output,
-verbatim. A job ends `done` (exit 0), `stopped` (130) or `failed` (anything else). A run that never reached @backup is a 503 and opens no job; one that died behind
+verbatim. A job ends `done` (exit 0), `stopped` (130) or `failed` (anything else).
+snapshot and versioned get 30 min, all a day; drive_sync has no limit (a Drive
+rebuild is hours; cancel ends it). At a limit the server asks @backup to `stop` the
+lane, which exits 130 and clears its running file; drone's hang guard backs it up. A run that never reached @backup is a 503 and opens no job; one that died behind
 the door is a `failed` job with drone's sentence in `error`.
 
 **A restart forgets every job.** Jobs live in the server's memory, and a finished one is
