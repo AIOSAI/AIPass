@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Added
+
+- **seedgo's `host_portability` gains arm F: a file that empties git's config must name a commit email** (@seedgo; `host_portability_check.py` 1.4.0, `host_portability_content.py` 1.3.0, `host_portability.md` v1.4, `tests/test_aipass_standards.py` 1.3.0, 4 pins red first, 8 mutants red, fleet sweep 2,140 files 0 rows, audit 100). From PR #800's red: a test fixture set `GIT_CONFIG_GLOBAL` to an empty file with no `GIT_AUTHOR_EMAIL` or `GIT_COMMITTER_EMAIL`, green on a developer machine where git auto-detects one and exit 128 on a runner. A file holding `GIT_CONFIG_GLOBAL` or `GIT_CONFIG_NOSYSTEM` must also hold both emails or a `user.email` string; one row per file at the first emptying line. File-local because the fixture that empties the config and the fixture that commits can live in different files.
+
 ### Fixed
 
 - **drone's `aipass_github` test fixture commits as a fixed identity** (@drone, by devpulse; `tests/conftest.py` 1.3.1). PR #800's first CI run erred at setup in all 13 `TestRestore` cases on every Python: the fixture emptied git's global config but set no author, and a GitHub runner has no identity git can auto-detect, so `git commit` exited 128. A developer machine passed because git derived one from the OS user. Same four `GIT_AUTHOR_*`/`GIT_COMMITTER_*` variables the gh-door fixture already sets.

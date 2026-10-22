@@ -1,6 +1,6 @@
 # Host Portability
-**Status:** Draft v1.3 (arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
-**Date:** 2026-10-10
+**Status:** Draft v1.4 (arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
+**Date:** 2026-10-22
 
 ---
 
@@ -148,6 +148,32 @@ with `home = Path.home()` as the stop beside a resolved `search`:
 `apps/modules/admin_seat.py:99`, `apps/modules/grounding_content.py:225` and
 `:406`, `apps/modules/release_notice.py:78`. **Cure:** resolve both sides
 (`Path.home().resolve()`), as loader 2.1.0 does.
+
+### Arm F — git's config emptied with no commit email (file-local)
+
+A test that sets `GIT_CONFIG_GLOBAL` to an empty file, or `GIT_CONFIG_NOSYSTEM`,
+reads no `user.email` from the host. A developer machine still commits: git
+derives an email from the OS user and the hostname. A GitHub runner cannot, and
+`git commit` exits 128 (`unable to auto-detect email address`). Specimen: drone's
+`aipass_github` fixture in `tests/conftest.py` 1.3.0 emptied the config and set
+no identity; `dev_tree` in `test_git_access_gh_door.py` committed on top of it,
+13 setup errors on every Python. 1.3.1 sets the four `GIT_AUTHOR_*` /
+`GIT_COMMITTER_*` variables.
+
+**What it reads:** a file holding the string `GIT_CONFIG_GLOBAL` or
+`GIT_CONFIG_NOSYSTEM` must also hold `GIT_AUTHOR_EMAIL` **and**
+`GIT_COMMITTER_EMAIL` (git resolves the two separately), or a string containing
+`user.email` (`git config user.email`, `-c user.email=`). One row per file, at
+the first emptying line.
+
+**Why file-local:** the fixture that empties the config cannot know which
+consumer commits, and the consumer is often another file. The file that takes
+the host's identity away gives one back.
+
+**Not read:** the name. A runner's user has one; the email is what fails.
+
+**Fleet, 2026-10-22:** 5 test files empty git's config, all drone; 0 rows. The
+specimen at 1.3.0 is convicted at the `GIT_CONFIG_GLOBAL` line.
 
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,
