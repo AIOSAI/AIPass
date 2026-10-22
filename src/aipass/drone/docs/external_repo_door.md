@@ -120,9 +120,11 @@ argv the door builds.
 
 ## Two design constraints
 
-**A module routed in-process has no caller stamp.** `@git` runs inside drone, so the
-`AIPASS_CALLER_*` variables the rail reads are unset unless the door stamps them. It stamps them
-itself and restores them in a `finally`, so the rail sees the same shape it sees for a routed child.
+**A module routed in-process is stamped like a routed child.** `@git` runs inside drone, so the
+`AIPASS_CALLER_*` variables the rail reads would be unset or inherited. `route_module_command`
+stamps them fresh around every module call and restores them after, and the door stamps again
+around its own rail call (`caller_stamp` in `router_handler.py`), so a direct caller of the door
+gets the same shape.
 
 **A new flag can eat a passthrough's own flag.** The door's `--repo` must never swallow gh's
 `--repo OWNER/NAME` on `issue`, `run`, `workflow` and `release`. The exclusion is explicit in

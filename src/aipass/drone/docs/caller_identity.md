@@ -73,6 +73,11 @@ lands on the TARGET's tree, not the caller's. The caller's own directory travels
 `AIPASS_CALLER_CWD`. That is the contract, and it is why a lane that needs the caller's project
 (the deletion record, the external-repo door) reads the stamp rather than the cwd.
 
+A module routed in-process (`@git`, `@spawn`, `@seedgo`, `@cli`) has no child to stamp, so
+`route_module_command()` stamps this process with the same three variables, fresh from the cwd and
+`AIPASS_BRANCH_NAME`, for the duration of the call and puts every prior value back. An inherited
+stamp proves nothing about the caller; a gate that reads the rail inside a module sees the real one.
+
 ---
 
 ## Related

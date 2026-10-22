@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_module_registry.py
 # Description: module_registry orchestrator - handle_command routing
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-04-05
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/module_registry.py and apps/handlers/module_registry_handler.py."""
@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -395,6 +396,26 @@ class TestRouteModuleCommand:
         ):
             mrh.route_module_command("logext", "ping")
         mock_jh.log_operation.assert_called_once_with("route_module_command", {"module": "logext", "command": "ping"})
+
+    def test_an_in_process_module_sees_the_caller_stamp_and_the_env_is_restored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A module run inside drone gets the AIPASS_CALLER_* a routed child gets, and the stamp dies with the call."""
+        monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"seatmod": "fake.seat.mod"})
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_BRANCH_NAME", "devpulse")
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "stale")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        seen: dict[str, str] = {}
+        mock_mod = MagicMock()
+        mock_mod.handle_command.side_effect = lambda command, args: seen.update(os.environ) or True
+        monkeypatch.setitem(sys.modules, "fake.seat.mod", mock_mod)
+        with patch(f"{_HANDLER}.json_handler", autospec=True):
+            mrh.route_module_command("seatmod", "status")
+        assert seen["AIPASS_CALLER_BRANCH"] == "devpulse"
+        assert seen["AIPASS_CALLER_CWD"] == str(tmp_path.resolve())
+        assert os.environ["AIPASS_CALLER_BRANCH"] == "stale"
+        assert "AIPASS_CALLER_CWD" not in os.environ
 
 
 class TestGetModuleHelp:
