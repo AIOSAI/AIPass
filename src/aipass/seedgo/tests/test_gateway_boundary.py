@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_gateway_boundary.py
 # Description: Tests for the gateway boundary standards checker
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-10-03
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/gateway_boundary_check.py."""
@@ -221,3 +221,89 @@ class TestContractShape:
 
     def test_unparseable_source_does_not_crash(self, tmp_path: Path):
         assert _check(tmp_path, "def broken(:\n")["passed"] is True
+
+
+class TestTheSecretsStoreIsApisAlone:
+    """Agents get actions, never values: outside @api a file never imports, paths or calls the store."""
+
+    def test_importing_the_secrets_door_is_a_row_naming_api(self, tmp_path: Path):
+        source = "from aipass.api.apps.modules.secrets import get_secret\n"
+        result = _check(tmp_path, source, branch="prax")
+        assert result["passed"] is False
+        assert "line 1" in result["checks"][0]["message"] and "@api" in result["checks"][0]["message"]
+
+    def test_a_string_import_of_the_keys_handler_is_a_row(self, tmp_path: Path):
+        source = "import importlib\nkeys = importlib.import_module('aipass.api.apps.handlers.auth.keys')\n"
+        assert "line 2" in _check(tmp_path, source, branch="skills")["checks"][0]["message"]
+
+    def test_a_path_built_into_the_store_is_a_row(self, tmp_path: Path):
+        source = "from pathlib import Path\n\nSESSION_DIR = Path.home() / '.secrets' / 'aipass' / 'telegram'\n"
+        assert "line 3" in _check(tmp_path, source, branch="skills")["checks"][0]["message"]
+
+    def test_an_expanded_store_literal_is_a_row(self, tmp_path: Path):
+        source = "import os\nENV = os.path.expanduser('~/.secrets/aipass/.env')\n"
+        assert "line 2" in _check(tmp_path, source, branch="daemon")["checks"][0]["message"]
+
+    def test_a_call_above_its_late_import_is_the_row_and_names_the_action(self, tmp_path: Path):
+        source = (
+            "def token():\n"
+            "    return secrets.get_secret('telegram', 'bot')\n"
+            "\n"
+            "\n"
+            "from aipass.api.apps.modules import secrets\n"
+        )
+        message = _check(tmp_path, source, branch="skills")["checks"][0]["message"]
+        assert "line 2" in message and "get_secret" in message
+
+    def test_one_row_per_file_however_many_reaches(self, tmp_path: Path):
+        source = (
+            "from pathlib import Path\n"
+            "from aipass.api.apps.handlers.auth import secrets\n"
+            "BASE = Path.home() / '.secrets'\n"
+            "VALUE = secrets.get_secret('a', 'b')\n"
+        )
+        result = _check(tmp_path, source, branch="skills")
+        assert [check["message"][:7] for check in result["checks"]] == ["line 2:"]
+
+    def test_the_floor_naming_secrets_as_a_pattern_is_not_a_row(self, tmp_path: Path):
+        """backup's drive floor: '.secrets/' is a name to keep out, not a path to open."""
+        source = "NEVER_LEAVES = (\n    '.env',\n    '.secrets/',  # any directory named .secrets\n)\n"
+        assert _check(tmp_path, source, branch="backup")["passed"] is True
+
+    def test_a_docstring_naming_the_store_is_not_a_row(self, tmp_path: Path):
+        source = '"""Session is saved to ~/.secrets/aipass/telegram/.telethon.session."""\n'
+        assert _check(tmp_path, source, branch="skills")["passed"] is True
+
+    def test_api_reaching_its_own_store_is_not_a_row(self, tmp_path: Path):
+        source = (
+            "from pathlib import Path\n"
+            "from aipass.api.apps.handlers.auth import keys\n"
+            "BASE = Path.home() / '.secrets' / 'aipass'\n"
+            "KEY = keys.get_api_key('openrouter')\n"
+        )
+        assert _check(tmp_path, source, branch="api")["passed"] is True
+
+    def test_a_renamed_function_called_above_its_late_import_is_the_row(self, tmp_path: Path):
+        source = (
+            "def token():\n"
+            "    return fetch('telegram', 'bot')\n"
+            "\n"
+            "\n"
+            "from aipass.api.apps.modules.secrets import get_secret as fetch\n"
+        )
+        message = _check(tmp_path, source, branch="skills")["checks"][0]["message"]
+        assert "line 2" in message and "calls fetch" in message
+
+    def test_prose_naming_the_store_in_a_message_is_not_a_row(self, tmp_path: Path):
+        """aipass doctor's wiring line: '~/.secrets/' printed as advice, never opened."""
+        source = "def tell(console):\n    console.print('deny rules (protect ~/.secrets/, block destructive git)')\n"
+        assert _check(tmp_path, source, branch="aipass")["passed"] is True
+
+    def test_a_module_name_held_as_data_is_not_a_string_import(self, tmp_path: Path):
+        """This checker's own table names the modules; only import_module() or __import__() imports one."""
+        source = "MODULES = set()\nMODULES.add('aipass.api.apps.modules.secrets')\n"
+        assert _check(tmp_path, source, branch="seedgo")["passed"] is True
+
+    def test_a_plain_import_of_the_env_handler_is_a_row(self, tmp_path: Path):
+        source = "import os\nimport aipass.api.apps.handlers.auth.env as env\n"
+        assert "line 2" in _check(tmp_path, source, branch="daemon")["checks"][0]["message"]

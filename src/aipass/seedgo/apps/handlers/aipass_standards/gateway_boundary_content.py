@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: gateway_boundary_content.py
 # Description: Gateway Boundary Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Gateway Boundary Standards Content Handler"""
@@ -40,6 +40,15 @@ def get_gateway_boundary_standards() -> str:
         "  2. [red]Private storage roots[/red]: writing under .seedgo/, .daemon/,",
         "     .spawn/, .flow/ or .ai_mail.local/ when you are not the owner and the",
         "     file shows no sign of routing through one.",
+        "  3. [red]@api's secrets store[/red]: outside src/aipass/api, any import of",
+        "     [dim]aipass.api.apps.modules.secrets[/dim] or [dim]handlers.auth.secrets/keys/env[/dim]",
+        "     (also by [dim]import_module()[/dim]), a [dim]/[/dim] path through [dim]'.secrets'[/dim], a",
+        "     [dim]'~/.secrets...'[/dim] literal handed to Path/open/expanduser/join, or a",
+        "     get_secret / set_secret / list_secrets / get_api_key call bound from them.",
+        "     One row per file, at the first reach. Agents get actions, never values:",
+        "     [cyan]ask @api for the action through a drone door[/cyan].",
+        "     A [dim]'.secrets/'[/dim] pattern in a tuple (backup's floor) or prose in a",
+        "     message opens nothing and is not a row.",
         "",
         "[bold cyan]HOW THE WRITE IS BOUND TO THE PATH:[/bold cyan]",
         "  The check tracks which names are assigned from a foreign path literal,",
@@ -64,7 +73,8 @@ def get_gateway_boundary_standards() -> str:
         "  silent hand-written copy is not.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
-        "  100 = no cross-branch storage writes. Each violation costs 25.",
+        "  100 = no cross-branch storage writes and no reach into the secrets store.",
+        "  Each violation costs 25.",
     ]
     json_handler.log_operation("gateway_boundary_standards_served", {"lines": len(lines)})
     return "\n".join(lines)

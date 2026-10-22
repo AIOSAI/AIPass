@@ -7,6 +7,12 @@
   },
   "bypass": [
     {
+      "file": "apps/modules/monitor.py",
+      "standard": "gateway_boundary",
+      "pattern": "from aipass.api.apps.modules.secrets import get_secret",
+      "reason": "The Telegram relay's token loader. The owner retired Telegram 2026-10-22 (nothing runs, the relay is opt-in and off); the lane is archived on his word, not rewritten. Until then the import stays and this anchor keeps prax's audit honest about the one known reach into @api's secrets store."
+    },
+    {
       "file": "apps/handlers/monitoring/unified_stream.py",
       "standard": "cli",
       "pattern": "console.print(",
