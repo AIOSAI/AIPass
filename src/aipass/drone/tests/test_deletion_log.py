@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
-"""Tests for apps/handlers/deletion_log.py and the safe_delete path that writes it."""
+"""Tests for apps/handlers/deletion_log.py, the safe_delete path that writes it, and apps/modules/door_deletion_log.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
@@ -24,6 +24,7 @@ import pytest
 from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
+from aipass.drone.apps.modules.door_deletion_log import record_deletion as door_record_deletion
 
 # ``drone rm`` is the only sanctioned delete; refusals are records too (a blocked attempt leaves no other trace).
 
@@ -447,6 +448,53 @@ class TestLogLocation:
             safe_delete([str(target)])
 
         assert log.info.called
+
+
+class TestAnotherBranchRecordsThroughTheDoor:
+    ROW = {
+        "lane": "spawn_retire",
+        "outcome": "retired",
+        "caller": "spawn",
+        "requested": "/projects/drivetest",
+        "resolved": "/projects/drivetest",
+        "target": "/backup/retired_projects/drivetest_1",
+        "reason": "Retired with its registry",
+    }
+    MEASURED = {"kind": "directory", "size_bytes": 1100, "entry_count": 12, "measured": "exact"}
+
+    def test_a_door_row_reads_back_beside_a_drone_rm_row_with_its_fields(self, project):
+        gone = project / "gone.txt"
+        gone.write_text("x", encoding="utf-8")
+        safe_delete([str(gone)])
+
+        door_record_deletion(**self.ROW, measurement=self.MEASURED)
+
+        rm_row, door_row = read_records(project)
+        assert door_record_deletion is deletion_log.record_foreign_deletion
+        assert set(TestRecordContents.REQUIRED) <= set(rm_row) & set(door_row)
+        assert {k: door_row[k] for k in ("lane", "outcome", "caller", "target", "path", "reason")} == {
+            "lane": "spawn_retire",
+            "outcome": "retired",
+            "caller": "spawn",
+            "target": "/backup/retired_projects/drivetest_1",
+            "path": "/projects/drivetest",
+            "reason": "Retired with its registry",
+        }
+        assert (door_row["size_bytes"], door_row["entry_count"]) == (1100, 12)
+
+    @pytest.mark.parametrize("field", ["lane", "outcome", "caller", "resolved", "target"])
+    @pytest.mark.parametrize("empty", ["", "  ", None])
+    def test_an_empty_required_field_is_refused_and_writes_no_half_row(self, project, field, empty):
+        with pytest.raises(ValueError, match=field):
+            door_record_deletion(**{**self.ROW, field: empty})
+
+        assert read_records(project) == []
+
+    def test_a_measurement_not_shaped_like_drones_is_refused(self, project):
+        with pytest.raises(ValueError, match="measurement"):
+            deletion_log.record_foreign_deletion(**self.ROW, measurement={"size": 1100, "entry_count": 12})
+
+        assert read_records(project) == []
 
 
 class TestRecordFailureIsContained:

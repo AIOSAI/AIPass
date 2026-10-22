@@ -59,6 +59,14 @@ behalf of an HMAC-authenticated requester and therefore passes that identity in 
 its own cwd. The broker's protocol audit log is unchanged — that records requests and error codes;
 this records deletions.
 
+Another branch's removals reach the same store through `apps/modules/door_deletion_log.py`, whose
+one export `record_deletion()` takes `lane`, `outcome`, `caller`, `requested`, `resolved`, `target`
+and `reason`, plus an optional `measurement` keyed like `measure()`'s and an optional
+`project_root`. Its row reads back beside `rm`'s, with `target` added. It raises `ValueError` on an
+empty `lane`, `outcome`, `caller`, `resolved` or `target`, or on a measurement with other keys, and
+writes nothing: a half row is refused. @spawn's branch and project retirements write through it
+under the `spawn_delete` and `spawn_retire` lanes.
+
 **Known gap in the `caller` field.** The resolver's last resort before `unknown` is the *project*,
 not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no passport anywhere up the tree, it
 derives a name from the registry that answered. A delete run from the repo root therefore records
