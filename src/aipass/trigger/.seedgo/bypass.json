@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.1.0",
     "created": "2026-03-07T22:43:25.317608",
-    "updated": "2026-10-17",
+    "updated": "2026-10-21",
     "description": "Standards bypass configuration for @trigger — rebuilt from ground truth (FPLAN-0382 wave 1), re-measured after FPLAN-0384 scoping",
     "true_up": "Every rule below was re-derived by running the seedgo checkers over this branch with bypass_rules=[] and matching one rule to one surviving violation. 84 rules became 25: the rest were dead (file deleted, violation fixed, or target never audited). Re-derive the same way before editing — do not hand-adjust line numbers.",
     "liveness_2026_08_09": "Leave-one-out re-measurement after FPLAN-0384 landed: 24 of 25 rules provably suppress a real violation (audit lane 24 hits with rules=[], 0 with the full set). The dead one — error_handling on events/error_detected.py — was removed. NOTE for whoever measures next: audit-lane unused_function records carry no line/name field (function names live inside the `issues` strings), so attributing a functions-scoped rule by record fields reports a false DEAD. A/B the rule instead.",
@@ -140,7 +140,7 @@
       "file": "tests/test_error_registry.py",
       "standard": "through_the_command",
       "lines": [
-        946
+        948
       ],
       "pattern": "er._load_circuit_breaker_state() read directly",
       "reason": "No product door (@devpulse ruling, fleet green leg 10). The loader's only caller is module import (error_registry.py, _circuit_breaker = _load_circuit_breaker_state()), so the one public route to it is a re-import, and a re-import binds the live trigger_json/trigger_cb_state.json.",
@@ -150,7 +150,7 @@
       "file": "tests/test_error_registry.py",
       "standard": "through_the_command",
       "lines": [
-        1269
+        1271
       ],
       "pattern": "er._fingerprint_dispatch_count read directly",
       "reason": "Truly internal (trigger's reading, fleet green leg 10). The test pins that get_dispatch_count never creates an entry for an unknown fingerprint. No public answer can see the difference between an entry of 0 and no entry: get_dispatch_count answers 0 for both (correctly; it counts true, pinned at 2 after two dispatches), should_dispatch treats both as never dispatched, and the saved per_fingerprint keys come from _fingerprint_dispatch_times. What it guards is memory growth alone.",
@@ -201,7 +201,7 @@
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        529
+        530
       ],
       "pattern": "update_status returns False on an exception",
       "reason": "The success path returns _save_registry's answer, so False is always a failure: invalid status, not found, save failed or an exception (fleet green leg 4, kept leg 10). Its callers in errors.py (suppress, unsuppress, resolve) print the failure on False and do nothing else, and the warning names the exception.",
@@ -211,7 +211,7 @@
       "file": "apps/handlers/error_registry.py",
       "standard": "logged_fallback",
       "lines": [
-        640
+        643
       ],
       "pattern": "update_source_fix_status returns False on an exception",
       "reason": "Fleet green leg 5, kept leg 10. Its caller, errors suppress, ignores the answer and runs after the suppression write and after the source-fix send. A raise would crash after the mail went, and a distinct value would need that caller changed.",
