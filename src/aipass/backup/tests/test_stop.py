@@ -37,7 +37,7 @@ from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.state import lane_process, progress, stop_flag
 from aipass.backup.apps.handlers.state.changelog import load_changelog
-from aipass.backup.apps.modules import display, snapshot
+from aipass.backup.apps.modules import display, snapshot, status
 
 SIZE = 1000
 
@@ -302,7 +302,13 @@ class TestADriveRunStops:
         assert out[-1].startswith(f"stopped by request: {len(sent)} of 120 files, ")
         saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
         assert len(set(saved) - {drive_tracker.LANE_KEY}) == len(sent)
-        assert load_changelog(str(project)) == []
+        # A stopped run that sent files records them: status says when, how many, and not complete.
+        entries = load_changelog(str(project))
+        assert [(e["mode"], e["files_copied"], e["stopped"], e["aborted"], e["failed"]) for e in entries] == [
+            ("drive_sync", len(sent), True, "", 0)
+        ]
+        lane = status.build_status(str(project))["lanes"]["drive_sync"]
+        assert lane == {"last": entries[0]["timestamp"], "files": len(sent), "complete": False}
         rows = _trail_rows("drive_sync_stopped")
         assert len(rows) == 1 and rows[0]["done"] == len(sent) and rows[0]["total"] == 120
 

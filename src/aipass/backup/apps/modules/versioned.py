@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: versioned.py
 # Description: Versioned module — per-file baseline + diff backup
-# Version: 3.1.0
+# Version: 3.1.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Versioned Module — per-file baseline + diff backup of a project directory."""
@@ -177,7 +177,7 @@ def _versioned_run(
     if show_panels:
         show_result_summary(result)
         if not result.errors:
-            show_backups_now("versioned")
+            show_backups_now("versioned", project_root)
 
     return result
 

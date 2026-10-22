@@ -150,10 +150,35 @@ its worker threads; the 20th in a row with no success between
 (`BREAKER_FAILURES`) trips the breaker, and no worker starts another file.
 Uploads already in flight finish. The run logs one warning,
 `Drive upload aborted after 20 consecutive failures: <the client's last
-error>`, prints the same sentence as its last stdout line, writes no
-changelog entry, and calls `mark_command_failed()`, so the verb exits 2: a
-failed run, not a stop. The tracker keeps what went; the failed files are
-untracked and go on the next run.
+error>`, prints the same sentence as its last stdout line, and calls
+`mark_command_failed()`, so the verb exits 2: a failed run, not a stop. The
+tracker keeps what went; the failed files are untracked and go on the next
+run. If any file went before the breaker tripped, the changelog entry records
+it with `aborted` set to that sentence.
+
+## Drive is the truth for what is remote
+
+Files on Drive are deleted only by hand, so a tracked file Drive no longer
+has was deleted on purpose and goes again. After the tracker loads and before
+any file is weighed, the run lists every live file the app can see: one paged
+`files().list(q="trashed=false")`, 1,000 to a page. The `drive.file` scope
+sees only what this app created, so the listing is the whole remote side.
+Every tracker entry whose `drive_id` is not live is dropped, one log line
+says `N tracked files are gone from Drive; they upload again`, and the audit
+trail gets a `tracker_healed` row with the count. Unchanged files are then
+skipped on size and mtime as before.
+
+The listing is also an index of `(parent folder id, name) -> id`. A file
+with no tracked id whose name Drive already has in its target folder (a
+cleared tracker, a save lost to a kill) is updated in place, not created a
+second time; its `upload_file` trail row says `action: adopt`. The index
+costs no request per file.
+
+A listing that gets no answer fails the run before anything uploads: the last
+stdout line is `Drive listing unavailable: <reason>. Nothing uploaded.`, the
+command is marked failed, and the verb exits 2, like a headroom refusal. A
+tracker that cannot be checked is not trusted. Creating a new root folder
+never touches the tracker; the listing at run start is the only heal.
 
 ## The tracker answers for one lane
 
@@ -169,12 +194,15 @@ overwriting it; move one of the two by hand. An empty tracker (what
 
 ## The changelog entry
 
-A run whose uploads all succeeded appends one entry to the project's
-`.backup/changelog.json`, the same shape snapshot and versioned write, with
-`mode` `drive_sync` and `files_copied` set to the files uploaded in that run.
-`status --json` reads the Drive lane's `last` and `files` from it. A run with
-a failed upload, or with nothing to upload, writes none: the snapshot lane's
-rule for a run that copied nothing. The `all` cycle's Drive step is the same
+Every run that uploaded a file appends one entry to the project's
+`.backup/changelog.json`, whether it finished, was stopped or was aborted by
+the breaker. It has the shape snapshot and versioned write, with `mode`
+`drive_sync` and `files_copied` set to the files uploaded in that run, plus
+`stopped` (true or false), `aborted` (the breaker's sentence, or `""`) and
+`failed` (a count). `status --json` reads the Drive lane's `last`, `files`
+and `complete` from it; `complete` is true only when the entry has none of
+the three. A run that uploaded nothing writes none, the snapshot lane's rule
+for a run that copied nothing. The `all` cycle's Drive step is the same
 function, so it writes the same entry.
 
 `share` is the single-file lane: it uploads one file and prints the shareable

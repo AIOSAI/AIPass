@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-04-17
 # Modified: 2026-10-21
 # =============================================
@@ -120,6 +120,7 @@ def _drive_sync_run(
     """The Drive sync proper, inside the stop handler and the running file."""
     from aipass.backup.apps.handlers.drive.client import DriveClient
     from aipass.backup.apps.handlers.drive.floor import hold_back
+    from aipass.backup.apps.handlers.drive.remote import heal_tracker, list_live
     from aipass.backup.apps.handlers.drive.tracker import (
         DRIVE_LANE,
         check_needs_upload,
@@ -187,6 +188,24 @@ def _drive_sync_run(
     # A tracker from the versioned era is moved aside first: its keys name versioned-store paths.
     set_aside_foreign_tracker(project_root)
     tracker = load_tracker(project_root)
+
+    # Drive is the truth for what is remote: a tracker that cannot be checked would skip files that are gone.
+    live = list_live(client)
+    if live is None:
+        refusal = f"Drive listing unavailable: {client.last_error or 'no answer'}. Nothing uploaded."
+        result["error"] = refusal
+        result["error_shown"] = True
+        result["duration"] = time.time() - start
+        logger.warning(f"[backup] {refusal}")
+        trail.log_operation("drive_sync_refused", {"project_root": project_root, "reason": refusal})
+        console.print(refusal, markup=False)
+        mark_command_failed()
+        return result
+    gone = heal_tracker(tracker, live["ids"])
+    if gone:
+        logger.info(f"[backup] {gone} tracked files are gone from Drive; they upload again")
+    client.live_files = live["by_place"]
+
     if force:
         files_to_upload = all_files
     else:
@@ -269,7 +288,25 @@ def _drive_sync_run(
 
     save_tracker(project_root, tracker)
 
-    # Stopped: what went is tracked, but no changelog entry (lanes.drive_sync.last means a completed run).
+    # Every run that sent a file records it, stopped and aborted too; status --json reads complete from the flags.
+    if result["uploaded"]:
+        run = BackupResult(
+            mode=PRIMARY_COMMAND,
+            project_root=project_root,
+            files_copied=result["uploaded"],
+            files_checked=len(all_files),
+            files_skipped=skipped,
+            bytes_copied=result["bytes_uploaded"],
+            duration_seconds=result["duration"],
+        )
+        entry = build_metadata(run)
+        entry.update(
+            stopped=bool(batch_result.get("stopped")),
+            aborted=batch_result.get("aborted", ""),
+            failed=result["failed"],
+        )
+        append_changelog(project_root, entry)
+
     if batch_result.get("stopped"):
         result["stopped"] = True
         result["success"] = False
@@ -292,19 +329,6 @@ def _drive_sync_run(
         mark_command_failed()
         return result
 
-    # One changelog entry per clean run; status --json reads the Drive lane's last run from it.
-    if result["success"]:
-        run = BackupResult(
-            mode=PRIMARY_COMMAND,
-            project_root=project_root,
-            files_copied=result["uploaded"],
-            files_checked=len(all_files),
-            files_skipped=skipped,
-            bytes_copied=result["bytes_uploaded"],
-            duration_seconds=result["duration"],
-        )
-        append_changelog(project_root, build_metadata(run))
-
     trail.log_operation(
         "drive_sync_complete",
         {
@@ -319,7 +343,7 @@ def _drive_sync_run(
     logger.info(f"[backup] Drive sync: {result['uploaded']} uploaded, {result['failed']} failed, {skipped} skipped")
 
     if show_panels:
-        show_drive_result(result)
+        show_drive_result(result, project_root)
 
     return result
 

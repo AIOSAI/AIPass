@@ -3,7 +3,7 @@
 # Description: Tests for the all cycle's Drive switch, its Drive step's headroom refusal and the --registered run
 # Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/all.py: the drive_sync setting it obeys and the --registered run."""
@@ -162,7 +162,9 @@ class TestADriveStepThatCannotFit:
         assert re.fullmatch(r"Drive has 0\.0 B free; this run needs \d+\.\d B\. Nothing uploaded\.", last), last
         assert (project / ".backup" / "snapshots" / "file_0.txt").is_file()
         assert (project / ".backup" / "versioned").is_dir()
-        client.drive_service.files.assert_not_called()
+        # The run-start listing reads Drive; nothing is written to it.
+        client.drive_service.files.return_value.create.assert_not_called()
+        client.drive_service.files.return_value.update.assert_not_called()
 
 
 class TestAllRegistered:

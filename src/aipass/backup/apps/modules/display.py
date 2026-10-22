@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Rich CLI rendering for backup results (full 9-stage output)
-# Version: 3.0.0
+# Version: 3.1.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-10-21
 # =============================================
 
 """Rich CLI rendering for backup — full output pipeline faithfully ported from gold source."""
@@ -27,6 +27,7 @@ from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 from aipass.backup.apps.handlers.report.result import BackupResult
 from aipass.backup.apps.handlers.scan.ceiling import CeilingBreach
+from aipass.backup.apps.handlers.state.changelog import load_changelog
 from aipass.backup.apps.handlers.state.backup_timestamps import (
     format_age,
     get_timestamps,
@@ -168,10 +169,10 @@ def show_result_summary(result: BackupResult) -> None:
     logger.info(f"[backup] Rendered {result.mode} result: {result.files_copied} files")
 
 
-def show_backups_now(mode: str) -> None:
-    """Stage 8: Update timestamp and show 'Backups now:' panel with updated dim ages."""
+def show_backups_now(mode: str, project_root: str) -> None:
+    """Stage 8: the 'Backups now:' panel, each age from this project's own changelog, as status --json reads it."""
     update_timestamp(mode)
-    ts = get_timestamps()
+    ts = {entry.get("mode"): entry.get("timestamp") for entry in load_changelog(project_root)}
     console.print()
     console.print("[dim]Backups now:[/dim]")
     console.print(f"  [dim]Snapshot:   {format_age(ts.get('snapshot'))}[/dim]")
@@ -179,7 +180,7 @@ def show_backups_now(mode: str) -> None:
     console.print(f"  [dim]Drive sync: {format_age(ts.get('drive_sync'))}[/dim]")
 
 
-def show_drive_result(result: dict) -> None:
+def show_drive_result(result: dict, project_root: str) -> None:
     """Show Drive sync result panel matching Snapshot/Versioned style."""
     console.print()
 
@@ -218,7 +219,7 @@ def show_drive_result(result: dict) -> None:
     console.print(f"  [dim]Duration: {duration:.1f}s | Location: {location}[/dim]")
 
     if not failed:
-        show_backups_now("drive_sync")
+        show_backups_now("drive_sync", project_root)
 
     trail.log_operation("render_drive_result", {"uploaded": uploaded})
     logger.info(f"[backup] Rendered drive_sync result: {uploaded} uploaded")

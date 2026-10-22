@@ -3,7 +3,7 @@
 # Description: Tests for the share module and the drive/share handler it drives
 # Version: 2.0.3
 # Created: 2026-07-01
-# Modified: 2026-10-02
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/share.py and apps/handlers/drive/share.py."""
@@ -52,6 +52,7 @@ def client() -> MagicMock:
     stand_in = MagicMock()
     stand_in.last_error = None
     stand_in.file_tracker = {}
+    stand_in.live_files = {}
     stand_in.backup_folder_id = None
     stand_in.project_folder_cache = {}
 

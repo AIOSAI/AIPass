@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-23
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Status Module — display backup info and recent history for a project.
@@ -83,12 +83,18 @@ def _tree_bytes(path: Path) -> int:
 
 
 def _last_runs(changelog: list[dict]) -> dict:
-    """Each lane's last changelog entry as ``{"last", "files"}``, null when that lane never ran."""
-    lanes = {lane: {"last": None, "files": None} for lane in LANES}
+    """Each lane's last changelog entry as ``{"last", "files"}``, null when that lane never ran.
+
+    drive_sync also carries ``complete``: a stopped, aborted or part-failed run still records what it sent.
+    """
+    lanes: dict = {lane: {"last": None, "files": None} for lane in LANES}
+    lanes["drive_sync"]["complete"] = None
     for entry in changelog:
         mode = entry.get("mode")
         if mode in lanes:
             lanes[mode] = {"last": entry.get("timestamp"), "files": entry.get("files_copied")}
+            if mode == "drive_sync":
+                lanes[mode]["complete"] = not (entry.get("stopped") or entry.get("aborted") or entry.get("failed"))
     return lanes
 
 

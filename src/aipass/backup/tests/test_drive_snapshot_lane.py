@@ -3,7 +3,7 @@
 # Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor and Drive headroom
 # Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
@@ -55,18 +55,23 @@ def uploads(monkeypatch: pytest.MonkeyPatch) -> list[list[Path]]:
 ROOMY = {"storageQuota": {"usage": "0", "limit": str(15 * 1024**3)}}
 
 
-def _offline_client(monkeypatch: pytest.MonkeyPatch, quota: dict | None = ROOMY) -> MagicMock:
+def _offline_client(
+    monkeypatch: pytest.MonkeyPatch, quota: dict | None = ROOMY, live_ids: tuple[str, ...] = ()
+) -> MagicMock:
     """Put a DriveClient that talks to nobody where the late import looks for one.
 
-    The about.get request answers with ``quota``; every other request answers
-    with ``_api_call.return_value``, which a test may set.
+    The about.get request answers with ``quota``, the run-start listing with ``live_ids``
+    as the live files; every other request answers with ``_api_call.return_value``, which a test may set.
     """
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = True
     instance.last_error = None
     instance.file_tracker = {}
     about_request = instance.drive_service.about.return_value.get.return_value
-    instance._api_call.side_effect = lambda request, *args, **kwargs: quota if request is about_request else DEFAULT
+    list_request = instance.drive_service.files.return_value.list.return_value
+    listing = {"files": [{"id": drive_id, "name": drive_id, "parents": []} for drive_id in live_ids]}
+    answers = {id(about_request): quota, id(list_request): listing}
+    instance._api_call.side_effect = lambda request, *args, **kwargs: answers.get(id(request), DEFAULT)
     monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
     return instance
 
@@ -203,7 +208,7 @@ class TestTheTrackerAnswersForOneLane:
         entry = {"drive_id": "d", "local_size": stat.st_size, "local_mtime": stat.st_mtime}
         doc = {"_lane": "snapshot", "a.txt": entry}
         (project / ".backup" / drive_tracker.TRACKER_FILENAME).write_text(json.dumps(doc), encoding="utf-8")
-        _offline_client(monkeypatch)
+        _offline_client(monkeypatch, live_ids=("d",))
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
 
@@ -242,16 +247,18 @@ class TestTheRunIsReadByStatus:
         drive_tracker.save_tracker(
             str(project), {"kept.txt": {"drive_id": "d", "local_size": stat.st_size, "local_mtime": stat.st_mtime}}
         )
-        _offline_client(monkeypatch)
+        _offline_client(monkeypatch, live_ids=("d",))
 
         drive_sync.run_drive_sync(str(project), show_panels=False)
 
         entries = load_changelog(str(project))
         assert [(e["mode"], e["files_copied"]) for e in entries] == [("drive_sync", 2)]
         lane = status.build_status(str(project))["lanes"]["drive_sync"]
-        assert lane == {"last": entries[0]["timestamp"], "files": 2}
+        assert lane == {"last": entries[0]["timestamp"], "files": 2, "complete": True}
 
-    def test_a_run_with_a_failed_upload_writes_no_entry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_run_with_a_failed_upload_records_what_went_and_reads_not_complete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         project = tmp_path / "project"
         _seed(project / ".backup" / "snapshots", ("a.txt", "b.txt"))
         _offline_client(monkeypatch)
@@ -260,7 +267,9 @@ class TestTheRunIsReadByStatus:
 
         drive_sync.run_drive_sync(str(project), show_panels=False)
 
-        assert load_changelog(str(project)) == []
+        entries = load_changelog(str(project))
+        assert [(e["files_copied"], e["failed"], e["stopped"], e["aborted"]) for e in entries] == [(1, 1, False, "")]
+        assert status.build_status(str(project))["lanes"]["drive_sync"]["complete"] is False
 
     def test_a_run_with_everything_up_to_date_writes_no_entry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
@@ -272,7 +281,7 @@ class TestTheRunIsReadByStatus:
         drive_tracker.save_tracker(
             str(project), {"a.txt": {"drive_id": "d", "local_size": stat.st_size, "local_mtime": stat.st_mtime}}
         )
-        _offline_client(monkeypatch)
+        _offline_client(monkeypatch, live_ids=("d",))
 
         drive_sync.run_drive_sync(str(project), show_panels=False)
 

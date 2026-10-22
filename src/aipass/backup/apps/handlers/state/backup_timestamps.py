@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup_timestamps.py
 # Description: Tracks last-run timestamps for all backup modes
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-10-21
 # =============================================
 
 """Backup timestamps — tracks when each backup mode was last run."""
@@ -94,7 +94,8 @@ def format_age(iso_str: str | None) -> str:
         logger.info(f"[backup_timestamps] Could not parse timestamp '{iso_str}': {e}")
         return "unknown"
 
-    delta = datetime.now() - then
+    # The branch clock is naive local time; changelog stamps are UTC-aware.
+    delta = datetime.now(then.tzinfo) - then
     seconds = int(delta.total_seconds())
 
     if seconds < 60:

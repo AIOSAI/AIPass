@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-16
 # Modified: 2026-10-21
 # =============================================
@@ -46,7 +46,7 @@ def upload_single_file(
     note: str = "",
     lane_folder: str = "",
 ) -> bool:
-    """Upload one file with resumable MediaFileUpload, updating the tracked drive_id when there is one.
+    """Upload one file with resumable MediaFileUpload, updating the tracked or live drive_id when there is one.
 
     lane_folder prefixes the Drive folder only; tracker keys stay relative to backup_root.
     """
@@ -81,6 +81,12 @@ def upload_single_file(
         rel_key = str(local_file)
 
     existing_drive_id = client.file_tracker.get(rel_key, {}).get("drive_id")
+    action = "update" if existing_drive_id else "create"
+    if not existing_drive_id:
+        # Drive already has this name in this folder (a cleared tracker, a lost save): update it, never a twin.
+        existing_drive_id = client.live_files.get((target_folder_id, local_file.name))
+        if existing_drive_id:
+            action = "adopt"
 
     mime_type, _ = mimetypes.guess_type(str(local_file))
     if mime_type is None:
@@ -129,7 +135,7 @@ def upload_single_file(
                 {
                     "file": str(local_file),
                     "drive_id": drive_file_id,
-                    "action": "update" if existing_drive_id else "create",
+                    "action": action,
                 },
             )
             return True
