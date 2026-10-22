@@ -57,6 +57,16 @@ drone @api secrets migrate             # imports, then shreds each imported file
 
 Each import writes the entry, reads it back, then overwrites the file with zeros, fsyncs and unlinks it, and logs one `secret_migrated` row (provider, slug). A write that fails leaves the file whole and names it. `.env` is shredded once every key in it is in; a `.env` that also holds other settings (`BLUESKY_HANDLE`, ...) has its keys imported and stays. A second run says nothing is left to move. `drone @api init` still writes the `.env` template the owner fills before `secrets migrate`. The verb is the owner's run; a seat never runs it unasked.
 
+The integration drivers read named entries. A `.env` line they need that `secrets migrate` does not import from the `.env` is written by hand as the store file in the right column, then imported; after that the `.env` line is the owner's to delete.
+
+| Driver  | `.env` line name        | Store file (raw, no suffix) → entry |
+|---------|-------------------------|-------------------------------------|
+| devto   | `DEVTO_API_KEY`         | imported from the `.env` → `devto/api_key` |
+| bluesky | `BLUESKY_HANDLE`        | `bluesky/handle`                    |
+| bluesky | `BLUESKY_APP_PASSWORD`  | `bluesky/app_password` (not imported from the `.env`: it does not end in `_API_KEY`) |
+
+A driver whose entry is absent or empty raises naming the entry and `secrets migrate`; neither driver reads the `.env`.
+
 ## What Stays on Disk
 
 `~/.secrets/aipass/` (directory `0o700`) keeps what is not a store shape, named as left by `secrets migrate`:
