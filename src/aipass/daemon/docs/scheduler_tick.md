@@ -58,7 +58,7 @@ of three states, not two, and each writes a different record:
 |---------|---------------|-----------|-----------|
 | `fired` | An agent started | stamped | period consumed |
 | `blocked` | The wake was refused before anything started — the target is busy (`lock`), holds an interactive session (`occupancy`), autonomous_pause is on, or the dispatch lock could not be taken | **untouched** | still due; retries inside the same window after a 5-min hold |
-| `failed` | The wake ran and went wrong, or the target is a decided refusal (`resolve` — no such branch; `blocklist`) | stamped | measured from the last SUCCESS; 10-min backoff |
+| `failed` | The wake ran and went wrong, a command job exited non-zero or timed out, or the target is a decided refusal (`resolve` — no such branch; `blocklist`) | stamped | measured from the last SUCCESS; 10-min backoff, so a windowed job retries inside the same window |
 
 Blocked is not ran: a refusal recorded as a run would let an interactive room left open in a
 branch swallow that branch's next fire.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.6.2
+# Version: 1.6.3
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -24,6 +24,7 @@ from aipass.daemon.apps.modules.rotation import ROTATION_TYPE, fire_rotation
 from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
 from aipass.daemon.apps.handlers.schedule.runstate import (
     catch_up_on,
+    failed_today_at,
     get_job_state,
     load_runstate,
     save_runstate,
@@ -311,8 +312,11 @@ def _report_missed_windows(enabled: List[dict], runstate: dict, dry_run: bool) -
 
         missed_count += 1
         tail = "catch_up is on — firing late this tick" if catch_up else "catch_up is off — not firing"
-        logger.warning("[run] MISSED %s/%s: window %s closed with no run; %s", owner, job_id, window, tail)
-        _log(f"MISSED: {owner}/{job_id} — window {window} closed with no run; {tail}")
+        # A windowed job retries a failure inside its window, so a missed window may hold real runs.
+        failed_at = failed_today_at(runstate, owner, job_id)
+        unrun = f"no successful run (last attempt failed at {failed_at})" if failed_at else "no run"
+        logger.warning("[run] MISSED %s/%s: window %s closed with %s; %s", owner, job_id, window, unrun, tail)
+        _log(f"MISSED: {owner}/{job_id} — window {window} closed with {unrun}; {tail}")
 
     if missed_count and not dry_run:
         save_runstate(runstate)

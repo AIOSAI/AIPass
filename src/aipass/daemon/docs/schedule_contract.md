@@ -100,7 +100,9 @@ rather than guessed at, in both directions.
 unrun — independent of `catch_up`, because a job nobody opted in still missed its
 window and that is the fact you need in order to decide whether to opt it in. Stamped
 once per job per day (`missed_logged_for`), since a ~2-minute tick would otherwise
-repeat the same miss ~500 times before midnight.
+repeat the same miss ~500 times before midnight. A window counts as missed when it closed
+with no **successful** run; when the job's attempts inside it failed, the line says so:
+`closed with no successful run (last attempt failed at HH:MM)`, not `closed with no run`.
 
 ### Wake options
 

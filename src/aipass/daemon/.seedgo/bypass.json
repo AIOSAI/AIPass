@@ -19,19 +19,19 @@
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [396, 419],
+      "lines": [406, 429],
       "reason": "Holds of the live tick (daemon, fleet green leg 5): an unreadable last_failure_at or last_blocked_at answers no hold, because a hold that cannot be measured could never expire and would stall the job for good, while releasing it costs at most one early attempt whose own outcome writes a fresh stamp. False is the decision, not a stand-in; a raise would stop the tick for every job."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [307],
+      "lines": [317],
       "reason": "_slot_anchor (daemon, fleet green legs 3 and 5): None is 'no anchor to seed', the documented answer for an unreadable slot and for an interval that is not a positive number; the one caller, seed_interval_slot, warns and leaves the job unseeded. A raise here stopped the whole tick (leg 3, item 2), which this answer cured."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [489, 494, 504, 509, 523],
+      "lines": [499, 504, 514, 519, 533],
       "reason": "_calc_next_run is display (daemon, fleet green leg 5): None means 'no next run to advertise', which is the true answer when the schedule or last_run cannot be read; the queue shows it blank and nothing fires from next_run (is_job_due reads the schedule and last_run itself). A raise would land in update_job_runstate after a fire and lose that fire's record."
     },
     {

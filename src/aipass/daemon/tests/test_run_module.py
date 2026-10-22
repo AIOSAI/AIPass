@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.2.3
+# Version: 1.2.4
 # Created:2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -366,6 +366,22 @@ class TestMissedWindowLine:
         assert results["missed"] == 1
         assert "MISSED: @commons/live" in flat(out)
         assert "04:00 +/-15m" in flat(out)
+        assert "closed with no run;" in flat(out)
+
+    def test_a_window_whose_runs_failed_is_not_reported_as_unrun(self, capsys, monkeypatch):
+        # A windowed job retries a failure inside its window, so a MISSED window may hold real runs.
+        freeze_runstate_clock(monkeypatch, "2026-10-19T05:18:30")
+        failed = {"last_run": "2026-10-19T05:07:30", "last_status": "failed", "last_failure_at": "2026-10-19T05:15:37"}
+        self._tick({"jobs": {"@commons/live": failed}})
+        out = flat(capsys.readouterr().out)
+        assert "closed with no successful run (last attempt failed at 05:15)" in out
+        assert "closed with no run" not in out
+
+    def test_a_failure_on_an_earlier_day_does_not_name_today_s_window(self, capsys, monkeypatch):
+        freeze_runstate_clock(monkeypatch, "2026-10-19T05:18:30")
+        stale = {"last_run": "2026-10-18T05:07:30", "last_status": "failed", "last_failure_at": "2026-10-18T05:15:37"}
+        self._tick({"jobs": {"@commons/live": stale}})
+        assert "closed with no run;" in flat(capsys.readouterr().out)
 
     def test_the_same_miss_is_not_repeated_on_the_next_tick(self):
         # The scheduler ticks about every two minutes; an unguarded line would
