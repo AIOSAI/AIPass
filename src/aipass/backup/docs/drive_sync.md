@@ -142,6 +142,19 @@ well as once at the end of the run. A run that is killed or fails part-way
 leaves the files it uploaded tracked, so the next run skips them instead of
 uploading them again as orphans.
 
+## An outage ends the run after 20 failures in a row
+
+With no network every file fails in milliseconds, so a run with no breaker
+walks the whole queue and floods its log. `upload_batch` counts failures in
+its worker threads; the 20th in a row with no success between
+(`BREAKER_FAILURES`) trips the breaker, and no worker starts another file.
+Uploads already in flight finish. The run logs one warning,
+`Drive upload aborted after 20 consecutive failures: <the client's last
+error>`, prints the same sentence as its last stdout line, writes no
+changelog entry, and calls `mark_command_failed()`, so the verb exits 2: a
+failed run, not a stop. The tracker keeps what went; the failed files are
+untracked and go on the next run.
+
 ## The tracker answers for one lane
 
 `.backup/drive_tracker.json` records what has been uploaded, keyed by path

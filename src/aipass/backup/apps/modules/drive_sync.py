@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -282,6 +282,14 @@ def _drive_sync_run(
             failed=result["failed"],
             bytes_done=result["bytes_uploaded"],
         )
+        return result
+
+    # Aborted by the breaker: a failed run, exit 2, its sentence the last stdout line like a headroom refusal.
+    if batch_result.get("aborted"):
+        result["error"] = batch_result["aborted"]
+        result["error_shown"] = True
+        console.print(result["error"], markup=False)
+        mark_command_failed()
         return result
 
     # One changelog entry per clean run; status --json reads the Drive lane's last run from it.

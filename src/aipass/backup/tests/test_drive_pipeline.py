@@ -3,7 +3,7 @@
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
 # Version: 3.1.0
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -712,7 +712,8 @@ class TestDriveUpload:
 
         result = drive_upload.upload_batch(client, files, "proj", store, {}, max_workers=1, project_root=str(project))
 
-        assert result["uploaded"] == 60 and result["failed"] == 60
+        # The breaker ends the 60 failures at the 20th; the uploads before them stay tracked.
+        assert result["uploaded"] == 60 and result["failed"] == drive_upload.BREAKER_FAILURES
         saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
         uploaded = {f"file_{index:03d}.txt" for index in range(60)}
         tracked = set(saved) - {drive_tracker.LANE_KEY}

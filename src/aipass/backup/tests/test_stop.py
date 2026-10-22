@@ -205,6 +205,71 @@ def _drive_project(tmp_path: Path, files: int) -> tuple[Path, Path]:
     return project, store
 
 
+def _fake_drive_client(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """An authenticated Drive client with a terabyte free, standing in for the network."""
+    instance = MagicMock(name="DriveClient")
+    instance.authenticate.return_value = True
+    instance.last_error = None
+    instance._api_call.return_value = {"storageQuota": {"usage": "0", "limit": str(10**12)}}
+    # MagicMock builds children unlocked; three upload threads racing on _thread_local break its __bool__.
+    instance._thread_local = threading.local()
+    instance._build_thread_service.return_value = "service"
+    monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
+    return instance
+
+
+class TestADriveRunWithNoNetworkGivesUp:
+    """20 failures in a row with no success between: unstarted files never go, one line names why, exit 2."""
+
+    def test_an_outage_aborts_near_20_names_the_last_error_and_exits_2(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        project, _store = _drive_project(tmp_path, files=120)
+        _fake_drive_client(monkeypatch)
+        sent: list[str] = []
+
+        def _upload(client, local_file, project_name, backup_root, note="", lane_folder=""):
+            """Fail the way an outage does: no answer, the cause left on the client."""
+            sent.append(local_file.name)
+            client.last_error = "Unable to find the server at www.googleapis.com"
+            return False
+
+        monkeypatch.setattr(drive_upload, "upload_single_file", _upload)
+
+        code = _main(["drive_sync", str(project)])
+
+        # Three workers: the uploads already started when the 20th failure landed may finish, nothing after.
+        assert 20 <= len(sent) <= 22
+        assert code == 2
+        out = capsys.readouterr().out.splitlines()
+        assert out[-1] == (
+            "Drive upload aborted after 20 consecutive failures: Unable to find the server at www.googleapis.com"
+        )
+        assert load_changelog(str(project)) == []
+        rows = _trail_rows("upload_batch_complete")
+        assert len(rows) == 1 and rows[0]["aborted"] is True and rows[0]["stopped"] is False
+
+    def test_19_failures_then_a_success_never_trips_the_breaker(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project, store = _drive_project(tmp_path, files=120)
+        files = sorted(store.iterdir())
+        sent: list[str] = []
+
+        def _upload(client_, local_file, project_name, backup_root, note="", lane_folder=""):
+            """Every 20th call goes; the 19 between fail."""
+            sent.append(local_file.name)
+            return len(sent) % 20 == 0
+
+        monkeypatch.setattr(drive_upload, "upload_single_file", _upload)
+
+        # One worker: completion order is call order, so the run of failures is exactly 19.
+        result = drive_upload.upload_batch(MagicMock(name="DriveClient"), files, "proj", store, {}, max_workers=1)
+
+        assert len(sent) == 120
+        assert result["aborted"] == "" and result["uploaded"] == 6 and result["failed"] == 114
+
+
 class TestADriveRunStops:
     """SIGTERM mid-upload: files not yet started never go, the tracker keeps what went, exit 130."""
 
@@ -212,14 +277,7 @@ class TestADriveRunStops:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         project, _store = _drive_project(tmp_path, files=120)
-        instance = MagicMock(name="DriveClient")
-        instance.authenticate.return_value = True
-        instance.last_error = None
-        instance._api_call.return_value = {"storageQuota": {"usage": "0", "limit": str(10**12)}}
-        # MagicMock builds children unlocked; three upload threads racing on _thread_local break its __bool__.
-        instance._thread_local = threading.local()
-        instance._build_thread_service.return_value = "service"
-        monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
+        _fake_drive_client(monkeypatch)
         sent: list[str] = []
         counting = threading.Lock()
 
