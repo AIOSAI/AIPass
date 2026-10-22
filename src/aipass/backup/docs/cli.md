@@ -33,6 +33,7 @@ reference lists verbs and this page lists their options.
 | Verb | Flag | Effect |
 |---|---|---|
 | `register` | `--name <name>` | Register under a short name, so `@name` resolves to the path |
+| `register` | `--remove <name>` | Drop a registered project from the registry; its `.backup/` store and files stay where they are |
 | `all` | `--quiet` | Suppress the Rich panels; the run itself is unchanged |
 | `all` | `--registered` | Run the cycle for every registered project, in registry order (below) |
 | `drive_sync` | `--force` | Re-upload files the tracker already recorded |

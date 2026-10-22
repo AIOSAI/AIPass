@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """BACKUP Branch - Main Orchestrator"""
@@ -88,6 +88,7 @@ def print_help() -> None:
     console.print("[bold cyan]OPTIONS:[/bold cyan]")
     console.print()
     console.print("  [green]--name <name>[/green]     register: register under a short name, so @name resolves")
+    console.print("  [green]--remove <name>[/green]   register: drop a project from the registry; its .backup/ stays")
     console.print("  [green]--quiet[/green]           all: suppress the panels, the run itself is unchanged")
     console.print("  [green]--registered[/green]      all: every registered project in turn, a summary line each")
     console.print("  [green]--force[/green]           drive_sync: re-upload tracked files · drive_clear: required")

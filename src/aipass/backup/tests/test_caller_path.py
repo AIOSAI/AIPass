@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-08-08
-# Modified: 2026-10-02
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
@@ -14,15 +14,18 @@
 # seedgo: no-test-needed(stdlib) — Path.resolve() and pathlib behavior
 
 import inspect
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.backup.apps.handlers.drive import share as share_handler
 from aipass.backup.apps.handlers.path.caller import caller_cwd, resolve_caller_path
+from aipass.backup.apps.handlers.project import registry
 from aipass.backup.apps.modules import register as register_mod
 from aipass.backup.apps.modules import share as share_mod
 from aipass.backup.apps.modules import status as status_mod
 from aipass.backup.apps.modules.register import resolve_project
+from aipass.cli.apps.modules import command_failed
 
 
 def _arguments(func, call) -> dict:
@@ -194,6 +197,44 @@ class TestRegisterUsesCallerCwd:
         assert "Registered: shortname" in out
         assert "Registered: myproj" in out
         assert err == ""
+
+
+class TestRegisterRemove:
+    """register --remove — a retired project leaves the registry, so all --registered never meets its path."""
+
+    def _registry(self, tmp_path: Path, monkeypatch) -> Path:
+        path = tmp_path / "project_registry.json"
+        projects = {name: {"path": str(tmp_path / name), "name": name} for name in ("aipass", "drivetest")}
+        path.write_text(json.dumps({"projects": projects}), encoding="utf-8")
+        monkeypatch.setattr(registry, "REGISTRY_PATH", path)
+        return path
+
+    def test_remove_drops_only_the_named_project_and_leaves_its_store(
+        self, tmp_path: Path, monkeypatch, capsys
+    ) -> None:
+        path = self._registry(tmp_path, monkeypatch)
+        (tmp_path / "drivetest" / ".backup").mkdir(parents=True)
+
+        register_mod.handle_command("register", ["--remove", "drivetest"])
+
+        out, err = capsys.readouterr()
+        assert list(json.loads(path.read_text(encoding="utf-8"))["projects"]) == ["aipass"]
+        assert (tmp_path / "drivetest" / ".backup").is_dir()
+        assert "Removed: drivetest" in out
+        assert err == ""
+        assert not command_failed()
+
+    def test_remove_of_an_unknown_name_fails_and_writes_nothing(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        path = self._registry(tmp_path, monkeypatch)
+        before = path.read_text(encoding="utf-8")
+
+        register_mod.handle_command("register", ["--remove", "nosuch"])
+
+        out, err = capsys.readouterr()
+        assert path.read_text(encoding="utf-8") == before
+        assert "No registered project named 'nosuch'" in err
+        assert "Removed" not in out
+        assert command_failed()
 
 
 class TestStatusUsesCallerCwd:

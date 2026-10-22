@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Project registry handler — load/register/lookup backup projects
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Project registry handler."""
@@ -51,6 +51,19 @@ def register_project(name: str, path: str) -> bool:
         trail.log_operation("project_register_failed", {"name": name, "path": path})
         return False
     trail.log_operation("project_registered", {"name": name, "path": path})
+    return True
+
+
+def unregister_project(name: str) -> bool:
+    """Drop a project from the registry; its .backup/ store stays where it is. False when absent or unwritten."""
+    data = _read_registry()
+    if data.get("projects", {}).pop(name, None) is None:
+        trail.log_operation("project_lookup_miss", {"name": name})
+        return False
+    if not json_handler.write_json(REGISTRY_PATH, data):
+        trail.log_operation("project_unregister_failed", {"name": name})
+        return False
+    trail.log_operation("project_unregistered", {"name": name})
     return True
 
 
