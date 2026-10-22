@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.4.0
+# Version: 5.4.1
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
@@ -848,6 +848,12 @@ class TestGitHubWritesWithoutGh:
             result = _canary_bash(command, seat)
             _assert_blocked(result)
             assert "GitHub credential" in json.loads(result["stdout"])["reason"], command
+
+    def test_the_keyring_module_is_refused_and_a_package_named_keyring_installs(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        _assert_blocked(_canary_bash("python3 -m keyring get gh:github.com ''", seat))
+        _assert_allowed(_canary_bash("python3 -m pip install keyring", seat))
+        _assert_allowed(_canary_bash(".venv/bin/python -m pip install -e . keyring>=25.0", seat))
 
     def test_a_non_get_or_a_body_to_the_api_is_refused(self, tmp_path):
         seat = _seat(tmp_path, "canary")

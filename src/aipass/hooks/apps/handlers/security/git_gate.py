@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.2.0
+# Version: 5.2.1
 # Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -283,7 +283,9 @@ def _credential_read(inv, reader) -> str:
             return "gh " + " ".join(args[:2])
     if inv.program in _SECRET_PROGRAMS:
         return inv.program
-    if inv.program == "keyring" or (inv.language == "python" and "keyring" in args and "-m" in args):
+    if inv.program == "keyring" or (
+        inv.language == "python" and "-m" in args and _next(args, args.index("-m")) == "keyring"
+    ):
         return "the keyring command"
     if inv.program == "security" and args[:1] and args[0] in _SECURITY_READS:
         return f"security {args[0]}"
