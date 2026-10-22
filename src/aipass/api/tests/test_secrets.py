@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_secrets.py
-# Description: Tests for secrets handler and get_secret_cmd orchestrator
-# Version: 1.0.2
+# Description: Tests for the keyring-backed secrets handler, its module door, migrate and get_secret_cmd
+# Version: 2.0.0
 # Created: 2026-06-15
-# Modified: 2026-10-18
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -17,16 +17,19 @@ from __future__ import annotations
 
 import json
 import os
-import stat
-import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch, MagicMock
 
 import pytest
+from keyring.backend import KeyringBackend
+from keyring.backends import chainer, fail, null
+from keyring.errors import KeyringLocked, PasswordSetError
 
 from aipass.api.apps.modules.api_key import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
-from aipass.api.apps.modules.secrets import handle_command as _hc2  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.modules.secrets import handle_command
 from aipass.api.apps.handlers.auth.secrets import (
+    SecretsUnavailable,
     get_secret,
     set_secret,
     list_secrets,
@@ -44,235 +47,173 @@ PATCH_CMD_ERROR = "aipass.api.apps.modules.api_key.error"
 PATCH_CMD_SUCCESS = "aipass.api.apps.modules.api_key.success"
 PATCH_CMD_CONSOLE = "aipass.api.apps.modules.api_key.console"
 PATCH_CMD_JSON_HANDLER = "aipass.api.apps.modules.api_key.json_handler"
-GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--out FILE] [--json] [--list]"
+GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--json] [--list]"
 
 PATCH_MOD_HANDLER = "aipass.api.apps.modules.secrets._handler"
 PATCH_MOD_JSON_HANDLER = "aipass.api.apps.modules.secrets.json_handler"
 
-
-class TestGetSecret:
-    """Verifies secret retrieval under various conditions."""
-
-    def test_json_token_extraction(self, tmp_path: Path) -> None:
-        """JSON file with a known token key returns the extracted token string."""
-        provider_dir = tmp_path / "telegram"
-        provider_dir.mkdir()
-        secret_file = provider_dir / "bot.json"
-        secret_file.write_text(json.dumps({"bot_token": "abc123", "extra": "stuff"}), encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("telegram", "bot")
-
-        assert result == "abc123"
-
-    def test_json_token_extraction_searches_keys_in_order(self, tmp_path: Path) -> None:
-        """Token extraction tries _TOKEN_KEYS in order; first match wins."""
-        provider_dir = tmp_path / "discord"
-        provider_dir.mkdir()
-        # api_key precedes token in the handler's _TOKEN_KEYS.
-        secret_file = provider_dir / "creds.json"
-        secret_file.write_text(json.dumps({"token": "second", "api_key": "first"}), encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("discord", "creds")
-
-        assert result == "first"
-
-    def test_as_json_returns_full_dict(self, tmp_path: Path) -> None:
-        """as_json=True returns the full parsed dictionary."""
-        provider_dir = tmp_path / "telegram"
-        provider_dir.mkdir()
-        data = {"bot_token": "abc123", "webhook_url": "https://example.com"}
-        (provider_dir / "bot.json").write_text(json.dumps(data), encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("telegram", "bot", as_json=True)
-
-        assert result == data
-
-    def test_raw_file_fallback(self, tmp_path: Path) -> None:
-        """When no JSON file exists, falls back to raw file and returns stripped content."""
-        provider_dir = tmp_path / "generic"
-        provider_dir.mkdir()
-        (provider_dir / "api_token").write_text("  raw-secret-value  \n", encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("generic", "api_token")
-
-        assert result == "raw-secret-value"
-
-    def test_missing_provider_directory(self, tmp_path: Path) -> None:
-        """Non-existent provider directory returns None."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("nonexistent", "bot")
-
-        assert result is None
-
-    def test_missing_slug_file(self, tmp_path: Path) -> None:
-        """Provider exists but slug file does not -- returns None."""
-        provider_dir = tmp_path / "telegram"
-        provider_dir.mkdir()
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("telegram", "missing_slug")
-
-        assert result is None
-
-    def test_malformed_json_returns_none(self, tmp_path: Path) -> None:
-        """Malformed JSON file returns None and logs a warning."""
-        provider_dir = tmp_path / "telegram"
-        provider_dir.mkdir()
-        (provider_dir / "bot.json").write_text("{not valid json", encoding="utf-8")
-
-        mock_logger = MagicMock()
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER, mock_logger):
-            result = get_secret("telegram", "bot")
-
-        assert result is None
-        calls = mock_logger.warning.call_args_list
-        assert len(calls) == 2
-        warnings = [c.args[0] % tuple(c.args[1:]) for c in calls]
-        # Neither the store path nor the slug may reach the log (seedgo clear_text_secret_logging;
-        # CodeQL py/clear-text-logging-sensitive-data): a slug is a name listed out of the store.
-        assert warnings[0].startswith("Error reading a JSON secret file: ")
-        assert not any(str(tmp_path) in warning for warning in warnings)
-        assert warnings[1] == "Secret not found under provider telegram: no JSON or raw document for the requested slug"
-        assert "bot" not in warnings[1]
-        assert "bot" not in calls[1].args[0]
-
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="chmod(0o000) does not make a file unreadable to its owner on Windows",
-    )
-    def test_unreadable_file_returns_none(self, tmp_path: Path) -> None:
-        """OSError when reading file returns None."""
-        provider_dir = tmp_path / "telegram"
-        provider_dir.mkdir()
-        secret_file = provider_dir / "bot.json"
-        secret_file.write_text(json.dumps({"bot_token": "abc"}), encoding="utf-8")
-        secret_file.chmod(0o000)
-
-        mock_logger = MagicMock()
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER, mock_logger):
-            result = get_secret("telegram", "bot")
-
-        secret_file.chmod(0o644)
-
-        assert result is None
-
-    def test_json_no_matching_token_key(self, tmp_path: Path) -> None:
-        """JSON dict with no recognized token key returns json.dumps of the dict."""
-        provider_dir = tmp_path / "custom"
-        provider_dir.mkdir()
-        data = {"username": "admin", "host": "localhost"}
-        (provider_dir / "config.json").write_text(json.dumps(data), encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("custom", "config")
-
-        assert result == json.dumps(data)
-
-    def test_json_non_dict_value(self, tmp_path: Path) -> None:
-        """JSON file containing a non-dict value (e.g., a string) returns str of it."""
-        provider_dir = tmp_path / "simple"
-        provider_dir.mkdir()
-        (provider_dir / "token.json").write_text(json.dumps("plain-string-secret"), encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("simple", "token")
-
-        assert result == "plain-string-secret"
-
-    def test_json_preferred_over_raw(self, tmp_path: Path) -> None:
-        """When both JSON and raw files exist, JSON takes priority."""
-        provider_dir = tmp_path / "dual"
-        provider_dir.mkdir()
-        (provider_dir / "cred.json").write_text(json.dumps({"api_key": "from-json"}), encoding="utf-8")
-        (provider_dir / "cred").write_text("from-raw", encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("dual", "cred")
-
-        assert result == "from-json"
-
-    def test_provider_is_file_not_dir(self, tmp_path: Path) -> None:
-        """If provider path exists but is a file (not a directory), returns None."""
-        (tmp_path / "notadir").write_text("file content", encoding="utf-8")
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = get_secret("notadir", "slug")
-
-        assert result is None
+SERVICE = "aipass"
+TG_DOC = {"bot_token": "tg-fixture-token", "chat_id": 42}
+RAW_VALUE = "raw-fixture-value"
+ENV_KEY = "sk-or-v1-" + "0" * 40
+CLIENT_DOC = {"installed": {"client_id": "cid-fixture", "client_secret": "cs-fixture"}}
+CREDS_DOC = {"token": "gtok-fixture", "refresh_token": "gref-fixture"}
+FIXTURE_VALUES = ("tg-fixture-token", RAW_VALUE, ENV_KEY, "cs-fixture", "gtok-fixture", "gref-fixture")
 
 
-class TestListSecrets:
-    """Verifies secret listing under various conditions."""
+@pytest.fixture
+def quiet() -> Any:
+    """The handler's log and operations rows, recorded."""
+    # The module's rows too: unpatched, they land in the json seam under tmp_path, which is the store here.
+    with patch(PATCH_JSON_HANDLER) as jh, patch(PATCH_LOGGER) as log, patch(PATCH_MOD_JSON_HANDLER):
+        yield {"json": jh, "logger": log}
 
-    def test_returns_sorted_slugs(self, tmp_path: Path) -> None:
-        """Returns sorted slug names with .json extension stripped."""
-        provider_dir = tmp_path / "telegram"
-        provider_dir.mkdir()
-        (provider_dir / "webhook.json").write_text("{}", encoding="utf-8")
-        (provider_dir / "bot.json").write_text("{}", encoding="utf-8")
-        (provider_dir / "raw_token").write_text("tok", encoding="utf-8")
 
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
-            result = list_secrets("telegram")
+class _LockedKeyring(KeyringBackend):
+    """A real-looking backend whose keyring is locked."""
 
-        assert result == ["bot", "raw_token", "webhook"]
+    priority = 1  # type: ignore[assignment]
 
-    def test_nonexistent_provider_returns_empty(self, tmp_path: Path) -> None:
-        """Non-existent provider returns empty list."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
-            result = list_secrets("nonexistent")
+    def get_password(self, service: str, username: str) -> Any:
+        raise KeyringLocked("locked")
 
-        assert result == []
+    def set_password(self, service: str, username: str, password: str) -> None:
+        raise KeyringLocked("locked")
 
-    def test_skips_dotfiles(self, tmp_path: Path) -> None:
-        """Entries starting with '.' are excluded."""
-        provider_dir = tmp_path / "provider"
-        provider_dir.mkdir()
-        (provider_dir / ".hidden").write_text("secret", encoding="utf-8")
-        (provider_dir / "visible.json").write_text("{}", encoding="utf-8")
+    def delete_password(self, service: str, username: str) -> None:
+        raise KeyringLocked("locked")
 
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
-            result = list_secrets("provider")
 
-        assert result == ["visible"]
+class _WorkingKeyring(KeyringBackend):
+    """A backend that holds whatever it is given."""
 
-    def test_skips_pycache(self, tmp_path: Path) -> None:
-        """__pycache__ directory is excluded."""
-        provider_dir = tmp_path / "provider"
-        provider_dir.mkdir()
-        pycache = provider_dir / "__pycache__"
-        pycache.mkdir()
-        (provider_dir / "real.json").write_text("{}", encoding="utf-8")
+    priority = 1  # type: ignore[assignment]
 
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
-            result = list_secrets("provider")
+    def __init__(self) -> None:
+        super().__init__()
+        self.entries: dict = {}
 
-        assert result == ["real"]
+    def get_password(self, service: str, username: str) -> Any:
+        return self.entries.get((service, username))
 
-    def test_skips_directories(self, tmp_path: Path) -> None:
-        """Subdirectories (non-files) are excluded."""
-        provider_dir = tmp_path / "provider"
-        provider_dir.mkdir()
-        (provider_dir / "subdir").mkdir()
-        (provider_dir / "secret.json").write_text("{}", encoding="utf-8")
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.entries[(service, username)] = password
 
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
-            result = list_secrets("provider")
+    def delete_password(self, service: str, username: str) -> None:
+        self.entries.pop((service, username), None)
 
-        assert result == ["secret"]
 
-    def test_provider_is_file_not_dir(self, tmp_path: Path) -> None:
-        """If provider path is a file instead of a directory, returns empty list."""
-        (tmp_path / "notadir").write_text("file", encoding="utf-8")
+def _plaintext_backend() -> Any:
+    """A working backend whose module is keyrings.alt's: the plaintext family."""
+    return type("PlaintextKeyring", (_WorkingKeyring,), {"__module__": "keyrings.alt.file"})()
 
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_LOGGER):
-            result = list_secrets("notadir")
 
-        assert result == []
+def _empty_chainer() -> Any:
+    """A chainer that resolved to no backend at all."""
+    return type("ChainerBackend", (chainer.ChainerBackend,), {"backends": []})()
+
+
+def _plaintext_chainer() -> Any:
+    """A chainer whose members include a plaintext backend."""
+    return type("ChainerBackend", (chainer.ChainerBackend,), {"backends": [_WorkingKeyring(), _plaintext_backend()]})()
+
+
+class TestTheKeyringHoldsTheValues:
+    def test_a_string_round_trips_through_one_entry_named_provider_slug(
+        self, store: Path, keyring_store: Any, quiet: dict
+    ) -> None:
+        assert set_secret("telegram", "bot", "round-trip-token") == "telegram/bot"
+
+        assert keyring_store.entries[(SERVICE, "telegram/bot")] == "round-trip-token"
+        assert get_secret("telegram", "bot") == "round-trip-token"
+        assert list(store.iterdir()) == []
+
+    def test_a_json_document_round_trips_and_rests_as_json(self, keyring_store: Any, quiet: dict) -> None:
+        set_secret("telegram", "bot", TG_DOC, as_json=True)
+
+        assert json.loads(keyring_store.entries[(SERVICE, "telegram/bot")]) == TG_DOC
+        assert get_secret("telegram", "bot", as_json=True) == TG_DOC
+
+    def test_a_json_entry_read_as_a_string_gives_its_token_key(self, quiet: dict) -> None:
+        set_secret("discord", "creds", {"token": "second", "api_key": "first"}, as_json=True)
+
+        assert get_secret("discord", "creds") == "first"
+
+    def test_a_json_entry_with_no_token_key_reads_as_its_document(self, quiet: dict) -> None:
+        set_secret("custom", "config", {"username": "admin"}, as_json=True)
+
+        assert get_secret("custom", "config") == json.dumps({"username": "admin"})
+
+    def test_a_missing_entry_is_none_and_the_warning_names_no_slug(self, quiet: dict) -> None:
+        assert get_secret("telegram", "missing_slug") is None
+
+        message, *values = quiet["logger"].warning.call_args.args
+        assert "missing_slug" not in message % tuple(values)
+
+    def test_nothing_is_read_from_a_file_left_in_the_store(self, store: Path, quiet: dict) -> None:
+        (store / "telegram").mkdir()
+        (store / "telegram" / "bot.json").write_text(json.dumps(TG_DOC), encoding="utf-8")
+        (store / "telegram" / "raw").write_text(RAW_VALUE, encoding="utf-8")
+
+        assert get_secret("telegram", "bot") is None
+        assert get_secret("telegram", "raw") is None
+
+    def test_list_secrets_works_with_no_file_on_disk(self, store: Path, quiet: dict) -> None:
+        set_secret("telegram", "webhook", "w")
+        set_secret("telegram", "bot", TG_DOC, as_json=True)
+        set_secret("telegram", "bot", TG_DOC, as_json=True)
+        set_secret("discord", "creds", "d")
+
+        assert list_secrets("telegram") == ["bot", "webhook"]
+        assert list(store.iterdir()) == []
+
+    def test_list_secrets_for_an_unknown_provider_is_empty(self, quiet: dict) -> None:
+        assert list_secrets("nonexistent") == []
+
+
+@pytest.mark.parametrize(
+    ("make", "named"),
+    [
+        (fail.Keyring, "Keyring"),
+        (null.Keyring, "Keyring"),
+        (_plaintext_backend, "PlaintextKeyring"),
+        (_empty_chainer, "ChainerBackend"),
+        (_plaintext_chainer, "ChainerBackend"),
+        (_LockedKeyring, "_LockedKeyring"),
+    ],
+    ids=["fail", "null", "keyrings.alt", "empty-chainer", "plaintext-chainer", "locked"],
+)
+class TestABackendThatCannotHoldASecretRaises:
+    def test_get_raises_naming_the_backend(self, store: Path, quiet: dict, make: Any, named: str) -> None:
+        with patch("keyring.core._keyring_backend", make()), pytest.raises(SecretsUnavailable) as raised:
+            get_secret("telegram", "bot")
+
+        assert named in str(raised.value)
+        assert str(store) not in str(raised.value)
+
+    def test_set_raises_and_the_value_is_not_in_the_error(self, quiet: dict, make: Any, named: str) -> None:
+        with patch("keyring.core._keyring_backend", make()), pytest.raises(SecretsUnavailable) as raised:
+            set_secret("telegram", "bot", RAW_VALUE)
+
+        assert named in str(raised.value)
+        assert RAW_VALUE not in str(raised.value)
+        assert raised.value.__cause__ is None
+
+    def test_list_raises_never_an_empty_list(self, quiet: dict, make: Any, named: str) -> None:
+        with patch("keyring.core._keyring_backend", make()), pytest.raises(SecretsUnavailable) as raised:
+            list_secrets("telegram")
+
+        assert named in str(raised.value)
+
+
+class TestTheOperationsLog:
+    def test_get_and_set_rows_carry_provider_and_slug_only(self, quiet: dict) -> None:
+        set_secret("telegram", "bot", RAW_VALUE)
+        get_secret("telegram", "bot")
+
+        rows = [call.args for call in quiet["json"].log_operation.call_args_list]
+        assert [name for name, _ in rows] == ["secret_written", "secret_retrieved"]
+        assert all(data == {"provider": "telegram", "slug": "bot"} for _, data in rows)
 
 
 class TestSecretsModule:
@@ -304,19 +245,16 @@ class TestSecretsModule:
         assert result == data
         mock_handler.get_secret.assert_called_once_with("telegram", "bot", as_json=True)
 
-    def test_set_secret_logs_that_it_wrote_never_where(self, tmp_path: Path) -> None:
-        """A path in the secrets base reads as a secret's location: the operations log gets a boolean."""
+    def test_set_secret_returns_the_entry_name_and_logs_that_it_wrote(self, quiet: dict) -> None:
         mock_jh = MagicMock()
 
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            with patch(PATCH_MOD_JSON_HANDLER, mock_jh):
-                written = secrets_module.set_secret("telegram", "bot", "my-token-value")
+        with patch(PATCH_MOD_JSON_HANDLER, mock_jh):
+            written = secrets_module.set_secret("telegram", "bot", "my-token-value")
 
-        assert written.exists()
+        assert written == "telegram/bot"
         operation, data = mock_jh.log_operation.call_args[0]
         assert operation == "secrets_set"
         assert data == {"provider": "telegram", "slug": "bot", "wrote": True}
-        assert all(tmp_path.name not in str(value) for value in data.values())
 
     def test_get_secret_not_found_logs(self) -> None:
         """Module get_secret logs even when handler returns None."""
@@ -344,7 +282,7 @@ class TestSecretsModule:
 
 
 class TestGetSecretCmd:
-    """Verifies the hardened get_secret_cmd: no raw secrets to stdout."""
+    """Verifies the hardened get_secret_cmd: no raw secrets to stdout, none to a file."""
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
@@ -362,41 +300,33 @@ class TestGetSecretCmd:
         assert "chars" in msg
         assert "my-secret-token-value" not in msg
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="File permission checks are POSIX-only")
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
-    @patch(PATCH_CMD_SUCCESS)
-    def test_out_writes_file_with_0600(self, mock_success, mock_secrets, mock_jh, tmp_path: Path) -> None:
-        """--out writes secret value to file with 0o600 permissions."""
+    @patch(PATCH_CMD_ERROR)
+    def test_out_is_unknown_and_no_value_reaches_a_file(self, mock_error, mock_secrets, mock_jh, tmp_path) -> None:
         mock_secrets.get_secret.return_value = "secret-token-here"
-        out_file = str(tmp_path / "token.txt")
+        out_file = tmp_path / "token.txt"
 
-        get_secret_cmd(["telegram/bot", "--out", out_file])
+        get_secret_cmd(["telegram/bot", "--out", str(out_file)])
 
-        assert Path(out_file).exists()
-        assert Path(out_file).read_text(encoding="utf-8") == "secret-token-here"
-        file_mode = stat.S_IMODE(os.stat(out_file).st_mode)
-        assert file_mode == 0o600
-        msg = mock_success.call_args[0][0]
-        assert out_file in msg
-        assert "secret-token-here" not in msg
+        mock_error.assert_called_once_with("Unknown option: --out", suggestion=GET_SECRET_USAGE)
+        mock_secrets.get_secret.assert_not_called()
+        assert list(tmp_path.iterdir()) == []
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="File permission checks are POSIX-only")
+    def test_the_usage_names_no_file(self) -> None:
+        assert "FILE" not in GET_SECRET_USAGE
+        assert "--out" not in GET_SECRET_USAGE
+
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
-    @patch(PATCH_CMD_SUCCESS)
-    def test_out_json_writes_json_file(self, mock_success, mock_secrets, mock_jh, tmp_path: Path) -> None:
-        """--out --json writes JSON-formatted secret to file."""
-        data = {"bot_token": "abc123", "allowed": [1, 2]}
-        mock_secrets.get_secret.return_value = data
-        out_file = str(tmp_path / "bot.json")
+    @patch(PATCH_CMD_ERROR)
+    def test_an_unavailable_keyring_is_named_not_reported_missing(self, mock_error, mock_secrets, mock_jh) -> None:
+        mock_secrets.SecretsUnavailable = SecretsUnavailable
+        mock_secrets.get_secret.side_effect = SecretsUnavailable("The keyring backend X is locked")
 
-        get_secret_cmd(["telegram/bot", "--out", out_file, "--json"])
+        get_secret_cmd(["telegram/bot"])
 
-        content = Path(out_file).read_text(encoding="utf-8")
-        assert json.loads(content) == data
-        file_mode = stat.S_IMODE(os.stat(out_file).st_mode)
-        assert file_mode == 0o600
+        mock_error.assert_called_once_with("The keyring backend X is locked")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
@@ -447,14 +377,6 @@ class TestGetSecretCmd:
         mock_error.assert_called_once_with("Secret not found: telegram/bot")
 
     @patch(PATCH_CMD_JSON_HANDLER)
-    @patch(PATCH_CMD_ERROR)
-    def test_out_missing_path_calls_error(self, mock_error, mock_jh) -> None:
-        """--out without a file path argument calls error()."""
-        get_secret_cmd(["telegram/bot", "--out"])
-
-        mock_error.assert_called_once_with("--out requires a file path argument")
-
-    @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
     @patch(PATCH_CMD_CONSOLE)
     def test_list_empty_provider(self, mock_console, mock_secrets, mock_jh) -> None:
@@ -466,115 +388,26 @@ class TestGetSecretCmd:
         mock_secrets.list_secrets.assert_called_once_with("empty_provider")
 
 
-class TestSetSecret:
-    """Verifies secret writing under various conditions."""
-
-    def test_writes_string_value(self, tmp_path: Path) -> None:
-        """Writes a plain string value to provider/slug.json."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = set_secret("telegram", "bot", "my-token-value")
-
-        assert result == tmp_path / "telegram" / "bot.json"
-        assert json.loads(result.read_text(encoding="utf-8")) == "my-token-value"
-
-    def test_as_json_writes_dict(self, tmp_path: Path) -> None:
-        """as_json=True writes JSON-serialized dict."""
-        data = {"bot_token": "abc123", "webhook_url": "https://example.com"}
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = set_secret("telegram", "bot", data, as_json=True)
-
-        written = json.loads(result.read_text(encoding="utf-8"))
-        assert written == data
-
-    def test_creates_provider_directory(self, tmp_path: Path) -> None:
-        """Creates provider directory if it doesn't exist."""
-        assert not (tmp_path / "newprovider").exists()
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            set_secret("newprovider", "cred", "value")
-
-        assert (tmp_path / "newprovider").is_dir()
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="File permission checks are POSIX-only")
-    def test_file_has_0600_permissions(self, tmp_path: Path) -> None:
-        """Written file has 0o600 permissions."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            result = set_secret("telegram", "bot", "token")
-
-        file_mode = stat.S_IMODE(os.stat(result).st_mode)
-        assert file_mode == 0o600
-
-    @pytest.mark.skipif(sys.platform == "win32", reason="File permission checks are POSIX-only")
-    def test_provider_dir_has_0700_permissions(self, tmp_path: Path) -> None:
-        """Provider directory has 0o700 permissions."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            set_secret("telegram", "bot", "token")
-
-        dir_mode = stat.S_IMODE(os.stat(tmp_path / "telegram").st_mode)
-        assert dir_mode == 0o700
-
-    def test_overwrites_existing_secret(self, tmp_path: Path) -> None:
-        """Overwrites an existing secret file."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            set_secret("telegram", "bot", "old-value")
-            set_secret("telegram", "bot", "new-value")
-
-        content = json.loads((tmp_path / "telegram" / "bot.json").read_text(encoding="utf-8"))
-        assert content == "new-value"
-
-    def test_round_trip_string(self, tmp_path: Path) -> None:
-        """set_secret then get_secret returns the same string value."""
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            set_secret("telegram", "bot", "round-trip-token")
-            result = get_secret("telegram", "bot")
-
-        assert result == "round-trip-token"
-
-    def test_round_trip_json(self, tmp_path: Path) -> None:
-        """set_secret as_json then get_secret as_json returns the same dict."""
-        data = {"bot_token": "abc123", "chat_id": 42}
-
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER), patch(PATCH_LOGGER):
-            set_secret("telegram", "bot", data, as_json=True)
-            result = get_secret("telegram", "bot", as_json=True)
-
-        assert result == data
-
-    def test_logs_operation(self, tmp_path: Path) -> None:
-        """set_secret logs the write operation via json_handler."""
-        mock_jh = MagicMock()
-        with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_JSON_HANDLER, mock_jh), patch(PATCH_LOGGER):
-            set_secret("telegram", "bot", "token")
-
-        mock_jh.log_operation.assert_called_once()
-        call_args = mock_jh.log_operation.call_args[0]
-        assert call_args[0] == "secret_written"
-        assert call_args[1]["provider"] == "telegram"
-        assert call_args[1]["slug"] == "bot"
-
-
 class TestSetSecretModule:
     """Verifies the module-level set_secret wrapper."""
 
-    def test_set_secret_wraps_handler(self, tmp_path: Path) -> None:
+    def test_set_secret_wraps_handler(self) -> None:
         """Module set_secret delegates to handler and logs the operation."""
         mock_handler = MagicMock()
-        mock_handler.set_secret.return_value = tmp_path / "telegram" / "bot.json"
+        mock_handler.set_secret.return_value = "telegram/bot"
         mock_jh = MagicMock()
 
         with patch(PATCH_MOD_HANDLER, mock_handler), patch(PATCH_MOD_JSON_HANDLER, mock_jh):
             result = secrets_module.set_secret("telegram", "bot", "token-val")
 
-        assert result == tmp_path / "telegram" / "bot.json"
+        assert result == "telegram/bot"
         mock_handler.set_secret.assert_called_once_with("telegram", "bot", "token-val", as_json=False)
         mock_jh.log_operation.assert_called_once()
         assert mock_jh.log_operation.call_args[0][0] == "secrets_set"
 
-    def test_set_secret_as_json(self, tmp_path: Path) -> None:
+    def test_set_secret_as_json(self) -> None:
         """Module set_secret passes as_json through to handler."""
         mock_handler = MagicMock()
-        mock_handler.set_secret.return_value = tmp_path / "path.json"
         mock_jh = MagicMock()
         data = {"bot_token": "abc"}
 
@@ -585,7 +418,7 @@ class TestSetSecretModule:
 
 
 class TestSecretsHandleCommand:
-    """The secrets module owns no CLI commands — get-secret routes via api_key."""
+    """The secrets module owns `secrets` alone — get-secret routes via api_key."""
 
     def test_no_args_returns_false_and_is_silent(self, capsys: object) -> None:
         """Claiming a no-arg command would swallow it before api.py can reject it."""
@@ -597,3 +430,144 @@ class TestSecretsHandleCommand:
         """A trailing help flag for another module's command is not ours to answer."""
         assert secrets_module.handle_command("bogus-command", ["--help"]) is False
         assert capsys.readouterr().out == ""  # type: ignore[union-attr]
+
+    def test_secrets_help_names_migrate(self, capsys: pytest.CaptureFixture) -> None:
+        assert handle_command("secrets", ["--help"]) is True
+
+        assert "secrets migrate [--dry-run]" in capsys.readouterr().out
+
+
+def _seed_store(base: Path) -> None:
+    """A store of the three shapes, plus a Telethon session and a pairing receipt that stay."""
+    (base / "telegram").mkdir()
+    (base / "telegram" / "bot.json").write_text(json.dumps(TG_DOC), encoding="utf-8")
+    (base / "telegram" / "mirror.session").write_text("sqlite-fixture", encoding="utf-8")
+    (base / "generic").mkdir()
+    (base / "generic" / "api_token").write_text(f"  {RAW_VALUE}\n", encoding="utf-8")
+    (base / "host_api").mkdir()
+    (base / "host_api" / "pixel.token").write_text("receipt-fixture", encoding="utf-8")
+    (base / ".env").write_text(f"# AIPass API Keys\n\nOPENROUTER_API_KEY={ENV_KEY}\n", encoding="utf-8")
+    (base / "google_client_secret.json").write_text(json.dumps(CLIENT_DOC), encoding="utf-8")
+    (base / "google_creds.json").write_text(json.dumps(CREDS_DOC), encoding="utf-8")
+
+
+MOVED = {
+    "telegram/bot": TG_DOC,
+    "generic/api_token": RAW_VALUE,
+    "openrouter/api_key": ENV_KEY,
+    "google/client_secret": CLIENT_DOC,
+    "google/creds": CREDS_DOC,
+}
+
+
+class TestSecretsMigrate:
+    def test_the_three_shapes_move_in_and_the_others_stay(
+        self, store: Path, keyring_store: Any, quiet: dict, capsys: pytest.CaptureFixture
+    ) -> None:
+        _seed_store(store)
+
+        assert handle_command("secrets", ["migrate"]) is True
+
+        for name, value in MOVED.items():
+            provider, slug = name.split("/")
+            assert get_secret(provider, slug, as_json=isinstance(value, dict)) == value
+        assert sorted(p.relative_to(store).as_posix() for p in store.rglob("*") if p.is_file()) == [
+            "host_api/pixel.token",
+            "telegram/mirror.session",
+        ]
+        out = capsys.readouterr().out
+        assert "telegram/mirror.session" in out and "host_api/pixel.token" in out
+        assert not any(value in out for value in FIXTURE_VALUES)
+
+    def test_each_file_is_zeroed_before_it_is_unlinked(
+        self, store: Path, tmp_path_factory: pytest.TempPathFactory, quiet: dict
+    ) -> None:
+        # A second hard link outlives the unlink and keeps the inode's last bytes: what the shred left on disk.
+        _seed_store(store)
+        witnesses = tmp_path_factory.mktemp("witness")
+        linked = {}
+        for index, name in enumerate(("telegram/bot.json", "generic/api_token", ".env", "google_creds.json")):
+            witness = witnesses / str(index)
+            os.link(store / name, witness)
+            linked[store / name] = (witness, witness.stat().st_size)
+
+        handle_command("secrets", ["migrate"])
+
+        for original, (witness, size) in linked.items():
+            assert not original.exists()
+            assert witness.read_bytes() == b"\0" * size
+
+    def test_a_failed_write_leaves_the_file_whole_and_says_so(
+        self, store: Path, keyring_store: Any, quiet: dict, capsys: pytest.CaptureFixture
+    ) -> None:
+        (store / "generic").mkdir()
+        (store / "generic" / "api_token").write_text(RAW_VALUE, encoding="utf-8")
+
+        with patch.object(keyring_store, "set_password", side_effect=PasswordSetError("refused")):
+            handle_command("secrets", ["migrate"])
+
+        assert (store / "generic" / "api_token").read_text(encoding="utf-8") == RAW_VALUE
+        _, err = capsys.readouterr()
+        assert "PasswordSetError" in err
+        assert RAW_VALUE not in err
+
+    def test_dry_run_names_the_backend_and_what_would_move_and_changes_nothing(
+        self, store: Path, keyring_store: Any, quiet: dict, capsys: pytest.CaptureFixture
+    ) -> None:
+        _seed_store(store)
+        before = {p: p.read_bytes() for p in store.rglob("*") if p.is_file()}
+
+        handle_command("secrets", ["migrate", "--dry-run"])
+
+        assert keyring_store.entries == {}
+        assert {p: p.read_bytes() for p in store.rglob("*") if p.is_file()} == before
+        out = capsys.readouterr().out
+        assert "DictKeyring" in out
+        assert all(name in out for name in MOVED)
+
+    def test_a_second_run_moves_nothing(
+        self, store: Path, keyring_store: Any, quiet: dict, capsys: pytest.CaptureFixture
+    ) -> None:
+        _seed_store(store)
+        handle_command("secrets", ["migrate"])
+        entries = dict(keyring_store.entries)
+        capsys.readouterr()
+
+        handle_command("secrets", ["migrate"])
+
+        assert keyring_store.entries == entries
+        assert "Nothing left to move" in capsys.readouterr().out
+
+    def test_the_log_rows_hold_provider_and_slug_and_no_value(self, store: Path, quiet: dict) -> None:
+        _seed_store(store)
+
+        handle_command("secrets", ["migrate"])
+
+        rows = [c.args[1] for c in quiet["json"].log_operation.call_args_list if c.args[0] == "secret_migrated"]
+        assert sorted(f"{row['provider']}/{row['slug']}" for row in rows) == sorted(MOVED)
+        assert all(set(row) == {"provider", "slug"} for row in rows)
+        logged = repr(quiet["json"].log_operation.call_args_list) + repr(quiet["logger"].mock_calls)
+        assert not any(value in logged for value in FIXTURE_VALUES)
+        assert str(store) not in logged
+
+    def test_an_env_holding_other_settings_is_imported_but_kept(
+        self, store: Path, keyring_store: Any, quiet: dict, capsys: pytest.CaptureFixture
+    ) -> None:
+        (store / ".env").write_text(f"OPENROUTER_API_KEY={ENV_KEY}\nBLUESKY_HANDLE=me\n", encoding="utf-8")
+
+        handle_command("secrets", ["migrate"])
+
+        assert get_secret("openrouter", "api_key") == ENV_KEY
+        assert (store / ".env").exists()
+        assert ".env" in capsys.readouterr().out
+
+    def test_an_unavailable_backend_is_an_error_and_moves_nothing(
+        self, store: Path, quiet: dict, capsys: pytest.CaptureFixture
+    ) -> None:
+        _seed_store(store)
+
+        with patch("keyring.core._keyring_backend", null.Keyring()):
+            handle_command("secrets", ["migrate"])
+
+        assert (store / "google_creds.json").exists()
+        assert "null" in capsys.readouterr().err.lower()

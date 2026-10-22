@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: google_client.py
 # Description: Google API Client Module — public API for Google services
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -22,7 +22,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
@@ -30,6 +30,8 @@ from aipass.prax import logger  # noqa: F401
 import aipass.api.apps.handlers.google.auth as google_auth
 import aipass.api.apps.handlers.google.service_factory as google_factory
 import aipass.api.apps.handlers.google.retry as google_retry
+
+IMPORT_HINT = "Put google_client_secret.json in the store, then run: drone @api secrets migrate"
 
 
 def print_introspection() -> None:
@@ -59,14 +61,28 @@ def print_introspection() -> None:
     status = "[green]installed[/green]" if available else "[red]missing[/red]"
     console.print(f"[cyan]Google Libraries:[/cyan] {status}")
 
-    has_creds = google_auth.CREDS_PATH.exists()
-    cred_status = "[green]found[/green]" if has_creds else "[yellow]not configured[/yellow]"
-    console.print(f"[cyan]Credentials:[/cyan] {cred_status}")
-
-    has_secret = google_auth.CLIENT_SECRET_PATH.exists()
-    secret_status = "[green]found[/green]" if has_secret else "[yellow]not configured[/yellow]"
-    console.print(f"[cyan]Client Secret:[/cyan] {secret_status}")
+    console.print(f"[cyan]Credentials:[/cyan] {_entry_status(google_auth.has_credentials)}")
+    console.print(f"[cyan]Client Secret:[/cyan] {_entry_status(google_auth.has_client_secret)}")
     console.print()
+
+
+def _entry_status(present: Callable[[], bool]) -> str:
+    """found / not configured / the keyring's own refusal, for the introspection lines."""
+    try:
+        return "[green]found[/green]" if present() else "[yellow]not configured[/yellow]"
+    except google_auth.GoogleAuthUnavailable as e:
+        return f"[red]unavailable[/red] [dim]({e})[/dim]"
+
+
+def _client_secret_present() -> bool:
+    """Whether google/client_secret is in the keyring; an error() says why when it is not."""
+    try:
+        if google_auth.has_client_secret():
+            return True
+        error("Client secret not found", suggestion=IMPORT_HINT)
+    except google_auth.GoogleAuthUnavailable as e:
+        error(str(e))
+    return False
 
 
 def print_help() -> None:
@@ -84,10 +100,10 @@ def print_help() -> None:
     console.print()
     console.print("[yellow]CREDENTIAL SETUP:[/yellow]")
     console.print("  [dim]1.[/dim] Get OAuth client secret from Google Cloud Console")
-    console.print("  [dim]2.[/dim] Save as: [cyan]~/.secrets/aipass/google_client_secret.json[/cyan]")
+    console.print("  [dim]2.[/dim] Import it: [cyan]drone @api secrets migrate[/cyan] (google_client_secret.json)")
     console.print("  [dim]3.[/dim] Run: [cyan]drone @api reauth google[/cyan]")
     console.print("  [dim]4.[/dim] Complete OAuth consent in browser")
-    console.print("  [dim]5.[/dim] Credentials saved to: [cyan]~/.secrets/aipass/google_creds.json[/cyan]")
+    console.print("  [dim]5.[/dim] Credentials saved to the keyring entry [cyan]google/creds[/cyan]")
     console.print()
 
 
@@ -129,11 +145,7 @@ def _cmd_validate() -> None:
         )
         return
 
-    if not google_auth.CLIENT_SECRET_PATH.exists():
-        error(
-            "Client secret not found",
-            suggestion=f"Save OAuth client secret to: {google_auth.CLIENT_SECRET_PATH}",
-        )
+    if not _client_secret_present():
         return
 
     try:
@@ -165,11 +177,7 @@ def _cmd_reauth() -> None:
         )
         return
 
-    if not google_auth.CLIENT_SECRET_PATH.exists():
-        error(
-            "Client secret not found",
-            suggestion=f"Save OAuth client secret to: {google_auth.CLIENT_SECRET_PATH}",
-        )
+    if not _client_secret_present():
         return
 
     warning("Starting OAuth2 flow...")
@@ -185,7 +193,7 @@ def _cmd_reauth() -> None:
 
     if creds:
         success("Google re-authentication successful")
-        console.print(f"[dim]Credentials saved to: {google_auth.CREDS_PATH}[/dim]")
+        console.print("[dim]Credentials saved to the entry google/creds[/dim]")
         json_handler.log_operation("google_reauth", {"status": "success"})
     else:
         error("Google re-authentication failed")

@@ -298,8 +298,8 @@
     {
       "file": "tests/conftest.py",
       "standard": "through_the_command",
-      "lines": [143, 145, 327, 329],
-      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (327, 329), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 143, 145: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09. Lines moved 225/227/466/468 -> 143/145/327/329 in the comment sweep (2026-10-17)."
+      "lines": [180, 182, 364, 366],
+      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (364, 366), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 143, 145: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09. Lines moved 225/227/466/468 -> 143/145/327/329 in the comment sweep (2026-10-17); 143/145/327/329 -> 180/182/364/366 with the keyring test backend (2026-10-22)."
     }
   ],
   "notes": {

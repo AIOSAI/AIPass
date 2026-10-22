@@ -1,12 +1,13 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.1.2
+# Version: 2.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.2.0 (2026-10-22): dict-backed keyring for every test (autouse); no test reaches the login keyring
 #   - v2.1.0 (2026-09-27): Console width pin + command-state reset (C1, C2);
 #     host imports hoisted to module level; mock_json_handler removed (unused)
 #   - v2.0.0 (2026-03-27): Added mock_infrastructure, mock_logger,
@@ -36,7 +37,11 @@ from pathlib import Path
 from typing import Any, Generator
 from unittest.mock import MagicMock, patch
 
+import keyring
+import keyring.core
 import pytest
+from keyring.backend import KeyringBackend
+from keyring.errors import PasswordDeleteError
 
 from aipass.cli.apps.modules import display
 
@@ -83,9 +88,41 @@ def tmux_preflight(monkeypatch: Any):
     monkeypatch.setattr(host_attach.shutil, "which", _forced_tmux_which(shutil.which))
 
 
+class DictKeyring(KeyringBackend):
+    """The keyring as a dict, so no test reaches the login keyring or a D-Bus."""
+
+    priority = 1  # type: ignore[assignment]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entries: dict = {}
+
+    def get_password(self, service: str, username: str) -> Any:
+        return self.entries.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.entries[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        if self.entries.pop((service, username), None) is None:
+            raise PasswordDeleteError(username)
+
+
+@pytest.fixture(autouse=True)
+def keyring_store(monkeypatch: pytest.MonkeyPatch) -> DictKeyring:
+    """A fresh dict keyring per test; the backend in place before is put back after."""
+    # The private slot, not get_keyring(): reading the backend that way would probe D-Bus to build one.
+    monkeypatch.setattr(keyring.core, "_keyring_backend", keyring.core._keyring_backend)
+    # A child process a test spawns gets keyring's fail backend, never the real one.
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+    backend = DictKeyring()
+    keyring.set_keyring(backend)
+    return backend
+
+
 @pytest.fixture
 def store(tmp_path: Path):
-    """Redirect the token store to a temp dir — no real token is ever touched."""
+    """Redirect the lock and receipt directory to a temp dir; the rows sit in the dict keyring."""
     with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER):
             yield tmp_path

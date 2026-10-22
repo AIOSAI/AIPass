@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_pairing.py
 # Description: Tests for the pairing door — one-use QR codes a phone trades for its bearer
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-13
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/host/pairings.py, POST /v1/pair and the host-api pair verb."""
@@ -11,7 +11,7 @@
 # A file of its own, permitted by @devpulse for DPLAN-0406's leg: the pairing
 # store, its route and its verb are one behaviour (the token's hop to the phone)
 # that test_host_api.py's commands and test_host_api_routes.py's auth do not own.
-# Every test runs on the conftest `store` fixture: the secrets base is tmp_path.
+# Every test runs on the conftest `store` fixture: the lock directory is tmp_path, the rows sit in the dict store.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — segno's QR encoding itself; render_qr is pinned to its block characters only
@@ -26,6 +26,8 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 import pytest
+from keyring import get_password, set_password
+from keyring.errors import KeyringLocked
 
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import pairings as host_pairings
@@ -57,24 +59,32 @@ def paired(store: Path, listener: Any) -> Any:
         yield store
 
 
+ENTRY = "host_api/pairings"
+
+
+def _entry() -> Any:
+    """The pairing rows' entry as stored, or None."""
+    return get_password("aipass", ENTRY)
+
+
 def _stored_rows() -> list:
-    return json.loads(host_pairings.store_path().read_text(encoding="utf-8"))["pairings"]
+    return json.loads(_entry())["pairings"]
 
 
 def _expire_every_row() -> None:
     """Move every stored row's expiry an hour into the past: the clock's edge, set in the store."""
-    document = json.loads(host_pairings.store_path().read_text(encoding="utf-8"))
+    document = json.loads(_entry())
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     for row in document["pairings"]:
         row["expires"] = past
-    host_pairings.store_path().write_text(json.dumps(document), encoding="utf-8")
+    set_password("aipass", ENTRY, json.dumps(document))
 
 
 class TestMintPairing:
     def test_mint_stores_the_codes_hash_and_never_the_code(self, paired: Path) -> None:
         minted = host_api_module.mint_pairing("phone", "operate")
 
-        stored = host_pairings.store_path().read_text(encoding="utf-8")
+        stored = _entry()
         assert minted["code"] not in stored
         [row] = _stored_rows()
         assert row["id"] == minted["id"]
@@ -94,7 +104,7 @@ class TestMintPairing:
 
         with pytest.raises(host_api_module.PairingError, match="wildcard"):
             host_api_module.mint_pairing("phone")
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None
 
     @pytest.mark.parametrize(
         ("label", "scope", "ttl"),
@@ -111,7 +121,7 @@ class TestMintPairing:
     ) -> None:
         with pytest.raises(host_pairings.PairingError):
             host_api_module.mint_pairing(label, scope, ttl)
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None
 
     def test_the_mint_asks_the_bind_itself_whether_a_server_answers(self, paired: Path, listener: Any) -> None:
         host_api_module.mint_pairing("phone")
@@ -130,7 +140,7 @@ class TestMintPairing:
         lines = str(raised.value).splitlines()
         assert lines[0].startswith(f"No server answers on {TAILNET_SHAPED}:8787")
         assert lines[1:] == ["  drone @api host-api serve --detach", "  drone @api host-api pair phone --scope operate"]
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None
 
     def test_a_server_answering_an_error_refuses_and_names_status(self, paired: Path, listener: Any) -> None:
         listener.side_effect = HTTPError(f"http://{TAILNET_SHAPED}:8787/", 503, "Service Unavailable", Message(), None)
@@ -140,18 +150,39 @@ class TestMintPairing:
 
         assert "answers 503" in str(raised.value)
         assert str(raised.value).endswith("drone @api host-api status")
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None
 
     def test_the_door_refusal_is_a_token_error(self) -> None:
         assert issubclass(host_api_module.PairingError, host_api_module.TokenError)
 
     def test_an_unreadable_store_is_an_error_naming_the_store_never_an_empty_list(self, paired: Path) -> None:
-        host_pairings.store_path().parent.mkdir(parents=True, exist_ok=True)
-        host_pairings.store_path().write_text("{not json", encoding="utf-8")
+        set_password("aipass", ENTRY, "{not json")
 
         with pytest.raises(host_pairings.PairingError) as raised:
             host_api_module.mint_pairing("phone")
-        assert host_pairings.store_path().name in str(raised.value)
+        assert ENTRY in str(raised.value)
+
+    def test_a_locked_store_is_a_pairing_error_naming_the_entry(self, paired: Path, keyring_store: Any) -> None:
+        held = keyring_store.get_password
+
+        def locked_for_pairings(service: str, username: str) -> Any:
+            if username == ENTRY:
+                raise KeyringLocked("locked")
+            return held(service, username)
+
+        with patch.object(keyring_store, "get_password", side_effect=locked_for_pairings):
+            with pytest.raises(host_pairings.PairingError) as raised:
+                host_api_module.mint_pairing("phone")
+
+        assert ENTRY in str(raised.value)
+        assert str(paired) not in str(raised.value)
+
+    def test_the_rows_rest_in_the_entry_and_no_store_file_is_named(self, paired: Path) -> None:
+        host_api_module.mint_pairing("phone")
+
+        assert len(_stored_rows()) == 1
+        assert not hasattr(host_pairings, "store_path")
+        assert [item.name for item in (paired / "host_api").iterdir()] == []
 
 
 class TestRedeemPairing:
@@ -273,8 +304,7 @@ class TestPairRoute:
         assert statuses == [401] * 10 + [429]
 
     def test_an_unreadable_store_is_503_with_the_fixed_sentence(self, client: Any) -> None:
-        host_pairings.store_path().parent.mkdir(parents=True, exist_ok=True)
-        host_pairings.store_path().write_text("[]", encoding="utf-8")
+        set_password("aipass", ENTRY, "[]")
 
         with patch("aipass.api.apps.handlers.host.denials.logger") as log:
             response = client.post("/v1/pair", json={"code": "guess"})
@@ -284,7 +314,7 @@ class TestPairRoute:
         assert error["code"] == "pairing_unavailable"
         assert "pairings" not in error["message"]
         assert error["ref"] in log.warning.call_args.args
-        assert host_pairings.store_path().name in str(log.warning.call_args.args[-1])
+        assert ENTRY in str(log.warning.call_args.args[-1])
 
 
 class TestPairCommand:
@@ -314,7 +344,7 @@ class TestPairCommand:
         assert exit_info.value.code == 1
         _, err = capsys.readouterr()
         assert "a phone cannot reach it" in err
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None
 
     def test_pair_with_no_server_exits_1_and_prints_both_commands(
         self, paired: Path, listener: Any, capsys: pytest.CaptureFixture
@@ -328,7 +358,7 @@ class TestPairCommand:
         _, err = capsys.readouterr()
         assert "drone @api host-api serve --detach" in err
         assert "drone @api host-api pair phone --scope operate" in err
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None
 
     def test_pair_refuses_a_ttl_that_is_not_seconds(self, paired: Path, capsys: pytest.CaptureFixture) -> None:
         with pytest.raises(SystemExit):
@@ -336,4 +366,4 @@ class TestPairCommand:
 
         _, err = capsys.readouterr()
         assert "soon" in err
-        assert not host_pairings.store_path().exists()
+        assert _entry() is None

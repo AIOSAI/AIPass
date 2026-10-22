@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: keys.py
 # Description: API Key Management Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """API Key Management Handler"""
 
-from pathlib import Path
 from typing import Optional, Dict, Any
 
+from aipass.api.apps.handlers.auth import secrets
 from aipass.api.apps.handlers.json import json_handler
 
 
@@ -23,16 +23,13 @@ VALIDATION_RULES = {
 
 
 class KeyUnavailable(Exception):
-    """The secrets file exists but could not be read.
-
-    Raised from None and named only by strerror or type, so no byte of the file reaches a message or traceback.
-    """
+    """The keyring could not give the key: named by backend class and reason, raised from None."""
 
 
 def get_api_key(provider: str = "openrouter") -> Optional[str]:
-    """Get validated API key for provider from secrets file.
+    """Get validated API key for provider from its keyring entry.
 
-    Raises KeyUnavailable when the file exists but cannot be read; None means no key set.
+    Raises KeyUnavailable when the keyring cannot be read; None means no key set.
     """
     key = _read_key_from_secrets(provider)
     if key and validate_key(key, provider):
@@ -43,26 +40,12 @@ def get_api_key(provider: str = "openrouter") -> Optional[str]:
 
 
 def _read_key_from_secrets(provider: str) -> Optional[str]:
-    """Read API key directly from ~/.secrets/aipass/.env."""
-    secrets_path = Path.home() / ".secrets" / "aipass" / ".env"
-    if not secrets_path.exists():
-        return None
-
+    """Read the API key from the keyring entry <provider>/api_key."""
     try:
-        env_var = f"{provider.upper()}_API_KEY"
-        with open(secrets_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    if key.strip() == env_var:
-                        return value.strip()
-        return None
-    except Exception as e:
-        reason = getattr(e, "strerror", None) or type(e).__name__
-        raise KeyUnavailable(f"The secrets file could not be read ({reason})") from None
+        key = secrets.get_secret(provider, "api_key")
+    except secrets.SecretsUnavailable as e:
+        raise KeyUnavailable(str(e)) from None
+    return None if key is None else str(key)
 
 
 def validate_key(key: str, provider: str = "openrouter") -> bool:
@@ -95,8 +78,10 @@ def diagnose_key(provider: str = "openrouter") -> str:
     key = _read_key_from_secrets(provider)
 
     if not key:
-        secrets_path = Path.home() / ".secrets" / "aipass" / ".env"
-        return f"API key for {provider} not found. Expected at {secrets_path}. Run drone @api init to configure."
+        return (
+            f"API key for {provider} not found in the keyring entry {provider}/api_key. Run drone @api init, "
+            f"fill in {provider.upper()}_API_KEY, then drone @api secrets migrate."
+        )
 
     key = key.strip()
     rules = get_validation_rules(provider)

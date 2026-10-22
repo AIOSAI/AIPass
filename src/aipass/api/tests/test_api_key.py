@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_key.py
 # Description: Tests for API Key Management Module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -12,7 +12,7 @@
 # seedgo: no-test-needed(ruff) — that api_key.py parses and imports
 # seedgo: no-test-needed(covered_elsewhere) — fetch_api_key and fetch_validate_key, tests/test_critical_paths.py
 # seedgo: no-test-needed(covered_elsewhere) — get_secret_cmd's secret read, tests/test_secrets.py
-# seedgo: no-test-needed(hardcoded_key) — any real key on disk; keys, env and provider are patched at the edge
+# seedgo: no-test-needed(hardcoded_key) — any real key; the keyring is conftest's dict and the env writer is stubbed
 
 from unittest.mock import patch, MagicMock
 
@@ -21,23 +21,16 @@ import pytest
 from aipass.api.apps.api import discover_modules, route_command
 from aipass.api.apps.handlers.auth import env as env_handler
 from aipass.api.apps.handlers.auth import keys as keys_handler
-from aipass.api.apps.handlers.auth import secrets as secrets_handler
 from aipass.api.apps.modules import api_key
+
+FIXTURE_KEY = "sk-or-v1-" + "7" * 40
 
 
 @pytest.fixture(autouse=True)
 def key_source_stub(monkeypatch):
-    """Replace every key source for every test in this file, so no test can read a real key."""
-    stubs = {
-        "read_key": MagicMock(name="_read_key_from_secrets", return_value=None),
-        "create_env": MagicMock(name="create_env_template", return_value=False),
-        "get_secret": MagicMock(name="get_secret", return_value=None),
-        "list_secrets": MagicMock(name="list_secrets", return_value=[]),
-    }
-    monkeypatch.setattr(keys_handler, "_read_key_from_secrets", stubs["read_key"])
+    """Stub the env template writer; conftest's dict keyring is every key source, so no test reads a real key."""
+    stubs = {"create_env": MagicMock(name="create_env_template", return_value=False)}
     monkeypatch.setattr(env_handler, "create_env_template", stubs["create_env"])
-    monkeypatch.setattr(secrets_handler, "get_secret", stubs["get_secret"])
-    monkeypatch.setattr(secrets_handler, "list_secrets", stubs["list_secrets"])
     return stubs
 
 
@@ -596,3 +589,46 @@ class TestTrailingHelpDoesNotExecute:
 
         mock_validate.assert_not_called()
         mock_help.assert_called_once()
+
+
+class TestTheKeyringIsTheOnlyKeySource:
+    """get-key reads the entry `aipass`/`<provider>/api_key`; get-secret writes no value to any file."""
+
+    def test_get_key_reads_the_keyring_entry_and_prints_it_masked(self, keyring_store, capsys):
+        keyring_store.set_password("aipass", "openrouter/api_key", FIXTURE_KEY)
+
+        assert api_key.handle_command("get-key", ["openrouter"]) is True
+
+        out, _ = capsys.readouterr()
+        assert "API key retrieved for openrouter" in out
+        assert f"{FIXTURE_KEY[:6]}****{FIXTURE_KEY[-4:]}" in out
+        assert FIXTURE_KEY not in out
+
+    def test_get_key_reads_no_env_file(self, fake_home, capsys):
+        env_path = fake_home / ".secrets" / "aipass" / ".env"
+        env_path.parent.mkdir(parents=True)
+        env_path.write_text(f"OPENROUTER_API_KEY={FIXTURE_KEY}\n", encoding="utf-8")
+
+        api_key.handle_command("get-key", ["openrouter"])
+
+        _, err = capsys.readouterr()
+        assert "Failed to retrieve API key for openrouter" in err
+
+    def test_get_secret_out_is_unknown_and_no_value_reaches_a_file(self, keyring_store, tmp_path, capsys):
+        keyring_store.set_password("aipass", "telegram/bot", FIXTURE_KEY)
+        target = tmp_path / "token.txt"
+
+        assert api_key.handle_command("get-secret", ["telegram/bot", "--out", str(target)]) is True
+
+        out, err = capsys.readouterr()
+        assert "Unknown option: --out" in err
+        assert "FILE" not in err
+        assert not target.exists()
+        assert FIXTURE_KEY not in out + err
+
+    def test_the_help_offers_no_out_flag(self, capsys):
+        api_key.print_help()
+
+        out, _ = capsys.readouterr()
+        assert "get-secret telegram/bot" in out
+        assert "--out" not in out

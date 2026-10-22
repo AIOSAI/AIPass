@@ -33,6 +33,7 @@ dependencies = [
     "questionary>=2.0",
     "pathspec>=0.12",
     "segno>=1.6",
+    "keyring>=25.0",
 ]
 
 [project.urls]

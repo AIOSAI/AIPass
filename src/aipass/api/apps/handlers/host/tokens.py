@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -14,7 +14,6 @@ Reference: docs/host_api.md (two auth layers, the store, last_used).
 
 import hashlib
 import hmac
-import json
 import os
 import secrets as secrets_lib
 import time
@@ -85,11 +84,6 @@ def load_tokens() -> List[Dict[str, Any]]:
     return [record for record in records if isinstance(record, dict)]
 
 
-def store_path() -> Path:
-    """Where the token store lives."""
-    return secrets_store.SECRETS_BASE / TOKEN_PROVIDER / f"{TOKEN_SLUG}.json"
-
-
 def prepare_receipt_dir(target: Path) -> None:
     """Make sure a receipt's directory exists and is owner-only."""
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -131,40 +125,9 @@ def lock_path() -> Path:
 
 
 def save_tokens(records: List[Dict[str, Any]]) -> str:
-    """Persist token records ATOMICALLY."""
-    # A torn write reads as EMPTY in load_tokens(), which denies every request.
+    """Persist token records as the keyring entry host_api/tokens; returns the entry's name."""
     envelope: Dict[str, Any] = {"version": STORE_VERSION, "tokens": records}
-    return write_private_json(store_path(), envelope)
-
-
-def write_private_json(target: Path, document: Dict[str, Any]) -> str:
-    """Write a JSON document owner-only and atomically: save_tokens' write, shared."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    os.chmod(target.parent, 0o700)
-
-    # Same directory, so the rename cannot cross a filesystem boundary.
-    temporary = target.parent / f".{target.stem}.{os.getpid()}.tmp"
-    content = json.dumps(document, indent=2).encode("utf-8")
-
-    # os.open for the mode: 0o600 at creation, never briefly readable as a chmod-after would be.
-    descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # encoding=utf-8 done above
-    try:
-        os.write(descriptor, content)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-    try:
-        os.replace(str(temporary), str(target))
-    except OSError:
-        try:
-            os.unlink(str(temporary))
-        except OSError as cleanup_error:
-            # Named in words, never by path: a secrets-base path reads as a secret's location (seedgo).
-            logger.warning("[host_api] could not remove a host_api store's temp file: %s", cleanup_error)
-        raise
-
-    return str(target)
+    return secrets_store.set_secret(TOKEN_PROVIDER, TOKEN_SLUG, envelope, as_json=True)
 
 
 @contextmanager
@@ -330,7 +293,7 @@ def touch_token(token_id: str) -> None:
                 record["last_used"] = datetime.now().isoformat()
                 save_tokens(records)
                 return
-    except OSError as e:
+    except (OSError, secrets_store.SecretsUnavailable) as e:
         # Swallowed: telemetry never fails a request. No id: nothing read from the store reaches a log (CodeQL).
         logger.warning("[host_api] could not record last_used for the presented token: %s", e)
 
@@ -341,14 +304,14 @@ def _is_due(last_used: Any) -> bool:
     if not last_used:
         return True
 
+    stamp: Optional[datetime] = None
     try:
-        age = (datetime.now() - datetime.fromisoformat(str(last_used))).total_seconds()
+        stamp = datetime.fromisoformat(str(last_used))
     except ValueError as e:
         # Type name only: ValueError's text quotes the stamp, a value read from the credential store.
         logger.warning("[host_api] unreadable last_used stamp, treating as due (%s)", type(e).__name__)
-        return True
 
-    return age >= LAST_USED_GRANULARITY_SECONDS
+    return stamp is None or (datetime.now() - stamp).total_seconds() >= LAST_USED_GRANULARITY_SECONDS
 
 
 def revoke_token(token_id: str) -> bool:

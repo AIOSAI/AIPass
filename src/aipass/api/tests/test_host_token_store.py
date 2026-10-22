@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -284,40 +284,25 @@ class TestTelemetryNeverUndoesSecurity:
         assert record["id"] not in logged
 
 
-class TestTheStoreIsNeverSeenHalfWritten:
-    """A truncated store reads as empty, and an empty store denies every request."""
+class TestTheRowsRestInTheKeyring:
+    """The token rows are one JSON entry, host_api/tokens; the directory keeps only the lock and receipts."""
 
-    def test_the_store_is_valid_json_after_a_write(self, store: Path) -> None:
-        """The property, stated at its simplest."""
+    def test_the_rows_are_one_json_entry_after_a_write(self, store: Path, keyring_store: Any) -> None:
         host_tokens.issue_token("pixel-8", scope="read")
 
-        path = store / "host_api" / "tokens.json"
-        assert json.loads(path.read_text(encoding="utf-8"))["tokens"]
+        assert json.loads(keyring_store.entries[("aipass", "host_api/tokens")])["tokens"]
 
-    def test_no_temporary_file_is_left_behind(self, store: Path) -> None:
-        """An atomic write that litters is an atomic write nobody keeps."""
+    def test_no_file_is_left_in_the_directory_by_a_write(self, store: Path) -> None:
         host_tokens.issue_token("pixel-8", scope="read")
 
-        leftovers = [item.name for item in (store / "host_api").iterdir() if item.name != "tokens.json"]
-        assert leftovers == []
+        assert [item.name for item in (store / "host_api").iterdir()] == []
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="0o600 is a POSIX mode; Windows st_mode carries no owner-only story to assert",
-    )
-    def test_the_store_file_stays_owner_only(self, store: Path) -> None:
-        """0o600 survives the rename: a default-mode temp file renamed in would widen the store."""
-        host_tokens.issue_token("pixel-8", scope="read")
-
-        path = store / "host_api" / "tokens.json"
-        assert (path.stat().st_mode & 0o777) == 0o600
-
-    def test_the_version_is_bumped_for_the_new_fields(self, store: Path) -> None:
+    def test_the_version_is_bumped_for_the_new_fields(self, store: Path, keyring_store: Any) -> None:
         """A reader must be able to tell which shape it is holding."""
         host_tokens.issue_token("pixel-8", scope="read")
 
-        path = store / "host_api" / "tokens.json"
-        assert json.loads(path.read_text(encoding="utf-8"))["version"] == host_tokens.STORE_VERSION
+        stored = json.loads(keyring_store.entries[("aipass", "host_api/tokens")])
+        assert stored["version"] == host_tokens.STORE_VERSION
         assert host_tokens.STORE_VERSION >= 2
 
 
@@ -434,15 +419,10 @@ class TestTheLockIsRealNotDecorative:
 
         assert not host_tokens.lock_path().exists()
 
-    def test_the_lock_guards_the_store_it_names(self, store: Path) -> None:
-        """Both paths, side by side — a lock beside a DIFFERENT file guards nothing."""
-        assert host_tokens.store_path().parent == host_tokens.lock_path().parent
-        assert host_tokens.store_path() != host_tokens.lock_path()
-
-        host_tokens.issue_token("pixel-8", scope="read")
-
-        assert host_tokens.store_path().exists()
-        assert json.loads(host_tokens.store_path().read_text(encoding="utf-8"))["tokens"]
+    def test_the_lock_sits_in_the_directory_and_no_store_file_is_named(self, store: Path) -> None:
+        assert host_tokens.lock_path() == store / "host_api" / "tokens.lock"
+        assert not hasattr(host_tokens, "store_path")
+        assert not hasattr(host_tokens, "write_private_json")
 
     def test_a_lock_being_deleted_is_waited_for_and_the_revoke_lands(self, store: Path) -> None:
         """
@@ -709,12 +689,12 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     The label becomes a filename, the one place it could reach somewhere it should not.
     """
 
-    def test_the_receipt_sits_beside_the_hashed_store(self, store: Path) -> None:
-        """One provider directory, both halves of the same secret."""
+    def test_the_receipt_sits_beside_the_lock(self, store: Path) -> None:
+        """The receipt is the one value written to disk on purpose, in the same 0700 directory as the lock."""
         receipt = host_tokens.receipt_path("pixel-8")
 
         assert receipt == (store / "host_api" / "pixel-8.token").resolve()
-        assert receipt.parent == host_tokens.store_path().parent.resolve()
+        assert receipt.parent == host_tokens.lock_path().parent.resolve()
 
     def test_a_label_carrying_a_separator_is_refused(self, store: Path) -> None:
         """A label is a NAME. This is the one function that makes it a path."""
