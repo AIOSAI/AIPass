@@ -13,6 +13,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **drone's `aipass_github` test fixture commits as a fixed identity** (@drone, by devpulse; `tests/conftest.py` 1.3.1). PR #800's first CI run erred at setup in all 13 `TestRestore` cases on every Python: the fixture emptied git's global config but set no author, and a GitHub runner has no identity git can auto-detect, so `git commit` exited 128. A developer machine passed because git derived one from the OS user. Same four `GIT_AUTHOR_*`/`GIT_COMMITTER_*` variables the gh-door fixture already sets.
 - **A module routed in-process now carries the caller stamp, so a gate inside `@spawn`, `@git`, `@seedgo` or `@cli` can prove who is calling** (@drone, by devpulse; `handlers/router_handler.py` 1.4.0, `handlers/module_registry_handler.py` 2.1.0, `handlers/git/repo_door.py` 1.9.1, `tests/test_module_registry.py` 1.1.0, `docs/caller_identity.md`, `docs/external_repo_door.md`). Drone stamped `AIPASS_CALLER_CWD`, `AIPASS_CALLER_BRANCH` and `AIPASS_CALLER_IDENTITY_SOURCE` only onto a routed child's environment; a module declared in `routing_config.json` runs inside drone's own process and saw none of them, so `drone @spawn retire-project --dry-run` from the admin seat answered "Admin seat: no" while the rail verified the same seat when stamped by hand. `route_module_command` now wraps every module call in `caller_stamp()`, the gh door's own stamp block moved into the router and is reused there; the stamp is always fresh and every prior value is put back after the call.
 
 ### Added

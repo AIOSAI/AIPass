@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-05
-# Modified: 2026-10-19
+# Modified: 2026-10-22
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -294,12 +294,17 @@ def chore_ledger(tmp_path: Path) -> list[dict]:
 def aipass_github(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """An AIPass root whose origin is github.com/AIOSAI/AIPass, standing in devpulse's seat; returns the root.
 
-    Git reads no host config and stops at tmp_path; the caller env is cleared so the seat decides who calls.
+    Git reads no host config, commits as a fixed identity (a CI runner has none to auto-detect) and stops at
+    tmp_path; the caller env is cleared so the seat decides who calls.
     """
     (tmp_path / "gitconfig").write_text("", encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", os.pathsep.join(sorted({str(tmp_path), str(tmp_path.resolve())})))
+    for name in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(name, "Door Test")
+    for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(name, "door@test.invalid")
     for name in ("AIPASS_BRANCH_NAME", "AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE"):
         monkeypatch.delenv(name, raising=False)
     root = tmp_path / "aipass"
