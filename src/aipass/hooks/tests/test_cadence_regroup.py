@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cadence_regroup.py
 # Description: Cadence's regroup and counter machinery: reset, the regroup token and part queue, config, fail-loud
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/cadence.py: the regroup and counter machinery."""
@@ -450,14 +450,15 @@ class TestModuleInterface:
 
     def test_introspection_shows_a_global_loader_whose_beat_is_off(self, tmp_path, capsys):
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"loaders": {"tier0": {"beat": False}}}), encoding="utf-8")
+        config.write_text(json.dumps({"loaders": {"identity": {"beat": False}}}), encoding="utf-8")
 
         with patch(f"{MODULE}._CONFIG_PATH", config), patch(f"{MODULE}._GUARD_DIR", tmp_path):
             assert handle_command("cadence", []) is True
 
         err = capsys.readouterr().err
-        assert "Loader 'tier0': period=5 offset=0 beat=off" in err
-        assert "Loader 'navmap': period=5 offset=0 beat=on" in err
+        assert "Loader 'identity': period=5 offset=0 beat=off" in err
+        assert "Loader 'navmap': period=5 offset=0 beat=off" in err
+        assert "Loader 'alert': period=5 offset=0 beat=on" in err
 
 
 class TestCompactIntegration:

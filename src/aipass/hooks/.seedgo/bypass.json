@@ -1403,7 +1403,7 @@
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "logged_fallback",
-      "lines": [203, 206, 209, 212],
+      "lines": [205, 208, 211, 214],
       "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
     },
     {

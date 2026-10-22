@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-16
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -459,6 +459,9 @@ def branch_tree(tmp_path: Path):
 UNKNOWN_SYMBOL = {"line": 1, "message": '"_is_live_inbox" is unknown import symbol'}
 MISSING_IMPORT = {"line": 1, "message": 'Import "aipass.x" could not be resolved'}
 LOCAL_ERROR = {"line": 4, "message": 'Argument of type "str" cannot be assigned to parameter of type "int"'}
+MODULE_ATTRIBUTE = {"line": 5, "message": '"model_window" is not a known attribute of module "aipass.x"'}
+MODULE_TYPE_ATTRIBUTE = {"line": 6, "message": 'Cannot access attribute "model_window" for class "ModuleType"'}
+LOCAL_TYPO = {"line": 7, "message": '"undefinde" is not defined'}
 
 
 class TestEditGateDiagnosticsState:
@@ -490,6 +493,20 @@ class TestEditGateDiagnosticsState:
         with patch.object(branch_tree["ds"], "revalidate", return_value=[MISSING_IMPORT]):
             result = self._edit_other_file(branch_tree)
         assert result["exit_code"] == 0
+
+    def test_a_red_pin_on_names_its_module_lacks_does_not_block_the_module(self, branch_tree: dict):
+        """2026-10-22: a red test_context_window.py held the Edit to context_window.py that cures it."""
+        red = [UNKNOWN_SYMBOL, MODULE_ATTRIBUTE, MODULE_TYPE_ATTRIBUTE]
+        branch_tree["write_state"](red)
+        with patch.object(branch_tree["ds"], "revalidate", return_value=red):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 0
+
+    def test_a_local_typo_beside_a_red_pin_still_blocks(self, branch_tree: dict):
+        branch_tree["write_state"]([MODULE_ATTRIBUTE, LOCAL_TYPO])
+        with patch.object(branch_tree["ds"], "revalidate", return_value=[MODULE_ATTRIBUTE, LOCAL_TYPO]):
+            result = self._edit_other_file(branch_tree)
+        assert result["exit_code"] == 2
 
     def test_local_error_still_blocks(self, branch_tree: dict):
         """The gate keeps doing its job for errors the errored file can actually fix."""
@@ -582,6 +599,15 @@ class TestDiagnosticsStateModule:
 
     def test_classifies_unresolved_import_as_cross_file(self):
         assert ds.is_cross_file_error(MISSING_IMPORT) is True
+
+    def test_classifies_a_name_missing_from_a_module_as_cross_file(self):
+        assert ds.is_cross_file_error(MODULE_ATTRIBUTE) is True
+        assert ds.is_cross_file_error(MODULE_TYPE_ATTRIBUTE) is True
+
+    def test_does_not_classify_a_local_typo_or_a_non_module_attribute_as_cross_file(self):
+        assert ds.is_cross_file_error(LOCAL_TYPO) is False
+        assert ds.is_cross_file_error({"message": 'Cannot access attribute "foo" for class "int"'}) is False
+        assert ds.is_cross_file_error({"message": '"upper" is not a known attribute of "None"'}) is False
 
     def test_does_not_classify_a_local_type_error_as_cross_file(self):
         assert ds.is_cross_file_error(LOCAL_ERROR) is False

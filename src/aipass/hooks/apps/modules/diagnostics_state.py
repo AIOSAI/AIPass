@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -34,11 +34,13 @@ STATE_DIR = Path(tempfile.gettempdir()) / "aipass-diagnostics-state"
 LEGACY_FILE = Path(__file__).parent.parent.parent.parent / ".diagnostics_state.json"
 MAX_AGE_SECONDS = 24 * 60 * 60
 
-# Matched on message text: auto_fix stores no rule name, and reportAttributeAccessIssue
-# would over-match a local typo that IS fixable where it is reported.
+# A name missing from ANOTHER module is cross-file. Matched on text: auto_fix stores no rule name,
+# and all of reportAttributeAccessIssue would take in a typo on a local attribute, fixable here.
 _CROSS_FILE_SIGNATURES = (
     "is unknown import symbol",
     "could not be resolved",
+    "is not a known attribute of module",
+    'for class "ModuleType"',
 )
 
 _PYRIGHT_TIMEOUT_SECONDS = 15

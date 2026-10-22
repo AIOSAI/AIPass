@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.7.0
+# Version: 1.8.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-10-08
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -338,7 +338,7 @@ class TestPerLoaderPeriod:
                 {
                     "enabled": True,
                     "period": 5,
-                    "loaders": {"tier0": {"period": 1}, "global": {"offset": 0}},
+                    "loaders": {"tier0": {"period": 1, "beat": True}, "global": {"offset": 0}},
                 }
             ),
             encoding="utf-8",
@@ -384,7 +384,7 @@ class TestPerLoaderPeriod:
                 {
                     "enabled": True,
                     "period": 5,
-                    "loaders": {"tier0": {"period": 1}},
+                    "loaders": {"tier0": {"period": 1, "beat": True}},
                 }
             ),
             encoding="utf-8",
@@ -789,7 +789,11 @@ class TestBranchOverride:
             _write_state(tmp_path, turn=turn - 1)
         return should_fire(loader, {"cwd": str(cwd)})
 
-    _BEAT_FALSE = {"branches": {"canary": {"loaders": {"tier0": {"beat": False}}}}}
+    # The global tier0 beats here, so the override is what turns it off.
+    _BEAT_FALSE = {
+        "loaders": {"tier0": {"beat": True}},
+        "branches": {"canary": {"loaders": {"tier0": {"beat": False}}}},
+    }
 
     def test_a_beat_false_override_fires_at_turn_0_and_skips_turns_5_and_10(self, tmp_path, monkeypatch):
         dirs = self._fleet(tmp_path, monkeypatch, self._BEAT_FALSE)
@@ -809,10 +813,13 @@ class TestBranchOverride:
     def test_a_loader_the_override_does_not_name_inherits_global(self, tmp_path, monkeypatch):
         dirs = self._fleet(tmp_path, monkeypatch, self._BEAT_FALSE)
 
-        assert self._decide(tmp_path, "navmap", dirs["canary"], 5) is True
+        assert self._decide(tmp_path, "identity", dirs["canary"], 5) is True
 
     def test_an_override_merges_over_the_global_entry_not_in_place_of_it(self, tmp_path, monkeypatch):
-        config = {"loaders": {"tier0": {"period": 4}}, "branches": {"canary": {"loaders": {"tier0": {"offset": 1}}}}}
+        config = {
+            "loaders": {"tier0": {"period": 4, "beat": True}},
+            "branches": {"canary": {"loaders": {"tier0": {"offset": 1}}}},
+        }
         dirs = self._fleet(tmp_path, monkeypatch, config)
 
         assert self._decide(tmp_path, "tier0", dirs["canary"], 5) is True
@@ -827,13 +834,14 @@ class TestBranchOverride:
         assert "branch=canary" in caplog.text
 
     def test_a_cwd_under_no_branch_uses_global_and_says_so(self, tmp_path, monkeypatch, caplog):
-        dirs = self._fleet(tmp_path, monkeypatch, {"branches": {"repo": {"loaders": {"tier0": {"beat": False}}}}})
+        config = {"loaders": {"tier0": {"beat": True}}, "branches": {"repo": {"loaders": {"tier0": {"beat": False}}}}}
+        dirs = self._fleet(tmp_path, monkeypatch, config)
 
         assert self._decide(tmp_path, "tier0", dirs["root"], 5) is True
         assert "under no branch" in caplog.text
 
     def test_a_malformed_override_logs_error_and_serves_global(self, tmp_path, monkeypatch, caplog):
-        config = {"branches": {"canary": {"loaders": {"tier0": {"beat": "no"}}}}}
+        config = {"loaders": {"tier0": {"beat": True}}, "branches": {"canary": {"loaders": {"tier0": {"beat": "no"}}}}}
         dirs = self._fleet(tmp_path, monkeypatch, config)
 
         assert self._decide(tmp_path, "tier0", dirs["canary"], 5) is True
@@ -887,3 +895,35 @@ class TestOneDecisionPerPrompt:
         payload = {"prompt": "go on", "transcript_path": str(transcript)}
 
         assert [self._sibling(tmp_path, payload), self._sibling(tmp_path, payload, age=3)] == [5, 5]
+
+
+class TestShippedDefaults:
+    """What a clone runs on: cadence_config.json is gitignored, so DEFAULTS alone decide."""
+
+    def _decide(self, tmp_path, monkeypatch, loader: str, turn: int, config: dict | None = None) -> bool:
+        """A fresh process deciding *loader* on *turn*; no config file unless *config* is given."""
+        config_file = tmp_path / "cadence.json"
+        if config is not None:
+            config_file.write_text(json.dumps(config), encoding="utf-8")
+        monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path)
+        monkeypatch.setattr(cadence, "_CONFIG_PATH", config_file)
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "test-session")
+        _reset_module_globals()
+        (tmp_path / "aipass-cadence-test-session.json").unlink(missing_ok=True)
+        if turn > 0:
+            _write_state(tmp_path, turn=turn - 1)
+        return should_fire(loader)
+
+    @pytest.mark.parametrize("loader", ["tier0", "navmap"])
+    def test_the_kernel_and_navmap_ground_at_turn_0_and_skip_turns_5_and_10(self, tmp_path, monkeypatch, loader):
+        assert [self._decide(tmp_path, monkeypatch, loader, turn) for turn in (0, 5, 10)] == [True, False, False]
+
+    @pytest.mark.parametrize("loader", ["identity", "branch", "alert"])
+    def test_every_other_loader_still_fires_on_the_beat(self, tmp_path, monkeypatch, loader):
+        assert [self._decide(tmp_path, monkeypatch, loader, turn) for turn in (0, 4, 5)] == [True, False, True]
+
+    def test_a_config_file_beat_true_puts_the_kernel_back_on_the_beat(self, tmp_path, monkeypatch):
+        config = {"loaders": {"tier0": {"beat": True}}}
+
+        assert self._decide(tmp_path, monkeypatch, "tier0", 5, config) is True
+        assert self._decide(tmp_path, monkeypatch, "navmap", 5, config) is False

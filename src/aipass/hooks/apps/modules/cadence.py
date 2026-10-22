@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.9.2
+# Version: 2.10.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -49,8 +49,10 @@ DEFAULTS = {
     # fire-all (0 = off). cadence_config.json is gitignored, so this is what a clone runs on.
     "regroup_fresh_bytes": 150000,
     "loaders": {
-        "tier0": {"period": 5, "offset": 0},
-        "navmap": {"period": 5, "offset": 0},
+        # The kernel and the navmap ground once (turn 0: session start, /clear, post-compact), not every
+        # Nth turn; "beat": false fires a loader at turn 0 only, and a config file's "beat": true restores it.
+        "tier0": {"period": 5, "offset": 0, "beat": False},
+        "navmap": {"period": 5, "offset": 0, "beat": False},
         "identity": {"period": 5, "offset": 0},
         "branch": {"offset": 0},
         "email": {"period": 5},
