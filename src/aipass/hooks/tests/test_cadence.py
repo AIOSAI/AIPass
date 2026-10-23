@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.8.0
+# Version: 1.9.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
@@ -760,6 +760,29 @@ class TestCurrentTurn:
     def test_no_session_id_is_none(self, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
         assert cadence.current_turn() is None
+
+
+class TestTurnToken:
+    def setup_method(self):
+        _reset_module_globals()
+
+    def test_an_unmeasurable_transcript_answers_minus_one_not_an_empty_files_zero(self, tmp_path):
+        empty = tmp_path / "empty.jsonl"
+        empty.write_text("", encoding="utf-8")
+        assert cadence.turn_token({"transcript_path": str(empty)}) == 0
+        assert cadence.turn_token({"transcript_path": str(tmp_path / "missing.jsonl")}) == -1
+        assert cadence.turn_token({}) == -1
+
+    def test_two_unmeasurable_turns_in_a_row_still_count(self, tmp_path):
+        state_file = _write_state(tmp_path, turn=3, token=-1)
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        ):
+            should_fire("global", {"transcript_path": str(tmp_path / "missing.jsonl")})
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 4
 
 
 class TestBranchOverride:
