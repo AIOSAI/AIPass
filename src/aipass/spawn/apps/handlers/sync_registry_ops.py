@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry_ops.py
 # Description: Registry sync handler — implementation logic for registry repair
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-10-18
+# Modified: 2026-10-23
 # =============================================
 
 """Registry synchronization handler for branch lifecycle management.
@@ -353,7 +353,7 @@ def sync_registry(fix: bool = False) -> dict:
 
 
 def check_owner_identity(registry_path=None):
-    """Read-only owner/identity health check — 7 flags.
+    """Read-only owner/identity health check — 8 flags.
 
     Returns the pinned schema: ``clean``, ``owner``, ``owner_uid``, ``issues`` (flag/detail/branch dicts).
     """
@@ -378,6 +378,11 @@ def check_owner_identity(registry_path=None):
     if len(owners) > 1:
         names = [b.get("name", "?") for b in owners]
         issues.append({"flag": "multi_owner", "detail": f"Multiple owners: {', '.join(names)}"})
+
+    ci_cure_holders = [b.get("name", "?") for b in branches if b.get("ci_cure") is True]
+    if len(ci_cure_holders) > 1:
+        # drone's ci-cure tier refuses every holder when two exist; reported, never auto-picked.
+        issues.append({"flag": "multi_ci_cure", "detail": f"Multiple ci_cure holders: {', '.join(ci_cure_holders)}"})
 
     for owner in owners:
         owner_path = (project_root / owner.get("path", "")).resolve()

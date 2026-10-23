@@ -9,7 +9,7 @@ the action behind each row, plus the rows that exist as vocabulary only.
 
 ---
 
-**6 events, 6 handlers.** That is the live count and `drone @trigger list` prints it.
+**7 events, 7 handlers.** That is the live count and `drone @trigger list` prints it.
 Registered via `handlers/events/registry.py` on first `Trigger.fire()`. All fire through
 the event bus. Retired and decommissioned rows are kept and marked below, because those
 files are still on disk.
@@ -21,6 +21,7 @@ files are still on disk.
 | `warning_logged` | `warning_logged.py` | Warning in branch or system logs | Feeds the escalation digest lane — counted by signature, never dispatched |
 | `memory_template_updated` | `memory_template_updated.py` | **Nothing fires it.** No `fire("memory_template_updated")` call site exists in the fleet | **Stub — does nothing.** Writes one `json_handler` operation line and returns. Its own docstring claims it calls memory's `push_templates()`; there is no such import and no such call |
 | `runaway_log_detected` | `runaway_handler.py` | Prax rate tracker detects sustained high log volume | Per-file cooldown dispatch to responsible branch; gated by VOLUME mutes only (CRITICAL bypasses); UNKNOWN attribution falls back to @prax; writes alert to `.aipass/alerts.json` |
+| `ci_red` | `ci_red.py` | `drone @trigger ci poll` for each owner of a new red on dev; `drone @trigger fire ci_red run_id=<id>` by hand | Medic's gates, then the owner's dispatch; a run with no owner mails @devpulse. See [ci_red_lane.md](ci_red_lane.md) |
 | `memory_pool_auto_processed` | `memory_pool.py` | @memory's detached child at the point it finishes — `memory/apps/handlers/intake/auto_process.py`, `_fire_completion()` from `run_once()`, on both the success and the failure leg; a run that declines the lock announces nothing, because the holder announces its own | Logs result; on failure fires `error_detected` for Medic dispatch. `status` vocabulary is `ok` / `skipped` / `failed` / `unknown` — `unknown` means the section never reported, and an absent section must derive to it rather than to `ok`, or a crashed run announces that the pool completed — and `branch` must be a **registered** citizen — `__global__` is refused by gate 5 and the failure would be lost there. Both published in the handler docstring |
 
 **Renamed events.** `DEPRECATED_EVENT_ALIASES` in `modules/core.py` resolves an old name in

@@ -12,6 +12,7 @@ read in one pass. The face is [../README.md](../README.md); the live inventory i
 | [events.md](events.md) | Every live event and its handler, the rename-alias mechanism, the retired and decommissioned files, the names with nothing behind them |
 | [medic.md](medic.md) | The dispatch pipeline gate by gate, suppression doctrine, the two mute classes, runaway gating |
 | [error_registry.md](error_registry.md) | Fingerprinting, the circuit breaker, per-fingerprint backoff |
+| [ci_red_lane.md](ci_red_lane.md) | The CI red lane: poll, triage, the ledger, the reply shapes, the push and its limits |
 | [escalation.md](escalation.md) | The repeat-signature digest lane, what makes a signature, every operator knob |
 | [log_watching.md](log_watching.md) | The two watchers, who owns `system_logs/`, twin dedup, branch attribution, path classification |
 | [error_catchup.md](error_catchup.md) | The startup catch-up scan and why the cursor only moves on a completed scan |

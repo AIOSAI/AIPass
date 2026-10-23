@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Event handler registry for startup registration
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2025-12-04
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Event Handler Registry - Setup all event handlers on startup"""
@@ -22,6 +22,8 @@ def setup_handlers():
     from .error_detected import handle_error_detected, set_send_email_callback
     from .runaway_handler import handle_runaway_log_detected, set_send_email_callback as set_runaway_email_callback
     from aipass.trigger.apps.handlers.escalation import set_send_email_callback as set_escalation_email_callback
+    from aipass.trigger.apps.handlers.ci.outbound import set_send_email_callback as set_ci_email_callback
+    from .ci_red import handle_ci_red
 
     try:
         from aipass.ai_mail.apps.modules.email_send import deliver_email_to_branch
@@ -61,6 +63,7 @@ def setup_handlers():
         set_runaway_email_callback(_send_email_adapter)
         # Escalation digests keep auto_execute=False: an email to a manager, never a wake.
         set_escalation_email_callback(_send_email_adapter)
+        set_ci_email_callback(_send_email_adapter)
     # OSError too: an uncured peer's import guard raises FileNotFoundError.
     except (ImportError, OSError):
         logger.warning("ai_mail not available — error notifications won't send")
@@ -75,5 +78,6 @@ def setup_handlers():
     trigger.on("memory_template_updated", handle_memory_template_updated)
     trigger.on("memory_pool_auto_processed", handle_memory_pool_auto_processed)
     trigger.on("runaway_log_detected", handle_runaway_log_detected)
+    trigger.on("ci_red", handle_ci_red)
 
     json_handler.log_operation("handlers_registered", {"success": True})

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_public_surface.py
 # Description: Tests for ai_mail's package-level public surface (the feed, register, outstanding and inbox doors)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
@@ -192,6 +192,23 @@ class TestInboxFileDoor:
 
     def test_the_door_is_advertised_in_dunder_all(self):
         assert "post_to_inbox_file" in ai_mail.__all__
+
+
+class TestNotificationDoor:
+    """The fifth door, asked for by @trigger's CI red lane: one feed event from a foreign branch."""
+
+    def test_an_event_lands_on_the_feed_with_its_kind_source_and_extra(self, monkeypatch, tmp_path):
+        feed = tmp_path / "notifications.jsonl"
+        monkeypatch.setattr(notify, "FEED_PATH", feed)
+
+        written = ai_mail.send_notification("CI red", "hooks 99", source="ci", kind="system", extra={"run_id": "7"})
+
+        assert written is True
+        row = json.loads(feed.read_text(encoding="utf-8").splitlines()[-1])
+        assert (row["kind"], row["source"], row["title"], row["run_id"]) == ("system", "ci", "CI red", "7")
+
+    def test_the_door_is_advertised_in_dunder_all(self):
+        assert "send_notification" in ai_mail.__all__
 
 
 class TestImportStaysLight:

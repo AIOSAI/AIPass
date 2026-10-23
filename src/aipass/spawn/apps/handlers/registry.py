@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-23
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -30,6 +30,8 @@ _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
 
 # The one seat that may ever carry the registry admin flag: a constant, never a parameter.
 ADMIN_BRANCH = "devpulse"
+# drone's ci-cure git tier is granted by this flag and refuses unless exactly one entry carries it.
+CI_CURE_BRANCH = "trigger"
 
 
 def is_protected(branch_name, branch_dir=None, registry_path=None, count_passport=True):
@@ -363,11 +365,24 @@ def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
 
     branch_name exists so the refusal is testable; anything but ADMIN_BRANCH is refused by name.
     Returns (status, reason), status one of "granted", "already", "refused" (nothing written)."""
+    return _seal_seat_flag("admin", ADMIN_BRANCH, registry_path, branch_name)
+
+
+def ensure_ci_cure(registry_path=None, branch_name=CI_CURE_BRANCH):
+    """Set ``ci_cure: true`` on the trigger entry of the root registry.
+
+    Refused, nothing written, when another entry already carries it: drone refuses every holder of two.
+    Returns (status, reason) as ensure_admin does."""
+    return _seal_seat_flag("ci_cure", CI_CURE_BRANCH, registry_path, branch_name, sole=True)
+
+
+def _seal_seat_flag(flag, seat, registry_path, branch_name, sole=False):
+    """Write ``<flag>: true`` onto the one seat's entry; any other name is refused by name."""
     requested = (branch_name or "").strip().lower()
-    if requested != ADMIN_BRANCH:
+    if requested != seat:
         reason = (
-            f"REFUSED: admin is a {ADMIN_BRANCH}-only privilege — "
-            f"ensure_admin cannot grant it to '{branch_name or '(empty)'}'. "
+            f"REFUSED: {flag} is a {seat}-only privilege — "
+            f"ensure_{flag} cannot grant it to '{branch_name or '(empty)'}'. "
             "The seat is a constant, not a parameter."
         )
         logger.warning("[registry] %s", reason)
@@ -375,28 +390,34 @@ def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
 
     registry_path = Path(registry_path) if registry_path else find_registry()
     if registry_path is None:
-        reason = "REFUSED: no registry found — admin is granted in a registry, and there is none to grant it in"
+        reason = f"REFUSED: no registry found — {flag} is granted in a registry, and there is none to grant it in"
         logger.warning("[registry] %s", reason)
         return "refused", reason
 
     reg_data = load_registry(registry_path)
     branches = branches_as_list(reg_data.get("branches", []))
 
+    others = [b.get("name", "?") for b in branches if b.get(flag) is True and b.get("name", "").lower() != seat]
+    if sole and others:
+        reason = f"REFUSED: {', '.join(others)} already carries {flag}:true in {registry_path.name} — nothing written"
+        logger.warning("[registry] %s", reason)
+        return "refused", reason
+
     for branch in branches:
-        if branch.get("name", "").lower() != ADMIN_BRANCH:
+        if branch.get("name", "").lower() != seat:
             continue
-        if branch.get("admin") is True:
-            reason = f"{ADMIN_BRANCH} entry already carries admin:true in {registry_path.name}"
+        if branch.get(flag) is True:
+            reason = f"{seat} entry already carries {flag}:true in {registry_path.name}"
             logger.info("[registry] %s", reason)
             return "already", reason
-        branch["admin"] = True
+        branch[flag] = True
         save_registry(registry_path, reg_data)
-        reason = f"Granted admin:true to the {ADMIN_BRANCH} entry in {registry_path.name}"
+        reason = f"Granted {flag}:true to the {seat} entry in {registry_path.name}"
         logger.info("[registry] %s", reason)
-        json_handler.log_operation("admin_granted", data={"branch": ADMIN_BRANCH})
+        json_handler.log_operation(f"{flag}_granted", data={"branch": seat})
         return "granted", reason
 
-    reason = f"REFUSED: no {ADMIN_BRANCH} entry in {registry_path} — nothing written"
+    reason = f"REFUSED: no {seat} entry in {registry_path} — nothing written"
     logger.warning("[registry] %s", reason)
     return "refused", reason
 

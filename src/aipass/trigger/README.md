@@ -37,6 +37,10 @@ drone @trigger fire error_detected branch=api error_type=ImportError
 - **Keeps the registry operational, not archival** — suppression is real silence, resolution
   is not, and both stay auditable.
 
+- **Routes a red CI run on dev to its owner.** The `ci` lane polls dev's runs, wakes the
+  branch whose code failed, has @seedgo review the cure, and pushes it through drone's
+  `ci-cure` door; @devpulse and the phone hear about every step.
+
 It never fixes another branch's code: it detects, it tells the owner, and the owner fixes.
 
 ---
@@ -76,7 +80,8 @@ Inventory**, and it is always current.
 Three layers. `apps/trigger.py` is a thin router: it discovers modules, hands the command to
 the first one that claims it, and turns a refusal into an exit code. `apps/modules/` holds
 one business-logic module per surface — `core` (the event bus), `errors` (the registry CLI),
-`medic` (the dispatch toggle and the service door), `escalation` (the digest lane),
+`medic` (the dispatch toggle and the service door), `escalation` (the digest lane), `ci`
+(the CI red lane),
 `branch_log_events` and `log_events` (the two watcher CLIs). `apps/handlers/` holds the
 implementation, grouped by concern: the event handlers (`events/`), the watchers
 (`log_watcher.py` and `watchers/`), the registry and reporter, the escalation counter, medic
@@ -103,6 +108,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/events.md](docs/events.md) | Every live event and its handler, the rename-alias mechanism, the retired files, the names with nothing behind them |
 | [docs/medic.md](docs/medic.md) | The dispatch pipeline gate by gate, suppression doctrine, the two mute classes, runaway gating |
 | [docs/error_registry.md](docs/error_registry.md) | Fingerprinting, the circuit breaker, per-fingerprint backoff |
+| [docs/ci_red_lane.md](docs/ci_red_lane.md) | The CI red lane: poll, triage, the ledger, the reply shapes, the push and its limits |
 | [docs/escalation.md](docs/escalation.md) | The digest lane, what makes a signature, every operator knob |
 | [docs/log_watching.md](docs/log_watching.md) | The two watchers, who owns the system log directory, twin dedup, branch attribution |
 | [docs/error_catchup.md](docs/error_catchup.md) | The startup catch-up scan, and why the cursor moves only on a completed scan |
@@ -127,7 +133,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-23
 
 ---
 [← Back to AIPass](../../../README.md)

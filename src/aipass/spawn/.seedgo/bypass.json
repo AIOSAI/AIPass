@@ -132,8 +132,8 @@
     {
       "file": "apps/modules/grant_admin.py",
       "standard": "logged_fallback",
-      "lines": [97],
-      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 106) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
+      "lines": [109],
+      "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 118) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/repair.py",

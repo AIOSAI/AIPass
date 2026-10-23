@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @spawn
 # Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -76,6 +76,7 @@ def print_help():
     )
     console.print("  [dim]         add --relocate-artifacts to carry the branch's vector store with it[/dim]")
     console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
+    console.print("  [green]grant-ci-cure[/green]                  Ceremony: write ci_cure:true onto the trigger entry")
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
@@ -326,7 +327,9 @@ def print_introspection():
     console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
     console.print("    [dim]- migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]")
     console.print("    [dim]- export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
-    console.print("    [dim]- grant_admin.py (handle_grant_admin — devpulse admin flag ceremony)[/dim]")
+    console.print(
+        "    [dim]- grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
+    )
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
     console.print()
@@ -410,6 +413,11 @@ def main():
         from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
         return _resolved(handle_grant_admin(remaining))
+
+    if command == "grant-ci-cure":
+        from aipass.spawn.apps.modules.grant_admin import handle_grant_ci_cure
+
+        return _resolved(handle_grant_ci_cure(remaining))
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")
     return 1
