@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.8.0
+# Version: 2.8.1
 # Created: 2026-02-02
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -598,8 +598,6 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
                     error_type=parsed["level"], message=message, component=branch, log_path=log_path, severity="medium"
                 )
                 error_count = result.get("count", 1)
-                if not result.get("is_new", False) and error_count != 2:
-                    return
                 if _fire_event is not None:
                     _fire_event(
                         "error_detected",

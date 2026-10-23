@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -484,6 +484,24 @@ class TestProcessLogLineDeeper:
         fire.assert_called_once()
         call_kwargs = fire.call_args[1]
         assert call_kwargs["message"] == "Lazy import works"
+
+    def test_fallback_lazy_path_fires_every_occurrence_like_the_main_path(self, monkeypatch):
+        """A third occurrence still fires: the handler, not the watcher, owns threshold and backoff."""
+        fire = MagicMock()
+        lw.set_event_callback(fire)
+        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", False)
+        monkeypatch.setattr(
+            error_registry,
+            "report",
+            MagicMock(return_value={"is_new": False, "count": 3, "id": "reg789", "fingerprint": "fp789"}),
+        )
+
+        watcher = lw.BranchLogWatcher()
+        watcher._process_log_line(self._make_error_line("Third time"), _BRANCH_LOG_PATH)
+
+        fire.assert_called_once()
+        assert fire.call_args[1]["count"] == 3
+        assert fire.call_args[1]["registry_id"] == "reg789"
 
     def test_local_count_tracking_increments(self, monkeypatch):
         """Local count path: repeated errors increment counter."""
