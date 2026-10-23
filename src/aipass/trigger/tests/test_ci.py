@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ci.py
 # Description: Tests for the CI red lane module - poll, reply, verdict, status - and the handlers it drives
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-23
 # Modified: 2026-10-23
 # =============================================
@@ -50,6 +50,12 @@ def _dispatched_hooks_red(ci_lane) -> None:
     ci_lane.add_run("900", created="2026-10-23T05:00:00Z")
     ci_lane.logs["900"] = AUDIT_LOG
     assert ci.handle_command("ci", ["poll"]) is True
+
+
+def _mute_hooks(ci_lane, muted: bool = True) -> None:
+    names = [{"name": "hooks", "expires_at": None}] if muted else []
+    state = {"config": {"muted_branches": names}}
+    (ci_lane.root / "medic_state.json").write_text(json.dumps(state), encoding="utf-8")
 
 
 def _reviewing(ci_lane) -> Path:
@@ -144,6 +150,33 @@ class TestPoll:
         ci.poll()
         assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "superseded"
         assert ci_lane.mails == []
+
+    def test_a_gated_cure_dispatches_on_the_first_poll_after_the_gate_opens(self, ci_lane):
+        _mute_hooks(ci_lane)
+        _dispatched_hooks_red(ci_lane)
+        ci.poll()
+        assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "gated" and ci_lane.mails == []
+        _mute_hooks(ci_lane, muted=False)
+        ci.poll()
+        assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "dispatched"
+        assert [m["to_branch"] for m in ci_lane.mails] == ["@hooks"]
+
+    def test_a_gated_cure_never_dispatches_twice(self, ci_lane):
+        _mute_hooks(ci_lane)
+        _dispatched_hooks_red(ci_lane)
+        _mute_hooks(ci_lane, muted=False)
+        ci.poll()
+        ci.poll()
+        assert [w[0] for w in ci_lane.wakes] == ["@hooks"]
+
+    def test_a_gated_cure_of_a_superseded_red_closes_without_a_dispatch(self, ci_lane):
+        _mute_hooks(ci_lane)
+        _dispatched_hooks_red(ci_lane)
+        _mute_hooks(ci_lane, muted=False)
+        ci_lane.add_run("901", conclusion="success", created="2026-10-23T06:00:00Z")
+        ci.poll()
+        assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "superseded"
+        assert ci_lane.mails == [] and ci_lane.wakes == []
 
     def test_a_first_time_green_sends_nothing(self, ci_lane):
         ci_lane.add_run("901", conclusion="success")

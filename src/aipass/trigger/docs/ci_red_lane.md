@@ -17,7 +17,8 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    (`ci-poll`, every 10 minutes, no agent woken for the poll itself). It reads
    `drone @git run list` and records every dev run in the ledger. Only the **newest run per
    workflow** counts. An older red is marked `superseded` and never dispatched, and so is any
-   of its cures still `queued`. A cure whose owner is already awake keeps going.
+   of its cures still `queued` or `gated`: a run that a newer run (green or red) replaces
+   closes its waiting cure with no dispatch. A cure whose owner is already awake keeps going.
 2. **Triage.** For a new red, `drone @git run view <id> --log-failed` is read. The failing step
    is the one that carries `##[error]`. Owners come from the failing lines:
    - an audit line `<branch>: NN%` below 100 names that branch;
@@ -31,8 +32,12 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    apply to it the same way they apply to a repeating log error. Then medic's gates run, in
    medic's order, by calling the same functions in `error_detected.py`: medic enabled, branch
    not muted, registered citizen, circuit breaker, then suppression and backoff. A refusal goes
-   to `logs/medic_suppressed.jsonl` and the cure becomes `gated`. Gate four still holds: an
-   owner that is @devpulse is mailed and never woken.
+   to `logs/medic_suppressed.jsonl` and the cure becomes `gated`, with the refusal as its
+   reason. Every poll fires `ci_red` again for each `gated` and `queued` cure. The gates run
+   again and the refusal is logged once per poll, until a gate opens (the mute expires or is
+   lifted, the breaker closes, the backoff ends) and the owner is dispatched. Only the first
+   fire counts the red in the escalation lane and feeds the circuit breaker; a retry is not a
+   new error. Gate four still holds: an owner that is @devpulse is mailed and never woken.
 4. **Owner.** The owner gets a dispatch: the mail, then a wake with @trigger as sender. The
    brief carries the run id, workflow, step, URL and failing lines. It says the owner has no
    git and asks for the owner reply shape below. When the owner exits, @trigger is woken back.
@@ -90,7 +95,8 @@ records a warning.
 `ci_red` takes `run_id` (required), `workflow`, `step`, `owner`, `lines` (a list, or one string
 split on newlines) and `url`. With no `owner` and no `lines`, the handler triages the run
 itself. That is why `drone @trigger fire ci_red run_id=<id>` walks the whole lane for a real red.
-Firing the same cure twice does nothing once it has left `queued`.
+Firing a cure again runs the gates again while it is `queued` or `gated`, and does nothing once
+it has left those states.
 
 ## Reply shapes
 
@@ -131,13 +137,10 @@ Feed events use `kind` `system`, `source` `ci`, and
 
 ## Limits
 
-- **The feed has no door yet.** ai_mail's package publishes no `send_notification`. The lane
-  calls it by the contract when it exists. Until then each event answers `no_door` and leaves a
-  warning in `logs/ci_lane.jsonl`.
 - `drone @git diff` does not show untracked files, so the diff seedgo reviews leaves out a new
   file the cure adds.
 - `projects/*` paths name no owner. Such a red is unowned.
-- A `gated` cure is not tried again. Unmute the owner and fire `ci_red` by hand.
+- A `gated` cure waits for its gate. A 24h build mute holds it for up to 24h; `medic unmute @<owner>` sends it on the next poll.
 - The poll reads only what `drone @git run list` returns (gh's newest 20 runs).
 - The event path logs only to `logs/ci_lane.jsonl` and never through prax. The `ci` verbs log
   through prax at WARNING and below.
