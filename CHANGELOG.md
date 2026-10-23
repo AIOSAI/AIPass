@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-23] — v2.8.25: the CI red lane in @trigger with the drone ci-cure tier, secret values in the login keyring behind drone @api, Telegram out of the tree, Drive as the truth for the backup sync, the .trinity cap band, plan templates drop the spoken summary
 
 ### Fixed
 
