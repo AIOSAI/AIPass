@@ -33,6 +33,7 @@ reference lists verbs and this page lists their options.
 | Verb | Flag | Effect |
 |---|---|---|
 | `register` | `--name <name>` | Register under a short name, so `@name` resolves to the path |
+| `register` | `--remove <name>` | Drop a registered project from the registry; its `.backup/` store and files stay where they are |
 | `all` | `--quiet` | Suppress the Rich panels; the run itself is unchanged |
 | `all` | `--registered` | Run the cycle for every registered project, in registry order (below) |
 | `drive_sync` | `--force` | Re-upload files the tracker already recorded |
@@ -89,7 +90,10 @@ lists the lanes in flight, `[]` when none; see
 `last` and `files` come from the project's changelog: the last entry of that
 mode, its `timestamp` and `files_copied`. A snapshot that found no changes writes
 no entry, so `snapshot.last` is the last snapshot that copied; the same rule holds
-for `drive_sync`, whose entry counts the files a clean run uploaded. `runs` counts
+for `drive_sync`, whose entry counts the files any run uploaded, stopped and
+aborted runs included. `lanes.drive_sync` also carries `complete`: true for a
+clean run, false for one that was stopped, aborted or had a failed upload, null
+when the lane never ran. `runs` counts
 every entry, Drive runs included. `registered` means the root has a
 `.backup/config.json`. A root with no store answers `registered: false`, every
 `last` null, `runs: 0`, exit 0; an absent root exits non-zero with one line on

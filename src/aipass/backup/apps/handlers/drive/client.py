@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.0.3
+# Version: 2.1.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Google Drive client.
@@ -48,6 +48,8 @@ class DriveClient:
         self.backup_folder_id: str | None = None
         self.project_folder_cache: dict[str, str] = {}
         self.file_tracker: dict[str, dict] = {}
+        # (parent_id, name) -> id of every live file, from drive_sync's listing at run start; a create adopts a hit.
+        self.live_files: dict[tuple[str, str], str] = {}
         self.last_error: str | None = None
 
     @property
@@ -151,7 +153,7 @@ class DriveClient:
             )
             result = self._api_call(request)
             if result is None:
-                # No answer is not an empty search: a create here makes a second root and resets the tracker.
+                # No answer is not an empty search: a create here makes a second root.
                 self.last_error = "Backup folder search got no answer - not creating a second root"
                 logger.warning(self.last_error)
                 return None
@@ -176,20 +178,6 @@ class DriveClient:
 
             new_id: str = result["id"]
             self.backup_folder_id = new_id
-
-            # A new root means every tracked drive_id points at a file under the old root.
-            old_count = len(self.file_tracker)
-            if old_count > 0:
-                self.file_tracker.clear()
-                self.project_folder_cache.clear()
-                trail.log_operation(
-                    "tracker_reset",
-                    {
-                        "message": f"New backup folder - reset {old_count} tracker entries",
-                        "old_tracker_count": old_count,
-                        "new_folder_id": new_id,
-                    },
-                )
 
             if not self._verify_folder_id(new_id):
                 self.last_error = f"Backup folder {new_id} created but not accessible"

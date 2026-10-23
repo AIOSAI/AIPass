@@ -5,8 +5,8 @@
 **Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
-door, held by @devpulse's admin grant. Fifteen verbs take
-`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, log, tracked, commit, untrack, push,
+door, held by @devpulse's admin grant. Sixteen verbs take
+`--repo <path>` (or `--repo=<path>`) in any slot: status, diff, show, log, tracked, commit, untrack, push,
 tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub chores `release edit`,
 `label` and `alerts` (see [git_interface.md](git_interface.md)), aimed at the repo's own origin.
 `release list` keeps `--repo` as GitHub's OWNER/NAME.
@@ -23,7 +23,7 @@ tag, fetch, sync, merge-upstream, the read side of gh's `run`, and the GitHub ch
    the repo you stand in. A project manager standing in its own repo is refused by name.
 2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the
    standing repo.
-3. **Which verb** — anything outside the fifteen is refused. `issue`, `workflow` and `release list`
+3. **Which verb** — anything outside the sixteen is refused. `issue`, `workflow` and `release list`
    never reach the door: their `--repo OWNER/NAME` names a GitHub repo, not a path. `run` reaches it
    only when the value names a directory (see below); `release edit` always does.
 4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a
@@ -120,9 +120,11 @@ argv the door builds.
 
 ## Two design constraints
 
-**A module routed in-process has no caller stamp.** `@git` runs inside drone, so the
-`AIPASS_CALLER_*` variables the rail reads are unset unless the door stamps them. It stamps them
-itself and restores them in a `finally`, so the rail sees the same shape it sees for a routed child.
+**A module routed in-process is stamped like a routed child.** `@git` runs inside drone, so the
+`AIPASS_CALLER_*` variables the rail reads would be unset or inherited. `route_module_command`
+stamps them fresh around every module call and restores them after, and the door stamps again
+around its own rail call (`caller_stamp` in `router_handler.py`), so a direct caller of the door
+gets the same shape.
 
 **A new flag can eat a passthrough's own flag.** The door's `--repo` must never swallow gh's
 `--repo OWNER/NAME` on `issue`, `run`, `workflow` and `release`. The exclusion is explicit in

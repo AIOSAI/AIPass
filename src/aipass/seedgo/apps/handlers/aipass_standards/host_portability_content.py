@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-12
-# Modified: 2026-10-10
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -76,6 +76,11 @@ def get_host_portability_standards() -> str:
         "     Followed through same-function names, [dim]/[/dim], [dim].parent[/dim], [dim]str()[/dim],",
         "     and same-file helpers (hooks loader: aipass_home -> _absolute -> resolve).",
         "     macOS /var -> /private/var makes the two differ. Cure: resolve both.",
+        "",
+        "  [red]ARM F -- git's config emptied with no commit email (file-local)[/red]",
+        "     A file naming [dim]GIT_CONFIG_GLOBAL[/dim] or [dim]GIT_CONFIG_NOSYSTEM[/dim] also names",
+        "     [dim]GIT_AUTHOR_EMAIL[/dim] and [dim]GIT_COMMITTER_EMAIL[/dim], or a [dim]user.email[/dim].",
+        "     A runner has no email to auto-detect: [yellow]git commit exits 128[/yellow].",
         "",
         f"  Arm A also follows a name bound to a {_PROC} literal to where it is",
         "  READ; a bound [dim]Path()[/dim] is judged at its read, not its constructor.",

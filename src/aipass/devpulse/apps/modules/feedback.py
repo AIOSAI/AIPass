@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feedback.py
 # Description: Feedback Module — command routing for devpulse feedback mailbox
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-11
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -145,24 +145,12 @@ def handle_command(command: str, args: list[str]) -> bool:
 
 
 def _handle_send(args: list[str]) -> bool:
-    """Handle the send subcommand; an explicit first-arg from_branch gets a reply path only if it is the caller."""
+    """Handle the send subcommand. The sender is the drone rail, never an argument: a body of several
+    tokens once read as sender + subject + body, and the reply went nowhere."""
     if len(args) < 2:
         error('Usage: feedback send "subject" "body"')
-        console.print("[dim]Tip: from_branch is auto-detected or pass as first arg.[/dim]")
         return True
 
-    auto_branch, auto_path = _resolve_sender()
-
-    if len(args) >= 3 and not args[0].startswith('"'):
-        from_branch = args[0]
-        subject = args[1]
-        body = " ".join(args[2:])
-        ai_mail_path = auto_path if from_branch == auto_branch else ""
-    else:
-        from_branch = auto_branch
-        subject = args[0]
-        body = " ".join(args[1:])
-        ai_mail_path = auto_path
-
-    send_feedback(from_branch, subject, body, ai_mail_path)
+    from_branch, ai_mail_path = _resolve_sender()
+    send_feedback(from_branch, args[0], " ".join(args[1:]), ai_mail_path)
     return True

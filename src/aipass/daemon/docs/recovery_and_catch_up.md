@@ -54,7 +54,7 @@ could not reach this branch" and "this branch owed nothing" are not the same sen
 **The queue is visible.** `drone @daemon queue` prints a Catch-up Queue under the job
 table (owner, windows missed, oldest, cause, state, attempts) whenever anything is
 owed, and `--json` carries it under an additive `catch_up_queue` key beside the three
-original top-level keys and the eleven job fields, which @skills' scheduler bot reads.
+original top-level keys and the eleven job fields, the frozen schema an outside reader parses.
 
 **Where the wake transcript is filed.** Both places: the target branch's
 `.daemon/last_wake_prompt.txt` **and** daemon's own `daemon_json/last_wake_prompt.txt`.

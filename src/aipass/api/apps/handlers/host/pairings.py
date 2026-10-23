@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pairings.py
 # Description: Host API Pairings — one-use, five-minute codes a phone trades for its bearer
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-13
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -16,14 +16,12 @@ import hashlib
 import hmac
 import io
 import ipaddress
-import json
 import secrets as secrets_lib
 import threading
 import time
 import uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Tuple
 from urllib import error as urllib_error
 from urllib import request as urllib_request
@@ -37,6 +35,7 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 PAIRING_SLUG = "pairings"
+_ENTRY = f"{host_tokens.TOKEN_PROVIDER}/{PAIRING_SLUG}"
 STORE_VERSION = 1
 
 DEFAULT_TTL_SECONDS = 300
@@ -93,38 +92,32 @@ class AttemptWindow:
             return True
 
 
-def store_path() -> Path:
-    """Where the pairing store lives."""
-    return secrets_store.SECRETS_BASE / host_tokens.TOKEN_PROVIDER / f"{PAIRING_SLUG}.json"
-
-
 def load_pairings() -> List[Dict[str, Any]]:
     """
-    Read every pairing row.
+    Read every pairing row from the keyring entry host_api/pairings.
 
     A broken store raises, never []: an empty list would refuse a live code as unknown and hide why.
     """
-    path = store_path()
-    if not path.exists():
-        return []
-
     try:
-        stored = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as e:
-        raise PairingError(f"The pairing store at {path} cannot be read ({type(e).__name__})") from e
+        stored = secrets_store.get_secret(host_tokens.TOKEN_PROVIDER, PAIRING_SLUG, as_json=True)
+    except secrets_store.SecretsUnavailable as e:
+        raise PairingError(f"The pairing store {_ENTRY} cannot be read ({e})") from None
+    if stored is None:
+        return []
 
     rows = stored.get("pairings") if isinstance(stored, dict) else None
     if not isinstance(rows, list):
-        raise PairingError(f"The pairing store at {path} has no 'pairings' list")
+        raise PairingError(f"The pairing store {_ENTRY} has no 'pairings' list")
     return [row for row in rows if isinstance(row, dict)]
 
 
 def _save_pairings(rows: List[Dict[str, Any]]) -> None:
-    """Write the rows through the token store's atomic owner-only write."""
+    """Write the rows to the keyring entry host_api/pairings."""
+    document = {"version": STORE_VERSION, "pairings": rows}
     try:
-        host_tokens.write_private_json(store_path(), {"version": STORE_VERSION, "pairings": rows})
-    except OSError as e:
-        raise PairingError(f"The pairing store at {store_path()} cannot be written ({type(e).__name__})") from e
+        secrets_store.set_secret(host_tokens.TOKEN_PROVIDER, PAIRING_SLUG, document, as_json=True)
+    except secrets_store.SecretsUnavailable as e:
+        raise PairingError(f"The pairing store {_ENTRY} cannot be written ({e})") from None
 
 
 def _expires(row: Dict[str, Any]) -> Optional[datetime]:

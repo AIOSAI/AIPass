@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_feedback_module.py
 # Description: Tests for feedback module command routing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-11
-# Modified: 2026-09-27
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/feedback.py, driven through handle_command()."""
@@ -149,19 +149,21 @@ class TestCommandRouting:
         assert "Usage: feedback clear <id> | feedback clear --all" in capsys.readouterr().err
         assert [m["id"] for m in storage.load_inbox()["messages"]] == ["aaa11111", "bbb22222"]
 
-    def test_feedback_send(self, empty_inbox):
-        """Should accept feedback from an agent."""
-        result = feedback_module.handle_command("feedback", ["send", "seedgo", "Bug report", "Found an issue"])
+    def test_feedback_send(self, empty_inbox, monkeypatch):
+        """The sender is the drone rail: three tokens are subject + a two-token body, never sender + subject + body."""
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
+        monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+        result = feedback_module.handle_command("feedback", ["send", "Bug report", "line one", "line two"])
         assert result is True
 
         data = storage.load_inbox()
         assert data["total_messages"] == 1
         assert data["messages"][0]["from"] == "seedgo"
         assert data["messages"][0]["subject"] == "Bug report"
+        assert data["messages"][0]["body"] == "line one line two"
 
     def test_feedback_send_without_from(self, empty_inbox):
         """Should handle send with just subject and body."""
-        # When args start with a quoted-looking string, from defaults to 'unknown'
         result = feedback_module.handle_command("feedback", ["send", "Subject here", "Body text"])
         assert result is True
 

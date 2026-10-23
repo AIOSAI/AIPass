@@ -1,23 +1,12 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.3.3
+# Version: 1.4.0
 # Created: 2026-06-25
-# Modified: 2026-10-10
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/tracking/tab_renderer.py."""
-
-# Tests for the tab_renderer handler.
-#
-# Covers:
-#   1. render_tab() — correct strings for each section type.
-#   2. render_tab() — per-branch overrides from config.
-#   3. render_tab() — fallback to defaults when branch not in per_branch.
-#   4. _reorder_keys() — canonical key ordering.
-#   5. refresh_all_tabs() — reads config and writes tabs (mocked I/O).
-#   6. Key ordering verification after tab insertion.
-#   7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — template_usage(), template_semantics(): tests/test_trinity_standard.py
@@ -152,6 +141,23 @@ class TestRenderTabSessions:
         assert "summary" in tab
         assert "≤30" in tab  # ≤300
         assert tab.endswith("summary ≤300 chars · draft to 240 ⟧")
+
+    @pytest.mark.parametrize(
+        "section, tail",
+        [
+            ("key_learnings", "value ≤200 chars · draft to 160 ⟧"),
+            ("sessions", "summary ≤300 chars · draft to 240 ⟧"),
+            ("observations", "note ≤300 chars · draft to 240 ⟧"),
+            ("todos", "task ≤150 chars · draft to 120 · next #? ⟧"),
+        ],
+    )
+    def test_the_tolerance_band_never_reaches_the_meta_line(self, section, tail):
+        banded = {**SAMPLE_ENTRY_LIMITS_CFG, "tolerance_percent": 10}
+
+        tab = tab_renderer.render_tab(section, SAMPLE_ROLLOVER_CFG, banded, "memory")
+
+        assert tab.endswith(tail)
+        assert tab == tab_renderer.render_tab(section, SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory")
 
     def test_sessions_per_branch(self):
         mod = tab_renderer

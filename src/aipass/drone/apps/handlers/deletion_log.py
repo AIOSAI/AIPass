@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.2.3
+# Version: 1.3.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -286,3 +286,45 @@ def record_deletion(
         logger.error("deletion record: failed to write store for %s: %s", record["path"], exc)
 
     return record
+
+
+_MEASUREMENT_KEYS = frozenset({"kind", "size_bytes", "entry_count", "measured"})
+
+
+def record_foreign_deletion(
+    *,
+    lane: str,
+    outcome: str,
+    caller: str,
+    requested: str,
+    resolved: Path | str,
+    target: Path | str,
+    reason: str,
+    measurement: dict | None = None,
+    project_root: Path | None = None,
+) -> dict:
+    """Record another branch's removal in drone rm's row shape; ValueError on a half row, never written."""
+    for name, value in (
+        ("lane", lane),
+        ("outcome", outcome),
+        ("caller", caller),
+        ("resolved", resolved),
+        ("target", target),
+    ):
+        if not str(value or "").strip():
+            raise ValueError(f"record_deletion: {name} is required, got {value!r}")
+    if measurement is not None and set(measurement) != _MEASUREMENT_KEYS:
+        raise ValueError(
+            f"record_deletion: measurement keys must be {sorted(_MEASUREMENT_KEYS)}, got {sorted(measurement)}"
+        )
+    return record_deletion(
+        lane=lane,
+        outcome=outcome,
+        caller=caller,
+        requested=requested,
+        resolved=resolved,
+        target=target,
+        reason=reason,
+        measurement=measurement,
+        project_root=project_root,
+    )

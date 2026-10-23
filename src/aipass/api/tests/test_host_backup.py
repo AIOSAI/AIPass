@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_backup.py
 # Description: Tests for the host API's backup door — runs, cancels, jobs and status (DPLAN-0411, DPLAN-0412)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-19
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/host/backup.py."""
@@ -81,6 +81,20 @@ class Starter:
             target(*args)
 
 
+class Alarms:
+    """Records each limit the table sets; a test fires one by hand."""
+
+    def __init__(self) -> None:
+        self.set: List[Tuple[float, Callable[[], None]]] = []
+        self.cancelled = 0
+
+    def __call__(self, seconds: float, action: Callable[[], None]) -> Any:
+        self.set.append((seconds, action))
+        alarm = MagicMock()
+        alarm.cancel.side_effect = lambda: setattr(self, "cancelled", self.cancelled + 1)
+        return alarm
+
+
 def _result(stdout: str = "", exit_code: int = 0, stderr: str = "", command: str = "snapshot") -> Any:
     return drone.CommandResult(stdout=stdout, stderr=stderr, exit_code=exit_code, branch="backup", command=command)
 
@@ -96,9 +110,14 @@ def starter() -> Starter:
 
 
 @pytest.fixture
-def door(seated: Path, clock: FakeClock, starter: Starter, monkeypatch: Any):
+def alarms() -> Alarms:
+    return Alarms()
+
+
+@pytest.fixture
+def door(seated: Path, clock: FakeClock, starter: Starter, alarms: Alarms, monkeypatch: Any):
     """A fresh job table, a hermetic seat, and drone's router replaced at the handler's reference."""
-    monkeypatch.setattr(host_backup, "JOBS", host_backup.JobTable(clock=clock, start=starter))
+    monkeypatch.setattr(host_backup, "JOBS", host_backup.JobTable(clock=clock, start=starter, after=alarms))
     router = MagicMock()
     router.RoutingError = drone.RoutingError
     router.route_command.return_value = _result("snapshot=15414 files, 2.9 GB, 30.1s")
@@ -144,11 +163,11 @@ class TestStartRun:
         door.route_command.assert_not_called()
 
     @pytest.mark.parametrize(
-        ("lane", "flags"),
-        [("snapshot", ["--quiet"]), ("versioned", ["--quiet"]), ("all", ["--quiet"]), ("drive_sync", [])],
+        ("lane", "flags", "limit"),
+        [("snapshot", ["--quiet"], 1800), ("versioned", ["--quiet"], 1800), ("all", ["--quiet"], 86400)],
     )
-    def test_each_lane_runs_its_contract_argv_and_drive_sync_takes_no_quiet(
-        self, door: Any, starter: Starter, seated: Path, lane: str, flags: List[str]
+    def test_each_limited_lane_runs_its_contract_argv_under_its_own_limit(
+        self, door: Any, starter: Starter, alarms: Alarms, seated: Path, lane: str, flags: List[str], limit: int
     ) -> None:
         host_backup.start_run("AIPASS", lane)
         starter.run_all()
@@ -157,7 +176,63 @@ class TestStartRun:
         assert (target, verb) == ("@backup", lane)
         assert Path(argv[0]) == seated.resolve()
         assert argv[1:] == flags
-        assert door.route_command.call_args.kwargs == {"timeout": 1800}
+        assert [seconds for seconds, _ in alarms.set] == [limit]
+        assert door.route_command.call_args.kwargs == {"timeout": limit + host_backup.LIMIT_GRACE_SECONDS}
+
+    def test_drive_sync_runs_without_quiet_and_with_no_limit_of_ours(
+        self, door: Any, starter: Starter, alarms: Alarms, seated: Path
+    ) -> None:
+        host_backup.start_run("AIPASS", "drive_sync")
+        starter.run_all()
+
+        target, verb, argv = door.route_command.call_args.args
+        assert (target, verb, argv[1:]) == ("@backup", "drive_sync", [])
+        assert alarms.set == []
+        assert door.route_command.call_args.kwargs["timeout"] >= 10 * 365 * 86400
+
+    def test_a_lane_at_its_limit_is_ended_through_backups_stop_and_reads_stopped(
+        self, door: Any, starter: Starter, alarms: Alarms, seated: Path
+    ) -> None:
+        def lane_or_stop(target: str, verb: str, argv: List[str], timeout: int) -> Any:
+            if verb == "stop":
+                return _result("stopped snapshot (pid 4242)", command="stop")
+            alarms.set[0][1]()
+            return _result("", exit_code=130, command=verb)
+
+        door.route_command.side_effect = lane_or_stop
+        job = host_backup.start_run("AIPASS", "snapshot")
+        starter.run_all()
+
+        stop = door.route_command.call_args_list[1]
+        assert stop.args[:2] == ("@backup", "stop")
+        assert (Path(stop.args[2][0]), stop.args[2][1]) == (seated.resolve(), "snapshot")
+        assert stop.kwargs == {"timeout": host_backup.CANCEL_TIMEOUT_SECONDS}
+        assert host_backup.read_job(job["job"])["state"] == "stopped"
+
+    def test_a_lane_that_finishes_in_time_cancels_its_limit_and_stops_nothing(
+        self, door: Any, starter: Starter, alarms: Alarms
+    ) -> None:
+        host_backup.start_run("AIPASS", "snapshot")
+        starter.run_all()
+
+        assert alarms.cancelled == 1
+        assert [c.args[1] for c in door.route_command.call_args_list] == ["snapshot"]
+
+    def test_a_limit_whose_stop_cannot_be_routed_is_logged_never_raised(
+        self, door: Any, starter: Starter, alarms: Alarms, backup_log: Any
+    ) -> None:
+        job = host_backup.start_run("AIPASS", "versioned")
+        starter.run_all()
+        refusal = drone.RoutingError("Branch not found: @backup")
+        door.route_command.side_effect = refusal
+
+        alarms.set[0][1]()
+
+        backup_log.error.assert_called_once()
+        message, lane, job_id, error = backup_log.error.call_args.args
+        assert "could not be stopped at its limit" in message
+        assert (lane, job_id, error) == ("versioned", job["job"], refusal)
+        assert backup_log.error.call_args.kwargs == {"exc_info": refusal}
 
     def test_a_second_run_of_the_same_lane_is_refused_with_the_contract_sentence(
         self, door: Any, starter: Starter
@@ -595,3 +670,16 @@ class TestStartWorker:
         assert ran.is_set()
         assert worker.daemon
         assert not worker.is_alive()
+
+    def test_the_alarm_fires_once_on_a_daemon_timer_and_a_cancel_holds_it(self) -> None:
+        fired = threading.Event()
+        held = threading.Event()
+
+        alarm = host_backup.start_alarm(0.01, fired.set)
+        alarm.join(timeout=5)
+        cancelled = host_backup.start_alarm(5, held.set)
+        cancelled.cancel()
+        cancelled.join(timeout=5)
+
+        assert fired.is_set() and alarm.daemon
+        assert not held.is_set()

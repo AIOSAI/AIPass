@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
-# Description: Tests for the gh passthrough verbs, release edit and the external-repo door (--repo)
-# Version: 1.7.0
+# Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
+# Version: 1.8.0
 # Created: 2026-10-08
-# Modified: 2026-10-19
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
@@ -26,7 +26,7 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
     GIT_ACCESS_TIERS,
     verify_git_access,
 )
-from aipass.drone.apps.handlers.git import release_handler, repo_door, untrack_handler
+from aipass.drone.apps.handlers.git import release_handler, repo_door, restore_handler, untrack_handler
 from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
 from .conftest import GITHUB_SLUG, chore_ledger, github_stand_in, make_owner_project
@@ -1383,3 +1383,148 @@ class TestChoresThroughTheDoor:
         result = _chore("release", ["list", "--repo", "AIOSAI/AIPass"], answers, calls)
 
         assert result == {"stdout": "No published releases of github.com/AIOSAI/AIPass.", "stderr": "", "exit_code": 0}
+
+
+# ===========================================================================
+# restore: named tracked files back to HEAD or a given commit; show through the door
+# ===========================================================================
+
+
+def _restore_ledger(tmp_path: Path) -> list[dict]:
+    path = tmp_path / restore_handler.LEDGER_NAME
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+@pytest.fixture()
+def dev_tree(aipass_github: Path) -> Path:
+    """The AIPass root on dev with two commits of app/a.txt and app/b.txt; returns the root."""
+    root = aipass_github
+    (root / "app").mkdir()
+    for content in ("one\n", "two\n"):
+        (root / "app" / "a.txt").write_text(f"a {content}", encoding="utf-8")
+        (root / "app" / "b.txt").write_text(f"b {content}", encoding="utf-8")
+        _git(root, "add", "app")
+        _git(root, "commit", "-q", "-m", content.strip())
+    _git(root, "checkout", "-q", "-b", "dev")
+    return root
+
+
+class TestRestore:
+    """restore puts named tracked files back, index included, and refuses everything that is not a named file."""
+
+    def test_a_dirty_and_a_staged_file_go_back_to_head_and_an_untracked_one_is_left_and_named(
+        self, dev_tree: Path, tmp_path: Path
+    ) -> None:
+        """Mutant: only the worktree diff is read — the staged edit to b.txt stays in the index."""
+        (dev_tree / "app" / "a.txt").write_text("edited\n", encoding="utf-8")
+        (dev_tree / "app" / "b.txt").write_text("staged\n", encoding="utf-8")
+        _git(dev_tree, "add", "app/b.txt")
+        (dev_tree / "app" / "b.txt").write_text("b two\n", encoding="utf-8")
+        (dev_tree / "app" / "new.txt").write_text("mine\n", encoding="utf-8")
+
+        result = handle_command("restore", ["app"])
+
+        assert result == {
+            "stdout": (
+                "restored  app/a.txt  (from HEAD)\nrestored  app/b.txt  (from HEAD)\n2 file(s) restored to HEAD.\n"
+                "untracked, left in place: app/new.txt"
+            ),
+            "stderr": "",
+            "exit_code": 0,
+        }
+        assert (dev_tree / "app" / "a.txt").read_text(encoding="utf-8") == "a two\n"
+        assert _git(dev_tree, "status", "--porcelain", "--", "app") == "?? app/new.txt"
+        [record] = _restore_ledger(tmp_path)
+        assert (record["caller"], record["source"], record["restored"]) == (
+            "devpulse",
+            "HEAD",
+            ["app/a.txt", "app/b.txt"],
+        )
+
+    def test_source_puts_a_file_at_that_commits_content_and_names_the_source(self, dev_tree: Path) -> None:
+        """Mutant: --source parsed and dropped — the file stays at HEAD's content."""
+        result = handle_command("restore", ["--source", "HEAD^", "app/a.txt"])
+
+        assert result["stdout"] == "restored  app/a.txt  (from HEAD^)\n1 file(s) restored to HEAD^."
+        assert (dev_tree / "app" / "a.txt").read_text(encoding="utf-8") == "a one\n"
+        assert _git(dev_tree, "status", "--porcelain", "--", "app") == "M  app/a.txt"
+
+    @pytest.mark.parametrize(
+        ("args", "refusal"),
+        [
+            (["."], restore_handler.REFUSE_GLOB.format(path=".")),
+            (["app/*.txt"], restore_handler.REFUSE_GLOB.format(path="app/*.txt")),
+            (["app/[ab].txt"], restore_handler.REFUSE_GLOB.format(path="app/[ab].txt")),
+            (["--force", "app/a.txt"], restore_handler.REFUSE_FLAG.format(arg="--force")),
+            (["-f", "app/a.txt"], restore_handler.REFUSE_FLAG.format(arg="-f")),
+            (["app/a.txt", "--source"], restore_handler.REFUSE_NO_SOURCE),
+            (["--source", "nope", "app/a.txt"], restore_handler.REFUSE_SOURCE.format(ref="nope")),
+        ],
+    )
+    def test_a_dot_a_glob_a_force_flag_and_a_bad_source_are_refused_and_nothing_is_touched(
+        self, dev_tree: Path, args: list[str], refusal: str
+    ) -> None:
+        """Mutant: the glob check removed — app/*.txt reaches git's pathspec and both files go back."""
+        (dev_tree / "app" / "a.txt").write_text("edited\n", encoding="utf-8")
+
+        result = handle_command("restore", args)
+
+        assert result == {"stdout": "", "stderr": refusal, "exit_code": 1}
+        assert (dev_tree / "app" / "a.txt").read_text(encoding="utf-8") == "edited\n"
+
+    def test_a_clean_path_is_nothing_to_restore(self, dev_tree: Path) -> None:
+        result = handle_command("restore", ["app/a.txt"])
+
+        assert result["stdout"] == restore_handler.NOTHING.format(source="HEAD")
+
+    def test_main_is_refused_and_the_edit_stays(self, dev_tree: Path) -> None:
+        """Mutant: the branch check removed — main's tree is put back from a dev seat's command."""
+        _git(dev_tree, "checkout", "-q", "main")
+        (dev_tree / "app" / "a.txt").write_text("edited\n", encoding="utf-8")
+
+        result = handle_command("restore", ["app/a.txt"])
+
+        assert result["stderr"] == restore_handler.REFUSE_MAIN
+        assert (dev_tree / "app" / "a.txt").read_text(encoding="utf-8") == "edited\n"
+
+    def test_a_file_the_source_does_not_hold_is_refused_never_deleted(self, dev_tree: Path) -> None:
+        """Mutant: the at-source check removed — git restore deletes the newly staged file."""
+        (dev_tree / "app" / "c.txt").write_text("new\n", encoding="utf-8")
+        _git(dev_tree, "add", "app/c.txt")
+
+        result = handle_command("restore", ["app"])
+
+        assert result["stderr"] == restore_handler.REFUSE_NOT_AT_SOURCE.format(path="app/c.txt", source="HEAD")
+        assert (dev_tree / "app" / "c.txt").read_text(encoding="utf-8") == "new\n"
+
+    def test_a_path_outside_the_repo_is_refused(self, dev_tree: Path, tmp_path: Path) -> None:
+        outside = tmp_path / "elsewhere.txt"
+        outside.write_text("x\n", encoding="utf-8")
+
+        result = handle_command("restore", [str(outside)])
+
+        assert result["stderr"] == restore_handler.REFUSE_OUTSIDE.format(path=str(outside), repo=dev_tree)
+
+    def test_a_seat_that_does_not_own_the_repo_is_refused_before_git(self, builder_seat: Path, tmp_path: Path) -> None:
+        """Mutant: restore put in the global tier — a builder resets the owner's files."""
+        result = handle_command("restore", ["app/a.txt"])
+
+        assert result["exit_code"] == 1 and "seedgo" in result["stderr"]
+        assert _restore_ledger(tmp_path) == []
+
+
+class TestShowThroughTheDoor:
+    def test_the_admin_reads_an_external_commits_patch_and_the_door_records_it(
+        self, door_world: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """Mutant: show dispatched without repo_root — git show runs in the standing repo and finds no such commit."""
+        sha = _local_commit(door_world["ext"], "here.txt")
+
+        with patch(f"{_RAIL}.is_verified_admin_caller", return_value=True):
+            result = handle_command("show", [sha, "--repo", "projects/ext"])
+
+        assert result["exit_code"] == 0, result
+        assert result["stdout"].startswith(f"commit {sha}\n")
+        assert "\n+here.txt\n" in result["stdout"]
+        [record] = _ledger(tmp_path)
+        assert (record["verb"], record["outcome"], record["args"]) == ("show", "ran", [sha])

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.2.3
+# Version: 1.3.0
 # Created:2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -268,7 +268,7 @@ class TestRotationDelegation:
         assert "Last run never" in mock_rotation.call_args.kwargs["header"]
         assert runstate["jobs"]["@daemon/rounds"]["last_status"] == "success"
 
-    def test_ordinary_job_never_touches_the_rotation(self, telegram):
+    def test_ordinary_job_never_touches_the_rotation(self):
         runstate = {"jobs": {}}
         with patch(f"{RUN}.fire_rotation") as mock_rotation:
             results = self._tick(
@@ -366,6 +366,22 @@ class TestMissedWindowLine:
         assert results["missed"] == 1
         assert "MISSED: @commons/live" in flat(out)
         assert "04:00 +/-15m" in flat(out)
+        assert "closed with no run;" in flat(out)
+
+    def test_a_window_whose_runs_failed_is_not_reported_as_unrun(self, capsys, monkeypatch):
+        # A windowed job retries a failure inside its window, so a MISSED window may hold real runs.
+        freeze_runstate_clock(monkeypatch, "2026-10-19T05:18:30")
+        failed = {"last_run": "2026-10-19T05:07:30", "last_status": "failed", "last_failure_at": "2026-10-19T05:15:37"}
+        self._tick({"jobs": {"@commons/live": failed}})
+        out = flat(capsys.readouterr().out)
+        assert "closed with no successful run (last attempt failed at 05:15)" in out
+        assert "closed with no run" not in out
+
+    def test_a_failure_on_an_earlier_day_does_not_name_today_s_window(self, capsys, monkeypatch):
+        freeze_runstate_clock(monkeypatch, "2026-10-19T05:18:30")
+        stale = {"last_run": "2026-10-18T05:07:30", "last_status": "failed", "last_failure_at": "2026-10-18T05:15:37"}
+        self._tick({"jobs": {"@commons/live": stale}})
+        assert "closed with no run;" in flat(capsys.readouterr().out)
 
     def test_the_same_miss_is_not_repeated_on_the_next_tick(self):
         # The scheduler ticks about every two minutes; an unguarded line would
@@ -644,18 +660,6 @@ def kill_quietly(pid: int) -> None:
 
 
 @pytest.fixture
-def telegram():
-    """The three telegram seams, mocked, so no test here pings a real chat."""
-    base = "aipass.daemon.apps.handlers.schedule.telegram_notifier"
-    with (
-        patch(f"{base}.notify_triggered") as triggered,
-        patch(f"{base}.notify_complete") as complete,
-        patch(f"{base}.notify_error") as error,
-    ):
-        yield {"triggered": triggered, "complete": complete, "error": error}
-
-
-@pytest.fixture
 def no_wake():
     """wake_branch, wired to fail loudly if a command job ever reaches it."""
     wake = "aipass.ai_mail.apps.modules.door_wake.wake_branch"
@@ -895,7 +899,7 @@ class TestCommandJobFire:
         return outcome, detail, launches(journal), branch
 
     def test_exit_zero_is_fired_and_nobody_is_woken(
-        self, tmp_path, monkeypatch, telegram, no_wake, capsys, caplog, _seal_branch_wake_prompt
+        self, tmp_path, monkeypatch, no_wake, capsys, caplog, _seal_branch_wake_prompt
     ):
         with caplog.at_level("INFO"):
             outcome, detail, runs, _ = self._fire(tmp_path, monkeypatch, "print('4 files deleted')\n")
@@ -914,7 +918,7 @@ class TestCommandJobFire:
         assert "[run] DONE @commons/sweep exit 0, " in caplog.text
         assert "4 files deleted" in caplog.text
 
-    def test_a_non_zero_exit_is_failed_with_the_tail(self, tmp_path, monkeypatch, telegram, no_wake, caplog):
+    def test_a_non_zero_exit_is_failed_with_the_tail(self, tmp_path, monkeypatch, no_wake, caplog):
         with caplog.at_level("WARNING"):
             outcome, detail, _, _ = self._fire(
                 tmp_path, monkeypatch, "print('refused: fence', flush=True)\nsys.exit(2)\n"
@@ -925,39 +929,24 @@ class TestCommandJobFire:
         assert "[run] DONE @commons/sweep exit 2, " in caplog.text
         no_wake.assert_not_called()
 
-    def test_an_overrun_is_failed_and_named(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_an_overrun_is_failed_and_named(self, tmp_path, monkeypatch, no_wake):
         outcome, detail, _, _ = self._fire(tmp_path, monkeypatch, "time.sleep(30)\n", timeout_seconds=1)
         assert outcome == OUTCOME_FAILED
         assert detail.startswith("timed out after 1s, process tree stopped")
         no_wake.assert_not_called()
 
-    def test_a_wake_block_is_ignored_at_fire(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_a_wake_block_is_ignored_at_fire(self, tmp_path, monkeypatch, no_wake):
         outcome, _, runs, _ = self._fire(tmp_path, monkeypatch, "", wake={"fresh": True, "model": "opus"})
         assert outcome == OUTCOME_FIRED
         assert len(runs) == 1
         no_wake.assert_not_called()
 
-    def test_telegram_pings_on_start_and_on_finish(self, tmp_path, monkeypatch, telegram, no_wake):
-        self._fire(tmp_path, monkeypatch, "print('ok')\n")
-        telegram["triggered"].assert_called_once_with("@commons", "sweep")
-        telegram["complete"].assert_called_once()
-        owner, job_id, done = telegram["complete"].call_args.args
-        assert (owner, job_id) == ("@commons", "sweep")
-        assert done.startswith("exit 0, ") and done.endswith("— ok"), done
-        telegram["error"].assert_not_called()
+    def test_notify_false_still_fires_and_sends_no_mail(self, tmp_path, monkeypatch, no_wake):
+        outcome, _, runs, _ = self._fire(tmp_path, monkeypatch, "print('ok')\n", notify=False)
+        assert outcome == OUTCOME_FIRED
+        assert [entry["argv"] for entry in runs] == [["@daemon", "--help"]]
 
-    def test_telegram_names_a_failure(self, tmp_path, monkeypatch, telegram, no_wake):
-        _, detail, _, _ = self._fire(tmp_path, monkeypatch, "sys.exit(4)\n")
-        telegram["triggered"].assert_called_once_with("@commons", "sweep")
-        telegram["error"].assert_called_once_with("@commons", "sweep", detail)
-        telegram["complete"].assert_not_called()
-
-    def test_notify_false_keeps_telegram_quiet(self, tmp_path, monkeypatch, telegram, no_wake):
-        self._fire(tmp_path, monkeypatch, "print('ok')\n", notify=False)
-        for seam in telegram.values():
-            seam.assert_not_called()
-
-    def test_notify_email_mails_start_and_finish_signed_daemon(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_notify_email_mails_start_and_finish_signed_daemon(self, tmp_path, monkeypatch, no_wake):
         """Mutant killed: run.py's _DAEMON_ROOT one level short (parents[1])."""
         notify = {"email": "@devpulse"}
         outcome, _, runs, branch = self._fire(tmp_path, monkeypatch, "print('4 deleted')\n", notify=notify)
@@ -986,16 +975,14 @@ class TestCommandJobFire:
         assert same_dir(runs[0]["cwd"], daemon_dir)
         assert same_dir(runs[2]["cwd"], daemon_dir)
         assert same_dir(runs[1]["cwd"], branch)
-        # A notify BLOCK is not a no: telegram keeps pinging under the same rule.
-        telegram["triggered"].assert_called_once()
 
-    def test_the_finish_mail_says_failed(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_the_finish_mail_says_failed(self, tmp_path, monkeypatch, no_wake):
         _, _, runs, _ = self._fire(tmp_path, monkeypatch, "sys.exit(2)\n", notify={"email": "@devpulse"})
         finish_subject, finish_body = runs[-1]["argv"][3:]
         assert finish_subject.startswith("Command job FAILED: @commons/sweep (exit 2, ")
         assert "Exit code: 2" in finish_body
 
-    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, telegram, no_wake, caplog):
+    def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, no_wake, caplog):
         with caplog.at_level("WARNING"):
             outcome, _, runs, _ = self._fire(
                 tmp_path, monkeypatch, "print('ok')\n", mail_exit=1, notify={"email": "@devpulse"}
@@ -1021,7 +1008,7 @@ class TestCommandJobTick:
             results = run_tick()
         return results, runstate, journal
 
-    def test_a_pass_writes_the_row_a_wake_would(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_a_pass_writes_the_row_a_wake_would(self, tmp_path, monkeypatch, no_wake):
         job = command_job_dict(tmp_path)
         results, runstate, _ = self._tick(tmp_path, monkeypatch, "print('ok')\n", job)
         assert (results["fired"], results["failed"], results["blocked"]) == (1, 0, 0)
@@ -1035,7 +1022,7 @@ class TestCommandJobTick:
         runstate_mod.update_job_runstate(wake_row, "@commons", "sweep", job["schedule"])
         assert set(row) == set(wake_row["jobs"]["@commons/sweep"]), "no new fields: the row is a wake job's row"
 
-    def test_a_failure_writes_the_row_a_wake_would(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_a_failure_writes_the_row_a_wake_would(self, tmp_path, monkeypatch, no_wake):
         job = command_job_dict(tmp_path)
         results, runstate, _ = self._tick(tmp_path, monkeypatch, "print('refused', flush=True)\nsys.exit(2)\n", job)
         assert (results["fired"], results["failed"], results["blocked"]) == (0, 1, 0)
@@ -1046,7 +1033,7 @@ class TestCommandJobTick:
         assert row["last_error"].endswith("— refused")
         assert "completed" not in row, "a failed once job is not done; it retries after the backoff"
 
-    def test_a_completed_once_job_does_not_run_again(self, tmp_path, monkeypatch, telegram, no_wake):
+    def test_a_completed_once_job_does_not_run_again(self, tmp_path, monkeypatch, no_wake):
         job = command_job_dict(tmp_path)
         launcher, journal = fake_drone(tmp_path, "print('ok')\n")
         monkeypatch.setattr(command_job, "LAUNCHER", launcher)
@@ -1062,7 +1049,7 @@ class TestCommandJobTick:
         assert len(launches(journal)) == 1
 
     @pytest.mark.parametrize("now", ["2026-10-11T03:00:00", "2026-10-11T12:00:00", "2026-10-11T23:59:00"])
-    def test_a_late_daily_command_job_is_caught_up_like_any_other(self, tmp_path, monkeypatch, telegram, no_wake, now):
+    def test_a_late_daily_command_job_is_caught_up_like_any_other(self, tmp_path, monkeypatch, no_wake, now):
         # catch_up is opt-in while RECOVERY_LANE_LIVE is False. The test owns the clock: unfrozen, it
         # answered (1, 0) in the minute before today's 00:01 window.
         freeze_runstate_clock(monkeypatch, now)

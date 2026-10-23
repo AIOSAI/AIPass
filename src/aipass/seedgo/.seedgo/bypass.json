@@ -258,7 +258,7 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "windows_compat",
-      "lines": [934, 936],
+      "lines": [935, 937],
       "reason": "Test input (fleet green leg 15; re-pinned +3 leg 16): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
     },
     {
@@ -312,7 +312,7 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [713],
+      "lines": [714],
       "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -616,7 +616,7 @@
     {
       "file": "apps/handlers/aipass_standards/trinity_groups.py",
       "standard": "logged_fallback",
-      "lines": [980],
+      "lines": [992],
       "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
     },
     {

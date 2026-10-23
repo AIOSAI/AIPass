@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2026-02-13
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -510,19 +510,20 @@ def update_status(fingerprint: str, new_status: str, reason: str = "") -> bool:
         if new_status not in VALID_STATUSES:
             return False
 
-        registry = _load_registry()
-        entry = _find_entry(registry, fingerprint)
+        with json_file_lock(REGISTRY_FILE):
+            registry = _load_registry()
+            entry = _find_entry(registry, fingerprint)
 
-        if entry is None:
-            return False
+            if entry is None:
+                return False
 
-        entry["status"] = new_status
-        if new_status == "suppressed" and reason:
-            entry["suppress_reason"] = reason
-        elif reason:
-            entry["suppress_reason"] = reason
+            entry["status"] = new_status
+            if new_status == "suppressed" and reason:
+                entry["suppress_reason"] = reason
+            elif reason:
+                entry["suppress_reason"] = reason
 
-        return _save_registry(registry)
+            return _save_registry(registry)
 
     except Exception as exc:
         logger.warning("Failed to update status for fingerprint '%s': %s", fingerprint, exc)
@@ -542,23 +543,23 @@ def get_entry(fingerprint: str) -> Optional[dict]:
 def clear_resolved(days: int = 7) -> int:
     """Remove resolved entries older than N days; -1 means the registry could not be walked."""
     try:
-        registry = _load_registry()
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        removed = 0
+        with json_file_lock(REGISTRY_FILE):
+            registry = _load_registry()
+            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            removed = 0
 
-        fingerprints_to_remove = []
-        for fp, entry in registry["errors"].items():
-            if entry.get("status") == "resolved":
+            fingerprints_to_remove = []
+            for fp, entry in registry["errors"].items():
                 last_seen = entry.get("last_seen", "")
-                if last_seen and last_seen < cutoff:
+                if entry.get("status") == "resolved" and last_seen and last_seen < cutoff:
                     fingerprints_to_remove.append(fp)
 
-        for fp in fingerprints_to_remove:
-            del registry["errors"][fp]
-            removed += 1
+            for fp in fingerprints_to_remove:
+                del registry["errors"][fp]
+                removed += 1
 
-        if removed > 0:
-            _save_registry(registry)
+            if removed > 0:
+                _save_registry(registry)
 
         return removed
 
@@ -573,22 +574,23 @@ def purge_stale(days: int = 30) -> int:
     Returns -1 when the registry could not be walked.
     """
     try:
-        registry = _load_registry()
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        removed = 0
+        with json_file_lock(REGISTRY_FILE):
+            registry = _load_registry()
+            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            removed = 0
 
-        fingerprints_to_remove = []
-        for fp, entry in registry["errors"].items():
-            last_seen = entry.get("last_seen", "")
-            if last_seen and last_seen < cutoff:
-                fingerprints_to_remove.append(fp)
+            fingerprints_to_remove = []
+            for fp, entry in registry["errors"].items():
+                last_seen = entry.get("last_seen", "")
+                if last_seen and last_seen < cutoff:
+                    fingerprints_to_remove.append(fp)
 
-        for fp in fingerprints_to_remove:
-            del registry["errors"][fp]
-            removed += 1
+            for fp in fingerprints_to_remove:
+                del registry["errors"][fp]
+                removed += 1
 
-        if removed > 0:
-            _save_registry(registry)
+            if removed > 0:
+                _save_registry(registry)
 
         return removed
 
@@ -629,12 +631,13 @@ def update_source_fix_status(fingerprint: str, fix_status: str) -> bool:
     if fix_status not in VALID_FIX_STATUSES:
         return False
     try:
-        registry = _load_registry()
-        entry = _find_entry(registry, fingerprint)
-        if entry is None:
-            return False
-        entry["source_fix_status"] = fix_status
-        return _save_registry(registry)
+        with json_file_lock(REGISTRY_FILE):
+            registry = _load_registry()
+            entry = _find_entry(registry, fingerprint)
+            if entry is None:
+                return False
+            entry["source_fix_status"] = fix_status
+            return _save_registry(registry)
     except Exception as exc:
         logger.warning("Failed to update source fix status for '%s': %s", fingerprint, exc)
         return False

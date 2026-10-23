@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_registry.py
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/watchdog/registry.py and the handlers that register through it."""
@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.devpulse.apps.handlers import file_lock
 from aipass.devpulse.apps.handlers.watchdog import agent as agent_handler
 from aipass.devpulse.apps.handlers.watchdog import registry as reg
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
@@ -248,7 +249,7 @@ def test_a_zombie_watch_is_pruned_off_linux(store_path, monkeypatch, pretend_pla
 
 def test_the_lock_is_a_no_op_where_fcntl_is_absent(store_path, monkeypatch, pretend_platform):
     """The lock reads the fcntl binding, not sys.platform: pretended darwin without fcntl neither imports nor locks."""
-    monkeypatch.setattr(watch_registry, "fcntl", None)
+    monkeypatch.setattr(file_lock, "fcntl", None)
     pretend_platform(watch_registry, "darwin")
 
     handle = watch_registry.register("agent", {"label": "unlocked"}, storage_path=store_path)

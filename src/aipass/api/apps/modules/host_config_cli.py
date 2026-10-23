@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_config_cli.py
 # Description: Host API Config Module — showing and setting what the server binds, serves and execs
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -122,11 +122,11 @@ def _cmd_set_config(args: List[str]) -> None:
         # Re-read: the path settings above may have just written this same store.
         config = host_config.load_config()
         config["host"], config["port"] = bind_host, bind_port
-        path = host_config.save_config(config)
+        entry = host_config.save_config(config)
         json_handler.log_operation("host_api_config_saved", {"host": bind_host, "port": bind_port})
 
         success(f"Config saved: {bind_host}:{bind_port}")
-        console.print(f"  [dim]{path}[/dim]")
+        console.print(f"  [dim]keyring entry {entry}[/dim]")
     console.print()
 
 

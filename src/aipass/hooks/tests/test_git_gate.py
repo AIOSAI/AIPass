@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 5.3.0
-# Description: Tests for git_gate: raw git and gh refused for every seat; protected config writes the admin seat's
+# Version: 5.4.1
+# Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -849,6 +849,12 @@ class TestGitHubWritesWithoutGh:
             _assert_blocked(result)
             assert "GitHub credential" in json.loads(result["stdout"])["reason"], command
 
+    def test_the_keyring_module_is_refused_and_a_package_named_keyring_installs(self, tmp_path):
+        seat = _seat(tmp_path, "canary")
+        _assert_blocked(_canary_bash("python3 -m keyring get gh:github.com ''", seat))
+        _assert_allowed(_canary_bash("python3 -m pip install keyring", seat))
+        _assert_allowed(_canary_bash(".venv/bin/python -m pip install -e . keyring>=25.0", seat))
+
     def test_a_non_get_or_a_body_to_the_api_is_refused(self, tmp_path):
         seat = _seat(tmp_path, "canary")
         for command in (
@@ -981,3 +987,102 @@ class TestRawGitAndGhAreRefusedForEverySeat:
     @pytest.mark.parametrize("command", ("drone @git status", "drone @git log 5 notes.txt", "drone @git diff"))
     def test_the_drone_twins_still_run(self, command):
         _assert_allowed(self._admin(command))
+
+
+@pytest.fixture
+def store_home(tmp_path, monkeypatch):
+    """A home of its own holding a secrets store, so no test names this machine's real one."""
+    home = tmp_path / "home"
+    (home / ".secrets" / "aipass").mkdir(parents=True)
+    (home / ".secrets" / "aipass" / ".env").write_text("K=v\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home / ".secrets"
+
+
+class TestReadingTheSecretsStoreIsRefusedForEverySeat:
+    """R7, the owner 2026-10-22: agents get actions, never values. python -c listed the store past the deny list."""
+
+    _READS = (
+        "python3 -c \"import os; print(os.listdir(os.path.expanduser('~/.secrets/aipass')))\"",
+        "grep token ~/.secrets/aipass/.env",
+        "python3 <<'EOF'\nfrom aipass.api.apps.modules.secrets import get_secret\nprint(get_secret('x'))\nEOF",
+        "find ~/.secrets -maxdepth 2",
+        "cat ~/.secrets/aipass/.env",
+        "cat $HOME/.secrets/aipass/.env",
+        "ls .secrets/aipass",
+        "type 'D:\\keep\\.secrets\\aipass\\.env'",
+        "node -e \"require('fs').readFileSync(process.env.HOME + '/.secrets/aipass/.env')\"",
+        'python3 -c "from aipass.api.apps.handlers.auth import keys"',
+        'python3 -c "from aipass.api.apps.modules import secrets"',
+    )
+
+    @pytest.mark.parametrize("grant", (False, True))
+    @pytest.mark.parametrize("command", _READS)
+    def test_each_read_is_refused_on_the_plain_and_the_admin_seat(self, command, grant, tmp_path, store_home):
+        seat = _seat(tmp_path, "devpulse" if grant else "canary")
+        with patch(_RAIL, return_value=grant):
+            result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": seat})
+        reason = _reason(result)
+        assert "Reading the secrets store is refused for every seat" in reason, command
+        assert ("@devpulse" if grant else "@canary") in reason
+
+    def test_the_refusal_names_what_it_saw(self, tmp_path, store_home):
+        reason = _reason(_canary_bash("grep token ~/.secrets/aipass/.env", _seat(tmp_path, "canary")))
+        assert "Seen: " in reason and ".secrets" in reason.split("Seen: ")[1]
+        assert "drone @api --help" in reason
+
+    @pytest.mark.parametrize(
+        "command",
+        (
+            "drone @api get-secret telegram prax_monitor",
+            "drone @api --help",
+            "drone @api list ~/.secrets/aipass",
+            'grep -rn ".secrets" src/aipass/backup',
+            "pytest src/aipass/api/tests -q",
+            "cat notes.secrets.md",
+            "python3 -c \"print('secrets')\"",
+        ),
+    )
+    def test_the_door_and_a_bare_word_pass(self, command, tmp_path, store_home):
+        with patch(_RAIL, return_value=True):
+            result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": DEVPULSE_CWD})
+        _assert_allowed(result)
+
+
+class TestWritingTheSecretsStoreIsNoSeats:
+    """R7 writes, the owner 2026-09-02: the admin seat changes any file except .secrets and sudo."""
+
+    @pytest.mark.parametrize("grant", (False, True))
+    def test_a_shell_write_into_or_out_of_the_store_is_refused(self, grant, tmp_path, store_home):
+        seat = _seat(tmp_path, "devpulse" if grant else "canary")
+        for command in (
+            "echo K=v >> ~/.secrets/aipass/.env",
+            f"echo K=v > {_word(store_home / 'aipass' / 'new.env')}",
+            "cp ~/.secrets/aipass/.env out.env",
+            "chmod 644 ~/.secrets/aipass/.env",
+            "printf x | tee ~/.secrets/aipass/.env",
+            "rm -rf ~/.secrets",
+        ):
+            with patch(_RAIL, return_value=grant):
+                result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": seat})
+            assert "the secrets store" in _reason(result), command
+
+    def test_the_edit_tools_on_a_store_path_are_refused_from_the_admin_seat(self, store_home):
+        for tool in ("Edit", "Write"):
+            reason = _reason(_edit(str(store_home / "aipass" / ".env"), DEVPULSE_CWD, grant=True, tool=tool))
+            assert "Writing the secrets store is refused for every seat" in reason
+            assert "@api verb" in reason
+
+    def test_a_redirect_alone_lands_in_the_write_lane(self, tmp_path, store_home):
+        reason = _reason(_canary_bash("echo K=v >> ~/.secrets/aipass/.env", _seat(tmp_path, "canary")))
+        assert "Writing the secrets store" in reason
+
+    def test_a_write_under_the_project_still_passes_from_the_admin_seat(self, store_home):
+        target = store_home.parent / "Projects" / "AIPass" / "notes.md"
+        _assert_allowed(_edit(str(target), DEVPULSE_CWD, grant=True, tool="Write"))
+        with patch(_RAIL, return_value=True):
+            result = handle(
+                {"tool_name": "Bash", "tool_input": {"command": "echo x > ~/Projects/AIPass/n.md"}, "cwd": DEVPULSE_CWD}
+            )
+        _assert_allowed(result)

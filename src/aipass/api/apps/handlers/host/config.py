@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Host API Config Handler — server config, bind-address and face-dir validation
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
 Host API Config Handler
 
 Reference: docs/host_api.md (the bind rule), docs/host_surfaces.md (face_dir, baud_bin).
-Lives in ~/.secrets (not a secret): one machine root, no repo discovery, never ships.
+Lives in the secrets store's keyring (not a secret): one machine root, no repo discovery, never ships.
 """
 
 import ipaddress
@@ -73,11 +73,11 @@ def load_config() -> Dict[str, Any]:
 
 
 def save_config(config: Dict[str, Any]) -> str:
-    """Persist server config to the store."""
-    path = secrets_store.set_secret(CONFIG_PROVIDER, CONFIG_SLUG, config, as_json=True)
-    # Named in words: CodeQL flags the secret-named call's path in a log as clear-text secret.
+    """Persist server config to the keyring entry host_api/config; returns the entry's name."""
+    entry = secrets_store.set_secret(CONFIG_PROVIDER, CONFIG_SLUG, config, as_json=True)
+    # Named in words: CodeQL flags the secret-named call's result in a log as clear-text secret.
     logger.info("[host_api] config saved to the host_api config in the secrets store")
-    return str(path)
+    return entry
 
 
 def set_bind(host: str, port: int) -> Dict[str, Any]:

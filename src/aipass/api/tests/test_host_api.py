@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api.py
 # Description: Tests for the Stage 0 host API's commands — routing, tokens, serve/status/stop, config, the door
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for the host-api commands in apps/modules/host_api.py, host_serve.py and host_config_cli.py."""
@@ -692,6 +692,14 @@ class TestSetConfigCommand:
 
         assert config == {"host": "127.0.0.1", "port": 9100}
 
+    def test_the_saved_line_names_the_entry_never_a_path(self, store: Path, quiet_module: dict) -> None:
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--host", "127.0.0.1", "--port", "9100"])
+
+        printed = " ".join(str(call.args[0]) for call in quiet_module["console"].print.call_args_list if call.args)
+        assert "host_api/config" in printed
+        assert str(store) not in printed
+
     def test_refuses_to_store_a_bind_that_would_not_start(self, store: Path, quiet_module: dict) -> None:
         """Validate before storing, so the refusal reaches the person who typed
         it rather than surfacing at 3am when the server will not come up."""
@@ -795,14 +803,14 @@ class TestSetConfigCommand:
 
     def test_a_save_is_logged_without_the_store_path(self, store: Path) -> None:
         """
-        The caller gets the path back; the log line names the store in words.
+        The caller gets the entry name back; the log line names the store in words.
 
-        CodeQL follows the secret-named call's path into a log as clear-text secret data.
+        CodeQL follows the secret-named call's result into a log as clear-text secret data.
         """
         with patch(PATCH_CONFIG_LOGGER) as log:
             written = host_config.save_config({"host": UNHELD_ADDRESS, "port": 8787})
 
-        assert Path(written).exists()
+        assert written == "host_api/config"
         logged = " ".join(str(arg) for arg in log.info.call_args.args)
         assert "config saved to the host_api config in the secrets store" in logged
         assert written not in logged

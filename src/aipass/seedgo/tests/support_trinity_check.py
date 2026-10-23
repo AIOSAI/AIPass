@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_trinity_check.py
 # Description: Shared gold data and builders for the trinity_check test files (split from test_trinity_check.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-23
 # =============================================
 
 """Shared helpers for the tests of apps/handlers/aipass_standards/trinity_check.py (not test_: never collected)."""
@@ -50,6 +50,7 @@ _CONFIG = {
         # N" half of every tab. A fixture without it renders the unpublished
         # marker, which is the behaviour TestTheDraftPercentIsRead pins.
         "draft_percent": 80,
+        "tolerance_percent": 10,
         "entry_types": {
             "key_learnings": {
                 "file": "local.json",

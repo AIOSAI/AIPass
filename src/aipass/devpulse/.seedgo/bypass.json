@@ -36,6 +36,12 @@
     },
     {
       "standard": "logged_fallback",
+      "file": "apps/devpulse.py",
+      "lines": [116],
+      "reason": "route_command's bool is the module's claim on the command, not its verdict. A module that raised is reported by name through error(), which marks the command failed, so resolve_exit answers 2 and a chained next step does not run; the shell can tell. A re-raise would hand drone a traceback for a module defect, and False would exit 1 as 'unknown command', which it is not (pinned in tests/test_devpulse.py test_route_command_catches_module_errors)."
+    },
+    {
+      "standard": "logged_fallback",
       "file": "apps/modules/compass.py",
       "lines": [201, 222, 254, 278, 293, 306, 352, 377, 388, 396, 416, 427, 450, 465, 488],
       "reason": "CLI handler contract (fleet green, devpulse 2026-10-04; ai_mail leg 9 precedent). A _handle_* return is 'command recognised', not 'it worked': the router stops on True. Every line follows a cli error(), which marks the command failed and sets the non-zero exit, so the caller is told by that flag, never by the bool."

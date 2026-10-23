@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Release mail body — version, release URL, CHANGELOG headline, ritual
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """The one body every manager receives (DPLAN-0335 leg 1).
@@ -74,10 +74,11 @@ def changelog_headline(changelog_path: Path, version: str, limit: int = HEADLINE
         logger.warning(f"[{MODULE_NAME}] no '## [' section in {changelog_path}")
         return []
 
+    # A substring test reads v2.8.2 inside v2.8.24, and the newest section sits on top.
+    wanted = re.compile(rf"\bv?{re.escape(version)}(?![\d.])")
     chosen = starts[0]
     for index in starts:
-        header = lines[index]
-        if f"v{version}" in header or f"[{version}]" in header:
+        if wanted.search(lines[index]):
             chosen = index
             break
 

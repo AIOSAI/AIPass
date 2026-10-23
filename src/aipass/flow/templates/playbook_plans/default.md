@@ -52,10 +52,7 @@ anything that broke and how it was handled.
 
 ---
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this run here. No markdown, no symbols, no tables,
-no code blocks, no asterisks, no bullet points. Just natural sentences for text to speech.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 

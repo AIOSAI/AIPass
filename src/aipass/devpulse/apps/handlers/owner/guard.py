@@ -1,38 +1,27 @@
 # =================== AIPass ====================
 # Name: guard.py
 # Description: Owner-capability caller guard for devpulse owner-only tools
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
-"""
-Owner-capability guard for devpulse's owner-only tools.
-
-drone runs a routed module with cwd set to the branch, so Path.cwd() never names the caller; AIPASS_CALLER_* does.
-"""
+"""Owner-capability guard for devpulse's owner-only tools."""
 
 import os
 from pathlib import Path
 
 from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.owner.admin_grant import _resolve_verified_caller
 
 
 def _resolve_caller() -> tuple[str, Path]:
-    """Resolve ``(caller_email, caller_cwd)`` from the env drone sets; the email is @ + directory name, as ai_mail."""
+    """``(email, cwd)`` from the AIPASS_CALLER_* rail only: drone sets cwd to the branch, so no rail, no caller."""
     caller_cwd_env = os.environ.get("AIPASS_CALLER_CWD", "")
     caller_cwd = Path(caller_cwd_env) if caller_cwd_env else Path.cwd()
-
-    branch = os.environ.get("AIPASS_CALLER_BRANCH", "")
-    if not branch:
-        for candidate in [caller_cwd, *caller_cwd.parents]:
-            if (candidate / ".trinity" / "passport.json").exists():
-                branch = candidate.name
-                break
-
-    email = f"@{branch.lstrip('@').lower()}" if branch else ""
-    return email, caller_cwd
+    branch = _resolve_verified_caller()
+    return (f"@{branch}" if branch else ""), caller_cwd
 
 
 def _legacy_devpulse_heuristic(caller_cwd: Path) -> bool:
@@ -69,19 +58,17 @@ def _owner_decision(email: str, caller_cwd: Path) -> bool:
 def owner_address(start_path: Path | None = None) -> str | None:
     """The project owner's address — ``@devpulse`` here, ``@vera`` elsewhere.
 
-    The single lookup for "who owns this project". None, never a raise: a message-builder must not break its refusal.
+    The single lookup for "who owns this project". None when no owner is sealed, the registry is unreadable
+    (get_owner's own None) or the entry has no email. "" when the lookup itself raised (logged): a refusal
+    builder must not become a traceback, and a caller can still tell a crashed lookup from an unsealed project.
     """
     try:
         from aipass.spawn.apps.modules.door_owner import get_owner
-    except ImportError as exc:  # pragma: no cover - resolver is a hard dependency
-        logger.info("[owner_guard] owner resolver unavailable: %s", exc)
-        return None
 
-    try:
         entry = get_owner(start_path=start_path) if start_path is not None else get_owner()
-    except Exception as exc:  # a registry read can fail any number of ways
-        logger.info("[owner_guard] owner lookup failed: %s", exc)
-        return None
+    except Exception as exc:
+        logger.warning("[owner_guard] owner lookup failed: %s", exc)
+        return ""
 
     if not isinstance(entry, dict):
         return None

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """
@@ -270,6 +270,16 @@ def missed_window(job: dict, runstate: dict, now: Optional[datetime] = None) -> 
     if sched_type == "hourly":
         return _hourly_window_closed_unrun(schedule, _due_from(state), now)
     return window_closed_unrun(schedule, _due_from(state), now)
+
+
+def failed_today_at(runstate: dict, owner: str, job_id: str, now: Optional[datetime] = None) -> str:
+    """'HH:MM' of the job's last failure when it is stamped today, else ''. Read as text: stamps are isoformat."""
+    if now is None:
+        now = datetime.now()
+    stamp = get_job_state(runstate, owner, job_id).get("last_failure_at")
+    if not isinstance(stamp, str) or not stamp.startswith(now.date().isoformat() + "T"):
+        return ""
+    return stamp[11:16]
 
 
 def note_missed_window(runstate: dict, owner: str, job_id: str, now: Optional[datetime] = None) -> bool:

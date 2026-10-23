@@ -3,17 +3,17 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-10-17
-# Version: 1.5.1
+# Modified: 2026-10-23
+# Version: 1.6.0
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.6.0 (2026-10-23): ci_lane fixture - the CI red lane on tmp_path with drone, mail, wake and feed faked
 #   - v1.5.1 (2026-10-10): Spawn-template temp_test_dir and sample_test_data removed; no live test requested them
 #   - v1.5.0 (2026-10-08): Escalation lane fixtures moved from test_escalation.py; log_watcher_infrastructure
 #     moved from test_log_watcher.py (its _mock_infrastructure); both at the oversize_test_file splits
 #   - v1.4.0 (2026-09-27): Template C1/C2 fixtures - pinned console width, command state reset
 #   - v1.3.0 (2026-09-12): Autouse catch-up state isolation (DPLAN-0339 step 2c)
-#   - v1.2.0 (2026-08-08): Autouse resync of parent-package attrs after sys.modules surgery (CI xdist red)
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -48,6 +48,11 @@ from aipass.trigger.apps.handlers.events import error_detected
 import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
 from aipass.cli.apps.modules import display
+import aipass.ai_mail as ai_mail_pkg
+from aipass.ai_mail.apps.modules import door_wake
+from aipass.trigger.apps.handlers.ci import git_door, ledger as ci_ledger, outbound
+from aipass.trigger.apps.handlers.events import ci_red
+from aipass.trigger.apps.modules import ci as ci_module, core
 
 # .archive/ holds verbatim disposal copies that must never be collected.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -269,3 +274,80 @@ def log_watcher_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(lw, "_branch_names_cache", (0.0, ()))
     monkeypatch.setattr(lw, "_fire_event", None)
     monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, True))
+
+
+RUN_ROW = "completed\t{conclusion}\ttitle\t{workflow}\t{branch}\tpush\t{run_id}\t1m\t{created}"
+
+
+@pytest.fixture
+def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
+    """The CI red lane on tmp_path: drone, mail, wake, feed and the dispatch register are recorders."""
+    lane = SimpleNamespace(
+        runs=[], logs={}, cure_answer=(0, "abc1234def\npushed"), calls=[], mails=[], wakes=[], feed=[], awake=[]
+    )
+
+    def add_run(
+        run_id, conclusion="failure", workflow="CI", created="2026-10-23T05:00:00Z", status="completed", branch="dev"
+    ):
+        row = RUN_ROW.format(conclusion=conclusion, workflow=workflow, branch=branch, run_id=run_id, created=created)
+        lane.runs.append(row.replace("completed", status, 1))
+
+    def fake_drone(args, timeout=0):
+        lane.calls.append(list(args))
+        verb = args[1]
+        if verb == "run" and args[2] == "list":
+            return 0, "\n".join(lane.runs)
+        if verb == "run" and args[2] == "view":
+            return 0, lane.logs.get(args[3], "")
+        if verb == "remote":
+            return 0, "origin  https://github.com/AIOSAI/AIPass.git (fetch)"
+        if verb == "diff":
+            return 0, "diff --git a/x b/x\n+cure"
+        return lane.cure_answer
+
+    def fake_mail(**kwargs):
+        lane.mails.append(kwargs)
+        return True
+
+    def fake_wake(branch, **kwargs):
+        lane.wakes.append((branch, kwargs))
+        return None, True
+
+    def fake_feed(**kwargs):
+        lane.feed.append(kwargs)
+        return True
+
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    emails = ["@hooks", "@spawn", "@seedgo", "@devpulse", "@trigger"]
+    registry.write_text(json.dumps({"branches": [{"email": e} for e in emails]}), encoding="utf-8")
+    monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", registry)
+    monkeypatch.setattr(error_detected, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
+    monkeypatch.setattr(error_detected, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
+    lane.breaker_open = False
+    lane.backoff = False
+    monkeypatch.setattr(error_detected, "circuit_breaker_record_error", lambda: None)
+    monkeypatch.setattr(error_detected, "circuit_breaker_allows", lambda: not lane.breaker_open)
+    monkeypatch.setattr(error_detected, "circuit_breaker_probe_succeeded", lambda: None)
+    monkeypatch.setattr(error_detected, "registry_should_dispatch", lambda fingerprint: not lane.backoff)
+    monkeypatch.setattr(error_detected, "registry_record_dispatch", lambda fingerprint: None)
+    monkeypatch.setattr(error_registry, "REGISTRY_FILE", tmp_path / "error_registry.json")
+    monkeypatch.setattr(error_registry, "CB_STATE_FILE", tmp_path / "trigger_cb_state.json")
+    monkeypatch.setattr(ci_ledger, "LEDGER_FILE", tmp_path / "ci_ledger.json")
+    monkeypatch.setattr(ci_red, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
+    monkeypatch.setattr(outbound, "logger", trail_logger(tmp_path / "ci_lane.jsonl"))
+    monkeypatch.setattr(outbound, "_send_email", fake_mail)
+    monkeypatch.setattr(git_door, "run_drone", fake_drone)
+    monkeypatch.setattr(door_wake, "wake_branch", fake_wake)
+    monkeypatch.setattr(ai_mail_pkg, "send_notification", fake_feed, raising=False)
+    monkeypatch.setattr(ai_mail_pkg, "outstanding_dispatches", lambda: lane.awake)
+    monkeypatch.setattr(ci_module, "find_repo_root", lambda **kwargs: tmp_path)
+    # The bus already wired: a first live fire would run setup_handlers and the real mail adapter.
+    monkeypatch.setattr(core.Trigger, "_initialized", True)
+    monkeypatch.setattr(core.Trigger, "_handlers", {"ci_red": [ci_red.handle_ci_red]})
+    monkeypatch.setattr(core.Trigger, "_handler_failures", {})
+    monkeypatch.setattr(core.Trigger, "_disabled_handlers", set())
+    lane.add_run = add_run
+    lane.root = tmp_path
+    lane.ledger = lambda: json.loads((tmp_path / "ci_ledger.json").read_text(encoding="utf-8"))
+    return lane

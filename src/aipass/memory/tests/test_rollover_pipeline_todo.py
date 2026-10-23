@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline_todo.py
 # Description: Rollover pipeline - the todo pad rolls to a backlog file, the backlog trim and restore
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -673,13 +673,13 @@ class TestTodoRestore:
     def test_the_check_reports_and_never_repairs(self, tr, tmp_path):
         # Cut-to-fit vs verbatim for an over-cap task is an open ruling; a quiet trim would decide it.
         cap = _todo_cap(tr)
-        original = _todo(2, task="x" * (cap + 5))
+        original = _todo(2, task="x" * (cap * 2))
         local = _mint_pad(tmp_path, [_todo(5)])
         backlog = self._backlog_with(tmp_path, [self._record(original)])
 
         assert self._restore(tr, 2, local, tmp_path)["success"] is False
         record = json.loads(backlog.read_text(encoding="utf-8"))["entries"][0]["entry"]
-        assert record["task"] == "x" * (cap + 5), "the backlog record was reshaped"
+        assert record["task"] == "x" * (cap * 2), "the backlog record was reshaped"
         assert json.loads(local.read_text(encoding="utf-8"))["todos"] == [_todo(5)]
 
     def test_the_pad_is_written_before_the_backlog_is_touched(self, tr, tmp_path, monkeypatch):

@@ -78,9 +78,10 @@ then `@target` resolution, then the module lane. `apps/modules/` holds one orche
 concern — `resolver` and `config` for addressing, `router` for dispatch, `registry` and
 `module_registry` for what exists, `discovery` and `scan` for what a branch can do, `commands` for
 shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
-daemon that performs them on request. Beside it, `door_broker` is the one modules file a foreign
-branch may import: a re-export of the broker client's identified connection and the daemon, which
-ai_mail's dispatch monitor reaches the broker through. `apps/handlers/` holds the implementation, grouped one
+daemon that performs them on request. Beside them, the doors are the modules files a foreign
+branch may import: `door_broker` re-exports the broker client's identified connection and the
+daemon, which ai_mail's dispatch monitor reaches the broker through, and `door_deletion_log`
+exports `record_deletion`, through which @spawn writes its removals into the deletion record. `apps/handlers/` holds the implementation, grouped one
 directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
 the server-side path resolver), `scanning/`, `command_registry/` and the json shim every branch
 shares. `apps/plugins/devpulse_ops/` sits outside the three layers on purpose: auth-gated
@@ -100,7 +101,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/routing_and_resolution.md](docs/routing_and_resolution.md) | The routing decision tree, the two kinds of module, registry resolution, the Python API, interactive commands, the help-flag rule, external projects |
 | [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, and what each log level means |
 | [docs/subprocess_timeouts.md](docs/subprocess_timeouts.md) | The deadline ladder: the default, the idle grace, the ceiling, and why output extends life |
-| [docs/git_access.md](docs/git_access.md) | The two tiers, how owner tier is earned per repo, the two refusal species, the dev branch model, the plugins |
+| [docs/git_access.md](docs/git_access.md) | The three tiers, how owner and ci-cure are earned per repo, the two refusal species, the dev branch model, the plugins |
 | [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, the pre-commit lane, tag lanes, gh passthrough |
 | [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
 | [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, and stale mode |

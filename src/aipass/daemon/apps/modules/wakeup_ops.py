@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wakeup_ops.py
 # Description: Wake-Up Cron Operations Module
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -32,7 +32,7 @@ def print_introspection():
     console.print("[dim]Facade for daemon_wakeup.py — notifications archived[/dim]")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
-    console.print("  [dim](notifications archived — Telegram moving to skills system)[/dim]")
+    console.print("  [dim](no notifications — Telegram retired)[/dim]")
     console.print()
 
 
@@ -49,7 +49,7 @@ def handle_command(command: str, args: list) -> bool:
         console.print()
         console.print("[bold cyan]Wakeup Ops[/bold cyan] - Cron wake-up facade")
         console.print()
-        console.print("  [dim]Notifications:[/dim] archived (Telegram moving to skills system)")
+        console.print("  [dim]Notifications:[/dim] none (Telegram retired)")
         console.print()
         console.print("[dim]This module is a facade used by daemon_wakeup.py.[/dim]")
         console.print()

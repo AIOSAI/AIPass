@@ -1,6 +1,6 @@
 # Trinity Standards
-**Status:** Live v1.2 — enforced by `trinity_check.py`
-**Date:** 2026-09-16
+**Status:** Live v1.3 — enforced by `trinity_check.py`
+**Date:** 2026-10-23
 **Standard:** `trinity` (branch_level, no bypass)
 **Scope:** `local.json`, `observations.json`, `.template_version.json`. Passports and compass are separate systems with their own rules.
 
@@ -149,7 +149,7 @@ Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, 
 2. **Top-level keys** — exact set and order per file; stray sections and duplicate keys flagged.
 3. **Entry shapes** — required fields present with required TYPES; renamed fields flagged by name; entries missing `number`/`date` flagged.
 4. **Ordering & numbering** — newest-first, numbers strictly descending, no reuse.
-5. **Char caps** — measured against the CONFIG (not the meta line), on the canonical field; an unmeasurable field is a violation.
+5. **Char caps** — measured against the CONFIG (not the meta line), on the canonical field, with the band @memory's write gate allows: `entry_limits.tolerance_percent` (an int 0-100; missing or unusable reads as 10). An entry is a violation only when its length passes `max_chars * (100 + tolerance_percent) // 100` (300 -> 330, 205 -> 225); the message names the plain cap (`is 331 chars, cap 300`). An unmeasurable field is a violation.
 6. **Meta lines & `_usage`** — byte-match against what the renderer would produce from config + template (the todos tab's `next #N` slot is read by shape, see above).
 7. **Freshness** — `last_updated` ≥ newest entry date.
 8. **Receipt** — `.template_version.json` present, machine-shaped, `template_versions` matching the gold source.

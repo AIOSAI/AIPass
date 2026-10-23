@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.9.2
+# Version: 2.11.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -49,8 +49,10 @@ DEFAULTS = {
     # fire-all (0 = off). cadence_config.json is gitignored, so this is what a clone runs on.
     "regroup_fresh_bytes": 150000,
     "loaders": {
-        "tier0": {"period": 5, "offset": 0},
-        "navmap": {"period": 5, "offset": 0},
+        # The kernel and the navmap ground once (turn 0: session start, /clear, post-compact), not every
+        # Nth turn; "beat": false fires a loader at turn 0 only, and a config file's "beat": true restores it.
+        "tier0": {"period": 5, "offset": 0, "beat": False},
+        "navmap": {"period": 5, "offset": 0, "beat": False},
         "identity": {"period": 5, "offset": 0},
         "branch": {"offset": 0},
         "email": {"period": 5},
@@ -120,15 +122,15 @@ def _state_path() -> Path | None:
 
 
 def _get_turn_token(hook_data: dict) -> int:
-    """Per-turn token from transcript_path size (monotonic, identical across siblings)."""
+    """Per-turn token: transcript_path size, identical across siblings; -1 when unmeasurable (no size is)."""
     tp = hook_data.get("transcript_path", "")
     if not tp:
-        return 0
+        return -1
     try:
         return os.path.getsize(tp)
     except OSError as exc:
         logger.info("[HOOKS] cadence: transcript stat failed: %s", exc)
-        return 0
+        return -1
 
 
 def is_automated(hook_data: dict | None) -> bool:
@@ -193,7 +195,7 @@ def _prompt_key(hook_data: dict, token: int) -> str | None:
 def _should_increment(stored_turn: int, stored_token: int, token: int, fd, key=None, stored_key=None) -> bool:
     """Decide whether to increment the counter: once per prompt key, else by the old window.
 
-    Without a key on both sides, the 2s debounce and the nonzero-token guard decide.
+    Without a key on both sides, the 2s debounce and the positive-token guard decide.
     """
     if stored_turn < 0:
         return True
@@ -201,7 +203,7 @@ def _should_increment(stored_turn: int, stored_token: int, token: int, fd, key=N
         return key != stored_key
     if _mtime_age(fd) < _DEBOUNCE_S:
         return False
-    if token == stored_token and token != 0:
+    if token == stored_token and token > 0:
         return False
     return True
 

@@ -79,7 +79,7 @@ drone @skills run screen_lock lock
 drone @skills run screen_lock state
 ```
 
-In-process (what the Telegram control bot and the host API verb lane use):
+In-process (what the host API verb lane uses):
 
 ```python
 from aipass.skills.lib.screen_lock import handler as screen_lock
@@ -143,5 +143,3 @@ envelope with `detail (reason=<code>)` when it cannot tell.
   required for the skill to be usable.
 - Only sessions of type `wayland`/`x11`, state `active`, owned by our own uid are
   eligible — another user's desktop is never locked.
-- Extracted from the Telegram control bot in DPLAN-0300; that bot is the first
-  consumer, not the owner.

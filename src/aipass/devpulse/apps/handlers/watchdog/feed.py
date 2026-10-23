@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Watchdog Feed Handler — read completions off the push feed instead of polling for them
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-21
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 # The cursor is a set of line digests, never wire.py's byte offset: @ai_mail's
@@ -70,19 +70,25 @@ def _digest(raw_line: str) -> str:
 
 
 def _read_cursor(cursor_file: Path) -> dict:
-    """Load the delivery cursor. An unreadable cursor replays, never wedges."""
+    """Load the delivery cursor. An unreadable cursor starts fresh, never wedges.
+
+    Fresh means the next drain seeds: every line on disk is absorbed, not delivered, unless the
+    caller passes ``seed_if_new=False``.
+    """
     try:
         data = json.loads(cursor_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.debug("[watchdog.feed] no cursor at %s — first drain for this reader", cursor_file)
         return {"seen": [], "seeded": False}
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        logger.warning("[watchdog.feed] cursor unreadable %s — replaying: %s", cursor_file, exc)
+        logger.warning(
+            "[watchdog.feed] cursor unreadable %s — starting fresh, disk lines are seeded: %s", cursor_file, exc
+        )
         return {"seen": [], "seeded": False}
 
     seen = data.get("seen")
     if not isinstance(seen, list):
-        logger.warning("[watchdog.feed] cursor has no usable digest list — replaying")
+        logger.warning("[watchdog.feed] cursor has no usable digest list — starting fresh, lines on disk are seeded")
         return {"seen": [], "seeded": False}
 
     return {

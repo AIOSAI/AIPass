@@ -47,11 +47,10 @@ skill's systemd units only quiets the machine — this is the door that keeps it
 code from being started in-process. See [off_switch.md](off_switch.md).
 
 Not every caller comes through this door. A function published for in-process
-import — `machine_vitals()` in the system_status skill, the notifier in the
-telegram skill — is called directly and never meets the gate, so each one asks
-the switch itself. A door that forgets to ask keeps working after the skill is
-switched off; the telegram notifier's own check is described in
-[telegram.md](telegram.md).
+import — `machine_vitals()` and `machine_processes()` in the system_status
+skill — is called directly and never meets the gate, so each one asks the
+switch itself. A door that forgets to ask keeps working after the skill is
+switched off; see [system_status.md](system_status.md).
 
 ---
 

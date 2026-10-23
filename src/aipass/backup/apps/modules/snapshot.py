@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot module — full-copy backup of a project
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -268,7 +268,7 @@ def _snapshot_run(
     if show_panels:
         show_result_summary(result)
         if not result.errors:
-            show_backups_now("snapshot")
+            show_backups_now("snapshot", project_root)
 
     return result
 

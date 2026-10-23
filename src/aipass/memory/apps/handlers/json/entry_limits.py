@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -36,6 +36,7 @@ NEAR_CAP_RATIO = 0.9
 
 # @hooks matches on these strings: a typo in a refusal reason is a refusal nobody renders.
 FIELDS_KEY = "fields"
+TOLERANCE_KEY = "tolerance_percent"
 REASON_UNKNOWN_FIELD = "unknown_field"
 REASON_FIELD_OVER_CAP = "field_over_cap"
 REASON_FILE_OVER_BUDGET = "file_over_budget"
@@ -54,6 +55,21 @@ def draft_percent() -> int:
 def draft_target(max_chars: int) -> int:
     """Return the length to draft an entry to for a cap of *max_chars*; floored, below a positive cap."""
     return max_chars * draft_percent() // 100
+
+
+def tolerance_percent(section: dict[str, Any]) -> int:
+    """Return the section's tolerance band in percent; the seed when the key is missing or unusable."""
+    raw = section.get(TOLERANCE_KEY)
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 0 <= raw <= 100:
+        if raw is not None:
+            logger.warning(f"[entry_limits] {TOLERANCE_KEY} is not 0-100 ({raw!r}) — serving the seed")
+        return int(config_loader.DEFAULT_CONFIG["entry_limits"][TOLERANCE_KEY])
+    return raw
+
+
+def allowed_chars(cap: int, percent: int) -> int:
+    """The longest text the gate accepts for *cap*: the band rounded down to whole characters."""
+    return cap * (100 + percent) // 100
 
 
 def _deep_merge_entry_types(
@@ -81,8 +97,10 @@ def resolve_entry_types(section: dict[str, Any], branch: str) -> dict[str, Any]:
         resolved = _deep_merge_entry_types(base_types, branch_overrides)
     else:
         resolved = copy.deepcopy(base_types)
+    percent = tolerance_percent(section)
     for type_name, type_def in resolved.items():
         _reconcile_canonical_cap(type_name, type_def)
+        type_def[TOLERANCE_KEY] = percent
     return resolved
 
 
@@ -189,7 +207,7 @@ def check_entry(entry_type: str, text: Any, limits: dict[str, Any]) -> dict[str,
         ratio = NEAR_CAP_RATIO
 
     return {
-        "ok": length <= cap,
+        "ok": length <= allowed_chars(cap, type_def.get(TOLERANCE_KEY, 0)),
         "length": length,
         "cap": cap,
         "over_by": over_by,
@@ -329,6 +347,7 @@ def _check_list_field(
     field: str,
     value: list[Any],
     spec: dict[str, Any],
+    percent: int = 0,
 ) -> list[dict[str, Any]]:
     """Measure a ``list[str]`` field both ways: how many items, how much text.
 
@@ -344,7 +363,7 @@ def _check_list_field(
         )
     max_chars = spec.get("max_chars")
     joined = len("".join(value))
-    if isinstance(max_chars, int) and not isinstance(max_chars, bool) and joined > max_chars:
+    if isinstance(max_chars, int) and not isinstance(max_chars, bool) and joined > allowed_chars(max_chars, percent):
         hits.append(_field_violation(type_name, container, key, field, REASON_FIELD_OVER_CAP, joined, max_chars))
     return hits
 
@@ -364,7 +383,9 @@ def check_fields(
     if not fields or not isinstance(entry, dict):
         return []
 
-    canonical = limits.get("entry_types", {}).get(type_name, {}).get("field")
+    type_def = limits.get("entry_types", {}).get(type_name, {})
+    canonical = type_def.get("field")
+    percent = type_def.get(TOLERANCE_KEY, 0)
     hits: list[dict[str, Any]] = []
 
     for field, spec in fields.items():
@@ -383,10 +404,10 @@ def check_fields(
             continue
         if isinstance(value, str):
             cap = spec.get("max_chars")
-            if isinstance(cap, int) and not isinstance(cap, bool) and len(value) > cap:
+            if isinstance(cap, int) and not isinstance(cap, bool) and len(value) > allowed_chars(cap, percent):
                 hits.append(_field_violation(type_name, container, key, field, REASON_FIELD_OVER_CAP, len(value), cap))
         elif isinstance(value, list):
-            hits.extend(_check_list_field(type_name, container, key, field, value, spec))
+            hits.extend(_check_list_field(type_name, container, key, field, value, spec, percent))
 
     for field in entry:
         if field not in fields:

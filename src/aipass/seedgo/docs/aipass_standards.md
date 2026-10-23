@@ -46,13 +46,13 @@ The table below carries every other row.
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
 | error_handling | all_files | production | Try/except patterns, error propagation |
 | exception_text_in_response *(production only)* | all_files | production | CodeQL `py/stack-trace-exposure` (specimen: PR #774): inside an `except`, the bound exception (or an attribute, `str()`/`repr()`, f-string, local carrying it) or `traceback.format_exc()` reaches `HTTPException(detail=)`, a `*Response` content, a `deny`/`refuse`/`error_response`/`respond` helper, or a returned dict/str. Only modules importing fastapi/starlette or defining a route; any other file declines. Logger-only and `type(e).__name__` acquit. A cross-branch flow (through `ReadCache.get`) is out of its reach; the `.md` says why |
-| gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door |
+| gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door. Outside @api, no file imports, paths into or calls @api's secrets store (`~/.secrets`): agents get actions, never values |
 | handlers | all_files | production | Handler directory structure + handler independence |
 | hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
 | hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
 | help_text | all_files | production | --help content quality |
-| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, a test skip that names Windows on a Linux recipe, a direct `Path` subclass (3.10/3.11), and a `resolve()`d path compared in the same function with `Path.home()` / `Path.cwd()` / `os.getcwd()` / `tempfile` as given (arm E, file-local) (corpus: apps/, tests/ **and** lib/) |
+| host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, a test skip that names Windows on a Linux recipe, a direct `Path` subclass (3.10/3.11), and a `resolve()`d path compared in the same function with `Path.home()` / `Path.cwd()` / `os.getcwd()` / `tempfile` as given (arm E, file-local), and a file that empties git's config (`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM`) with no commit email (arm F, file-local) (corpus: apps/, tests/ **and** lib/) |
 | imports | all_files | everywhere | Import ordering and grouping |
 | introspection | all_files | production | No-args introspection gate |
 | json_handler | branch_level | production | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |

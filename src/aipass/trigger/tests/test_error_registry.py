@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -13,7 +13,9 @@
 # seedgo: no-test-needed(covered_elsewhere) — the dispatch gate on should_dispatch, in tests/test_error_detected.py
 
 import json
+import threading
 import time
+from datetime import datetime
 from dataclasses import fields
 
 import pytest
@@ -1304,3 +1306,44 @@ def test_a_refused_read_does_not_wipe_the_registry(tmp_path: Path) -> None:
     assert state["seen"] == 1, "fixture refused nothing — test is vacuous"
     errors = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]
     assert len(errors) == 2, f"registry was blanked by a transient refusal: {list(errors)}"
+
+
+_STALE = "2020-01-01T00:00:00"
+_WRITERS = {
+    "update_status": (lambda: er.update_status("a" * 40, "resolved"), lambda e: e["a" * 40]["status"] == "resolved"),
+    "update_source_fix_status": (
+        lambda: er.update_source_fix_status("a" * 40, "fix_requested"),
+        lambda e: e["a" * 40]["source_fix_status"] == "fix_requested",
+    ),
+    "clear_resolved": (lambda: er.clear_resolved(days=7), lambda e: "b" * 40 not in e),
+    "purge_stale": (lambda: er.purge_stale(days=30), lambda e: "b" * 40 not in e),
+}
+
+
+class TestRegistryWritersHoldTheLock:
+    """Every read-modify-write of the registry holds its lock, as report() does, or a concurrent write is lost."""
+
+    @pytest.mark.parametrize("writer", sorted(_WRITERS))
+    def test_a_writer_waits_for_the_lock_and_keeps_a_concurrent_entry(self, tmp_path: Path, writer: str) -> None:
+        call, landed = _WRITERS[writer]
+        now = datetime.now().isoformat()
+        _seed_registry(
+            tmp_path,
+            {
+                "a" * 40: {"fingerprint": "a" * 40, "status": "new", "source_fix_status": "none", "last_seen": now},
+                "b" * 40: {"fingerprint": "b" * 40, "status": "resolved", "last_seen": _STALE},
+            },
+        )
+        worker = threading.Thread(target=call)
+        with er.json_file_lock(er.REGISTRY_FILE):
+            worker.start()
+            worker.join(timeout=0.5)
+            assert worker.is_alive(), f"{writer} ran while the registry lock was held"
+            data = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))
+            data["errors"]["c" * 40] = {"fingerprint": "c" * 40, "status": "new", "last_seen": now}
+            er.REGISTRY_FILE.write_text(json.dumps(data), encoding="utf-8")
+        worker.join(timeout=10)
+
+        errors = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]
+        assert landed(errors), f"{writer} did not apply its change"
+        assert "c" * 40 in errors, f"{writer} wrote back a stale read and lost the concurrent entry"

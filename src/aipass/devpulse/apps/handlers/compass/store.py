@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: store.py
 # Description: Compass storage core — SQLite/FTS5 rated decision store
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-16
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Compass storage core — the SQLite/FTS5 layer for rated decisions.
@@ -96,18 +96,6 @@ END;
 """
 
 
-def _verify_fts5(conn: sqlite3.Connection) -> None:
-    """Raise a clear error if FTS5 is not compiled into this sqlite3, never degrade search silently."""
-    try:
-        conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS _fts5_probe USING fts5(x)")
-        conn.execute("DROP TABLE IF EXISTS _fts5_probe")
-    except sqlite3.OperationalError as exc:
-        raise RuntimeError(
-            "Compass requires SQLite FTS5, which is not available in this "
-            "Python's sqlite3 build. Compass cannot operate without it."
-        ) from exc
-
-
 def _migrate(conn: sqlite3.Connection) -> None:
     """Apply idempotent schema migrations to an already-open DB; runs on every connect, never a blind ALTER."""
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(decisions)")}
@@ -144,8 +132,19 @@ def _connect(db_path: Optional[Path | str]) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    _verify_fts5(conn)
-    conn.executescript(_SCHEMA)
+    try:
+        conn.executescript(_SCHEMA)
+        # A read probe, never a create-and-drop: the recall hook connects on every prompt, and a write per read
+        # churned the file. A missing FTS5 is a clear error here, never a silent search downgrade.
+        conn.execute("SELECT 1 FROM decisions_fts LIMIT 1").fetchall()
+    except sqlite3.OperationalError as exc:
+        conn.close()
+        if "fts5" not in str(exc).lower():
+            raise
+        raise RuntimeError(
+            "Compass requires SQLite FTS5, which is not available in this "
+            "Python's sqlite3 build. Compass cannot operate without it."
+        ) from exc
     _migrate(conn)
     return conn
 

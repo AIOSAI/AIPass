@@ -27,8 +27,8 @@ Consequences worth knowing before you touch it:
   service — `json_handler.get_json_path(module, json_type).parent` — which
   recomputes it per call rather than capturing it at import.
 - **Tests redirect with `AIPASS_TEST_LOG_DIR`, never by patching an attribute.**
-  The shim has no attributes to patch, and that is the point. All three
-  conftests (`tests/`, `lib/telegram/tests/`, `lib/screen_lock/tests/`) set the
+  The shim has no attributes to patch, and that is the point. Both
+  conftests (`tests/`, `lib/screen_lock/tests/`) set the
   seam; in `tests/` the autouse `mock_infrastructure` fixture scopes it per test.
 - Nothing imports out of `apps/handlers/json/.archive/`.
 

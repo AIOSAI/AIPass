@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
 # Version: 1.1.0
 # Created: 2026-10-16
-# Modified: 2026-10-16
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/status.py's --json [--sizes], the backup door's status contract."""
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(stdlib) — json.dumps' encoding of the object once it is built
 
 import json
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -24,10 +25,11 @@ import pytest
 
 from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
-from aipass.backup.apps.handlers.state import progress
-from aipass.backup.apps.modules import status
+from aipass.backup.apps.handlers.state import backup_timestamps, progress
+from aipass.backup.apps.modules import display, status
 
 NO_RUN = {"last": None, "files": None}
+NO_DRIVE_RUN = {"last": None, "files": None, "complete": None}
 
 
 def _store(root: Path, config: dict | None = None, entries: list[dict] | None = None) -> Path:
@@ -66,11 +68,52 @@ class TestStatusJsonWithoutAStore:
             "mode": "snapshot",
             "drive_sync": False,
             "runs": 0,
-            "lanes": {"snapshot": NO_RUN, "versioned": NO_RUN, "drive_sync": NO_RUN},
+            "lanes": {"snapshot": NO_RUN, "versioned": NO_RUN, "drive_sync": NO_DRIVE_RUN},
             "drive": {"tracked_files": 0},
             "running": [],
         }
         assert not (root / ".backup").exists(), "status wrote a store it was only asked to read"
+
+
+class TestTheDriveLaneSaysWhetherItsLastRunCompleted:
+    """lanes.drive_sync.complete: true only for a clean run; a record from before the field is a clean run."""
+
+    def test_a_clean_run_and_a_record_older_than_the_field_read_complete(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = tmp_path / "proj"
+        _store(root, entries=[{"timestamp": "2026-10-20T05:50:00+00:00", "mode": "drive_sync", "files_copied": 11}])
+
+        lane = _status_json(root, capsys=capsys)["lanes"]["drive_sync"]
+
+        assert lane == {"last": "2026-10-20T05:50:00+00:00", "files": 11, "complete": True}
+
+    def test_a_run_with_failures_reads_not_complete(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        root = tmp_path / "proj"
+        run = {"timestamp": "2026-10-21T22:00:00+00:00", "mode": "drive_sync", "files_copied": 9}
+        _store(root, entries=[{**run, "stopped": False, "aborted": "", "failed": 2}])
+
+        assert _status_json(root, capsys=capsys)["lanes"]["drive_sync"]["complete"] is False
+
+
+class TestTheBackupsNowPanel:
+    """The panel after a run reads this project's lanes, the same source as status --json."""
+
+    def test_the_panel_reads_this_projects_lanes_not_another_projects_run_on_the_branch_clock(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        root = tmp_path / "proj"
+        now = datetime.now(timezone.utc).isoformat()
+        _store(root, entries=[{"timestamp": now, "mode": "snapshot", "files_copied": 3}])
+        backup_timestamps.update_timestamp("versioned")
+
+        display.show_backups_now("snapshot", str(root))
+
+        assert capsys.readouterr().out.splitlines()[-3:] == [
+            "  Snapshot:   just now",
+            "  Versioned:  never",
+            "  Drive sync: never",
+        ]
 
 
 class TestStatusJsonFromTheStore:
@@ -103,7 +146,7 @@ class TestStatusJsonFromTheStore:
             "lanes": {
                 "snapshot": {"last": "2026-10-16T07:09:50+00:00", "files": 15414},
                 "versioned": {"last": "2026-09-28T03:12:00+00:00", "files": 120},
-                "drive_sync": NO_RUN,
+                "drive_sync": NO_DRIVE_RUN,
             },
             "drive": {"tracked_files": 2},
             "running": [],

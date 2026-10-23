@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
-# Description: Tests for spawn lifecycle commands (delete, sync-registry)
-# Version: 1.1.4
+# Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-10-18
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -25,6 +25,7 @@ from aipass.spawn.apps.handlers.registry import fix_passport_registry_id
 from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
 from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.modules.delete import handle_delete
+from aipass.spawn.apps.modules.retire_project import handle_retire_project
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
 # Also exercises apps/modules/delete.py's and apps/modules/sync_registry.py's CLI entry points,
@@ -1042,7 +1043,7 @@ class TestHandleDelete:
 
         result = handle_delete(["--help"])
         assert result == 0
-        assert "Usage: drone @spawn delete <@branch>" in capsys.readouterr().out
+        assert "Usage: drone @spawn delete <@branch | path>" in capsys.readouterr().out
 
     def test_protected_branch_via_handle(self, repo_root, mock_registry):
         """handle_delete should reject protected branches."""
@@ -1137,6 +1138,215 @@ class TestHandleDelete:
         assert "[dim]" not in combined
         assert "[/dim]" not in combined
         assert "(dry-run)" in combined
+
+
+def _foreign_project(tmp_path, owner=False):
+    """A sibling project with capitals in its path, one registered citizen, its own sealing registry."""
+    root = tmp_path / "Projects" / "DriveTest"
+    branch = root / "src" / "driveTest" / "Worker"
+    (branch / ".trinity").mkdir(parents=True)
+    (branch / ".trinity" / "passport.json").write_text(
+        json.dumps({"citizenship": {"registered": True}}) + "\n", encoding="utf-8"
+    )
+    (branch / "README.md").write_text("# Worker\n", encoding="utf-8")
+    entry: dict[str, object] = {"name": "WORKER", "path": "src/driveTest/Worker", "email": "@worker"}
+    if owner:
+        entry["owner"] = True
+    registry = root / "DRIVETEST_REGISTRY.json"
+    registry.write_text(json.dumps({"metadata": {"total_branches": 1}, "branches": [entry]}) + "\n", encoding="utf-8")
+    return root, branch, registry
+
+
+def _deletion_rows(tmp_path):
+    """The rows conftest's AIPASS_DELETION_LOG redirect collected."""
+    log = tmp_path / "deletions.jsonl"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _said(capsys):
+    """Both channels with whitespace collapsed: Rich wraps a long tmp path's line, and xdist lengthens the path."""
+    return " ".join("".join(capsys.readouterr()).split())
+
+
+def _seat(monkeypatch, branch="devpulse"):
+    """Stand the caller rail on one seat; drone stamps these, the host shell may carry stale ones."""
+    for var in ("AIPASS_CALLER_CWD", "AIPASS_CALLER_IDENTITY_SOURCE", "AIPASS_REGISTRY", "AIPASS_CALLER_BRANCH"):
+        monkeypatch.delenv(var, raising=False)
+    if branch:
+        monkeypatch.setenv("AIPASS_CALLER_BRANCH", branch)
+
+
+class TestDeleteByPath:
+    """delete <path>: the registry comes from the path, never from the cwd."""
+
+    def test_a_path_with_capitals_resolves_from_its_own_registry_from_a_foreign_cwd(self, tmp_path, monkeypatch):
+        root, branch, registry = _foreign_project(tmp_path)
+        seat = tmp_path / "seat"
+        seat.mkdir()
+        monkeypatch.chdir(seat)
+        _seat(monkeypatch)
+
+        result = handle_delete([str(branch), "--retire", "--yes"])
+
+        assert result == 0
+        assert not branch.exists()
+        assert _registry_names(registry) == []
+        (archive,) = (root / ".archive" / "deleted_branches").iterdir()
+        assert _passport(archive)["citizenship"]["registered"] is False
+
+    def test_delete_by_path_still_refuses_the_registry_owner(self, capsys, tmp_path, monkeypatch):
+        root, branch, registry = _foreign_project(tmp_path, owner=True)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch)
+
+        result = handle_delete([str(branch), "--retire", "--yes"])
+
+        assert result == 1
+        assert "registry owner" in _said(capsys)
+        assert branch.exists()
+        assert _registry_names(registry) == ["WORKER"]
+        assert _deletion_rows(tmp_path) == []
+
+    def test_a_delete_writes_one_spawn_delete_row_and_its_own_log_names_caller_and_registry(
+        self, tmp_path, monkeypatch, _isolate_spawn_json
+    ):
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch)
+
+        assert handle_delete([str(branch), "--retire", "--yes"]) == 0
+
+        (archive,) = (root / ".archive" / "deleted_branches").iterdir()
+        (row,) = _deletion_rows(tmp_path)
+        assert (row["lane"], row["outcome"], row["caller"]) == ("spawn_delete", "retired", "@devpulse")
+        assert (row["path"], row["target"], row["requested"]) == (str(branch), str(archive), str(branch))
+        assert (row["kind"], row["entry_count"], row["measured"]) == ("directory", 3, "exact")
+        assert str(registry) in row["reason"]
+        log = json.loads((_isolate_spawn_json / "delete_ops_log.json").read_text(encoding="utf-8"))
+        executed = [e["data"] for e in log if e["operation"] == "delete_executed"]
+        assert executed[-1]["caller"] == "@devpulse"
+        assert executed[-1]["registry"] == str(registry)
+
+
+def _retire_rig(tmp_path, monkeypatch, admin=True):
+    """A tmp AIPass root, a sibling project the hooks trust registry knows, and the seat answering admin or not."""
+    aipass = tmp_path / "AIPass"
+    aipass.mkdir()
+    (aipass / "AIPASS_REGISTRY.json").write_text('{"metadata": {}, "branches": []}\n', encoding="utf-8")
+    root, branch, registry = _foreign_project(tmp_path, owner=True)
+    other = str(tmp_path / "other")
+    trust = tmp_path / "trusted_projects.json"
+    projects = {str(root.resolve()): {"enrolled": "2026-10-21"}, other: {"enrolled": "2026-10-21"}}
+    trust.write_text(json.dumps({"version": 1, "projects": projects}) + "\n", encoding="utf-8")
+    monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.repo_root", lambda: aipass)
+    monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.is_verified_admin_caller", lambda: admin)
+    monkeypatch.chdir(tmp_path)
+    _seat(monkeypatch)
+    return aipass, root, branch, registry, trust, other
+
+
+class TestRetireProject:
+    """retire-project: admin seat only, archive into AIPass, passports flipped, trust revoked, tree removed last."""
+
+    def test_a_dry_run_lists_what_would_go_and_writes_nothing(self, capsys, tmp_path, monkeypatch):
+        aipass, root, branch, registry, trust, _ = _retire_rig(tmp_path, monkeypatch)
+        before, trust_before = _tree_bytes(root), trust.read_text(encoding="utf-8")
+
+        result = handle_retire_project([str(root), "--dry-run"])
+
+        out = capsys.readouterr().out
+        assert result == 0
+        assert str(branch.resolve()) in out
+        assert str(registry.resolve()) in out
+        assert _tree_bytes(root) == before
+        assert trust.read_text(encoding="utf-8") == trust_before
+        assert not (aipass / ".archive").exists()
+        assert _deletion_rows(tmp_path) == []
+
+    @pytest.mark.parametrize("target", ["aipass", "ancestor"])
+    def test_the_aipass_root_and_any_directory_holding_it_are_refused(self, capsys, tmp_path, monkeypatch, target):
+        aipass, root, *_ = _retire_rig(tmp_path, monkeypatch)
+        # The ancestor gets a registry of its own, so only the AIPass guard can stop it.
+        (tmp_path / "HOME_REGISTRY.json").write_text('{"branches": []}\n', encoding="utf-8")
+        requested = aipass if target == "aipass" else tmp_path
+
+        result = handle_retire_project([str(requested), "--yes"])
+
+        assert result == 1
+        assert "AIPass root" in _said(capsys)
+        assert (aipass / "AIPASS_REGISTRY.json").exists()
+        assert root.exists()
+        assert not (aipass / ".archive").exists()
+        assert _deletion_rows(tmp_path) == []
+
+    def test_a_directory_with_no_registry_in_it_is_refused(self, capsys, tmp_path, monkeypatch):
+        aipass, root, branch, *_ = _retire_rig(tmp_path, monkeypatch)
+
+        result = handle_retire_project([str(root / "src"), "--yes"])
+
+        assert result == 1
+        assert "_REGISTRY.json" in "".join(capsys.readouterr())
+        assert branch.exists()
+        assert not (aipass / ".archive").exists()
+
+    def test_a_caller_who_is_not_the_admin_seat_is_refused_and_nothing_moves(self, capsys, tmp_path, monkeypatch):
+        aipass, root, _, _, trust, _ = _retire_rig(tmp_path, monkeypatch, admin=False)
+        before, trust_before = _tree_bytes(root), trust.read_text(encoding="utf-8")
+
+        result = handle_retire_project([str(root), "--yes"])
+
+        assert result == 1
+        assert "admin seat" in _said(capsys)
+        assert _tree_bytes(root) == before
+        assert trust.read_text(encoding="utf-8") == trust_before
+        assert not (aipass / ".archive").exists()
+        assert _deletion_rows(tmp_path) == []
+
+    def test_retire_archives_under_aipass_flips_passports_revokes_trust_and_removes_the_tree(
+        self, tmp_path, monkeypatch
+    ):
+        aipass, root, _, _, trust, other = _retire_rig(tmp_path, monkeypatch)
+
+        result = handle_retire_project([str(root), "--yes"])
+
+        assert result == 0
+        assert not root.exists()
+        (archive,) = (aipass / ".archive" / "deleted_branches").iterdir()
+        assert archive.name.startswith("DriveTest_")
+        assert _passport(archive / "src" / "driveTest" / "Worker")["citizenship"]["registered"] is False
+        assert (archive / "DRIVETEST_REGISTRY.json").is_file()
+        assert set(json.loads(trust.read_text(encoding="utf-8"))["projects"]) == {other}
+
+    def test_one_receipt_row_per_removed_thing_reads_back_with_its_fields(self, tmp_path, monkeypatch):
+        aipass, root, branch, registry, trust, _ = _retire_rig(tmp_path, monkeypatch)
+        expected = {str(branch.resolve()), str(registry.resolve()), str(root.resolve()), str(trust)}
+
+        assert handle_retire_project([str(root), "--yes"]) == 0
+
+        (archive,) = (aipass / ".archive" / "deleted_branches").iterdir()
+        rows = _deletion_rows(tmp_path)
+        assert sorted(r["path"] for r in rows) == sorted(expected)
+        for row in rows:
+            assert (row["lane"], row["outcome"], row["caller"]) == ("spawn_retire", "retired", "@devpulse")
+            assert (row["requested"], row["target"]) == (str(root), str(archive))
+            assert row["measured"] == "exact"
+            assert "DRIVETEST_REGISTRY.json" in row["reason"]
+
+    def test_a_row_the_door_would_refuse_stops_the_retirement_with_the_tree_intact(self, capsys, tmp_path, monkeypatch):
+        aipass, root, _, _, trust, _ = _retire_rig(tmp_path, monkeypatch)
+        _seat(monkeypatch, branch="")
+        before, trust_before = _tree_bytes(root), trust.read_text(encoding="utf-8")
+
+        result = handle_retire_project([str(root), "--yes"])
+
+        assert result == 1
+        assert "caller" in "".join(capsys.readouterr())
+        assert _tree_bytes(root) == before
+        assert trust.read_text(encoding="utf-8") == trust_before
+        assert not (aipass / ".archive").exists()
+        assert _deletion_rows(tmp_path) == []
 
 
 class TestHandleSyncRegistry:

@@ -211,7 +211,7 @@
       "file": "apps/handlers/module_registry_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        129
+        130
       ],
       "reason": "get_module_info: None for a registered internal module whose adapter fails to import, and None for an unknown name. Every caller tells them apart by what it already knows: drone.py:237 and module_registry.py:106 iterate list_modules() (registered names only) and print '(not available)'; module_registry.py:116 asks is_module() and says 'registered but could not load'. A raise would take the whole services listing down for one broken adapter. Fleet green leg 6, drone's decision.",
       "anchor": "return None"
@@ -220,7 +220,7 @@
       "file": "apps/handlers/router_handler.py",
       "standard": "logged_fallback",
       "lines": [
-        88
+        89
       ],
       "reason": "_project_name_from_registry: None = this registry file yields no project name, whether unreadable (here, logged WARNING) or named exactly '_REGISTRY.json'. Its one caller (detect_caller_signal, line 271) does the same right thing for both: keeps walking up for another registry. The answer to the caller is the same fact either way. Fleet green leg 6, drone's decision.",
       "anchor": "return None"

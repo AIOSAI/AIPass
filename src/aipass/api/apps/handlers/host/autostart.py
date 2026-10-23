@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: autostart.py
-# Description: Host API Autostart Handler — the supervisor seam, so the server survives a reboot
-# Version: 1.1.0
+# Description: Host API Autostart Handler — the supervisor seam, so the server comes back at each login
+# Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -36,7 +36,7 @@ PROBE_TIMEOUT_SECONDS = 5.0
 # Above TIMEOUT_STOP_SECONDS: systemd runs the graceful shutdown and its bookkeeping.
 STOP_TIMEOUT_SECONDS = 20.0
 
-# Generous enough to outlast tailscaled assigning the bind address at boot, still finite.
+# Generous enough to outlast tailscaled assigning the bind address at login, still finite.
 RESTART_SECONDS = 5
 START_LIMIT_INTERVAL_SECONDS = 600
 START_LIMIT_BURST = 60
@@ -68,13 +68,15 @@ def unit_name() -> str:
 
 def unit_text(argv: List[str], workdir: Path, log: Path) -> str:
     """Render the unit file."""
-    # append:, never file: (truncates each start). StartLimit* belong under [Unit]:
-    # since v230 systemd silently IGNORES them under [Service].
+    # append:, never file: (truncates each start). StartLimit* under [Unit]: systemd >=230 IGNORES them in [Service].
+    # The session target: the login keyring unlocks at login, and a unit started before it dies at the start limit.
     command = " ".join(argv)
 
     return f"""[Unit]
 Description=AIPass host API — the tailnet server behind BAUD's phone face
 Documentation=file://{workdir}/README.md
+After=graphical-session.target
+PartOf=graphical-session.target
 StartLimitIntervalSec={START_LIMIT_INTERVAL_SECONDS}
 StartLimitBurst={START_LIMIT_BURST}
 
@@ -90,7 +92,7 @@ KillSignal=SIGTERM
 TimeoutStopSec={TIMEOUT_STOP_SECONDS}
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
 """
 
 
@@ -201,53 +203,21 @@ def stop_unit() -> bool:
     return True
 
 
-def linger_enabled() -> Optional[bool]:
-    """
-    Whether this account's user units run without a login session.
-
-    None means the question could not be asked: a third answer, not a no.
-    """
-    if not sys.platform.startswith("linux") or shutil.which("loginctl") is None:
-        return None
-
-    try:
-        result = subprocess.run(
-            ["loginctl", "show-user", str(Path.home().name), "-p", "Linger", "--value"],
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as e:
-        logger.warning("[host_api] lingering could not be read: %s", e)
-        return None
-
-    if result.returncode != 0:
-        return None
-
-    return (result.stdout or "").strip().lower() == "yes"
-
-
 def install_commands(unit_file: Path) -> List[str]:
     """The exact host-side steps, in the order they must run."""
-    # Positional contract: install_unit takes [:3], enable_unit takes [3:].
+    # Positional contract: install_unit takes [:3], enable_unit takes [3].
     # enable --now, so enabled-but-not-running cannot be the state left behind.
     return [
         f"mkdir -p {USER_UNIT_DIR}",
         f"cp {unit_file} {USER_UNIT_DIR}/{UNIT_NAME}",
         "systemctl --user daemon-reload",
         f"systemctl --user enable --now {UNIT_NAME}",
-        "loginctl enable-linger $USER",
     ]
 
 
 def installation_report(unit_file: Path) -> dict:
     """Everything the autostart command has to show, gathered in one place."""
-    return {
-        "unit": unit_file,
-        "steps": install_commands(unit_file),
-        "linger": linger_enabled(),
-    }
+    return {"unit": unit_file, "steps": install_commands(unit_file)}
 
 
 class _StepFailed(Exception):
@@ -328,33 +298,12 @@ def install_unit(unit_file: Path, dry_run: bool = False) -> Dict[str, Any]:
 
 
 def enable_unit(dry_run: bool = False) -> Dict[str, Any]:
-    """Enable and start the installed unit, and turn lingering on if it is off."""
+    """Enable and start the installed unit."""
     if not is_supported():
         raise AutostartUnsupported("Autostart needs a user-level systemd, which this platform does not have")
 
-    enable_step, linger_step = install_commands(Path(UNIT_NAME))[3:]
-    steps: List[Tuple[str, Callable[[], str]]] = [
-        (enable_step, lambda: _systemctl_step(["enable", "--now", UNIT_NAME], ENABLE_TIMEOUT_SECONDS)),
-    ]
-    # Unreadable lingering (None) still runs the step: enable-linger is idempotent.
-    if linger_enabled() is not True:
-        steps.append((linger_step, _enable_linger))
-    return _run_steps(steps, dry_run)
-
-
-def _enable_linger() -> str:
-    """loginctl enable-linger for this account, as a step. No user named: loginctl means the caller."""
-    try:
-        result = subprocess.run(
-            ["loginctl", "enable-linger"],
-            capture_output=True,
-            text=True,
-            timeout=PROBE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as e:
-        raise _StepFailed(str(e)) from e
-
-    if result.returncode != 0:
-        raise _StepFailed((result.stderr or f"exit {result.returncode}").strip())
-    return ""
+    enable_step = install_commands(Path(UNIT_NAME))[3]
+    return _run_steps(
+        [(enable_step, lambda: _systemctl_step(["enable", "--now", UNIT_NAME], ENABLE_TIMEOUT_SECONDS))],
+        dry_run,
+    )

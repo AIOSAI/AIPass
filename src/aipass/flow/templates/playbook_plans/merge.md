@@ -70,6 +70,7 @@ just that one merge commit — **cosmetic and trivially resolved**.
 
 ## 1. Pre-flight
 
+- [ ] **Start the local audit gate NOW, in the background** (the section 2 gate: `cd <repo-root> && .venv/bin/python .github/scripts/seedgo_audit.py`, `run_in_background`). It took 24 minutes on 2026-10-21 and grows with the fleet; everything below proceeds while it runs and its exit lands before the push needs it.
 - [ ] On `dev`, working tree understood: `drone @git status --all`
 - [ ] Confirm what's shipping — scan uncommitted changes + already-pushed dev commits ahead of main: `git rev-list --count main..dev` (read git, raw ok)
 - [ ] No surprise files (stray `/tmp` artifacts, test pollution, `.recovery`/`.archive` churn). Clean = archive, never delete.
@@ -80,6 +81,7 @@ just that one merge commit — **cosmetic and trivially resolved**.
 
 - [ ] **Run the CI audit gate LOCALLY before pushing** (local == CI, S199 parity — catches red before the PR): `cd <repo-root> && .venv/bin/python .github/scripts/seedgo_audit.py` → expect every **code** row `100%` on every branch (the script prints the live count — don't trust a hardcoded number). **The `trinity` row is advisory-local** (seedgo ruling 2026-09-10, PPLAN-0053): `.trinity/` is gitignored, so CI never sees it and gating the merge on it breaks parity instead of restoring it. A branch at 99% on trinity alone does not block the train — ship on the code rows and mail that owner to cure their memory file. Read the per-branch rows; the exit code alone is not the verdict until the script drops trinity from it. Uses a relative `src/aipass` path, so run from the repo **root**, not a branch dir. ⚠️ **Runtime is DYNAMIC** — it audits every branch, so it grows with the system and no fixed wall-clock budget is valid (the owner's ruling 2026-08-02: a 2-min shell timeout killed a healthy run; "8 more minutes" would just be the next stale number). Run it as a background task and wait for exit — judge it by exit code, never by elapsed time.
 - [ ] Update `CHANGELOG.md` — add entries under a dated section header `## [YYYY-MM-DD]` (the merge date), one section per merge. Sort into Added / Changed / Fixed.
+- [ ] **Bump the version and date the CHANGELOG header NOW, before the push** (the owner's ruling 2026-10-21, PPLAN-0074: CI runs once, on the final state; a bump committed after green is a second full CI run for nothing). Both release-tied files move together: `pyproject.toml` `version` and `src/aipass/__init__.py` `__version__` (the one that gets forgotten). The `## [Unreleased]` header becomes `## [YYYY-MM-DD] — vX.Y.Z: one-line summary`. Commit as `chore(release): vX.Y.Z, changelog dated YYYY-MM-DD`. Section 7 only verifies these; it never bumps.
 - [ ] Commit: `drone @git commit "msg" --all` (from a branch dir, e.g. devpulse). New/untracked files (e.g. new templates) — confirm they got staged: `git ls-files <path>` after; `--all` may not pick up untracked.
 - [ ] All commits are auto-SSH-signed via repo-level git config (key `~/.ssh/aipass_signing`, wired 2026-07-15). Nothing manual required; verify with `git log --show-signature -1` if in doubt.
 - [ ] Every commit pushed — local-only commits are invisible
@@ -144,8 +146,8 @@ How the release fires (verified `publish.yml`): a `v*` **git tag push** runs bui
 - GitHub Release notes = the **topmost `## [...]` CHANGELOG block** (awk-extracted).
 
 Steps:
-- [ ] Bump the version in **BOTH** files (they must match the tag, or `__version__` ships wrong): `pyproject.toml` `version` **and** `src/aipass/__init__.py` `__version__`. Do it **on dev so it rides into the PR** (then main's merge commit carries the right version). ⚠️ These two drift easily — `__init__.py` is the one that gets forgotten.
-- [ ] Confirm the CHANGELOG top section is the release notes you want
+- [ ] **Verify, never bump here:** both versions were bumped in section 2 and rode into the PR, so main's merge commit carries them. Check `grep '^version' pyproject.toml` and `grep __version__ src/aipass/__init__.py` equal the tag you are about to push. A bump found missing here means a second PR and a second CI run; that is the cost the section 2 step exists to avoid.
+- [ ] Confirm the CHANGELOG top section (dated in section 2) is the release notes you want
 - [ ] **Push the tag — `drone @git tag v<version>` (devpulse, no user input needed).** The verb (owner tier) does it all safely: `git fetch origin`, **VERSION GUARD** (refuses unless the tag's `X.Y.Z` matches BOTH `origin/main:pyproject.toml` version and `origin/main:src/aipass/__init__.py` `__version__` — so you can't tag the wrong version), **EXISTS GUARD** (refuses if the tag already exists local or remote), then tags `origin/main` (the remote ref, never stale local main) and pushes → fires `publish.yml`. It reports the pushed sha. `drone @git tag --list` shows existing tags. This replaced the old manual `git tag`/`push` step (S274).
 - [ ] Verify PyPI shows the new version + the GitHub Release appeared (`curl -s https://pypi.org/pypi/aipass/json | python3 -c "import sys,json;print(json.load(sys.stdin)['info']['version'])"`)
 - [ ] **Notify project managers (DPLAN-0335):** `drone @devpulse release-notify v<version>` — mails every manager-class citizen outside the source repo (declared roots + `projects/*`) with the release link and the update ritual, and posts one commons thread. Idempotent per version; `--dry-run` first if in doubt. Managers preview with `aipass init update <root> --dry-run` and apply only on the owner's or devpulse's go.
@@ -172,10 +174,7 @@ Steps:
 
 ---
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this merge here when done. No markdown, no symbols,
-no tables, no code blocks, no asterisks, no bullet points. Just natural sentences for text to speech.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 

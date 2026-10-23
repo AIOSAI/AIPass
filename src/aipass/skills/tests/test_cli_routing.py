@@ -3,7 +3,7 @@
 # Description: Unit tests for skills.py CLI routing
 # Version: 1.1.0
 # Created: 2026-03-10
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # Category: skills/tests
 # =============================================
 
@@ -223,7 +223,7 @@ class TestPrintIntrospection:
         print_introspection()
         captured = capsys.readouterr()
         assert "modules/" in captured.out
-        on_disk = sorted(p for p in modules_dir.glob("*.py") if p.name != "__init__.py")
+        on_disk = sorted(p for p in modules_dir.glob("*.py") if p.name != "__init__.py" and p.stem.isidentifier())
         assert len(on_disk) > 0, "no modules found on disk - the oracle would be vacuous"
         for path in on_disk:
             description = next(
@@ -239,11 +239,13 @@ class TestPrintIntrospection:
         (tmp_path / "__init__.py").write_text("", encoding="utf-8")
         (tmp_path / "widget.py").write_text("# Description: Spin widgets\n", encoding="utf-8")
         (tmp_path / "bare.py").write_text('"""No header here."""\n', encoding="utf-8")
+        (tmp_path / "old(disabled).py").write_text("# Description: Parked door\n", encoding="utf-8")
         print_introspection(modules_dir=tmp_path)
         captured = capsys.readouterr()
         assert "widget.py (Spin widgets)" in captured.out
         assert "- bare.py\n" in captured.out
         assert "__init__.py" not in captured.out
+        assert "old(disabled).py" not in captured.out
         assert "discovery.py" not in captured.out
 
 

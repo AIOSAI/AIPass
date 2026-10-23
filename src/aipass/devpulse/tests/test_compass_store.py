@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_compass_store.py
 # Description: Tests for the compass SQLite/FTS5 storage core
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-06-16
-# Modified: 2026-10-04
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/compass/store.py through the compass package API, on a tmp_path db_path."""
@@ -13,10 +13,13 @@
 # seedgo: no-test-needed(stdlib) — sqlite3.connect() and the rank arithmetic SQLite computes for a MATCH
 
 import sqlite3
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.devpulse.apps.handlers import compass
+from aipass.devpulse.apps.handlers.compass import store as store_mod
 
 
 @pytest.fixture
@@ -29,9 +32,28 @@ class TestFts5Available:
     """FTS5 must be present for compass to function at all."""
 
     def test_fts5_compiled_in(self, db):
-        """The FTS5 probe every connect runs passes on this interpreter (mutant: the probe always raises)."""
+        """The FTS5 read probe at connect passes on this interpreter (mutant: the probe always raises)."""
         compass.add_decision("fts probe context", "fts probe decision", "good", db_path=db)
         assert [h["context"] for h in compass.query_decisions("probe", db_path=db)] == ["fts probe context"]
+
+    def test_a_sqlite_without_fts5_is_refused_at_connect(self, db, monkeypatch):
+        """No FTS5 is a RuntimeError at connect, never a silent search downgrade (mutant: the except re-raises)."""
+        conn = MagicMock()
+        conn.executescript.side_effect = sqlite3.OperationalError("no such module: fts5")
+        no_fts5 = SimpleNamespace(
+            connect=lambda *_a, **_k: conn, Row=sqlite3.Row, OperationalError=sqlite3.OperationalError
+        )
+        monkeypatch.setattr(store_mod, "sqlite3", no_fts5)
+        with pytest.raises(RuntimeError, match="FTS5"):
+            compass.add_decision("c", "d", "good", db_path=db)
+
+    def test_a_read_does_not_write_the_db(self, db):
+        """stats() on an existing db leaves its bytes untouched (SQLite's change counter moves on any write);
+        the old create-and-drop probe wrote on every read. Bytes, not mtime: a coarse clock would hide a write."""
+        compass.add_decision("c", "d", "good", db_path=db)
+        before = db.read_bytes()
+        compass.stats(db_path=db)
+        assert db.read_bytes() == before
 
 
 class TestAddQueryRoundTrip:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.8.0
+# Version: 1.9.1
 # Created: 2026-09-13
-# Modified: 2026-10-19
+# Modified: 2026-10-22
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -19,9 +19,8 @@ import os
 import subprocess
 import tempfile
 import time
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 from aipass.prax import logger
@@ -29,7 +28,7 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.deletion_log import NO_CURRENT_DIRECTORY, append_ledger_line, ledger_beside
 from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 from aipass.drone.apps.handlers.registry_handler import resolve_aipass_home
-from aipass.drone.apps.handlers.router_handler import caller_cwd, resolve_caller_identity_signal
+from aipass.drone.apps.handlers.router_handler import caller_cwd, caller_stamp
 
 REPO_FLAG = "--repo"
 
@@ -38,6 +37,7 @@ REPO_FLAG = "--repo"
 DOOR_VERBS = (
     "status",
     "diff",
+    "show",
     "log",
     "tracked",
     "commit",
@@ -124,9 +124,6 @@ GIT_NETWORK_TIMEOUT = 120
 GIT_LOCAL_TIMEOUT = 60
 _NETWORK_VERBS = ("fetch", "merge")
 
-# What drone's router stamps onto every routed command, and what the rail reads.
-_STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE")
-
 
 def help_block() -> str:
     """The door's block of the @git help page, its refusals rendered from the constants above."""
@@ -165,7 +162,8 @@ def help_block() -> str:
     lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
     return (
         "External-repo door — admin seat only (DPLAN-0344):\n"
-        "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
+        "  status | diff [--staged] | show <ref> [path] | log [count] | commit <msg> [--all | files]\n"
+        "  | push | tag <name>  --repo <path>\n"
         "  fetch | sync  --repo <path>\n"
         "  merge-upstream  --repo <path> [--theirs <path> ...]\n"
         "  tracked <path ...> | untrack [--recursive] <path ...>  --repo <path>  (paths repo-relative)\n"
@@ -261,38 +259,6 @@ def extract_repo_flag(args: list[str]) -> RepoFlag:
     return RepoFlag(bool(values) or missing, values[0] if values else "", remaining, error)
 
 
-@contextmanager
-def _drone_caller_stamp() -> Iterator[None]:
-    """Stamp this process the way drone's router stamps every command it routes.
-
-    @git runs inside drone, not as a routed child, so the rail's variables were
-    never set here. Always fresh: an inherited stamp proves nothing about this
-    process. Every prior value is put back.
-    """
-    saved = {key: os.environ.get(key) for key in _STAMP_KEYS}
-    cwd = caller_cwd()
-    signal = resolve_caller_identity_signal(cwd)
-    fresh: dict[str, str] = {}
-    if cwd is not None:
-        fresh["AIPASS_CALLER_CWD"] = str(cwd)
-    if signal.name:
-        fresh["AIPASS_CALLER_BRANCH"] = signal.name
-        fresh["AIPASS_CALLER_IDENTITY_SOURCE"] = signal.source or "unknown"
-    for key in _STAMP_KEYS:
-        if key in fresh:
-            os.environ[key] = fresh[key]
-        else:
-            os.environ.pop(key, None)
-    try:
-        yield
-    finally:
-        for key, value in saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
 def admin_verdict() -> AdminVerdict:
     """Ask @ai_mail's verified-caller rail whether this caller holds the admin grant.
 
@@ -308,7 +274,8 @@ def admin_verdict() -> AdminVerdict:
             False, UNKNOWN_CALLER, REFUSE_LANE_DARK.format(reason=f"verified-caller rail unavailable: {exc}")
         )
 
-    with _drone_caller_stamp():
+    # Stamped again here: the module route stamps, and a direct caller of the door gets the same rail.
+    with caller_stamp():
         try:
             caller = rail.resolve_verified_caller()
             granted = bool(rail.is_verified_admin_caller())

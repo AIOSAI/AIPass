@@ -75,12 +75,6 @@
       "handler": "aipass.hooks.apps.handlers.prompt.temporal.handle",
       "matcher": "",
       "timeout": 90
-    },
-    "user_message_relay": {
-      "enabled": true,
-      "handler": "aipass.skills.lib.telegram.apps.handlers.user_message_relay.handle",
-      "matcher": "",
-      "timeout": 90
     }
   },
 
@@ -167,12 +161,6 @@
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.notification.stop_sound.handle",
       "matcher": ""
-    },
-    "telegram_response": {
-      "enabled": true,
-      "handler": "aipass.hooks.apps.handlers.notification.telegram_response.handle",
-      "matcher": "",
-      "timeout": 30
     },
     "presence_release": {
       "enabled": true,

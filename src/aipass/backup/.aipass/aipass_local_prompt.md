@@ -45,7 +45,7 @@ apps/
     ├── cleanup/           # mirror sweep + prune of ignore-matched stored copies
     ├── copy/              # copying for snapshot and versioned
     ├── diff/              # diff generation + restore from the store
-    ├── drive/             # auth, upload, tracker, share, never-leaves floor, quota
+    ├── drive/             # auth, upload, tracker, remote listing, share, never-leaves floor, quota
     ├── ignore/            # .backupignore spec + whitelist + the *.tmp floor
     ├── json/              # the fleet's json shim — @prax service, byte-identical
     ├── path/              # store paths, caller cwd, module_paths safe resolve
@@ -78,7 +78,8 @@ Branch top level: `apps/` `docs/` `docs.local/` `dropbox/` `artifacts/` `templat
  - `handlers/__init__.py` guards against cross-branch imports with a path-based kinship check, not a hardcoded module name. Fabricated filenames in its tests stay under `tmp_path` or the coverage report goes red with no test failure.
  - The audit trail honours AIPASS_TEST_LOG_DIR; `handlers/json/` is the byte-identical fleet shim — never add a name to it.
  - No `resolve()` reached at import anywhere: `handlers/path/module_paths.py` is the one door, stdlib-only on purpose.
- - `backup_timestamps.json` is branch-global, so the "Backups now" panel reports my last run anywhere. Open defect. Tests reach it only through `timestamps_path()`, which honours AIPASS_TEST_LOG_DIR.
+ - `backup_timestamps.json` is branch-global; the "Backups now" panel reads the project's changelog instead. Tests reach the clock only through `timestamps_path()`, which honours AIPASS_TEST_LOG_DIR.
+ - Drive is the truth for what is remote: every Drive run lists live files first, heals the tracker, adopts by name. A listing with no answer is a failed run.
  - A filename over 50 characters gets a shortened store folder, and restore cannot find it. Open defect.
  - `.backup/` is excluded by the repo's own `.backupignore`, so nothing written inside a store is itself backed up.
  - The Drive upload path is not exercised locally — it publishes to a real account. Connectivity and stats are safe to run; uploads are not a casual probe.

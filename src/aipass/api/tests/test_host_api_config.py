@@ -1,26 +1,24 @@
 # =================== AIPass ====================
 # Name: test_host_api_config.py
 # Description: Tests for the host API's config, face dir, baud binary and tokens — the bind gate and the store
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/host/config.py (bind gate, face dir, baud binary) and apps/handlers/host/tokens.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
-# seedgo: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
 
 import json
-import os
-import stat
 import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from keyring import get_password, set_password
 
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -29,6 +27,8 @@ from aipass.api.tests.support_host_api import TAILNET_SHAPED, UNHELD_ADDRESS, _b
 # Kept local, not imported from the support module: seedgo's discarded_patch
 # rule judges a target imported from this package, and this silences on purpose.
 PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
+CONFIG_ENTRY = "host_api/config"
+TOKENS_ENTRY = "host_api/tokens"
 
 
 class TestValidateBind:
@@ -169,14 +169,19 @@ class TestConfig:
 
     def test_non_dict_store_falls_back_to_defaults(self, store: Path) -> None:
         """A corrupted config must not produce a half-applied bind."""
-        provider_dir = store / host_config.CONFIG_PROVIDER
-        provider_dir.mkdir(parents=True, exist_ok=True)
-        (provider_dir / f"{host_config.CONFIG_SLUG}.json").write_text('"not-an-object"', encoding="utf-8")
+        set_password("aipass", CONFIG_ENTRY, '"not-an-object"')
 
         with patch(PATCH_CONFIG_LOGGER):
             config = host_config.load_config()
 
         assert config["host"] == host_config.DEFAULT_HOST
+
+    def test_save_config_returns_the_entry_name_never_a_path(self, store: Path) -> None:
+        with patch(PATCH_CONFIG_LOGGER):
+            written = host_config.save_config({"host": "127.0.0.1", "port": 8080})
+
+        assert written == CONFIG_ENTRY
+        assert json.loads(str(get_password("aipass", CONFIG_ENTRY))) == {"host": "127.0.0.1", "port": 8080}
 
     def test_save_config_round_trips(self, store: Path) -> None:
         """What was saved is what loads back."""
@@ -221,7 +226,7 @@ class TestFaceDir:
         with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="not a directory"):
             host_config.set_face_dir(tmp_path / "never-built")
 
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+        assert get_password("aipass", CONFIG_ENTRY) is None
 
     def test_the_entry_file_itself_is_refused(self, store: Path, tmp_path: Path) -> None:
         """Naming phone.html instead of the directory holding it is an easy slip."""
@@ -272,7 +277,7 @@ class TestFaceDir:
         with patch(PATCH_CONFIG_LOGGER):
             assert host_config.set_face_dir(None) is None
 
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+        assert get_password("aipass", CONFIG_ENTRY) is None
 
     def test_the_bind_survives_a_face_dir_write(self, store: Path, tmp_path: Path) -> None:
         """One store, two settings: writing one keeps the other."""
@@ -319,7 +324,7 @@ class TestBaudBin:
         with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="does not exist"):
             host_config.set_baud_bin(tmp_path / "never-installed")
 
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+        assert get_password("aipass", CONFIG_ENTRY) is None
 
     def test_a_directory_is_refused(self, store: Path, tmp_path: Path) -> None:
         """Leg three: a directory exists and carries the x bit, and is still not a binary."""
@@ -368,7 +373,7 @@ class TestBaudBin:
         with patch(PATCH_CONFIG_LOGGER):
             assert host_config.set_baud_bin(None) is None
 
-        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+        assert get_password("aipass", CONFIG_ENTRY) is None
 
     def test_the_face_dir_survives_a_baud_bin_write_and_clear(self, store: Path, tmp_path: Path) -> None:
         """One store, three settings: writing or clearing one keeps the others."""
@@ -391,7 +396,7 @@ class TestIssueToken:
         """A reader of the token file must not be able to authenticate with it."""
         _, raw = host_tokens.issue_token("pixel-8")
 
-        stored = (store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json").read_text(encoding="utf-8")
+        stored = str(get_password("aipass", TOKENS_ENTRY))
         assert raw not in stored
 
     def test_store_holds_a_sha256_hash(self, store: Path) -> None:
@@ -442,23 +447,25 @@ class TestIssueToken:
         assert host_tokens.verify_token(first) is not None
         assert host_tokens.verify_token(second) is not None
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
-    def test_token_file_is_0600(self, store: Path) -> None:
-        """The store sits at 0600 like every other secret this branch writes."""
+    def test_no_token_file_is_written(self, store: Path) -> None:
+        """The rows rest in the entry host_api/tokens; nothing lands on disk."""
         host_tokens.issue_token("pixel-8")
-        path = store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json"
 
-        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+        assert not [path for path in store.rglob("*") if path.is_file()]
 
 
 class TestSaveTokens:
     """The store envelope, written directly."""
 
+    def test_returns_the_entry_name_and_writes_no_file(self, store: Path) -> None:
+        assert host_tokens.save_tokens([{"id": "abc"}]) == TOKENS_ENTRY
+        assert list(store.iterdir()) == []
+
     def test_writes_versioned_envelope(self, store: Path) -> None:
         """Records live under a version key so a later reader need not guess."""
         host_tokens.save_tokens([{"id": "abc", "label": "x", "scope": "read", "hash": "h", "revoked": False}])
 
-        raw = (store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json").read_text(encoding="utf-8")
+        raw = str(get_password("aipass", TOKENS_ENTRY))
         envelope = json.loads(raw)
 
         assert envelope["version"] == host_tokens.STORE_VERSION
@@ -514,8 +521,7 @@ class TestVerifyToken:
         """A broken store must fail closed — deny all, never admit one."""
         _, raw = host_tokens.issue_token("pixel-8")
 
-        path = store / host_tokens.TOKEN_PROVIDER / f"{host_tokens.TOKEN_SLUG}.json"
-        path.write_text(json.dumps(["not", "an", "envelope"]), encoding="utf-8")
+        set_password("aipass", TOKENS_ENTRY, json.dumps(["not", "an", "envelope"]))
 
         assert host_tokens.verify_token(raw) is None
 

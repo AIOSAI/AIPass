@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.4.0
+# Version: 2.6.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -120,6 +120,7 @@ def _drive_sync_run(
     """The Drive sync proper, inside the stop handler and the running file."""
     from aipass.backup.apps.handlers.drive.client import DriveClient
     from aipass.backup.apps.handlers.drive.floor import hold_back
+    from aipass.backup.apps.handlers.drive.remote import heal_tracker, list_live
     from aipass.backup.apps.handlers.drive.tracker import (
         DRIVE_LANE,
         check_needs_upload,
@@ -144,19 +145,27 @@ def _drive_sync_run(
         "error": None,
     }
 
+    # Both early refusals fail the command like the later ones: the daemon and the host-api
+    # read the exit code and the stdout tail, and a log line alone was reported as "passed".
     client = DriveClient()
     if not client.authenticate():
         result["error"] = client.last_error or "Drive authentication failed"
+        result["error_shown"] = True
         result["duration"] = time.time() - start
         logger.warning(f"[backup] Drive sync auth failed: {result['error']}")
+        console.print(f"Drive sync auth failed: {result['error']}. Nothing uploaded.", markup=False)
+        mark_command_failed()
         return result
 
     store_path = build_snapshot_path(project_root)
     result["location"] = str(store_path)
     if not store_path.exists():
         result["error"] = f"Snapshot store not found: {store_path}"
+        result["error_shown"] = True
         result["duration"] = time.time() - start
         logger.warning(f"[backup] {result['error']}")
+        console.print(f"{result['error']}. Nothing uploaded.", markup=False)
+        mark_command_failed()
         return result
 
     # Re-filter through .backupignore: legacy stores hold files swept in before a rule was added.
@@ -187,6 +196,24 @@ def _drive_sync_run(
     # A tracker from the versioned era is moved aside first: its keys name versioned-store paths.
     set_aside_foreign_tracker(project_root)
     tracker = load_tracker(project_root)
+
+    # Drive is the truth for what is remote: a tracker that cannot be checked would skip files that are gone.
+    live = list_live(client)
+    if live is None:
+        refusal = f"Drive listing unavailable: {client.last_error or 'no answer'}. Nothing uploaded."
+        result["error"] = refusal
+        result["error_shown"] = True
+        result["duration"] = time.time() - start
+        logger.warning(f"[backup] {refusal}")
+        trail.log_operation("drive_sync_refused", {"project_root": project_root, "reason": refusal})
+        console.print(refusal, markup=False)
+        mark_command_failed()
+        return result
+    gone = heal_tracker(tracker, live["ids"])
+    if gone:
+        logger.info(f"[backup] {gone} tracked files are gone from Drive; they upload again")
+    client.live_files = live["by_place"]
+
     if force:
         files_to_upload = all_files
     else:
@@ -269,7 +296,25 @@ def _drive_sync_run(
 
     save_tracker(project_root, tracker)
 
-    # Stopped: what went is tracked, but no changelog entry (lanes.drive_sync.last means a completed run).
+    # Every run that sent a file records it, stopped and aborted too; status --json reads complete from the flags.
+    if result["uploaded"]:
+        run = BackupResult(
+            mode=PRIMARY_COMMAND,
+            project_root=project_root,
+            files_copied=result["uploaded"],
+            files_checked=len(all_files),
+            files_skipped=skipped,
+            bytes_copied=result["bytes_uploaded"],
+            duration_seconds=result["duration"],
+        )
+        entry = build_metadata(run)
+        entry.update(
+            stopped=bool(batch_result.get("stopped")),
+            aborted=batch_result.get("aborted", ""),
+            failed=result["failed"],
+        )
+        append_changelog(project_root, entry)
+
     if batch_result.get("stopped"):
         result["stopped"] = True
         result["success"] = False
@@ -284,18 +329,13 @@ def _drive_sync_run(
         )
         return result
 
-    # One changelog entry per clean run; status --json reads the Drive lane's last run from it.
-    if result["success"]:
-        run = BackupResult(
-            mode=PRIMARY_COMMAND,
-            project_root=project_root,
-            files_copied=result["uploaded"],
-            files_checked=len(all_files),
-            files_skipped=skipped,
-            bytes_copied=result["bytes_uploaded"],
-            duration_seconds=result["duration"],
-        )
-        append_changelog(project_root, build_metadata(run))
+    # Aborted by the breaker: a failed run, exit 2, its sentence the last stdout line like a headroom refusal.
+    if batch_result.get("aborted"):
+        result["error"] = batch_result["aborted"]
+        result["error_shown"] = True
+        console.print(result["error"], markup=False)
+        mark_command_failed()
+        return result
 
     trail.log_operation(
         "drive_sync_complete",
@@ -311,7 +351,7 @@ def _drive_sync_run(
     logger.info(f"[backup] Drive sync: {result['uploaded']} uploaded, {result['failed']} failed, {skipped} skipped")
 
     if show_panels:
-        show_drive_result(result)
+        show_drive_result(result, project_root)
 
     return result
 

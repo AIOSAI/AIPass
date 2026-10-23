@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_owner_guard.py
 # Description: Tests for the shared owner-capability caller guard (#681)
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/owner/guard.py through guard_owner_caller, against a stubbed sealed registry."""
@@ -49,6 +49,20 @@ def _patch_registry(monkeypatch, owner_email):
     monkeypatch.setattr(reg, "get_owner", fake_get_owner)
     monkeypatch.setattr(reg, "is_owner", fake_is_owner)
     return asked
+
+
+class TestOwnerAddress:
+    """owner_address tells a crashed lookup from an unsealed project, and neither is a traceback."""
+
+    def test_unsealed_answers_none_and_a_raising_lookup_answers_empty(self, monkeypatch):
+        _patch_registry(monkeypatch, None)
+        assert guard_mod.owner_address() is None
+
+        def explode(start_path=None):
+            raise RuntimeError("registry unreadable")
+
+        monkeypatch.setattr(reg, "get_owner", explode)
+        assert guard_mod.owner_address() == ""
 
 
 class TestResolveCaller:

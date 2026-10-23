@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -47,6 +47,10 @@ def print_help():
     console.print("  [green]create[/green] @existing              Adopt a directory that already carries a passport")
     console.print("  [green]delete[/green] <@branch> --yes        Archive and deregister (omit --yes to confirm)")
     console.print("  [green]delete[/green] <@branch> --retire     Retire a registered citizen (floor and owner refuse)")
+    console.print("  [green]delete[/green] <path> --retire --yes  The same, reading the registry that seals the path")
+    console.print(
+        "  [green]retire-project[/green] <root> --yes   Admin seat: archive into AIPass, remove, write receipts"
+    )
     console.print("  [green]sync-registry[/green]                 Report registry against filesystem (read-only)")
     console.print("  [green]sync-registry[/green] --fix           Rebuild tracking, register strays, repair ids")
     console.print(
@@ -72,6 +76,7 @@ def print_help():
     )
     console.print("  [dim]         add --relocate-artifacts to carry the branch's vector store with it[/dim]")
     console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
+    console.print("  [green]grant-ci-cure[/green]                  Ceremony: write ci_cure:true onto the trigger entry")
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
     console.print()
@@ -316,12 +321,15 @@ def print_introspection():
     console.print("    [dim]- core.py (handle_command, spawn_agent — agent creation orchestrator)[/dim]")
     console.print("    [dim]- update.py (handle_update — single/all branch updates)[/dim]")
     console.print("    [dim]- delete.py (handle_delete — archive and deregister branch)[/dim]")
+    console.print("    [dim]- retire_project.py (handle_retire_project — retire a whole project, admin seat)[/dim]")
     console.print("    [dim]- sync_registry.py (handle_sync_registry — registry repair)[/dim]")
     console.print("    [dim]- regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]")
     console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
     console.print("    [dim]- migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]")
     console.print("    [dim]- export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
-    console.print("    [dim]- grant_admin.py (handle_grant_admin — devpulse admin flag ceremony)[/dim]")
+    console.print(
+        "    [dim]- grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
+    )
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")
     console.print()
@@ -371,6 +379,11 @@ def main():
 
         return _resolved(handle_delete(remaining))
 
+    if command == "retire-project":
+        from aipass.spawn.apps.modules.retire_project import handle_retire_project
+
+        return _resolved(handle_retire_project(remaining))
+
     if command == "sync-registry":
         from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
@@ -400,6 +413,11 @@ def main():
         from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 
         return _resolved(handle_grant_admin(remaining))
+
+    if command == "grant-ci-cure":
+        from aipass.spawn.apps.modules.grant_admin import handle_grant_ci_cure
+
+        return _resolved(handle_grant_ci_cure(remaining))
 
     error(f"Unknown command: {command}", suggestion="Run 'drone @spawn --help' for available commands")
     return 1

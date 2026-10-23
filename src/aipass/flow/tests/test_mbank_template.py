@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_mbank_template.py
 # Description: Tests for mbank/process.py and template handler functions
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-04
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -841,6 +841,13 @@ class TestGetTemplate:
         # hostname sanitization (py/incomplete-url-substring-sanitization).
         assert "Website: https://aipass.ai, changelog link" in result
         assert "YOUR OWN branch dir" in result
+
+    @pytest.mark.parametrize("tpl", sorted(TEMPLATES_DIR.glob("*/*.md")), ids=lambda p: f"{p.parent.name}/{p.name}")
+    def test_a_fresh_plan_of_every_shipped_template_has_no_listen_section(self, tpl):
+        result = get_template(template_path=tpl, number=1, subject="Fresh")
+
+        assert "## Listen" not in result
+        assert "Spoken summary: written only when the user asks for one" in result
 
 
 # ===================================================================

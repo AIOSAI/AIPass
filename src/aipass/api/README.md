@@ -23,7 +23,7 @@ drone @api host-api status                              # Is the phone's server 
 ## What It Does
 
 - **Hands out authenticated clients.** A consumer imports a ready service — OpenRouter chat, Google Drive, Google Calendar — and never writes an auth flow of its own. Plumbing, never product: what you do with the service is yours.
-- **Owns the credentials.** Keys, OAuth tokens and per-provider secrets live under `~/.secrets/aipass/`, owner-only on disk, and are read through this branch. A raw value is never printed to a terminal.
+- **Owns the credentials.** Keys, OAuth tokens and per-provider secrets rest in the login keyring (service `aipass`, entry `<provider>/<slug>`) and are read through this branch. A plaintext or failing keyring is refused by name. A raw value is never printed to a terminal.
 - **Accounts for usage.** Every generation can be tracked by caller, aggregated, and cleaned up on a retention window.
 - **Serves the phone.** The host API binds one address this machine holds and answers the BAUD face: reads of the fleet, the git surface, files, settings, a photo upload, a terminal socket into a real tmux room, and a backup door that starts and stops @backup's lanes and reads their status and progress.
 - **Pairs a phone by its camera.** `drone @api host-api pair phone --scope operate` prints a
@@ -129,14 +129,14 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 - `@baud` — the Stage 0 host API the phone face is served from and talks to
 - `@aipass` — the installer door for the phone face directory and the baud binary
 
-**Credentials** (`~/.secrets/aipass/`): `.env` for API keys, `google_creds.json` and
-`google_client_secret.json` for OAuth, `host_api/` for the token store, its receipts and
-the pairing store.
-Values are never printed; read them through the Python door.
+**Credentials** rest in the login keyring (service `aipass`, one entry per `<provider>/<slug>`);
+files in `~/.secrets/aipass/` are only the import source for `drone @api secrets migrate`, which
+shreds each file it imports. `host_api/` keeps the write lock and the pairing receipts.
+Values are never printed; read them through the Python door. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-22
 
 ---
 [← Back to AIPass](../../../README.md)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_lifetime.py
 # Description: Tests for a serve that outlives the shell that started it
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
@@ -763,12 +763,11 @@ class TestTheInstallReportNamesAConflictItCanSee:
         monkeypatch.setattr(host_autostart.shutil, "which", lambda name: f"/bin/{name}" if name == "loginctl" else None)
         asked: list = []
 
-        def loginctl(argv: list, **kwargs: Any) -> Any:
+        def run(argv: list, **kwargs: Any) -> Any:
             asked.append(argv)
-            assert argv[0] == "loginctl"
             return subprocess.CompletedProcess(argv, 0, stdout="yes\n", stderr="")
 
-        monkeypatch.setattr(host_autostart.subprocess, "run", loginctl)
+        monkeypatch.setattr(host_autostart.subprocess, "run", run)
         host_lifetime.record_path().write_text(
             json.dumps({"pid": 4242, "host": "127.0.0.1", "port": 8790}), encoding="utf-8"
         )
@@ -776,8 +775,8 @@ class TestTheInstallReportNamesAConflictItCanSee:
         report = host_lifetime.autostart_report()
 
         assert report["conflict"]["pid"] == 4242
-        assert report["linger"] is True
-        assert asked == [["loginctl", "show-user", Path.home().name, "-p", "Linger", "--value"]]
+        assert "linger" not in report
+        assert asked == [], "the report asked the account's lingering, which is not this unit's concern"
         supported.assert_called_once_with()
 
     def test_a_supervised_server_is_not_a_conflict(
@@ -788,12 +787,10 @@ class TestTheInstallReportNamesAConflictItCanSee:
         supervisor restarts it. Only a HAND-started server is in the way."""
         supported = MagicMock(return_value=True)
         monkeypatch.setattr(host_autostart, "is_supported", supported)
-        monkeypatch.setattr(host_autostart, "linger_enabled", MagicMock(return_value=True))
 
         report = host_lifetime.autostart_report()
 
         assert report["conflict"] is None
-        assert report["linger"] is True
         supported.assert_called_once_with()
 
     def test_an_unreachable_supervisor_never_retracts_a_written_unit(
@@ -802,7 +799,6 @@ class TestTheInstallReportNamesAConflictItCanSee:
         """The conflict check is a courtesy and runs AFTER the write."""
         supported = MagicMock(return_value=True)
         monkeypatch.setattr(host_autostart, "is_supported", supported)
-        monkeypatch.setattr(host_autostart, "linger_enabled", MagicMock(return_value=True))
 
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")

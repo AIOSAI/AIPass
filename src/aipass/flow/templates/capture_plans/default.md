@@ -48,9 +48,7 @@ The substance. Full detail — this is the part future-you searches for.
 - [x] Created
 - [ ] Closed (same sitting — that's the design)
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this capture here. No markdown, no symbols, no tables, no code blocks, no asterisks, no bullet points. Just natural sentences that can be read aloud by a text to speech tool.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 *Created: {today}*

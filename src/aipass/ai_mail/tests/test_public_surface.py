@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_public_surface.py
-# Description: Tests for ai_mail's package-level public surface (the feed path door)
-# Version: 1.0.1
+# Description: Tests for ai_mail's package-level public surface (the feed, register, outstanding and inbox doors)
+# Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for aipass/ai_mail/__init__.py's public surface: feed_path(), register_path(), outstanding_dispatches()."""
@@ -14,6 +14,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
+import json
 import subprocess
 import sys
 
@@ -165,6 +166,49 @@ class TestOutstandingDoor:
 
         assert ai_mail.outstanding_dispatches(target) == []
         assert target in register.register_file(repo_root=target).parents
+
+
+class TestInboxFileDoor:
+    """The fourth door, asked for by @devpulse's feedback reply lane: a guest write under ai_mail's lock."""
+
+    def test_a_missing_inbox_is_refused_by_name(self, tmp_path):
+        ok, reason, mail_id = ai_mail.post_to_inbox_file(tmp_path / "inbox.json", {"subject": "s"})
+
+        assert (ok, mail_id) == (False, "")
+        assert "inbox not found" in reason
+
+    def test_a_message_lands_with_an_id_and_the_unread_count(self, tmp_path):
+        inbox = tmp_path / "x" / ".ai_mail.local" / "inbox.json"
+        inbox.parent.mkdir(parents=True)
+        inbox.write_text('{"messages": []}', encoding="utf-8")
+        message = {"from": "@devpulse", "to": "@x", "subject": "s", "message": "m", "status": "new"}
+
+        ok, reason, mail_id = ai_mail.post_to_inbox_file(inbox, message)
+
+        assert (ok, reason) == (True, "")
+        stored = json.loads(inbox.read_text(encoding="utf-8"))
+        assert [m["id"] for m in stored["messages"]] == [mail_id]
+        assert stored["unread_count"] == 1
+
+    def test_the_door_is_advertised_in_dunder_all(self):
+        assert "post_to_inbox_file" in ai_mail.__all__
+
+
+class TestNotificationDoor:
+    """The fifth door, asked for by @trigger's CI red lane: one feed event from a foreign branch."""
+
+    def test_an_event_lands_on_the_feed_with_its_kind_source_and_extra(self, monkeypatch, tmp_path):
+        feed = tmp_path / "notifications.jsonl"
+        monkeypatch.setattr(notify, "FEED_PATH", feed)
+
+        written = ai_mail.send_notification("CI red", "hooks 99", source="ci", kind="system", extra={"run_id": "7"})
+
+        assert written is True
+        row = json.loads(feed.read_text(encoding="utf-8").splitlines()[-1])
+        assert (row["kind"], row["source"], row["title"], row["run_id"]) == ("system", "ci", "CI red", "7")
+
+    def test_the_door_is_advertised_in_dunder_all(self):
+        assert "send_notification" in ai_mail.__all__
 
 
 class TestImportStaysLight:

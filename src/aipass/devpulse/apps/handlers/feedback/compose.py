@@ -1,22 +1,22 @@
 # =================== AIPass ====================
 # Name: compose.py
 # Description: Compose operations — send feedback and reply to messages
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-11
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
 Feedback Compose — sending and replying to feedback messages.
 """
 
-import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from aipass.prax import logger
 from aipass.devpulse.apps.handlers.feedback.storage import (
+    inbox_lock,
     load_inbox,
     save_inbox,
     generate_id,
@@ -25,6 +25,7 @@ from aipass.devpulse.apps.handlers.feedback.storage import (
 from aipass.cli.apps.modules import err_console, error, success, warning
 from aipass.devpulse.apps.handlers.json import json_handler
 from aipass.devpulse.apps.handlers.module_root import module_file
+from aipass import ai_mail as _ai_mail
 
 console = err_console
 
@@ -62,7 +63,6 @@ def _resolve_sender() -> tuple[str, str]:
 def send_feedback(from_branch: str, subject: str, body: str, ai_mail_path: str = "") -> str:
     """Add a new feedback message to devpulse's inbox and return its id."""
     json_handler.log_operation("send_feedback", {"from_branch": from_branch, "subject": subject})
-    data = load_inbox()
     msg_id = generate_id()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -77,11 +77,12 @@ def send_feedback(from_branch: str, subject: str, body: str, ai_mail_path: str =
         "reply_path": ai_mail_path,
     }
 
-    data["messages"].append(message)
-    data["total_messages"] = len(data["messages"])
-    data["unread_count"] = data.get("unread_count", 0) + 1
-
-    save_inbox(data)
+    with inbox_lock():
+        data = load_inbox()
+        data["messages"].append(message)
+        data["total_messages"] = len(data["messages"])
+        data["unread_count"] = data.get("unread_count", 0) + 1
+        save_inbox(data)
 
     logger.info(f"[FEEDBACK] Received feedback from {from_branch}: {subject}")
     console.print(f"[green]Feedback received (id: {msg_id}).[/green]")
@@ -104,29 +105,21 @@ def send_feedback(from_branch: str, subject: str, body: str, ai_mail_path: str =
 
 def reply_to(msg_id: str, body: str) -> bool:
     """Reply to a feedback message and deliver to sender's ai_mail; True once saved, whatever the delivery."""
-    data = load_inbox()
-    messages = data.get("messages", [])
-
-    msg = None
-    for m in messages:
-        if m.get("id") == msg_id:
-            msg = m
-            break
-
-    if msg is None:
-        error(f"Message {msg_id} not found.")
-        return False
-
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-
     reply = {
         "from": "devpulse",
         "body": body,
         "timestamp": now,
     }
 
-    msg.setdefault("thread", []).append(reply)
-    save_inbox(data)
+    with inbox_lock():
+        data = load_inbox()
+        msg = next((m for m in data.get("messages", []) if m.get("id") == msg_id), None)
+        if msg is None:
+            error(f"Message {msg_id} not found.")
+            return False
+        msg.setdefault("thread", []).append(reply)
+        save_inbox(data)
 
     console.print(f"[green]Reply added to thread {msg_id}.[/green]")
 
@@ -151,37 +144,27 @@ def reply_to(msg_id: str, body: str) -> bool:
 def _deliver_to_ai_mail(
     to_branch: str, subject: str, body: str, thread_id: str, reply_path: str = ""
 ) -> tuple[bool, str]:
-    """Write a reply into the sender's .ai_mail.local/inbox.json: (delivered, reason)."""
+    """Write a reply into the sender's .ai_mail.local/inbox.json through ai_mail's door: (delivered, reason).
+
+    The door holds ai_mail's inbox lock and fires the feed event; a direct write here once raced the host's
+    own delivery and left the phone deaf to the reply.
+    """
     if reply_path:
         ai_mail_path = Path(reply_path)
     else:
         ai_mail_path = _AIPASS_ROOT / to_branch / ".ai_mail.local" / "inbox.json"
 
-    if not ai_mail_path.exists():
-        reason = f"ai_mail inbox not found at {ai_mail_path}"
-        logger.warning(f"[FEEDBACK] {reason} for {to_branch} — skipping delivery")
-        return False, reason
-
-    try:
-        with open(ai_mail_path, encoding="utf-8") as f:
-            inbox = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        reason = f"failed to read inbox: {e}"
-        logger.warning(f"[FEEDBACK] Failed to read {to_branch} ai_mail inbox: {e}")
-        return False, reason
-
     # A guest in ai_mail's store writes the host's timestamp format: local wall-clock, space-separated.
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    mail_id = generate_id()
 
     # ai_mail v2 schema: its viewer reads 'message' and 'status'; 'body'/'read' render empty.
     # 'reply_to' must miss every registry email: a hit routes through delivery, which refuses cross-project
     # mail, and only a miss reaches the stored reply_path. '@devpulse:feedback' misses on purpose.
     mail_message = {
-        "id": mail_id,
         "timestamp": now,
         "from": "@devpulse",
         "from_name": "devpulse",
+        "to": f"@{to_branch.lstrip('@')}",
         "reply_to": "@devpulse:feedback",
         "subject": f"Re: {subject}",
         "message": body,
@@ -193,21 +176,9 @@ def _deliver_to_ai_mail(
         },
     }
 
-    inbox.setdefault("messages", []).insert(0, mail_message)
-    inbox["total_messages"] = len(inbox["messages"])
-    inbox["unread_count"] = sum(
-        1
-        for m in inbox["messages"]
-        if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
-    )
-
-    try:
-        with open(ai_mail_path, "w", encoding="utf-8") as f:
-            json.dump(inbox, f, indent=2)
-            f.write("\n")
+    delivered, reason, _mail_id = _ai_mail.post_to_inbox_file(ai_mail_path, mail_message)
+    if delivered:
         logger.info(f"[FEEDBACK] Reply delivered to {to_branch} ai_mail")
         return True, "delivered"
-    except OSError as e:
-        reason = f"failed to write inbox: {e}"
-        logger.warning(f"[FEEDBACK] Failed to write to {to_branch} ai_mail: {e}")
-        return False, reason
+    logger.warning(f"[FEEDBACK] Reply to {to_branch} not delivered: {reason}")
+    return False, reason

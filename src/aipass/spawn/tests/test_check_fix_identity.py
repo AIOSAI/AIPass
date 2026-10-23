@@ -1,16 +1,16 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-07-11
-# Modified: 2026-10-18
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — docstrings on check_owner_identity, fix_owner_identity and pick_owner_branch
-# seedgo: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", etc.) sync_registry_ops emits
+# seedgo: no-test-needed(constant) — the flag-name strings ("no_owner", "multi_owner", "multi_ci_cure", etc.) sync_registry_ops emits
 
 import json
 
@@ -130,6 +130,31 @@ class TestCheckOwnerIdentity:
         result = check_owner_identity(registry_path=reg)
         flags = [i["flag"] for i in result["issues"]]
         assert "multi_owner" in flags
+
+    def test_a_second_ci_cure_holder_is_reported_by_check_and_one_is_not(self, tmp_path, monkeypatch, capsys):
+        _make_branch(tmp_path, "alpha", "src/alpha")
+        _make_branch(tmp_path, "trigger", "src/trigger")
+        trigger = _entry("trigger", "src/trigger", registry_id="uid-t")
+        trigger["ci_cure"] = True
+        reg = _write_registry(
+            tmp_path,
+            metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
+            branches=[_entry("alpha", "src/alpha", owner=True, registry_id="uid-a"), trigger],
+        )
+        monkeypatch.setattr("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", lambda *a, **k: reg)
+
+        handle_sync_registry(["--check"])
+        assert "multi_ci_cure" not in "".join(capsys.readouterr())
+
+        data = json.loads(reg.read_text(encoding="utf-8"))
+        data["branches"][0]["ci_cure"] = True
+        reg.write_text(json.dumps(data), encoding="utf-8")
+        result = handle_sync_registry(["--check"])
+
+        said = " ".join("".join(capsys.readouterr()).split())
+        assert result == 1
+        assert "multi_ci_cure" in said
+        assert "alpha, trigger" in said
 
     def test_owner_missing_branch_flag(self, tmp_path):
 

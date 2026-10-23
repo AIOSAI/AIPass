@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_entry_limits.py
 # Description: entry_limits config reader and the apps/modules/limits.py gateway over it
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -365,6 +365,79 @@ class TestTheDraftPercentComesFromTheConfig:
 
         assert mod.draft_percent() == 80
         assert mod.draft_target(300) == 240
+
+
+def _gate_hits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config: dict, session: dict) -> list:
+    """Run one authored session through the gate's own route: the door's load_entry_limits + changed_entries."""
+    monkeypatch.setattr(_entry_limits.config_loader, "_CONFIG_PATH", _write_config(tmp_path, config))
+    limits = _limits.load_entry_limits("any")
+    entry = {"number": 1, "date": "2026-10-23", "summary": "ok", "status": "done", **session}
+    return _limits.changed_entries({}, {"sessions": [entry]}, limits)
+
+
+def _banded_config(**overrides) -> dict:
+    """_full_config with a closed session shape, so a non-canonical field cap is measured too."""
+    config = _full_config(**overrides)
+    config["entry_limits"]["entry_types"]["sessions"]["fields"] = {
+        "summary": {"type": "str", "required": True, "max_chars": 300},
+        "status": {"type": "str", "required": False, "max_chars": 40},
+    }
+    return config
+
+
+class TestTheGateAllowsATenPercentBand:
+    """The writer aims at the cap; the gate refuses only past cap * (100 + tolerance_percent) // 100."""
+
+    def test_an_entry_at_cap_plus_ten_percent_is_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        hits = _gate_hits(tmp_path, monkeypatch, _banded_config(tolerance_percent=10), {"summary": "x" * 330})
+
+        assert hits == []
+
+    def test_one_char_past_the_band_is_refused_naming_the_plain_cap(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        hits = _gate_hits(tmp_path, monkeypatch, _banded_config(tolerance_percent=10), {"summary": "x" * 331})
+
+        assert [(h["length"], h["cap"], h["over_by"]) for h in hits] == [(331, 300, 31)]
+
+    def test_the_band_rounds_down_to_whole_characters(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config = _banded_config(tolerance_percent=10)
+        config["entry_limits"]["entry_types"]["sessions"]["max_chars"] = 205
+
+        assert _gate_hits(tmp_path, monkeypatch, config, {"summary": "x" * 225}) == []
+        assert [h["length"] for h in _gate_hits(tmp_path, monkeypatch, config, {"summary": "x" * 226})] == [226]
+
+    def test_a_non_canonical_field_cap_carries_the_same_band(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = _banded_config(tolerance_percent=10)
+
+        assert _gate_hits(tmp_path, monkeypatch, config, {"status": "s" * 44}) == []
+        refused = _gate_hits(tmp_path, monkeypatch, config, {"status": "s" * 45})
+        assert [(h["field"], h["reason"], h["cap"]) for h in refused] == [("status", "field_over_cap", 40)]
+
+    def test_a_tag_list_s_joined_cap_carries_the_same_band(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = _banded_config(tolerance_percent=10)
+
+        assert _gate_hits(tmp_path, monkeypatch, config, {"tags": ["a" * 66, "b" * 66]}) == []
+        refused = _gate_hits(tmp_path, monkeypatch, config, {"tags": ["a" * 66, "b" * 67]})
+        assert [(h["field"], h["length"], h["cap"]) for h in refused] == [("tags", 133, 120)]
+
+    def test_the_band_is_the_config_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        hits = _gate_hits(tmp_path, monkeypatch, _banded_config(tolerance_percent=0), {"summary": "x" * 301})
+
+        assert [h["length"] for h in hits] == [301]
+
+    @pytest.mark.parametrize("bad", [-1, 101, "10", True, [10], "absent"])
+    def test_an_unusable_or_missing_tolerance_serves_the_seed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: object
+    ) -> None:
+        config = _banded_config() if bad == "absent" else _banded_config(tolerance_percent=bad)
+
+        assert _gate_hits(tmp_path, monkeypatch, config, {"summary": "x" * 330}) == []
+        assert [h["length"] for h in _gate_hits(tmp_path, monkeypatch, config, {"summary": "x" * 331})] == [331]
 
 
 _GATEWAY_CONTRACT = (

@@ -1,12 +1,13 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import pins
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.1 (2026-10-22): Telethon import probe cut (Telegram left skills); walk skips '(disabled)' files
 #   - v1.1.0 (2026-10-08): The old guard's caller-is-None case, read through
 #     private names, becomes two dead-cwd pins on the v2 fence (DPLAN-0404)
 #   - v1.0.0 (2026-08-31): Windows round 4 - every skills module must import
@@ -55,6 +56,9 @@ def _skills_modules(branch_root: Path = BRANCH_ROOT) -> list:
         if any(part.startswith(".") for part in rel.parts):
             continue
         if {"tests", "__pycache__", "templates", "dropbox", "docs.local"} & set(rel.parts):
+            continue
+        # A '(disabled)' file is parked by name: not an identifier, so nothing can import it.
+        if not all(part.isidentifier() for part in rel.with_suffix("").parts):
             continue
         parts = ["aipass", "skills", *rel.with_suffix("").parts]
         if parts[-1] == "__init__":
@@ -488,62 +492,6 @@ def test_the_fence_refuses_an_elsewhere_seat_with_a_dead_cwd(tmp_path):
     assert _run_fence_with_a_dead_cwd(seat, tmp_path)[-1] == "DENIED Caller branch: unknown"
 
 
-# An absent optional dependency is reported once, at first use, never as a WARNING at module import.
-_IMPORT_WARNING_PROBE = r"""
-import importlib
-import sys
-
-records = []
-
-
-class _Recorder:
-    def warning(self, msg, *a, **k):
-        records.append(str(msg))
-
-    def __getattr__(self, _name):
-        return lambda *a, **k: None
-
-
-import aipass.prax
-
-aipass.prax.logger = _Recorder()
-
-import aipass.skills.lib.telegram.apps.handlers.botfather_client as bfc
-
-bfc.logger = _Recorder.__call__ if False else bfc.logger
-before = len(records)
-
-# Import the module three more times the way a fresh process would.
-for _ in range(3):
-    del sys.modules["aipass.skills.lib.telegram.apps.handlers.botfather_client"]
-    mod = importlib.import_module(
-        "aipass.skills.lib.telegram.apps.handlers.botfather_client"
-    )
-    mod.logger = _Recorder()
-
-telethon_warnings = [r for r in records if "Telethon not installed" in r]
-print("IMPORT_TIME_TELETHON_WARNINGS=%d" % len(telethon_warnings))
-"""
-
-
-def test_absent_telethon_is_not_announced_on_every_import():
-    """Importing the module must not log the same environment fact each time."""
-    env = dict(os.environ, PYTHONPATH=str(SRC_ROOT))
-    env.pop("AIPASS_TEST_LOG_DIR", None)
-    result = subprocess.run(
-        [sys.executable, "-c", "import sys; exec(compile(sys.argv[1], '<string>', 'exec'))", _IMPORT_WARNING_PROBE],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=env,
-        cwd=str(SRC_ROOT),
-        timeout=60,
-    )
-    assert result.returncode == 0, f"import-warning probe crashed: {result.stderr[-800:]}"
-    line = [ln for ln in result.stdout.splitlines() if ln.startswith("IMPORT_TIME_TELETHON_WARNINGS=")][0]
-    assert line.endswith("=0"), f"the absent-Telethon condition is still announced at import time: {line}"
-
-
 # Pre-3.11 pathlib's capture, rebuilt here so dropping the accessor patch reddens on 3.11+ too, not only on 3.10.
 _EMULATION = r"""
 import os
@@ -831,7 +779,14 @@ class TestTheModuleWalk:
         The root stands inside a directory named dropbox, so a skip judged on the whole path would hide the branch.
         """
         branch = tmp_path / "dropbox" / "skills"
-        for rel in ("apps/a.py", "dropbox/tool.py", "docs.local/x/tool.py", ".archive/old.py", "tests/test_a.py"):
+        for rel in (
+            "apps/a.py",
+            "dropbox/tool.py",
+            "docs.local/x/tool.py",
+            ".archive/old.py",
+            "tests/test_a.py",
+            "apps/b(disabled).py",
+        ):
             target = branch / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("", encoding="utf-8")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_blocked_contract.py
 # Description: Blocked is not ran — a wake that never started must not consume the period
-# Version: 1.0.1
+# Version: 1.0.2
 # Created:2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
@@ -96,7 +96,6 @@ def _fire_due(job, *seams):
         stack.enter_context(patch(f"{RUN}.is_job_due", return_value=True))
         stack.enter_context(patch(f"{RUN}.missed_window", return_value=False))
         stack.enter_context(patch(f"{RUN}.save_runstate", return_value=True))
-        stack.enter_context(patch(f"{RUN}._should_notify", return_value=False))
         for seam in seams:
             stack.enter_context(seam)
         results = run_tick()

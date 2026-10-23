@@ -65,9 +65,7 @@ Captured ideas, brainstorms, future possibilities. Add freely.
 ## Notes
 Session notes, discoveries, changes
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this plan here. No markdown, no symbols, no tables, no code blocks, no asterisks, no bullet points. Just natural sentences that can be read aloud by a text to speech tool. Update this section whenever the plan changes significantly.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 *Created: {today}*

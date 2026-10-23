@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_critical_paths.py
 # Description: Critical path tests for API branch core functions
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-31
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
@@ -15,81 +15,42 @@
 from unittest.mock import patch, MagicMock
 
 import pytest
+from keyring.errors import KeyringLocked
 
 from aipass.api.apps.modules import api_key
 from aipass.api.apps.modules import openrouter_client
 
 
-def _home_at(monkeypatch, home):
-    """Point Path.home() at `home` through the environment it reads on every platform."""
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
+FIXTURE_KEY = "sk-or-v1-" + "a" * 40
 
 
 class TestGetApiKey:
-    """Tests for fetch_api_key() — key retrieval from secrets file (single source)."""
+    """Tests for fetch_api_key() — the key read from the keyring entry aipass/<provider>/api_key."""
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_key_from_secrets_file(self, mock_jh, tmp_path, monkeypatch):
-        """Key found in ~/.secrets/aipass/.env is returned after validation."""
-        secrets_dir = tmp_path / ".secrets" / "aipass"
-        secrets_dir.mkdir(parents=True)
-        env_file = secrets_dir / ".env"
-        env_file.write_text(
-            "OPENROUTER_API_KEY=sk-or-v1-fake-test-key-do-not-use-aabbccdd0011\n",
-            encoding="utf-8",
-        )
+    def test_key_from_the_keyring_entry(self, mock_jh, keyring_store):
+        keyring_store.set_password("aipass", "openrouter/api_key", FIXTURE_KEY)
 
-        _home_at(monkeypatch, tmp_path)
-        result = api_key.fetch_api_key("openrouter")
-
-        assert result == "sk-or-v1-fake-test-key-do-not-use-aabbccdd0011"
+        assert api_key.fetch_api_key("openrouter") == FIXTURE_KEY
         mock_jh.log_operation.assert_called_once()
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_no_key_found_returns_none(self, mock_jh, tmp_path, monkeypatch):
-        """Returns None when no secrets file exists."""
-        _home_at(monkeypatch, tmp_path / "nonexistent_home")
-        result = api_key.fetch_api_key("openrouter")
-
-        assert result is None
+    def test_no_entry_returns_none(self, mock_jh):
+        assert api_key.fetch_api_key("openrouter") is None
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_invalid_key_format_returns_none(self, mock_jh, tmp_path, monkeypatch):
-        """Key in secrets with wrong prefix returns None."""
-        secrets_dir = tmp_path / ".secrets" / "aipass"
-        secrets_dir.mkdir(parents=True)
-        env_file = secrets_dir / ".env"
-        env_file.write_text(
-            "OPENROUTER_API_KEY=INVALID-PREFIX-key-that-is-long-enough-to-pass\n",
-            encoding="utf-8",
-        )
+    def test_invalid_key_format_returns_none(self, mock_jh, keyring_store):
+        keyring_store.set_password("aipass", "openrouter/api_key", "INVALID-PREFIX-key-that-is-long-enough-to-pass")
 
-        _home_at(monkeypatch, tmp_path)
-        result = api_key.fetch_api_key("openrouter")
-
-        assert result is None
+        assert api_key.fetch_api_key("openrouter") is None
 
     @patch("aipass.api.apps.handlers.auth.keys.json_handler", autospec=True)
-    def test_an_unreadable_secrets_file_raises_naming_only_the_error(self, mock_jh, tmp_path, monkeypatch):
-        """A secrets file that does not read raises KeyUnavailable, with no byte of the file in it."""
-        # None would read the same as "no key set"; the expected reason is the interpreter's own on the same read.
-        secrets_dir = tmp_path / ".secrets" / "aipass"
-        secrets_dir.mkdir(parents=True)
-        env_file = secrets_dir / ".env"
-        env_file.write_bytes(b"OPENROUTER_API_KEY=\xff\xfeQZ\n")
-        try:
-            env_file.read_text(encoding="utf-8")
-        except Exception as own:
-            expected = getattr(own, "strerror", None) or type(own).__name__
-        else:
-            pytest.fail("the stand-in file read cleanly; it cannot stand for an unreadable one")
+    def test_a_locked_keyring_raises_naming_the_backend_never_none(self, mock_jh, keyring_store):
+        with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+            with pytest.raises(api_key.keys.KeyUnavailable) as caught:
+                api_key.fetch_api_key("openrouter")
 
-        _home_at(monkeypatch, tmp_path)
-        with pytest.raises(api_key.keys.KeyUnavailable) as caught:
-            api_key.fetch_api_key("openrouter")
-
-        assert str(caught.value) == f"The secrets file could not be read ({expected})"
+        assert "DictKeyring" in str(caught.value)
         assert caught.value.__cause__ is None
         assert caught.value.__suppress_context__ is True
         mock_jh.log_operation.assert_not_called()

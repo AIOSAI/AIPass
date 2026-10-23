@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_autostart.py
 # Description: Tests for the supervisor seam — a server that comes back on its own
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -15,7 +15,6 @@
 # seedgo: no-test-needed(ruff) — that autostart.py parses and imports
 # seedgo: no-test-needed(constant) — RESTART_SECONDS, START_LIMIT_INTERVAL_SECONDS and START_LIMIT_BURST's values
 # seedgo: no-test-needed(external) — a real systemd; subprocess.run is scripted and is_supported pinned
-# seedgo: no-test-needed(external) — linger_enabled's real loginctl query; it is patched where it is read
 
 from pathlib import Path
 from typing import Any, Iterator
@@ -87,6 +86,19 @@ class TestTheUnitSaysWhatItMeans:
         assert "StartLimitBurst" in unit_section
         assert "StartLimitIntervalSec" not in service_section
         assert "StartLimitBurst" not in service_section
+
+    def test_the_unit_starts_and_stops_with_the_graphical_session(self, tmp_path: Path) -> None:
+        """The login keyring opens at login: a unit started at boot dies at its start limit and stays dead."""
+        text = host_autostart.unit_text(["/py", "/app.py"], tmp_path, tmp_path / "x.log")
+        unit_section = text.split("[Service]")[0].splitlines()
+        install_section = text.split("[Install]")[1].splitlines()
+
+        assert "After=graphical-session.target" in unit_section
+        assert "PartOf=graphical-session.target" in unit_section
+        assert [line for line in install_section if line.startswith("WantedBy=")] == [
+            "WantedBy=graphical-session.target"
+        ]
+        assert "default.target" not in text
 
     def test_both_streams_append_to_the_one_log(self, tmp_path: Path) -> None:
         """
@@ -254,22 +266,22 @@ class TestTheInstallStepsAreOrderedAndOutsideTheTree:
 
         assert joined.index("cp ") < joined.index("daemon-reload") < joined.index("enable --now")
 
-    def test_lingering_is_part_of_the_instructions(self) -> None:
-        """
-        Without it a user unit waits for a login, which a headless reboot never
-        provides — the exact failure this build exists to end."""
-        assert any("enable-linger" in step for step in host_autostart.install_commands(Path("/u")))
+    def test_the_steps_are_four_and_none_touches_the_account(self) -> None:
+        """Lingering is the account's setting for the daemon's timers, never this unit's install."""
+        steps = host_autostart.install_commands(Path("/u"))
+
+        assert len(steps) == 4
+        assert not [step for step in steps if "linger" in step or "loginctl" in step]
 
 
 class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
     """The verb itself, routed the way a person reaches it."""
 
-    def _report(self, base: Path, linger: Any = True, conflict: Any = None) -> dict:
-        """The handler's real report shape — unit, steps, linger, conflict."""
+    def _report(self, base: Path, conflict: Any = None) -> dict:
+        """The handler's real report shape — unit, steps, conflict."""
         return {
             "unit": base / "branch" / "logs" / "aipass-host-api.service",
             "steps": ["cp /branch/logs/u.service ~/.config/systemd/user/", "systemctl --user enable --now x"],
-            "linger": linger,
             "conflict": conflict,
         }
 
@@ -287,26 +299,16 @@ class TestTheAutostartVerbAtTheLayerAnOperatorTypes:
         for step in report["steps"]:
             assert step in printed, f"the operator was not shown the step they have to run: {step}"
 
-    def test_lingering_being_off_is_a_warning_not_a_dim_note(self, quiet_serve: dict, tmp_path: Path) -> None:
-        """Lingering off is the one report field shown as a warning, not a dim note."""
+    def test_the_verb_says_nothing_about_lingering(
+        self, quiet_serve: dict, tmp_path: Path, capsys: pytest.CaptureFixture
+    ) -> None:
+        """No conflict means no warning, and no line about the account's lingering."""
         with patch.object(host_serve_module, "warning") as warned:
-            with patch.object(
-                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(tmp_path, linger=False)
-            ):
-                assert handle_command("host-api", ["autostart"]) is True
-
-        warned.assert_called_once()
-        assert "linger" in str(warned.call_args).lower()
-
-    def test_lingering_that_could_not_be_read_is_not_reported_as_off(self, quiet_serve: dict, tmp_path: Path) -> None:
-        """None is a third answer, and collapsing it into False cries wolf."""
-        with patch.object(host_serve_module, "warning") as warned:
-            with patch.object(
-                host_serve_module.host_lifetime, "autostart_report", return_value=self._report(tmp_path, linger=None)
-            ):
+            with patch.object(host_serve_module.host_lifetime, "autostart_report", return_value=self._report(tmp_path)):
                 assert handle_command("host-api", ["autostart"]) is True
 
         warned.assert_not_called()
+        assert "linger" not in capsys.readouterr().out.lower()
 
     def test_a_non_numeric_port_is_refused_before_the_handler_runs(self, quiet_serve: dict) -> None:
         """A typo'd --port must not reach the unit renderer."""
@@ -379,25 +381,25 @@ class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
         refused = _completed(returncode=1)
         refused.stderr = "Failed to enable unit"
 
-        with patch.object(host_autostart, "linger_enabled", return_value=False):
-            with patch.object(host_autostart.subprocess, "run", return_value=refused) as run:
-                report = host_autostart.enable_unit()
+        with patch.object(host_autostart.subprocess, "run", return_value=refused) as run:
+            report = host_autostart.enable_unit()
 
-        assert run.call_count == 1, "the linger step ran after the enable had already failed"
+        assert run.call_count == 1
         assert report["ok"] is False
         assert [(step["ok"], step["detail"]) for step in report["steps"]] == [(False, "Failed to enable unit")]
         assert "enable --now" in report["steps"][0]["step"]
 
-    def test_enable_turns_lingering_on_only_when_it_is_off(self, has_systemd: None) -> None:
-        for linger, expected in ((False, 2), (True, 1)):
-            with patch.object(host_autostart, "linger_enabled", return_value=linger):
-                with patch.object(host_autostart.subprocess, "run", return_value=_completed()) as run:
-                    report = host_autostart.enable_unit()
+    def test_enable_runs_enable_now_and_nothing_else(self, has_systemd: None) -> None:
+        with patch.object(host_autostart.subprocess, "run", return_value=_completed()) as run:
+            report = host_autostart.enable_unit()
 
-            assert run.call_count == expected
-            assert run.call_args_list[0].args[0] == ["systemctl", "--user", "enable", "--now", host_autostart.UNIT_NAME]
-            assert report["ok"] is True
-        assert len(report["steps"]) == 1
+        assert [call.args[0] for call in run.call_args_list] == [
+            ["systemctl", "--user", "enable", "--now", host_autostart.UNIT_NAME]
+        ]
+        assert report["ok"] is True
+        assert [step["step"] for step in report["steps"]] == [
+            f"systemctl --user enable --now {host_autostart.UNIT_NAME}"
+        ]
 
     def test_the_module_door_refuses_to_enable_over_a_hand_started_server(self, quiet: None) -> None:
         """enable --now against a detached server's port would crash-loop the unit."""
@@ -417,16 +419,15 @@ class TestTheInstallerDoorsRunTheStepsTheVerbPrints:
             patch.object(host_autostart, "supervised_pid", return_value=4242),
             patch.object(host_lifetime, "unit_path", return_value=tmp_path / "u.service"),
         ):
-            with patch.object(host_autostart, "linger_enabled", return_value=True):
-                with patch.object(host_lifetime, "write_unit") as write:
-                    report = host_api_module.autostart("127.0.0.1", 9100)
+            with patch.object(host_lifetime, "write_unit") as write:
+                report = host_api_module.autostart("127.0.0.1", 9100)
 
         write.assert_not_called()
         assert report["rendered"] is False
         assert report["running"] == 4242
 
     def test_the_module_door_renders_when_no_unit_runs(self, quiet: None, tmp_path: Path) -> None:
-        rendered = {"unit": tmp_path / "u.service", "steps": [], "linger": True, "conflict": None}
+        rendered = {"unit": tmp_path / "u.service", "steps": [], "conflict": None}
 
         with patch.object(host_autostart, "supervised_pid", return_value=0):
             with patch.object(host_lifetime, "autostart_report", return_value=rendered) as reporter:

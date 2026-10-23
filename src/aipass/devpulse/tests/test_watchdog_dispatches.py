@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_watchdog_dispatches.py
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/watchdog/dispatches.py parses and imports
-# seedgo: no-test-needed(documentation) — that seat_email, is_mine, outstanding and overdue carry docstrings
+# seedgo: no-test-needed(documentation) — that seat_email, is_mine and outstanding carry docstrings
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -138,7 +138,7 @@ def test_a_closed_dispatch_is_not_outstanding(tmp_path):
 def test_overdue_is_true_on_its_own_with_nothing_running(tmp_path):
     """Overdue is a fact about a file, not a poll result: expected_by is the monitor's own hard timeout."""
     root = _repo_with_register(tmp_path, [_sent("late", minutes_ahead=-30), _sent("fine", minutes_ahead=30)])
-    late = dispatches.overdue(root)
+    late = [e for e in dispatches.outstanding(root) if e["overdue"]]
     assert [e["dispatch_id"] for e in late] == ["late"]
 
 
@@ -147,7 +147,7 @@ def test_a_completed_dispatch_is_never_overdue(tmp_path):
         tmp_path,
         [_sent("d1", minutes_ahead=-90), {"dispatch_id": "d1", "status": "completed"}],
     )
-    assert dispatches.overdue(root) == []
+    assert [e for e in dispatches.outstanding(root) if e["overdue"]] == []
 
 
 def test_outstanding_refuses_rather_than_returning_the_live_register(tmp_path):

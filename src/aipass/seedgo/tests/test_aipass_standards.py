@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -30,7 +30,8 @@ from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 def _pin_bypass_log(monkeypatch):
     """Point is_bypassed's json_handler at a mock for every test here.
 
-    is_bypassed appends to the tracked seedgo_json/utils_log.json via its own module's json_handler; xdist races corrupt it.
+    is_bypassed appends to the tracked seedgo_json/utils_log.json via its own module's json_handler;
+    xdist races corrupt it.
     """
     mock_handler = MagicMock()
     mock_handler.log_operation = MagicMock(return_value=True)
@@ -1558,6 +1559,50 @@ def test_two_unresolved_or_two_resolved_spellings_are_acquitted(tmp_path):
         "def same_resolved(target):\n"
         "    return Path(target).resolve().relative_to(Path.home().resolve())\n"
     )
+    assert _scan_source(tmp_path, source)[0] == []
+
+
+# Arm F: drone's aipass_github fixture (conftest 1.3.0 vs 1.3.1), minimised.
+_EMPTIED_GIT = (
+    "import pytest\n\n\n"
+    "@pytest.fixture()\n"
+    "def repo(tmp_path, monkeypatch):\n"
+    '    (tmp_path / "gitconfig").write_text("", encoding="utf-8")\n'
+    '    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))\n'
+    '    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")\n'
+    "IDENTITY"
+    "    return tmp_path\n"
+)
+
+
+def test_emptied_git_config_with_no_commit_email_is_convicted_once_at_the_first_emptying_line(tmp_path):
+    """The CI exit 128: a runner has no email git can auto-detect once the host config is gone."""
+    violations, _acquitted = _scan_source(tmp_path, _EMPTIED_GIT.replace("IDENTITY", ""))
+    assert _lines(violations) == [7]
+    assert "GIT_AUTHOR_EMAIL" in violations[0][1] and "GIT_COMMITTER_EMAIL" in violations[0][1]
+
+
+def test_both_emails_set_as_the_cured_fixture_does_are_acquitted(tmp_path):
+    """conftest 1.3.1: the four GIT_AUTHOR_*/GIT_COMMITTER_* variables set through a loop."""
+    identity = (
+        '    for name in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):\n'
+        '        monkeypatch.setenv(name, "door@test.invalid")\n'
+    )
+    assert _scan_source(tmp_path, _EMPTIED_GIT.replace("IDENTITY", identity))[0] == []
+
+
+def test_an_author_email_alone_is_convicted_because_git_resolves_the_committer_separately(tmp_path):
+    """A half cure: git commit still asks for the committer's email and exits 128."""
+    identity = '    monkeypatch.setenv("GIT_AUTHOR_EMAIL", "a@test.invalid")\n'
+    violations, _acquitted = _scan_source(tmp_path, _EMPTIED_GIT.replace("IDENTITY", identity))
+    assert _lines(violations) == [7]
+    assert "GIT_COMMITTER_EMAIL" in violations[0][1] and "GIT_AUTHOR_EMAIL" not in violations[0][1]
+
+
+def test_a_user_email_written_to_git_config_is_acquitted(tmp_path):
+    """`git config user.email` (or `-c user.email=`) answers both identities at once."""
+    identity = '    subprocess.run(["git", "config", "--global", "user.email", "t@test.invalid"], check=True)\n'
+    source = "import subprocess\n" + _EMPTIED_GIT.replace("IDENTITY", identity)
     assert _scan_source(tmp_path, source)[0] == []
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_google_client.py
 # Description: Tests for Google API client module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -24,11 +24,12 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — build_service() and its thread-safe twin, tests/test_service_factory_handler.py
 # seedgo: no-test-needed(covered) — the backoff behind api_call_with_retry(), tests/test_retry_handler.py
-# seedgo: no-test-needed(constant) — CREDS_PATH and CLIENT_SECRET_PATH's real locations; every test patches them
 
+import json
 from unittest.mock import patch, MagicMock
 
 import pytest
+from keyring.errors import KeyringLocked
 
 from aipass.api.apps.handlers.google.auth import DEFAULT_SCOPES, load_credentials, refresh_credentials, run_oauth_flow
 from aipass.api.apps.modules import google_client
@@ -37,6 +38,9 @@ from aipass.api.apps.modules.google_client import handle_command as _hc  # noqa:
 
 # Base patch path for all mocks in this module
 _MOD = "aipass.api.apps.modules.google_client"
+IMPORT_HINT = "Put google_client_secret.json in the store, then run: drone @api secrets migrate"
+CREDS_DOC = {"token": "gtok-fixture", "refresh_token": "gref-fixture", "client_id": "cid", "client_secret": "cs"}
+CLIENT_DOC = {"installed": {"client_id": "cid-fixture", "client_secret": "cs-fixture"}}
 
 
 # =============================================
@@ -89,7 +93,7 @@ def test_handle_command_routes_reauth_google(
 ):
     """handle_command routes 'reauth' with ['google'] to _cmd_reauth."""
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.reauth.return_value = MagicMock()
 
     result = google_client.handle_command("reauth", ["google"])
@@ -129,8 +133,8 @@ def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _fact
 def test_handle_command_google_introspection(_warn, _err, _succ, mock_hdr, _json, _retry, _factory, mock_auth, capsys):
     """handle_command prints introspection when command='google' and args=[]."""
     mock_auth.is_available.return_value = True
-    mock_auth.CREDS_PATH.exists.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_credentials.return_value = True
+    mock_auth.has_client_secret.return_value = True
 
     result = google_client.handle_command("google", [])
 
@@ -517,13 +521,13 @@ def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, mock_hdr, mock_
 def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
     """validate google shows error when client secret file is missing."""
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = False
+    mock_auth.has_client_secret.return_value = False
 
     assert google_client.handle_command("validate", ["google"]) is True
 
     mock_err.assert_called_once_with(
         "Client secret not found",
-        suggestion=f"Save OAuth client secret to: {mock_auth.CLIENT_SECRET_PATH}",
+        suggestion=IMPORT_HINT,
     )
     mock_auth.validate_credentials.assert_not_called()
     mock_json.log_operation.assert_not_called()
@@ -540,7 +544,7 @@ def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, mock_json, 
 def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth):
     """validate google shows success when credentials are valid."""
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.validate_credentials.return_value = True
 
     assert google_client.handle_command("validate", ["google"]) is True
@@ -563,7 +567,7 @@ def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retr
 def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, capsys):
     """validate google shows warning and the reauth hint when credentials are invalid."""
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.validate_credentials.return_value = False
 
     assert google_client.handle_command("validate", ["google"]) is True
@@ -613,14 +617,14 @@ def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, mock_hdr, mock_js
 def test_cmd_reauth_success(mock_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, capsys):
     """reauth google shows success when reauth returns credentials."""
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.reauth.return_value = MagicMock()
 
     assert google_client.handle_command("reauth", ["google"]) is True
 
     mock_warn.assert_called_once_with("Starting OAuth2 flow...")
     mock_succ.assert_called_once_with("Google re-authentication successful")
-    assert f"Credentials saved to: {mock_auth.CREDS_PATH}" in capsys.readouterr().out
+    assert "Credentials saved to the entry google/creds" in capsys.readouterr().out
     mock_json.log_operation.assert_called_once_with("google_reauth", {"status": "success"})
     _err.assert_not_called()
 
@@ -636,7 +640,7 @@ def test_cmd_reauth_success(mock_warn, _err, mock_succ, _hdr, mock_json, _retry,
 def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
     """reauth google shows error when reauth returns None."""
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.reauth.return_value = None
 
     assert google_client.handle_command("reauth", ["google"]) is True
@@ -658,7 +662,7 @@ def test_cmd_reauth_shows_the_flow_reason(_warn, mock_err, _succ, _hdr, mock_jso
     """reauth google shows the consent flow's own reason."""
     mock_auth.GoogleAuthUnavailable = _GOOGLE_UNAVAILABLE
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.reauth.side_effect = _GOOGLE_UNAVAILABLE("Google OAuth flow failed: port in use")
 
     assert google_client.handle_command("reauth", ["google"]) is True
@@ -680,7 +684,7 @@ def test_cmd_validate_shows_the_reason(mock_warn, mock_err, _succ, _hdr, mock_js
     """validate google names an unreadable file or a failed refresh instead of "invalid"."""
     mock_auth.GoogleAuthUnavailable = _GOOGLE_UNAVAILABLE
     mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
+    mock_auth.has_client_secret.return_value = True
     mock_auth.validate_credentials.side_effect = _GOOGLE_UNAVAILABLE("Google credential refresh failed: offline")
 
     assert google_client.handle_command("validate", ["google"]) is True
@@ -725,83 +729,91 @@ _GOOGLE_UNAVAILABLE = google_client.google_auth.GoogleAuthUnavailable
 
 @patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
-@patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_load_credentials_success(mock_creds_path, mock_creds_cls, mock_json):
-    """load_credentials() returns Credentials when file exists and loads ok."""
-    mock_creds_path.exists.return_value = True
+def test_load_credentials_come_from_the_creds_entry(mock_creds_cls, mock_json, keyring_store):
+    """load_credentials() builds Credentials from the entry google/creds, never a file."""
+    keyring_store.set_password("aipass", "google/creds", json.dumps(CREDS_DOC))
     mock_creds_obj = MagicMock()
-    mock_creds_cls.from_authorized_user_file.return_value = mock_creds_obj
+    mock_creds_cls.from_authorized_user_info.return_value = mock_creds_obj
 
     result = load_credentials()
 
     assert result is mock_creds_obj
-    mock_creds_cls.from_authorized_user_file.assert_called_once_with(
-        str(mock_creds_path),
+    mock_creds_cls.from_authorized_user_info.assert_called_once_with(
+        CREDS_DOC,
         ["https://www.googleapis.com/auth/drive.file"],
     )
-    mock_json.log_operation.assert_called_once_with("credentials_loaded", {"source": str(mock_creds_path)})
+    mock_json.log_operation.assert_called_once_with("credentials_loaded", {"source": "google/creds"})
 
 
 @patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
-@patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_load_credentials_custom_scopes(mock_creds_path, mock_creds_cls, mock_json):
+def test_load_credentials_custom_scopes(mock_creds_cls, mock_json, keyring_store):
     """load_credentials() uses custom scopes when provided."""
-    mock_creds_path.exists.return_value = True
+    keyring_store.set_password("aipass", "google/creds", json.dumps(CREDS_DOC))
     custom_scopes = ["https://www.googleapis.com/auth/calendar.readonly"]
-    mock_creds_cls.from_authorized_user_file.return_value = MagicMock()
 
     load_credentials(scopes=custom_scopes)
 
-    mock_creds_cls.from_authorized_user_file.assert_called_once_with(
-        str(mock_creds_path),
-        custom_scopes,
-    )
+    mock_creds_cls.from_authorized_user_info.assert_called_once_with(CREDS_DOC, custom_scopes)
 
 
 @patch(f"{_AUTH}.Credentials")
-@patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
-def test_load_credentials_libs_unavailable(mock_creds_path, mock_creds_cls):
-    """load_credentials() returns None without touching the token file when Google libs are not installed."""
-    result = load_credentials()
+def test_load_credentials_libs_unavailable(mock_creds_cls, keyring_store):
+    """load_credentials() returns None without reading the entry when Google libs are not installed."""
+    with patch.object(keyring_store, "get_password") as read:
+        assert load_credentials() is None
 
-    assert result is None
-    mock_creds_path.exists.assert_not_called()
-    mock_creds_cls.from_authorized_user_file.assert_not_called()
+    read.assert_not_called()
+    mock_creds_cls.from_authorized_user_info.assert_not_called()
 
 
-@patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_load_credentials_no_file(mock_creds_path):
-    """load_credentials() returns None when creds file does not exist."""
-    mock_creds_path.exists.return_value = False
-
-    result = load_credentials()
-
-    assert result is None
+def test_load_credentials_no_entry():
+    """load_credentials() returns None when the entry google/creds does not exist."""
+    assert load_credentials() is None
 
 
 @patch(f"{_AUTH}.json_handler", autospec=True)
 @patch(f"{_AUTH}.Credentials")
-@patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_load_credentials_exception(mock_creds_path, mock_creds_cls, mock_json):
-    """A saved file that does not load raises GoogleAuthUnavailable with the reason.
-
-    It used to answer None, which read the same as "nothing saved yet"
-    (api, fleet green leg 10).
-    """
-    mock_creds_path.exists.return_value = True
-    mock_creds_cls.from_authorized_user_file.side_effect = ValueError("corrupt file")
+def test_load_credentials_exception(mock_creds_cls, mock_json, keyring_store):
+    """An entry that does not load raises GoogleAuthUnavailable with the reason, never None."""
+    keyring_store.set_password("aipass", "google/creds", json.dumps(CREDS_DOC))
+    mock_creds_cls.from_authorized_user_info.side_effect = ValueError("corrupt entry")
 
     with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
         load_credentials()
 
-    assert str(caught.value) == "Saved Google credentials could not be loaded: corrupt file"
+    assert str(caught.value) == "Saved Google credentials could not be loaded: corrupt entry"
     mock_json.log_operation.assert_not_called()
+
+
+@patch(f"{_AUTH}.Credentials")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_a_locked_keyring_is_a_google_auth_error_for_the_headless_caller(mock_creds_cls, keyring_store):
+    """@backup's 05:45 job gets GoogleAuthUnavailable naming the backend, not a consent flow."""
+    with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+        with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
+            load_credentials()
+
+    assert "DictKeyring" in str(caught.value)
+
+
+@patch(f"{_AUTH}.Request")
+@patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
+def test_a_refresh_saves_to_the_creds_entry(mock_request_cls, keyring_store):
+    """A refreshed token is written to google/creds through the secrets store, not to a file."""
+    mock_creds = MagicMock()
+    mock_creds.expired = True
+    mock_creds.refresh_token = "tok_refresh"
+    mock_creds.to_json.return_value = json.dumps(CREDS_DOC)
+
+    assert refresh_credentials(mock_creds) is True
+
+    assert json.loads(keyring_store.entries[("aipass", "google/creds")]) == CREDS_DOC
 
 
 # =============================================
@@ -915,89 +927,80 @@ def test_refresh_transport_error_is_named_transient(mock_request_cls, mock_save)
 
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.InstalledAppFlow")
-@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_run_oauth_flow_success(mock_secret_path, mock_flow_cls, mock_save):
-    """run_oauth_flow() returns credentials after successful OAuth flow."""
-    mock_secret_path.exists.return_value = True
+def test_run_oauth_flow_reads_the_client_config_entry(mock_flow_cls, mock_save, keyring_store):
+    """run_oauth_flow() builds the flow from the entry google/client_secret."""
+    keyring_store.set_password("aipass", "google/client_secret", json.dumps(CLIENT_DOC))
     mock_flow = MagicMock()
     mock_creds = MagicMock()
-    mock_flow_cls.from_client_secrets_file.return_value = mock_flow
+    mock_flow_cls.from_client_config.return_value = mock_flow
     mock_flow.run_local_server.return_value = mock_creds
 
     result = run_oauth_flow()
 
     assert result is mock_creds
-    mock_flow_cls.from_client_secrets_file.assert_called_once_with(
-        str(mock_secret_path),
-        DEFAULT_SCOPES["drive"],
-    )
+    mock_flow_cls.from_client_config.assert_called_once_with(CLIENT_DOC, DEFAULT_SCOPES["drive"])
     mock_flow.run_local_server.assert_called_once_with(port=0, open_browser=True)
     mock_save.assert_called_once_with(mock_creds)
 
 
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.InstalledAppFlow")
-@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_run_oauth_flow_custom_params(mock_secret_path, mock_flow_cls, mock_save):
+def test_run_oauth_flow_custom_params(mock_flow_cls, mock_save, keyring_store):
     """run_oauth_flow() passes custom scopes, port, and open_browser."""
-    mock_secret_path.exists.return_value = True
+    keyring_store.set_password("aipass", "google/client_secret", json.dumps(CLIENT_DOC))
     mock_flow = MagicMock()
-    mock_creds = MagicMock()
-    mock_flow_cls.from_client_secrets_file.return_value = mock_flow
-    mock_flow.run_local_server.return_value = mock_creds
+    mock_flow_cls.from_client_config.return_value = mock_flow
     custom_scopes = ["https://www.googleapis.com/auth/calendar"]
 
-    result = run_oauth_flow(scopes=custom_scopes, port=8085, open_browser=False)
+    run_oauth_flow(scopes=custom_scopes, port=8085, open_browser=False)
 
-    assert result is mock_creds
-    mock_flow_cls.from_client_secrets_file.assert_called_once_with(
-        str(mock_secret_path),
-        custom_scopes,
-    )
+    mock_flow_cls.from_client_config.assert_called_once_with(CLIENT_DOC, custom_scopes)
     mock_flow.run_local_server.assert_called_once_with(port=8085, open_browser=False)
 
 
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.InstalledAppFlow")
-@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
-def test_run_oauth_flow_libs_unavailable(mock_secret_path, mock_flow_cls, mock_save):
-    """run_oauth_flow() returns None without touching the client secret when Google libs are not installed."""
-    result = run_oauth_flow()
+def test_run_oauth_flow_libs_unavailable(mock_flow_cls, mock_save, keyring_store):
+    """run_oauth_flow() returns None without reading the entry when Google libs are not installed."""
+    with patch.object(keyring_store, "get_password") as read:
+        assert run_oauth_flow() is None
 
-    assert result is None
-    mock_secret_path.exists.assert_not_called()
-    mock_flow_cls.from_client_secrets_file.assert_not_called()
+    read.assert_not_called()
+    mock_flow_cls.from_client_config.assert_not_called()
     mock_save.assert_not_called()
 
 
-@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_run_oauth_flow_no_client_secret(mock_secret_path):
-    """run_oauth_flow() returns None when client secret file is missing."""
-    mock_secret_path.exists.return_value = False
-
-    result = run_oauth_flow()
-
-    assert result is None
+def test_run_oauth_flow_no_client_secret():
+    """run_oauth_flow() returns None when the entry google/client_secret does not exist."""
+    assert run_oauth_flow() is None
 
 
 @patch(f"{_AUTH}._save_credentials")
 @patch(f"{_AUTH}.InstalledAppFlow")
-@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
-def test_run_oauth_flow_exception(mock_secret_path, mock_flow_cls, mock_save):
+def test_run_oauth_flow_exception(mock_flow_cls, mock_save, keyring_store):
     """A failed consent flow raises GoogleAuthUnavailable with the reason."""
-    mock_secret_path.exists.return_value = True
-    mock_flow_cls.from_client_secrets_file.side_effect = ValueError("bad secret file")
+    keyring_store.set_password("aipass", "google/client_secret", json.dumps(CLIENT_DOC))
+    mock_flow_cls.from_client_config.side_effect = ValueError("bad client config")
 
     with pytest.raises(_GOOGLE_UNAVAILABLE) as caught:
         run_oauth_flow()
 
-    assert str(caught.value) == "Google OAuth flow failed: bad secret file"
+    assert str(caught.value) == "Google OAuth flow failed: bad client config"
     mock_save.assert_not_called()
+
+
+def test_the_help_names_the_import_verb_and_no_path(capsys):
+    google_client.print_help()
+
+    out = capsys.readouterr().out
+    assert "drone @api secrets migrate" in out
+    assert ".secrets" not in out
+    assert "~/" not in out
 
 
 @patch(f"{_AUTH}.run_oauth_flow")
@@ -1013,3 +1016,21 @@ def test_reauth_repairs_an_unloadable_file_through_the_flow(mock_load, mock_flow
 
     assert google_client.google_auth.reauth(port=8085, open_browser=False) is fresh
     mock_flow.assert_called_once_with(scopes=None, port=8085, open_browser=False)
+
+
+def test_the_introspection_reports_each_entry_from_the_store(keyring_store, capsys):
+    keyring_store.set_password("aipass", "google/creds", json.dumps(CREDS_DOC))
+
+    assert google_client.handle_command("google", []) is True
+
+    out = capsys.readouterr().out
+    assert google_client.google_auth.has_credentials() is True
+    assert "Credentials: found" in out
+    assert "Client Secret: not configured" in out
+
+
+def test_the_introspection_names_a_locked_store_as_unavailable(keyring_store, capsys):
+    with patch.object(keyring_store, "get_password", side_effect=KeyringLocked("locked")):
+        google_client.handle_command("google", [])
+
+    assert "Credentials: unavailable" in capsys.readouterr().out

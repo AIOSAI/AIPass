@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: presenter.py
 # Description: Watchdog presentation layer — handler result dicts rendered as CLI output
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Watchdog presentation — turning handler result dicts into console output.
@@ -139,12 +139,12 @@ def print_delivery_lag() -> None:
     dispatches_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.dispatches")
     try:
         open_now = dispatches_mod.outstanding()
-        late = dispatches_mod.overdue()
     except dispatches_mod.RegisterUnavailable as exc:
         # Logged too: the log is what remains if coverage went blind with nobody at the terminal.
         logger.warning("[watchdog] dispatch register unavailable: %s", exc)
         console.print(f"[dim]Dispatch register unavailable: {exc}[/dim]")
         return
+    late = [entry for entry in open_now if entry.get("overdue")]
 
     # Tells a week of "nothing overdue" from a week of nobody looking.
     json_handler.log_operation("delivery_lag_read", {"outstanding": len(open_now), "overdue": len(late)})

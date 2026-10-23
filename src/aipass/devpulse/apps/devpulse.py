@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: devpulse.py
 # Description: Entry point for devpulse branch — auto-discovers modules
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -26,12 +26,12 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console, err_console, error, resolve_exit, reset_command_state
+from aipass.cli.apps.modules import console, err_console, error, resolve_exit, reset_command_state, warning
 
 # The self-map and --help go to stdout like every branch's; never alias console to err_console here.
 
 # The one version source in the branch: keep it in step with the header's Version line.
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -47,29 +47,16 @@ def discover_modules() -> list[Any]:
         if file_path.name.startswith("_"):
             continue
 
-        module_names = [
-            f"aipass.devpulse.apps.modules.{file_path.stem}",
-            f"apps.modules.{file_path.stem}",
-        ]
-
-        loaded = False
-        for module_name in module_names:
-            try:
-                module = importlib.import_module(module_name)
-                if hasattr(module, "handle_command"):
-                    modules.append(module)
-                loaded = True
-                break
-            except (ImportError, ModuleNotFoundError) as e:
-                logger.info(f"[DEVPULSE] Module {module_name} not found: {e}")
-                continue
-            except Exception as e:
-                logger.error(f"[DEVPULSE] Failed to load module {module_name}: {e}")
-                loaded = True
-                break
-
-        if not loaded:
-            logger.error(f"[DEVPULSE] Could not import module {file_path.stem}")
+        module_name = f"aipass.devpulse.apps.modules.{file_path.stem}"
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as e:
+            # Said on stderr, not only logged: a swallowed import error read as "Unknown command" at the prompt.
+            logger.error(f"[DEVPULSE] Failed to load module {module_name}: {e}")
+            warning(f"module {file_path.stem} failed to load: {type(e).__name__}: {e}")
+            continue
+        if hasattr(module, "handle_command"):
+            modules.append(module)
 
     return modules
 
@@ -137,16 +124,7 @@ def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Entry point for drone routing. Guards against cross-branch misuse."""
-    caller = Path.cwd().name
-    if caller != "devpulse" and not any(p.name == "devpulse" for p in Path.cwd().parents):
-        logger.warning(f"[DEVPULSE] Cross-branch call from {caller} — use ai_mail instead")
-
-    return _handle_command(command, args)
-
-
-def _handle_command(command: str, args: list) -> bool:
-    """Internal command handler."""
+    """Entry point for drone routing."""
     modules = discover_modules()
 
     if command in ["--help", "-h", "help"]:
@@ -169,7 +147,7 @@ def main():
         print_introspection()
         return 0
 
-    return resolve_exit(_handle_command(args[0], args[1:]))
+    return resolve_exit(handle_command(args[0], args[1:]))
 
 
 if __name__ == "__main__":

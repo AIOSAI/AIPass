@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """API Key Management Module"""
@@ -24,6 +24,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, success, error
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.auth import keys, env, secrets
+
+GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--json] [--list]"
 
 
 def print_introspection():
@@ -170,36 +172,37 @@ def init_env():
 
 
 def get_secret_cmd(args: List[str]):
-    """Orchestrate secret retrieval workflow (masked output only — no raw values to stdout)"""
-    import json
-    import os
-
+    """Orchestrate secret retrieval workflow (masked output only — no raw value to stdout or a file)"""
     if not args:
-        error("Usage: drone @api get-secret <provider/slug> [--out FILE] [--json] [--list]")
+        error(GET_SECRET_USAGE)
         return
 
     has_json = "--json" in args
     has_list = "--list" in args
-    has_out = "--out" in args
-    out_file = None
-    if has_out:
-        out_idx = args.index("--out")
-        if out_idx + 1 < len(args):
-            out_file = args[out_idx + 1]
-        else:
-            error("--out requires a file path argument")
-            return
+    unknown = [a for a in args if a.startswith("--") and a not in ("--json", "--list")]
+    if unknown:
+        # No --out: drone is the hooks' one exempt program, so a value written to a file is a value a seat reads.
+        error(f"Unknown option: {unknown[0]}", suggestion=GET_SECRET_USAGE)
+        return
 
     clean_args = [a for a in args if not a.startswith("--")]
-    if has_out and out_file in clean_args:
-        clean_args.remove(out_file)
 
     if not clean_args:
-        error("Usage: drone @api get-secret <provider/slug> [--out FILE] [--json] [--list]")
+        error(GET_SECRET_USAGE)
         return
 
     parts = clean_args[0].split("/", 1)
     provider = parts[0]
+
+    try:
+        _show_secret(provider, parts, has_json, has_list)
+    except secrets.SecretsUnavailable as e:
+        error(str(e))
+
+
+def _show_secret(provider: str, parts: List[str], has_json: bool, has_list: bool) -> None:
+    """The masked summary or the slug list for get-secret; never a value."""
+    import json
 
     if has_list:
         slugs = secrets.list_secrets(provider)
@@ -219,17 +222,8 @@ def get_secret_cmd(args: List[str]):
         error(f"Secret not found: {provider}/{slug}")
         return
 
-    if out_file:
-        content = json.dumps(result, indent=2) if has_json else str(result)
-        fd = os.open(out_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            os.write(fd, content.encode("utf-8"))
-        finally:
-            os.close(fd)
-        success(f"Wrote {provider}/{slug} to {out_file}")
-    else:
-        value_len = len(json.dumps(result)) if has_json else len(str(result))
-        success(f"{provider}/{slug}: set ({value_len} chars)")
+    value_len = len(json.dumps(result)) if has_json else len(str(result))
+    success(f"{provider}/{slug}: set ({value_len} chars)")
 
 
 def fetch_api_key(provider: str = "openrouter"):
@@ -268,12 +262,6 @@ def print_help():
     console.print()
     console.print("  [dim]# Check if a secret exists (masked summary, no raw value)[/dim]")
     console.print("  [cyan]drone @api get-secret telegram/bot[/cyan]")
-    console.print()
-    console.print("  [dim]# Write secret to a protected file[/dim]")
-    console.print("  [cyan]drone @api get-secret telegram/bot --out token.txt[/cyan]")
-    console.print()
-    console.print("  [dim]# Write secret as JSON to a protected file[/dim]")
-    console.print("  [cyan]drone @api get-secret telegram/bot --out bot.json --json[/cyan]")
     console.print()
     console.print("  [dim]# List secrets for a provider[/dim]")
     console.print("  [cyan]drone @api get-secret telegram --list[/cyan]")

@@ -43,6 +43,7 @@ apps/
  - `drone @trigger errors list|stats|detail <id>|suppress <id>|resolve <id>` — the registry.
  - `drone @trigger medic status|on|off|mute @branch|unmute @branch` — dispatch control.
  - `drone @trigger escalation status|list|config` — the digest lane.
+ - `drone @trigger ci poll|status|reply|verdict` — the CI red lane. On a wake-back, a reply to `[CI RED] run N @x` → `ci reply N @x "<body>"`; to `[CI REVIEW] run N @x` → `ci verdict N @x "<body>"`. Depth: docs/ci_red_lane.md.
  - `drone @trigger branch_log_events status` — the watcher CLI reports THIS process, never the daemon.
  - `pytest` from this directory, or `python -m pytest src/aipass/trigger/tests` from the repo root.
  - `systemctl --user status trigger-log-watcher` — the live daemon, when the host has systemd.

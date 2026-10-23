@@ -90,7 +90,6 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 - `@prax` — the logger every module writes through
 - `@memory` — branch health, rendered by the per-branch deep dive
 - `@cli` — the shared Rich console
-- `@skills` — lifecycle pings, imported lazily and fail-soft; the Telegram channel behind it is retired
 - Python stdlib, and a systemd *user* instance for the tick timer
 
 ### Provides To

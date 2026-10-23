@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: integrations_manager.py
 # Description: Integrations command module — list and call generic contracts
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-15
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 """Integrations Module"""
 
@@ -91,7 +91,8 @@ def _run_call(contract_name: str, args: List[str]) -> int:
         return 1
 
     if result["result"] is not None:
-        console.print(result["result"])
+        # A result is data (JSON, a URL): never wrapped, read as markup or highlighted.
+        console.print(result["result"], markup=False, highlight=False, soft_wrap=True)
     return 0
 
 

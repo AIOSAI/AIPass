@@ -3,7 +3,7 @@
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
 # Version: 3.1.0
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-21
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -23,6 +23,8 @@ from unittest.mock import DEFAULT, MagicMock, call
 
 import pytest
 
+from aipass.backup.apps import backup as entry
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import test as drive_test
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
@@ -75,11 +77,14 @@ def _install_offline_client(
     *,
     authenticated: bool = True,
     last_error: str | None = None,
+    listing: dict | None = None,
+    listing_answers: bool = True,
 ) -> MagicMock:
     """Put a DriveClient that talks to nobody where the late import looks for one.
 
     Its about.get answers with 15 GiB free, so drive_sync's headroom check passes;
-    test_drive_snapshot_lane.py pins the headroom itself.
+    test_drive_snapshot_lane.py pins the headroom itself. Its files.list answers
+    ``listing`` (no live files by default), or nothing when listing_answers is False.
     """
     instance = MagicMock(name="DriveClient")
     instance.authenticate.return_value = authenticated
@@ -87,7 +92,9 @@ def _install_offline_client(
     instance.file_tracker = {}
     roomy = {"storageQuota": {"usage": "0", "limit": str(15 * 1024**3)}}
     about_request = instance.drive_service.about.return_value.get.return_value
-    instance._api_call.side_effect = lambda request, *args, **kwargs: roomy if request is about_request else DEFAULT
+    list_request = instance.drive_service.files.return_value.list.return_value
+    answers = {id(about_request): roomy, id(list_request): (listing or {"files": []}) if listing_answers else None}
+    instance._api_call.side_effect = lambda request, *args, **kwargs: answers.get(id(request), DEFAULT)
     monkeypatch.setattr(drive_client, "DriveClient", MagicMock(return_value=instance))
     return instance
 
@@ -626,6 +633,27 @@ class TestDriveUpload:
         service.files.return_value.create.assert_not_called()
         assert service.files.return_value.update.call_args.kwargs["fileId"] == "existing_drive_id"
 
+    def test_upload_single_file_adopts_the_file_drive_already_has_by_name_instead_of_creating_a_twin(
+        self,
+        tmp_path: Path,
+        drive_api: MagicMock,
+    ) -> None:
+        client = drive_client.DriveClient()
+        service = MagicMock(name="drive_service")
+        client._drive_service = service
+        client.get_or_create_project_folder = MagicMock(return_value="proj_folder")
+        client.live_files = {("proj_folder", "hello.py"): "drive_has_it"}
+        test_file = tmp_path / "hello.py"
+        test_file.write_text("print('hello')", encoding="utf-8")
+        drive_api.return_value = {"id": "drive_has_it"}
+
+        assert drive_upload.upload_single_file(client, test_file, "testproj", tmp_path) is True
+        service.files.return_value.create.assert_not_called()
+        assert service.files.return_value.update.call_args.kwargs["fileId"] == "drive_has_it"
+        assert client.file_tracker["hello.py"]["drive_id"] == "drive_has_it"
+        rows = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines() if line]
+        assert [row["action"] for row in rows if row.get("operation") == "upload_file"] == ["adopt"]
+
     def test_upload_single_file_refuses_a_missing_file_before_any_request(
         self,
         tmp_path: Path,
@@ -712,7 +740,8 @@ class TestDriveUpload:
 
         result = drive_upload.upload_batch(client, files, "proj", store, {}, max_workers=1, project_root=str(project))
 
-        assert result["uploaded"] == 60 and result["failed"] == 60
+        # The breaker ends the 60 failures at the 20th; the uploads before them stay tracked.
+        assert result["uploaded"] == 60 and result["failed"] == drive_upload.BREAKER_FAILURES
         saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
         uploaded = {f"file_{index:03d}.txt" for index in range(60)}
         tracked = set(saved) - {drive_tracker.LANE_KEY}
@@ -922,6 +951,47 @@ class TestDriveSync:
         assert len(uploads) == 1
         assert sorted(f.name for f in uploads[0]) == ["file_0.txt", "file_1.txt", "file_2.txt"]
         assert (project / ".backup" / drive_tracker.TRACKER_FILENAME).exists()
+
+    def test_a_tracked_file_drive_no_longer_has_is_dropped_and_uploads_again(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        uploads: list,
+    ) -> None:
+        project, store = self._store(tmp_path)
+        tracker: dict = {}
+        for name, drive_id in (("gone.txt", "deleted_by_hand"), ("kept.txt", "still_there")):
+            (store / name).write_text(name, encoding="utf-8")
+            drive_tracker.update_entry(tracker, store / name, store, drive_id)
+        drive_tracker.save_tracker(str(project), tracker)
+        live = {"files": [{"id": "still_there", "name": "kept.txt", "parents": ["lane"], "mimeType": "text/plain"}]}
+        _install_offline_client(monkeypatch, listing=live)
+
+        drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        assert [f.name for f in uploads[0]] == ["gone.txt"]
+        saved = json.loads((project / ".backup" / drive_tracker.TRACKER_FILENAME).read_text(encoding="utf-8"))
+        assert set(saved) - {drive_tracker.LANE_KEY} == {"kept.txt"}
+        rows = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines() if line]
+        assert [row["gone"] for row in rows if row.get("operation") == "tracker_healed"] == [1]
+
+    def test_a_listing_with_no_answer_fails_the_run_says_so_last_and_uploads_nothing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        uploads: list,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        project, store = self._store(tmp_path)
+        (store / "file.txt").write_text("x", encoding="utf-8")
+        _install_offline_client(monkeypatch, listing_answers=False, last_error="Unable to find the server")
+        monkeypatch.setattr("sys.argv", ["backup", "drive_sync", str(project)])
+
+        assert entry.main() == 2
+
+        assert uploads == []
+        out = capsys.readouterr().out.splitlines()
+        assert out[-1] == "Drive listing unavailable: Unable to find the server. Nothing uploaded."
 
     def test_run_drive_sync_filters_ignored_files(
         self,
@@ -1311,12 +1381,11 @@ class TestFolderGetOrCreate:
         assert client.get_or_create_backup_folder() == "found_folder"
         assert client.file_tracker == {"existing.txt": {"drive_id": "abc"}}
 
-    def test_tracker_reset_on_new_folder_with_old_entries(self, drive_api: MagicMock) -> None:
-        """Tracker cleared ONLY when creating a NEW root folder AND old_count>0."""
+    def test_a_new_root_leaves_the_tracker_to_the_heal_at_run_start(self, drive_api: MagicMock) -> None:
+        """The batch iterates the tracker while folders resolve; only drive_sync's listing prunes it."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
         client.file_tracker = {"old.txt": {"drive_id": "dead_id"}}
-        client.project_folder_cache["stale"] = "dead_folder"
         drive_api.side_effect = [
             {"files": []},
             {"id": "brand_new_folder"},
@@ -1324,10 +1393,7 @@ class TestFolderGetOrCreate:
         ]
 
         assert client.get_or_create_backup_folder() == "brand_new_folder"
-        assert client.file_tracker == {}
-        assert client.project_folder_cache == {}
-        # Search, create, then the verify at client.py:213-216 -- the reset path
-        # still verifies the new folder, so the third call is part of the claim.
+        assert client.file_tracker == {"old.txt": {"drive_id": "dead_id"}}
         assert drive_api.call_count == 3
 
     def test_tracker_not_reset_on_new_folder_empty_tracker(self, drive_api: MagicMock) -> None:

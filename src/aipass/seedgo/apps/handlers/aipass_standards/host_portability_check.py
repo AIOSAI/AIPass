@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -892,6 +892,33 @@ def _mixed_spelling_comparisons(tree: ast.Module) -> List[Tuple[int, str]]:
     return violations
 
 
+#: Either one empties git's config; then nothing on the host answers who commits.
+_GIT_CONFIG_EMPTIERS = frozenset({"GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"})
+#: git resolves author and committer separately, and the email is what a runner cannot auto-detect.
+_COMMIT_EMAILS = ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL")
+_IDENTITY_FIX = "a CI runner has no email git can auto-detect, so git commit exits 128; set "
+
+
+def _unanswered_git_identity(tree: ast.Module) -> List[Tuple[int, str]]:
+    """A file that empties git's config names no commit email: green only where the host supplies one.
+
+    File-local: a fixture cannot know which consumer commits, so the file that empties the config answers.
+    """
+    strings = [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    emptied = sorted(lineno for lineno, value in strings if value in _GIT_CONFIG_EMPTIERS)
+    if not emptied or any("user.email" in value for _lineno, value in strings):
+        return []
+    named = {value for _lineno, value in strings}
+    missing = [name for name in _COMMIT_EMAILS if name not in named]
+    if not missing:
+        return []
+    return [(emptied[0], f"empties git's config, no {' or '.join(missing)} - {_IDENTITY_FIX}{', '.join(missing)}")]
+
+
 def _corpus_files(branch_root: Path, ignore_entries: list) -> List[Path]:
     """Every auditable .py file under apps/, tests/ and lib/."""
     files: List[Path] = []
@@ -920,7 +947,7 @@ def _relative(path: Path, branch_root: Path) -> str:
 
 
 def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
-    """Every arm (A to E) over one file. Returns (violations, acquitted binary sites).
+    """Every arm (A to F) over one file. Returns (violations, acquitted binary sites).
 
     A file that cannot be read or parsed reports NOTHING: an unparseable file is ruff's business.
     """
@@ -944,6 +971,7 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
     violations.extend(_gate_violations(tree, aliases, module_marks))
     violations.extend(_flavourless_subclasses(tree))
     violations.extend(_mixed_spelling_comparisons(tree))
+    violations.extend(_unanswered_git_identity(tree))
     violations.sort(key=lambda row: row[0])
     return violations, acquitted
 

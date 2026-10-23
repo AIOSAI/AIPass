@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Register module — adds a project to backup and creates .backup/
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-17
-# Modified: 2026-08-08
+# Modified: 2026-10-21
 # =============================================
 
 """Register Module — register a project for backup and scaffold its .backup/."""
@@ -25,7 +25,7 @@ from aipass.cli.apps.modules import console, error
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.registry import lookup_project as _lookup_project
-from aipass.backup.apps.handlers.project.registry import register_project
+from aipass.backup.apps.handlers.project.registry import register_project, unregister_project
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 
 
@@ -86,6 +86,17 @@ def handle_command(command: str, args: list) -> bool:
     # positions are user values (filenames), not flags.
     if args[0] == "help" or any(arg in ("--help", "-h") for arg in args):
         print_introspection()
+        return True
+
+    if args[0] == "--remove":
+        name = args[1] if len(args) > 1 else ""
+        if _lookup_project(name) is None:
+            error(f"No registered project named '{name}'")
+        elif not unregister_project(name):
+            error(f"Failed to write the project registry removing '{name}'")
+        else:
+            logger.info(f"[backup] Removed project '{name}' from the registry")
+            console.print(f"[green]Removed:[/green] {name} (its .backup/ store is left in place)")
         return True
 
     project_path = str(resolve_caller_path(args[0]))

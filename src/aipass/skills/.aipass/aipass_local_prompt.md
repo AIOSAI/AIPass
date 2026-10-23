@@ -25,7 +25,7 @@ apps/
   .archive/                retired code, imported by nothing
 lib/                       built-in skills, one directory each:
                            branch_health drone_commands github inbox_check
-                           screen_lock system_status telegram
+                           screen_lock system_status
 templates/                 markdown_only with_handler full
 tests/                     branch suite, plus dead_cwd_world.py (the denial worlds)
 docs/                      tracked pages, every one linked from README.md
@@ -35,7 +35,7 @@ skills_json/               switch_state.json and per-module operation logs
 .seedgo/bypass.json        one carried waiver
 ```
 
-Two skills carry their own suites: `lib/telegram/tests/` and `lib/screen_lock/tests/`.
+One skill carries its own suite: `lib/screen_lock/tests/`.
 
 # Search paths
 
@@ -47,9 +47,8 @@ First match for a name wins, so a project shadows a built-in without editing it.
 
 # Gotchas
 
- - Counting the suite: bare `pytest` here collects `tests/` only. The skill suites join under `pytest .` or from the repo root — that is the figure to quote.
- - Telegram is retired: switched off, left in place, every test under `lib/telegram/tests/` skipped at collection and never fixed. A failing telegram test gets disabled, not repaired. See `docs/telegram.md`.
- - The off-switch gates the runner, not an import. Any function published for in-process use must consult the switch itself — `machine_vitals()` does, and the telegram notifier does now because it was still sending after the skill went dark.
+ - Counting the suite: bare `pytest` here collects `tests/` only. The skill suite joins under `pytest .` or from the repo root — that is the figure to quote.
+ - The off-switch gates the runner, not an import. Any function published for in-process use must consult the switch itself — `machine_vitals()` and `machine_processes()` do.
  - No module-level `Path(__file__).resolve()`. Use `module_paths.module_file()`: on Windows `realpath` reads the working directory unconditionally, so a dead cwd is an import-time crash. See `docs/dead_cwd.md`.
  - `apps/handlers/json/json_handler.py` is a hash-checked fleet shim. Add nothing to it; ask the service for a path instead of capturing one at import.
  - Tests redirect json and log output with `AIPASS_TEST_LOG_DIR`, never by patching a shim attribute.

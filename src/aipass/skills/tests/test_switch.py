@@ -1,12 +1,13 @@
 # =================== AIPass ====================
 # Name: test_switch.py
 # Description: Skill off-switch tests
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-10-22): Telegram left skills - its notifier door and unit-declaration tests go with it
 #   - v1.1.0 (2026-09-14): Refusal line carries the recorded reason; notifier door gated (telegram retired)
 #   - v1.0.0 (2026-08-18): Initial creation - DPLAN-0306 per-skill off-switch
 #
@@ -16,7 +17,7 @@
 #   - systemctl is ALWAYS faked - a test must never touch this machine's units
 # =============================================
 
-"""Tests for apps/handlers/switch_handler.py and the doors that read it (runner, telegram notifier)."""
+"""Tests for apps/handlers/switch_handler.py and the runner door that reads it."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/handlers/switch_handler.py parses and carries no unused import
@@ -27,15 +28,13 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from aipass.skills.apps.handlers import discovery_handler as dh
 from aipass.skills.apps.handlers import switch_handler as sh
 from aipass.skills.apps.handlers.json import json_handler as jh
 from aipass.skills.apps.modules import runner
-from aipass.skills.lib.telegram.apps.handlers import notifier
 
 
 class FakeSystemctl:
@@ -355,7 +354,7 @@ class TestRunnerGate:
     def test_run_skill_refuses_a_switched_off_skill(self, state_dir):
         sh.set_enabled("telegram", False, reason="retired 08-18")
 
-        # Stubbed so a regressed gate fails here instead of starting a real Telegram bot.
+        # Stubbed so a regressed gate fails here instead of running the skill's handler.
         with patch.object(runner, "run_handler") as ran_handler, patch.object(runner, "run_markdown") as ran_markdown:
             result = runner.run_skill("telegram", action="start", args={"arg0": "base"})
 
@@ -368,7 +367,7 @@ class TestRunnerGate:
         ran_markdown.assert_not_called()
 
     def test_the_gate_runs_before_the_handler_is_even_loaded(self, state_dir):
-        # `run telegram start base` spawns a bot IN-PROCESS: the gate bites before the import.
+        # A handler can start work IN-PROCESS on import: the gate bites before the load.
         sh.set_enabled("telegram", False)
         with patch.object(runner, "load_skill") as loader:
             result = runner.run_skill("telegram", action="start")
@@ -406,32 +405,6 @@ class TestRunnerGate:
 class TestDeclaredUnits:
     """A skill declares its own processes in SKILL.md frontmatter."""
 
-    EXPECTED_TELEGRAM_UNITS = [
-        "telegram-bot@api",
-        "telegram-bot@base",
-        "telegram-bot@devpulse",
-        "telegram-bot@prax_monitor",
-        "telegram-bot@scheduler",
-    ]
-
-    def test_telegram_declares_its_five_bots(self):
-        assert sorted(sh.declared_units("telegram")) == self.EXPECTED_TELEGRAM_UNITS
-
-    def test_the_declaration_reads_the_same_without_pyyaml(self):
-        # PyYAML is not declared in pyproject.toml, so CI uses discovery_handler's fallback parser.
-        with patch.object(dh, "yaml", None):
-            without_yaml = sh.declared_units("telegram")
-
-        assert sorted(without_yaml) == self.EXPECTED_TELEGRAM_UNITS
-        assert sorted(without_yaml) == sorted(sh.declared_units("telegram"))
-
-    def test_every_file_the_declaration_reads_is_tracked(self):
-        builtin = [path for path, source in dh.get_search_paths() if source == "builtin"][0]
-        assert (builtin / "telegram" / "SKILL.md").exists(), (
-            "telegram's SKILL.md is missing from the built-in lib — the declaration "
-            "test above would be asserting against nothing"
-        )
-
     def test_a_skill_that_declares_nothing_gets_an_empty_list(self):
         assert sh.declared_units("github") == []
 
@@ -444,64 +417,22 @@ class TestSwitchRows:
 
     def test_rows_carry_every_discovered_skill(self, state_dir):
         names = [row["name"] for row in sh.switch_rows()]
-        assert "telegram" in names
+        assert "screen_lock" in names
         assert "github" in names
 
     def test_an_off_skill_is_marked_off(self, state_dir, monkeypatch):
         monkeypatch.setattr(sh, "_systemctl", FakeSystemctl())
-        sh.set_enabled("telegram", False, reason="retired 08-18")
+        sh.set_enabled("screen_lock", False, reason="retired 08-18")
 
-        row = next(r for r in sh.switch_rows() if r["name"] == "telegram")
+        row = next(r for r in sh.switch_rows() if r["name"] == "screen_lock")
         assert row["enabled"] is False
         assert row["reason"] == "retired 08-18"
 
     def test_a_skill_that_is_off_but_still_running_is_flagged(self, state_dir, monkeypatch):
         monkeypatch.setattr(sh, "declared_units", lambda name: ["fake-bot@one"])
         monkeypatch.setattr(sh, "_systemctl", FakeSystemctl(active=["fake-bot@one"]))
-        sh.set_enabled("telegram", False)
+        sh.set_enabled("screen_lock", False)
 
-        row = next(r for r in sh.switch_rows() if r["name"] == "telegram")
+        row = next(r for r in sh.switch_rows() if r["name"] == "screen_lock")
         assert row["enabled"] is False
         assert row["live_units"] == ["fake-bot@one"]
-
-
-class TestTheNotifierDoor:
-    """A door imported in-process asks the switch itself.
-
-    @daemon's lifecycle pings import send_telegram_notification and never pass the runner's gate.
-    """
-
-    BOT = {"bot_token": "123:not-a-token", "chat_id": "42"}
-
-    def _send(self):
-        response = MagicMock()
-        response.__enter__.return_value.read.return_value = b'{"ok": true}'
-        with (
-            patch.object(notifier, "load_bot_config", return_value=self.BOT) as loaded,
-            patch.object(notifier, "urlopen", return_value=response) as opened,
-        ):
-            sent = notifier.send_telegram_notification("job fired")
-        return sent, loaded, opened
-
-    def test_a_switched_off_telegram_sends_nothing(self, state_dir):
-        sh.set_enabled("telegram", False, reason="retired 09-14")
-        sent, loaded, opened = self._send()
-        assert sent is False
-        loaded.assert_not_called()
-        opened.assert_not_called()
-
-    def test_an_unreadable_state_document_sends_nothing(self, state_dir):
-        (state_dir / "switch_state.json").write_text("{corrupt", encoding="utf-8")
-        sent, loaded, opened = self._send()
-        assert sent is False
-        loaded.assert_not_called()
-        opened.assert_not_called()
-
-    def test_a_switched_on_telegram_still_reaches_the_send(self, state_dir):
-        """Control: the stubs can say yes, so the two refusals above are the gate's."""
-        sh.set_enabled("telegram", True)
-        sent, loaded, opened = self._send()
-        assert sent is True
-        loaded.assert_called_once_with("scheduler")
-        assert opened.call_count == 1
-        assert opened.call_args.args[0].full_url == "https://api.telegram.org/bot123:not-a-token/sendMessage"

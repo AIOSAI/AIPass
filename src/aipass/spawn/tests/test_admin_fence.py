@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_admin_fence.py
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
-"""Tests for apps/handlers/registry.py and apps/handlers/class_registry.py, the two halves of the admin fence."""
+"""Tests for apps/modules/grant_admin.py, apps/handlers/registry.py and apps/handlers/class_registry.py: the seat-flag fences."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every handler and module this file imports parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on ensure_admin and handle_grant_admin
+# seedgo: no-test-needed(documentation) — docstrings on ensure_admin, ensure_ci_cure and the two grant handlers
 # seedgo: no-test-needed(documentation) — docstrings on the class_registry refusal helpers
 
 import json
@@ -27,10 +27,10 @@ from aipass.spawn.apps.handlers.class_registry import (
     resolve_template_class,
     validate_class,
 )
-from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin
+from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin, ensure_ci_cure
 from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
 from aipass.spawn.apps.modules.core import spawn_agent
-from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
+from aipass.spawn.apps.modules.grant_admin import handle_grant_admin, handle_grant_ci_cure
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main
 
@@ -216,6 +216,83 @@ class TestGrantAdminCli:
 
         assert result == 0
         mock_handler.assert_called_once_with(["--help"])
+
+
+class TestGrantCiCure:
+    """drone @spawn grant-ci-cure — ci_cure:true on the trigger entry, and on no other."""
+
+    def _registry(self, tmp_path, **spawn_extra):
+        return _write_registry(
+            tmp_path,
+            [
+                _entry("DEVPULSE", owner=True, admin=True),
+                _entry("TRIGGER", custom_key="keep-me"),
+                _entry("SPAWN", **spawn_extra),
+            ],
+        )
+
+    def test_the_ceremony_seals_ci_cure_on_trigger_alone_as_a_json_boolean(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+
+        code = handle_grant_ci_cure(["--registry", str(registry)])
+
+        data = json.loads(registry.read_text(encoding="utf-8"))
+        assert code == 0
+        assert "ci-cure granted" in capsys.readouterr().out
+        assert [b["name"] for b in data["branches"] if "ci_cure" in b] == ["TRIGGER"]
+        assert _read_entry(registry, "trigger")["ci_cure"] is True
+        assert _read_entry(registry, "trigger")["custom_key"] == "keep-me"
+        assert _read_entry(registry, "devpulse")["admin"] is True
+
+    def test_a_second_run_reports_already_in_place_and_exits_zero(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+        handle_grant_ci_cure(["--registry", str(registry)])
+        before = registry.read_text(encoding="utf-8")
+        capsys.readouterr()
+
+        code = handle_grant_ci_cure(["--registry", str(registry)])
+
+        assert code == 0
+        assert "ci-cure already in place" in capsys.readouterr().out
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_another_holder_refuses_the_seal_and_writes_nothing(self, tmp_path, capsys):
+        registry = self._registry(tmp_path, ci_cure=True)
+        before = registry.read_text(encoding="utf-8")
+
+        code = handle_grant_ci_cure(["--registry", str(registry)])
+
+        assert code == 1
+        assert "SPAWN already carries ci_cure" in " ".join(capsys.readouterr().err.split())
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_a_branch_argument_is_refused_and_writes_nothing(self, tmp_path, capsys):
+        registry = self._registry(tmp_path)
+        before = registry.read_text(encoding="utf-8")
+
+        code = handle_grant_ci_cure(["@spawn", "--registry", str(registry)])
+
+        assert code == 1
+        assert "no branch argument" in " ".join(capsys.readouterr().err.split())
+        assert registry.read_text(encoding="utf-8") == before
+
+    @pytest.mark.parametrize("name", ["spawn", "devpulse", "trigger_evil", ""])
+    def test_every_name_but_trigger_is_refused(self, tmp_path, name):
+        registry = self._registry(tmp_path)
+        before = registry.read_text(encoding="utf-8")
+
+        status, reason = ensure_ci_cure(registry, name)
+
+        assert status == "refused"
+        assert "trigger-only" in reason
+        assert registry.read_text(encoding="utf-8") == before
+
+    def test_entry_point_routes_grant_ci_cure(self, tmp_path, capsys, monkeypatch):
+        registry = self._registry(tmp_path)
+        monkeypatch.setattr("sys.argv", ["spawn", "grant-ci-cure", "--registry", str(registry)])
+
+        assert main() == 0
+        assert _read_entry(registry, "trigger")["ci_cure"] is True
 
 
 class TestAdminClassRefusal:

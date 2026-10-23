@@ -36,8 +36,14 @@ decides it in under a millisecond; the log line is WARNING on turn 0 and INFO on
 per context.
 
 **Cadence is per handler, not an engine default.** Only the loaders that ask cadence (`tier0`, `navmap`,
-`identity`, `branch`, `alert`, and mail through `should_fire_mail`) fire on the beat. Every other
+`identity`, `branch`, `alert`, and mail through `should_fire_mail`) are decided by cadence. Every other
 UserPromptSubmit handler (`temporal`, `context_gauge`, `presence_gate`, …) fires on every prompt it is wired for.
+
+**The shipped defaults.** `cadence.DEFAULTS` is what a clone runs on (`cadence_config.json` is gitignored).
+`tier0` and `navmap` carry `"beat": false`: they ground at turn 0 (session start, `/clear`, post-compact)
+and never on the period. `identity`, `alert` and mail beat every 5th turn and `branch` on the global
+period (5), all at offset 0. An operator's `cadence_config.json` merges over each entry, so
+`{"loaders": {"tier0": {"beat": true}}}` puts the kernel back on the beat.
 
 **A turn the harness sent is not a turn.** A Monitor that expires wakes the seat with a `<task-notification>`
 prompt, and UserPromptSubmit hooks fire on it. `cadence.is_automated` reads the payload's `source` first

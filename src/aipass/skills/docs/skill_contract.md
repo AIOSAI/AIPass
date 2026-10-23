@@ -35,7 +35,7 @@ my-skill/
       __init__.py
 ```
 
-Built-in examples: `drone_commands` and `telegram` are full-tier; `github` is
+Built-in examples: `drone_commands` is full-tier; `github` is
 markdown-only; the rest carry a `handler.py`.
 
 ## Creating a Skill

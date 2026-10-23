@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -66,7 +66,7 @@ def print_introspection() -> None:
     console.print("  - set_bind()       - Validate and store the bind address")
     console.print("  - autostart()      - Render the boot unit (a running unit is left alone)")
     console.print("  - install_unit()   - Install the unit under the user's systemd (dry_run names the steps)")
-    console.print("  - enable_unit()    - enable --now it, and lingering (dry_run names the steps)")
+    console.print("  - enable_unit()    - enable --now it, inside the graphical session (dry_run names the steps)")
     console.print("  - mint_pairing()   - A one-use, five-minute code the phone trades for its bearer")
     console.print("  - render_qr()      - A text's QR as terminal block characters")
     console.print()
@@ -232,7 +232,7 @@ def install_unit(dry_run: bool = False) -> dict:
 
 
 def enable_unit(dry_run: bool = False) -> dict:
-    """enable --now the installed unit, and lingering if off; refused while a hand-started server holds the port."""
+    """enable --now the installed unit; refused while a hand-started server holds the port."""
     return host_lifetime.enable_autostart(dry_run)
 
 

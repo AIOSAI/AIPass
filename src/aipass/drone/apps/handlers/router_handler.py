@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
-# Description: Handler for command routing implementation
-# Version: 1.3.0
+# Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
+# Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -12,8 +12,9 @@ Handler for command routing implementation.
 
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List, NamedTuple, Optional
+from typing import Iterator, List, NamedTuple, Optional
 
 from aipass.prax.apps.modules.logger import system_logger
 from .exceptions import CommandExecutionError
@@ -209,6 +210,48 @@ def resolve_caller_identity_signal(cwd: Path | None) -> CallerIdentity:
     return CallerIdentity(None, None)
 
 
+# What drone stamps onto every command it routes, and what the verified-caller rail reads.
+CALLER_STAMP_KEYS = ("AIPASS_CALLER_CWD", "AIPASS_CALLER_BRANCH", "AIPASS_CALLER_IDENTITY_SOURCE")
+
+
+def caller_stamp_values() -> dict[str, str]:
+    """The AIPASS_CALLER_* a routed command receives; a key is omitted when its answer is absent."""
+    # Omitted when absent: a target must get no answer, not a sentinel it might resolve.
+    cwd = caller_cwd()
+    stamp: dict[str, str] = {}
+    if cwd is not None:
+        stamp["AIPASS_CALLER_CWD"] = str(cwd)
+    # Provenance ships with the name: the consumer, in another process, cannot re-derive it.
+    caller_branch, identity_source = resolve_caller_identity_signal(cwd)
+    if caller_branch:
+        stamp["AIPASS_CALLER_BRANCH"] = caller_branch
+        stamp["AIPASS_CALLER_IDENTITY_SOURCE"] = identity_source or "unknown"
+    return stamp
+
+
+@contextmanager
+def caller_stamp() -> Iterator[None]:
+    """Stamp this process the way a routed child is stamped, for a module that runs in-process.
+
+    Always fresh: an inherited stamp proves nothing about this process. Every prior value is put back.
+    """
+    saved = {key: os.environ.get(key) for key in CALLER_STAMP_KEYS}
+    fresh = caller_stamp_values()
+    for key in CALLER_STAMP_KEYS:
+        if key in fresh:
+            os.environ[key] = fresh[key]
+        else:
+            os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 def resolve_caller_identity(cwd: Path | None) -> str | None:
     """Resolve who is CALLING drone — the name alone, for attribution; decisions take the signal."""
     return resolve_caller_identity_signal(cwd).name
@@ -231,17 +274,8 @@ def execute_branch_command(
     if command:
         cmd_args += [command] + list(args or [])
 
-    # Omitted when absent: a target must get no answer, not a sentinel it might resolve.
-    cwd = caller_cwd()
-    caller_env = {"AIPASS_BRANCH_NAME": branch_name}
-    if cwd is not None:
-        caller_env["AIPASS_CALLER_CWD"] = str(cwd)
-
-    # Provenance ships with the name: the consumer, in another process, cannot re-derive it.
-    caller_branch, identity_source = resolve_caller_identity_signal(cwd)
-    if caller_branch:
-        caller_env["AIPASS_CALLER_BRANCH"] = caller_branch
-        caller_env["AIPASS_CALLER_IDENTITY_SOURCE"] = identity_source or "unknown"
+    caller_env = {"AIPASS_BRANCH_NAME": branch_name, **caller_stamp_values()}
+    caller_branch = caller_env.get("AIPASS_CALLER_BRANCH", "")
 
     # Lazy: registry_handler imports this module for caller_cwd and registries_in.
     from aipass.drone.apps.handlers.registry_handler import branch_interpreter

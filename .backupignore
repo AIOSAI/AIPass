@@ -30,3 +30,5 @@ target/
 logs/
 .ruff_cache/
 .coverage
+# Inbound hand-offs between branches are relays, not records (the owner, 2026-10-21)
+dropbox/

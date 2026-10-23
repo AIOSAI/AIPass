@@ -9,7 +9,7 @@ included, and every verb arrives here. Which verbs exist is `drone @git --help`;
 
 ---
 
-## Two tiers
+## Three tiers
 
 Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 `git_module.handle_command()`, before any handler is called.
@@ -18,10 +18,28 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 |------|-----|----------------|
 | **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, and the `gh` reads |
 | **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, and the `gh` writes |
+| **CI cure** | The one citizen whose registry entry carries `ci_cure: true` (@trigger in AIPass) | `ci-cure` alone: commit a CI cure on dev and push dev |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:
 `citizen_class: manager`, registry tenancy, an entry carrying `owner: true`, and path-binding of
 the passport to the recorded home. There is no caller allowlist anywhere in the branch.
+
+The ci-cure tier is earned the same way, minus the manager class: registry tenancy, an entry
+carrying `ci_cure: true` (the JSON boolean), and path-binding. The fact must sit on exactly one
+entry of the registry; two holders refuse both. `AIPASS_GIT_AUTH_MODE=warn` never lifts a ci-cure
+refusal. Outside AIPass's own registry the verb is a capability refusal: its fence is AIPass's tree.
+
+`drone @git ci-cure <run_id> @<owner> "<message>" <path ...>` commits exactly the named paths on
+`dev` (`git commit --only`, so anything else staged stays staged), pushes `dev` to origin, and
+prints the new sha on the first line of stdout. Every path is repo-relative and sits under
+`src/aipass/<owner>/` or is `CHANGELOG.md`; no `..`, no glob, and git reads pathspecs literally. The
+message's first line starts `fix(<owner>): `, names the numeric run id, and fits the commit subject
+cap. A branch other than `dev` is a capability refusal at WARNING; every other refusal is ERROR, and
+none commits anything. It opens no PR and never merges, syncs, tags, reruns or takes `--repo`. Every
+call, refused or run, is one row in `.ai_central/git_ci_cures.jsonl` with the caller, the arguments,
+the outcome (`pushed`, `failed` for a commit whose push failed, `refused`) and, once committed, the
+run id, owner, paths and sha. The refusal texts are `drone @git ci-cure --help`. Pinned in
+`tests/test_git_ci_cure.py` against a real repo and a local bare origin.
 
 **A command in neither tier is unreachable, not merely ungated.** `verify_git_access()` refuses
 anything it cannot find in a tier as `Unknown git command`, so registering a verb and wiring it to

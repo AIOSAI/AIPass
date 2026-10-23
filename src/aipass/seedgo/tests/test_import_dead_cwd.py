@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins seedgo imports against a working directory the OS cannot read
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Tests that every module under apps/, apps/handlers/__init__.py first, imports with a dead cwd."""
@@ -27,9 +27,10 @@ import pytest
 
 SEEDGO_ROOT = Path(__file__).resolve().parents[1]
 
-# The children run with their cwd at the repo root (see _run), so a world writing to a RELATIVE path
-# lands in the working tree; the litter detector below fails the module if one does.
-CHILD_CWD = SEEDGO_ROOT.parents[2]
+# The children's cwd is a room this module owns, so a world writing to a RELATIVE path lands there and
+# the litter detector below fails the module. Not the repo root: parallel workers write there (a ruff
+# call mints .ruff_cache), and a detector over a shared directory convicts a sibling's write.
+CHILD_CWD = None
 
 
 def _working_tree_entries(root: Path) -> set:
@@ -46,17 +47,17 @@ def _litter(before: set, after: set) -> set:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _no_working_tree_litter():
-    """Fail the module if its children left anything in the repo root.
-
-    It never deletes what it finds: `drone rm` is the sanctioned remover, and tidying destroys the evidence.
-    """
-    before = _working_tree_entries(CHILD_CWD)
-    yield
-    new = _litter(before, _working_tree_entries(CHILD_CWD))
+def _no_working_tree_litter(tmp_path_factory):
+    """Hand the children their own room as cwd, and fail the module if they left anything in it."""
+    room = tmp_path_factory.mktemp("child_cwd")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sys.modules[__name__], "CHILD_CWD", room)
+        before = _working_tree_entries(room)
+        yield
+        new = _litter(before, _working_tree_entries(room))
     assert not new, (
-        "a world in this file wrote into the working tree - the children run with "
-        f"cwd at the repo root, so a relative path lands there: {sorted(new)}"
+        "a world in this file wrote into its cwd - the children run in this module's "
+        f"room, so a relative path lands there: {sorted(new)}"
     )
 
 
@@ -586,7 +587,7 @@ def _run(world: str):
         capture_output=True,
         text=True,
         encoding="utf-8",
-        cwd=str(SEEDGO_ROOT.parents[2]),
+        cwd=str(CHILD_CWD),
     )
 
 

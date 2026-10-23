@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: gateway_boundary_check.py
 # Description: Gateway Boundary Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Gateway Boundary Standards Checker Handler.
@@ -170,6 +170,92 @@ def _writes_to(tree: ast.AST, tainted: Dict[str, set], markers: frozenset) -> Li
     return found
 
 
+# @api alone holds the secrets store: agents get actions, never values.
+_SECRETS_OWNER = "api"
+_SECRETS_MODULES = frozenset(
+    {
+        "aipass.api.apps.modules.secrets",
+        "aipass.api.apps.handlers.auth.secrets",
+        "aipass.api.apps.handlers.auth.keys",
+        "aipass.api.apps.handlers.auth.env",
+    }
+)
+_SECRETS_CALLS = frozenset({"get_secret", "set_secret", "list_secrets", "get_api_key"})
+_SECRETS_DIR = ".secrets"
+#: A literal is judged only as an argument: imported by one of these, or opened by the other.
+_IMPORTERS = frozenset({"import_module", "__import__"})
+_PATH_MAKERS = frozenset({"Path", "PurePath", "PosixPath", "open", "expanduser", "expandvars", "join", "joinpath"})
+_SECRETS_CURE = "ask @api for the action through a drone door, never the value"
+
+
+def _is_store_segment(node: ast.AST) -> bool:
+    """`'.secrets'` or `'.secrets/aipass'` as one side of a `/`."""
+    return (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and (node.value.strip("/").split("/")[0] == _SECRETS_DIR)
+    )
+
+
+def _imported_secrets(node: ast.AST) -> List[Tuple[int, str, str]]:
+    """(line, bound name, dotted target) for each secrets module or member this import statement binds."""
+    if isinstance(node, ast.Import):
+        names = [(alias.asname or alias.name, alias.name) for alias in node.names]
+        return [(node.lineno, name, full) for name, full in names if full in _SECRETS_MODULES]
+    if not isinstance(node, ast.ImportFrom) or not node.module:
+        return []
+    module = node.module
+    names = [(alias.asname or alias.name, f"{module}.{alias.name}") for alias in node.names]
+    return [(node.lineno, name, full) for name, full in names if module in _SECRETS_MODULES or full in _SECRETS_MODULES]
+
+
+def _call_reach(node: ast.Call, bound: Dict[str, str]) -> str:
+    """What this call does with the store - an import by name, a path opened, an action - or ''."""
+    func = node.func
+    callee = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+    texts = [arg.value for arg in node.args if isinstance(arg, ast.Constant) and isinstance(arg.value, str)]
+    if callee in _IMPORTERS and texts[:1] and texts[0] in _SECRETS_MODULES:
+        return f"imports {texts[0]} by name"
+    if callee in _PATH_MAKERS and any("/" + _SECRETS_DIR in text for text in texts):
+        return f"opens a path into ~/{_SECRETS_DIR}"
+    if isinstance(func, ast.Name) and bound.get(func.id, "").rsplit(".", 1)[-1] in _SECRETS_CALLS:
+        return f"calls {func.id}"
+    receiver = func.value.id if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) else ""
+    if callee in _SECRETS_CALLS and bound.get(receiver) in _SECRETS_MODULES:
+        return f"calls {callee}"
+    return ""
+
+
+def _secrets_reaches(tree: ast.AST) -> List[Tuple[int, str]]:
+    """Every (line, what) that imports, paths or calls @api's secrets store.
+
+    A `.secrets` literal outside a `/` chain or a path maker is a pattern or prose, never a path.
+    """
+    bound: Dict[str, str] = {}
+    reaches: List[Tuple[int, str]] = []
+    for node in ast.walk(tree):
+        for lineno, name, full in _imported_secrets(node):
+            bound[name] = full
+            reaches.append((lineno, f"imports {full}"))
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+            continue
+        if _is_store_segment(node.left) or _is_store_segment(node.right):
+            reaches.append((node.lineno, f"builds a path into ~/{_SECRETS_DIR}"))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    reaches += [(call.lineno, what) for call in calls if (what := _call_reach(call, bound))]
+    return reaches
+
+
+def _secrets_row(tree: ast.AST, source: str) -> List[Tuple[int, str, str]]:
+    """One row per file, at the first reach, the line quoted."""
+    reaches = _secrets_reaches(tree)
+    if not reaches:
+        return []
+    lineno, what = min(reaches)
+    quoted = source.splitlines()[lineno - 1].strip()
+    return [(lineno, f"{what} - @api's secrets store (`{quoted}`); {_SECRETS_CURE}", _SECRETS_DIR)]
+
+
 def _has_door(source: str) -> bool:
     """True if the file shows any sign of routing through an owner."""
     return any(marker in source for marker in _DOOR_MARKERS)
@@ -196,19 +282,21 @@ def _scan(source: str, branch: str) -> Optional[List[Tuple[int, str, str]]]:
         logger.info("[gateway_boundary] unparseable source: %s", e)
         return None
 
+    secrets_row = [] if branch == _SECRETS_OWNER else _secrets_row(tree, source)
+
     foreign_dirs = {m for m, allowed in _STORAGE_OWNERS.items() if branch not in allowed}
     foreign_files = {f for f, owner in _OWNED_FILENAMES.items() if owner != branch}
     markers = frozenset(foreign_dirs | foreign_files)
     if not markers:
-        return []
+        return secrets_row
 
     tainted = _tainted_names(tree, markers)
     writes = _writes_to(tree, tainted, markers)
     if not writes:
-        return []
+        return secrets_row
 
     has_door = _has_door(source)
-    violations: List[Tuple[int, str, str]] = []
+    violations: List[Tuple[int, str, str]] = list(secrets_row)
     seen: set = set()
 
     for lineno, hit in sorted(writes):

@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog module router
 # Version: 1.1.2
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -210,7 +210,6 @@ def _serve_registry(monkeypatch, fake_registry, fake_timer=None):
         raise wd_dispatches.RegisterUnavailable("no register in this test")
 
     monkeypatch.setattr(wd_dispatches, "outstanding", _unavailable)
-    monkeypatch.setattr(wd_dispatches, "overdue", _unavailable)
 
 
 def test_cancel_requires_handle(capsys):

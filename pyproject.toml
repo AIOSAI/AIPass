@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipass"
-version = "2.8.24"
+version = "2.8.25"
 description = "A local multi-agent framework where your AI agents keep their memory, work together, and never ask you to re-explain context"
 readme = "README.md"
 license = "MIT"
@@ -33,6 +33,7 @@ dependencies = [
     "questionary>=2.0",
     "pathspec>=0.12",
     "segno>=1.6",
+    "keyring>=25.0",
 ]
 
 [project.urls]
@@ -51,9 +52,6 @@ memory = [
     "numpy>=2.0",
     "chromadb>=1.0",
     "fastembed>=0.4",
-]
-telegram = [
-    "telethon>=1.36",
 ]
 drive = [
     "google-auth>=2.29",
@@ -120,13 +118,13 @@ testpaths = ["tests", "src"]
 # docs.local and dropbox are untracked scratch and inbound relays; the test files
 # they hold are snapshots, never a suite, and they import nothing on the path.
 norecursedirs = ["templates", "*.egg-info", ".*", "__pycache__", "my-project", "docs.local", "dropbox"]
-# Telegram is retired (the owner, 2026-09-14 and 2026-10-11: the code stays in
-# place, disabled, and nothing scans it). Every file or directory whose name
-# carries "telegram" is left out of collection: the skill lib under
-# src/aipass/skills/lib/telegram, prax's relay test, hooks' response tests and
-# the daemon's notifier. 1410 items on 2026-10-11. CodeQL carries the same
-# exclusion in .github/workflows/security.yml; seedgo's audit reads a
-# .seedgoignore in daemon, prax and hooks.
+# Telegram is retired (the owner, 2026-09-14; out of the tree 2026-10-22). The
+# skill lib sits untracked in projects/telegram; what stayed in the tree is
+# renamed (disabled). Every file or directory whose name carries "telegram" is
+# left out of collection: prax's relay test, the disabled daemon notifier and
+# hooks response. CodeQL carries the same exclusion in
+# .github/workflows/security.yml; seedgo's audit reads a .seedgoignore in
+# daemon, prax and hooks.
 addopts = ["--ignore-glob=*telegram*"]
 
 [tool.coverage.run]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared test fixtures for spawn test suite
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -191,6 +191,9 @@ def _isolate_spawn_json(tmp_path, monkeypatch) -> Path:
 
     The json service recomputes its dir from AIPASS_TEST_LOG_DIR on every call, so setting it late works."""
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+    # Delete and retire write drone's deletion trail and revoke hooks trust; both owners read these at call time.
+    monkeypatch.setenv("AIPASS_DELETION_LOG", str(tmp_path / "deletions.jsonl"))
+    monkeypatch.setenv("AIPASS_TRUST_REGISTRY", str(tmp_path / "trusted_projects.json"))
     return tmp_path / "spawn" / "spawn_json"
 
 

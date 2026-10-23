@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_registry_handler.py
 # Description: Handler for internal module registry operations
-# Version: 2.0.2
+# Version: 2.1.0
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Handler for internal module registry operations."""
@@ -19,6 +19,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.generic_adapter import capture_main
 from aipass.drone.apps.handlers.module_root import module_file
+from aipass.drone.apps.handlers.router_handler import caller_stamp
 
 
 # Internal modules live inside drone and act as their own adapter.
@@ -130,7 +131,13 @@ def get_module_info(name: str) -> ModuleInfo | None:
 
 
 def route_module_command(name: str, command: str, args: list[str] | None = None) -> dict:
-    """Route a command to a module."""
+    """Route a command to a module, stamped with the caller the way a routed child is."""
+    with caller_stamp():
+        return _route_stamped(name, command, args)
+
+
+def _route_stamped(name: str, command: str, args: list[str] | None) -> dict:
+    """Run the module: an external one through capture_main, an internal one through its adapter."""
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
         result = capture_main(ext.entry_point, ext.name, command, args)

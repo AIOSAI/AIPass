@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -25,6 +25,7 @@ from aipass.flow.apps.handlers.plan.close_ops import (
 from aipass.flow.apps.handlers.plan.registry_routing import canonical_plan_id
 from aipass.flow.apps.handlers.plan.validator import validate_plan_exists
 from aipass.flow.apps.handlers.registry import load_registry as plan_load
+from aipass.flow.apps.handlers.template.get_template import TEMPLATES_DIR, get_template
 from aipass.flow.tests.support_close_ops import _make_deps
 
 
@@ -451,6 +452,35 @@ class TestClosePlanImplSuccess:
         deps["save_registry"].assert_called()
         deps["update_dashboard_local"].assert_called_once()
         deps["push_to_plans_central"].assert_called_once()
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess")
+    def test_a_plan_rendered_without_a_listen_section_closes(
+        self, mock_subprocess, _mock_find, _mock_resolve, tmp_path
+    ):
+        plan_file = tmp_path / "FPLAN-0001_fresh_2026-10-23.md"
+        fresh = get_template(template_path=TEMPLATES_DIR / "flow_plans" / "default.md", number=1, subject="Fresh")
+        plan_file.write_text(fresh, encoding="utf-8")
+        assert "## Listen" not in plan_file.read_text(encoding="utf-8")
+        deps = _make_deps()
+        deps["load_registry"].return_value = {
+            "plans": {
+                "1": {"status": "open", "subject": "Fresh", "location": str(tmp_path), "file_path": str(plan_file)}
+            }
+        }
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
+        ):
+            result = close_plan_impl(plan_num="1", **deps)
+
+        assert result["success"] is True
+        mock_append.assert_called_once_with("1", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
 
     @pytest.mark.parametrize("answer, failed", [(None, False), (False, True)])
     @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)

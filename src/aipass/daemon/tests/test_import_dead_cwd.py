@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins daemon imports against a dead working directory
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
@@ -124,7 +124,6 @@ import aipass.daemon.apps.handlers.json.json_handler  # noqa: F401
 import aipass.daemon.apps.handlers.schedule.discovery  # noqa: F401
 import aipass.daemon.apps.handlers.schedule.runstate  # noqa: F401
 import aipass.daemon.apps.handlers.schedule.rotation  # noqa: F401
-import aipass.daemon.apps.handlers.schedule.telegram_notifier  # noqa: F401
 import aipass.daemon.apps.handlers.monitoring.activity_collector  # noqa: F401
 import aipass.daemon.apps.handlers.monitoring.inbox_scanner  # noqa: F401
 import aipass.daemon.apps.handlers.monitoring.memory_health  # noqa: F401

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: Host API Backup Handler — the backup door: start and stop a lane, read a job, read the store
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-10-16
-# Modified: 2026-10-19
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -35,10 +35,17 @@ LANES: Dict[str, List[str]] = {
     "drive_sync": [],
 }
 
-RUN_TIMEOUT_SECONDS = 1800
+# drive_sync has no limit by the owner's ruling: a rebuild is hours, its own stop ends it early.
+RUN_LIMIT_SECONDS: Dict[str, Optional[int]] = {"snapshot": 1800, "versioned": 1800, "all": 86400, "drive_sync": None}
+
+# shortcut: drone's router has no no-deadline mode, so an unlimited lane gets ten years; use drone's when it has one.
+UNLIMITED_SECONDS = 10 * 365 * 86400
 
 # @backup's stop waits up to 30 s for a lane before SIGKILL; this leaves it room.
 CANCEL_TIMEOUT_SECONDS = 60
+
+# drone's hang guard is the backstop past the limit: it terminates, then kills, after one second.
+LIMIT_GRACE_SECONDS = CANCEL_TIMEOUT_SECONDS + 60
 
 STOPPED_EXIT = 130
 
@@ -102,6 +109,14 @@ def start_worker(target: Callable[..., None], args: Tuple[Any, ...]) -> threadin
     return worker
 
 
+def start_alarm(seconds: float, action: Callable[[], None]) -> threading.Timer:
+    """Run *action* once after *seconds* on a daemon timer, the table's default alarm."""
+    alarm = threading.Timer(seconds, action)
+    alarm.daemon = True
+    alarm.start()
+    return alarm
+
+
 class JobTable:
     """The jobs this server started, in memory, behind one lock."""
 
@@ -109,9 +124,11 @@ class JobTable:
         self,
         clock: Optional[Callable[[], datetime]] = None,
         start: Optional[Callable[[Callable[..., None], Tuple[Any, ...]], Any]] = None,
+        after: Optional[Callable[[float, Callable[[], None]], Any]] = None,
     ) -> None:
         self.clock = clock or _utc_now
         self.start = start or start_worker
+        self.after = after or start_alarm
         self._jobs: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
 
@@ -211,8 +228,11 @@ JOBS = JobTable()
 
 def _work(table: JobTable, job_id: str, lane: str, argv: List[str]) -> None:
     """Run one lane through drone and close its job. Runs on the worker thread."""
+    limit = RUN_LIMIT_SECONDS[lane]
+    alarm = None if limit is None else table.after(limit, lambda: _end_at_limit(job_id, lane, argv[0], limit))
+    timeout = UNLIMITED_SECONDS if limit is None else limit + LIMIT_GRACE_SECONDS
     try:
-        result = drone.route_command(BACKUP, lane, argv, timeout=RUN_TIMEOUT_SECONDS)
+        result = drone.route_command(BACKUP, lane, argv, timeout=timeout)
     except drone.RoutingError as e:
         logger.warning("[host_api] backup %s job %s could not finish: %s", lane, job_id, e)
         table.finish(job_id, None, "", str(e).strip() or type(e).__name__)
@@ -222,11 +242,23 @@ def _work(table: JobTable, job_id: str, lane: str, argv: List[str]) -> None:
         logger.error("[host_api] backup %s job %s worker failed: %s", lane, job_id, e, exc_info=e)
         table.finish(job_id, None, "", WORKER_DIED)
         return
+    finally:
+        if alarm is not None:
+            alarm.cancel()
 
     output = "\n".join(part.rstrip("\n") for part in (result.stdout, result.stderr) if part and part.strip())
     table.finish(job_id, result.exit_code, output[-SUMMARY_CHARS:], None)
     json_handler.log_operation("host_api_backup_finished", {"job": job_id, "lane": lane, "exit": result.exit_code})
     logger.info("[host_api] backup %s job %s finished with exit %s", lane, job_id, result.exit_code)
+
+
+def _end_at_limit(job_id: str, lane: str, root: str, limit: int) -> None:
+    """End a lane past its limit the way a cancel does, so it exits 130 and clears its running file."""
+    logger.warning("[host_api] backup %s job %s reached its %ss limit; asking @backup to stop it", lane, job_id, limit)
+    try:
+        drone.route_command(BACKUP, "stop", [root, lane], timeout=CANCEL_TIMEOUT_SECONDS)
+    except Exception as e:
+        logger.error("[host_api] backup %s job %s could not be stopped at its limit: %s", lane, job_id, e, exc_info=e)
 
 
 def _root_of(project: str) -> Path:

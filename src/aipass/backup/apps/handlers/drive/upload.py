@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-21
 # =============================================
 
 """Google Drive upload engine."""
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import mimetypes
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,9 @@ except ImportError:
 if TYPE_CHECKING:
     from .client import DriveClient
 
+#: Failures in a row, no success between, before a batch gives up: an outage fails every file in milliseconds.
+BREAKER_FAILURES = 20
+
 
 def upload_single_file(
     client: DriveClient,
@@ -42,7 +46,7 @@ def upload_single_file(
     note: str = "",
     lane_folder: str = "",
 ) -> bool:
-    """Upload one file with resumable MediaFileUpload, updating the tracked drive_id when there is one.
+    """Upload one file with resumable MediaFileUpload, updating the tracked or live drive_id when there is one.
 
     lane_folder prefixes the Drive folder only; tracker keys stay relative to backup_root.
     """
@@ -77,6 +81,12 @@ def upload_single_file(
         rel_key = str(local_file)
 
     existing_drive_id = client.file_tracker.get(rel_key, {}).get("drive_id")
+    action = "update" if existing_drive_id else "create"
+    if not existing_drive_id:
+        # Drive already has this name in this folder (a cleared tracker, a lost save): update it, never a twin.
+        existing_drive_id = client.live_files.get((target_folder_id, local_file.name))
+        if existing_drive_id:
+            action = "adopt"
 
     mime_type, _ = mimetypes.guess_type(str(local_file))
     if mime_type is None:
@@ -125,7 +135,7 @@ def upload_single_file(
                 {
                     "file": str(local_file),
                     "drive_id": drive_file_id,
-                    "action": "update" if existing_drive_id else "create",
+                    "action": action,
                 },
             )
             return True
@@ -166,6 +176,7 @@ def upload_batch(
 
     project_root set: the tracker is saved every batch_save_interval files, so a dying run keeps what it uploaded.
     A stop cancels unstarted futures; uploads in flight finish and count; success is then False.
+    So do BREAKER_FAILURES failures in a row, and "aborted" then names the last error.
     """
     if not files:
         return {"success": True, "uploaded": 0, "failed": 0}
@@ -176,21 +187,38 @@ def upload_batch(
     uploaded = 0
     failed = 0
     bytes_uploaded = 0
+    # Counted in the workers: they start the next file before the main thread sees the last one fail.
+    breaker = {"in_a_row": 0, "aborted": ""}
+    breaker_lock = threading.Lock()
+
+    def _count(ok: object) -> None:
+        """Reset the failure run on a success; the BREAKER_FAILURES-th failure in a row trips it."""
+        with breaker_lock:
+            breaker["in_a_row"] = 0 if ok else breaker["in_a_row"] + 1
+            if breaker["in_a_row"] >= BREAKER_FAILURES and not breaker["aborted"]:
+                breaker["aborted"] = (
+                    f"Drive upload aborted after {BREAKER_FAILURES} consecutive failures: {client.last_error}"
+                )
 
     def _upload_one(file_path: Path) -> object:
-        """Upload a single file in a worker thread; ``skipped`` when a stop came first."""
-        if stop_requested():
+        """Upload a single file in a worker thread; ``skipped`` when a stop or the breaker came first."""
+        if stop_requested() or breaker["aborted"]:
             return skipped
         if not getattr(client._thread_local, "service", None):
             client._thread_local.service = client._build_thread_service()
-        return upload_single_file(
-            client,
-            file_path,
-            project_name,
-            backup_root,
-            note=note,
-            lane_folder=lane_folder,
-        )
+        ok: object = False
+        try:
+            ok = upload_single_file(
+                client,
+                file_path,
+                project_name,
+                backup_root,
+                note=note,
+                lane_folder=lane_folder,
+            )
+            return ok
+        finally:
+            _count(ok)
 
     def _process_future(future: object) -> object:
         """Process a completed upload future: its answer, or False when it raised."""
@@ -250,10 +278,13 @@ def upload_batch(
 
     # A stop that lands after the last upload finished stopped nothing.
     stopped = stop_requested() and completed < len(files)
+    aborted = breaker["aborted"]
+    if aborted:
+        logger.warning(f"[backup] {aborted}")
 
     trail.log_operation(
         "upload_batch_complete",
-        {"uploaded": uploaded, "failed": failed, "total": len(files), "stopped": stopped},
+        {"uploaded": uploaded, "failed": failed, "total": len(files), "stopped": stopped, "aborted": bool(aborted)},
     )
 
     return {
@@ -262,4 +293,5 @@ def upload_batch(
         "failed": failed,
         "bytes_uploaded": bytes_uploaded,
         "stopped": stopped,
+        "aborted": aborted,
     }

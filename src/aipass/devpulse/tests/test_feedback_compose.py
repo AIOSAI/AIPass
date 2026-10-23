@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_feedback_compose.py
 # Description: Tests for feedback compose — send, reply, ai_mail delivery
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-10-18
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/feedback/compose.py."""
@@ -20,7 +20,25 @@ from unittest.mock import patch
 
 import pytest
 
+import aipass.ai_mail as ai_mail
 from aipass.devpulse.apps.handlers.feedback import storage, compose
+
+
+@pytest.fixture(autouse=True)
+def door(monkeypatch):
+    """Stand in for ai_mail's inbox door: a missing inbox answers through the real door (it refuses before any
+    write), an existing one is recorded here as delivered. The write and its feed event are ai_mail's to pin."""
+    real = ai_mail.post_to_inbox_file
+    posted: list[tuple] = []
+
+    def fake(inbox_file, email_data):
+        if not inbox_file.exists():
+            return real(inbox_file, email_data)
+        posted.append((inbox_file, dict(email_data)))
+        return True, "", "fake-id"
+
+    monkeypatch.setattr(ai_mail, "post_to_inbox_file", fake)
+    return posted
 
 
 @pytest.fixture
@@ -177,32 +195,17 @@ class TestAiMailDelivery:
             }
         )
 
-    def test_delivers_to_ai_mail(self, inbox_with_message, mock_aipass_root):
-        """Should write reply to sender's ai_mail inbox."""
-        # Create sender's ai_mail directory and inbox
-        ai_mail_dir = mock_aipass_root / "seedgo" / ".ai_mail.local"
-        ai_mail_dir.mkdir(parents=True)
-        ai_mail_inbox = ai_mail_dir / "inbox.json"
-        with open(ai_mail_inbox, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "mailbox": "inbox",
-                    "total_messages": 0,
-                    "unread_count": 0,
-                    "messages": [],
-                },
-                f,
-            )
+    def test_delivers_to_ai_mail(self, inbox_with_message, mock_aipass_root, door):
+        """The reply reaches the sender's ai_mail inbox through ai_mail's door, in the replyable v2 shape."""
+        ai_mail_inbox = mock_aipass_root / "seedgo" / ".ai_mail.local" / "inbox.json"
+        ai_mail_inbox.parent.mkdir(parents=True)
+        ai_mail_inbox.write_text('{"messages": []}', encoding="utf-8")
 
         compose.reply_to("aaa11111", "Thanks for the feedback!")
 
-        with open(ai_mail_inbox, encoding="utf-8") as f:
-            mail_data = json.load(f)
-
-        assert mail_data["total_messages"] == 1
-        assert mail_data["unread_count"] == 1
-
-        mail_msg = mail_data["messages"][0]
+        assert [path for path, _ in door] == [ai_mail_inbox]
+        mail_msg = door[0][1]
+        assert mail_msg["to"] == "@seedgo"
         # '@'-prefixed from + reply_path are what make the message REPLYABLE:
         # ai_mail's reply verb matches from against branch emails, then falls
         # back to the stored reply_path for cross-project delivery (wall-2,
@@ -226,7 +229,7 @@ class TestAiMailDelivery:
         assert mail_msg["metadata"]["source"] == "feedback"
         assert mail_msg["metadata"]["thread_id"] == "aaa11111"
 
-    def test_delivered_timestamp_matches_ai_mail_store_format(self, inbox_with_message, mock_aipass_root):
+    def test_delivered_timestamp_matches_ai_mail_store_format(self, inbox_with_message, mock_aipass_root, door):
         """Delivered timestamp must use ai_mail's canonical store format.
 
         ai_mail stamps its store with local '%Y-%m-%d %H:%M:%S' (create.py,
@@ -234,19 +237,13 @@ class TestAiMailDelivery:
         two timestamp shapes in one file (BAUD report e8c235f8, 2026-08-24).
         One store, one format — and local wall-clock, not UTC wearing it.
         """
-        ai_mail_dir = mock_aipass_root / "seedgo" / ".ai_mail.local"
-        ai_mail_dir.mkdir(parents=True)
-        ai_mail_inbox = ai_mail_dir / "inbox.json"
-        with open(ai_mail_inbox, "w", encoding="utf-8") as f:
-            json.dump(
-                {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []},
-                f,
-            )
+        ai_mail_inbox = mock_aipass_root / "seedgo" / ".ai_mail.local" / "inbox.json"
+        ai_mail_inbox.parent.mkdir(parents=True)
+        ai_mail_inbox.write_text('{"messages": []}', encoding="utf-8")
 
         compose.reply_to("aaa11111", "format check")
 
-        with open(ai_mail_inbox, encoding="utf-8") as f:
-            ts = json.load(f)["messages"][0]["timestamp"]
+        ts = door[0][1]["timestamp"]
 
         # Parses in ai_mail's canonical shape (raises on ISO-T)...
         parsed = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
@@ -258,21 +255,6 @@ class TestAiMailDelivery:
         """Should log warning and skip when sender has no ai_mail inbox."""
         # Don't create sender's ai_mail directory
         result = compose.reply_to("aaa11111", "Reply without delivery")
-
-        # Reply should still succeed locally
-        assert result is True
-        data = storage.load_inbox()
-        assert len(data["messages"][0]["thread"]) == 1
-
-    def test_skips_delivery_on_corrupt_ai_mail(self, inbox_with_message, mock_aipass_root):
-        """Should skip delivery when sender's ai_mail inbox is corrupt."""
-        ai_mail_dir = mock_aipass_root / "seedgo" / ".ai_mail.local"
-        ai_mail_dir.mkdir(parents=True)
-        ai_mail_inbox = ai_mail_dir / "inbox.json"
-        with open(ai_mail_inbox, "w", encoding="utf-8") as f:
-            f.write("{corrupt json!!!")
-
-        result = compose.reply_to("aaa11111", "Reply with corrupt ai_mail")
 
         # Reply should still succeed locally
         assert result is True
@@ -343,7 +325,7 @@ class TestHonestDeliveryReporting:
         )
         assert compose.reply_to("aaa11111", "Body") is True
         err = capsys.readouterr().err
-        assert "NOT delivered to ghost: ai_mail inbox not found at" in err
+        assert "NOT delivered to ghost: inbox not found: " in err
         assert "nowhere" in err and "inbox.json" in err
 
     def test_send_warns_when_sender_unknown(self, empty_inbox):

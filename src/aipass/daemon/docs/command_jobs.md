@@ -33,7 +33,7 @@ one call covers every branch. The slot names a Sunday, 04:00. The live file's `_
 |-------|----------|---------|
 | `command` | yes, instead of `prompt` | One drone command line. `drone` must be the first token. |
 | `timeout_seconds` | no, default **600** | A positive whole number. When it runs out, the command's whole process tree is stopped and the fire is FAILED. 600 matches drone's own executor default. |
-| `notify` | no | `false` silences the Telegram pings. `{"email": "@devpulse"}` also sends an ai_mail **email** (never a wake) on start and on finish. |
+| `notify` | no | `{"email": "@devpulse"}` sends an ai_mail **email** (never a wake) on start and on finish. `true` and `false` are accepted and send nothing. |
 | `wake` | ignored | A command job wakes nobody. Discovery drops the block and logs a warning if one is present. |
 
 **The rules, and why each one exists.**
@@ -72,8 +72,8 @@ FIRE: @daemon/dplan-0338-proof -> command: drone @daemon --help
 DONE: @daemon/dplan-0338-proof — exit 0, 1.5s —   Fleet mail: | ... |   drone @daemon <command> --help
 ```
 
-**Notify.** The Telegram pings follow the rule every job follows (`_should_notify`: on unless
-`notify` is false). A `notify` block counts as on. `notify.email` sends one mail as the command
+**Notify.** The daemon sends no notifications of its own; `notify.email` is the only channel.
+It sends one mail as the command
 starts (owner, id, command, timeout) and one as it finishes (exit code, duration, output tail).
 The mail goes out as a `drone @ai_mail email` subprocess from daemon's own directory, so it is
 signed `@daemon`. It is not sent through an in-process ai_mail import, for two reasons: ai_mail has
