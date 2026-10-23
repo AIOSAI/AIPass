@@ -632,7 +632,7 @@
     {
       "file": "tests/test_trinity_push.py",
       "standard": "through_the_command",
-      "lines": [1429],
+      "lines": [1438],
       "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
     },
     {

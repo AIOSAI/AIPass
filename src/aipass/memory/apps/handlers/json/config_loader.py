@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -75,6 +75,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enforce": True,
         # Percent of each cap an agent drafts to; @seedgo's meta line reads it, never mirrors it.
         "draft_percent": 80,
+        # The gate refuses past cap * (100 + this) // 100: a writer estimates length, it cannot count it.
+        "tolerance_percent": 10,
         "entry_types": {
             "key_learnings": {
                 "file": "local.json",

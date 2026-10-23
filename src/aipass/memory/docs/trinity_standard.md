@@ -89,6 +89,21 @@ The canonical text field keeps its own top-level `field` / `max_chars` keys: @se
 can never disagree at runtime: the top-level `max_chars` wins, because it is the number the agent is
 shown in its own `*_meta` line.
 
+### The tolerance band
+
+A writer estimates length, it cannot count it, so an entry aimed at a 100 cap lands at 101 to 104.
+`entry_limits.tolerance_percent` (10) is a band over every per-entry character cap: the canonical
+text field and every `max_chars` in the closed shape, a `list[str]` field's joined text included. A
+write is refused only past `cap * (100 + tolerance_percent) // 100`, rounded down to whole characters:
+100 allows 110, 200 allows 220, 300 allows 330. `resolve_entry_types` stamps the percent onto every
+resolved type, so the write gate, `lint`, the trinity push and the todo restore measure one number.
+
+The cap does not move. The `*_meta` lines print the plain cap and its draft target and say nothing
+about the band, so the writer still aims at the cap; a refusal names the plain cap, with `over_by`
+counted from it. `max_items` and the whole-file budgets carry no band, and the keep-count arithmetic
+in `budget.py` measures the plain cap. A missing value, or one that is not an int from 0 to 100,
+serves the seed, 10.
+
 Two reasons, in the SAME shape as the over-cap violation so @hooks' `%d` formatting keeps working:
 
 | `reason` | Means |

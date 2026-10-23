@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_lint.py
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-06-13
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py check_entry, apps/handlers/json/lint_handler.py and apps/modules/lint.py."""
@@ -628,6 +628,28 @@ class TestFieldsModeFlagsTheClosedShape:
         assert result["success"] is True
         assert result["violations"] == []
         assert result["branches_scanned"] == 1
+
+
+class TestLintAgreesWithTheGate:
+    """An entry inside the tolerance band is never drift; one char past it is flagged by lint and refused by the gate."""
+
+    def test_both_lanes_flag_exactly_what_the_gate_refuses(self, tmp_path: Path) -> None:
+        section = {**_shape_limits(), "tolerance_percent": 10}
+        limits = {**section, "entry_types": entry_limits.resolve_entry_types(section, "alpha")}
+        sessions = [
+            _session(summary="x" * 330, status="s" * 44),
+            _session(number=2, summary="y" * 331, status="t" * 45),
+        ]
+        branches = _plant(tmp_path, "alpha", sessions)
+
+        gate = entry_limits.changed_entries({}, {"sessions": sessions}, limits)
+        with patch.object(lint_handler, "load_entry_limits", return_value=limits):
+            caps = lint_handler.run_lint(branches)["violations"]
+        fields = _run_fields(lint_handler, branches, limits)["violations"]
+
+        assert sorted((v["length"], v["cap"]) for v in gate) == [(45, 40), (331, 300)]
+        assert [(v["key"], v["length"]) for v in caps] == [("[1]", 331)]
+        assert [(v["key"], v["field"], v["length"]) for v in fields] == [("[1]", "status", 45)]
 
 
 class TestFieldsModeIsAnInventory:

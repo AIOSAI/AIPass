@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Trinity Push Handler
@@ -151,7 +151,8 @@ def _cap_problem(entry: dict, cap_spec: Any) -> str | None:
     if not isinstance(field, str) or not isinstance(max_chars, int) or isinstance(max_chars, bool):
         return None
     value = entry.get(field)
-    if not isinstance(value, str) or len(value) <= max_chars:
+    allowed = entry_limits.allowed_chars(max_chars, cap_spec.get("tolerance_percent", 0))
+    if not isinstance(value, str) or len(value) <= allowed:
         return None
     return f"'{field}' is {len(value)} chars, over its {max_chars}-char cap"
 

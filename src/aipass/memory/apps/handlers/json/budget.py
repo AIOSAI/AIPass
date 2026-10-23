@@ -1,16 +1,12 @@
 # =================== AIPass ====================
 # Name: budget.py
 # Description: Worst-case size arithmetic for the .trinity file budgets
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
-"""
-File Budget Arithmetic
-
-Imports no config_loader or entry_limits: config_loader calls this while resolving.
-"""
+"""File budget arithmetic. Imports no config_loader or entry_limits: config_loader calls this while resolving."""
 
 import json
 from typing import Any
@@ -47,6 +43,7 @@ def _worst_field_value(spec: Any) -> Any:
     if kind == _TYPE_INT:
         return _WORST_INT
 
+    # shortcut: the plain cap, not the tolerance band (local.json worst case 23,973 -> 25,374 of 25,000 with it); upgrade on a budget ruling.
     max_chars = spec.get("max_chars")
     if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 0:
         max_chars = 0

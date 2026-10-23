@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.2.3
+# Version: 1.3.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -1030,15 +1030,24 @@ class TestTodosMoveToTheBacklog:
         assert document["document_metadata"] == {"managed_by": "memory", "branch": self.BRANCH, "high_water": 2}
 
     def test_an_over_cap_task_lands_in_the_backlog_unshortened(self, tmp_path, monkeypatch):
-        long_task = {"number": 1, "date": "2026-09-15", "task": "t" * 101, "priority": "low"}
+        long_task = {"number": 1, "date": "2026-09-15", "task": "t" * 111, "priority": "low"}
         root = _branch(tmp_path, self.BRANCH, {"todos": [copy.deepcopy(long_task)]})
 
         self._push(monkeypatch, tmp_path, root, dry_run=False)
 
         assert self._pad(root) == []
         [record] = self._records(tmp_path)
-        assert len(record["entry"]["task"]) == 101
+        assert len(record["entry"]["task"]) == 111
         assert self._same(record["entry"], long_task)
+
+    def test_a_task_inside_the_tolerance_band_stays_on_the_pad(self, tmp_path, monkeypatch):
+        banded = {"number": 1, "date": "2026-09-15", "task": "t" * 110, "priority": "low"}
+        root = _branch(tmp_path, self.BRANCH, {"todos": [copy.deepcopy(banded)]})
+
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert self._pad(root) == [banded]
+        assert not self._backlog(tmp_path).exists()
 
     def test_a_todo_missing_a_field_moves(self, tmp_path, monkeypatch):
         """canary's real shape on 2026-09-15: a task and nothing else."""
