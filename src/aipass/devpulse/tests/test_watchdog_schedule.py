@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_schedule.py
 # Description: Tests for the watchdog schedule handler + router integration
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/handlers/watchdog/schedule.py and the watchdog schedule command that drives it."""
@@ -210,6 +210,16 @@ def test_wake_at_nonexistent_command():
 
     assert result["command_exit_code"] != 0
     assert result["command"] == "this-command-does-not-exist-xyz-123"
+
+
+def test_wake_at_hung_command_times_out_in_the_exec_failure_shape(monkeypatch):
+    """A hung command answers exit -1 and names the timeout, so the wake's report never waits on it forever."""
+    monkeypatch.setattr(schedule_handler, "_COMMAND_TIMEOUT_SECONDS", 0.2)
+    result = schedule_handler.wake_at("+1s", command=f'{sys.executable} -c "import time; time.sleep(30)"')
+
+    assert result["command_exit_code"] == -1
+    assert result["command_stdout"] == ""
+    assert "timed out after 0s" in result["command_stderr"]
 
 
 def test_wake_at_sleeps_in_chunks(monkeypatch):

@@ -1,38 +1,27 @@
 # =================== AIPass ====================
 # Name: guard.py
 # Description: Owner-capability caller guard for devpulse owner-only tools
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
-"""
-Owner-capability guard for devpulse's owner-only tools.
-
-drone runs a routed module with cwd set to the branch, so Path.cwd() never names the caller; AIPASS_CALLER_* does.
-"""
+"""Owner-capability guard for devpulse's owner-only tools."""
 
 import os
 from pathlib import Path
 
 from aipass.prax import logger
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.owner.admin_grant import _resolve_verified_caller
 
 
 def _resolve_caller() -> tuple[str, Path]:
-    """Resolve ``(caller_email, caller_cwd)`` from the env drone sets; the email is @ + directory name, as ai_mail."""
+    """``(email, cwd)`` from the AIPASS_CALLER_* rail only: drone sets cwd to the branch, so no rail, no caller."""
     caller_cwd_env = os.environ.get("AIPASS_CALLER_CWD", "")
     caller_cwd = Path(caller_cwd_env) if caller_cwd_env else Path.cwd()
-
-    branch = os.environ.get("AIPASS_CALLER_BRANCH", "")
-    if not branch:
-        for candidate in [caller_cwd, *caller_cwd.parents]:
-            if (candidate / ".trinity" / "passport.json").exists():
-                branch = candidate.name
-                break
-
-    email = f"@{branch.lstrip('@').lower()}" if branch else ""
-    return email, caller_cwd
+    branch = _resolve_verified_caller()
+    return (f"@{branch}" if branch else ""), caller_cwd
 
 
 def _legacy_devpulse_heuristic(caller_cwd: Path) -> bool:

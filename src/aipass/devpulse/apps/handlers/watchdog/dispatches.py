@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatches.py
 # Description: Watchdog seat attribution — which completions are THIS seat's, and what is still out
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Watchdog seat attribution — whose dispatch was that, and what is still out."""
@@ -50,17 +50,10 @@ def is_mine(record: dict, seat: str) -> bool:
 
 
 def outstanding(repo_root: Path | None = None) -> list[dict]:
-    """Every dispatch still open, newest first, each carrying an ``overdue`` bool."""
-    return list(_ai_mail.outstanding_dispatches(repo_root))
-
-
-def overdue(repo_root: Path | None = None) -> list[dict]:
-    """The outstanding dispatches that are past their expected_by.
-
-    Not proof the monitor died: a retry runs on past the FIRST expected_by.
-    """
-    late = [entry for entry in outstanding(repo_root) if entry.get("overdue")]
+    """Every dispatch still open, newest first, each with ``overdue``: past expected_by, not proof the monitor died."""
+    entries = list(_ai_mail.outstanding_dispatches(repo_root))
+    late = sum(1 for entry in entries if entry.get("overdue"))
     if late:
-        logger.info("[watchdog.dispatches] %s dispatch(es) past the hard timeout, monitor state unknown", len(late))
-        json_handler.log_operation("dispatches_overdue", {"count": len(late)})
-    return late
+        logger.info("[watchdog.dispatches] %s dispatch(es) past the hard timeout, monitor state unknown", late)
+        json_handler.log_operation("dispatches_overdue", {"count": late})
+    return entries

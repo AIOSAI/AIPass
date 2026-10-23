@@ -3,7 +3,7 @@
 # Description: Tests for devpulse.py CLI routing, introspection, and resilience
 # Version: 1.0.0
 # Created: 2026-05-15
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/devpulse.py and the routing of apps/modules/release_notify.py."""
@@ -144,9 +144,31 @@ class TestErrorResilience:
             result = devpulse_module.discover_modules()
         assert result == []
 
+    def test_a_broken_module_is_named_not_unknown(self, tmp_path, capsys):
+        """A module file that cannot be imported is named on stderr, never dropped so its command reads "Unknown"."""
+        (tmp_path / "broken.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
+        with patch.object(devpulse_module, "MODULES_DIR", tmp_path):
+            assert devpulse_module.discover_modules() == []
+        assert "module broken failed to load: ModuleNotFoundError" in capsys.readouterr().err
+
+
+class TestChangelogHeadline:
+    """The release section is matched as a whole version, never as a prefix of a later one."""
+
+    def test_a_prefix_version_does_not_read_the_later_section(self, tmp_path):
+        """v2.8.2 answers its own section, not v2.8.24's that sits above it (mutant: substring match)."""
+        changelog = tmp_path / "CHANGELOG.md"
+        changelog.write_text(
+            "## [2026-10-21] — v2.8.24: later\n\n- later line\n\n## [2026-09-01] — v2.8.2: wanted\n\n- wanted line\n",
+            encoding="utf-8",
+        )
+        headline = "\n".join(release_notify_module.changelog_headline(changelog, "2.8.2"))
+        assert "wanted line" in headline
+        assert "later line" not in headline
+
 
 class TestHandleCommandGuard:
-    """handle_command cross-branch security guard."""
+    """handle_command is the one entry: drone and main() share it."""
 
     def test_handle_command_returns_bool(self):
         """handle_command always returns a bool."""

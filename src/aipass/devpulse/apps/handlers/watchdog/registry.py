@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Watchdog Watch Registry — multi-watch tracking + lifecycle
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 # Operational state lives in .watchdog/, never .trinity/ (identity and memory only).
@@ -21,13 +21,8 @@ from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.devpulse.apps.handlers.file_lock import FileLock
 from aipass.devpulse.apps.handlers.json import json_handler
-
-try:
-    import fcntl  # POSIX advisory locks: absent on Windows, so the lock door reads this, not sys.platform
-except ImportError as exc:  # pragma: no cover - the host that lacks it is the Windows runner
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[watchdog.registry] fcntl absent on this host, registry writes run unlocked: %s", exc)
 
 
 _STORAGE_FILENAME = "watchdog_active.json"
@@ -90,35 +85,6 @@ def _atomic_write_unlocked(storage_path: Path, data: dict) -> None:
                 tmp_path.unlink()
             except OSError as exc:
                 logger.warning("[watchdog.registry] leftover tmp %s: %s", tmp_path, exc)
-
-
-class _FileLock:
-    """Exclusive lock on a sibling .lock file (fcntl where it exists, no-op without it).
-
-    A sibling, because os.replace on the data file would swap the inode out from
-    under the lock. The door is ``fcntl``, not ``sys.platform``: a test pretending
-    darwin must not make a Windows host import a module it does not have.
-    """
-
-    def __init__(self, storage_path: Path) -> None:
-        self._lock_path = storage_path.with_suffix(storage_path.suffix + ".lock")
-        self._fh = None
-
-    def __enter__(self) -> "_FileLock":
-        if fcntl is not None:
-            self._lock_path.parent.mkdir(parents=True, exist_ok=True)
-            # 'a+' so the file is created if missing and lock survives concurrent opens.
-            self._fh = open(self._lock_path, "a+", encoding="utf-8")
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        if fcntl is not None and self._fh is not None:
-            try:
-                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
-            finally:
-                self._fh.close()
-                self._fh = None
 
 
 def _generate_handle(watch_type: str) -> str:
@@ -260,7 +226,7 @@ def register(
         "metadata": metadata or {},
     }
 
-    with _FileLock(path):
+    with FileLock(path):
         store = _load_store_unlocked(path)
         existing_handles = {w.get("handle") for w in store["watches"]}
         while handle in existing_handles:
@@ -280,7 +246,7 @@ def deregister(handle: str, storage_path: Path | None = None) -> bool:
         return False
 
     path = storage_path or default_storage_path()
-    with _FileLock(path):
+    with FileLock(path):
         store = _load_store_unlocked(path)
         before = len(store["watches"])
         store["watches"] = [w for w in store["watches"] if w.get("handle") != handle]
@@ -304,7 +270,7 @@ def list_active(
     now = time.time()
     pruned_count = 0
 
-    with _FileLock(path):
+    with FileLock(path):
         store = _load_store_unlocked(path)
         if prune_stale:
             survivors = []
@@ -344,7 +310,7 @@ def kill_watch(handle: str, storage_path: Path | None = None) -> dict:
     """Look up ``handle``, SIGTERM its pid, wait briefly for exit, deregister."""
     path = storage_path or default_storage_path()
     watch = None
-    with _FileLock(path):
+    with FileLock(path):
         watch = _lookup(handle, path)
 
     if watch is None:

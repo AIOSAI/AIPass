@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: schedule.py
 # Description: Watchdog Schedule Handler — wall-clock + relative wake, optional command
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 # Naive local datetimes throughout: "02:00" means what a human means by it.
@@ -27,6 +27,9 @@ from aipass.devpulse.apps.handlers.json import json_handler
 
 # Chunked so a long sleep stays interruptible and an injected clock returns at once.
 _SLEEP_CHUNK_SECONDS = 5.0
+
+# A hung command must not hold the wake's report forever; its output is the wake.
+_COMMAND_TIMEOUT_SECONDS = 600.0
 
 _WALL_CLOCK_RE = re.compile(r"^(\d{1,2}):(\d{2})(?::(\d{2}))?$")
 _RELATIVE_PREFIX = "+"
@@ -88,7 +91,7 @@ def format_wait(target: datetime, now: datetime) -> str:
 
 
 def _run_command(command: str) -> dict:
-    """Execute ``command``; never raises, an exec failure answers exit -1 in the same shape."""
+    """Execute ``command`` as an argument list, no shell; an exec failure or a timeout answers exit -1."""
     import shlex
 
     try:
@@ -97,11 +100,19 @@ def _run_command(command: str) -> dict:
             capture_output=True,
             text=True,
             check=False,
+            timeout=_COMMAND_TIMEOUT_SECONDS,
         )
         return {
             "command_exit_code": completed.returncode,
             "command_stdout": completed.stdout,
             "command_stderr": completed.stderr,
+        }
+    except subprocess.TimeoutExpired as exc:
+        logger.warning("[watchdog.schedule] command timed out after %ss %r", _COMMAND_TIMEOUT_SECONDS, command)
+        return {
+            "command_exit_code": -1,
+            "command_stdout": "",
+            "command_stderr": f"timed out after {int(_COMMAND_TIMEOUT_SECONDS)}s: {exc}",
         }
     except OSError as exc:
         logger.warning("[watchdog.schedule] command exec failed %r: %s", command, exc)

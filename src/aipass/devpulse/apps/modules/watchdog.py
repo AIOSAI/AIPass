@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Watchdog Module — devpulse's personal directed-wake system.
@@ -79,7 +79,7 @@ _SCHEDULE_HELP_TEXT = """\
 
 Usage:
   watchdog schedule <time>            Wake at HH:MM[:SS] or +N (+30m, +1h30m)
-  watchdog schedule <time> <command>  Wake + run command via shell
+  watchdog schedule <time> <command>  Wake + run command (an argument list, no shell: no && or |)
   watchdog schedule --help            Show this help
 
 Examples:
@@ -423,28 +423,19 @@ def _handle_status() -> bool:
     registry_mod = _load_registry_module()
     timer_mod = _load_timer_module_for_format()
 
-    pre = registry_mod.list_active(prune_stale=False)
-    post = registry_mod.list_active(prune_stale=True)
-    pruned = len(pre) - len(post)
+    watches = registry_mod.list_active(prune_stale=True)
 
     console.print("[bold]Watchdog Status[/bold]")
     console.print("===============")
 
-    if not post:
+    if not watches:
         console.print("No active watches.")
-        if pruned:
-            console.print(f"[dim]Pruned {pruned} stale watch(es).[/dim]")
         return True
 
-    console.print(f"{len(post)} active watch(es):")
+    console.print(f"{len(watches)} active watch(es):")
     console.print()
-    for watch in post:
+    for watch in watches:
         console.print(presenter.format_status_line(watch, timer_mod.format_human))
-
-    if pruned:
-        console.print(f"[dim]Pruned {pruned} stale watch(es).[/dim]")
-    else:
-        console.print("[dim]No stale watches to prune.[/dim]")
 
     presenter.print_delivery_lag()
     return True

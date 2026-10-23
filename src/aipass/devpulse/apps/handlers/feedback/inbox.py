@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox.py
 # Description: Inbox operations — list, view, clear feedback messages
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-11
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Feedback Inbox — reading and managing feedback messages.
 
 from rich.table import Table
 
-from aipass.devpulse.apps.handlers.feedback.storage import load_inbox, save_inbox
+from aipass.devpulse.apps.handlers.feedback.storage import inbox_lock, load_inbox, save_inbox
 
 from aipass.cli.apps.modules import err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
@@ -52,18 +52,19 @@ def list_messages() -> None:
 
 def view_message(msg_id: str) -> None:
     """Display a message and its thread, marking it as read."""
-    data = load_inbox()
-    messages = data.get("messages", [])
+    with inbox_lock():
+        data = load_inbox()
+        messages = data.get("messages", [])
 
-    msg = _find_message(messages, msg_id)
-    if msg is None:
-        error(f"Message {msg_id} not found.")
-        return
+        msg = _find_message(messages, msg_id)
+        if msg is None:
+            error(f"Message {msg_id} not found.")
+            return
 
-    if not msg.get("read"):
-        msg["read"] = True
-        data["unread_count"] = max(0, data.get("unread_count", 1) - 1)
-        save_inbox(data)
+        if not msg.get("read"):
+            msg["read"] = True
+            data["unread_count"] = max(0, data.get("unread_count", 1) - 1)
+            save_inbox(data)
 
     console.print(f"\n[bold cyan]From:[/bold cyan] {msg.get('from', '?')}")
     console.print(f"[bold cyan]Subject:[/bold cyan] {msg.get('subject', '(no subject)')}")
@@ -83,37 +84,39 @@ def view_message(msg_id: str) -> None:
 
 def clear_message(msg_id: str) -> None:
     """Remove a single message from the inbox."""
-    data = load_inbox()
-    messages = data.get("messages", [])
+    with inbox_lock():
+        data = load_inbox()
+        messages = data.get("messages", [])
 
-    msg = _find_message(messages, msg_id)
-    if msg is None:
-        error(f"Message {msg_id} not found.")
-        return
+        msg = _find_message(messages, msg_id)
+        if msg is None:
+            error(f"Message {msg_id} not found.")
+            return
 
-    was_unread = not msg.get("read")
-    data["messages"] = [m for m in messages if m.get("id") != msg_id]
-    data["total_messages"] = len(data["messages"])
-    if was_unread:
-        data["unread_count"] = max(0, data.get("unread_count", 1) - 1)
+        was_unread = not msg.get("read")
+        data["messages"] = [m for m in messages if m.get("id") != msg_id]
+        data["total_messages"] = len(data["messages"])
+        if was_unread:
+            data["unread_count"] = max(0, data.get("unread_count", 1) - 1)
 
-    save_inbox(data)
+        save_inbox(data)
     console.print(f"[green]Cleared message {msg_id}.[/green]")
 
 
 def clear_all_read() -> None:
     """Remove all read messages from the inbox."""
-    data = load_inbox()
-    messages = data.get("messages", [])
+    with inbox_lock():
+        data = load_inbox()
+        messages = data.get("messages", [])
 
-    before_count = len(messages)
-    data["messages"] = [m for m in messages if not m.get("read")]
-    after_count = len(data["messages"])
-    removed = before_count - after_count
+        before_count = len(messages)
+        data["messages"] = [m for m in messages if not m.get("read")]
+        after_count = len(data["messages"])
+        removed = before_count - after_count
 
-    data["total_messages"] = after_count
+        data["total_messages"] = after_count
 
-    save_inbox(data)
+        save_inbox(data)
 
     if removed == 0:
         console.print("[dim]No read messages to clear.[/dim]")
