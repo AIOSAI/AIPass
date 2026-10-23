@@ -25,6 +25,7 @@ drone @spawn create <path> --role R --purpose P   # mint (add --dry-run to previ
 drone @spawn update @branch                       # preview; --apply executes
 drone @spawn update specialist --all --apply      # every branch of a class
 drone @spawn delete @branch --retire --dry-run    # preview retiring a citizen
+drone @spawn retire-project <root> --dry-run      # admin seat: retire a whole project
 drone @spawn sync-registry --check                # read-only owner/identity health
 drone @spawn regenerate-registry                  # after ANY template file change
 drone @spawn migrate-passports                    # fleet schema 2.0, preview by default

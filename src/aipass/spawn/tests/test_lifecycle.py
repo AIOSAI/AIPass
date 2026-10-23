@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
 # Modified: 2026-10-22
 # =============================================
@@ -1165,6 +1165,11 @@ def _deletion_rows(tmp_path):
     return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _said(capsys):
+    """Both channels with whitespace collapsed: Rich wraps a long tmp path's line, and xdist lengthens the path."""
+    return " ".join("".join(capsys.readouterr()).split())
+
+
 def _seat(monkeypatch, branch="devpulse"):
     """Stand the caller rail on one seat; drone stamps these, the host shell may carry stale ones."""
     for var in ("AIPASS_CALLER_CWD", "AIPASS_CALLER_IDENTITY_SOURCE", "AIPASS_REGISTRY", "AIPASS_CALLER_BRANCH"):
@@ -1199,7 +1204,7 @@ class TestDeleteByPath:
         result = handle_delete([str(branch), "--retire", "--yes"])
 
         assert result == 1
-        assert "registry owner" in "".join(capsys.readouterr())
+        assert "registry owner" in _said(capsys)
         assert branch.exists()
         assert _registry_names(registry) == ["WORKER"]
         assert _deletion_rows(tmp_path) == []
@@ -1270,7 +1275,7 @@ class TestRetireProject:
         result = handle_retire_project([str(requested), "--yes"])
 
         assert result == 1
-        assert "AIPass root" in "".join(capsys.readouterr())
+        assert "AIPass root" in _said(capsys)
         assert (aipass / "AIPASS_REGISTRY.json").exists()
         assert root.exists()
         assert not (aipass / ".archive").exists()
@@ -1293,7 +1298,7 @@ class TestRetireProject:
         result = handle_retire_project([str(root), "--yes"])
 
         assert result == 1
-        assert "admin seat" in "".join(capsys.readouterr())
+        assert "admin seat" in _said(capsys)
         assert _tree_bytes(root) == before
         assert trust.read_text(encoding="utf-8") == trust_before
         assert not (aipass / ".archive").exists()
