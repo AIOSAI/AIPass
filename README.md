@@ -161,12 +161,12 @@ The installer writes a layer outside the project. Remove all of it to erase AIPa
 - `~/.claude/.backup/settings/` — those dated copies and the receipts ledger.
 - `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`.
 - Your shell rc (`.bashrc`, `.zshrc` or `.bash_profile`): an `AIPASS_HOME` export, a PATH line where the commands went to `~/.local/bin`, and the `claude()` boot-shim function between the `AIPass boot shim` markers in `.bashrc` and `.zshrc`.
-- `~/.aipass/` — cross-project state: the trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), Telegram bot state (the Telegram skill is retired and switched off, but its state lands here if you turn it on).
-- `~/.secrets/aipass/` if seeded.
+- `~/.aipass/` — cross-project state: the trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, the logs of the `aipass` CLI installed from PyPI under `system_logs/` (a clone logs under its own `system_logs/` instead), and any Telegram bot state an earlier version left (the Telegram skill is out of the tree).
+- Your login keyring: one entry per secret under the service `aipass` (API keys, Google credentials, the host API's token, pairings and config), in SecretService on Linux, the Keychain on macOS, the Credential Locker on Windows. `drone @api secrets migrate` imports the files an earlier version kept under `~/.secrets/aipass/` and shreds them; that directory keeps only the host API's write lock and pairing receipts.
 - `git config --global pull.rebase true`, set only if install also set your identity.
 - Only if a `codex` binary was on PATH at install: `~/.codex/config.toml` is rewritten.
 - Only if you ran `drone @daemon install-timer`: a systemd user timer, with its `daemon-tick.log` under `~/.aipass/`, removed by `drone @daemon uninstall-timer`.
-- Unless you pass `--no-baud`, `aipass install` sets up the host API (the `./aipass install` clone route skips this step): its bind in `~/.secrets/aipass/host_api/config.json`, token and pairing files beside it (pairing codes are stored as hashes once one is minted), and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
+- Unless you pass `--no-baud`, `aipass install` sets up the host API (the `./aipass install` clone route skips this step): its bind, token and pairings as keyring entries (pairing codes are stored as hashes once one is minted), its write lock and pairing receipts under `~/.secrets/aipass/`, and the `aipass-host-api.service` user unit under `~/.config/systemd/user/` (`systemctl --user disable --now aipass-host-api.service` removes it from boot).
 - macOS only, when no Python 3.10+ is found and an existing Homebrew cannot provide one: a `uv`-managed interpreter under `~/.local/`. Linux with no Python 3.10+ stops the install and says so.
 
 No cloud accounts, no external services — everything to clean up is on your machine.
