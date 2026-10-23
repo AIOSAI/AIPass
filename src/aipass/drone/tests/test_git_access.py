@@ -3,7 +3,7 @@
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
 # Version: 1.4.0
 # Created: 2026-05-12
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
