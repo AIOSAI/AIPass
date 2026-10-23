@@ -48,11 +48,12 @@ class TestFts5Available:
             compass.add_decision("c", "d", "good", db_path=db)
 
     def test_a_read_does_not_write_the_db(self, db):
-        """stats() on an existing db leaves the file untouched: the old create-and-drop probe wrote on every read."""
+        """stats() on an existing db leaves its bytes untouched (SQLite's change counter moves on any write);
+        the old create-and-drop probe wrote on every read. Bytes, not mtime: a coarse clock would hide a write."""
         compass.add_decision("c", "d", "good", db_path=db)
-        before = db.stat().st_mtime_ns
+        before = db.read_bytes()
         compass.stats(db_path=db)
-        assert db.stat().st_mtime_ns == before
+        assert db.read_bytes() == before
 
 
 class TestAddQueryRoundTrip:
