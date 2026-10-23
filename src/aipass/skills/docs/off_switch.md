@@ -6,9 +6,9 @@ A skill can be disconnected from AIPass and reconnected later. The setting
 persists across restarts and reboots (`skills_json/switch_state.json`).
 
 ```bash
-drone @skills off telegram "retired"              # disconnect
+drone @skills off screen_lock "not on this host" # disconnect
 drone @skills switch                              # who is on, who is off
-drone @skills on telegram                         # reconnect
+drone @skills on screen_lock                      # reconnect
 ```
 
 **OFF** means three things, not one:
@@ -29,7 +29,7 @@ A skill declares what belongs to it in its own SKILL.md frontmatter:
 ```yaml
 switch:
   systemd_user:
-    - telegram-bot@base
+    - my-skill-worker@main
 ```
 
 A skill that declares nothing still toggles; it simply owns no processes to
@@ -38,9 +38,8 @@ than defaulting to on — defaulting to on would restart exactly what someone
 deliberately switched off.
 
 A door that is imported in-process never passes the runner's gate, so it asks
-the switch itself — `machine_vitals()` in the system_status skill, and the
-telegram notifier. See [system_status.md](system_status.md) and
-[telegram.md](telegram.md).
+the switch itself — `machine_vitals()` and `machine_processes()` in the
+system_status skill. See [system_status.md](system_status.md).
 
 ---
 

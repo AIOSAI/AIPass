@@ -10,7 +10,7 @@
 Unified queue view — aggregates .daemon/schedule.json jobs joined to runstate.
 
 Human-readable Rich table (default) or --json matching the frozen contract
-consumed by @skills' scheduler bot.
+any outside reader (BAUD, a script) parses.
 """
 
 import json
@@ -215,10 +215,10 @@ def _print_catch_up_queue(runstate: dict) -> None:
 
 
 def _build_json_output(entries: list, runstate: Optional[dict] = None) -> dict:
-    """Build frozen-schema JSON output for @skills consumption.
+    """Build frozen-schema JSON output for outside readers.
 
     ``catch_up_queue`` was ADDED, never a rename: the eleven job fields and the
-    three top-level keys are the frozen schema @skills reads, and a consumer
+    three top-level keys are the frozen schema a consumer reads, and one
     that ignores the new key sees exactly what it saw before.
     """
     return {

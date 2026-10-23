@@ -24,7 +24,7 @@ code. The smallest is a `SKILL.md` file alone: frontmatter describing the skill
 and a body of instructions an agent reads and follows. Add a `handler.py` and
 the same skill becomes executable — the runner imports it and dispatches an
 action. Add a full three-layer app beside it and a skill is an application in
-its own right, which is what the shipped Telegram bridge is.
+its own right, which is what the shipped `drone_commands` skill is.
 
 Skills are found by scanning three search paths in order — the project's own
 `.aipass/skills/`, the user's global `~/.aipass/skills/`, then the built-ins
@@ -36,8 +36,7 @@ reboot; switching one off stops the processes it declares, blocks their respawn,
 and makes the runner refuse to start it.
 
 The skills that ship with AIPass live in `lib/`: branch health, drone command
-reference, GitHub, inbox check, screen lock, system status and the retired
-Telegram bridge.
+reference, GitHub, inbox check, screen lock and system status.
 
 ## Live Inventory
 
@@ -70,10 +69,8 @@ skill from a template; the validator checks requirements; the switch owns the
 on/off state and its systemd actuation. Two handlers are infrastructure rather
 than a verb: `module_paths.py`, which locates a module without ever reading the
 working directory, and the `json/` shim, which binds the fleet's one JSON
-service. One module is not a command but a door: `door_notifier`
-publishes the Telegram push notification to @daemon, so no other branch
-imports this branch's handlers. `apps/handlers/__init__.py` is the fence that
-refuses one that tries.
+service. `apps/handlers/__init__.py` is a fence: another branch that imports
+this branch's handlers is refused.
 
 Built-in skills live under `lib/`, one directory each, and the templates the
 creator stamps live under `templates/`. The directory tree is not drawn here:
@@ -88,7 +85,6 @@ re-derived from the real tree and read on every prompt.
 | [docs/off_switch.md](docs/off_switch.md) | What OFF means, what it stops, how it fails closed |
 | [docs/runner_notes.md](docs/runner_notes.md) | How a skill is executed, and the doors that bypass the runner |
 | [docs/system_status.md](docs/system_status.md) | The system_status skill and its published reads, `machine_vitals()` and `machine_processes()` |
-| [docs/telegram.md](docs/telegram.md) | The retired Telegram bridge: what retirement means here |
 | [docs/dead_cwd.md](docs/dead_cwd.md) | Importing without a readable working directory |
 | [docs/json_handler.md](docs/json_handler.md) | Why the JSON handler is a shim, and what may not be added to it |
 

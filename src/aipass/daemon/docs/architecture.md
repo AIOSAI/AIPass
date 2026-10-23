@@ -86,15 +86,15 @@ per-directory notes that the tree points at.
 | `recovery.py` | Gap detection, missed windows, queue, wake headers |
 | `rotation.py` | Rounds roster, pointer state, prompt rendering |
 | `runstate.py` | last_run/next_run tracking + due-logic |
-| `telegram_notifier.py` | Fail-soft lifecycle pings via @skills |
+| `telegram_notifier(disabled).py` | Disabled with Telegram; nothing imports it |
 | `tick_lock.py` | Single-instance advisory lock for the tick |
 | `.archive/` | assistant_notifier, task_registry, plugin_processor, telegram_notifier (superseded copy) |
 
-### apps/handlers/telegram/
+### apps/handlers/telegram(disabled)/
 
 | Path | What it does |
 |---|---|
-| *(this directory)* | Retired with telegram fleet-wide: an empty package, out of the audit and of test collection |
+| *(this directory)* | Disabled with Telegram: an empty package, not importable, out of the audit and of test collection |
 | `.archive/` | assistant_chat (archived) |
 
 ### apps/handlers/update/

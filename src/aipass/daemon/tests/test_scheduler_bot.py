@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_scheduler_bot.py
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-10-08
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/modules/queue.py, apps/modules/run.py and telegram_notifier.py parse
+# seedgo: no-test-needed(ruff) — that apps/modules/queue.py, and apps/modules/run.py parse
 # seedgo: no-test-needed(generated) — _print_rich_table's column layout; only the --json contract is frozen
 
 import importlib.util
@@ -24,11 +24,6 @@ from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.daemon.apps.handlers.schedule.runstate import (
     update_job_runstate,
     record_job_failure,
-)
-from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
-    notify_triggered,
-    notify_complete,
-    notify_error,
 )
 from aipass.daemon.apps.modules import queue as queue_mod
 from aipass.daemon.apps.modules.actions import handle_command as act_cmd
@@ -102,43 +97,6 @@ class TestOnceJobLifecycle:
             }
         }
         assert _queue_json(monkeypatch, capsys, [once_job], runstate)["jobs"] == []
-
-
-# ── Test 2: fire emits notify_triggered then notify_complete; failed emits notify_error ──
-
-
-class TestLifecycleNotifications:
-    """Verify telegram notifications fire on real job events."""
-
-    @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
-    def test_triggered_sends_running(self, mock_send):
-        """notify_triggered sends running ping."""
-        mock_send.return_value = True
-        result = notify_triggered("@api", "data-check")
-        assert result is True
-        call_msg = mock_send.call_args[0][0]
-        assert "@api/data-check" in call_msg
-        assert "running" in call_msg
-
-    @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
-    def test_complete_sends_dispatched(self, mock_send):
-        """notify_complete sends dispatched ping with summary."""
-        mock_send.return_value = True
-        result = notify_complete("@api", "data-check", "Agent spawned OK")
-        assert result is True
-        call_msg = mock_send.call_args[0][0]
-        assert "dispatched" in call_msg
-        assert "Agent spawned OK" in call_msg
-
-    @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
-    def test_error_sends_failed(self, mock_send):
-        """notify_error sends failed ping with error detail."""
-        mock_send.return_value = True
-        result = notify_error("@api", "data-check", "timeout")
-        assert result is True
-        call_msg = mock_send.call_args[0][0]
-        assert "FAILED" in call_msg
-        assert "timeout" in call_msg
 
 
 # ── Test 3: runstate records last_status + last_error on both paths ──
@@ -275,69 +233,19 @@ class TestQueueJsonSchema:
         assert row["schedule_human"] == "every 1h"
 
 
-# ── Test 5: empty tick emits ZERO telegram calls ──
+# ── Test 6: a notify key never blocks a fire ──
 
 
-class TestEmptyTickNoNotify:
-    """Verify no telegram calls on empty ticks (no due jobs)."""
-
-    @patch("aipass.daemon.apps.modules.run.discover_jobs", return_value=[])
-    @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
-    def test_no_jobs_no_send(self, mock_send, mock_discover):
-        """Empty tick with no discovered jobs makes zero telegram calls."""
-        run_tick(dry_run=True)
-        mock_send.assert_not_called()
-
-    @patch("aipass.daemon.apps.modules.run.discover_jobs")
-    @patch("aipass.daemon.apps.modules.run.load_runstate")
-    @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
-    def test_no_due_jobs_no_send(self, mock_send, mock_rs, mock_discover):
-        """Tick with jobs but none due makes zero telegram calls."""
-        mock_discover.return_value = [
-            {
-                "owner": "@commons",
-                "id": "test",
-                "enabled": True,
-                "schedule": {"type": "interval", "interval_minutes": 9999},
-                "wake": {},
-                "prompt": "test",
-            }
-        ]
-        mock_rs.return_value = {"jobs": {"@commons/test": {"last_run": datetime.now().isoformat()}}}
-        run_tick()
-        mock_send.assert_not_called()
-
-
-# ── Test 6: send is fail-soft ──
-
-
-class TestFailSoft:
-    """Verify telegram send failures don't block job firing."""
-
-    @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
-    def test_send_returns_false_on_failure(self, mock_send):
-        """When _send fails, notify functions return False gracefully."""
-        mock_send.return_value = False
-        assert notify_triggered("@x", "y") is False
-        assert notify_complete("@x", "y", "s") is False
-        assert notify_error("@x", "y", "e") is False
-
-    @patch(
-        "aipass.skills.apps.modules.door_notifier.send_telegram_notification",
-        side_effect=Exception("connection refused"),
-    )
-    def test_exception_caught(self, mock_notifier):
-        """Exception in send_telegram_notification is caught, returns False. Mutant killed: _send re-raises."""
-        assert notify_triggered("@x", "y") is False
-        mock_notifier.assert_called_once()
+class TestNotifyKeyTolerated:
+    """A job that still carries a notify key fires and records like any other."""
 
     @patch("aipass.daemon.apps.modules.run.save_runstate")
     @patch("aipass.daemon.apps.modules.run.record_job_failure")
     @patch("aipass.daemon.apps.modules.run.update_job_runstate")
     @patch("aipass.daemon.apps.modules.run.discover_jobs")
     @patch("aipass.daemon.apps.modules.run.load_runstate", return_value={"jobs": {}})
-    def test_fire_continues_when_notify_fails(self, mock_rs, mock_discover, mock_update, mock_fail, mock_save):
-        """Job fires and records status even when telegram is down. Mutant killed: owner and id swapped."""
+    def test_a_job_with_notify_true_fires_and_records(self, mock_rs, mock_discover, mock_update, mock_fail, mock_save):
+        """Mutant killed: owner and id swapped."""
         schedule = {"type": "interval", "interval_minutes": 1}
         mock_discover.return_value = [
             {

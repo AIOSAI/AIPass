@@ -27,8 +27,7 @@ src/aipass/daemon/
 │   │   └── wakeup_ops.py          # Orphaned facade, unrouted (see docs/known_issues.md)
 │   ├── handlers/
 │   │   ├── schedule/              # discovery, runstate, command_job, catch_up_lane,
-│   │   │                          # recovery, rotation, tick_lock, job_reference,
-│   │   │                          # telegram_notifier
+│   │   │                          # recovery, rotation, tick_lock, job_reference
 │   │   ├── monitoring/            # activity_collector, inbox_scanner, memory_health,
 │   │   │                          # red_flag_detector, report_generator
 │   │   ├── cli/arg_gate.py        # Refuses unknown verbs and arguments by name
@@ -74,7 +73,7 @@ drone @daemon branch-health DAEMON  # One branch, deep
  - Prax names a log file after the nearest non-prax frame, so a line that must reach logs/run.log is logged from the module, not from a handler.
  - The suite must not move host state or write into another citizen's tree. Both rules have sentinels and both were learned the hard way — docs/testing.md.
  - A command job holds the tick lock for its whole run, so a heavy command needs a short timeout.
- - Telegram is retired fleet-wide: the notifier stays in place, its sends return False, and that is not an error.
+ - Telegram is retired fleet-wide: the daemon sends no notifications; `notify.email` on a command job is the only channel.
  - The catch-up recovery lane is built but off. Do not flip RECOVERY_LANE_LIVE without the owner's word.
  - Secrets path is `~/.secrets/aipass/` — never probe it, never read it here.
  - activity_report answers three verbs; the bare module name is an alias that also works.

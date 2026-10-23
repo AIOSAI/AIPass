@@ -11,6 +11,7 @@
     "**/.venv",
     "**/node_modules",
     "**/.archive",
-    "**/.sorting_unprocessed"
+    "**/.sorting_unprocessed",
+    "**/*(disabled)*"
   ]
 }

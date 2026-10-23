@@ -15,7 +15,7 @@ process whose directory was deleted or whose network share dropped. Not
 "degrades" — cannot import.
 
 This matters more here than in most branches: skill units run in host processes
-nobody in this branch chose — the telegram relay, cron-fired lanes, hook
+nobody in this branch chose — @api's host routes, cron-fired lanes, hook
 subprocesses — and those are exactly the processes likely to hold a dead or
 foreign working directory.
 

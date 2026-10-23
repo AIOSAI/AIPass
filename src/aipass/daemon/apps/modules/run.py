@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.6.3
+# Version: 1.7.0
 # Created: 2026-06-15
-# Modified: 2026-10-21
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -103,11 +103,6 @@ def _log(message: str) -> None:
     console.print(f"[{timestamp}] {message}")
 
 
-def _should_notify(job: dict) -> bool:
-    """Check if this job should emit telegram notifications."""
-    return job.get("notify", True)
-
-
 def _blocked_reason(status) -> str:
     """Name the gate that refused to START this wake, or "" if none did.
 
@@ -133,15 +128,11 @@ def _fire_command_job(job: dict) -> tuple:
 
     Never BLOCKED: exit 0 is FIRED; anything else is FAILED with the output tail as detail.
     """
-    from aipass.daemon.apps.handlers.schedule.telegram_notifier import notify_complete, notify_error, notify_triggered
-
     owner, job_id, command = job["owner"], job["id"], job["command"]
-    notify, mail_to = _should_notify(job), command_job.notify_email(job)
+    mail_to = command_job.notify_email(job)
 
     _log(f"FIRE: {owner}/{job_id} -> command: {command}")
     logger.info("[run] FIRE %s/%s command: %s", owner, job_id, command)
-    if notify:
-        notify_triggered(owner, job_id)
     if mail_to:
         _mail_notice(mail_to, *command_job.start_mail(job))
 
@@ -152,13 +143,7 @@ def _fire_command_job(job: dict) -> tuple:
     if mail_to:
         _mail_notice(mail_to, *command_job.finish_mail(job, result))
 
-    if result.ok:
-        if notify:
-            notify_complete(owner, job_id, done)
-        return OUTCOME_FIRED, done
-    if notify:
-        notify_error(owner, job_id, done)
-    return OUTCOME_FAILED, done
+    return (OUTCOME_FIRED if result.ok else OUTCOME_FAILED), done
 
 
 def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
@@ -180,11 +165,6 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
     from aipass.ai_mail.apps.modules.door_wake import wake_branch
-    from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
-        notify_triggered,
-        notify_complete,
-        notify_error,
-    )
 
     owner = job["owner"]
     job_id = job["id"]
@@ -193,12 +173,8 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
     wake = job.get("wake", {})
     fresh = wake.get("fresh", True)
     model = wake.get("model")
-    notify = _should_notify(job)
 
     _log(f"FIRE: {owner}/{job_id} -> wake_branch({owner}, fresh={fresh}, model={model})")
-
-    if notify:
-        notify_triggered(owner, job_id)
 
     try:
         status, ok = wake_branch(
@@ -217,13 +193,10 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
         if ok:
             _log(f"OK: {owner}/{job_id} — {status.summary}")
             logger.info("[run] Fired %s/%s successfully", owner, job_id)
-            if notify:
-                notify_complete(owner, job_id, status.summary)
             return OUTCOME_FIRED, ""
 
         blocked = _blocked_reason(status)
         if blocked:
-            # No telegram: a deferral is not an error, and a busy target would ping once per retry.
             _log(f"BLOCKED: {owner}/{job_id} — {blocked}; stays due, retries this window")
             logger.info("[run] Blocked firing %s/%s: %s — not recorded as a run", owner, job_id, blocked)
             return OUTCOME_BLOCKED, blocked
@@ -231,14 +204,10 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
         msg = status.summary
         _log(f"FAIL: {owner}/{job_id} — {msg}")
         logger.warning("[run] Failed to fire %s/%s: %s", owner, job_id, msg)
-        if notify:
-            notify_error(owner, job_id, msg)
         return OUTCOME_FAILED, msg
     except Exception as e:
         logger.error("[run] Exception firing %s/%s: %s", owner, job_id, e)
         _log(f"ERROR: {owner}/{job_id} — {e}")
-        if notify:
-            notify_error(owner, job_id, str(e))
         return OUTCOME_FAILED, str(e)
 
 

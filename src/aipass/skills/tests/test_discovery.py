@@ -3,7 +3,7 @@
 # Description: Unit tests for skills discovery
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # Category: skills/tests
 # =============================================
 
@@ -227,7 +227,7 @@ class TestDiscoverSkillsInPath:
         catalog_path = Path(__file__).resolve().parent.parent / "lib"
         skills = discover_skills_in_path(catalog_path, "builtin")
         # The floor: without it an empty lib/ makes the loop below a silent pass.
-        assert len(skills) == 7, f"lib/ discovery returned {len(skills)} skills, expected 7"
+        assert len(skills) == 6, f"lib/ discovery returned {len(skills)} skills, expected 6"
         for skill in skills:
             assert "name" in skill
             assert "description" in skill

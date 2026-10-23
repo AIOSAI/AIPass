@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon_wakeup.py
 # Description: DAEMON Wake-Up Cron Trigger
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-02-15
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -50,7 +50,7 @@ def print_introspection():
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  modules/")
-    console.print("  [cyan]*[/cyan] wakeup_ops.py [dim](notifications archived — Telegram removed)[/dim]")
+    console.print("  [cyan]*[/cyan] wakeup_ops.py [dim](no notifications — Telegram retired)[/dim]")
     console.print()
     console.print("[dim]Run with --help for more info[/dim]")
     console.print()

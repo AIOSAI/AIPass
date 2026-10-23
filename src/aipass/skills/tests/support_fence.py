@@ -3,7 +3,7 @@
 # Description: Fence probe for test_handlers_fence.py, run from a kin seat and from foreign copies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Probe for the handlers fence of apps/handlers/__init__.py (no test_ prefix: never collected)."""
@@ -21,7 +21,7 @@ import aipass
 BRANCH = "skills"
 HANDLERS = f"aipass.{BRANCH}.apps.handlers"
 A_HANDLER = f"{HANDLERS}.json.json_handler"
-A_DOOR = "aipass.skills.apps.modules.door_notifier"
+A_DOOR = "aipass.skills.apps.modules.switch"
 KIN_PROBE = f"aipass.{BRANCH}.tests.support_fence"
 
 

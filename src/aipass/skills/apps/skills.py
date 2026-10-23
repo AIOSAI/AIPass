@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Skills system entry point."""
@@ -47,7 +47,8 @@ def print_introspection(modules_dir=None):
     console.print("[bold]Connected Modules:[/bold]")
     console.print("  [cyan]modules/[/cyan]")
     for path in sorted(modules_dir.glob("*.py")):
-        if path.name == "__init__.py":
+        # A '(disabled)' file is parked, not connected: its stem cannot be imported.
+        if path.name == "__init__.py" or not path.stem.isidentifier():
             continue
         description = _header_description(path)
         suffix = f" ({description})" if description else ""
@@ -151,13 +152,13 @@ def print_help():
     console.print("  [green]drone @skills list[/green]")
     console.print()
     console.print("  [dim]# Get info about a skill[/dim]")
-    console.print("  [green]drone @skills info telegram[/green]")
+    console.print("  [green]drone @skills info screen_lock[/green]")
     console.print()
     console.print("  [dim]# Create a new skill[/dim]")
     console.print("  [green]drone @skills create my-skill --with-handler[/green]")
     console.print()
     console.print("  [dim]# Disconnect a skill from AIPass (stops its processes, survives reboot)[/dim]")
-    console.print('  [green]drone @skills off telegram "retired 2026-08-18"[/green]')
+    console.print('  [green]drone @skills off screen_lock "not on this host"[/green]')
 
 
 def _cmd_list():
