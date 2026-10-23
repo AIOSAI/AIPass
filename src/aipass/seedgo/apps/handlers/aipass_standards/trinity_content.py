@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_content.py
 # Description: Trinity Memory-File Standards Content
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-25
-# Modified: 2026-09-15
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -62,7 +62,9 @@ def get_trinity_standards() -> str:
         "     descending, no reuse. Unnumbered entries are flagged, not",
         "     skipped.",
         "  [bold]5. Char caps[/bold] (12) — measured against the CONFIG, never",
-        "     the meta line. An unmeasurable field is a violation.",
+        "     the meta line, with @memory's band: a violation only past",
+        "     max_chars * (100 + tolerance_percent) // 100 (300 -> 330); the",
+        "     message names the plain cap. An unmeasurable field is a violation.",
         "  [bold]6. Meta lines & _usage[/bold] (10) — byte-match against",
         "     rendered tab + template prose. The todos tab's next #N is",
         "     read by shape: it is stale by design once a todo is added.",

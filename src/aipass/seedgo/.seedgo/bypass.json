@@ -616,7 +616,7 @@
     {
       "file": "apps/handlers/aipass_standards/trinity_groups.py",
       "standard": "logged_fallback",
-      "lines": [980],
+      "lines": [992],
       "reason": "The checker is wrong on this line (fleet green leg 14): an impossible date is no date, and both callers make None a violation. _newest_entry_date lists the entry as bad, and the last_updated check fails by name with the value found. The value is logged as a warning."
     },
     {

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_groups.py
 # Description: Trinity standard - the eight group checkers and their shared helpers
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -104,6 +104,9 @@ _RENDERER_FALLBACK_FIELD = "value"
 # Read from the config, never assumed: no usable percent renders the marker and
 # the Meta lines group refuses, rather than scoring against a seed nobody published.
 _DRAFT_PERCENT_KEY = "draft_percent"
+#: @memory's write gate accepts this far over a char cap; the seed when the key is missing or unusable.
+_TOLERANCE_KEY = "tolerance_percent"
+_TOLERANCE_SEED = 10
 _DRAFT_PERCENT_BOUNDS = (1, 100)
 _UNPUBLISHED_DRAFT = "<entry_limits.draft_percent unpublished>"
 
@@ -264,6 +267,12 @@ def _draft_percent(config: object) -> int | None:
     if not _is_int(raw) or not low <= int(raw) <= high:  # pyright: ignore[reportArgumentType]
         return None
     return int(raw)  # pyright: ignore[reportArgumentType]
+
+
+def _tolerance_percent(config: object) -> int:
+    """The band @memory's gate allows over every char cap: an int 0-100, else the seed."""
+    raw = _as_dict(_as_dict(config).get("entry_limits")).get(_TOLERANCE_KEY)
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and 0 <= raw <= 100 else _TOLERANCE_SEED
 
 
 def _resolve_entry_limits(config: dict, branch_name: str) -> dict:
@@ -820,25 +829,27 @@ def _group_ordering(ctx: dict) -> dict:
     return _records_check("Ordering & numbering", ok, total, records, clean)
 
 
-def _cap_problem(entry: object, field: str, max_chars: int) -> str | None:
-    """Return why *entry* fails its cap, or None."""
+def _cap_problem(entry: object, field: str, max_chars: int, tolerance: int) -> str | None:
+    """Return why *entry* fails its cap widened by the *tolerance* band, or None; the message names the plain cap."""
     if not isinstance(entry, dict):
         return f"entry must be an object, found {type(entry).__name__} -- '{field}' unmeasurable"
     value = entry.get(field)
     if not isinstance(value, str):
         return f"'{field}' unmeasurable: must be str, found {_found(entry, field)}"
-    if len(value) > max_chars:
+    if len(value) > max_chars * (100 + tolerance) // 100:
         return f"'{field}' is {len(value)} chars, cap {max_chars}"
     return None
 
 
-def _cap_probe(section: str, entries: list, limits: dict) -> tuple[int, list]:
+def _cap_probe(section: str, entries: list, limits: dict, tolerance: int) -> tuple[int, list]:
     """Measure every entry of *section* against its configured cap."""
     spec = _as_dict(limits.get(section))
     field = spec.get("field")
     max_chars = spec.get("max_chars")
     if isinstance(field, str) and isinstance(max_chars, int) and not isinstance(max_chars, bool):
-        return _run_probe(section, entries, partial(_cap_problem, field=field, max_chars=max_chars))
+        return _run_probe(
+            section, entries, partial(_cap_problem, field=field, max_chars=max_chars, tolerance=tolerance)
+        )
     reason = f"cannot measure caps for '{section}': config has no usable entry_types.{section} field/max_chars"
     return 0, [(_section_file(section), reason, None)]
 
@@ -850,7 +861,8 @@ def _group_char_caps(ctx: dict) -> dict:
         message = "cannot measure caps: memory.config.json unreadable -- cap numbers are never assumed"
         return _binary_check("Char caps", False, message)
     limits = _resolve_entry_limits(config, ctx["branch"])
-    ok, total, records = _entry_scan(ctx, _ALL_SECTIONS, partial(_cap_probe, limits=limits))
+    probe = partial(_cap_probe, limits=limits, tolerance=_tolerance_percent(config))
+    ok, total, records = _entry_scan(ctx, _ALL_SECTIONS, probe)
     return _records_check("Char caps", ok, total, records, f"All {total} entries are within their configured caps")
 
 

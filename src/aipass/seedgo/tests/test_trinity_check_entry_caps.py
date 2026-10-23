@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check_entry_caps.py
 # Description: trinity_check entry shapes, caps and numbering: drift classes D1-D16 (split from test_trinity_check.py)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -96,14 +96,14 @@ class TestDriftClassRegressions:
         )
 
     def test_d3_observation_note_over_cap_measured_against_config(self, trinity, tmp_path):
-        """D3 -- over-cap notes, measured against the CONFIG number."""
+        """D3 -- over-cap notes, measured against the CONFIG number; 331 is one past the 10% band."""
         observations = _canonical_observations()
-        observations["observations"][0]["note"] = "x" * 301
+        observations["observations"][0]["note"] = "x" * 331
         branch = _write_branch(tmp_path, observations=observations)
 
         result = trinity.check_branch(str(branch))
 
-        _assert_failed(_group(result, "Char caps"), "'note' is 301 chars", "cap 300")
+        _assert_failed(_group(result, "Char caps"), "'note' is 331 chars", "cap 300")
 
     def test_d3_cap_number_comes_from_config_not_from_a_constant(self, trinity, tmp_path, monkeypatch):
         """A config edit must move the cap the checker enforces."""
@@ -255,21 +255,21 @@ class TestDriftClassRegressions:
 
     def test_d8_key_learning_value_over_cap(self, trinity, tmp_path):
         local = _canonical_local()
-        local["key_learnings"][0]["value"] = "v" * 201
+        local["key_learnings"][0]["value"] = "v" * 221
         branch = _write_branch(tmp_path, local=local)
 
         result = trinity.check_branch(str(branch))
 
-        _assert_failed(_group(result, "Char caps"), "'value' is 201 chars", "cap 200")
+        _assert_failed(_group(result, "Char caps"), "'value' is 221 chars", "cap 200")
 
     def test_d8_todo_task_over_cap(self, trinity, tmp_path):
         local = _canonical_local()
-        local["todos"][0]["task"] = "t" * 151
+        local["todos"][0]["task"] = "t" * 166
         branch = _write_branch(tmp_path, local=local)
 
         result = trinity.check_branch(str(branch))
 
-        _assert_failed(_group(result, "Char caps"), "'task' is 151 chars", "cap 150")
+        _assert_failed(_group(result, "Char caps"), "'task' is 166 chars", "cap 150")
 
     def test_d13_managed_by_casing_disagreement_across_a_branch_own_files(self, trinity, tmp_path):
         """D13 -- managed_by casing disagrees in 5 branches."""
@@ -327,6 +327,42 @@ class TestDriftClassRegressions:
 
 
 # The entry shape is read from @memory, never remembered.
+
+
+class TestTheToleranceBand:
+    """@memory's gate accepts up to tolerance_percent over a cap; the Char caps group measures the same band."""
+
+    @staticmethod
+    def _note_result(trinity, tmp_path, monkeypatch, length, **limits):
+        """Char caps over one observation note of *length*, under an entry_limits patched by *limits*."""
+        config = copy.deepcopy(_CONFIG)
+        config["entry_limits"].update(limits)
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(config))
+        observations = _canonical_observations()
+        observations["observations"][0]["note"] = "n" * length
+        return _group(trinity.check_branch(str(_write_branch(tmp_path, observations=observations))), "Char caps")
+
+    def test_a_note_at_the_edge_of_the_band_passes(self, trinity, tmp_path, monkeypatch):
+        assert self._note_result(trinity, tmp_path, monkeypatch, 330)["passed"] is True
+
+    def test_one_char_past_the_band_fails_naming_the_plain_cap(self, trinity, tmp_path, monkeypatch):
+        _assert_failed(self._note_result(trinity, tmp_path, monkeypatch, 331), "'note' is 331 chars", "cap 300")
+
+    def test_the_band_comes_from_the_config(self, trinity, tmp_path, monkeypatch):
+        result = self._note_result(trinity, tmp_path, monkeypatch, 301, tolerance_percent=0)
+        _assert_failed(result, "'note' is 301 chars", "cap 300")
+
+    @pytest.mark.parametrize("raw", [True, 101, -1, "10", None])
+    def test_an_unusable_band_is_served_as_the_seed_of_10(self, trinity, tmp_path, monkeypatch, raw):
+        assert self._note_result(trinity, tmp_path, monkeypatch, 330, tolerance_percent=raw)["passed"] is True
+        _assert_failed(self._note_result(trinity, tmp_path, monkeypatch, 331, tolerance_percent=raw), "cap 300")
+
+    def test_the_band_rounds_down_to_whole_characters(self, trinity, tmp_path, monkeypatch):
+        """205 * 110 // 100 = 225: 225 passes, 226 fails."""
+        per_branch = {_BRANCH: {"observations": {"max_chars": 205}}}
+        assert self._note_result(trinity, tmp_path, monkeypatch, 225, per_branch=per_branch)["passed"] is True
+        result = self._note_result(trinity, tmp_path, monkeypatch, 226, per_branch=per_branch)
+        _assert_failed(result, "'note' is 226 chars", "cap 205")
 
 
 class TestTheEntryShapeComesFromTheConfig:
