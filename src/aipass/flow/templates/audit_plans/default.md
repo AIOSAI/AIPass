@@ -101,9 +101,7 @@ Session notes, discoveries, changes. Stamp each entry: session number + date.
 
 **S00 ({today}):** Initial audit created.
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this audit here. No markdown, no symbols, no tables, no code blocks, no asterisks, no bullet points. Just natural sentences that can be read aloud by a text to speech tool. Cover the branch health, key open issues, and what needs attention next. Update this section whenever the audit changes significantly.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 Last verified {today}.
 

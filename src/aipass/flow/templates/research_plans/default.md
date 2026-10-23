@@ -102,9 +102,7 @@ What not to copy or repeat. Bad practices, overcomplicated approaches, things th
 ## Notes
 Session notes, raw observations, things noticed during research
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this research here. No markdown, no symbols, no tables, no code blocks, no asterisks, no bullet points. Just natural sentences that can be read aloud by a text to speech tool. Cover what was studied, what the research found, and what it changes for AIPass.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 *Created: {today}*

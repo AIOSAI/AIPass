@@ -174,10 +174,7 @@ Steps:
 
 ---
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this merge here when done. No markdown, no symbols,
-no tables, no code blocks, no asterisks, no bullet points. Just natural sentences for text to speech.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 

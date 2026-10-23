@@ -88,9 +88,7 @@ Fill as you go — this becomes the vectorized trail.
 
 ---
 
-## Listen (TTS-friendly summary)
-
-This playbook is the checklist for changing any injected prompt in AIPass. The big lesson it captures is that live is not the same as seeded. When you change a prompt, editing the repository's own hook configuration makes it work for us right now, but it does nothing for a fresh clone, a newly initialised project, or a newly spawned branch, because those are all built from separate seed files. So the checklist walks you through three things. First, the content of the prompt itself, watching the size limits. Second, the three wiring layers that make it inject live, which are the handler registration, the cadence timing, and the event bridge. Third, and most important, every seed path that a fresh install is built from, including the provider manifest which both the setup script and doctor read as the single source, the cadence defaults, the two files behind the aipass init flow, and the spawn templates. There are also two runtimes — Claude Code and Codex — both injecting the same prompt content, so retiring or changing a prompt for one means doing it for the other; Claude reads it on a per-turn cadence, Codex reads it once at session start. Then you verify it actually injects, including right after a compaction, tidy away any retired prompt without deleting it, and update the changelog. Run it any time a prompt changes so nothing is left half wired.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 

@@ -82,7 +82,7 @@ PPLAN-0008 / 0011 / 0015 / 0017 / 0029 runs. v2.1: full clickable URLs
       https://aipass.ai link card renders automatically — free real estate,
       keep the URL in.
 - [ ] 8. Leave mod-approve for the owner; log any cleanup items.
-- [ ] 9. Fill Run Summary + Listen, update `.trinity`, close the plan (auto-vectorizes).
+- [ ] 9. Fill Run Summary, update `.trinity`, close the plan (auto-vectorizes).
       Post-mortem within 24h → `docs/reference/post_mortems/YYYY-MM-DD_slug.md`.
 
 ---
@@ -148,10 +148,7 @@ anything that broke and how it was handled.
 
 ---
 
-## Listen (TTS-friendly summary)
-
-Write a plain English summary of this run here. No markdown, no symbols, no tables,
-no code blocks, no asterisks, no bullet points. Just natural sentences for text to speech.
+*Spoken summary: written only when the user asks for one, in plain sentences with no markup.*
 
 ---
 

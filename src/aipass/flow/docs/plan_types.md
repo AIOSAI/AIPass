@@ -35,6 +35,8 @@ registration.
 2. Run `drone @flow register <dirname> <PREFIX>` (or let auto-registration detect it on next command)
 3. Use `drone @flow create . "Subject" <shorthand>` to create plans of the new type
 
+No template carries a spoken (TTS) summary section. Each ends its guidance with one line: a spoken summary is written only when the user asks for one, in plain sentences with no markup. No flow code reads or requires such a section, so a plan with or without one closes the same way.
+
 ### Auto-healing
 - Template registry auto-prunes orphaned types (directory deleted → entry + plan registry JSON removed)
 - Plan registries auto-close entries for missing files
