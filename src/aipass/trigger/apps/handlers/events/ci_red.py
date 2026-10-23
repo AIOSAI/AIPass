@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ci_red.py
 # Description: ci_red event handler - wakes the owner of a red CI run through medic's dispatch gates
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -25,6 +25,8 @@ from aipass.trigger.apps.handlers.json import json_handler
 logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 
 PAYLOAD_KEYS = ("run_id", "workflow", "step", "owner", "lines", "url", "fingerprint")
+# Cures still waiting on a gate or the cap: every poll fires them again until one dispatches.
+RETRIED_STATES = ("queued", "gated")
 
 
 def run_url(run_id: str) -> str:
@@ -52,15 +54,18 @@ def _fingerprint(owner: str, workflow: str, step: str) -> str:
     return str(entry.get("fingerprint", ""))
 
 
-def _gate_reason(owner: str, fingerprint: str) -> str:
-    """The first of medic's gates that refuses this owner, in medic's order; empty when all are open."""
+def _gate_reason(owner: str, fingerprint: str, fresh: bool = True) -> str:
+    """The first of medic's gates that refuses this owner, in medic's order; empty when all are open.
+
+    A retry is not a new error, so only a fresh red feeds the breaker."""
     if not medic._is_medic_enabled():
         return "Medic OFF - suppressed dispatch for"
     if medic._is_branch_muted(owner):
         return "Branch muted - suppressed dispatch for"
     if f"@{owner}" not in medic._get_registered_emails():
         return f"Unknown branch skipped: @{owner}"
-    medic.circuit_breaker_record_error()
+    if fresh:
+        medic.circuit_breaker_record_error()
     if not medic.circuit_breaker_allows():
         return "Circuit breaker OPEN - suppressed dispatch for"
     if fingerprint and not medic.registry_should_dispatch(fingerprint):
@@ -68,9 +73,9 @@ def _gate_reason(owner: str, fingerprint: str) -> str:
     return ""
 
 
-def _gate(payload: Dict[str, Any]) -> str:
+def _gate(payload: Dict[str, Any], fresh: bool) -> str:
     """Run the gates and write a refusal to medic's suppression log, where medic status counts it."""
-    reason = _gate_reason(payload["owner"], payload["fingerprint"])
+    reason = _gate_reason(payload["owner"], payload["fingerprint"], fresh)
     if reason:
         message = f"CI red run {payload['run_id']}: {payload['workflow']} / {payload['step']}"
         medic._write_suppression_log(reason, payload["owner"], "ci", message)
@@ -105,18 +110,18 @@ def _dispatch_owner(payload: Dict[str, Any]) -> str:
     owner = payload["owner"] = payload["owner"].lstrip("@").lower()
     key = ledger.cure_key(payload["run_id"], owner)
     existing = ledger.load()["cures"].get(key)
-    if existing and existing["state"] != "queued":
+    if existing and existing["state"] not in RETRIED_STATES:
         return existing["state"]
     if not payload.get("fingerprint"):
         payload["fingerprint"] = _fingerprint(owner, payload["workflow"], payload["step"])
     message = f"CI red: {payload['workflow']} / {payload['step']}"
-    # Count before every gate, as medic does: a mute stops the wake, never the count.
-    escalation.record_error(branch=owner, module="ci", message=message, fingerprint=payload["fingerprint"])
     if existing is None:
+        # Count before every gate, as medic does: a mute stops the wake, never the count.
+        escalation.record_error(branch=owner, module="ci", message=message, fingerprint=payload["fingerprint"])
         _record_run(payload, "red")
         outbound.feed("red", f"CI red: {payload['workflow']} on dev, @{owner}", message, **payload)
     stored = {k: payload.get(k) for k in PAYLOAD_KEYS}
-    reason = _gate(payload)
+    reason = _gate(payload, fresh=existing is None)
     recipient = f"@{owner}"
     if reason:
         state = "gated"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ci.py
 # Description: CI red lane - poll dev's runs, wake the owner, gate the cure through @seedgo, push it through drone
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.ci import git_door, ledger, outbound, replies, triage
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
-from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, run_url
+from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, RETRIED_STATES, run_url
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.modules.core import trigger
@@ -171,8 +171,8 @@ def _triage_reds(reds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
 
 
 def _drain(data: Dict[str, Any]) -> tuple:
-    """Cures waiting on the cap: owner wakes to re-fire, seedgo reviews to re-request."""
-    owners = [c for c in data["cures"].values() if c["state"] == "queued"]
+    """Cures waiting on a gate or the cap: owner wakes to re-fire, seedgo reviews to re-request."""
+    owners = [c for c in data["cures"].values() if c["state"] in RETRIED_STATES]
     reviews = [key for key, c in data["cures"].items() if c["state"] == "review_queued"]
     return owners, reviews
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_runstate_failure_retry.py
 # Description: A failed fire must not consume its own period
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — a failed fire must not consume its own period."""
@@ -186,3 +186,15 @@ class TestLastRunStillMeansTheLastAttempt:
         assert entry["last_run"] == "2026-08-30T19:02:04"
         assert entry["last_status"] == "failed"
         assert entry["last_error"].startswith("resolve:")
+
+    def test_a_failed_interval_job_reports_the_next_run_it_will_actually_fire(self):
+        """Pins the queue showing a failed weekly job's seeded slot, days past, as its next run."""
+        st = {}
+        rs.seed_interval_slot(st, _job(INTERVAL) | {"slot": "19:00"}, now=datetime(2026, 8, 30, 18, 30))
+        rs.record_job_failure(
+            st, "@vera", "release-watch", "exit 2", timestamp="2026-08-30T19:02:04", schedule=INTERVAL
+        )
+        entry = st["jobs"][rs.job_key("@vera", "release-watch")]
+
+        assert entry["next_run"] == "2026-08-30T20:02:04"
+        assert rs.is_job_due(_job(INTERVAL), st, now=datetime(2026, 8, 30, 20, 2, 4)) is True

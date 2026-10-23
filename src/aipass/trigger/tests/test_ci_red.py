@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ci_red.py
 # Description: Tests for the ci_red event handler and medic's dispatch gates it runs
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-23
 # Modified: 2026-10-23
 # =============================================
@@ -44,12 +44,29 @@ class TestGates:
         assert [w[0] for w in ci_lane.wakes] == ["@hooks"]
         assert _state(ci_lane)["state"] == "dispatched"
 
+    def test_a_dispatched_cure_is_not_woken_again_by_a_second_fire(self, ci_lane):
+        _fire()
+        _fire()
+        assert [w[0] for w in ci_lane.wakes] == ["@hooks"]
+
     def test_a_muted_owner_is_gated_and_the_refusal_logged(self, ci_lane):
         mute = {"config": {"muted_branches": [{"name": "hooks", "expires_at": None}]}}
         (ci_lane.root / "medic_state.json").write_text(json.dumps(mute), encoding="utf-8")
         _fire()
         assert ci_lane.mails == [] and _state(ci_lane)["state"] == "gated"
         assert _suppressed(ci_lane)[-1]["reason"].startswith("Branch muted")
+
+    def test_a_hand_fire_retries_a_gated_cure_once_the_mute_lifts(self, ci_lane):
+        state_file = ci_lane.root / "medic_state.json"
+        mute = {"config": {"muted_branches": [{"name": "hooks", "expires_at": None}]}}
+        state_file.write_text(json.dumps(mute), encoding="utf-8")
+        _fire()
+        _fire()
+        assert ci_lane.mails == [] and len(_suppressed(ci_lane)) == 2
+        state_file.write_text(json.dumps({"config": {"muted_branches": []}}), encoding="utf-8")
+        _fire()
+        assert _state(ci_lane)["state"] == "dispatched"
+        assert [m["to_branch"] for m in ci_lane.mails] == ["@hooks"]
 
     def test_medic_off_gates_the_dispatch(self, ci_lane):
         off = {"config": {"medic_enabled": False}}
