@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_integrations_manager.py
 # Description: Tests for integrations_manager command handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
@@ -200,6 +200,26 @@ class TestRunCall:
         assert result.value.code == 0
         mock_invoke.assert_called_once_with(mock_resolve.return_value, "mycontract", ["arg1"])
         assert capsys.readouterr().out == "done\n"
+
+    @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
+    @patch(f"{_IM}.error", new_callable=MagicMock)
+    @patch(f"{_IM}.resolve", return_value=MagicMock())
+    def test_a_result_reaches_stdout_byte_for_byte(
+        self,
+        _mock_resolve: MagicMock,
+        _mock_error: MagicMock,
+        _mock_loaded: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """A JSON result or a long URL is data: never wrapped, never read as markup, never highlighted."""
+        data = '{"posts": [{"text": "[bold]not markup[/bold] ' + "x" * 300 + '", "uri": "https://bsky.app/a/b"}]}'
+
+        with patch(f"{_IM}.invoke", return_value={"success": True, "result": data, "error": None}):
+            with pytest.raises(SystemExit) as result:
+                handle_command("integrations", ["call", "mycontract"])
+
+        assert result.value.code == 0
+        assert capsys.readouterr().out == data + "\n"
 
     @patch(f"{_IM}._ensure_loaded", new_callable=MagicMock)
     @patch(f"{_IM}.error", new_callable=MagicMock)
