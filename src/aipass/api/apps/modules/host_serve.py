@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_serve.py
 # Description: Host API Serve Module — starting, watching and stopping the server
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -142,7 +142,7 @@ def cmd_status() -> None:
         warning("No server is running")
         console.print()
         console.print("[dim]Start one now:      drone @api host-api serve --detach[/dim]")
-        console.print("[dim]Start one at boot:  drone @api host-api autostart[/dim]")
+        console.print("[dim]Start one with your login:  drone @api host-api autostart[/dim]")
         console.print(f"[dim]Its last output, if any: {host_lifetime.log_path()}[/dim]")
         return
 
@@ -159,7 +159,7 @@ def _show_server(record: dict) -> None:
 
     if record.get("owner") == host_lifetime.OWNER_SUPERVISOR:
         console.print(f"  [cyan]owner:[/cyan]    systemd [dim]({record.get('unit')})[/dim]")
-        console.print("  [cyan]restart:[/cyan]  [dim]on failure, and at boot[/dim]")
+        console.print("  [cyan]restart:[/cyan]  [dim]on failure, and at each login[/dim]")
     else:
         console.print("  [cyan]owner:[/cyan]    detached [dim](started by hand — dies with a reboot)[/dim]")
         console.print(f"  [cyan]started:[/cyan]  {record.get('started')}")
@@ -247,15 +247,7 @@ def _show_installation(report: dict) -> None:
         console.print(f"  [cyan]{step}[/cyan]")
 
     console.print()
-
-    linger = report["linger"]
-
-    if linger is True:
-        console.print("[dim]Lingering is already on for this account — the unit starts at boot without a login.[/dim]")
-    elif linger is False:
-        warning("Lingering is OFF — without the last step the unit waits for a login that a reboot never brings")
-    else:
-        console.print("[dim]Lingering could not be read — run the last step anyway, it is idempotent.[/dim]")
+    console.print("[dim]The unit starts with your graphical session and stops with it.[/dim]")
 
     # A hand-started server on the port makes `enable --now` fail to bind, which reads as broken autostart.
     conflict = report.get("conflict")

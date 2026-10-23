@@ -13,7 +13,7 @@ network-listening service in AIPass.
 drone @api host-api issue-token pixel-8 --scope read   # receipt -> ~/.secrets/aipass/host_api/
 drone @api host-api serve              # binds the configured address
 drone @api host-api serve --detach     # survives drone's exec timeout; log in logs/
-drone @api host-api autostart          # renders the boot unit + prints the install steps
+drone @api host-api autostart          # renders the session unit + prints the install steps
 drone @api host-api status             # pid, bind, owner, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
 drone @api host-api set-config --face-dir <dir>   # an installed phone face; 'default' clears it

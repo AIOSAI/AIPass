@@ -147,8 +147,8 @@
     {
       "file": "apps/handlers/host/autostart.py",
       "standard": "logged_fallback",
-      "lines": [182, 223],
-      "reason": "Both are status probes whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess); linger_enabled, None is the could-not-ask answer its docstring names, beside True/False (api, fleet green leg 9). Lines moved 374/438 -> 380/444 with FPLAN-0642's constant and Functions entries above them, 380/444 -> 182/223 in the comment sweep (2026-10-17)."
+      "lines": [184],
+      "reason": "A status probe whose None means unknown and is shown as unknown: _port_in, an absent and an unreadable --port are both a port nobody can state (never a guess) (api, fleet green leg 9). Lines moved 374/438 -> 380/444 with FPLAN-0642's constant and Functions entries above them, 380/444 -> 182/223 in the comment sweep (2026-10-17); 182 -> 184 with the session-target lines, and 223 went with linger_enabled (2026-10-22)."
     },
     {
       "file": "apps/handlers/openrouter/caller.py",

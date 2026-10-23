@@ -78,7 +78,7 @@ A driver whose entry is absent or empty raises naming the entry and `secrets mig
 ## Known Limits
 
 - The keyring protects the disk, the backups and a copied laptop. It does not protect against a process running as the owner while the session is unlocked; that case is held by the hooks rule that refuses any seat's command naming the store, and by the seedgo standard that refuses an import of the secrets modules outside `src/aipass/api/`.
-- After a reboot the login keyring is locked until the owner logs in. The 05:45 Drive backup then fails with exit 2 and the daemon mails the failure until then. There is no autologin and no stored keyring password: either would hand the disk the key again.
+- After a reboot the login keyring is locked until the owner logs in. The 05:45 Drive backup then fails with exit 2 and the daemon mails the failure until then. The host API, a unit of the graphical session, is down until that login and back by itself at it. There is no autologin and no stored keyring password: either would hand the disk the key again.
 
 ## Provider Key Formats
 

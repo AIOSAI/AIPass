@@ -6,10 +6,19 @@
 
 ---
 
-## The boot unit
+## The session unit
 
-A detached server dies with the machine. A face that waits for a human after every
-reboot is wrong, so a systemd user unit brings the server back.
+A detached server dies with the machine. A face that waits for a human to restart
+it after every reboot is wrong, so a systemd user unit brings the server back.
+
+**The unit lives inside the graphical session.** The server reads its tokens,
+pairings and config from the login keyring, which unlocks at login and locks at
+logout. A unit started at boot, before any login, exits 2 on every try, reaches
+its start limit and stays dead past the login. So the unit renders
+`After=graphical-session.target` and `PartOf=graphical-session.target` under
+`[Unit]` and `WantedBy=graphical-session.target` under `[Install]`: it starts
+when the owner logs in and stops when the session ends. After a reboot the host
+API is down until that login, then back by itself.
 
 **It is a systemd user unit, not a loop in this tree, because `lifetime.py` refuses
 on principle to restart anything.** A restart loop is a supervisor, and answering a
@@ -84,10 +93,8 @@ this branch. Otherwise it is `<home>/.venv`'s python and
 with `LifetimeError` naming it; there is no fall back, because a server that starts
 and dies is worse than a refusal.
 
-Lingering is reported, not assumed: without it a user unit waits for a login,
-which on a headless reboot never comes — the exact failure this build exists to
-end. It is set outside this tree and can be turned off by someone who never reads
-this file.
+`autostart` neither reads nor sets the account's lingering. Lingering keeps the
+user manager up for the daemon's timers; a session-bound unit does not depend on it.
 
 ---
 
@@ -126,7 +133,7 @@ paste two commands afterwards is a hand the phone does not need.
 | `set_bind(host, port) -> dict` | `set-config --host --port` in-process: `validate_bind`, then the store. `{host, port, changed, previous}`; an unchanged bind is kept and **not rewritten**. Raises `BindRefused`, storing nothing |
 | `autostart(host=None, port=None) -> dict` | `autostart_report` plus `rendered` and `running`. A unit the supervisor already runs is **not re-rendered** and keeps the bind it started with |
 | `install_unit(dry_run=False) -> dict` | the first three steps: mkdir, copy into the user unit dir, `daemon-reload` |
-| `enable_unit(dry_run=False) -> dict` | `enable --now`, then `loginctl enable-linger` only when lingering is not already on. Refused while a hand-started server holds the port |
+| `enable_unit(dry_run=False) -> dict` | the fourth step, `enable --now`. Refused while a hand-started server holds the port |
 | `receipt_path(label) -> Path` | where a token's receipt belongs, so the installer stops restating it |
 
 Each run returns `{dry_run, ok, steps: [{step, ok, detail}]}` and stops at the
