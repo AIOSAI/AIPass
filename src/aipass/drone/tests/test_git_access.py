@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-22
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -94,13 +94,13 @@ class TestGitAccessTiers:
 
         Auth runs first and refuses anything in no tier, so an untiered verb is unreachable.
         """
-        tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
+        tiered = {verb for tier in GIT_ACCESS_TIERS.values() for verb in tier["commands"]}
         orphaned = sorted(set(_registered_verbs()) - tiered)
         assert orphaned == [], f"registered but unreachable — in no tier: {orphaned}"
 
     def test_no_tier_grants_a_command_that_does_not_exist(self) -> None:
         """The mirror: a tier entry with no registered command is a dead grant."""
-        tiered = set(GIT_ACCESS_TIERS["global"]["commands"]) | set(GIT_ACCESS_TIERS["owner"]["commands"])
+        tiered = {verb for tier in GIT_ACCESS_TIERS.values() for verb in tier["commands"]}
         phantom = sorted(tiered - set(_registered_verbs()))
         assert phantom == [], f"granted but not registered: {phantom}"
 

@@ -62,7 +62,8 @@ Auth is checked once, at the top of `git_module.handle_command()`, via `verify_g
  - Global tier, every branch: the read doors and the gh passthroughs.
  - Owner tier, the project's registry-declared owner: everything that writes.
  - Owner tier is earned per repo from four facts — manager class, registry tenancy, an `owner: true` entry, passport path-binding. There is no caller allowlist anywhere in the branch.
- - A verb in neither tier is unreachable, not merely ungated: `verify_git_access()` refuses what it cannot find in a tier.
+ - CI-cure tier, the one citizen whose entry carries `ci_cure: true` (@trigger): `ci-cure` alone, fenced to the owner's tree and dev. Warn-mode never lifts it.
+ - A verb in no tier is unreachable, not merely ungated: `verify_git_access()` refuses what it cannot find in a tier.
  - Refusals come in two species and they are not interchangeable: not authorized is about who you are, cannot run here is about which repository you are in. Only the first is lifted by `AIPASS_GIT_AUTH_MODE=warn`.
 
 # Gotchas

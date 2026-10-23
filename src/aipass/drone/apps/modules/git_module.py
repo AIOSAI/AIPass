@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.12.0
+# Version: 1.13.0
 # Created: 2026-03-17
-# Modified: 2026-10-21
+# Modified: 2026-10-22
 # =============================================
 
 """
@@ -33,6 +33,7 @@ from aipass.drone.apps.handlers.git import (
     restore_handler,
     label_handler,
     alerts_handler,
+    ci_cure_handler,
     export_handler,
     show_handler,
     blame_handler,
@@ -47,6 +48,7 @@ from aipass.drone.apps.handlers.git import (
     repo_door,
     help_pages,
 )
+from aipass.drone.apps.handlers.deletion_log import UNKNOWN_CALLER
 from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
 from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
@@ -97,6 +99,7 @@ _COMMANDS = (
     "release-write",
     "label-write",
     "alerts-write",
+    "ci-cure",
 )
 
 _GH_PASSTHROUGH_COMMANDS = ("issue", "run", "workflow")
@@ -218,6 +221,10 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     except PermissionError as exc:
         # WARNING, not ERROR: auth.py already logged this denial at ERROR.
         logger.warning("git access denied: %s", exc)
+        if command == "ci-cure":
+            ci_cure_handler.record(
+                caller=UNKNOWN_CALLER, args=args, outcome=ci_cure_handler.OUTCOME_REFUSED, reason=str(exc)
+            )
         return {"stdout": "", "stderr": str(exc), "exit_code": 1}
 
     json_handler.log_operation("git_handle_command", {"command": command, "args": args, "caller": caller})
@@ -278,6 +285,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         return _handle_prune_temp()
     if command == "tag":
         return _handle_tag(args)
+    if command == "ci-cure":
+        return ci_cure_handler.cure(lock_handler.find_repo_root(), args, caller)
 
     available = ", ".join(_COMMANDS)
     return {
@@ -1341,6 +1350,7 @@ def get_introspective() -> str:
         "    - remote_handler.py, commit_handler.py, checkout_handler.py, sync_handler.py\n"
         "    - merge_main_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
+        "    - ci_cure_handler.py (the ci-cure tier)\n"
         "    - repo_door.py (--repo <path>, admin seat only)\n"
         "  plugins/devpulse_ops/\n"
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
@@ -1349,7 +1359,7 @@ def get_introspective() -> str:
         "Tiers: global (status,diff,log,show,blame,tracked,export,remote,lock,branches,tag --list,"
         "issue,run,workflow,release)"
         " | owner (pr,commit,untrack,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
-        "unlock,merge,smart-sync,fix,tag)\n"
+        "unlock,merge,smart-sync,fix,tag) | ci-cure (ci-cure)\n"
     )
 
 
@@ -1357,7 +1367,7 @@ def _tier_commands(tier: str) -> list[str]:
     """The commands a tier actually grants, read from the gate itself.
 
     Args:
-        tier: "global" or "owner".
+        tier: "global", "owner" or "ci-cure".
 
     Returns:
         An empty list if the gate cannot be imported: unknown, not a confident lie.
@@ -1403,7 +1413,7 @@ def print_introspection() -> None:
     c.print(
         "    - [cyan]dev_pr_handler.py[/cyan], [cyan]branches_handler.py[/cyan],"
         " [cyan]delete_branch_handler.py[/cyan], [cyan]close_pr_handler.py[/cyan],"
-        " [cyan]tag_handler.py[/cyan]"
+        " [cyan]tag_handler.py[/cyan], [cyan]ci_cure_handler.py[/cyan]"
     )
     c.print("    - [cyan]repo_door.py[/cyan] [dim](--repo <path>, admin seat only)[/dim]")
     c.print("  [cyan]plugins/devpulse_ops/[/cyan]")
@@ -1422,6 +1432,8 @@ def print_introspection() -> None:
         f" [dim]({','.join(_tier_commands('global'))})[/dim]"
         " | [dim]owner[/dim]"
         f" [dim]({','.join(_tier_commands('owner'))})[/dim]"
+        " | [dim]ci-cure[/dim]"
+        f" [dim]({','.join(_tier_commands('ci-cure'))})[/dim]"
     )
     c.print()
 

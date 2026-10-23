@@ -67,14 +67,6 @@ empty `lane`, `outcome`, `caller`, `resolved` or `target`, or on a measurement w
 writes nothing: a half row is refused. @spawn's branch and project retirements write through it
 under the `spawn_delete` and `spawn_retire` lanes.
 
-**Known gap in the `caller` field.** The resolver's last resort before `unknown` is the *project*,
-not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no passport anywhere up the tree, it
-derives a name from the registry that answered. A delete run from the repo root therefore records
-`caller: "aipass"` — a directory, not the citizen who typed it. Nothing is fabricated (`aipass` is a
-true statement about *where* the process stood, and `CallerIdentity.source` says `project`), but a
-reader auditing a deletion months later wants the citizen, and for those records the ledger cannot
-supply one. Writing it down beats a reader inferring a person from a project name.
-
 ---
 
 ## Sibling-branch guard — outermost `.trinity` wins

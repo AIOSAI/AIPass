@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-10-04
-# Modified: 2026-10-21
+# Modified: 2026-10-22
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -18,6 +18,7 @@ from __future__ import annotations
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import (
     alerts_handler,
+    ci_cure_handler,
     commit_handler,
     gh_chores,
     label_handler,
@@ -93,6 +94,30 @@ def page(command: str | None = None) -> str:
             "  missing (not on disk, not tracked) or outside (not in this repo).\n"
             "  A path is read against your directory first, then the repo root.\n"
             "  Example: drone @git tracked docs/plan.md logs/run.log\n"
+        )
+    if command == "ci-cure":
+        return (
+            ci_cure_handler.USAGE + "\n"
+            "  The ci-cure tier's one verb [ci-cure], held by the one citizen whose\n"
+            "  registry entry carries ci_cure: true (tenancy and path-binding as for owner).\n"
+            "  Commits exactly the named paths on dev (other staged work stays staged) and\n"
+            "  pushes dev to origin, then prints the new sha on the first line. Paths are\n"
+            "  repo-relative: under src/aipass/<owner>/, or CHANGELOG.md. The message's first\n"
+            "  line starts 'fix(<owner>): ' and names the run id. No PR, merge, sync, tag,\n"
+            "  rerun or --repo. Every call is a row in .ai_central/git_ci_cures.jsonl.\n"
+            "  Refused, exactly as printed:\n"
+            + _printed(
+                ci_cure_handler.REFUSE_RUN_ID.format(run_id="<run_id>"),
+                ci_cure_handler.REFUSE_OWNER.format(owner="<owner>"),
+                ci_cure_handler.REFUSE_NO_PATHS,
+                ci_cure_handler.REFUSE_PREFIX.format(owner="<owner>"),
+                ci_cure_handler.REFUSE_RUN_UNNAMED.format(run_id="<run_id>"),
+                ci_cure_handler.REFUSE_PATH.format(path="<path>", owner="<owner>"),
+                ci_cure_handler.REFUSE_NOT_DEV.format(branch="<branch>"),
+                ci_cure_handler.REFUSE_NO_CHANGE,
+            )
+            + '  Example: drone @git ci-cure 18712345678 @hooks "fix(hooks): bypass lines re-pinned, run 18712345678"'
+            " src/aipass/hooks/.seedgo/bypass.json CHANGELOG.md\n"
         )
     if command == "restore":
         return (
@@ -363,6 +388,9 @@ def page(command: str | None = None) -> str:
         "  label create <name>    Create a repo label; one already there is reported present\n"
         "  alerts dismiss <n> --reason R --comment 'text'  Dismiss a code-scanning alert\n"
         "  A gh subcommand in neither list is refused, never passed to gh.\n"
+        "CI cure (the one citizen whose registry entry carries ci_cure: true):\n"
+        "  ci-cure <run_id> @<owner> <msg> <path ...>  Commit a CI cure on dev, push dev\n"
+        "                         (paths under src/aipass/<owner>/ or CHANGELOG.md; ci-cure --help)\n"
         "  An external project's manager, from its own seat, runs: commit, untrack,\n"
         "  restore, checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp,\n"
         "  tag, issue <write>, run <write>, workflow <write>, release <write>, label\n"

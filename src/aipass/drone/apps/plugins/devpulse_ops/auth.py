@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-03-30
-# Modified: 2026-10-21
+# Modified: 2026-10-22
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -79,6 +79,10 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
         ],
         "description": "Write operations — the project's own manager only",
     },
+    "ci-cure": {
+        "commands": ["ci-cure"],
+        "description": "Commit and push a CI cure on dev — the one citizen whose registry entry carries ci_cure: true",
+    },
 }
 
 # A read asks the gate for the command (global tier), a write for "<command>-write"
@@ -129,6 +133,10 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     return None
 
 
+# The registry entry fields that grant a tier; ci_cure must sit on exactly one entry.
+_OWNER_FACT = "owner"
+_CI_CURE_FACT = "ci_cure"
+
 # Owner-tier: manager class, matching tenancy, owner: true, and a passport under the
 # registry-recorded path, which a copied registry id alone cannot forge.
 _MANAGER_CLASS = "manager"
@@ -137,7 +145,7 @@ _MANAGER_CLASS = "manager"
 _AUTH_MODE_ENV = "AIPASS_GIT_AUTH_MODE"
 
 # These encode AIPass's own flow and would half-run in another project's repo.
-_AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch"})
+_AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch", "ci-cure"})
 
 # authority: not shown to be the owner, ERROR, warn-mode lifts it.
 # capability: proven owner, untranslated verb, WARNING, warn-mode must NOT lift it.
@@ -308,19 +316,27 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
             ),
             _AUTHORITY,
         )
+    return _registry_fact_refusal(command, caller, _OWNER_FACT)
 
+
+def _registry_fact_refusal(command: str, caller: Caller, fact: str) -> Refusal | None:
+    """Return why the tier granted by *fact* is refused for this caller, or None if it holds.
+
+    Tenancy, an entry carrying ``<fact>: true``, path-binding, then the external-repo capability check.
+    ci_cure must also sit on exactly one entry. Fails CLOSED like the owner gate.
+    """
     try:
         registry_path = get_registry_path()
         registry_data = load_registry()
     except RegistryMismatchError as exc:
         # The loader's own credential check; same verdict as the tenancy check below.
-        logger.warning("owner-tier refused for '%s': registry credential mismatch: %s", caller.name, exc)
+        logger.warning("%s-tier refused for '%s': registry credential mismatch: %s", fact, caller.name, exc)
         return Refusal(
             f"caller '{caller.name}' does not hold citizenship in this project's registry ({exc})", _AUTHORITY
         )
     except Exception as exc:
-        logger.warning("owner-tier refused for '%s': registry unreadable: %s", caller.name, exc)
-        return Refusal(f"the project registry could not be read ({exc}) — cannot verify ownership", _AUTHORITY)
+        logger.warning("%s-tier refused for '%s': registry unreadable: %s", fact, caller.name, exc)
+        return Refusal(f"the project registry could not be read ({exc}) — cannot verify {fact}", _AUTHORITY)
 
     registry_id = registry_data.get("metadata", {}).get("id")
     passport_id = caller.passport.get("citizenship", {}).get("registry_id")
@@ -330,7 +346,7 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
         return Refusal(
             (
                 f"caller '{caller.name}' passport has no citizenship.registry_id — "
-                "needs a registry backfill before it can hold owner-tier"
+                f"needs a registry backfill before it can hold {fact}-tier"
             ),
             _AUTHORITY,
         )
@@ -346,8 +362,16 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
     entry = _registry_entry(registry_data, caller.name)
     if entry is None:
         return Refusal(f"caller '{caller.name}' is not listed in {registry_path.name}", _AUTHORITY)
-    if entry.get("owner") is not True:
-        return Refusal(f"caller '{caller.name}' is listed in {registry_path.name} without owner: true", _AUTHORITY)
+    if entry.get(fact) is not True:
+        return Refusal(f"caller '{caller.name}' is listed in {registry_path.name} without {fact}: true", _AUTHORITY)
+    if fact == _CI_CURE_FACT:
+        holders = _fact_holders(registry_data, fact)
+        if len(holders) != 1:
+            return Refusal(
+                f"{len(holders)} entries in {registry_path.name} carry {fact}: true ({', '.join(holders)}) — "
+                "the tier is held by one citizen alone",
+                _AUTHORITY,
+            )
 
     # Anchors path-binding to the SAME registry the checks above used.
     try:
@@ -392,6 +416,29 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
         )
 
     return None
+
+
+def _fact_holders(registry_data: dict, fact: str) -> list[str]:
+    """The names of every registry entry carrying ``<fact>: true``, either registry shape."""
+    branches = registry_data.get("branches", {})
+    entries = branches.items() if isinstance(branches, dict) else ((e.get("name", "?"), e) for e in branches)
+    return [str(name) for name, entry in entries if isinstance(entry, dict) and entry.get(fact) is True]
+
+
+def _ci_cure_access(command: str) -> str:
+    """The ci-cure tier: the registry fact alone grants it; warn-mode never lifts it, it predates no migration."""
+    caller_info = _resolve_caller()
+    refusal = _registry_fact_refusal(command, caller_info, _CI_CURE_FACT)
+    if refusal and refusal.kind == _CAPABILITY:
+        msg = f"Branch '{caller_info.name}' cannot run '{command}' in this repo: {refusal.reason}."
+        logger.warning(msg)
+        raise PermissionError(msg)
+    if refusal:
+        msg = f"Branch '{caller_info.name}' is not authorized for '{command}': {refusal.reason}."
+        logger.error(msg)
+        raise PermissionError(msg)
+    json_handler.log_operation("git_access_verify", {"caller": caller_info.name, "command": command, "tier": "ci-cure"})
+    return caller_info.name
 
 
 def verify_git_access(command: str) -> str:
@@ -441,5 +488,8 @@ def verify_git_access(command: str) -> str:
             },
         )
         return caller_info.name
+
+    if command in GIT_ACCESS_TIERS["ci-cure"]["commands"]:
+        return _ci_cure_access(command)
 
     raise PermissionError(f"Unknown git command: '{command}'.{_rerouted_hint(command)}")
