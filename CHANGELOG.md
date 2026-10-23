@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-23] — v2.8.26: a gated CI cure retries until its gate opens, a failed interval job shows the next run it will fire
 
 ### Fixed
 
