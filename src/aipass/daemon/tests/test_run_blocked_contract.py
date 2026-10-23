@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_blocked_contract.py
 # Description: Blocked is not ran — a wake that never started must not consume the period
-# Version: 1.0.2
+# Version: 1.1.0
 # Created:2026-08-30
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
@@ -13,7 +13,7 @@
 
 import errno
 from contextlib import ExitStack
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -332,6 +332,12 @@ class TestTickAccounting:
         entry = runstate["jobs"]["@vera/release-watch"]
         assert entry["last_status"] == "failed"
         assert entry["last_run"]
+
+    def test_a_failed_interval_tick_moves_next_run_one_interval_past_the_attempt(self):
+        _results, runstate = self._tick(OUTCOME_FAILED, "exit 2")
+        entry = runstate["jobs"]["@vera/release-watch"]
+        attempt = datetime.fromisoformat(entry["last_run"])
+        assert entry["next_run"] == (attempt + timedelta(minutes=60)).isoformat()
 
     @pytest.mark.parametrize(
         "outcome,expected_rc",

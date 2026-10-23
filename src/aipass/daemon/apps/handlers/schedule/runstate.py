@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-06-15
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -575,8 +575,12 @@ def record_job_failure(
     error_msg: str,
     status: str = "failed",
     timestamp: Optional[str] = None,
+    schedule: Optional[dict] = None,
 ) -> None:
-    """Record a failed job firing in runstate."""
+    """Record a failed job firing in runstate.
+
+    An interval job's next fire measures from this attempt, so its next_run moves too; a windowed job retries in-window.
+    """
     if timestamp is None:
         timestamp = datetime.now().isoformat()
 
@@ -586,6 +590,8 @@ def record_job_failure(
     entry["last_status"] = status
     entry["last_failure_at"] = timestamp
     entry["last_error"] = error_msg[:500]
+    if schedule and schedule.get("type") == "interval":
+        entry["next_run"] = _calc_next_run(schedule, timestamp)
 
     json_handler.log_operation("record_job_failure", {"key": key, "status": status})
 

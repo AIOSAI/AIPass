@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-06-15
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -403,7 +403,7 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
             record_job_blocked(runstate, job["owner"], job["id"], detail)
         else:
             results["failed"] += 1
-            record_job_failure(runstate, job["owner"], job["id"], detail)
+            record_job_failure(runstate, job["owner"], job["id"], detail, schedule=job["schedule"])
         save_runstate(runstate)
 
         if job != due_jobs[-1]:

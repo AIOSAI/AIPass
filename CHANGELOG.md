@@ -9,6 +9,13 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **a gated CI cure retries on every poll until its gate opens or the run is superseded** (@trigger, on devpulse's dispatch; `handlers/events/ci_red.py` 1.1.0, `modules/ci.py` 1.1.0, `handlers/ci/ledger.py` 1.1.0, `tests/test_ci.py` 1.1.0, `tests/test_ci_red.py` 1.1.0, `docs/ci_red_lane.md`; suite 50 green). The lane's first real red (PR #800, drone's `stale_header_date`) was triaged right in ten minutes, then the wake was refused by drone's 24-hour build mute and the cure sat `gated` for good: a gated cure was terminal. Now `_drain` re-fires every `queued` or `gated` cure with its stored payload on each poll, only a fresh red feeds the breaker and escalation counters (`_gate_reason(..., fresh=True)`), and `supersede()` closes queued and gated cures alike when a newer run lands. A mute delays a cure instead of dropping it.
+- **a failed interval job's next_run moves to attempt + interval, so the queue no longer shows a slot days past** (@daemon, rounds; `handlers/schedule/runstate.py` 1.7.0, `modules/run.py` 1.7.1, `tests/test_run_blocked_contract.py` 1.1.0, `tests/test_runstate_failure_retry.py` 1.1.0; suite 782 green, audit 100). `seedgo/ratchet-weekly` exited 2 on 10-18 and kept its seeded `next_run`, so `drone @daemon queue` read "next 2026-10-18" five days later while the scheduler, which measures an interval from the attempt, was right. `record_job_failure` takes `schedule=` and moves an interval job's next_run; windowed jobs retry in-window, unchanged. Two red-first pins: dropping the handler line and dropping the run.py wiring each kill a test.
+
 ## [2026-10-23] — v2.8.25: the CI red lane in @trigger with the drone ci-cure tier, secret values in the login keyring behind drone @api, Telegram out of the tree, Drive as the truth for the backup sync, the .trinity cap band, plan templates drop the spoken summary
 
 ### Fixed
