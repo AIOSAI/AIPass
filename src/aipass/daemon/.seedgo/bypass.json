@@ -13,37 +13,37 @@
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [77, 89, 129, 154, 176, 231],
+      "lines": [94, 147, 173, 193, 249],
       "reason": "Due checks of the live tick (daemon, fleet green leg 5). Each answer IS the scheduler's decision for an unreadable field, written in each function's docstring: an unreadable last_run reads not-yet-run or due (the fire writes a fresh stamp, so one bad row costs one fire); an unreadable time or due_date reads not due (no fire can repair the owner's schedule, so due would fire every tick or fire a one-shot early). The caller, is_job_due, needs exactly that bool; a raise would stop the tick for every job in the fleet, which the tick's contract forbids (one bad job costs that one job)."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [406, 429],
+      "lines": [425, 448],
       "reason": "Holds of the live tick (daemon, fleet green leg 5): an unreadable last_failure_at or last_blocked_at answers no hold, because a hold that cannot be measured could never expire and would stall the job for good, while releasing it costs at most one early attempt whose own outcome writes a fresh stamp. False is the decision, not a stand-in; a raise would stop the tick for every job."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [317],
+      "lines": [336],
       "reason": "_slot_anchor (daemon, fleet green legs 3 and 5): None is 'no anchor to seed', the documented answer for an unreadable slot and for an interval that is not a positive number; the one caller, seed_interval_slot, warns and leaves the job unseeded. A raise here stopped the whole tick (leg 3, item 2), which this answer cured."
     },
     {
       "file": "apps/handlers/schedule/runstate.py",
       "standard": "logged_fallback",
-      "lines": [499, 504, 514, 519, 533],
+      "lines": [518, 523, 533, 538, 552],
       "reason": "_calc_next_run is display (daemon, fleet green leg 5): None means 'no next run to advertise', which is the true answer when the schedule or last_run cannot be read; the queue shows it blank and nothing fires from next_run (is_job_due reads the schedule and last_run itself). A raise would land in update_job_runstate after a fire and lose that fire's record."
     },
     {
       "file": "apps/handlers/schedule/recovery.py",
       "standard": "logged_fallback",
-      "lines": [110, 197, 241, 245, 401],
+      "lines": [110, 197, 239, 243, 399],
       "reason": "Catch-up lane, built and OFF (RECOVERY_LANE_LIVE False) (daemon, fleet green leg 5). Each answer is the documented decision: an unparseable last_tick is no history, so no gap (181, as a missing one); an unreadable hourly time enumerates no windows, as the due check refuses the same value (286); an unreadable max-age bound or instant is unlimited, since one late wake with an honest header costs less than a window dropped unreported (350, 354); an unreadable instant has no age to print, '' (563, a header suffix)."
     },
     {
       "file": "apps/handlers/monitoring/inbox_scanner.py",
       "standard": "logged_fallback",
-      "lines": [53, 64],
+      "lines": [52, 63],
       "reason": "Inbox sweep, a hand tool (daemon, fleet green leg 5): an unparseable stamp answers None like a missing one, so the message is not aged, because a sweep that cannot tell a message's age must not wake a branch over it (60); an unreadable inbox answers None like a malformed one, so the branch is not reported, because the woken agent could not read that inbox either, and the warning names the file (74)."
     },
     {
@@ -55,13 +55,13 @@
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [167, 173],
+      "lines": [153, 159],
       "reason": "citizen_class_for (daemon, fleet green legs 2 and 3): None means 'unreadable' on every path that returns it (an unreadable .trinity or passport, a passport or identity that is not a dict); no passport can hold None, and an absent passport answers ''. The checker reads the guard returns as a success path, but they are the same answer for the same case. Callers (inbox sweep, rounds roster) leave a None citizen out."
     },
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [251],
+      "lines": [264],
       "reason": "_load_schedule_file (daemon, fleet green leg 5): None means 'this schedule file cannot be used', for an unreadable file and a malformed one alike; the one caller, discover_jobs, skips that file with a warning naming it, so one bad file cannot stop the fleet's tick. A raise would stop discovery for every citizen."
     },
     {
@@ -107,22 +107,10 @@
       "pattern": "red_flags|activity|health_data"
     },
     {
-      "file": "apps/daemon_wakeup.py",
-      "standard": "architecture",
-      "reason": "Entry point script — lives in apps/ root by design, not a module or handler",
-      "pattern": "File not in standard 3-layer structure"
-    },
-    {
       "file": "apps/daemon.py",
       "standard": "architecture",
       "reason": "Branch entry point — lives in apps/ root by design per AIPass convention",
       "pattern": "File not in standard 3-layer structure"
-    },
-    {
-      "file": "apps/plugins/__init__.py",
-      "standard": "unused_function",
-      "reason": "Public API for plugin discovery — used by scheduler_cron and available for external callers. Referenced in help text.",
-      "pattern": "discover_plugins"
     },
     {
       "file": "apps/modules/run.py",

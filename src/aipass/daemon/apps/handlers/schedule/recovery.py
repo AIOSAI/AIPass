@@ -3,7 +3,7 @@
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -220,10 +220,8 @@ CATCH_UP_MAX_AGE_FIELD = "catch_up_max_age_hours"
 
 
 def catch_up_enabled(schedule: dict) -> bool:
-    """Is catch-up on for this job? Default ON; a job opts out with ``"catch_up": false``."""
-    if schedule.get("type") not in WINDOWED_TYPES:
-        return False
-    return schedule.get(rs.CATCH_UP_FIELD, True) is not False
+    """Is catch-up on for this job? Windowed types only, by the due check's own rule (rs.catch_up_on)."""
+    return schedule.get("type") in WINDOWED_TYPES and rs.catch_up_on(schedule)
 
 
 def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
@@ -484,14 +482,6 @@ def _branch_daemon_dir(owner: str):
     return None
 
 
-def _write_atomic(target, text: str) -> None:
-    """Write via a sibling tmp file then replace. Never a partial read."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    tmp = target.with_suffix(target.suffix + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(target)
-
-
 def record_wake_prompt(owner: str, job_id: str, prompt: str) -> None:
     """File the exact text a wake was sent, header and all. Two places, both ours.
 
@@ -500,11 +490,11 @@ def record_wake_prompt(owner: str, job_id: str, prompt: str) -> None:
     branch_dir = _branch_daemon_dir(owner)
     if branch_dir is not None:
         try:
-            _write_atomic(branch_dir / "last_wake_prompt.txt", prompt)
+            rs.write_atomic(branch_dir / "last_wake_prompt.txt", lambda f: f.write(prompt))
         except OSError as e:
             logger.warning("[recovery] could not file wake prompt in %s: %s", branch_dir, e)
 
     try:
-        _write_atomic(rs.RUNSTATE_FILE.parent / "last_wake_prompt.txt", prompt)
+        rs.write_atomic(rs.RUNSTATE_FILE.parent / "last_wake_prompt.txt", lambda f: f.write(prompt))
     except OSError as e:
         logger.warning("[recovery] could not record wake prompt for %s/%s: %s", owner, job_id, e)

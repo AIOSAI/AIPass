@@ -3,7 +3,7 @@
 # Description: Unified job queue view (drone @daemon queue)
 # Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-09-28
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -93,10 +93,7 @@ def _compute_next_run(job: dict, state: dict) -> Optional[str]:
         return next_run
     sched = job.get("schedule", {})
     if sched.get("type") == "once":
-        due = sched.get("due_date")
-        if due and "T" not in due:
-            return f"{due}T09:00:00"
-        return due
+        return sched.get("due_date")  # a date alone fires from midnight, as is_job_due reads it
     return None
 
 

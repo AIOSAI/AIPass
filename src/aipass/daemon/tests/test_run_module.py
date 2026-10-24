@@ -3,7 +3,7 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.3.0
 # Created:2026-06-15
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -189,6 +189,24 @@ class TestPrunePersistence:
         assert mock_save.called, "a quiet tick must still persist its prune"
         assert all("@ghost/retired" not in call[0][0]["jobs"] for call in mock_save.call_args_list)
         assert "@ghost/retired" not in runstate["jobs"]
+
+    def test_an_owner_whose_schedule_did_not_read_keeps_its_rows(self):
+        """A citizen mid-edit (bad JSON, a refused job) must not lose its history, or its once jobs re-fire."""
+        runstate = {"jobs": {"@backup/once": {"completed": "2026-09-01T00:00:00"}, "@commons/live": {}}}
+
+        def discover(skipped_owners):
+            skipped_owners.add("@backup")
+            return [live_job()]
+
+        with (
+            patch(f"{RUN}.discover_jobs", side_effect=discover),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.is_job_due", return_value=False),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            run_tick()
+        assert runstate["jobs"]["@backup/once"] == {"completed": "2026-09-01T00:00:00"}
 
     def test_a_clean_quiet_tick_writes_only_its_tick_stamp(self):
         """A tick with nothing to prune or fire writes exactly once, and only the last_tick stamp.

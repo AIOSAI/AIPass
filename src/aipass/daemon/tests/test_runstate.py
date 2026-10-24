@@ -3,7 +3,7 @@
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.daemon.apps.handlers.schedule import recovery
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
 from aipass.daemon.apps.handlers.schedule.runstate import (
     load_runstate,
@@ -105,10 +106,11 @@ class TestRunstateIO:
         loaded = load_runstate()
         assert loaded["jobs"]["@x/y"]["last_run"] == "2026-01-01T00:00:00"
 
-    def test_load_corrupted_json(self, tmp_runstate):
-        tmp_runstate.write_text("{bad json", encoding="utf-8")
-        data = load_runstate()
-        assert data == {"version": 1, "jobs": {}}
+    def test_load_non_dict_root_raises(self, tmp_runstate):
+        """An empty answer here is saved by the tick's finally, erasing every job's history."""
+        tmp_runstate.write_text("[]", encoding="utf-8")
+        with pytest.raises(runstate_mod.RunstateUnreadable):
+            load_runstate()
 
     def test_a_read_modify_write_cycle_does_not_overwrite_the_other_jobs(self, tmp_runstate):
         """Recording one job's run must leave every other job's history alone.
@@ -592,3 +594,77 @@ class TestSeedIntervalSlot:
         job = slotted_job(slot="whenever")
         assert seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 1, 34)) is None
         assert runstate["jobs"] == {}
+
+
+class TestWindowAcrossMidnight:
+    """A window wrapping midnight (or the hour) is one window, never two fires a few minutes apart."""
+
+    def test_a_daily_fire_before_midnight_holds_the_post_midnight_tick(self):
+        job = {"type": "daily", "time": "00:05", "catch_up": False}
+        fired = datetime(2026, 9, 7, 23, 51)
+        assert due(job, datetime(2026, 9, 8, 0, 1), last_run=fired.isoformat()) is False
+
+    def test_an_hourly_fire_before_the_hour_holds_the_next_tick(self):
+        job = {"type": "hourly", "time": "5", "catch_up": False}
+        fired = datetime(2026, 9, 7, 10, 51)
+        assert due(job, datetime(2026, 9, 7, 11, 1), last_run=fired.isoformat()) is False
+
+    def test_the_next_days_window_still_fires(self):
+        job = {"type": "daily", "time": "00:05", "catch_up": False}
+        fired = datetime(2026, 9, 7, 23, 51)
+        assert due(job, datetime(2026, 9, 8, 23, 51), last_run=fired.isoformat()) is True
+
+
+class TestOnceWithATime:
+    def test_a_once_job_with_a_time_waits_for_that_time(self):
+        job = {"type": "once", "due_date": "2026-09-11T15:00:00"}
+        assert due(job, datetime(2026, 9, 11, 9, 0)) is False
+        assert due(job, datetime(2026, 9, 11, 15, 0)) is True
+
+    def test_a_date_only_once_job_is_due_from_midnight(self):
+        assert due({"type": "once", "due_date": "2026-09-11"}, datetime(2026, 9, 11, 0, 1)) is True
+
+
+class TestRunstateNeverWipes:
+    def test_an_unreadable_runstate_raises_instead_of_answering_empty(self, tmp_runstate):
+        tmp_runstate.write_text('{"version": 1, "jobs": {"@a/', encoding="utf-8")
+        with pytest.raises(runstate_mod.RunstateUnreadable):
+            load_runstate()
+
+    def test_a_save_that_dies_mid_write_leaves_the_old_file_whole(self, tmp_runstate):
+        old = {"version": 1, "jobs": {"@a/once": {"completed": "2026-09-01T00:00:00"}}}
+        assert save_runstate(old) is True
+
+        def dies_mid_write(data, f):
+            f.write('{"version": 1, "jo')
+            raise OSError("disk full")
+
+        with patch.object(runstate_mod, "_dump", side_effect=dies_mid_write):
+            assert save_runstate({"version": 1, "jobs": {}}) is False
+        assert load_runstate() == old
+
+    def test_prune_keeps_rows_of_owners_whose_schedule_could_not_be_read(self):
+        runstate = {"jobs": {"@a/once": {"completed": "x"}, "@b/gone": {}}}
+        assert prune_orphans(runstate, set(), keep_owners={"@a"}) == 1
+        assert "@a/once" in runstate["jobs"] and "@b/gone" not in runstate["jobs"]
+
+
+def test_queue_and_due_check_agree_on_whether_catch_up_is_on():
+    """Two spellings of one rule drift: the queue defaulted ON while the due check was opt-in."""
+    for schedule in ({"type": "daily"}, {"type": "daily", "catch_up": True}, {"type": "daily", "catch_up": False}):
+        assert recovery.catch_up_enabled(schedule) == runstate_mod.catch_up_on(schedule), schedule
+
+
+@pytest.mark.parametrize(
+    "schedule,fired,expected",
+    [
+        ({"type": "daily", "time": "00:05"}, "2026-09-07T23:51:00", "2026-09-09T00:05:00"),
+        ({"type": "daily", "time": "03:00"}, "2026-09-07T16:00:00", "2026-09-08T03:00:00"),
+        ({"type": "hourly", "time": "0"}, "2026-09-07T09:47:00", "2026-09-07T11:00:00"),
+    ],
+)
+def test_next_run_steps_from_the_window_that_fired(schedule, fired, expected):
+    """A fire at a window's early edge served that window; next_run names the one after it."""
+    runstate = {"jobs": {}}
+    update_job_runstate(runstate, "@a", "j", schedule, timestamp=fired)
+    assert runstate["jobs"]["@a/j"]["next_run"] == expected

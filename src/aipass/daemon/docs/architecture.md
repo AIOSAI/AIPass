@@ -31,11 +31,9 @@ per-directory notes that the tree points at.
 | Path | What it does |
 |---|---|
 | `daemon.py` | Entry point (CLI) — module discovery + command routing |
-| `daemon_wakeup.py` | Wakeup / cron trigger |
-| `.archive/` | scheduler_cron (archived — superseded by run.py) |
+| `.archive/` | scheduler_cron (superseded by run.py), daemon_wakeup and wakeup_ops (no caller), the plugin loader and its plugins, telegram_notifier |
 | `extensions/` | Extension point for additional capabilities |
 | `integrations/` | Private branch-local wrappers — gitignored except its README |
-| `.archive/` | json_templates (archived; nothing reads them) |
 
 ### apps/modules/
 
@@ -50,7 +48,6 @@ per-directory notes that the tree points at.
 | `timer_install.py` | systemd user timer install/uninstall |
 | `schedule.py` | (retired) prints migration notice only |
 | `actions.py` | (retired) prints migration notice only |
-| `wakeup_ops.py` | ORPHANED — imported by nothing, unroutable |
 | `.archive/` | scheduler_ops (archived) |
 
 ### apps/handlers/actions/
@@ -86,7 +83,6 @@ per-directory notes that the tree points at.
 | `recovery.py` | Gap detection, missed windows, queue, wake headers |
 | `rotation.py` | Rounds roster, pointer state, prompt rendering |
 | `runstate.py` | last_run/next_run tracking + due-logic |
-| `telegram_notifier(disabled).py` | Disabled with Telegram; nothing imports it |
 | `tick_lock.py` | Single-instance advisory lock for the tick |
 | `.archive/` | assistant_notifier, task_registry, plugin_processor, telegram_notifier (superseded copy) |
 
@@ -103,26 +99,18 @@ per-directory notes that the tree points at.
 |---|---|
 | `data_loader.py` | Data loading for status digests |
 
-### apps/plugins/
-
-| Path | What it does |
-|---|---|
-| `__init__.py` | discover_plugins() — ORPHANED, no live caller |
-| `.archive/` | ALL plugins archived: heartbeat, daily_audit, community_rotation, botfather_reminder, dev_central_monitor |
-
 ---
 
 ## Modules
 
 | Module | Description | Status |
 |--------|-------------|--------|
-| `update` | Status digest of DAEMON activity | *(partial)* — reads inbox/sessions but data_loader paths return empty |
+| `update` | Status digest of DAEMON's inbox: counts, actionable items, escalations; an unreadable inbox exits 1 | Operational |
 | `queue` | Unified job queue view — Rich table or `--json` (frozen schema for @skills bot) | Operational |
 | `schedule` | *(retired)* Fire-and-forget follow-ups — superseded by `.daemon/schedule.json` | Retired |
 | `activity_report` | Branch activity reports: `activity`, `activity-report`, `branch-health` (the last also renders entry health via @memory) | Operational |
 | `actions` | *(retired)* Action registry — superseded by `.daemon/schedule.json` | Retired |
 | `scheduler_ops` | *(archived)* Scheduler cron facade — went to `.archive/` with scheduler_cron.py | Archived |
-| `wakeup_ops` | *(orphaned)* Facade for daemon_wakeup.py that daemon_wakeup.py never imports — not registered in the router either, so `drone @daemon wakeup-ops` returns Unknown command | Dead code |
 | `timer_install` | Idempotent systemd user timer installer for daemon scheduler | Operational |
 | `run` | Decentralized scheduler tick: discover .daemon/ jobs, fire due ones — a wake, or a drone subprocess for a command job | Operational |
 | `inbox_sweep` | Fleet unread-mail backstop — wakes owners of mail unread past 24h | Operational *(hand tool — no scheduled job)* |

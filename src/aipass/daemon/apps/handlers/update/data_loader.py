@@ -3,7 +3,7 @@
 # Description: DAEMON Data Loading Handler
 # Version: 1.1.1
 # Created: 2026-01-29
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -19,11 +19,10 @@ from aipass.daemon.apps.handlers.module_root import module_file
 
 _DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
 INBOX_PATH = _DAEMON_ROOT / ".ai_mail.local" / "inbox.json"
-LOCAL_PATH = _DAEMON_ROOT / "DAEMON.local.json"
 
 
 def load_inbox() -> Dict[str, Any]:
-    """Load inbox.json and return parsed data."""
+    """Load inbox.json; a missing one is empty. An unreadable one raises: a digest of zeros would be false."""
     json_handler.log_operation("data_loaded")
     if not INBOX_PATH.exists():
         return {"messages": [], "total_messages": 0, "unread_count": 0}
@@ -31,23 +30,9 @@ def load_inbox() -> Dict[str, Any]:
     try:
         with open(INBOX_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         logger.error("[data_loader] Failed to load inbox.json: %s", e)
-        return {"messages": [], "total_messages": 0, "unread_count": 0}
-
-
-def load_local() -> Dict[str, Any]:
-    """Load DAEMON.local.json and return parsed data."""
-    if not LOCAL_PATH.exists():
-        return {"sessions": [], "active_tasks": {}}
-
-    try:
-        with open(LOCAL_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error("[data_loader] Failed to load DAEMON.local.json: %s", e)
-        return {"sessions": [], "active_tasks": {}}
-
+        raise
 
 def categorize_messages(messages: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """Categorize inbox messages into new, opened, actionable and informational."""
@@ -68,20 +53,6 @@ def categorize_messages(messages: List[Dict[str, Any]]) -> Dict[str, List[Dict[s
             categories["informational"].append(msg)
 
     return categories
-
-
-def get_session_summary(local_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Extract session summary from local.json."""
-    sessions = local_data.get("sessions", [])
-    active_tasks = local_data.get("active_tasks", {})
-
-    return {
-        "total_sessions": len(sessions),
-        "today_focus": active_tasks.get("today_focus", "None"),
-        "recently_completed": active_tasks.get("recently_completed", []),
-        "latest_session": sessions[0] if sessions else None,
-    }
-
 
 def get_escalations(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Find messages that need escalation."""

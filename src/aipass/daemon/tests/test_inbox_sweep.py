@@ -3,7 +3,7 @@
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
 # Version: 1.1.1
 # Created:2026-08-11
-# Modified: 2026-10-08
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""
@@ -239,6 +239,11 @@ class TestScanBranchInbox:
 # ── find_stale_inboxes ────────────────────────────────
 
 
+def citizen(path, email) -> dict:
+    """One active_citizens() record, the fields the scanner reads."""
+    return {"path": path, "email": email, "dir_name": path.name}
+
+
 class TestFindStaleInboxes:
     def test_sorted_oldest_first(self, branch_dir):
         newer = branch_dir / "newer"
@@ -247,22 +252,32 @@ class TestFindStaleInboxes:
             (path / ".ai_mail.local").mkdir(parents=True)
             write_inbox(path, [message(hours)])
 
-        with patch(f"{SCANNER}.active_branch_map", return_value={"newer": "@newer", "older": "@older"}):
-            with patch(f"{SCANNER}.branch_path_for", side_effect=lambda name: branch_dir / name):
-                entries = find_stale_inboxes(now=NOW)
+        with patch(f"{SCANNER}.active_citizens", return_value=[citizen(newer, "@newer"), citizen(older, "@older")]):
+            entries = find_stale_inboxes(now=NOW)
 
         assert [e["owner"] for e in entries] == ["@older", "@newer"]
 
     def test_empty_registry_returns_empty(self):
-        with patch(f"{SCANNER}.active_branch_map", return_value={}):
+        with patch(f"{SCANNER}.active_citizens", return_value=[]):
             assert find_stale_inboxes(now=NOW) == []
 
     def test_clean_fleet_returns_empty(self, branch_dir):
         (branch_dir / "clean" / ".ai_mail.local").mkdir(parents=True)
         write_inbox(branch_dir / "clean", [message(2)])
-        with patch(f"{SCANNER}.active_branch_map", return_value={"clean": "@clean"}):
-            with patch(f"{SCANNER}.branch_path_for", side_effect=lambda name: branch_dir / name):
-                assert find_stale_inboxes(now=NOW) == []
+        with patch(f"{SCANNER}.active_citizens", return_value=[citizen(branch_dir / "clean", "@clean")]):
+            assert find_stale_inboxes(now=NOW) == []
+
+    def test_two_citizens_sharing_a_directory_name_each_keep_their_own_inbox(self, branch_dir):
+        """Keyed by dir name, the map paired one citizen's email with the other's mailbox."""
+        stale = branch_dir / "core" / "api"
+        quiet = branch_dir / "proj" / "api"
+        for path in (stale, quiet):
+            (path / ".ai_mail.local").mkdir(parents=True)
+        write_inbox(stale, [message(48)])
+        write_inbox(quiet, [message(2)])
+        with patch(f"{SCANNER}.active_citizens", return_value=[citizen(stale, "@api"), citizen(quiet, "@proj_api")]):
+            entries = find_stale_inboxes(now=NOW)
+        assert [(e["owner"], e["path"]) for e in entries] == [("@api", str(stale))]
 
 
 # ── fleet scope: a citizen is a citizen (FPLAN-0492 ruling 6, todo 188) ──
@@ -273,7 +288,7 @@ class TestSweepScopeIsTheWholeFleet:
 
     Ruled 2026-09-07: projects/* citizens must not be invisible to the sweep.
     MEASURED on this machine the same morning: they already are not. The scan
-    walks active_branch_map() -> active_citizens() -> @memory's
+    walks active_citizens() -> @memory's
     fleet.fleet_branches(), which covers src/aipass/*, projects/*/ and the
     federated externals alike — 28 citizens, 18 core + 4 under projects/ + 6
     external, and the 08:48 sweep listed @baud, @finch, @earmark and
@@ -536,3 +551,11 @@ class TestScheduleEntry:
         with patch(f"{DISCOVERY}._REPO_ROOT", tmp_path):
             discovered = [job["id"] for job in discover_jobs()]
         assert discovered == [job["id"] for job in data["jobs"]]
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_a_limit_below_one_falls_back_to_the_cap(value):
+    """A negative slice, wakeable[:-1], woke all but one branch past MAX_WAKES."""
+    with patch.object(inbox_sweep, "run_sweep") as sweep:
+        assert inbox_sweep.handle_command("inbox-sweep", ["--dry-run", "--limit", value]) is True
+    assert sweep.call_args.kwargs["limit"] == inbox_sweep.MAX_WAKES

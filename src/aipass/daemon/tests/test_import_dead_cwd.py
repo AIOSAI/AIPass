@@ -3,7 +3,7 @@
 # Description: Pins daemon imports against a dead working directory
 # Version: 1.1.2
 # Created: 2026-08-31
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
@@ -137,9 +137,7 @@ import aipass.daemon.apps.modules.activity_report  # noqa: F401
 import aipass.daemon.apps.modules.queue  # noqa: F401
 import aipass.daemon.apps.modules.update  # noqa: F401
 import aipass.daemon.apps.modules.timer_install  # noqa: F401
-import aipass.daemon.apps.modules.wakeup_ops  # noqa: F401
 import aipass.daemon.apps.daemon  # noqa: F401
-import aipass.daemon.apps.daemon_wakeup  # noqa: F401
 
 sys.stdout.write("IMPORTED\\n")
 """

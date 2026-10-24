@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.7.1
+# Version: 1.8.0
 # Created: 2026-06-15
 # Modified: 2026-10-23
 # =============================================
@@ -326,7 +326,8 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
     json_handler.log_operation("scheduler_tick", {"dry_run": dry_run})
 
     _log("Discovering .daemon/ schedule files...")
-    jobs = discover_jobs()
+    skipped_owners: set = set()
+    jobs = discover_jobs(skipped_owners=skipped_owners)
     results["discovered"] = len(jobs)
 
     if not jobs:
@@ -341,9 +342,9 @@ def _tick_body(runstate: dict, dry_run: bool = False) -> dict:
         _log("No enabled jobs.")
         return results
 
-    # Save prunes now: quiet ticks never reach the save in the fire loop.
+    # Save prunes now: quiet ticks never reach the save in the fire loop. A half-read owner keeps its rows.
     active_keys = {job_key(j["owner"], j["id"]) for j in jobs}
-    pruned = prune_orphans(runstate, active_keys)
+    pruned = prune_orphans(runstate, active_keys, keep_owners=skipped_owners)
     if pruned and not dry_run:
         save_runstate(runstate)
         _log(f"Pruned {pruned} orphan runstate entr{'y' if pruned == 1 else 'ies'}")
@@ -450,9 +451,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command not in HANDLED_COMMANDS:
         return False
 
-    if not args:
-        pass
-    elif args[0] in ("--help", "-h"):
+    if args and args[0] in ("--help", "-h"):
         print_help()
         return True
 
