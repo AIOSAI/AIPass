@@ -35,11 +35,6 @@
       "file": "apps/modules/templates.py",
       "standard": "imports",
       "reason": "Cannot import prax \u2014 circular import (prax depends on cli). Documented in code comment."
-    },
-    {
-      "file": "__init__.py",
-      "standard": "unused_function",
-      "reason": "cli_entry() is a legacy console_scripts entry point. pyproject.toml now maps `aipass` to aipass.aipass.apps.aipass:main, so nothing in-tree calls it \u2014 retained as published API pending a keep-or-retire decision (APLAN-0002)."
     }
   ],
   "notes": {
