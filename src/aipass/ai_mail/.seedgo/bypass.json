@@ -151,18 +151,18 @@
       "file": "apps/modules/email_send.py",
       "standard": "logged_fallback",
       "lines": [
-        246,
-        251
+        248,
+        253
       ],
-      "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 246 is a BrokenPipeError (stdout closed early); 251 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
+      "reason": "Same CLI handler contract as apps/modules/email.py (ai_mail, fleet green leg 9): 248 is a BrokenPipeError (stdout closed early); 253 has already called error() (mark_command_failed) and mailed the failure through dispatch_send_error, so the caller is told by the failure flag, not by the bool."
     },
     {
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        324
+        326
       ],
-      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 324 is the send phase failing to resolve the sender, which has already called error() (mark_command_failed). True tells the router the command was recognised."
+      "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 326 is the send phase failing to resolve the sender, which has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
     {
       "file": "apps/handlers/email/send.py",
