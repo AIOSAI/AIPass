@@ -61,15 +61,15 @@
     },
     {
       "file": "apps/handlers/report/result.py",
-      "standard": "unused_function",
-      "reason": "new_result factory is public API surface for result creation",
-      "pattern": "unused function"
+      "standard": "json_structure",
+      "reason": "result.py is one dataclass and no function: it reads and writes no JSON and performs no operation to log. Its callers log the run it describes (build_metadata, append_changelog, the lanes' trail rows). Decision of @backup 2026-10-24.",
+      "pattern": "json_handler"
     },
     {
       "file": "apps/handlers/drive/client.py",
       "standard": "logged_fallback",
-      "lines": [97, 132, 170, 238, 315],
-      "reason": "Checker reads failure guards as the success path. Success is True (85), True/False (129) or a folder id str (166, 191, 234, 251, 322); every other return of the same False/None is itself a no-service/no-answer failure. Decision of @backup, fleet green leg 5; lines re-pointed 2026-10-21 after the tracker-reset block left client.py."
+      "lines": [104, 139, 177, 243, 314],
+      "reason": "Checker reads failure guards as the success path. Success is True (92), True/False (136) or a folder id str (148, 173, 198, 239, 256, 321); every other return of the same False/None is itself a no-service/no-answer failure. Decision of @backup, fleet green leg 5; lines re-pointed 2026-10-24 after the 10-23 client.py fixes moved them."
     },
     {
       "file": "apps/handlers/drive/share.py",

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: walk.py
 # Description: Project tree walker yielding file paths
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-16
 # Modified: 2026-10-24
 # =============================================
@@ -30,7 +30,7 @@ def walk_project(
     """Walk the project tree rooted at ``root``; with a spec, never enter a directory it ignores."""
     trail.log_operation("walk_project", {"root": root})
     root_path = os.path.realpath(root)
-    prune = _prunable(spec, whitelist or [])
+    prune_spec = spec if _prunable(spec, whitelist or []) else None
 
     def _refuse_unlisted(err: OSError) -> None:
         """Raise on a directory the walk cannot list; only a root that is not there walks to nothing."""
@@ -39,10 +39,10 @@ def walk_project(
         raise err
 
     for dirpath, dirnames, filenames in os.walk(root_path, onerror=_refuse_unlisted, followlinks=False):
-        if prune:
+        if prune_spec is not None:
             rel_dir = os.path.relpath(dirpath, root_path)
             prefix = "" if rel_dir == "." else rel_dir + "/"
-            dirnames[:] = [d for d in dirnames if not is_ignored(f"{prefix}{d}/", spec)]
+            dirnames[:] = [d for d in dirnames if not is_ignored(f"{prefix}{d}/", prune_spec)]
         for filename in filenames:
             abs_path = os.path.join(dirpath, filename)
             if os.path.islink(abs_path):

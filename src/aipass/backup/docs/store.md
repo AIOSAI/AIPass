@@ -11,15 +11,15 @@ Each registered project gets a `.backup/` directory at its root:
 ├── config.json          # Project backup configuration
 ├── snapshots/           # Full mirror copies (eager — created on register)
 ├── versioned/           # Incremental timestamped backups (lazy)
-├── logs/                # Operation logs (eager — created on register)
 ├── timestamps.json      # Per-file mtime index for change detection (lazy)
 ├── changelog.json       # Change history (lazy)
 ├── running/             # One <lane>.json per lane in flight, removed when it ends (lazy)
 └── drive_tracker.json   # Drive sync dedup tracker (lazy)
 ```
 
-On `register`, only `snapshots/` and `logs/` are created eagerly (plus
-`config.json` and the project's `.backupignore`). The rest are created lazily on
+On `register`, only `snapshots/` is created eagerly (plus `config.json` and the
+project's `.backupignore`). A `logs/` folder in an older store is unused: the
+branch's operation trail is its own `logs/operations.jsonl`. The rest are created lazily on
 first use (`handlers/project/setup.py`): `timestamps.json`, `changelog.json`
 and `versioned/` appear with the first `versioned` run.
 

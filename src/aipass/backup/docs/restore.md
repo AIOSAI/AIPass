@@ -24,11 +24,18 @@ The versioned store wraps each file in a folder of its own name
 <store>/root/root/<parent>/<name>/<name> # a file under the project's own root/ folder
 ```
 
-A project folder named `root/` is nested one level under the store's `root/`, so
-`x.py` and `root/x.py` never share a folder.
-
 so the folder and the file inside it share a name, and a lookup has to match the
-folder by the path and the file by its basename. A name longer than 50
+folder by the path and the file by its basename.
+
+A project folder named `root/` is nested one level under the store's `root/`, so
+`x.py` and `root/x.py` never share a folder. A store written by an earlier
+release can still hold versions of a `root/` file one level up, at
+`<store>/root/<rest of the path>/<name>/`, where `root/x.py` shared a folder with
+`x.py`. Once the nested folder holds a current copy, lookup by path answers with
+it, so those older versions stay in the store and are reached by browsing it,
+not through `restore`.
+
+A name longer than 50
 characters is shortened for the folder only (`<name[:30]>_<md5[:8]>`). The
 lookup (`_find_file_folder()` in `modules/restore.py`) asks the builder where a
 name would be written rather than re-deriving the layout, so a long name is
