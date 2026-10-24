@@ -4,7 +4,7 @@
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_fix.py."""
@@ -209,10 +209,23 @@ class TestAutoFixStateFile:
     def test_state_file_cleared_on_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
         ds.save_seat("nosession", str(tmp_path / "old.py"), [{"line": 1, "message": "old"}])
 
-        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "old.py")}})
 
         assert "sound" not in result
         assert ds.load_seat("nosession") == {}
+
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
+    @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
+    def test_a_clean_edit_elsewhere_keeps_another_files_errors(
+        self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path
+    ):
+        ds.save_seat("nosession", str(tmp_path / "old.py"), [{"line": 1, "message": "old"}])
+
+        handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
+
+        assert (ds.load_seat("nosession") or {}).get("errors") == [{"line": 1, "message": "old"}]
 
 
 class TestAutoFixJson:

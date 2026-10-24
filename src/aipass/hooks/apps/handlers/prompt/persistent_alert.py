@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: persistent_alert.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Injects advisory banners for active alerts on UserPromptSubmit — on arrival, then on cadence
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Injects advisory banners for active alerts from .aipass/alerts.json.
@@ -47,8 +47,8 @@ def _find_aipass_dir() -> Path | None:
     return None
 
 
-def _load_and_clean(alerts_path: Path) -> list[dict]:
-    """Load alerts, remove expired, write back if cleaned. Returns active alerts."""
+def _active_alerts(alerts_path: Path) -> list[dict]:
+    """The alerts not yet expired. Read only: alerts.json is trigger's, written under its json_file_lock."""
     try:
         data = json.loads(alerts_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -56,35 +56,18 @@ def _load_and_clean(alerts_path: Path) -> list[dict]:
         return []
 
     alerts = data.get("alerts", []) if isinstance(data, dict) else []
-    if not alerts:
-        return []
-
     now = datetime.now(timezone.utc)
     active = []
-    cleaned = False
     for alert in alerts:
         expires = alert.get("expires_at")
         if expires:
             try:
-                exp_dt = datetime.fromisoformat(expires)
-                if exp_dt.tzinfo is None:
-                    exp_dt = exp_dt.replace(tzinfo=timezone.utc)
-                if exp_dt < now:
-                    cleaned = True
+                # trigger writes a naive LOCAL time; astimezone() reads a naive datetime as local.
+                if datetime.fromisoformat(expires).astimezone() < now:
                     continue
             except (ValueError, TypeError) as exc:
                 logger.info("[HOOKS] persistent_alert: bad expires_at: %s", exc)
         active.append(alert)
-
-    if cleaned:
-        try:
-            alerts_path.write_text(
-                json.dumps({"alerts": active}, indent=2) + "\n",
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            logger.info("[HOOKS] persistent_alert: cleanup write error: %s", exc)
-
     return active
 
 
@@ -167,7 +150,7 @@ def handle(hook_data: dict) -> dict:
     if not alerts_path.exists():
         return {"stdout": "", "exit_code": 0}
 
-    alerts = _load_and_clean(alerts_path)
+    alerts = _active_alerts(alerts_path)
     if not alerts:
         return {"stdout": "", "exit_code": 0}
 

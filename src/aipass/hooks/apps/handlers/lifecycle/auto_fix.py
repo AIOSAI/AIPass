@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.5.0
+# Version: 1.5.1
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -360,7 +360,10 @@ def _record_diagnostics(seat: str, file_path: str, answers: list[list[dict] | No
     if found:
         ds.save_seat(seat, file_path, found)
     elif all(answer is not None for answer in answers):
-        ds.clear_seat(seat)
+        # Clean here says nothing of another file's record: edit_gate revalidates and clears that one.
+        recorded = (ds.load_seat(seat) or {}).get("file", "")
+        if not recorded or recorded == str(Path(file_path).resolve()):
+            ds.clear_seat(seat)
 
 
 def _check_emoji_list(items: list, key: str) -> str | None:

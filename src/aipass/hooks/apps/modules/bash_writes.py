@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.3.1
+# Version: 2.4.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -14,11 +14,13 @@ Edit/Write hooks never see a shell write. The bar is the obvious write verbs; ev
 Directed verbs (redirection, tee, sed -i, cp, mv, dd of=) report their target; interpreters, every path held.
 """
 
+import os
 import re
 import shlex
 from pathlib import Path, PureWindowsPath
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.modules.shell_programs import sed_actions, sed_scripts
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -107,8 +109,9 @@ _SOURCE_DELETE_SHAPES = (
 
 # drone, aipass, git, gh need no skip-list: no verb read here is theirs; a redirection they carry is caught.
 
-# Redirection tokens. `>&` is a descriptor dup (`2>&1`), never a filename.
-_REDIRECT_OPS = frozenset({">", ">>", ">|"})
+# Redirections that write their word; `>&` only when the word is no descriptor (`2>&1`, `>&-`).
+_REDIRECT_OPS = frozenset({">", ">>", ">|", "&>", "&>>", "<>"})
+_DUP_OP = ">&"
 
 # Both separators: a run that knew only "/" was blind to Windows paths in interpreter source.
 _PATH_RUN = re.compile(r"[~\w.@+\-]*[/\\][~\w./\\@+\-]*")
@@ -146,6 +149,7 @@ NOT_CAUGHT: tuple[str, ...] = (
     "bare word cannot be told from json.load, so it is not read as a path; './local.json' is",
     "a path joined in program text — Path('.trinity') / 'local.json' is two strings, neither a path",
     "write verbs this parser has no grammar for: sponge, ed / ex, an interactive editor",
+    "the w and W files of a sed -f script file: shell_reader reads its e commands, not its writes",
     "a WRITE an interpreter makes through a shape _SOURCE_WRITE_SHAPES has no pattern for — the "
     "path is still reported, but without the write-verb evidence a narrow caller (testwrite_gate) "
     "stands down on it. The broad callers, edit_gate's fences, are unaffected",
@@ -196,7 +200,8 @@ def verb_name(token: str) -> str:
 
     Every host reads alike: over-reading TEE on Linux is the safe side; misreading RM.EXE misses a delete.
     """
-    name = Path(token.replace("\\", "/")).name.lower()
+    # Path(".").name is "": the dot builtin (`. script.sh`) keeps its own name.
+    name = Path(token.replace("\\", "/")).name.lower() or token
     stem, dot, ext = name.rpartition(".")
     return stem if dot and f".{ext}" in _EXEC_EXTENSIONS else name
 
@@ -353,8 +358,8 @@ def _looks_like_path(token: str) -> bool:
 def _resolve(word: str, cwd: Path) -> Path | None:
     """Resolve one operand against the segment's working directory.
 
-    None, which no resolved operand is, means the word could not be read as a path
-    at all, even literally (logged; in NOT_CAUGHT). Every caller drops it.
+    None means an empty word, which names no file; every caller drops it. A word pathlib cannot
+    read even literally raises, and the gate calling this refuses the command.
     """
     word = word.strip().strip(_TRAILING_JUNK)
     if not word:
@@ -365,16 +370,8 @@ def _resolve(word: str, cwd: Path) -> Path | None:
         word = f"{drive.group(1).upper()}:/{word[drive.end() :].lstrip('/')}"
     # Separators normalise on every OS; a drive ROOT still names nothing on Linux (NOT_CAUGHT).
     word = word.replace("\\", "/")
-    try:
-        candidate = Path(word).expanduser()
-    except (OSError, ValueError, RuntimeError) as exc:
-        # The shell keeps an unexpandable tilde word (~nosuchuser) literal; only one unreadable both ways drops.
-        logger.info("[HOOKS] bash_writes: operand %r not expandable (%s), read literally", word, exc)
-        try:
-            candidate = Path(word)
-        except (OSError, ValueError, RuntimeError) as literal_exc:
-            logger.info("[HOOKS] bash_writes: unresolvable operand %r: %s", word, literal_exc)
-            return None
+    # os.path keeps an unknown user's word (~nosuchuser) literal, as bash does; pathlib raises on it.
+    candidate = Path(os.path.expanduser(word))
     return candidate if candidate.is_absolute() else (cwd / candidate)
 
 
@@ -382,7 +379,10 @@ def _redirect_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
     """Collect `> file` / `>> file` destinations."""
     hits: list[tuple[Path, str]] = []
     for index, token in enumerate(segment):
-        if token not in _REDIRECT_OPS or index + 1 >= len(segment):
+        if index + 1 >= len(segment):
+            continue
+        word = segment[index + 1]
+        if token not in _REDIRECT_OPS and not (token == _DUP_OP and not (word.isdigit() or word == "-")):
             continue
         target = _resolve(segment[index + 1], cwd)
         if target is not None:
@@ -407,20 +407,14 @@ def _sed_short_letters(flag: str) -> str:
 
 
 def _sed_in_place_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
-    """Every file `sed -i` edits, never its script (pad row 87, devpulse 953c8a70).
-
-    The script is the first plain word, taken before the path filter (``68,90p`` is not path-shaped).
-    With -e, -f, --expression or --file every path-looking word is a target.
-    """
+    """Every file `sed -i` edits, never its script (pad row 87, devpulse 953c8a70)."""
     flags = [token for token in segment[1:] if token.startswith("-") and token != "-"]
     longs = {flag.split("=", 1)[0] for flag in flags if flag.startswith("--")}
     shorts = "".join(_sed_short_letters(flag) for flag in flags if not flag.startswith("--"))
     if not (longs & _INPLACE_FLAGS or "i" in shorts):
         return []
-    words = _operands(segment)
-    script_given = bool(longs & {"--expression", "--file"}) or "e" in shorts or "f" in shorts
-    files = words if script_given else words[1:]
-    return [(t, "sed -i") for t in (_resolve(o, cwd) for o in files if _looks_like_path(o)) if t is not None]
+    inputs = sed_scripts(segment[1:])[2]
+    return [(t, "sed -i") for t in (_resolve(o, cwd) for o in inputs if _looks_like_path(o)) if t is not None]
 
 
 def _verb_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
@@ -438,16 +432,37 @@ def _verb_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:
         return hits
 
     if verb == "sed":
-        return _sed_in_place_targets(segment, cwd)
+        written = [path for script in sed_scripts(segment[1:])[0] for path in sed_actions(script)[1]]
+        hits = [(t, "sed w") for t in (_resolve(path, cwd) for path in written) if t is not None]
+        return _sed_in_place_targets(segment, cwd) + hits
 
     if verb in _ALL_OPERANDS:
         return [(t, verb) for t in (_resolve(o, cwd) for o in operands) if t is not None]
 
-    if verb in _LAST_OPERAND and len(operands) >= 2:
-        target = _resolve(operands[-1], cwd)
-        if target is not None:
-            hits.append((target, f"{verb} destination"))
+    if verb in _LAST_OPERAND:
+        return [(t, f"{verb} destination") for t in _landings(segment, operands, cwd)]
     return hits
+
+
+def _landings(segment: list[str], operands: list[str], cwd: Path) -> list[Path]:
+    """Where cp/mv/ln land: dest, or each source's name in a directory dest (shell_reader._landing; it imports us)."""
+    words = segment[1:]
+    target_dir = next((w.split("=", 1)[1] for w in words if w.startswith("--target-directory=")), None)
+    if "-t" in words[:-1]:
+        target_dir = words[words.index("-t") + 1]
+    if target_dir is not None:
+        sources, dest = [o for o in operands if o != target_dir], target_dir
+    elif len(operands) >= 2:
+        sources, dest = operands[:-1], operands[-1]
+    else:
+        return []
+    target = _resolve(dest, cwd)
+    if target is None:
+        return []
+    into_dir = target_dir is not None or dest.endswith(("/", "\\")) or os.path.isdir(target)
+    if into_dir and "-T" not in words and "--no-target-directory" not in words:
+        return [target / Path(source.replace("\\", "/")).name for source in sources] or [target]
+    return [target]
 
 
 def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[Path, str]]:

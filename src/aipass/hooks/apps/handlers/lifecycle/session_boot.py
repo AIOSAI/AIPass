@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.4.3
+# Version: 4.5.0
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -942,14 +942,10 @@ def _start_fresh(
 
     The id is minted and the pointer written BEFORE claude starts; a never-born session fails transcript-exists later.
     """
-    session_name = _make_session_name(branch)
-
-    if _tmux_session_exists(session_name):
-        logger.info("[SESSION_BOOT] Killing stale tmux session '%s'", session_name)
-        _tmux_kill_session(session_name)
-
     sp = _session_pointer()
     session_id = sp.mint_session_id()
+    # Named for the new id: a bare <branch> name could be a live session's, and fresh never kills one.
+    session_name = _make_session_name(branch, session_id)
     branch_cwd = cwd or str(Path.cwd())
     sp.write_pointer(Path(branch_cwd), session_id, "session_boot")
 

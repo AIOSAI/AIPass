@@ -3,7 +3,7 @@
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -19,6 +19,7 @@
 
 import importlib
 import json
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -63,6 +64,34 @@ class TestLayerATrustEnforcement:
         log_calls = [c[0][0] for c in mock_log.call_args_list]
         refused = [(e["event"], e["hook"]) for e in log_calls if e.get("action") == "refused_command_type"]
         assert refused == [("PreToolUse", "evil_cmd")]
+
+    def test_a_named_hook_call_keeps_the_project_source(self, mock_logger):
+        """claude.py Event:name cuts one hook out of the config: it is still the project's, still refused."""
+        config = {
+            "hooks_enabled": True,
+            "_source": "project",
+            "UserPromptSubmit": {"evil_cmd": {"enabled": True, "command": "echo PWNED", "matcher": ""}},
+        }
+        with (
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=config),
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            engine.run_event("UserPromptSubmit:evil_cmd", "{}")
+        mock_run.assert_not_called()
+        actions = [c[0][0].get("action") for c in mock_log.call_args_list]
+        assert "refused_command_type" in actions
+
+    def test_a_named_hook_call_keeps_the_master_switch(self, mock_logger):
+        config = {"hooks_enabled": False, "UserPromptSubmit": {"the_hook": {"enabled": True, "handler": "x.handle"}}}
+        with (
+            patch("aipass.hooks.apps.handlers.config.loader.resolve_config", return_value=config),
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_handler") as mock_run,
+        ):
+            engine.run_event("UserPromptSubmit:the_hook", "{}")
+        mock_run.assert_not_called()
+        assert "hooks_disabled_gates_run" in [c[0][0].get("action") for c in mock_log.call_args_list]
 
     def test_handler_namespace_enforced(self, mock_logger):
         result = _run_handler("evil.payload.handle", {})
@@ -828,12 +857,27 @@ def _load_by_path(name: str, path: Path):
 class TestTheBridgeFailsClosed:
     """DPLAN-0356 item 2: an engine that cannot import made Python exit 1, and Claude Code ran the tool."""
 
+    @pytest.fixture(autouse=True)
+    def _break_log(self, tmp_path):
+        self.break_log = tmp_path / "bridge.log"
+
     def _bridge(self, event: str, monkeypatch):
         bridge = _load_by_path("bridge_under_test", _BRIDGE)
         monkeypatch.setattr("sys.argv", ["claude.py", event])
         monkeypatch.setattr("sys.stdin", __import__("io").StringIO("{}"))
         monkeypatch.setattr(bridge, "_mount", MagicMock(side_effect=SyntaxError("half-edited engine")))
+        monkeypatch.setattr(bridge, "BREAK_LOG", str(self.break_log))
         return bridge
+
+    def test_the_break_is_an_error_line_medic_reads(self, monkeypatch, capsys, mock_logger):
+        """The prax logger can be what broke (2026-10-23): the line is written without it, in its format."""
+        with pytest.raises(SystemExit):
+            self._bridge("PreToolUse", monkeypatch).main()
+        (line,) = self.break_log.read_text(encoding="utf-8").splitlines()
+        stamp, _module, level, message = line.split(" | ", 3)
+        datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
+        assert level == "ERROR"
+        assert "half-edited engine" in message and "PreToolUse" in message
 
     def test_pre_tool_use_is_refused(self, monkeypatch, capsys, mock_logger):
         with pytest.raises(SystemExit) as refused:
@@ -873,6 +917,20 @@ class TestPromote:
         assert ok is False
         assert promote.live_name(root) is None
         assert not [p for p in root.iterdir() if p.name.startswith(".live-")]
+
+    def test_an_edit_made_while_the_checks_run_is_never_promoted(self, tmp_path, mock_logger):
+        root = self._branch(tmp_path)
+
+        def edit_mid_suite(r: Path) -> tuple[bool, str]:
+            (r / "apps" / "modules" / "x.py").write_text("X = undefined\n", encoding="utf-8")
+            return True, "passed"
+
+        with patch.object(promote, "check_smoke", return_value=(True, "ok")) as smoke:
+            ok, report = promote.promote(root, checks=(edit_mid_suite,))
+        assert ok is False and "changed" in report[-1]
+        assert promote.live_name(root) is None
+        assert not [p for p in root.iterdir() if p.name.startswith(".live-")]
+        smoke.assert_not_called()
 
     def test_a_passing_promote_points_at_a_copy_and_rotates(self, tmp_path, mock_logger):
         root = self._branch(tmp_path)

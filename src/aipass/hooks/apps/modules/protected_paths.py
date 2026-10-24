@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: protected_paths.py
-# Version: 2.2.0
+# Version: 2.2.1
 # Description: The files that switch the gates themselves — written by the admin seat alone (git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Which files decide whether the gates run, and so must never be an agent's to write (DPLAN-0356 item 1).
@@ -68,7 +68,7 @@ def _under(spelled: str, root: Path) -> bool:
 
 
 def _absolute(path: str | Path, cwd: str) -> Path:
-    target = Path(path).expanduser()
+    target = Path(os.path.expanduser(path))
     if not target.is_absolute() and cwd:
         target = Path(cwd) / target
     return target

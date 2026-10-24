@@ -4,7 +4,7 @@
 # Description: Tests for session boot wrapper (menu-based attach/start/close)
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py."""
@@ -169,7 +169,8 @@ class TestBoot:
         assert "new-session" in args[1]
         assert "/usr/local/bin/claude" in args[1]
 
-    def test_stale_tmux_session_killed_on_fresh_start(self, tmp_path):
+    def test_a_fresh_start_never_kills_a_tmux_session(self, tmp_path):
+        """'n' used to kill the tmux session named <branch>, which a live chat can hold; its name is new now."""
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
@@ -178,11 +179,12 @@ class TestBoot:
             patch.object(session_boot, "_read_choice", return_value="n"),
             patch.object(session_boot, "_tmux_session_exists", return_value=True),
             patch(f"{_MOD}.subprocess.run") as mock_run,
-            patch(f"{_MOD}.os.execvp"),
+            patch(f"{_MOD}.os.execvp") as mock_exec,
         ):
             session_boot.boot(cwd=str(tmp_path))
-        kill_calls = [c for c in mock_run.call_args_list if "kill-session" in str(c)]
-        assert len(kill_calls) == 1
+        assert not [c for c in mock_run.call_args_list if "kill-session" in str(c)]
+        argv = mock_exec.call_args[0][1]
+        assert argv[argv.index("-s") + 1] == f"{tmp_path.name}-{argv[argv.index('--session-id') + 1][:8]}"
 
     def test_extra_args_passed_on_fresh_start(self, tmp_path):
         with (

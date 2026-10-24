@@ -4,7 +4,7 @@
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-10-05
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -21,6 +21,7 @@
 # seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing the default guard directory
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -202,7 +203,8 @@ class TestPersistentAlertHandler:
 class TestExpiredAlertCleanup:
     """Auto-cleaning of expired alerts."""
 
-    def test_expired_alerts_removed(self, tmp_path):
+    def test_expired_alerts_are_hidden_and_the_file_is_left_alone(self, tmp_path):
+        """alerts.json is trigger's, written under its lock: an unlocked rewrite here could drop a new alert."""
 
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
@@ -225,8 +227,26 @@ class TestExpiredAlertCleanup:
         assert "expired" not in result["stdout"]
 
         saved = json.loads((aipass_dir / "alerts.json").read_text(encoding="utf-8"))
-        assert len(saved["alerts"]) == 1
-        assert saved["alerts"][0]["id"] == "active"
+        assert [alert["id"] for alert in saved["alerts"]] == ["expired", "active"]
+
+    @pytest.mark.skipif(not hasattr(time, "tzset"), reason="time.tzset sets the zone on POSIX only")
+    def test_a_naive_expiry_is_local_time_as_trigger_writes_it(self, tmp_path, monkeypatch):
+        """trigger stamps datetime.now() + TTL, naive local: read as UTC it died 7 hours early in PDT."""
+        monkeypatch.setenv("TZ", "America/Los_Angeles")
+        time.tzset()
+        try:
+            aipass_dir = tmp_path / ".aipass"
+            aipass_dir.mkdir()
+            soon = (datetime.now() + timedelta(hours=1)).isoformat()
+            _write_alerts(aipass_dir, [_make_alert(alert_id="runaway", expires_at=soon)])
+            with patch(
+                "aipass.hooks.apps.handlers.prompt.persistent_alert._find_aipass_dir",
+                return_value=aipass_dir,
+            ):
+                assert "runaway" in handle({})["stdout"]
+        finally:
+            monkeypatch.undo()
+            time.tzset()
 
     def test_all_expired_returns_empty(self, tmp_path):
 

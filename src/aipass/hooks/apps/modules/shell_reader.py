@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: shell_reader.py
-# Version: 1.4.0
+# Version: 1.4.3
 # Description: The one shell-word reader: every program a Bash command runs, as the shell runs it (rm_gate, git_gate)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-10-01
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """What a Bash command RUNS, read the way bash reads it (DPLAN-0356 phase 3, R3 to R6).
@@ -15,6 +15,9 @@ home-rolled split of the raw text, while the shell first removes quotes, honours
 escapes, decodes ``$'...'`` and expands braces and globs. ``r\\m x``, ``'r'm x``,
 ``$'\\x72\\x6d' x``, ``{rm,x}`` and ``/bin/r? x`` all ran rm and all read as some
 other program. This module is the one reader both gates use; neither keeps a copy.
+It walks past launchers, into ``bash -c``, ``eval``, ``find -exec``, ``sed e``, aliases,
+substitutions and the script files a shell is handed; what it cannot read comes back
+as an Invocation carrying ``unread``, which rm_gate refuses off the admin seat.
 
   - :func:`invocations` — every program, nested ones included, with what could not be read.
   - :func:`program_delete`, :func:`program_launch`, :func:`program_credential`,
@@ -38,7 +41,20 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.modules.bash_writes import _SOURCE_DELETE_SHAPES, _resolve, verb_name, write_targets
-from aipass.hooks.apps.modules.shell_programs import PLAIN_PROGRAMS, SHELL_PROGRAMS, WATCHED_VERBS, syntax_check_only
+from aipass.hooks.apps.modules.shell_programs import (
+    DELETE_PROGRAMS,
+    LAUNCHER_OPERANDS,
+    LAUNCHER_PROGRAM_FLAGS,
+    LAUNCHER_VALUED,
+    PLAIN_PROGRAMS,
+    RUNNER_VALUED,
+    RUNNERS,
+    SHELL_PROGRAMS,
+    WATCHED_VERBS,
+    sed_actions,
+    sed_scripts,
+    syntax_check_only,
+)
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -51,26 +67,6 @@ def print_introspection() -> None:
         "[dim]Consumed by handlers/security/rm_gate.py and git_gate.py. Residual: bash_writes NOT_CAUGHT.[/dim]"
     )
 
-
-# =============================================================================
-# THE SHELL-WORD READER — what the shell will RUN (DPLAN-0356 phase 3, R3 to R6)
-# =============================================================================
-#
-# The red team's R3: rm_gate and git_gate read the program name off a home-rolled
-# split of the raw text, while the shell first removes quotes, honours escapes,
-# decodes $'...' and expands braces and globs. `r\m x`, `'r'm x`, `$'\x72\x6d' x`,
-# `{rm,x}` and `/bin/r? x` all ran rm and all read as some other program.
-#
-# This is the one reader both gates use. It lexes the command the way bash does,
-# folds what can be folded (a literal assignment earlier in the same command, the
-# process environment), and walks every program the command runs: past launchers
-# (sudo, env, xargs, timeout ...), into `bash -c` / `eval` / `find -exec` / `trap` /
-# aliases / command substitutions, and, since R4, into the script FILES a shell or
-# an interpreter is handed. Whatever it cannot read comes back as an Invocation
-# carrying `unread`, and rm_gate refuses that off the admin seat: a program the
-# gate cannot see is not one it lets through.
-#
-# What it still cannot see is published in NOT_CAUGHT, like everything else here.
 
 #: The largest script file read at decision time. A bigger one is unread, and refused off the admin seat.
 SCRIPT_READ_LIMIT = 512 * 1024
@@ -131,49 +127,6 @@ _VALUED_FLAGS = {
 _SCRIPT_FLAGS = {"php": ("-f",), "awk": ("-f",), "pwsh": ("-file", "-f")}
 _MODULE_FLAGS = {"python": ("-m",)}
 
-# Launchers: the program they run comes after their own flags (the valued ones take the next
-# word) and, for a few, a fixed number of operands of their own (timeout's duration).
-_LAUNCHER_VALUED = {
-    "sudo": {"-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "--user", "--group", "--host", "--prompt",
-             "--close-from", "--chdir", "--chroot", "--command-timeout", "--other-user"},
-    "doas": {"-u", "-C"},
-    "env": {"-u", "--unset", "-C", "--chdir"},
-    "nohup": set(), "setsid": set(), "unbuffer": set(), "busybox": set(), "builtin": set(),
-    "noglob": set(), "nocorrect": set(), "valgrind": set(), "catchsegv": set(),
-    "time": {"-f", "--format", "-o", "--output"},
-    "nice": {"-n", "--adjustment"},
-    "timeout": {"-s", "--signal", "-k", "--kill-after"},
-    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
-    "ionice": {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata"},
-    "chrt": set(), "taskset": set(),
-    "flock": {"-w", "--timeout", "-E", "--conflict-exit-code"},
-    "caffeinate": {"-w", "-t"},
-    "strace": {"-o", "-e", "-p", "-s", "-u", "-E", "-a", "-b", "-I", "-O", "-S", "-X", "-P"},
-    "ltrace": {"-o", "-e", "-p", "-s", "-u", "-n", "-a", "-l"},
-    "systemd-run": {"-u", "--unit", "-p", "--property", "-E", "--setenv", "--uid", "--gid", "--working-directory",
-                    "-M", "--machine", "--slice", "--description"},
-    "xargs": {"-I", "-n", "-L", "-P", "-d", "-E", "-s", "-a", "--max-args", "--max-lines", "--max-procs",
-              "--delimiter", "--eof", "--max-chars", "--arg-file", "--replace"},
-    "exec": {"-a"},
-    "command": set(),
-    "su": {"-s", "--shell", "-g", "--group", "-G"},
-    "runuser": {"-u", "--user", "-s", "--shell", "-g", "--group", "-G"},
-    "script": {"-t", "--timing", "-T", "--log-timing", "-I", "-O", "-B", "-E", "--echo"},
-    "watch": {"-n", "--interval", "-d"},
-}  # fmt: skip
-_LAUNCHER_OPERANDS = {"timeout": 1, "chrt": 1, "taskset": 1, "flock": 1}
-
-# A flag after which the launcher's text is a PROGRAM re-read as shell (su -c 'rm x').
-_LAUNCHER_PROGRAM_FLAGS = {
-    "su": ("-c", "--command"), "runuser": ("-c", "--command"), "script": ("-c", "--command"),
-    "flock": ("-c", "--command"), "env": ("-S", "--split-string"),
-}  # fmt: skip
-
-# Task runners whose `run` (or `exec`) word runs the next program: uv run git push is git.
-_RUNNERS = {"uv": "run", "poetry": "run", "pipenv": "run", "pdm": "run", "hatch": "run", "conda": "run", "pnpm": "exec"}
-_RUNNER_VALUED = {"--with", "--python", "-p", "--directory", "--project", "--env-file", "--extra", "--group",
-                  "--package", "--index", "--index-url", "-n", "--name", "--prefix", "-e", "--env"}  # fmt: skip
-
 _BINARY_MAGIC = (b"\x7fELF", b"MZ", b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
 
 
@@ -189,6 +142,7 @@ class Invocation:
         language: An interpreter's language ("python", "node" ...), "" for anything else.
         text: That interpreter's own program text: inline, heredoc, here-string or script file.
         cwd: The directory it runs in, "" when a cd the reader could not follow moved it.
+        hidden: With unread, the program itself is unseen (an expansion, a pipe), not only its text.
     """
 
     program: str
@@ -198,6 +152,7 @@ class Invocation:
     language: str = ""
     text: str = ""
     cwd: str = ""
+    hidden: bool = False
 
 
 @dataclass(eq=False)
@@ -606,6 +561,10 @@ class _Parser:
 
     def __init__(self, tokens: list[tuple]) -> None:
         self.tokens = tokens
+        # The next )) at or after each token, found once: a search per (( was quadratic.
+        self.next_close: list[int | None] = [None] * (len(tokens) + 1)
+        for i in range(len(tokens) - 1, -1, -1):
+            self.next_close[i] = i if tokens[i] == ("op", "))") else self.next_close[i + 1]
         self.k = 0
         self.cmds: list[_Simple] = []
         self.subs: list[str] = []
@@ -686,15 +645,15 @@ class _Parser:
 
     def _arithmetic(self) -> None:
         """(( expr )) runs nothing but its substitutions; with no closing )) it is two subshells."""
-        ahead = [i for i in range(self.k, len(self.tokens)) if self.tokens[i] == ("op", "))")]
-        if not ahead or self.cur.words:
+        close = self.next_close[self.k]
+        if close is None or self.cur.words:
             self._op("(")
             self._op("(")
             return
-        for token in self.tokens[self.k : ahead[0]]:
+        for token in self.tokens[self.k : close]:
             if token[0] == "word":
                 self.subs.extend(token[1].subs)
-        self.k = ahead[0] + 1
+        self.k = close + 1
 
     def _open(self) -> None:
         if self.mode == "pattern":
@@ -770,13 +729,18 @@ class _Parser:
 
 
 def _assignment(word: _Word) -> tuple[str, list] | None:
-    """(name, value atoms) when *word* is NAME=value or NAME+=value, else None."""
+    """(name, value atoms) when *word* is NAME=value, NAME+=value or NAME[subscript]=value, else None."""
+    depth = 0
     for index, atom in enumerate(word.atoms):
-        if atom[0] != "c" or atom[2]:
+        literal = atom[0] == "c" and not atom[2]
+        if not literal and not depth:  # a subscript is arithmetic; its $(...) is read as a substitution
             return None
-        if atom[1] == "=":
+        if literal and atom[1] in ("[", "]"):
+            depth += 1 if atom[1] == "[" else -1
+        if literal and atom[1] == "=" and not depth:
             name = "".join(a[1] for a in word.atoms[:index]).rstrip("+")
-            return (name, word.atoms[index + 1 :]) if _NAME.fullmatch(name) else None
+            stem = name.split("[", 1)[0] if name.endswith("]") else name
+            return (name, word.atoms[index + 1 :]) if _NAME.fullmatch(stem) else None
     return None
 
 
@@ -816,7 +780,7 @@ def _command_candidates(word: _Word, text: str, ctx: _Ctx) -> list[str]:
     # /bin is a mount Windows cannot list, so /bin/r? ran rm and read as r? (CI red, PR #774).
     found = {verb for verb in WATCHED_VERBS if fnmatch.fnmatchcase(verb, text.rsplit("/", 1)[-1])}
     if "/" in text:
-        pattern = Path(text).expanduser()
+        pattern = Path(os.path.expanduser(text))
         if not pattern.is_absolute() and ctx.cwd is not None:
             pattern = ctx.cwd / pattern
         found.update(glob.glob(str(pattern)))
@@ -844,7 +808,7 @@ def _language(name: str) -> str:
 
 def _script_path(path_text: str, ctx: _Ctx) -> Path | None:
     """The script's absolute path; None when it is relative and the cwd is not known."""
-    path = Path(path_text).expanduser()
+    path = Path(os.path.expanduser(path_text))
     if path.is_absolute():
         return path
     return ctx.cwd / path if ctx.cwd is not None else None
@@ -868,6 +832,8 @@ def _script_text(path_text: str, ctx: _Ctx) -> tuple[str, str]:
     A script that does not exist yet is ("", ""): nothing to read, so nothing is
     claimed about it (DPLAN-0356 phase 4, P1 — the write-a-helper-then-run-it idiom).
     """
+    if path_text.startswith(("<(", ">(")):
+        return "", f"{path_text[:60]} is process substitution: its program is another command's output"
     path = _script_path(path_text, ctx)
     if path is None:
         return "", f"script {path_text}: the directory it runs from is not known here"
@@ -893,7 +859,7 @@ def _file_kind(path_text: str, ctx: _Ctx) -> tuple[str, str, str]:
     A binary is judged by its name alone. A text file is a script: its shebang names
     the interpreter, and no shebang means the shell runs it.
     """
-    path = _script_path(path_text, ctx) or Path(path_text).expanduser()
+    path = _script_path(path_text, ctx) or Path(os.path.expanduser(path_text))
     if _not_yet_written(path, path_text):
         return "script", "", ""
     try:
@@ -943,8 +909,8 @@ class _Walker:
             else:
                 self._command(cmd, ctx)
 
-    def _unread(self, ctx: _Ctx, why: str, argv: tuple[str, ...] = ()) -> None:
-        self.out.invocations.append(Invocation("", argv, ctx.via, why, cwd=str(ctx.cwd or "")))
+    def _unread(self, ctx: _Ctx, why: str, argv: tuple[str, ...] = (), hidden: bool = False) -> None:
+        self.out.invocations.append(Invocation("", argv, ctx.via, why, cwd=str(ctx.cwd or ""), hidden=hidden))
 
     def _reread(self, text: str, ctx: _Ctx, via: str, share_cwd: bool = False) -> None:
         child = ctx.child(via)
@@ -977,7 +943,7 @@ class _Walker:
         text = _text(target, ctx)
         if base in (">&", "<&") and (text.isdigit() or text == "-"):
             return
-        target_path = Path(text).expanduser()
+        target_path = Path(os.path.expanduser(text))
         if ctx.cwd is None and not target_path.is_absolute():
             return
         path = _resolve(text, ctx.cwd if ctx.cwd is not None else target_path)
@@ -988,7 +954,7 @@ class _Walker:
         head = words[0]
         folded = _atom_text(head.atoms, ctx, strict=True)
         if folded is None:
-            self._unread(ctx, f"the program word {head.raw} is an expansion this reader cannot fold", (head.raw,))
+            self._unread(ctx, f"the program word {head.raw} is an expansion this reader cannot fold", (head.raw,), True)
             return
         rest = words[1:]
         candidates = _command_candidates(head, folded, ctx)
@@ -1040,10 +1006,10 @@ class _Walker:
         builtin = self._BUILTINS.get(name)
         if builtin is not None:
             builtin(self, rest, texts, cmd, ctx)
-        elif name in _RUNNERS and texts[:1] == [_RUNNERS[name]]:
-            self._launch(name, rest[1:], cmd, ctx, _RUNNER_VALUED)
-        elif name in _LAUNCHER_VALUED:
-            self._launch(name, rest, cmd, ctx, _LAUNCHER_VALUED[name])
+        elif name in RUNNERS and texts[:1] == [RUNNERS[name]]:
+            self._launch(name, rest[1:], cmd, ctx, RUNNER_VALUED)
+        elif name in LAUNCHER_VALUED:
+            self._launch(name, rest, cmd, ctx, LAUNCHER_VALUED[name])
         elif name not in PLAIN_PROGRAMS and name not in WATCHED_VERBS:
             self._unknown_wrapper(name, texts, rest, cmd, ctx)
 
@@ -1073,7 +1039,13 @@ class _Walker:
 
     def _parallel(self, rest: list, texts: list[str], cmd: _Simple, ctx: _Ctx) -> None:
         program = texts[: texts.index(":::")] if ":::" in texts else texts
-        self._reread(" ".join(program), ctx, "parallel ")
+        if program and not all(text.startswith("-") for text in program):
+            self._reread(" ".join(program), ctx, "parallel ")
+            return
+        # With no command of its own, parallel runs each argument as a command line.
+        for text in texts[len(program) :]:
+            if not text.startswith(":::"):
+                self._reread(text, ctx, "parallel ::: ")
 
     def _change_dir(self, rest: list, texts: list[str], cmd: _Simple, ctx: _Ctx) -> None:
         self._cd(rest, ctx)
@@ -1086,7 +1058,7 @@ class _Walker:
         if target is None or target == "-":
             ctx.cwd = None
             return
-        path = Path(target).expanduser()
+        path = Path(os.path.expanduser(target))
         ctx.cwd = path if path.is_absolute() else (ctx.cwd / path if ctx.cwd is not None else None)
 
     def _source(self, path_text: str, ctx: _Ctx) -> None:
@@ -1095,6 +1067,19 @@ class _Walker:
             self._unread(ctx, why, ("source", path_text))
             return
         self._reread(text, ctx, f"source {path_text} ", share_cwd=True)
+
+    def _sed(self, rest: list, texts: list[str], cmd: _Simple, ctx: _Ctx) -> None:
+        scripts, files, _inputs = sed_scripts(texts)
+        for path_text in files:
+            text, why = _script_text(path_text, ctx)
+            scripts.append(text)
+            if why:
+                self._unread(ctx, why, ("sed", "-f", path_text))
+        for runs, _writes, why in map(sed_actions, scripts):
+            if why:
+                self._unread(ctx, why, ("sed",))
+            for text in runs:
+                self._reread(text, ctx, "sed e ")
 
     def _find(self, rest: list, texts: list[str], cmd: _Simple, ctx: _Ctx) -> None:
         index = 0
@@ -1112,7 +1097,7 @@ class _Walker:
     def _launch(self, name: str, rest: list, cmd: _Simple, ctx: _Ctx, valued: set) -> None:
         """Step past a launcher's own flags and operands to the program it runs."""
         index = 0
-        program_flags = _LAUNCHER_PROGRAM_FLAGS.get(name, ())
+        program_flags = LAUNCHER_PROGRAM_FLAGS.get(name, ())
         while index < len(rest):
             word = rest[index]
             text = _text(word, ctx)
@@ -1126,7 +1111,7 @@ class _Walker:
                 break
             if name == "command" and text in ("-v", "-V"):
                 return
-            program = self._program_flag(text, rest, index, program_flags, ctx)
+            program = self._program_flag(text, rest, index, program_flags, valued, ctx)
             if program is not None:
                 self._reread(program, ctx, f"{name} {text} ")
                 return
@@ -1134,23 +1119,45 @@ class _Walker:
                 self._reread(" ".join(_text(w, ctx) for w in rest[index + 1 :]), ctx, "sudo -s ")
                 return
             index += 2 if text in valued else 1
-        index += _LAUNCHER_OPERANDS.get(name, 0)
+        index += LAUNCHER_OPERANDS.get(name, 0)
+        # su, runuser and script take their flags after an operand too (su root -c); flock's -c follows its file.
+        later = (
+            rest[index:] if name in ("su", "runuser", "script") else rest[index : index + 1] if name == "flock" else []
+        )
+        for offset, word in enumerate(later):
+            text = _text(word, ctx)
+            if text == "--":
+                break
+            program = self._program_flag(text, rest, index + offset, program_flags, valued, ctx)
+            if program is not None:
+                self._reread(program, ctx, f"{name} {text} ")
+                return
         if name == "watch":
             self._reread(" ".join(_text(w, ctx) for w in rest[index:]), ctx, "watch ")
         elif index < len(rest):
             self._program(rest[index:], cmd, ctx.child(f"{name} "))
 
     @staticmethod
-    def _program_flag(text: str, rest: list, index: int, flags: tuple, ctx: _Ctx) -> str | None:
-        """The program text a -c / -S style flag carries (next word, or glued on), None when *text* is no such flag."""
+    def _program_flag(text: str, rest: list, index: int, flags: tuple, valued: set, ctx: _Ctx) -> str | None:
+        """The program text a -c / -S style flag carries: next word, glued on, or closing a cluster (su -lc)."""
         for flag in flags:
-            if text == flag:
-                tail = [_text(w, ctx) for w in rest[index + 1 :]]
-                return " ".join(tail) if flag in ("-S", "--split-string") else (tail[0] if tail else "")
-            if flag.startswith("--") and text.startswith(flag + "="):
-                return text[len(flag) + 1 :]
-            if not flag.startswith("--") and text.startswith(flag) and len(text) > len(flag):
-                return text[len(flag) :]
+            if flag.startswith("--"):
+                if text.startswith(flag + "="):
+                    return text[len(flag) + 1 :]
+                if text != flag:
+                    continue
+                glued = ""
+            else:
+                if text[:1] != "-" or text.startswith("--") or flag[1] not in text[1:]:
+                    continue
+                at = text.index(flag[1], 1)
+                if any(f"-{letter}" in valued for letter in text[1:at]):
+                    continue
+                glued = text[at + 1 :]
+            if glued:
+                return glued
+            tail = [_text(w, ctx) for w in rest[index + 1 :]]
+            return " ".join(tail) if flag in ("-S", "--split-string") else (tail[0] if tail else "")
         return None
 
     def _shell(self, name: str, rest: list, cmd: _Simple, ctx: _Ctx) -> None:
@@ -1192,7 +1199,7 @@ class _Walker:
                 self._unread(ctx, why, (name,))
             programs.append(text)
         if not programs and cmd.piped_in:
-            self._unread(ctx, f"{name} reads its program from a pipe, which this reader cannot see", (name,))
+            self._unread(ctx, f"{name} reads its program from a pipe, which this reader cannot see", (name,), True)
         return programs
 
     def _interpreter(self, name: str, language: str, argv: tuple, rest: list, cmd: _Simple, ctx: _Ctx) -> None:
@@ -1255,7 +1262,7 @@ class _Walker:
 
     _BUILTINS = {
         "cd": _change_dir, "pushd": _change_dir, "eval": _eval, "source": _dot, ".": _dot, "alias": _alias,
-        "trap": _trap, "find": _find, "parallel": _parallel,
+        "trap": _trap, "find": _find, "parallel": _parallel, "sed": _sed,
     }  # fmt: skip
 
 
@@ -1371,8 +1378,6 @@ def program_github_write(inv: Invocation) -> str:
 # WHAT A COMMAND CHANGES ON DISK, by role — the protected lane (R1, R2)
 # =============================================================================
 
-#: Every operand is deleted.
-_DELETE_PROGRAMS = frozenset({"rm", "rmdir", "unlink", "shred", "srm", "wipe", "trash", "trash-put", "rimraf"})
 #: Operands after the first (mode / owner) are changed in place.
 _ATTRIBUTE_PROGRAMS = frozenset({"chmod", "chown", "chgrp"})
 _MOVE_VALUED = frozenset(
@@ -1427,7 +1432,7 @@ def _mutations(inv: Invocation) -> list[tuple[Path, str, str]]:
     program = inv.program
     operands, flags = _operand_words(inv.argv, _MOVE_VALUED)
     paths = [(path, word) for word in operands if (path := _resolve(word, base)) is not None]
-    if program in _DELETE_PROGRAMS:
+    if program in DELETE_PROGRAMS:
         return [(path, "delete", f"{program} (delete)") for path, _word in paths]
     if program == "find" and ("-delete" in inv.argv or any(w.startswith("-exec") for w in inv.argv)):
         starts = [w for w in inv.argv[1:] if w.startswith(("-", "(", "!", ")"))]

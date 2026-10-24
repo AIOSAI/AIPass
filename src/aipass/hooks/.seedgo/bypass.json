@@ -1367,8 +1367,8 @@
     {
       "file": "apps/handlers/security/edit_gate.py",
       "standard": "logged_fallback",
-      "lines": [501, 539, 591, 830, 886],
-      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 685 _allowed_fields: the refusal's wording only, the refusal stands. 747: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 815: the todos advisory text, never a verdict. 1095 _seat_trinity and 1158 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through (the old 1049 and 1080) were cured fail-closed in leg 5. Re-pinned +3 after the 729ffaa9 probe refusal landed above them (2026-10-08)."
+      "lines": [493, 531, 583, 820, 876],
+      "reason": "Fleet green leg 5, each read for fail-open: none lets a write through. 493 _allowed_fields: the refusal's wording only, the refusal stands. 531 _evaluate_file_budget: an older @memory publishes no check_file_budget, so there is no rule to apply (logged). 583: the todos advisory text, never a verdict. 820 _seat_trinity and 876 _read_pending: the tripwire, which reports after the call and decides nothing. The two that did let a write through were cured fail-closed in leg 5."
     },
     {
       "file": "apps/handlers/security/subagent_gate.py",
@@ -1451,14 +1451,14 @@
     {
       "file": "apps/handlers/lifecycle/compact.py",
       "standard": "logged_fallback",
-      "lines": [56],
+      "lines": [45],
       "reason": "Fleet green leg 5: an injector's content (the last session); None injects nothing. Injectors are skipped on error by doctrine; guards no write."
     },
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "logged_fallback",
-      "lines": [62, 132, 196, 229],
-      "reason": "Fleet green leg 5: 62 and 132 are counts for the compact snapshot, None renders as unknown, never zero. 196 and 229: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+      "lines": [63, 133, 197, 230],
+      "reason": "Fleet green leg 5: 63 and 133 are counts for the compact snapshot, None renders as unknown, never zero. 197 and 230: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",

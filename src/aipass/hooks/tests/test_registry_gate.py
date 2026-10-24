@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_registry_gate.py
-# Version: 1.0.3
+# Version: 1.1.0
 # Description: Tests for registry_gate security handler
 # Branch: hooks
 # Created: 2026-07-10
-# Modified: 2026-10-05
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/registry_gate.py."""
@@ -17,6 +17,8 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 from aipass.hooks.apps.handlers.security.registry_gate import handle
 
 # Every helper of the gate is read through handle()'s answer (fleet green leg 9, through the command):
@@ -25,7 +27,7 @@ from aipass.hooks.apps.handlers.security.registry_gate import handle
 
 def _bash(command: str) -> dict:
     """handle()'s answer to a Bash call running `command`."""
-    return handle({"tool_name": "Bash", "tool_input": {"command": command}})
+    return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": "/srv/aipass/src/aipass/hooks"})
 
 
 def _edit(file_path: str) -> dict:
@@ -83,7 +85,7 @@ class TestIsDroneSpawn:
         assert _refused(_bash("echo hi &&   drone @spawn rm AIPASS_REGISTRY.json")) is False
 
     def test_not_drone(self):
-        assert _refused(_bash("echo drone @spawn rm AIPASS_REGISTRY.json")) is True
+        assert _refused(_bash("nodrone @spawn rm AIPASS_REGISTRY.json")) is True
 
 
 class TestStripQuotes:
@@ -193,8 +195,28 @@ class TestFindRegistryName:
     def test_finds_vera(self):
         assert _named(_bash("rm VERA_REGISTRY.json")) == "VERA_REGISTRY.json"
 
-    def test_fallback_when_the_name_does_not_end_the_clause(self):
-        assert _named(_bash("rm AIPASS_REGISTRY.json -f")) == "*_REGISTRY.json"
+    def test_the_name_is_read_off_the_path_wherever_it_stands(self):
+        assert _named(_bash("rm AIPASS_REGISTRY.json -f")) == "AIPASS_REGISTRY.json"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'echo a > "AIPASS_REGISTRY.json"',
+            "echo a > 'AIPASS_REGISTRY.json'",
+            'rm "AIPASS_REGISTRY.json"',
+            "rm AIPASS_REG''ISTRY.json",
+            'cp x "AIPASS_REGISTRY.json"',
+            'bash -c "rm AIPASS_REGISTRY.json"',
+            "sed -i s/a/b/ 'AIPASS_REGISTRY.json'",
+        ],
+    )
+    def test_quoting_the_name_still_names_the_file(self, command):
+        """The shell removes quotes before it runs a word: the gate reads the word the shell does."""
+        assert _named(_bash(command)) == "AIPASS_REGISTRY.json"
+
+    def test_a_bash_call_with_no_cwd_is_refused(self):
+        result = handle({"tool_name": "Bash", "tool_input": {"command": "echo a > AIPASS_REGISTRY.json"}})
+        assert "registry_gate could not check this call" in json.loads(result["stdout"])["reason"]
 
 
 class TestHandleBash:
@@ -336,3 +358,45 @@ class TestHandleExceptionSafety:
         assert result["exit_code"] == 2
         assert "registry_gate could not check this call" in json.loads(result["stdout"])["reason"]
         mock_logger.error.assert_called()
+
+
+class TestAGlobThatCouldNameARegistryIsTheRegistry:
+    """The shell expands the glob, not the gate: a word that could match a registry is refused like the name."""
+
+    def _run(self, command: str, cwd) -> dict:
+        return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)})
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "echo x > *_REGISTRY.json",
+            "echo x >> *_REGISTRY.json",
+            "echo x | tee *_REGISTRY.json",
+            "sed -i s/a/b/ *_REGISTRY.json",
+            "cp a *_REGISTRY.json",
+            "mv AIPASS_REGISTRY.js?n x",
+            "truncate -s0 AIPASS_REG*.json",
+            "echo x > {AIPASS,X}_REGISTRY.json",
+            "dd if=a of=AIPASS_[R]EGISTRY.json",
+        ],
+    )
+    def test_a_glob_word_is_refused_where_nothing_is_on_disk(self, tmp_path, command):
+        assert _refused(self._run(command, tmp_path / "unseen"))
+
+    def test_the_glob_is_read_against_the_disk_when_its_folder_is_there(self, tmp_path):
+        (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
+        assert not _refused(self._run("sed -i s/a/b/ *.json", tmp_path))
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        assert _refused(self._run("sed -i s/a/b/ *.json", tmp_path))
+
+    @pytest.mark.parametrize(
+        "command", ["sed -i s/a/b/ *.md", "sed -n p *_REGISTRY.json", "cp *_REGISTRY.json /x/backup.json"]
+    )
+    def test_a_glob_that_cannot_write_a_registry_is_let_through(self, tmp_path, command):
+        assert not _refused(self._run(command, tmp_path / "unseen"))
+
+    @pytest.mark.parametrize(
+        "command", ['cd "$D"; rm AIPASS_REGISTRY.json', "cd $(mktemp -d); mv AIPASS_REGISTRY.json x"]
+    )
+    def test_a_registry_named_after_a_cd_the_reader_cannot_follow(self, tmp_path, command):
+        assert _refused(self._run(command, tmp_path))

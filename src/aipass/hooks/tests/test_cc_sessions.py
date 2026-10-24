@@ -4,7 +4,7 @@
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -16,6 +16,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -377,6 +378,19 @@ class TestReclaim:
         assert actions == ["stopped"]
         mock_stop.assert_called_once()
         assert mock_stop.call_args.args[0]["sessionId"] == "a"
+
+    @pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="procStart is read from /proc")
+    def test_reclaim_never_stops_a_process_that_reused_the_pid(self, tmp_path):
+        """A session file outlives its process: SIGTERM by PID alone would hit whatever runs under it now."""
+        my_pid = os.getpid()
+        s = {"pid": my_pid, "sessionId": "a", "cwd": str(tmp_path / "hooks"), "kind": "interactive", "procStart": "1"}
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s), encoding="utf-8")
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
+            patch.object(cc_sessions, "_stop_session", return_value="stopped") as mock_stop,
+        ):
+            assert cc_sessions.reclaim() == []
+        mock_stop.assert_not_called()
 
     def test_reclaim_filters_by_branch(self, tmp_path):
         my_pid = os.getpid()

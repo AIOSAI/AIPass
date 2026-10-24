@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.3.0
+# Version: 3.3.1
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -326,7 +326,7 @@ def reclaim(branch_filter: str | None = None) -> list[str]:
     actions = []
     for session in read_all_sessions():
         pid = session.get("pid")
-        if not pid or not _is_pid_alive(pid):
+        if not pid or not _is_pid_alive(pid) or not _session_pid_matches(session):
             continue
         if branch_filter and _session_branch(session) != branch_filter:
             continue

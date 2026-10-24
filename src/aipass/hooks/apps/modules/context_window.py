@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Shared transcript reader (usage + model) and model-aware compact-window resolver (DPLAN-0253)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """Reads live context fill and the model from a session transcript, and resolves the
@@ -65,7 +65,7 @@ def user_settings_path() -> Path:
 
 
 def find_branch_dir(cwd: str) -> Path | None:
-    """Resolve the branch root (src/aipass/<name>) from a cwd. Same walk as compact.py."""
+    """Resolve the branch root (src/aipass/<name>) from a cwd: the one walk the lifecycle handlers share."""
     parts = Path(cwd).parts
     for i, part in enumerate(parts):
         if part == "aipass" and i > 0 and parts[i - 1] == "src":
@@ -82,17 +82,24 @@ def _latest_assistant_message(
 ) -> dict | None:
     """Tail a transcript JSONL and return the newest assistant `message` dict that `wanted` accepts.
 
+    The tail doubles until it holds one or covers the file: a long tool result can outgrow any fixed tail.
     Raises OSError when the transcript cannot be read; each public reader logs it and answers its own empty."""
     if not transcript_path:
         return None
 
     path = Path(transcript_path)
     size = path.stat().st_size
-    with path.open("rb") as fh:
-        if size > tail_bytes:
-            fh.seek(size - tail_bytes)
-        chunk = fh.read()
+    while True:
+        with path.open("rb") as fh:
+            fh.seek(max(0, size - tail_bytes))
+            chunk = fh.read(min(size, tail_bytes))
+        message = _newest_wanted(chunk, wanted)
+        if message is not None or tail_bytes >= size:
+            return message
+        tail_bytes = max(tail_bytes, 1) * 2
 
+
+def _newest_wanted(chunk: bytes, wanted: Callable[[dict], bool]) -> dict | None:
     lines = [ln for ln in chunk.decode("utf-8", errors="replace").splitlines() if ln.strip()]
     for line in reversed(lines):
         try:
