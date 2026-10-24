@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_test_operations.py
 # Description: Helpers shared by the test_operations split files
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Helpers shared by the test_operations files; product: apps/handlers/dashboard and apps/modules/dashboard.py."""
@@ -14,6 +14,7 @@
 import sys
 import types
 
+from aipass.cli.apps.modules import display
 from aipass.prax.apps.handlers.dashboard import operations, refresh, status, template_differ, template_pusher
 from aipass.prax.apps.modules import dashboard as dashboard_module
 
@@ -39,6 +40,10 @@ class _Screen:
     """What the real console showed, read with capsys; error() and warning() lines kept apart."""
 
     def __init__(self, capsys):
+        # Per test: every branch's session pin writes these shared consoles, and a later one resets prax's.
+        # Height too: with it unset, Rich answers 80 columns on a dumb terminal whatever the width pin.
+        for console in (display.CONSOLE, display.err_console):
+            console.width, console.height = 1000, 25
         self._capsys = capsys
         self.out = ""
         self.printed: list[str] = []
@@ -57,8 +62,11 @@ class _Screen:
                 self.printed.append(line)
         return self
 
+    def _evidence(self) -> str:
+        return f"errors={self.errors!r} ({len(self.errors)})\nwarnings={self.warnings!r}\nprinted={self.printed!r}"
+
     def assert_one_error(self, message: str) -> None:
-        assert self.read().errors == [message]
+        assert self.read().errors == [message], self._evidence()
 
     def assert_one_warning(self, message: str) -> None:
-        assert self.read().warnings == [message]
+        assert self.read().warnings == [message], self._evidence()
