@@ -3,7 +3,7 @@
 # Description: Unit tests for branch_log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
@@ -60,6 +60,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     ):
         monkeypatch.setattr(mod, name, getattr(mock_log_watcher, name))
     monkeypatch.setattr(mod, "AIPASS_PKG_ROOT", tmp_path)
+    monkeypatch.setattr(mod, "service_state", lambda: "unknown")
 
     _MOCKS.clear()
     _MOCKS.update(watcher=mock_log_watcher, json_handler=mock_json_handler, trigger=mock_trigger)
@@ -167,13 +168,17 @@ def test_handle_command_stop():
     watcher.stop_branch_log_watcher.assert_called_once()
 
 
-def test_handle_command_status():
-    """handle_command('status', []) displays status and returns True."""
+def test_status_reports_the_service_not_only_this_process(capsys, monkeypatch):
+    """Shipped defect: status printed only the CLI's own flag, Active False beside a running daemon."""
     mod = _import_module()
+    monkeypatch.setattr(mod, "service_state", lambda: "stopped")
     result = mod.handle_command("status", [])
     assert result is True
     watcher = _get_log_watcher()
     watcher.get_watcher_status.assert_called_once()
+    output = capsys.readouterr().out
+    assert "Service: stopped" in output
+    assert "This process: True" in output
 
 
 def test_handle_command_reset():
@@ -305,11 +310,12 @@ def test_print_help_outputs_commands(capsys):
 
 
 def test_handle_command_status_prints_all_fields(capsys):
-    """handle_command('status', []) prints active, watchdog, hashes, pending flush, root."""
+    """handle_command('status', []) prints service, process, watchdog, hashes, pending flush, root."""
     mod = _import_module()
     mod.handle_command("status", [])
     output = capsys.readouterr().out
-    assert "Active:" in output
+    assert "Service: unknown" in output
+    assert "This process:" in output
     assert "Watchdog available:" in output
     assert "Seen error hashes:" in output
     assert "Pending flush: False" in output

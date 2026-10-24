@@ -3,7 +3,7 @@
 # Description: Log events module for centralized log watcher public API
 # Version: 1.1.0
 # Created: 2026-01-31
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -16,6 +16,7 @@ import sys
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers.service_control import service_state
 
 from aipass.trigger.apps.handlers.watchers.log_watcher import (
     start_log_watcher,
@@ -152,7 +153,9 @@ def handle_command(command: str, args: list) -> bool:
     elif command == "status":
         info = status()
         console.print("Log Watcher Status")
-        console.print(f"  Active: {info['active']}")
+        # The daemon runs the watcher, not this CLI process: report both, never one as the other.
+        console.print(f"  Service: {service_state()}")
+        console.print(f"  This process: {info['active']}")
         console.print(f"  Log dir: {info['log_dir']}")
 
     json_handler.log_operation("log_watcher_command", {"command": command})

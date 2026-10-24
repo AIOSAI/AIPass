@@ -107,3 +107,11 @@ def systemctl(action: str) -> Optional[bool]:
 def is_service_active() -> Optional[bool]:
     """Check if the log watcher systemd service is running."""
     return systemctl("is-active")
+
+
+def service_state() -> str:
+    """The log watcher unit in one word: running, stopped, unknown, or unavailable."""
+    if not systemd_available():
+        return "unavailable"
+    active = is_service_active()
+    return "running" if active else "unknown" if active is None else "stopped"

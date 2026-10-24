@@ -3,7 +3,7 @@
 # Description: Branch log events module for log watcher public API
 # Version: 1.1.0
 # Created: 2026-02-02
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -16,6 +16,7 @@ import sys
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers.service_control import service_state
 from aipass.trigger.apps.modules.core import trigger
 
 from aipass.trigger.apps.handlers.log_watcher import (
@@ -172,7 +173,9 @@ def handle_command(command: str, args: list) -> bool:
     elif command == "status":
         info = status()
         console.print("Branch Log Watcher Status")
-        console.print(f"  Active: {info['active']}")
+        # The daemon runs the watcher, not this CLI process: report both, never one as the other.
+        console.print(f"  Service: {service_state()}")
+        console.print(f"  This process: {info['active']}")
         console.print(f"  Watchdog available: {info['watchdog_available']}")
         console.print(f"  Seen error hashes: {info['seen_hashes_count']}")
         console.print(f"  Pending flush: {info['pending_flush']}")

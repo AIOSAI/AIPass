@@ -12,7 +12,7 @@
       "command": "drone @trigger ci poll",
       "timeout_seconds": 300,
       "notify": false,
-      "_note": "WHAT: the CI red lane's poll. A command job: the daemon tick runs it from src/aipass/trigger/, so no agent wakes for the poll itself; it wakes an owner only for a new red, within the two-awake cap. WHY 10 minutes: a CI run takes 20 to 32 minutes, so a red is seen within a third of a run, and a poll is a handful of drone reads (run list, one run view per new red) that holds the tick lock for seconds. WHY notify false: the lane mails @devpulse itself on held, unowned, pushed and green; a start and finish mail every 10 minutes would be noise. DISABLED until the lead's live check of the lane passes; enabling is flipping enabled to true. Depth: docs/ci_red_lane.md."
+      "_note": "WHAT: the CI red lane's poll. A command job: the daemon tick runs it from src/aipass/trigger/, so no agent wakes for the poll itself; it wakes an owner only for a new red, within the two-awake cap. WHY 10 minutes: a CI run takes 20 to 32 minutes, so a red is seen within a third of a run, and a poll is a handful of drone reads (run list, one run view per new red) that holds the tick lock for seconds. WHY notify false: the lane mails @devpulse itself on held, unowned, pushed and green; a start and finish mail every 10 minutes would be noise. Enabled after the lead's live check of the lane passed; disabling is flipping enabled to false. Depth: docs/ci_red_lane.md."
     }
   ]
 }

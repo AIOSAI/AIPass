@@ -127,6 +127,25 @@ class TestIsServiceActive:
         assert asked == ["is-active"]
 
 
+class TestServiceState:
+    """service_state names the unit's state; a silent systemctl is unknown, never stopped."""
+
+    @pytest.mark.parametrize("active, word", [(True, "running"), (False, "stopped"), (None, "unknown")])
+    def test_each_answer_maps_to_its_own_word(
+        self, monkeypatch: pytest.MonkeyPatch, systemd_present, active, word
+    ) -> None:
+        monkeypatch.setattr(service_control, "is_service_active", lambda: active)
+
+        assert service_control.service_state() == word
+
+    def test_no_systemd_is_unavailable_and_asks_nothing(self, monkeypatch: pytest.MonkeyPatch, systemd_absent) -> None:
+        asked: list[str] = []
+        monkeypatch.setattr(service_control, "is_service_active", lambda: asked.append("asked"))
+
+        assert service_control.service_state() == "unavailable"
+        assert asked == []
+
+
 class TestGetAipassHome:
     """Env var wins; the walk is the last resort and never reads the cwd."""
 

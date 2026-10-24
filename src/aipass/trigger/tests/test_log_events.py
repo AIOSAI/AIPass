@@ -3,7 +3,7 @@
 # Description: Unit tests for log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the log_events module (apps/modules/log_events.py)."""
@@ -41,6 +41,7 @@ def _mock_infrastructure(monkeypatch, tmp_path):
         monkeypatch.setattr(mod, name, getattr(mock_log_watcher, name))
     log_dir = tmp_path / "system_logs"
     monkeypatch.setattr(mod, "SYSTEM_LOGS_DIR", log_dir)
+    monkeypatch.setattr(mod, "service_state", lambda: "unknown")
 
     # The CLI console and rich are real: output is read with capsys, and a
     # refusal through error() is read from cli's own failure flag.
@@ -148,13 +149,15 @@ def test_handle_command_stop():
     watcher.stop_log_watcher.assert_called_once()
 
 
-def test_handle_command_status(capsys):
-    """handle_command('status', []) displays status and returns True."""
+def test_status_reports_the_service_not_only_this_process(capsys, monkeypatch):
+    """Shipped defect: status printed only the CLI's own flag, Active False beside a running daemon."""
     mod = _import_module()
+    monkeypatch.setattr(mod, "service_state", lambda: "running")
     result = mod.handle_command("status", [])
     assert result is True
     output = capsys.readouterr().out
-    assert "Active:" in output
+    assert "Service: running" in output
+    assert "This process: False" in output
     assert "Log dir:" in output
 
 
