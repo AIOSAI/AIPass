@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-24] — v2.8.27: the whole fleet's ponytail audit fix-alls, dashboard and registry writes under locks, rollover stores before it trims, the battle test's fixes
 
 ### Fixed
 - **drone**: `dev-pr`'s subject-cap refusal ended "Nothing was committed." though nothing was pushed either; the refusal now ends in the verb's own outcome ("The PR title was refused. Nothing was pushed."). A passport-less caller's refusal is a `NoPassportError` logged at INFO, not WARNING, since refusing a non-branch cwd is designed behaviour. `drone @git run watch` now streams gh's own poll lines live every 60 s (or `-i`) and gives up after 45 min instead of a captured 60 s timeout; the same through the `--repo` door. (@drone's 2026-10-24 rounds build, rebuilt after 0f936f08 swallowed it.)
