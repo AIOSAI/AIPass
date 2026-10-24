@@ -117,7 +117,7 @@ class TestHandleCommand:
         assert result is False
 
     def test_info_with_valid_skill(self, capsys):
-        # Mutant killed: the info branch returns True without calling _cmd_info.
+        # Mutant killed: the info branch returns True without calling loader.print_skill_info.
         result = handle_command("info", ["github"])
         assert result is True
         assert "Skill: github" in capsys.readouterr().out
@@ -127,7 +127,7 @@ class TestHandleCommand:
         assert result is False
 
     def test_run_with_valid_skill(self, capsys):
-        # Mutant killed: the run branch returns True without calling _cmd_run.
+        # Mutant killed: the run branch returns True without calling runner.run_skill.
         result = handle_command("run", ["system_status", "disk"])
         assert result is True
         assert "Disk Usage (" in capsys.readouterr().out
@@ -137,7 +137,7 @@ class TestHandleCommand:
         assert result is False
 
     def test_validate_with_valid_skill(self, capsys):
-        # Mutant killed: the validate branch returns True without calling _cmd_validate.
+        # Mutant killed: the validate branch returns True without calling validator.validate_skill.
         result = handle_command("validate", ["github"])
         assert result is True
         assert "Skill 'github' - all requirements met." in capsys.readouterr().out
