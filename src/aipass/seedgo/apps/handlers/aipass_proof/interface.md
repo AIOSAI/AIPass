@@ -1,7 +1,7 @@
 # Interface Proof — Checker Interface Compliance
-**Version:** 1.0.0
+**Version:** 1.0.1
 **Created:** 2026-03-22
-**Modified:** 2026-03-22
+**Modified:** 2026-10-23
 **Status:** Placeholder
 
 ---
@@ -36,31 +36,32 @@ The audit engine calls a specific function depending on the AUDIT_SCOPE:
 ### File-Level Checkers (`all_files` / `entry_point`)
 
 ```python
-def check_module(file_path: str, module_name: str, branch_path: str) -> dict:
+def check_module(module_path: str, bypass_rules: list | None = None) -> dict:
     """Validate a single file against the standard.
 
     Args:
-        file_path: Absolute path to the file being checked
-        module_name: Name of the module (derived from filename)
-        branch_path: Absolute path to the branch root
+        module_path: Absolute path to the file being checked
+        bypass_rules: The branch's .seedgo/bypass.json rules, as branch_audit loads them
 
     Returns:
-        dict with at minimum: {"passed": bool, "issues": list}
+        {"passed": bool, "checks": [{"name": str, "passed": bool, "message": str}],
+         "score": int, "standard": str}
     """
 ```
 
 ### Branch-Level Checkers (`branch_level`)
 
 ```python
-def check_branch(branch_path: str, module_name: str) -> dict:
+def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Validate the branch as a whole against the standard.
 
     Args:
         branch_path: Absolute path to the branch root
-        module_name: Name of the standard being checked
+        bypass_rules: The branch's .seedgo/bypass.json rules, as branch_audit loads them
 
     Returns:
-        dict with at minimum: {"passed": bool, "issues": list}
+        {"passed": bool, "checks": [{"name": str, "passed": bool, "message": str}],
+         "score": int, "standard": str}
     """
 ```
 
@@ -83,7 +84,7 @@ If `AUDIT_SCOPE` is missing, the engine cannot determine how to call the checker
 1. **AUDIT_SCOPE exists** as a module-level variable in every `*_check.py`
 2. **AUDIT_SCOPE value** is one of the three valid strings
 3. **Function name** matches the scope: `check_module` for file-level, `check_branch` for branch-level
-4. **Parameter count** matches the expected signature
+4. **Parameters**: the first is `module_path` (file-level) or `branch_path` (branch-level), and `bypass_rules` is the second positional or a keyword-only parameter
 
 <!-- TODO: Detail the AST inspection approach vs import-based validation
      once the scanner implementation is finalized -->
@@ -96,7 +97,7 @@ If `AUDIT_SCOPE` is missing, the engine cannot determine how to call the checker
 |---------|--------|
 | Missing `AUDIT_SCOPE` | Audit engine skips or crashes on the checker |
 | Wrong function name (`check` instead of `check_module`) | `AttributeError` at runtime |
-| Missing parameters | `TypeError` when audit engine calls with expected args |
+| Wrong first parameter name, or no `bypass_rules` | `TypeError` when the audit engine passes `bypass_rules=` |
 | Invalid scope value | Engine doesn't know how to route the checker |
 
 ---
@@ -105,7 +106,7 @@ If `AUDIT_SCOPE` is missing, the engine cannot determine how to call the checker
 
 1. Add `AUDIT_SCOPE = "all_files"` (or `"entry_point"` / `"branch_level"`) at the top of the checker
 2. Ensure the function name is `check_module` (file-level) or `check_branch` (branch-level)
-3. Ensure all parameters are present in the signature
+3. Ensure the signature is `(module_path, bypass_rules=None)` or `(branch_path, bypass_rules=None)`
 
 ---
 

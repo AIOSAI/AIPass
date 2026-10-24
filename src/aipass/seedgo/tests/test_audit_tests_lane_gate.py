@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_gate.py
 # Description: audit-tests write gate: payload classifier and its gate log (split from test_audit_tests_lane.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py and gatelog.py."""
@@ -266,11 +266,20 @@ class TestAttribution:
         assert recorded == [os.path.normpath(spelled)]
         assert os.path.isabs(recorded[0])
 
-    def test_a_relative_path_is_counted_not_guessed_at(self, state, monkeypatch):
+    def test_a_dir_fd_relative_path_is_counted_not_guessed_at(self, state, monkeypatch):
         monkeypatch.setattr(plugin, "STATE", state)
-        plugin._record_write("os.remove", "inner/file")
+        plugin.audit_hook("os.remove", ("inner/file", 3))
         assert state.relative_unattributable == 1
         assert state.violations == {}
+
+    def test_a_cwd_relative_write_is_resolved_and_convicted(self, state, monkeypatch):
+        """`Path("leak.txt").write_text("x")` from a cwd outside the sandbox scored hygiene 100."""
+        monkeypatch.setattr(plugin, "STATE", state)
+        outside = _outside_path("cwd")
+        monkeypatch.setattr(plugin.os, "getcwd", lambda: outside)
+        plugin.audit_hook("open", ("leak.txt", "w", os.O_WRONLY | os.O_CREAT))
+        assert [key[3] for key in state.violations] == [os.path.join(outside, "leak.txt")]
+        assert state.relative_unattributable == 0
 
     def test_the_key_is_normalized_so_two_spellings_of_one_file_are_one_record(self, state, monkeypatch):
         # A ".." segment needs normalising on every platform, so this kills the deleted-normpath mutant anywhere.

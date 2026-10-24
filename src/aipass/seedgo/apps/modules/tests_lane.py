@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests Lane Module
@@ -37,7 +37,7 @@ from aipass.seedgo.apps.modules import CommandRefused
 #: The vocabulary is handlers/audit_tests/refusal.py's, so one code never means two things.
 EXIT_UNKNOWN_ARGUMENT = 7
 
-#: A bump that could not stamp what it was asked to, in the same vocabulary.
+#: A bump that could not stamp, or a restore that could not land, in the same vocabulary.
 EXIT_NOT_STAMPED = 2
 
 #: seedgo only operates its own retire lane: another branch's retirement is that branch's move.
@@ -169,6 +169,7 @@ def _handle_restore(args: List[str]) -> None:
         console.print(f"  [green]Restored[/green] {message}")
     else:
         display_error(f"Cannot restore: {message}")
+        raise CommandRefused(EXIT_NOT_STAMPED, "tests restore")
 
 
 def _handle_template_status() -> None:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_ops.py
 # Description: README Update Operations Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -41,15 +41,9 @@ def resolve_branch(branch_arg: str) -> Optional[Dict]:
     """Resolve @branch argument to branch info from registry.
 
     Raises OSError/ValueError on an unreadable registry: None means an unknown branch."""
-    registry_path = _find_registry()
-    if not registry_path.exists():
-        return None
-
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-
     name = branch_arg.lstrip("@").upper()
 
-    for branch in registry.get("branches", []):
+    for branch in _load_branches():
         if branch.get("name", "").upper() == name:
             return branch
         aliases = branch.get("aliases", [])
@@ -64,12 +58,19 @@ def get_all_branches() -> List[Dict]:
     """Get all branches from the registry.
 
     Raises OSError/ValueError on an unreadable registry: [] means no registry."""
+    return _load_branches()
+
+
+def _load_branches() -> List[Dict]:
+    """Registry branches with relative paths anchored at the registry's directory, not the CWD."""
     registry_path = _find_registry()
     if not registry_path.exists():
         return []
-
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    return registry.get("branches", [])
+    branches = json.loads(registry_path.read_text(encoding="utf-8")).get("branches", [])
+    for branch in branches:
+        if branch.get("path"):
+            branch["path"] = str((registry_path.parent / branch["path"]).resolve())
+    return branches
 
 
 def load_generator():

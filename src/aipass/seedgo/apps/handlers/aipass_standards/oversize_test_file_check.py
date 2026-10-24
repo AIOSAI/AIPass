@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: oversize_test_file_check.py
 # Description: Oversize Test File Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-20
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -58,7 +58,7 @@ def measure(source: str) -> Tuple[int, int, int]:
     total = len(source.splitlines())
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[oversize_test_file] Unparseable, measured whole at %d lines: %s", total, exc)
         return total, total, 0
     payload = _payload_lines(tree)

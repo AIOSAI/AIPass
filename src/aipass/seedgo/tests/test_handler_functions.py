@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handler_functions.py
 # Description: Unit tests for handler-level functions across multiple handler packages
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/ functions: audit/audit_display.py, diagnostics_check.py, readme/readme_ops.py."""
@@ -231,6 +231,21 @@ def test_get_all_branches_no_registry(tmp_path, monkeypatch):
 
     branches = readme_ops.get_all_branches()
     assert branches == []
+
+
+def test_resolve_branch_relative_path_anchored_at_registry(tmp_path, monkeypatch):
+    """A relative registry path resolves against the registry's directory, not the CWD."""
+    registry_path = tmp_path / "AIPASS_REGISTRY.json"
+    registry_path.write_text(
+        json.dumps({"branches": [{"name": "backup", "path": "src/aipass/backup"}]}), encoding="utf-8"
+    )
+    monkeypatch.setattr(readme_ops, "_find_registry", lambda: registry_path)
+    monkeypatch.chdir(tmp_path.parent)
+
+    resolved = readme_ops.resolve_branch("@backup")
+    assert resolved is not None
+    assert resolved["path"] == str(tmp_path / "src" / "aipass" / "backup")
+    assert readme_ops.get_all_branches()[0]["path"] == str(tmp_path / "src" / "aipass" / "backup")
 
 
 def test_generate_commands_section_no_entry_point(tmp_path):

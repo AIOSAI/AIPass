@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: declared_pass_symbol_resolves_check.py
 # Description: Declared Pass Symbol Resolves Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Declared Pass Symbol Resolves Standards Checker Handler
@@ -11,6 +11,7 @@
 Reference: declared_pass_symbol_resolves.md
 """
 
+from functools import partial
 import ast
 import importlib.util
 import re
@@ -25,9 +26,11 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
+READS_BRANCH = True
 
 STANDARD = "DECLARED_PASS_SYMBOL_RESOLVES"
 STANDARD_KEY = "declared_pass_symbol_resolves"
@@ -54,6 +57,9 @@ H2_UPPER = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+|[A-Z]{3,}")
 H2_SNAKE = re.compile(r"_?[a-z][a-z0-9]*(?:_[a-z0-9]+)+")
 
 ELSEWHERE = ("test_", "tests/")
+
+#: A dotted token ending in one of these names a file, not an attribute.
+FILE_EXTENSIONS = frozenset({"md", "py", "json", "txt", "toml", "yaml", "yml", "cfg", "ini", "rst", "sh", "csv", "log"})
 
 #: Where this pack's checkers live: a category that names one is a reference to it.
 #: Never resolve()d at import: that reads the working directory, and an import
@@ -99,6 +105,12 @@ def _is_path_shaped(token: str) -> bool:
     return token.endswith("/") or token.endswith(".py") or token.count("/") >= 2
 
 
+def _is_prose_dotted(token: str) -> bool:
+    """Whether a dotted token is prose, not a symbol: ``e.g``, ``i.e`` or a file name like ``README.md``."""
+    parts = token.split(".")
+    return any(len(part) == 1 for part in parts) or parts[-1].lower() in FILE_EXTENSIONS
+
+
 def _judged_by_h2(token: str) -> bool:
     """Whether declared_pass_contradiction already judges this bare name."""
     return H2_UPPER.fullmatch(token) is not None or H2_SNAKE.fullmatch(token) is not None
@@ -118,6 +130,8 @@ def identifiers(prose: str) -> Tuple[List[str], bool]:
             if not token or token.startswith(ELSEWHERE):
                 continue
             if rule is SLASHED and not _is_path_shaped(token):
+                continue
+            if rule is DOTTED and _is_prose_dotted(token):
                 continue
             named = True
             if rule is not SLASHED and "." not in token and _judged_by_h2(token):
@@ -166,13 +180,7 @@ def stdlib_anchors(tree: ast.AST) -> Dict[str, Tuple[str, bool]]:
     return anchors
 
 
-def _parse(source: str, where: object) -> ast.Module | None:
-    """A file's tree, or None when Python cannot read it (``ruff`` convicts that)."""
-    try:
-        return ast.parse(source, filename=str(where))
-    except SyntaxError as exc:
-        logger.info("[declared_pass_symbol_resolves] Unparseable %s: %s", where, exc)
-        return None
+_parse = partial(parse, tag="declared_pass_symbol_resolves")
 
 
 @lru_cache(maxsize=64)
@@ -193,7 +201,7 @@ def product_facts(branch_root: Path) -> Tuple[str, FrozenSet[str], Dict[str, Tup
         if source is None:
             continue
         chunks.append(source)
-        tree = _parse(source, path)
+        tree = _parse(source, str(path))
         if tree is not None:
             for name, anchor in stdlib_anchors(tree).items():
                 anchors.setdefault(name, anchor)
@@ -261,7 +269,7 @@ def _source_file(name: str, spec: ModuleSpec) -> Path | None:
 def _names_module(name: str, path: Path) -> object | None:
     """A stand-in module built from one source file's top-level names; nothing in it runs."""
     source = _read(path)
-    tree = _parse(source, path) if source is not None else None
+    tree = _parse(source, str(path)) if source is not None else None
     if source is None or tree is None:
         return None
     statements = _statements(tree.body)
@@ -477,18 +485,8 @@ def scan(source: str, branch_root: Path | None) -> List[Tuple[int, str, str]]:
     return found
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[declared_pass_symbol_resolves] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="declared_pass_symbol_resolves", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

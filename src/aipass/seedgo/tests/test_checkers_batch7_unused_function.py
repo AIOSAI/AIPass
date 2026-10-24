@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_unused_function.py
 # Description: unused_function_check ruling: the message says what was measured (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unused_function_check.py."""
@@ -22,7 +22,6 @@ class TestUnusedFunctionSaysWhatItActuallyMeasured:
     """The check measures "no caller in THIS branch" and said "unused"."""
 
     def _report(self, tmp_path, monkeypatch):
-        # The REAL ignore handler: a MagicMock returns a truthy Mock and the collector skips every file.
 
         # A neutral root inside tmp_path: the collector's skip set matches every path part, and tmp_path names the test.
         root = tmp_path / "branchroot"
@@ -43,3 +42,11 @@ class TestUnusedFunctionSaysWhatItActuallyMeasured:
         assert "cross-branch" in blob
         assert "importlib" in blob
         assert "confirm before deleting" in blob
+
+
+def test_a_function_that_only_calls_itself_has_no_caller(tmp_path):
+    pkg = tmp_path / "branchroot" / "apps" / "handlers"
+    pkg.mkdir(parents=True)
+    (pkg / "mod.py").write_text("def walk(n):\n    return walk(n - 1) if n else 0\n", encoding="utf-8")
+    report = unused_function_check.check_branch(str(tmp_path / "branchroot"))
+    assert [u["name"] for u in report["checks"][0]["unused"]] == ["walk"]

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: series.py
 # Description: the ratchet series - one append-only line per probe, and the archived artifact behind it
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -58,18 +58,25 @@ def read(directory: Optional[Path] = None) -> List[dict]:
     """Every line in the series, oldest first. A missing file is an empty series.
 
     A line that does not parse raises with its number: a series read past a
-    broken line would hand the pick a history with a hole in it."""
+    broken line would hand the pick a history with a hole in it. The one
+    exception is a final line with no newline, an append cut short: it is
+    skipped with a warning, since nothing after it can be missing."""
     path = series_path(directory)
     if not path.exists():
         return []
 
+    text = path.read_text(encoding="utf-8")
+    rows = text.splitlines()
     lines: List[dict] = []
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for number, raw in enumerate(rows, start=1):
         if not raw.strip():
             continue
         try:
             lines.append(json.loads(raw))
         except json.JSONDecodeError as exc:
+            if number == len(rows) and not text.endswith("\n"):
+                logger.warning(f"[RATCHET] {path} line {number} is a truncated append, ignored: {exc}")
+                continue
             raise ValueError(f"{path} line {number} is not JSON: {exc}") from exc
     return lines
 

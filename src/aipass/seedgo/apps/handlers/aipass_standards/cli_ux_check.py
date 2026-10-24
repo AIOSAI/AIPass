@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_ux_check.py
 # Description: CLI UX Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-17
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -96,7 +96,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         tree = ast.parse(content, filename=module_path)
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipped %s: SyntaxError during parse", path)
         return {
             "passed": False,

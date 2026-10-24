@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: state_leak_check.py
 # Description: State Leak Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-22
-# Modified: 2026-10-16
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -22,14 +22,15 @@ and an import-time write is counted, never charged. state_leak.md carries the
 measurements and the stated limits.
 """
 
+from functools import partial
 import ast
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -74,15 +75,6 @@ CURES: Dict[str, str] = {
 }
 
 
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
-
-
 def _base_name(node: ast.expr) -> str:
     """The leftmost name of a dotted expression -- ``os`` for ``os.environ.pop``."""
     while isinstance(node, ast.Attribute):
@@ -118,7 +110,7 @@ def _imports_aipass(node: ast.AST) -> List[str]:
     value = node.value
     named_aipass = (
         isinstance(value, ast.Call)
-        and _tail_name(value.func) == "import_module"
+        and tail_name(value.func) == "import_module"
         and bool(value.args)
         and isinstance(value.args[0], ast.Constant)
         and str(value.args[0].value).startswith("aipass")
@@ -153,7 +145,7 @@ def _statement_families(node: ast.AST) -> Set[str]:
         return families - {""}
     if not isinstance(node, ast.Call):
         return families
-    name = _tail_name(node.func)
+    name = tail_name(node.func)
     if name == "chdir":
         families.add("cwd")
     elif name == "setattr":
@@ -171,12 +163,23 @@ def _written_families(function: ast.AST) -> Set[str]:
     return families
 
 
+def _teardown_families(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Set[str]:
+    """Families a fixture writes after its ``yield`` or in a ``finally``: what it puts back."""
+    body = function.body
+    yielded = next(
+        (i for i, stmt in enumerate(body) if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(stmt))),
+        len(body),
+    )
+    teardown = body[yielded + 1 :] + [s for n in ast.walk(function) if isinstance(n, ast.Try) for s in n.finalbody]
+    return {family for stmt in teardown for family in _written_families(stmt)}
+
+
 def _restoring_fixtures(nodes: List[ast.AST]) -> Tuple[Set[str], Dict[str, Set[str]]]:
     """(families every test is covered for, families each named fixture covers).
 
-    A fixture counts only when it can actually run teardown: a ``yield`` or a
-    ``finally``. ``autouse=True`` covers the file; anything else covers only the
-    tests that ask for it by name.
+    A fixture covers only what its teardown writes: the statements after its ``yield``
+    and its ``finally`` blocks. ``autouse=True`` covers the file; anything else covers
+    only the tests that ask for it by name.
     """
     autouse: Set[str] = set()
     by_name: Dict[str, Set[str]] = {}
@@ -186,12 +189,7 @@ def _restoring_fixtures(nodes: List[ast.AST]) -> Tuple[Set[str], Dict[str, Set[s
         decorators = [ast.unparse(d) for d in function.decorator_list]
         if not any("fixture" in d for d in decorators):
             continue
-        teardown = any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in ast.walk(function)) or any(
-            isinstance(n, ast.Try) and n.finalbody for n in ast.walk(function)
-        )
-        if not teardown:
-            continue
-        families = _written_families(function)
+        families = _teardown_families(function)
         if not families:
             continue
         if any("autouse=True" in d for d in decorators):
@@ -214,11 +212,12 @@ def _covered(function: ast.AST, body: List[ast.AST], autouse: Set[str], by_name:
         # job by hand. (An autouse one is already covered -- its families are the file's.)
         covered |= by_name.get(function.name, set())
     for node in body:
-        if isinstance(node, ast.Try) and node.finalbody:
-            # A hand-written restore. @drone's test_registry.py is the fleet's one.
-            return {"os.environ", "sys.modules", "sys.path", "cwd", "attr", "patcher"}
+        if isinstance(node, ast.Try):
+            # A hand-written restore covers only what its finally writes back.
+            for stmt in node.finalbody:
+                covered |= _written_families(stmt)
         if isinstance(node, ast.Call) and _base_name(node.func) in _MONKEYPATCH_NAMES:
-            covered.update(_MONKEYPATCH_COVERS.get(_tail_name(node.func), ()))
+            covered.update(_MONKEYPATCH_COVERS.get(tail_name(node.func), ()))
     return covered
 
 
@@ -229,7 +228,7 @@ _UNSTOPPABLE = "patch(...).start() holds no patcher, so nothing can stop it"
 
 def _is_patch_call(node: ast.expr | None) -> bool:
     """Whether this expression IS a ``patch(...)`` call, not a name holding one."""
-    return isinstance(node, ast.Call) and _tail_name(node.func) in _PATCH_CALLS
+    return isinstance(node, ast.Call) and tail_name(node.func) in _PATCH_CALLS
 
 
 def _patcher_event(node: ast.AST, patchers: Set[str]) -> Tuple[str, str, int]:
@@ -311,18 +310,8 @@ def _functions(tree: ast.Module) -> Tuple[Dict[int, ast.AST], Dict[int, List[ast
     return holder, bodies
 
 
-@lru_cache(maxsize=64)
-def _parse(source: str, what: str) -> ast.Module | None:
-    """The file's tree, read-only and shared by every pass, or None when Python cannot read it.
-
-    ruff already convicts a syntax error, and a line number invented for a
-    statement Python cannot parse sends its author to the wrong place.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[state_leak] Unparseable, nothing %s: %s", what, exc)
-        return None
+# Read-only trees shared by every pass, so each source parses once.
+_parse = lru_cache(maxsize=64)(partial(parse, tag="state_leak"))
 
 
 def _target_finding(target: ast.expr, covered: Set[str], product: Set[str]) -> str | None:
@@ -344,7 +333,7 @@ def _call_finding(node: ast.Call, covered: Set[str], product: Set[str]) -> str |
     """What a call leaves behind, or None."""
     if _base_name(node.func) in _MONKEYPATCH_NAMES:
         return None
-    name = _tail_name(node.func)
+    name = tail_name(node.func)
     if name == "chdir" and _base_name(node.func) == "os":
         return None if "cwd" in covered else "os.chdir with no restore"
     if name in _MUTATORS and isinstance(node.func, ast.Attribute):
@@ -382,7 +371,7 @@ def _write_findings(
 
 def scan(source: str) -> List[Tuple[int, str, str]]:
     """(line, what was left behind, the cure) for every leak in a test file."""
-    tree = _parse(source, "scanned")
+    tree = _parse(source)
     if tree is None:
         return []
 
@@ -431,7 +420,7 @@ def _cure_for(what: str) -> str:
 
 def counted_import_time_writes(source: str) -> List[int]:
     """Lines writing shared state at MODULE scope, before any test runs: counted, never convicted."""
-    tree = _parse(source, "counted")
+    tree = _parse(source)
     if tree is None:
         return []
 
@@ -462,7 +451,7 @@ def _module_containers(tree: ast.Module) -> Set[str]:
         if isinstance(node, ast.AnnAssign) and node.value is not None:
             targets = [node.target]
         value = getattr(node, "value", None)
-        built = isinstance(value, ast.Call) and _tail_name(value.func) in _CONTAINER_CALLS
+        built = isinstance(value, ast.Call) and tail_name(value.func) in _CONTAINER_CALLS
         if isinstance(value, (ast.Dict, ast.List, ast.Set)) or built:
             names.update(t.id for t in targets if isinstance(t, ast.Name))
     return names
@@ -487,7 +476,7 @@ def _containers_written(function: ast.AST, containers: Set[str]) -> Set[str]:
 @lru_cache(maxsize=512)
 def product_resets(source: str) -> Tuple[frozenset[str], frozenset[str]]:
     """(public ``reset*`` functions, functions writing what they reset, directly or via a same-module call)."""
-    tree = _parse(source, "read as a product") if "def reset" in source else None
+    tree = _parse(source) if "def reset" in source else None
     if tree is None:
         return frozenset(), frozenset()
     containers = _module_containers(tree)
@@ -552,7 +541,7 @@ def _reset_fixtures(tree: ast.Module) -> Tuple[Set[str], Dict[str, Set[str]]]:
         decorators = [ast.unparse(d) for d in function.decorator_list]
         if not any("fixture" in d for d in decorators):
             continue
-        calls = {_tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
+        calls = {tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
         if any("autouse=True" in d for d in decorators):
             autouse |= calls
         else:
@@ -586,7 +575,7 @@ def _reset_credit(
     for node in ast.walk(test):
         if isinstance(node, ast.Try) and node.finalbody:
             finals = [n for statement in node.finalbody for n in ast.walk(statement)]
-            credit.update(_tail_name(n.func) for n in finals if isinstance(n, ast.Call))
+            credit.update(tail_name(n.func) for n in finals if isinstance(n, ast.Call))
     return credit
 
 
@@ -607,7 +596,7 @@ def _writer_call(
 
 def scan_product_resets(test_path: Path, source: str) -> List[Tuple[int, str, str]]:
     """(line, what was left behind, the cure) for shape (d): a product's own reset that no fixture calls."""
-    tree = _parse(source, "scanned") if "aipass" in source else None
+    tree = _parse(source) if "aipass" in source else None
     if tree is None:
         return []
     modules, functions = _product_bindings(tree, test_path)
@@ -615,7 +604,7 @@ def scan_product_resets(test_path: Path, source: str) -> List[Tuple[int, str, st
         return []
     autouse, by_name = _reset_fixtures(tree)
     for conftest in _conftests(test_path):
-        conftest_tree = _parse(_read(conftest) or "", "read as a conftest")
+        conftest_tree = _parse(_read(conftest) or "")
         more_autouse, more_named = _reset_fixtures(conftest_tree) if conftest_tree else (set(), {})
         autouse |= more_autouse
         for name, calls in more_named.items():
@@ -634,18 +623,8 @@ def scan_product_resets(test_path: Path, source: str) -> List[Tuple[int, str, st
     return sorted(set(hits))
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[state_leak] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="state_leak", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

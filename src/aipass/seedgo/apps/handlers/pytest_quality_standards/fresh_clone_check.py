@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fresh_clone_check.py
 # Description: v5 - would this test pass on a machine that has only what the repo ships
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Would this test pass on a machine that has only what the repo ships?
@@ -744,9 +744,17 @@ def _derived_expected(unit: corpus.TestUnit, scope: Dict[str, ast.expr]) -> List
 
 
 def skip_guarded(unit: corpus.TestUnit) -> bool:
-    """True when the unit steps aside on a machine that lacks what it reads (`self_skip`'s row, not ours)."""
-    calls = {_tail(corpus.dotted_name(n.func)) for n in ast.walk(unit.node) if isinstance(n, ast.Call)}
-    return bool(calls & SKIP_CALLS) and bool(_existence_probe(unit.node))
+    """True when the unit steps aside on a machine that lacks what it reads (`self_skip`'s row, not ours).
+
+    The skip must ASK the existence question, in its own condition or an enclosing `if`."""
+    parents = parent_map(unit.node)
+    for node in ast.walk(unit.node):
+        if not isinstance(node, ast.Call) or _tail(corpus.dotted_name(node.func)) not in SKIP_CALLS:
+            continue
+        tests = [a.test for a in _ancestors(node, parents) if isinstance(a, (ast.If, ast.IfExp))]
+        if any(_existence_probe(condition) for condition in list(node.args) + tests):
+            return True
+    return False
 
 
 def sandbox_fixtures(tree: ast.Module) -> Set[str]:

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_artifact.py
 # Description: Completeness + join-key tests for audit/artifact.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/audit/artifact.py."""
@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from aipass.seedgo.apps.handlers.audit import artifact as audit_artifact
+from aipass.seedgo.apps.handlers.audit import incremental_cache
 
 
 # Deliberately longer than the display's 60-char clip.
@@ -431,3 +432,18 @@ def test_empty_result_set_writes_a_valid_document(tmp_path):
     assert doc["branches"] == []
     assert doc["metadata"]["branch_count"] == 0
     assert doc["metadata"]["totals"]["violations"] == 0
+
+
+def test_a_failed_write_leaves_the_previous_artifact_whole(tmp_path, monkeypatch):
+    """Written in place, an interrupted write truncated last_audit.json; staged, the old document survives."""
+    target = tmp_path / "last_audit.json"
+    target.write_text('{"previous": true}\n', encoding="utf-8")
+
+    def _refuse(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(incremental_cache.os, "replace", _refuse)
+    with pytest.raises(OSError):
+        audit_artifact.write_audit_artifact(_make_results(tmp_path), output_path=target, pack="aipass")
+    assert json.loads(target.read_text(encoding="utf-8")) == {"previous": True}
+    assert list(tmp_path.glob("*.tmp")) == []

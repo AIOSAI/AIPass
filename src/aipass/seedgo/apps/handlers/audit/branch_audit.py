@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.8.0
+# Version: 2.8.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
 import copy
+import functools
 import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_f
 from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.audit.artifact import DEFAULT_PACK_NAME
 from aipass.seedgo.apps.handlers.audit.discovery import measure_pack_corpus, pack_corpus
+from aipass.seedgo.apps.handlers.checklist import verdicts
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.test_map.function_scanner import scan_branch
 
@@ -26,8 +28,18 @@ OBSERVE_LOG_MODULE = "branch_observe"
 
 
 def discover_checkers(pack_path: Path | None = None) -> Dict[str, Any]:
-    """Auto-discover all *_check.py modules from a pack directory (default handlers/aipass_standards/)."""
+    """Auto-discover all *_check.py modules from a pack directory (default handlers/aipass_standards/).
+
+    Memoised on the checker files' stamps; a copy is returned because callers add entries.
+    """
     standards_dir = pack_path if pack_path is not None else Path(__file__).resolve().parent.parent / "aipass_standards"
+    stamps = tuple(sorted(incremental_cache.compute_checker_stamps(standards_dir).items()))
+    return dict(_load_checkers(standards_dir.resolve(), stamps))
+
+
+@functools.lru_cache(maxsize=16)
+def _load_checkers(standards_dir: Path, _stamps: tuple) -> Dict[str, Any]:
+    """Execute every checker module in one pack directory once per stamp set."""
     checkers = {}
     for cf in sorted(standards_dir.glob("*_check.py")):
         name = cf.stem.removesuffix("_check")
@@ -283,7 +295,8 @@ def _get_or_compute_branch(
     """
     if unchanged_checkers is not None and cached_branch_results is not None and name in unchanged_checkers:
         cached = cached_branch_results.get(name)
-        if cached is not None:
+        # A crashed result (a pyright timeout) is a failure to run, never a measurement to serve again.
+        if cached is not None and "error" not in cached:
             return cached
     return checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
 
@@ -335,8 +348,8 @@ def _entry_point_pass(
             file_result_cache.setdefault(entry_rel, {})[name] = result
         return result
     except Exception as e:
-        logger.info("Entry-point checker %s failed: %s", name, e)
-        return {"passed": False, "score": 0, "error": str(e)}
+        logger.warning("Entry-point checker %s failed: %s", name, e)
+        return _crashed_result(name, e)
 
 
 def _run_all_files(
@@ -352,19 +365,18 @@ def _run_all_files(
     A file stands down only by contract: all checks pass and one carries ``"declined": True``;
     the message text is never read to decide it.
     """
-    violations, scores, declined, ff = [], [], [], getattr(checker, "FILE_FILTER", None)
+    violations, scores, declined = [], [], []
     for fi in files:
-        if ff and ff not in fi["name"]:
-            continue
         try:
             r = _get_or_compute(
                 checker, name, fi["file"], fi.get("rel"), bypass_rules, file_result_cache, unchanged_files
             )
-        except Exception:
-            logger.info("Checker %s failed on %s", name, fi["name"])
-            continue
+        except Exception as e:
+            # A crash is a failing file, never a dropped one: dropping it averages the rest upward.
+            logger.warning("Checker %s failed on %s: %s", name, fi["name"], e)
+            r = _crashed_result(name, e)
         score, checks = r.get("score", 0), r.get("checks", [])
-        failed = [c for c in checks if not c.get("passed", False)]
+        failed = verdicts.failed_checks(r)
         if checks and not failed and any(c.get("declined") is True for c in checks):
             declined.append(fi.get("rel") or fi["name"])
         elif checks:
@@ -446,7 +458,11 @@ def cache_key_for(branch_name: str, pack_path: Optional[Path], no_bypass: bool =
 
 
 def _bypass_hygiene(
-    branch_path: Path, bypass_rules: list, checkers: Dict[str, Any], pack_path: Path | None
+    branch_path: Path,
+    bypass_rules: list,
+    checkers: Dict[str, Any],
+    pack_path: Path | None,
+    files_with_init: List[Dict[str, str]] | None = None,
 ) -> Dict[str, list]:
     """The branch's dead bypass rules and its inline bypass comments.
 
@@ -456,7 +472,9 @@ def _bypass_hygiene(
     if pack_path is not None and pack_path.resolve() != default_pack:
         return {"bypass_dead": [], "bypass_markers": []}
     known = set(checkers) | {"diagnostics"}
-    corpus = [fi["file"] for fi in _collect_py_files(branch_path, include_init=True)]
+    if files_with_init is None:
+        files_with_init = _collect_py_files(branch_path, include_init=True)
+    corpus = [fi["file"] for fi in files_with_init]
     return {
         "bypass_dead": dead_rules.dead_rules(branch_path, bypass_rules, known),
         "bypass_markers": dead_rules.bypass_markers(branch_path, corpus),
@@ -478,10 +496,17 @@ def audit_branch(
     """
     entry_file, branch_path = branch["entry_file"], Path(branch["path"])
     entry_rel = _rel_path(Path(entry_file), branch_path.resolve())
+    file_result_cache = {} if file_result_cache is None else file_result_cache
+    ignored_all: Dict[str, List[str]] = {}
+    files_with_init = _collect_py_files(branch_path, include_init=True, ignored=ignored_all)
+    all_files = [f for f in files_with_init if f["name"] != "__init__.py"]
     ignored: Dict[str, List[str]] = {}
-    checkers, all_files = discover_checkers(pack_path), _collect_py_files(branch_path, ignored=ignored)
+    for pattern, rels in ignored_all.items():
+        kept = [rel for rel in rels if Path(rel).name != "__init__.py"]
+        if kept:
+            ignored[pattern] = kept
+    checkers = discover_checkers(pack_path)
     ignored_paths = sorted(rel for rels in ignored.values() for rel in rels)
-    files_with_init: List[Dict[str, str]] | None = None
 
     results, scores, all_violations, declined_files = {}, {}, {}, {}
 
@@ -534,13 +559,13 @@ def audit_branch(
         if r.get("not_applicable") is not True:
             scores[name] = r.get("score", 0)
         if scope == "all_files" and all_files:
-            scan_files = all_files
-            if getattr(checker, "INCLUDE_INIT_FILES", False):
-                if files_with_init is None:
-                    files_with_init = _collect_py_files(branch_path, include_init=True)
-                scan_files = files_with_init
+            scan_files = files_with_init if getattr(checker, "INCLUDE_INIT_FILES", False) else all_files
             scan_files = [f for f in scan_files if applicability.applies_to_file(checker, f["file"])]
-            v, s, d = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, unchanged_files)
+            # The entry pass above already judged entry_file; served from its fresh result, not recomputed.
+            reuse: set = set(unchanged_files or ())
+            if runs_on_entry_file and "error" not in r:
+                reuse.add(entry_rel)
+            v, s, d = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, reuse)
             all_violations[name] = v
             if d:
                 declined_files[name] = d
@@ -615,7 +640,7 @@ def audit_branch(
         "declined": declined_files,
         "ignored": {pattern: sorted(rels) for pattern, rels in ignored.items()},
         "ignored_tracked": ignore_handler.ignored_tracked_source(branch_path, ignored_paths),
-        **_bypass_hygiene(branch_path, bypass_rules, checkers, pack_path),
+        **_bypass_hygiene(branch_path, bypass_rules, checkers, pack_path, files_with_init),
         "advisory_standards": advisory_standards,
         "average": avg,
         "deprecated_patterns": deprecated,
@@ -662,7 +687,8 @@ def audit_branch_incremental(
     stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path, no_bypass=no_bypass)
     checker_stamps = incremental_cache.compute_checker_stamps(resolved_pack_path)
 
-    watch_files = _collect_watch_files(branch_path, discover_checkers(pack_path))
+    checkers = discover_checkers(pack_path)
+    watch_files = _collect_watch_files(branch_path, checkers)
     current_fp = incremental_cache.collect_fingerprints(watch_files)
 
     cached_branch_results: Dict[str, Any] = {}
@@ -674,14 +700,14 @@ def audit_branch_incremental(
         cached_fp = {rel: v.get("fp") for rel, v in cached_files_doc.items()}
         added, changed, deleted, unchanged = incremental_cache.diff_fileset(cached_fp, current_fp)
 
-        if not (added or changed or deleted) and not stale:
+        cached_results = branch_entry.get("output", {}).get("results", {})
+        crashed = {n for n, r in cached_results.items() if isinstance(r, dict) and "error" in r}
+        if not (added or changed or deleted) and not stale and not crashed:
             output = copy.deepcopy(branch_entry.get("output", {}))
             output["deprecated_patterns"] = _deprecated_patterns(branch_path)
             # Observations read live runtime state; a cached one is a past moment served as current.
-            output["observations"] = _collect_branch_observations(
-                discover_checkers(pack_path), branch_path, branch_name, bypass_rules
-            )
-            output.update(_bypass_hygiene(branch_path, bypass_rules, discover_checkers(pack_path), pack_path))
+            output["observations"] = _collect_branch_observations(checkers, branch_path, branch_name, bypass_rules)
+            output.update(_bypass_hygiene(branch_path, bypass_rules, checkers, pack_path))
             output["_cache_hit"] = True
             return output
 
@@ -694,8 +720,11 @@ def audit_branch_incremental(
             "files_cached": len(unchanged),
         }
 
+        # A READS_BRANCH checker's per-file verdict depends on its siblings: any moved file voids all of them.
+        moved = bool(added or changed or deleted)
+        drop = stale | {n for n, m in checkers.items() if moved and getattr(m, "READS_BRANCH", False) is True}
         file_result_cache = {
-            rel: {cname: r for cname, r in v.get("results", {}).items() if cname not in stale}
+            rel: {cname: r for cname, r in v.get("results", {}).items() if cname not in drop}
             for rel, v in cached_files_doc.items()
         }
         if not (added or changed or deleted):
@@ -717,10 +746,14 @@ def audit_branch_incremental(
     )
 
     new_files_doc = {rel: {"fp": current_fp[rel], "results": file_result_cache.get(rel, {})} for rel in current_fp}
-    incremental_cache.save_branch_entry(
-        cache_key,
-        {"stamp": stamp, "checker_stamps": checker_stamps, "files": new_files_doc, "output": output},
-    )
+    try:
+        incremental_cache.save_branch_entry(
+            cache_key,
+            {"stamp": stamp, "checker_stamps": checker_stamps, "files": new_files_doc, "output": output},
+        )
+    except Exception as e:
+        # The cache is an accelerator: an unwritable one costs the next run time, never this run's result.
+        logger.warning("[branch_audit] Cache save failed for %s: %s", cache_key, e)
     output["_cache_hit"] = False
     if partial is not None:
         output["_cache_partial"] = partial

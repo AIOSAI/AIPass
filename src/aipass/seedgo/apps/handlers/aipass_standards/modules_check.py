@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: modules_check.py
 # Description: Modules Standards Checker Handler
-# Version: 1.5.0
+# Version: 1.5.2
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
+from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify
 
 AUDIT_SCOPE = "all_files"
 # Applies to production source only: the module contract describes apps/modules/
@@ -158,7 +158,7 @@ def check_door(content: str, module_path: str) -> Dict:
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("modules: door unparseable %s: %s", module_path, exc)
         return {"name": "Door shape", "passed": False, "message": f"Door does not parse: {exc}"}
     # A handlers package nested anywhere under the branch's tree is its own, as encapsulation reads it.
@@ -241,38 +241,38 @@ def check_file_size(lines: List[str], module_path: str) -> Dict:
         }
 
 
+def _file_op_hint(func: ast.expr) -> Optional[str]:
+    """The handler to use instead of this callee, or None when it is no direct file operation."""
+    if isinstance(func, ast.Name) and func.id == "open":
+        return "use handler instead"
+    if not isinstance(func, ast.Attribute):
+        return None
+    if func.attr in ("write_text", "read_text"):
+        return "use json_handler instead"
+    if func.attr == "mkdir":
+        return "use handler for file operations"
+    if func.attr in ("dump", "load") and isinstance(func.value, ast.Name) and func.value.id == "json":
+        return "use json_handler instead"
+    return None
+
+
 def check_no_direct_file_ops(lines: List[str]) -> Optional[Dict]:
     """Check that module doesn't do direct file operations"""
-    file_operations = []
-    source = "\n".join(lines)
     try:
-        prose = classify(source).text_only
-    except UnparseableSource as exc:
-        logger.info("modules: unparseable, only # lines are prose: %s", exc)
-        prose = hash_lines(source)
+        tree = ast.parse("\n".join(lines))
+    except (SyntaxError, ValueError) as exc:
+        logger.info("modules: unparseable, file ops not judged: %s", exc)
+        return {"name": "No direct file operations", "passed": False, "message": f"File does not parse: {exc}"}
 
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if i in prose or not stripped:
+    # Calls, not text: a string or comment naming .read_text( is no file operation.
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
-
-        if stripped.startswith("from ") or stripped.startswith("import "):
-            continue
-
-        # Bare open() only: the lookbehind keeps _handle_open(args) out; one quoted inside a string is no call.
-        if re.search(r"(?<![.\w])open\s*\(", stripped) and "# open(" not in stripped:
-            before_pattern = stripped.split("open(")[0]
-            if before_pattern.count("'") % 2 == 0 and before_pattern.count('"') % 2 == 0:
-                file_operations.append(f"line {i}: {stripped} (use handler instead)")
-
-        if ".write_text(" in stripped or ".read_text(" in stripped:
-            file_operations.append(f"line {i}: {stripped} (use json_handler instead)")
-
-        if ".mkdir(" in stripped:
-            file_operations.append(f"line {i}: {stripped} (use handler for file operations)")
-
-        if "json.dump(" in stripped or "json.load(" in stripped:
-            file_operations.append(f"line {i}: {stripped} (use json_handler instead)")
+        hint = _file_op_hint(node.func)
+        if hint:
+            found.append((node.lineno, node.col_offset, hint))
+    file_operations = [f"line {ln}: {lines[ln - 1].strip()} ({hint})" for ln, _col, hint in sorted(found)]
 
     if file_operations:
         return {
@@ -369,7 +369,7 @@ def check_no_business_logic(content: str, lines: List[str], module_path: str) ->
 
             violations.append({"line": node.lineno, "var": var_name, "type": var_type, "count": element_count})
 
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         logger.info("Skipped business logic check: SyntaxError in %s", module_path)
         return None
     except Exception:
@@ -425,7 +425,7 @@ def check_thin_orchestration(content: str, module_path: str, bypass_rules: list 
 
     try:
         tree = ast.parse(content, filename=module_path)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         logger.info("Skipped orchestration check: SyntaxError in %s", module_path)
         return None
 

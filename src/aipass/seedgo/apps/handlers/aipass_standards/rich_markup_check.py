@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rich_markup_check.py
 # Description: Rich Markup Standards Checker Handler
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -299,7 +299,7 @@ def _scan_source(source: str) -> Tuple[Optional[List[Finding]], Optional[str]]:
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[rich_markup] Not parseable as Python, skipped: %s", exc)
         return None, str(exc)
 

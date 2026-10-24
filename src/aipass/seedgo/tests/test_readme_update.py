@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_readme_update.py
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
-# Version: 2.3.0
+# Version: 2.3.1
 # Created: 2026-09-20
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -24,7 +24,7 @@ import pytest
 
 from aipass.seedgo.apps.handlers import registry_scan
 from aipass.seedgo.apps.handlers.readme import readme_generator, readme_ops
-from aipass.seedgo.apps.modules import readme_update
+from aipass.seedgo.apps.modules import CommandRefused, readme_update
 
 
 # A read-only file is the only route a command has to a write failure, and it is
@@ -111,7 +111,9 @@ class TestHandleCommand:
         assert "readme update @branch" in printed
 
     def test_an_unknown_subcommand_is_named_back_on_stderr_with_the_valid_list(self, capsys):
-        readme_update.handle_command("readme", ["bogus_subcommand"])
+        with pytest.raises(CommandRefused) as refused:
+            readme_update.handle_command("readme", ["bogus_subcommand"])
+        assert refused.value.code == 7
 
         out, err = capsys.readouterr()
         assert "Unknown subcommand: 'bogus_subcommand'" in err
@@ -169,6 +171,16 @@ class TestUpdateRun:
         assert "Updated" not in checked
         assert "Updated" in updated
 
+    def test_a_section_error_is_printed_beside_the_sections_that_were_written(self, capsys, registered):
+        (registered / ".trinity").mkdir()
+        (registered / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+
+        readme_update.handle_command("readme", ["update", "@made_up"])
+
+        out, err = capsys.readouterr()
+        assert "header section failed" in err
+        assert "Updated" in out and "TREE" in out
+
     def test_a_section_with_no_marker_is_called_skipped_and_named(self, capsys, registered):
         readme_update.handle_command("readme", ["update", "@made_up"])
 
@@ -191,19 +203,25 @@ class TestUpdateRun:
         """`readme update` with no branch must never fan out across the fleet."""
         before = (registered / "README.md").read_text(encoding="utf-8")
 
-        readme_update.handle_command("readme", ["update"])
+        with pytest.raises(CommandRefused) as refused:
+            readme_update.handle_command("readme", ["update"])
+        assert refused.value.code == 7
 
         assert "Usage: drone @seedgo readme update @branch" in capsys.readouterr().err
         assert (registered / "README.md").read_text(encoding="utf-8") == before
 
     def test_an_unknown_branch_is_named_back_in_the_error(self, capsys, registered):
-        readme_update.handle_command("readme", ["update", "@nope_xyz"])
+        with pytest.raises(CommandRefused) as refused:
+            readme_update.handle_command("readme", ["update", "@nope_xyz"])
+        assert refused.value.code == 7
 
         assert "Branch '@nope_xyz' not found in registry" in capsys.readouterr().err
 
     def test_an_unreadable_registry_is_named_on_stderr_not_called_an_unknown_branch(self, capsys, unreadable_registry):
         """An unreadable registry read as "not found" (seedgo, fleet green leg 5)."""
-        readme_update.handle_command("readme", ["update", "@made_up"])
+        with pytest.raises(CommandRefused) as refused:
+            readme_update.handle_command("readme", ["update", "@made_up"])
+        assert refused.value.code == 2
 
         err = capsys.readouterr().err.splitlines()
         assert [line for line in err if line.endswith(f"Registry unreadable: {unreadable_registry}")] != []
@@ -213,7 +231,9 @@ class TestUpdateRun:
         """The load failure answered None and the reason was dropped (seedgo, fleet green leg 5)."""
         before = (registered / "README.md").read_text(encoding="utf-8")
 
-        readme_update.handle_command("readme", ["update", "@made_up"])
+        with pytest.raises(CommandRefused) as refused:
+            readme_update.handle_command("readme", ["update", "@made_up"])
+        assert refused.value.code == 2
 
         err = capsys.readouterr().err.splitlines()
         assert [line for line in err if line.endswith(f"Failed to load README generator: {broken_generator}")] != []
@@ -221,7 +241,9 @@ class TestUpdateRun:
 
     def test_check_names_a_generator_that_cannot_load_with_its_reason(self, capsys, registered, broken_generator):
         """`readme check` carries its own catch, and only a run of check can see it."""
-        readme_update.handle_command("readme", ["check", "@made_up"])
+        with pytest.raises(CommandRefused) as refused:
+            readme_update.handle_command("readme", ["check", "@made_up"])
+        assert refused.value.code == 2
 
         err = capsys.readouterr().err.splitlines()
         assert [line for line in err if line.endswith(f"Failed to load README generator: {broken_generator}")] != []
@@ -252,6 +274,13 @@ class TestMarkerReplacement:
 
         assert result["updated"] == ["tree"] and result["dry_run"] is True
         assert (branch / "README.md").read_text(encoding="utf-8") == before
+
+    def test_a_dry_run_lists_only_sections_whose_text_would_change(self, branch):
+        readme_generator.update_readme_auto_sections(str(branch))
+
+        result = readme_generator.update_readme_auto_sections(str(branch), dry_run=True)
+
+        assert result["updated"] == []
 
     def test_a_missing_readme_is_an_error_not_a_crash(self, tmp_path):
         result = readme_generator.update_readme_auto_sections(str(tmp_path))
@@ -339,6 +368,15 @@ class TestTreeSection:
 
         assert "__pycache__" not in result
         assert "real_file.py" in result
+
+    def test_a_file_is_commented_with_its_meta_description_line(self, tmp_path):
+        (tmp_path / "ops.py").write_text(
+            "# =================== AIPass ====================\n# Name: ops.py\n# Description: Ops Handler\n"
+            '# =============================================\n\n"""\nOps docstring\n"""\n',
+            encoding="utf-8",
+        )
+
+        assert "ops.py  # Ops Handler" in readme_generator.generate_tree_section(str(tmp_path))
 
     def test_a_file_that_cannot_be_read_is_marked_unreadable_not_left_blank(self, tmp_path, monkeypatch):
         """An unreadable module used to get the same blank comment as one with no docstring."""

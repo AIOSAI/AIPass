@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
 # Description: Tests for the wants_help predicate and the call sites without a module test file
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the gates in apps/modules/test_map.py and apps/seedgo.py."""
@@ -206,3 +206,18 @@ def test_entry_router_top_level_help_is_unchanged(monkeypatch):
 
     assert seedgo.main() == 0
     assert printed.call_count == 1
+
+
+def test_test_map_counts_a_function_tested_only_by_its_whole_name(tmp_path, monkeypatch):
+    """`build` is not tested by a test that only names `rebuild`."""
+    _silence_side_effects(monkeypatch, function_scanner)
+    (tmp_path / "apps" / "handlers").mkdir(parents=True)
+    (tmp_path / "apps" / "handlers" / "ops.py").write_text(
+        "def build():\n    pass\n\ndef rebuild():\n    pass\n", encoding="utf-8"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_ops.py").write_text("from apps.ops import rebuild\nrebuild()\n", encoding="utf-8")
+
+    tested = {f["name"]: f["tested"] for f in function_scanner.scan_branch(str(tmp_path))["files"][0]["functions"]}
+
+    assert tested == {"build": False, "rebuild": True}

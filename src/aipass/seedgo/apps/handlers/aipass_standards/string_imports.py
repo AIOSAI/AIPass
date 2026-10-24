@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: string_imports.py
 # Description: Import targets written as string literals, read from the parse tree
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Import targets a file names as a STRING, for the cross-branch handler rule.
@@ -84,7 +84,7 @@ def iter_string_imports(content: str) -> Iterator[Tuple[int, str]]:
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("string_imports: unparseable, no string targets read: %s", exc)
         json_handler.log_operation("string_imports_unparseable", {"error": str(exc)})
         return

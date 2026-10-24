@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_content_functions.py
 # Description: Unit tests for all 37 content handler functions
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_content.py and 36 sibling content functions."""
@@ -48,7 +48,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.modules_content import get_mod
 from aipass.seedgo.apps.handlers.aipass_standards.naming_content import get_naming_standards
 from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_content import get_permission_flags_standards
 from aipass.seedgo.apps.handlers.aipass_standards.readme_content import get_readme_standards
-from aipass.seedgo.apps.handlers.aipass_standards.ruff_check_content import get_ruff_check_standards
+from aipass.seedgo.apps.handlers.aipass_standards.ruff_content import get_ruff_standards
 from aipass.seedgo.apps.handlers.aipass_standards.shebang_content import get_shebang_standards
 from aipass.seedgo.apps.handlers.aipass_standards.silent_catch_content import get_silent_catch_standards
 from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_content import get_stderr_routing_standards
@@ -81,7 +81,7 @@ def test_get_interface_proof_has_expected_content():
     _assert_content_str(result, "interface_proof")
     assert "INTERFACE PROOF" in result
     assert "AUDIT_SCOPE variable is declared at module level" in result
-    assert "def check_branch(branch_path, module_name)" in result
+    assert "def check_branch(branch_path, bypass_rules=None)" in result
 
 
 def test_get_plugin_integrity_proof_has_expected_content():
@@ -350,11 +350,11 @@ def test_get_readme_standards_has_expected_content():
     assert "readme" in result.lower()
 
 
-def test_get_ruff_check_standards_has_expected_content():
-    """get_ruff_check_standards names ruff as the primary linter and shows the JSON output flag."""
+def test_get_ruff_standards_has_expected_content():
+    """get_ruff_standards names ruff as the primary linter and shows the JSON output flag."""
 
-    result = get_ruff_check_standards()
-    _assert_content_str(result, "ruff_check_standards")
+    result = get_ruff_standards()
+    _assert_content_str(result, "ruff_standards")
     assert "Ruff is the primary linter for AIPass code." in result
     assert "--output-format=json" in result
 

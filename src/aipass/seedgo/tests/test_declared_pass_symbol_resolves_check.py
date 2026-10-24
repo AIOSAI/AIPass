@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_symbol_resolves_check.py
 # Description: declared_pass_symbol_resolves_check — a declared-pass name that resolves nowhere
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-25
-# Modified: 2026-10-10
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_symbol_resolves_check.py."""
@@ -167,6 +167,11 @@ class TestAWordInProseIsNotAModule:
             100,
             "Every name the declared pass mentions resolves",
         )
+
+    def test_abbreviations_and_file_names_are_prose(self, tmp_path):
+        """e.g., i.e. and README.md are not dotted symbols; os.path.getsize is, and resolves."""
+        declared = "# seedgo: no-test-needed(stdlib) — os.path.getsize, e.g. a size read, i.e. no walk; see README.md"
+        assert _verdict(_branch(tmp_path, declared))[0] == 100
 
     def test_a_module_written_as_an_owner_is_a_module(self, tmp_path):
         """seedgo tests/test_checklist.py:13: "argparse's own parsing", imported by no code here.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: shadow_cycle.py
 # Description: the weekly shadow cycle - three fleet measurements, one document, one mail
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-02
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -62,6 +62,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     try:
         _run(args)
+    except CommandRefused:
+        raise
     except Exception as exc:
         logger.error(f"[SHADOW_CYCLE] the cycle failed: {type(exc).__name__}: {exc}")
         error(f"shadow-cycle failed: {type(exc).__name__}: {exc}")
@@ -76,10 +78,10 @@ def _run(args: List[str]) -> None:
     wants_run, no_mail, unrecognized = _parse(args)
     if unrecognized:
         error(f"shadow-cycle does not know the option '{unrecognized}' - it accepts {', '.join(FLAGS)}")
-        return
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, unrecognized)
     if not wants_run:
         _refuse_bare_flags()
-        return
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, " ".join(args))
 
     json_handler.log_operation("shadow_cycle_invoked", {"pack": SHADOW_PACK, "mail": not no_mail})
 

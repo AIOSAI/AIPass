@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapters.py
 # Description: audit-tests adapter discovery and contract enforcement
-# Version: 1.0.0
+# Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -32,9 +32,7 @@ REQUIRED_FUNCTIONS: tuple = (
     "build_env",
     "assert_env_is_live",
     "run_gated",
-    "fire_canary",
     "nominate",
-    "teardown",
     "declared_groups",
 )
 
@@ -88,8 +86,22 @@ def _aipass_imports_in(tree: ast.AST, filename: str) -> List[str]:
         elif isinstance(node, ast.ImportFrom):
             if (node.module or "").split(".")[0] == "aipass":
                 found.append(f"{filename}:{node.lineno}: from aipass import ...")
+        elif isinstance(node, ast.Call) and _dynamic_import_name(node).split(".")[0] == "aipass":
+            found.append(f"{filename}:{node.lineno}: imports aipass dynamically")
 
     return found
+
+
+def _dynamic_import_name(node: ast.AST) -> str:
+    """The literal module name of an `importlib.import_module(...)` / `__import__(...)` call, else ""."""
+    if not isinstance(node, ast.Call) or not node.args:
+        return ""
+    func = node.func
+    name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else ""
+    first = node.args[0]
+    if name in ("import_module", "__import__") and isinstance(first, ast.Constant) and isinstance(first.value, str):
+        return first.value
+    return ""
 
 
 def execution_isolation(pack_dir: Path) -> dict:

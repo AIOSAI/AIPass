@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: exception_text_in_response_check.py
 # Description: Exception Text In Response Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-10
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Exception Text In Response Standards Checker Handler
 Reference: exception_text_in_response.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Set
@@ -19,6 +20,7 @@ from typing import Dict, List, Set
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import read_text, result
 
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
@@ -186,18 +188,8 @@ def scan(tree: ast.AST) -> List[int]:
     return sorted(rows)
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[exception_text_in_response] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="exception_text_in_response", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:
@@ -230,7 +222,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[exception_text_in_response] Unparseable %s: %s", module_path, exc)
         return _declined("the file does not parse (ruff convicts that)")
 

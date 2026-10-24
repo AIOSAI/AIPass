@@ -130,12 +130,9 @@ logger.info("Starting create operation")
 # CLI display service
 header("Create New Branch", {"Name": branch_name})
 
-# CLI error handling service
-@track_operation
-def create_branch(name: str):
-    """Create branch with automatic error handling"""
-    execute_create(name)
-    return True
+# CLI operation templates service
+operation_start("Create branch", name=branch_name)
+operation_complete(created=1)
 ```
 
 ### What Modules SHOULD NOT Do

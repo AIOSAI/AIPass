@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_state_check.py
 # Description: v5 - a test that changes live host state and does not put it back
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Does this test leave the machine the way it found it?
@@ -159,7 +159,7 @@ def _is_patching_call(dotted: str) -> bool:
     tail = dotted.rsplit(".", 1)[-1]
     if tail in {"setattr", "delattr"}:
         return dotted.startswith("monkeypatch.")
-    return tail in {"patch", "object", "dict"}
+    return tail == "patch" or dotted.endswith(("patch.object", "patch.dict"))
 
 
 def _argument_text(argument: ast.expr) -> Set[str]:
@@ -211,12 +211,10 @@ def patched_targets(unit: corpus.TestUnit, module_strings: Optional[Dict[str, st
 
 
 def _seam_is_patched(patched: Set[str], needles: Sequence[str]) -> bool:
-    """True when any patched target names any of the needles."""
-    for target in patched:
-        for needle in needles:
-            if needle and needle in target:
-                return True
-    return False
+    """True when any patched target names any of the needles as whole dotted segments.
+
+    `x.environment_name` is not `environ`, and `dict()` is no patch."""
+    return any(needle and f".{needle}." in f".{target}." for target in patched for needle in needles)
 
 
 def _argv_binary(node: ast.Call) -> str:

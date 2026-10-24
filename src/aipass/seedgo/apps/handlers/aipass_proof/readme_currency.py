@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_currency.py
 # Description: Verify README.md accuracy against actual pack state
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """README Currency Proof -- Compare README checker counts and standard lists against actual pack.
@@ -136,19 +136,9 @@ def scan(pack_dir: Path) -> dict:
     actual_norm = set(actual_lookup.keys())
     readme_norm = set(readme_lookup.keys())
 
-    # Flexible matching: a README name matches if it is a substring of or
-    # equal to any actual normalized name, and vice-versa.
-    matched_actual: set[str] = set()
-    matched_readme: set[str] = set()
-
-    for rn in readme_norm:
-        for an in actual_norm:
-            if rn == an or rn in an or an in rn:
-                matched_actual.add(an)
-                matched_readme.add(rn)
-
-    stale_norm = readme_norm - matched_readme
-    missing_norm = actual_norm - matched_actual
+    # Exact after normalising: `cli` naming `cli_flags` would hide a stale or missing row.
+    stale_norm = readme_norm - actual_norm
+    missing_norm = actual_norm - readme_norm
 
     stale_refs = sorted(readme_lookup[n] for n in stale_norm)
     undocumented = sorted(actual_lookup[n] for n in missing_norm)

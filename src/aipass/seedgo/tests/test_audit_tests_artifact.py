@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_tests_artifact.py
 # Description: Target, artifact and adapter-seam pins for the audit-tests lane
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-08-29
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/audit_tests/target.py, artifact.py and adapters.py."""
@@ -303,6 +303,23 @@ class TestExitCode:
 
         assert artifact.exit_code_for(document) == refusal.EXIT_PASSED
 
+    @pytest.mark.parametrize(
+        "extra",
+        [{"harness": {"failed": 1}}, {"m10_proof": {"real_tree_unchanged": False}}],
+    )
+    def test_a_failed_self_check_or_changed_tree_is_unproven_not_passed(self, tmp_path, extra):
+        document = artifact.assemble(
+            _branch_target(tmp_path),
+            _lawful_groups(),
+            list(spine.CORE_SPINE),
+            ecosystem="pytest",
+            adapter="a",
+            adapter_api=1,
+        )
+        document.update(extra)
+
+        assert artifact.exit_code_for(document) == refusal.EXIT_UNPROVEN
+
 
 class TestPublication:
     def test_an_unlawful_artifact_never_reaches_disk(self, tmp_path, monkeypatch):
@@ -391,6 +408,15 @@ class TestIsolationProof:
         offenders = adapters.execution_isolation(tmp_path)["offenders"]
         assert any("from aipass" in o for o in offenders)
 
+    @pytest.mark.parametrize("call", ['importlib.import_module("aipass.prax")', '__import__("aipass")'])
+    def test_a_dynamic_import_of_aipass_breaks_isolation(self, tmp_path, call):
+        payload = tmp_path / "payload"
+        payload.mkdir()
+        (payload / "plugin.py").write_text(f"import importlib\n{call}\n", encoding="utf-8")
+
+        offenders = adapters.execution_isolation(tmp_path)["offenders"]
+        assert offenders == ["plugin.py:2: imports aipass dynamically"]
+
     def test_the_word_aipass_in_a_docstring_is_not_a_violation(self, tmp_path):
         """AST, not grep. Nominating on a token is the error this campaign already made twice."""
         payload = tmp_path / "payload"
@@ -432,7 +458,7 @@ class TestAdapterContract:
         that asserts `len(REQUIRED_FUNCTIONS) == len(REQUIRED_FUNCTIONS)` agrees
         with itself however the contract is emptied.
         """
-        assert len(adapters.REQUIRED_FUNCTIONS) == 8
+        assert len(adapters.REQUIRED_FUNCTIONS) == 6
         assert len(adapters.REQUIRED_CONSTANTS) == 2
         assert len(adapters.FORBIDDEN_FUNCTIONS) == 2
         assert adapters.REQUIRED_CONSTANTS == ("ADAPTER_API", "ECOSYSTEM")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: subcommand_help_check.py
 # Description: Subcommand Help Standards Checker Handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Subcommand Help Standards Checker Handler.
@@ -414,7 +414,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipped %s: SyntaxError during parse", path)
         return {
             "passed": False,

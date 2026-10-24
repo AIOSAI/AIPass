@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_windows_compat.py
 # Description: Tests for windows_compat_check.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-05-14
-# Modified: 2026-10-16
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/windows_compat_check.py."""
@@ -1416,3 +1416,32 @@ def test_text_bytes_advisory_respects_line_bypass(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(windows_compat_check, "load_bypass_rules", rules)
     assert check_branch_info(str(branch)) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'import sys\nif sys.platform.startswith("linux"):\n    import fcntl\n',
+        'import os\nIS_WIN = os.name == "nt"\n\n\ndef f(pid):\n    if not IS_WIN:\n        os.killpg(pid, 9)\n',
+    ],
+    ids=["startswith", "not-flag"],
+)
+def test_the_fleets_other_platform_guard_spellings_guard(tmp_path, source):
+    """sys.platform.startswith(...) and `not IS_WIN` ask the platform as surely as ==."""
+    result = _module_result(tmp_path, source)
+    assert result["passed"] is True, result["checks"][0]["message"]
+
+
+def test_hasattr_on_an_ordinary_object_is_no_platform_guard(tmp_path):
+    """hasattr(signal, ...) asks the platform; hasattr(obj, "x") does not."""
+    result = _module_result(tmp_path, 'import os\n\n\ndef f(obj):\n    if hasattr(obj, "x"):\n        os.fork()\n')
+    assert result["passed"] is False
+
+
+def test_a_tmp_path_named_in_a_docstring_is_prose(tmp_path):
+    """A docstring that names /tmp writes nothing there."""
+    source = (
+        '"""Writes logs to /tmp/foo by default? No."""\n\n\ndef f():\n    """Never use /tmp/x here."""\n    return 1\n'
+    )
+    result = _module_result(tmp_path, source)
+    assert result["passed"] is True, result["checks"][0]["message"]

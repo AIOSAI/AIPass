@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
@@ -418,6 +418,23 @@ def test_an_extra_positional_is_refused_rather_than_ignored(monkeypatch):
     assert "'@prax'" in _refusal_text()
 
 
+def test_a_second_branch_without_a_pack_is_refused_rather_than_dropped(monkeypatch):
+    """`audit @flow @prax` read @flow as the branch and audited it alone, @prax silently gone."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+
+    refused = _refuse(["@flow", "@prax", "--no-artifact"])
+    assert (refused.code, refused.token) == (7, "@prax")
+    assert audit_mock.call_count == 0
+
+
+def test_show_bypasses_is_an_unknown_flag_not_a_stub(monkeypatch):
+    """The flag printed "not yet implemented" and exited 0; it is gone, so it refuses by name."""
+    _wire_branches(monkeypatch, "FLOW")
+
+    assert _refuse(["aipass", "--show-bypasses"]).code == 7
+    assert "--show-bypasses" in _refusal_text()
+
+
 def test_the_first_unrecognized_token_is_the_one_reported(monkeypatch):
     """Argv order, so the report names the mistake the caller made first."""
     _wire_branches(monkeypatch, "FLOW")
@@ -459,7 +476,7 @@ def test_every_valid_audit_invocation_still_runs(monkeypatch, argv):
     assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
 
 
-@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"], ["aipass", "--show-bypasses"], ["aipass", "-b"]])
+@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"]])
 def test_every_valid_non_auditing_invocation_still_answers(monkeypatch, argv):
     """The forms that print rather than audit: still no refusal."""
     _wire_branches(monkeypatch, "FLOW")
@@ -679,7 +696,7 @@ def test_the_lane_word_leaves_every_ordinary_pack_audit_alone(monkeypatch, argv)
     assert audit_mock.call_count == 1, f"{argv} must still audit the branch"
 
 
-@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"], ["aipass", "--show-bypasses"], ["aipass", "-b"]])
+@pytest.mark.parametrize("argv", [[], ["--help"], ["-h"], ["help"]])
 def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv):
     """The forms that print rather than audit: still no lane, still no refusal."""
     _wire_branches(monkeypatch, "FLOW")

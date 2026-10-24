@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: calendar_bound_check.py
 # Description: Calendar Bound Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Calendar Bound Standards Checker Handler.
@@ -107,8 +107,13 @@ _NOT_CLOCK_SEAMS = frozenset({"sleep", "monotonic", "perf_counter"})
 _CLOCK_KWARGS = frozenset(
     {"now", "clock", "today", "at", "when", "current_time", "now_fn", "time_fn", "utcnow", "timestamp", "ts", "moment"}
 )
-_CLOCK_WORD = re.compile(r"datetime|\bdate\b|\btime\b|now|today|clock|freeze|frozen", re.IGNORECASE)
-_CLOCK_FIXTURE = re.compile(r"clock|now|frozen|freeze|fixed_time|fake_time|today", re.IGNORECASE)
+# Whole name tokens (underscore separates): fixed_now is a clock, known_ids is not.
+_CLOCK_WORD = re.compile(
+    r"datetime|\bdate\b|\btime\b|(?<![a-z0-9])(?:now|today|clock|freeze|frozen)(?![a-z0-9])", re.IGNORECASE
+)
+_CLOCK_FIXTURE = re.compile(
+    r"(?<![a-z0-9])(?:clock|now|frozen|freeze|fixed_time|fake_time|today)(?![a-z0-9])", re.IGNORECASE
+)
 _FREEZE_DECORATOR = re.compile(r"freeze_time|time_machine|travel")
 
 
@@ -119,7 +124,7 @@ def _parse_uncached(path: Path) -> Optional[ast.Module]:
     """Parse one file, or None when it cannot be read or parsed."""
     try:
         return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+    except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
         logger.info("[calendar_bound] skipped %s: %s", path, exc)
         return None
 

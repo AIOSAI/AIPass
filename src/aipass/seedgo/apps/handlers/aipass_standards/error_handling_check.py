@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_handling_check.py
 # Description: Error Handling Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Error Handling Standards Checker Handler"""
@@ -92,7 +92,7 @@ def _silent_except_lines(content: str, module_path: str = "") -> Optional[List[i
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipping error-handling scan: SyntaxError during parse: %s", e)
         return None
 

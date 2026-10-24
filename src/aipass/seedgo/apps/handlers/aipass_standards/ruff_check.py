@@ -1,20 +1,21 @@
 # =================== AIPass ====================
 # Name: ruff_check.py
 # Description: Ruff Linter & Formatter Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
 Ruff Linter & Formatter Standards Checker Handler
 
-Reference: ruff_check.md
+Reference: ruff.md
 """
 
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -29,6 +30,21 @@ AUDIT_SCOPE = "branch_level"
 # ruff format --check marks each unformatted file with this prefix; every other
 # stdout line is summary prose.
 _FORMAT_PREFIX = "Would reformat: "
+
+
+def _ruff_binary() -> str | None:
+    """Locate ruff on PATH, else beside the interpreter: drone runs the venv python without activating it."""
+    return shutil.which("ruff") or shutil.which("ruff", path=str(Path(sys.executable).parent))
+
+
+def _fail(message: str) -> Dict:
+    """A failed RUFF_CHECK row: an unrun linter is not a clean file."""
+    return {
+        "passed": False,
+        "checks": [{"name": "Ruff check", "passed": False, "message": message}],
+        "score": 0,
+        "standard": "RUFF_CHECK",
+    }
 
 
 def _load_ruff_bypass(branch_path: Path) -> list:
@@ -114,39 +130,25 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "RUFF_CHECK",
         }
 
-    if shutil.which("ruff") is None:
-        return {
-            "passed": True,
-            "checks": [{"name": "Ruff check", "passed": True, "message": "ruff not installed — check skipped"}],
-            "score": 100,
-            "standard": "RUFF_CHECK",
-        }
+    ruff = _ruff_binary()
+    if ruff is None:
+        return _fail("ruff not found on PATH or beside the interpreter")
 
     ruff_bypass = _find_ruff_bypass_from_file(module_path)
 
     try:
         proc = subprocess.run(
-            ["ruff", "check", str(fp), "--output-format=json"],
+            [ruff, "check", str(fp), "--output-format=json"],
             capture_output=True,
             text=True,
             timeout=15,
         )
     except subprocess.TimeoutExpired:
         logger.warning("ruff check_module timed out on %s", module_path)
-        return {
-            "passed": True,
-            "checks": [{"name": "Ruff check", "passed": True, "message": "ruff check timed out — skipped"}],
-            "score": 100,
-            "standard": "RUFF_CHECK",
-        }
+        return _fail("ruff check timed out after 15s")
     except Exception as exc:
         logger.warning("ruff check_module failed on %s: %s", module_path, exc)
-        return {
-            "passed": True,
-            "checks": [{"name": "Ruff check", "passed": True, "message": f"ruff error — skipped: {exc}"}],
-            "score": 100,
-            "standard": "RUFF_CHECK",
-        }
+        return _fail(f"ruff failed to run: {exc}")
 
     violations: list = []
     if proc.stdout.strip():
@@ -156,7 +158,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                 violations = []
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("ruff JSON parse failed for %s: %s", module_path, exc)
-            violations = []
+            return _fail(f"ruff JSON parse failed: {proc.stderr[:300] if proc.stderr else exc}")
 
     active = [v for v in violations if not _is_ruff_bypassed(v, ruff_bypass)]
     count = len(active)
@@ -179,7 +181,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     needs_format = False
     try:
         fmt_proc = subprocess.run(
-            ["ruff", "format", "--check", str(fp)],
+            [ruff, "format", "--check", str(fp)],
             capture_output=True,
             text=True,
             timeout=15,
@@ -234,18 +236,13 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "RUFF_CHECK",
         }
 
-    if shutil.which("ruff") is None:
+    ruff = _ruff_binary()
+    if ruff is None:
         json_handler.log_operation(
             "check_completed",
-            {"branch": branch_path, "score": 100, "standard": "ruff_check", "status": "skipped"},
+            {"branch": branch_path, "score": 0, "standard": "ruff_check", "error": "not_found"},
         )
-        return {
-            "passed": True,
-            "checks": [{"name": "Ruff check", "passed": True, "message": "ruff not installed — check skipped"}],
-            "score": 100,
-            "status": "skipped",
-            "standard": "RUFF_CHECK",
-        }
+        return _fail("ruff not found on PATH or beside the interpreter")
 
     # apps/ AND tests/: CI's gate is `ruff check src/ tests/`, which reaches every branch's tests/.
     # The whole branch when neither exists, so an unusual layout is still covered.
@@ -255,7 +252,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         proc = subprocess.run(
-            ["ruff", "check", *(str(t) for t in scan_targets), "--output-format=json"],
+            [ruff, "check", *(str(t) for t in scan_targets), "--output-format=json"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -317,7 +314,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     fmt_files: list[str] = []
     try:
         fmt_proc = subprocess.run(
-            ["ruff", "format", "--check", *(str(t) for t in scan_targets)],
+            [ruff, "format", "--check", *(str(t) for t in scan_targets)],
             capture_output=True,
             text=True,
             timeout=60,

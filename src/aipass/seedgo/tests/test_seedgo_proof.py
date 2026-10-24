@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_seedgo_proof.py
 # Description: Unit tests for the seedgo_proof module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/seedgo_proof.py."""
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aipass.seedgo.apps.modules import seedgo_proof
+from aipass.seedgo.apps.modules import CommandRefused, seedgo_proof
 
 
 @pytest.fixture(autouse=True)
@@ -44,10 +44,21 @@ def _handlers(tmp_path, monkeypatch, target: bool = True):
 
 
 def _run_json(capsys, pack: str = "code") -> dict:
-    """`proof <pack> --json`, the command a user runs, parsed off stdout."""
+    """`proof <pack> --json`, the command a user runs, parsed off stdout; NOT CERTIFIED must exit 1."""
     capsys.readouterr()
-    assert seedgo_proof.handle_command("proof", [pack, "--json"]) is True
-    return json.loads(capsys.readouterr().out)
+    code = _exit_code(pack)
+    result = json.loads(capsys.readouterr().out)
+    assert code == (0 if result["certified"] else 1)
+    return result
+
+
+def _exit_code(pack: str) -> int:
+    """0 for a handled `proof <pack> --json`, the refusal's code for a refused one."""
+    try:
+        assert seedgo_proof.handle_command("proof", [pack, "--json"]) is True
+    except CommandRefused as refused:
+        return refused.code
+    return 0
 
 
 def test_handle_command_wrong_command_returns_false():
@@ -105,7 +116,10 @@ def test_handle_command_help_word():
 def test_handle_command_unknown_pack():
     """An unknown pack is named back with the available ones, and nothing runs."""
     with patch.object(seedgo_proof, "_run_proof_pack") as ran:
-        assert seedgo_proof.handle_command("proof", ["nonexistent_pack_xyz"]) is True
+        with pytest.raises(CommandRefused) as refused:
+            seedgo_proof.handle_command("proof", ["nonexistent_pack_xyz"])
+
+    assert refused.value.code == 7
 
     assert ran.call_args_list == []
     reported = seedgo_proof.error.call_args_list  # type: ignore[attr-defined]

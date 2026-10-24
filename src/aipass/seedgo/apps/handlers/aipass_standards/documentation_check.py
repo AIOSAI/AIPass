@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: documentation_check.py
 # Description: Documentation Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Documentation Standards Checker Handler
@@ -123,7 +123,7 @@ def check_module_docstring(lines: List[str]) -> Dict:
     r"""Check for module-level docstring, read as Python reads it."""
     try:
         tree = ast.parse("\n".join(lines))
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         # Logged rather than swallowed: silent_catch would accept a bare `return None` here
         # and flag a return that names its fallback.
         logger.info("Module docstring check fell back to a line scan: %s", exc)
@@ -143,7 +143,7 @@ def _public_functions_by_ast(content: str):
     """Public functions and whether each has a docstring, read as Python reads."""
     try:
         tree = ast.parse(content)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         return None
 
     found = []

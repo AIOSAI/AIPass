@@ -1,6 +1,0 @@
-{
-  "description": "Diagnostics runners enabled for aipass_standards pack",
-  "runners": {
-    "python": true
-  }
-}

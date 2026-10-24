@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_modules.py
 # Description: modules_check sub-functions and the door shape (split from test_checkers_batch7.py)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-08
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/modules_check.py."""
@@ -230,6 +230,24 @@ class TestCheckNoDirectFileOps:
         result = check_no_direct_file_ops(lines)
         assert result is not None
         assert result["passed"] is True
+
+
+class TestFileOpWordsInStringsAndComments:
+    """Only calls are file operations; their names inside a string or a comment are not."""
+
+    def test_names_inside_a_string_and_a_trailing_comment_pass(self):
+        content = 'def f():\n    return "never call .read_text( here"  # nor .mkdir( or json.load(\n'
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["passed"] is True
+
+    def test_a_real_mkdir_call_is_still_named_by_its_line(self):
+        content = "def f(p):\n    x = 1\n    p.mkdir(parents=True)\n"
+        result = check_no_direct_file_ops(_lines(content))
+        assert result is not None
+        assert result["message"] == (
+            "Module has direct file operations: line 3: p.mkdir(parents=True) (use handler for file operations)"
+        )
 
 
 class TestAOneLineDocstringHidesNothing:

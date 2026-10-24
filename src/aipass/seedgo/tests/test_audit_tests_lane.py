@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the audit-tests runner, its target resolution and the verb
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/audit_tests.py, apps/handlers/audit_tests/runner.py and the pytest pack it drives."""
@@ -19,6 +19,7 @@
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -76,9 +77,6 @@ class _SealedAdapter:
     def nominate(self, spec) -> dict:
         """The canned nominations."""
         return self.nominations
-
-    def teardown(self, spec) -> None:
-        """Nothing was built, so nothing is torn down."""
 
 
 def _measured(tmp_path, monkeypatch, run, *, options=None, nominations=None) -> dict:
@@ -332,6 +330,26 @@ class TestRefusalPath:
         _publish_refusal(tmp_path, monkeypatch, refusal.EXIT_UNPROVEN, "the gate was blind")
         assert list((tmp_path / "artifacts").glob("audit_tests_*.json"))
 
+    def test_a_cleanup_failure_after_publish_keeps_the_published_artifact(self, tmp_path, monkeypatch):
+        scratch = tmp_path / "scratch"
+        scratch.mkdir()
+
+        class _CleanupFails:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            def __enter__(self) -> str:
+                return str(scratch)
+
+            def __exit__(self, *exc) -> None:
+                raise OSError("a grandchild still holds the scratch tree")
+
+        monkeypatch.setattr(tempfile, "TemporaryDirectory", _CleanupFails)
+        document = _measured(tmp_path, monkeypatch, _proven_run())
+
+        assert document["status"] != "refused"
+        assert document["groups"]["hygiene"]["score"] == 100
+
     def test_the_cache_block_states_that_no_cache_lane_exists(self, tmp_path, monkeypatch):
         written = _publish_refusal(tmp_path, monkeypatch, refusal.EXIT_UNPROVEN, "the gate was blind")
         assert written["cache"]["not_fingerprinted"]
@@ -493,10 +511,15 @@ class TestVerbParsing:
     def test_the_budget_is_read_as_an_integer(self, monkeypatch):
         assert _parsed(monkeypatch, ["@backup", "--budget", "300"])[1]["budget_seconds"] == 300
 
-    def test_a_non_numeric_budget_falls_back_to_the_default(self, monkeypatch):
-        # A target beside it: with none, the verb refuses before any option is used.
-        options = _parsed(monkeypatch, ["@backup", "--budget", "soon"])[1]
-        assert options["budget_seconds"] == runner.DEFAULT_BUDGET_SECONDS
+    @pytest.mark.parametrize(
+        "argv",
+        [["@backup", "--budget", "soon"], ["--budget", "@backup"], ["@backup", "--budget", "--pseudo-tested"]],
+    )
+    def test_a_budget_without_a_number_is_refused_by_name(self, monkeypatch, argv):
+        """Swallowing the next token would silently drop the target or a campaign."""
+        with pytest.raises(CommandRefused) as refused:
+            verb.handle_command("audit-tests", argv)
+        assert (refused.value.code, refused.value.token) == (refusal.EXIT_UNKNOWN_ARGUMENT, "--budget")
 
     def test_prove_refusal_is_recognised(self, monkeypatch):
         assert _parsed(monkeypatch, ["@backup", "--prove-refusal"])[1]["prove_refusal"] is True
@@ -684,12 +707,9 @@ class TestLaneParsingRefusesTheUnrecognized:
         assert refused == "", f"{argv} is documented usage and must not be refused"
         assert target, f"{argv} names a target"
 
-    def test_a_budget_with_no_value_keeps_the_default_rather_than_being_refused(self, monkeypatch):
-        """The flag IS known; only its value is missing. Refusing it would lie."""
-        target, options, refused = _parsed(monkeypatch, ["@backup", "--budget"])
-
-        assert refused == ""
-        assert options["budget_seconds"] == runner.DEFAULT_BUDGET_SECONDS
+    def test_a_budget_with_no_value_is_refused_by_name(self, monkeypatch):
+        """The help documents `--budget <seconds>`; a bare flag has no default to fall back on."""
+        assert _parsed(monkeypatch, ["@backup", "--budget"])[2] == "--budget"
 
 
 class TestLaneVerbRefusesTheUnrecognized:

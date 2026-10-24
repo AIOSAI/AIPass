@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo_proof.py
 # Description: Self-proof orchestrator — discovers and runs proof packs
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Seedgo Proof — Self-check orchestrator for standards pack integrity.
@@ -24,6 +24,8 @@ from aipass.cli import console, header
 from aipass.cli.apps.modules import error, warning
 
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
@@ -338,7 +340,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     pack_name, pack_dir, json_output = _validate_pack(args)
     if pack_name is None:
-        return True
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, str(pack_name))
 
     json_handler.log_operation("proof_started", {"pack": pack_name})
 
@@ -360,4 +362,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         },
     )
 
+    if not results["certified"]:
+        raise CommandRefused(refusal.EXIT_SCORED_FAILED, pack_name)
     return True

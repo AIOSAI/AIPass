@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch6.py
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""
@@ -157,6 +157,16 @@ class TestArchCheckFileSize:
         assert result["passed"] is False
         assert "must split" in result["message"]
 
+    def test_a_must_split_handler_fails_the_file(self, tmp_path):
+        """The size row alone failing keeps the other three rows from averaging it to a pass."""
+        handler = tmp_path / "branch" / "apps" / "handlers" / "json" / "big.py"
+        handler.parent.mkdir(parents=True)
+        handler.write_text("x = 1\n" * 1600, encoding="utf-8")
+        result = architecture_check.check_module(str(handler))
+        assert [c["name"] for c in result["checks"] if not c["passed"]] == ["File size"]
+        assert result["passed"] is False
+        assert result["score"] < 75
+
 
 # -- check_handler_independence (architecture) --------------------------------
 
@@ -193,6 +203,15 @@ class TestArchHandlerIndependence:
         assert result is not None
         assert result["passed"] is False
         assert "parent module" in result["message"]
+
+    def test_the_branch_is_read_before_the_last_apps(self, tmp_path):
+        """A checkout under some other apps/ directory still names its own branch."""
+        lines: list[str] = ["from seedgo.apps.modules.audit import run_audit"]
+        result = architecture_check.check_handler_independence(
+            lines, str(tmp_path / "apps" / "seedgo" / "apps" / "handlers" / "json" / "j.py")
+        )
+        assert result is not None
+        assert result["passed"] is False
 
     def test_allowed_service_imports_pass(self, tmp_path):
         """Prax and CLI service imports are allowed in handlers."""
@@ -250,6 +269,14 @@ class TestCheckDomainOrganization:
         """Handler in a helpers/ folder fails."""
         result = architecture_check.check_domain_organization(
             str(tmp_path / "branch" / "apps" / "handlers" / "helpers" / "tool.py")
+        )
+        assert result is not None
+        assert result["passed"] is False
+
+    def test_a_flat_technical_handler_file_fails(self, tmp_path):
+        """apps/handlers/utils.py is the utils domain, not a domain named utils.py."""
+        result = architecture_check.check_domain_organization(
+            str(tmp_path / "branch" / "apps" / "handlers" / "utils.py")
         )
         assert result is not None
         assert result["passed"] is False

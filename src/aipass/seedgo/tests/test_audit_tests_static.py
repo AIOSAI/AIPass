@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_static.py
 # Description: tests for the static nominator tier, harness selfcheck and cache stamp
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-29
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/ nominators and apps/handlers/audit_tests/selfcheck.py, cache, render."""
@@ -299,6 +299,38 @@ class TestMockDrift:
                     assert True
         """
         assert mock_drift_check.nominate(self._tree(tmp_path, source)) == []
+
+    def test_an_imported_object_sharing_a_module_files_stem_is_not_nominated(self, tmp_path):
+        """`from aipass.prax import logger` in a target that has its own logger.py binds an object, not that file."""
+        (tmp_path / "pkg").mkdir()
+        (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "pkg" / "logger.py").write_text("", encoding="utf-8")
+        (tmp_path / "pkg" / "service.py").write_text("from aipass.prax import logger\n", encoding="utf-8")
+        source = """
+            from unittest.mock import patch
+
+            @patch("pkg.service.logger")
+            def test_run(_logger):
+                assert True
+        """
+        assert mock_drift_check.nominate(_corpus(tmp_path, source)) == []
+
+    def test_a_module_imported_by_its_full_package_name_is_still_nominated(self, tmp_path):
+        """A branch imports itself as `aipass.<branch>...`; the `__init__.py` chain above the root supplies that prefix."""
+        branch = tmp_path / "aipass" / "fakebr"
+        (branch / "apps").mkdir(parents=True)
+        for package in (tmp_path / "aipass", branch, branch / "apps"):
+            (package / "__init__.py").write_text("", encoding="utf-8")
+        (branch / "apps" / "helper.py").write_text("def work():\n    return 1\n", encoding="utf-8")
+        (branch / "apps" / "service.py").write_text("from aipass.fakebr.apps import helper\n", encoding="utf-8")
+        source = """
+            from unittest.mock import patch
+
+            @patch("aipass.fakebr.apps.service.helper")
+            def test_run(_helper):
+                assert True
+        """
+        assert _species(mock_drift_check.nominate(_corpus(branch, source))) == {"MOCK-DRIFT"}
 
 
 class TestAssertionShape:

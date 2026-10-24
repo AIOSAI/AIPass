@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rendered_path_oracle_check.py
 # Description: Rendered Path Oracle Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,13 +12,14 @@ Rendered Path Oracle Standards Checker Handler
 Reference: rendered_path_oracle.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple, Union
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -257,17 +258,7 @@ def _tests(tree: ast.Module) -> Iterator[FUNCTION_NODE]:
             yield node
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[rendered_path_oracle] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="rendered_path_oracle")
 
 
 def scan(source: str) -> List[Tuple[int, str, str, str]]:
@@ -292,18 +283,8 @@ def scan(source: str) -> List[Tuple[int, str, str, str]]:
     return sorted(found)
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[rendered_path_oracle] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="rendered_path_oracle", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Branch Discovery Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -11,7 +11,7 @@ Branch Discovery Handler
 """
 
 from pathlib import Path
-from typing import List, Dict
+from typing import Any, List, Dict
 
 import importlib.util
 import json
@@ -19,6 +19,7 @@ import json
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers import registry_scan
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
 
 
 def _is_branch_private(branch_name: str) -> bool:
@@ -30,7 +31,7 @@ def _is_branch_private(branch_name: str) -> bool:
     try:
         with open(priv_path, "r", encoding="utf-8") as f:
             registry = json.load(f)
-        for branch in registry.get("branches", []):
+        for branch in registry_branches(registry):
             if branch.get("name", "").upper() == branch_name.upper():
                 return True
     except (json.JSONDecodeError, IOError):
@@ -50,6 +51,14 @@ def _find_caller_registries() -> List[Path]:
     return registry_scan.caller_registries()
 
 
+def registry_branches(registry_data: Any) -> List[Dict[str, Any]]:
+    """The branch entries of a loaded registry, whether "branches" is a list or a name-keyed dict."""
+    raw_branches = registry_data.get("branches", []) if isinstance(registry_data, dict) else []
+    if isinstance(raw_branches, dict):
+        raw_branches = list(raw_branches.values())
+    return [branch for branch in raw_branches if isinstance(branch, dict)]
+
+
 def _branches_from_registry(registry_path: Path) -> List[Dict[str, str]]:
     """Extract branch dicts from a single registry file."""
     branches = []
@@ -59,10 +68,7 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, str]]:
         with open(registry_path, "r", encoding="utf-8") as f:
             registry_data = json.load(f)
         registry_dir = registry_path.parent
-        raw_branches = registry_data.get("branches", [])
-        if isinstance(raw_branches, dict):
-            raw_branches = list(raw_branches.values())
-        for branch in raw_branches:
+        for branch in registry_branches(registry_data):
             branch_name = branch.get("name", "")
             raw_path = branch.get("path", "")
             branch_path = Path(raw_path)
@@ -70,13 +76,8 @@ def _branches_from_registry(registry_path: Path) -> List[Dict[str, str]]:
                 branch_path = (registry_dir / branch_path).resolve()
             if not branch_path.exists():
                 continue
-            entry_file = None
-            standard_entry = branch_path / "apps" / f"{branch_name.lower()}.py"
-            branch_entry = branch_path / "apps" / "branch.py"
-            if standard_entry.exists():
-                entry_file = standard_entry
-            elif branch_entry.exists():
-                entry_file = branch_entry
+            candidates = (branch_path / "apps" / name for name in applicability.entry_file_names(branch_name))
+            entry_file = next((path for path in candidates if path.exists()), None)
             if entry_file:
                 branches.append({"name": branch_name, "path": str(branch_path), "entry_file": str(entry_file)})
     except (json.JSONDecodeError, IOError):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unconsumed_side_effect_check.py
 # Description: Unconsumed Side Effect Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-23
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,13 +12,14 @@ Unconsumed Side Effect Standards Checker Handler
 Reference: unconsumed_side_effect.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -53,17 +54,7 @@ CONSUMERS: frozenset[str] = frozenset(
 CURE = "assert mock.call_count, or assert_has_calls when the arguments matter"
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[unconsumed_side_effect] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="unconsumed_side_effect")
 
 
 def _dotted(node: ast.AST) -> str:
@@ -145,18 +136,8 @@ def scan(source: str) -> Tuple[List[Tuple[int, str, int]], int]:
     return sorted(scored), reported
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[unconsumed_side_effect] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="unconsumed_side_effect", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

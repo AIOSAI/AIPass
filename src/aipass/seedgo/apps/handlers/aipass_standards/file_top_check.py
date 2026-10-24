@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_check.py
 # Description: Test File Top Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Test File Top Standards Checker Handler
@@ -11,6 +11,7 @@
 Reference: file_top.md
 """
 
+from functools import partial
 import ast
 import re
 from pathlib import Path
@@ -20,6 +21,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.meta_check import META_HEADER, META_HEADER_LEGACY
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import read_text, result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -185,7 +187,7 @@ def scan(source: str, conftest: bool = False, excuse_plugin: bool = False) -> Li
     """Every finding for one test file's top, in template order."""
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[file_top] Unparseable, nothing scanned: %s", exc)
         return []
 
@@ -204,18 +206,8 @@ def scan(source: str, conftest: bool = False, excuse_plugin: bool = False) -> Li
     return findings
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[file_top] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="file_top", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

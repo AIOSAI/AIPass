@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-07-31
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py's audit_branch_incremental and incremental_cache.py beside it."""
@@ -33,7 +33,6 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setattr(branch_audit, "dead_rules", MagicMock())
     monkeypatch.setattr(branch_audit, "inert", MagicMock())
     monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
-    monkeypatch.setattr(ignore_handler, "get_audit_ignore_patterns", MagicMock(return_value=[]))
     monkeypatch.setattr(ignore_handler, "audit_ignore_match", MagicMock(return_value=None))
     monkeypatch.setattr(ignore_handler, "ignored_tracked_source", MagicMock(return_value=[]))
 
@@ -129,7 +128,6 @@ def _write_entry_point_checker(pack_dir: Path, call_log: Path) -> None:
 
 _FILTER_CHECKER_TEMPLATE = """
 CALL_LOG = "__CALL_LOG__"
-FILE_FILTER = "special"
 AUDIT_SCOPE = "all_files"
 
 
@@ -148,7 +146,7 @@ def check_module(path, bypass_rules=None):
 
 
 def _write_filter_checker(pack_dir: Path, call_log: Path) -> None:
-    """Write an all_files checker with a FILE_FILTER and a 'skipped' result path."""
+    """Write an all_files checker with a 'skipped' result path."""
     pack_dir.mkdir(parents=True, exist_ok=True)
     escaped = str(call_log).replace("\\", "\\\\")
     (pack_dir / "filterthing_check.py").write_text(
@@ -523,8 +521,8 @@ class TestEquivalence:
         assert result["_cache_hit"] is False
         assert touched == {"good.py", "main.py"}
 
-    def test_file_filter_skipped_denominator_matches_full_audit(self, tmp_path, monkeypatch):
-        """A FILE_FILTER checker's skipped checks average the same whether files are cache-reused or fresh."""
+    def test_skipped_denominator_matches_full_audit(self, tmp_path, monkeypatch):
+        """An all_files checker's skipped checks average the same whether files are cache-reused or fresh."""
         branch_audit, _cache, branch, branch_path, pack_dir, call_log = _prepare(
             tmp_path, monkeypatch, {"special_ok.py": "print('GOOD')\n", "special_skip.py": "SKIP_ME\n"}
         )
@@ -883,6 +881,99 @@ class TestThePerCheckerStampScopesAReRun:
         assert first == {"good.py"}
         assert second == {"good.py"}
         assert branch_level == ["branchlevel:C:/runner/work"]
+
+
+_READER_CHECKER_TEMPLATE = """
+CALL_LOG = "__CALL_LOG__"
+AUDIT_SCOPE = "all_files"
+READS_BRANCH = True
+
+
+def check_module(path, bypass_rules=None):
+    with open(CALL_LOG, "a", encoding="utf-8") as f:
+        f.write("reader:" + path + "\\n")
+    return {"passed": True, "score": 100, "checks": []}
+"""
+
+
+_FLAKY_BRANCH_CHECKER_TEMPLATE = """
+from pathlib import Path
+
+RAN = Path("__RAN__")
+AUDIT_SCOPE = "branch_level"
+
+
+def check_branch(branch_path, bypass_rules=None):
+    first = not RAN.exists()
+    RAN.write_text("ran", encoding="utf-8")
+    if first:
+        raise TimeoutError("pyright timed out")
+    return {"passed": True, "score": 100, "checks": []}
+"""
+
+
+class TestTheCacheNeverServesWhatItCannotStandBehind:
+    def test_a_reads_branch_checker_re_runs_every_file_when_any_file_moves(self, tmp_path, monkeypatch):
+        """Its verdict on main.py reads good.py too: reusing main.py's cached row would serve a stale verdict."""
+        branch_audit, _cache, branch, branch_path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n", "other.py": "print('GOOD')\n"}
+        )
+        escaped = str(call_log).replace("\\", "\\\\")
+        (pack_dir / "reader_check.py").write_text(
+            _READER_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
+        )
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        (branch_path / "apps" / "good.py").write_text("print('BAD')\n", encoding="utf-8")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        calls = _read_calls(call_log)
+        reader = {Path(c.removeprefix("reader:")).name for c in calls if c.startswith("reader:")}
+        naming = {Path(c).name for c in calls if not c.startswith("reader:")}
+        assert reader == {"main.py", "good.py", "other.py"}
+        assert naming == {"good.py"}
+
+    def test_a_crashed_branch_level_result_is_re_run_not_served(self, tmp_path, monkeypatch):
+        """A pyright timeout cached as score 0 was served as the branch's score on every later clean run."""
+        branch_audit, _cache, branch, _path, pack_dir, _call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        ran = str(tmp_path / "flaky_ran").replace("\\", "\\\\")
+        (pack_dir / "flaky_check.py").write_text(
+            _FLAKY_BRANCH_CHECKER_TEMPLATE.replace("__RAN__", ran), encoding="utf-8"
+        )
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert "error" in first["results"]["flaky"]
+
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert second["_cache_hit"] is False
+        assert "error" not in second["results"]["flaky"]
+        assert second["scores"]["flaky"] == 100
+
+    def test_an_unwritable_cache_costs_time_never_the_result(self, tmp_path, monkeypatch):
+        """The audit already holds its answer when the save fails; a raise there threw the answer away."""
+        branch_audit, cache, branch, _path, pack_dir, _call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+
+        def _full_disk(*_args):
+            raise OSError("No space left on device")
+
+        monkeypatch.setattr(cache, "save_branch_entry", _full_disk)
+        result = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        assert result["_cache_hit"] is False
+        assert result["scores"]["naming"] == 100
+
+    def test_a_cold_run_judges_the_entry_file_once_per_checker(self, tmp_path, monkeypatch):
+        """The entry pass and the all_files pass both ran main.py; the second result overwrote the first."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        names = [Path(c).name for c in _read_calls(call_log)]
+        assert sorted(names) == ["good.py", "main.py"]
 
 
 class TestFingerprintFile:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: collection.py
 # Description: the corpus definition - which test functions the inventory counts
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -18,6 +18,7 @@ the defaults are used and recorded."""
 
 import ast
 import fnmatch
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -118,27 +119,31 @@ def read_rules(root: Path) -> CorpusRules:
     table, source, note = _load_pytest_table(config)
 
     return CorpusRules(
-        testpaths=tuple(table.get("testpaths", DEFAULT_TESTPATHS)),
-        norecursedirs=tuple(table.get("norecursedirs", DEFAULT_NORECURSEDIRS)),
-        python_files=tuple(table.get("python_files", DEFAULT_PYTHON_FILES)),
-        python_classes=tuple(table.get("python_classes", DEFAULT_PYTHON_CLASSES)),
-        python_functions=tuple(table.get("python_functions", DEFAULT_PYTHON_FUNCTIONS)),
+        testpaths=_ini_list(table.get("testpaths", DEFAULT_TESTPATHS)),
+        norecursedirs=_ini_list(table.get("norecursedirs", DEFAULT_NORECURSEDIRS)),
+        python_files=_ini_list(table.get("python_files", DEFAULT_PYTHON_FILES)),
+        python_classes=_ini_list(table.get("python_classes", DEFAULT_PYTHON_CLASSES)),
+        python_functions=_ini_list(table.get("python_functions", DEFAULT_PYTHON_FUNCTIONS)),
         config_source=source,
         config_note=note,
     )
 
 
+def _ini_list(value) -> Tuple[str, ...]:
+    """A pytest list setting; a plain string is whitespace-separated, as pytest's ini `args` type reads it."""
+    return tuple(value.split()) if isinstance(value, str) else tuple(value)
+
+
 def _load_pytest_table(config: Path) -> Tuple[dict, str, str]:
     """The `[tool.pytest.ini_options]` table, its source, and any caveat."""
-    try:
-        import tomllib
-    except ImportError:
+    if sys.version_info < (3, 11):
         note = (
             f"tomllib is unavailable on this interpreter, so {config.name} was NOT read "
             f"and pytest's own defaults are in force; the corpus may differ from what CI collects"
         )
         logger.warning(f"[INVENTORY] {note}")
         return {}, "pytest defaults", note
+    import tomllib
 
     if not config.is_file():
         return {}, "pytest defaults", f"{config} does not exist, so pytest's own defaults are in force"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Stdlib Patch Standards Checker Handler
 Reference: stdlib_patch.md
 """
 
+from functools import partial
 import ast
 import sys
 from functools import lru_cache
@@ -22,6 +23,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards import module_constants
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -46,15 +48,6 @@ _EDGE_ATTRIBUTES: frozenset[str] = frozenset(
 )
 
 CURE = "give the product a seam and patch that, or assert the effect on disk"
-
-
-def _tail_name(node: ast.AST) -> str:
-    """The last name in a call target: ``a.b.c`` -> ``c``, ``f`` -> ``f``."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
 
 
 def _dotted(node: ast.AST) -> str:
@@ -108,7 +101,7 @@ def bound_to(dotted: str, name: str) -> str | None:
         return ""
     try:
         tree = ast.parse(source.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, OSError) as exc:
+    except (SyntaxError, OSError, ValueError) as exc:
         logger.info("[stdlib_patch] Cannot read %s: %s", source, exc)
         return None
     return _imports(tree).get(name, "")
@@ -190,7 +183,7 @@ def _target(node: ast.Call, imports: Dict[str, str], constants: Dict[str, str], 
     chain = _resolve(first, imports, constants)
     second = node.args[1] if len(node.args) > 1 else None
     attribute = second.value if isinstance(second, ast.Constant) and isinstance(second.value, str) else ""
-    if attribute and _tail_name(node.func) in ("object", "setattr") and not isinstance(first, ast.Constant):
+    if attribute and tail_name(node.func) in ("object", "setattr") and not isinstance(first, ast.Constant):
         if chain and chain.split(".")[0] != PRODUCT:
             return written, f"{chain}.{attribute}"
     return written, chain
@@ -209,16 +202,7 @@ def _module_of(chain: str) -> str | None:
     return segments[0] if segments[0] in sys.stdlib_module_names else ""
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ruff already convicts a syntax error; a verdict invented for an unparseable file misleads.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[stdlib_patch] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="stdlib_patch")
 
 
 def scan(source: str, path: Path | None = None) -> Tuple[List[Tuple[int, str, str]], int]:
@@ -235,7 +219,7 @@ def scan(source: str, path: Path | None = None) -> Tuple[List[Tuple[int, str, st
     scored: List[Tuple[int, str, str]] = []
     unresolved = 0
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or _tail_name(node.func) not in _PATCH_VERBS or not node.args:
+        if not isinstance(node, ast.Call) or tail_name(node.func) not in _PATCH_VERBS or not node.args:
             continue
         written, chain = _target(node, imports, constants, source)
         if not chain:
@@ -251,18 +235,8 @@ def scan(source: str, path: Path | None = None) -> Tuple[List[Tuple[int, str, st
     return sorted(scored), unresolved
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[stdlib_patch] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="stdlib_patch", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: render.py
 # Description: renders an audit-tests artifact to the terminal
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -17,6 +17,7 @@ from typing import Dict, List
 
 from aipass.cli import console
 from aipass.cli.apps.modules import error, success, warning
+from aipass.seedgo.apps.handlers.audit_tests import artifact
 
 #: Terminal preview only; the artifact is always untruncated.
 NOMINATION_PREVIEW = 5
@@ -58,7 +59,10 @@ def _render_scored(document: dict) -> None:
     score = hygiene.get("score")
     count = hygiene.get("violation_count", 0)
 
-    if score == 100:
+    unproven = artifact.unproven_reasons(document)
+    if unproven:
+        error(f"UNPROVEN: {'; '.join(unproven)} - hygiene {score} is not a verdict")
+    elif score == 100:
         success(f"hygiene {score} - no write violation SEEN by this gate ({count} violation(s))")
     else:
         warning(f"hygiene {score} - the suite wrote outside its sandbox ({count} violation(s))")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: uncalled_public_function_check.py
 # Description: Uncalled Public Function Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Uncalled Public Function Standards Checker Handler
 Reference: uncalled_public_function.md
 """
 
+from functools import partial
 import ast
 import re
 from pathlib import Path
@@ -21,6 +22,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "branch_level"
@@ -105,20 +107,11 @@ PLUGIN_MARKERS: frozenset[str] = frozenset({"pytest_configure", "pytest_sessions
 CURE = "call it in a test, or retire it"
 
 
-def _tail_name(node: ast.AST) -> str:
-    """The last name in a call target: ``a.b.c`` -> ``c``, ``f`` -> ``f``."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
 def _parse(path: Path) -> ast.Module | None:
     """A file's tree, or None when Python cannot read it (ruff already convicts a syntax error)."""
     try:
         return ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
-    except (SyntaxError, OSError) as exc:
+    except (SyntaxError, OSError, ValueError) as exc:
         logger.info("[uncalled_public_function] Unparseable, nothing scanned: %s", exc)
         return None
 
@@ -137,7 +130,7 @@ def _named_target(node: ast.AST) -> str:
     """The name a patch argument points at, string target or object attribute."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value.rsplit(".", 1)[-1]
-    return _tail_name(node)
+    return tail_name(node)
 
 
 def _live_test_files(tests_dir: Path) -> List[Path]:
@@ -169,7 +162,7 @@ def _tally(tree: ast.Module, skip: Set[int], called: Set[str], elsewhere: Set[st
         if id(node) in skip:
             continue
         if isinstance(node, ast.Call):
-            called.add(_tail_name(node.func))
+            called.add(tail_name(node.func))
         elif isinstance(node, ast.Name):
             elsewhere.add(node.id)
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -184,7 +177,7 @@ def _patch_targets(tree: ast.AST, replaced: Set[str]) -> Set[int]:
     """
     skip: Set[int] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or _tail_name(node.func) not in _PATCH_VERBS:
+        if not isinstance(node, ast.Call) or tail_name(node.func) not in _PATCH_VERBS:
             continue
         for argument in node.args[:2]:
             replaced.add(_named_target(argument))
@@ -205,7 +198,7 @@ def _aliases(tree: ast.AST) -> Dict[str, str]:
 
 def _calls(function: ast.AST, aliases: Dict[str, str]) -> Set[str]:
     """The names a function calls, an imported alias also read as the name it imports."""
-    edges = {_tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
+    edges = {tail_name(n.func) for n in ast.walk(function) if isinstance(n, ast.Call)}
     return edges | {aliases[e] for e in edges if e in aliases}
 
 
@@ -364,9 +357,7 @@ def scan(branch_root: Path) -> Tuple[List[Tuple[Path, int, str, str]], Dict[str,
     return sorted(findings), acquitted
 
 
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

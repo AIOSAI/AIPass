@@ -1,16 +1,12 @@
 # =================== AIPass ====================
 # Name: json_handler_check.py
 # Description: JSON Handler Integrity Standards Checker
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
-"""
-JSON Handler Integrity Standards Checker
-
-Reference: json_handler.md
-"""
+"""JSON Handler Integrity Standards Checker. Reference: json_handler.md"""
 
 import hashlib
 import re
@@ -49,7 +45,7 @@ def _read_handler(branch_path: Path) -> str | None:
         return None
     try:
         return handler.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("json_handler_check: cannot read handler: %s", exc)
         return None
 
@@ -98,7 +94,7 @@ def _check_template_handler(branch_path: Path, bypass_rules: list | None = None)
 
     try:
         content = template.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("json_handler_check: cannot read citizen template: %s", exc)
         return {
             "name": "Template handler capability",
@@ -117,12 +113,7 @@ def _check_template_handler(branch_path: Path, bypass_rules: list | None = None)
 
 
 def _collect_triplet_members(json_dir: Path) -> dict[str, set[str]]:
-    """Map each module stem to the triplet members present on disk.
-
-    Any {stem}_config.json / {stem}_data.json / {stem}_log.json counts as
-    evidence the module exists, so a config with no log sibling is just as
-    visible as a log with no config.
-    """
+    """Map each module stem to the triplet members on disk; any one member is evidence the module exists."""
     members: dict[str, set[str]] = {}
     for path in sorted(json_dir.glob("*.json")):
         match = _TRIPLET_RE.match(path.name)

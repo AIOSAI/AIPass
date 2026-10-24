@@ -1,7 +1,7 @@
 # Triplet Proof — Standard File Completeness
-**Version:** 1.0.0
+**Version:** 1.0.1
 **Created:** 2026-03-22
-**Modified:** 2026-03-22
+**Modified:** 2026-10-24
 **Status:** Placeholder
 
 ---
@@ -28,7 +28,9 @@ Every standard `{name}` in a pack must have:
 
 1. **Glob all `*_check.py` files** in the pack directory to establish the standard names
 2. **For each standard name**, verify that `{name}_content.py` and `{name}.md` also exist
-3. **Detect orphans** — content or md files that exist without a matching checker
+3. **Detect orphans** — content or md files that exist without a matching checker, and any other
+   `.py` file. A `.py` that a sibling file imports (`check_support.py`, `prose_lines.py`) is a shared
+   helper, not an orphan
 4. **Report completeness** — count of complete triplets vs incomplete standards
 
 ---

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: platform_oracle_check.py
 # Description: v5 - is this test's verdict a fact about the code or about the host
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Is this test's pass or fail a fact about the code, or a fact about the host?
@@ -274,7 +274,7 @@ def _is_patching_call(dotted: str) -> bool:
     tail = _tail(dotted)
     if tail in {"setattr", "delattr"}:
         return dotted.startswith("monkeypatch.")
-    return tail in {"patch", "object", "dict"} or tail.endswith("_patch")
+    return tail == "patch" or tail.endswith("_patch") or dotted.endswith(("patch.object", "patch.dict"))
 
 
 def module_level_strings(tree: ast.Module) -> Dict[str, str]:
@@ -502,10 +502,11 @@ def _readonly_mode(node: ast.expr) -> str:
 def _chmod_injector(node: ast.Call) -> str:
     """How a chmod call makes a path unwritable, or "".
 
-    The mode is the LAST positional argument in both `os.chmod(p, m)` and `p.chmod(m)`."""
-    if _tail(corpus.dotted_name(node.func)) != "chmod" or not node.args:
+    The mode is `mode=` or the LAST positional argument in both `os.chmod(p, m)` and `p.chmod(m)`."""
+    if _tail(corpus.dotted_name(node.func)) != "chmod":
         return ""
-    mode = _readonly_mode(node.args[-1])
+    given = next((kw.value for kw in node.keywords if kw.arg == "mode"), node.args[-1] if node.args else None)
+    mode = _readonly_mode(given) if given is not None else ""
     return f"chmod to {mode}" if mode else ""
 
 
@@ -882,7 +883,7 @@ def _cwd_seam_sealed(unit_node: ast.AST, sandbox: Set[str], module_strings: Dict
         for argument in node.args:
             texts |= _argument_text(argument)
         texts |= {module_strings[t] for t in texts if t in module_strings}
-        if not any(needle in text for text in texts for needle in CWD_SEAM_NEEDLES):
+        if not any(f".{needle}." in f".{text}." for text in texts for needle in CWD_SEAM_NEEDLES):
             continue
         if any(_is_sandbox_path(kw.value, sandbox) for kw in node.keywords) or _names_under(node) & sandbox:
             return sorted(texts)[0] if texts else "Path.cwd"

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: accepted_and_never_used_parameter_check.py
 # Description: Accepted And Never Used Parameter Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-23
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Accepted And Never Used Parameter Standards Checker Handler
@@ -11,6 +11,7 @@
 Reference: accepted_and_never_used_parameter.md
 """
 
+from functools import partial
 import ast
 import io
 import re
@@ -22,9 +23,11 @@ from typing import Dict, FrozenSet, List, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result
 
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
+READS_BRANCH = True
 
 STANDARD = "ACCEPTED_AND_NEVER_USED_PARAMETER"
 STANDARD_KEY = "accepted_and_never_used_parameter"
@@ -53,16 +56,7 @@ CURE = "read the parameter, forward it, or drop it from the signature"
 FUNCTION = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[accepted_and_never_used_parameter] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="accepted_and_never_used_parameter")
 
 
 def _branch_root(path: Path) -> Path | None:
@@ -245,18 +239,8 @@ def scan(source: str, facts: Tuple[FrozenSet[str], FrozenSet[str], FrozenSet[str
     return sorted(scored), acquitted
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[accepted_and_never_used_parameter] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="accepted_and_never_used_parameter", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

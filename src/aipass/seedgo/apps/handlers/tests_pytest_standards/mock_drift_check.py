@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_drift_check.py
 # Description: nominator - patch-target resolution (MOCK-DRIFT)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """TAXONOMY rule 4 — a patch whose target is a MODULE answers anything.
@@ -56,11 +56,8 @@ SPECIFICATION = {
 }
 
 
-def _module_paths(root: Path) -> Set[str]:
-    """Every dotted module path that exists as a FILE under the target.
-
-    Every suffix is recorded: a test patches `aipass.daemon.apps.x`, not a branch-relative path.
-    """
+def _root_relative_modules(root: Path) -> Set[str]:
+    """Every module FILE under the target, as its dotted path from the target root."""
     found: Set[str] = set()
 
     for path in sorted(root.rglob("*.py")):
@@ -71,12 +68,38 @@ def _module_paths(root: Path) -> Set[str]:
         parts[-1] = relative.stem
         if parts[-1] == "__init__":
             parts = parts[:-1]
-        if not parts:
-            continue
-        for start in range(len(parts)):
-            found.add(".".join(parts[start:]))
+        if parts:
+            found.add(".".join(parts))
 
     return found
+
+
+def _module_paths(root: Path) -> Set[str]:
+    """Every dotted module path that exists as a FILE under the target.
+
+    Every suffix is recorded: a test patches `aipass.daemon.apps.x`, not a branch-relative path.
+    """
+    found: Set[str] = set()
+    for name in _root_relative_modules(root):
+        parts = name.split(".")
+        found.update(".".join(parts[start:]) for start in range(len(parts)))
+    return found
+
+
+def _qualified_modules(root: Path) -> Set[str]:
+    """Every module file under the target by its full import name, and by its root-relative name.
+
+    The package prefix is read from the `__init__.py` chain above the root, so `aipass.prax.logger`
+    is never mistaken for the target's own `logger.py`.
+    """
+    prefix: List[str] = []
+    directory = root
+    while (directory / "__init__.py").is_file():
+        prefix.insert(0, directory.name)
+        directory = directory.parent
+
+    relative = _root_relative_modules(root)
+    return relative | {".".join([*prefix, name]) for name in relative}
 
 
 def _module_constants(parsed: corpus.TestFile) -> Dict[str, str]:
@@ -146,26 +169,35 @@ def _patch_calls(unit: corpus.TestUnit) -> List[ast.Call]:
     return calls
 
 
-def _imported_module_names(tree: ast.Module, modules: Set[str]) -> Set[str]:
-    """The local names ONE module binds to another module by import."""
+def _imported_module_names(tree: ast.Module, modules: Set[str], package: List[str]) -> Set[str]:
+    """The local names ONE module binds to another module by import.
+
+    `modules` holds full dotted names; `package` is the importing file's root-relative package.
+    """
     names: Set[str] = set()
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(_from_import_stmt(node, modules))
         elif isinstance(node, ast.ImportFrom):
-            names.update(alias.asname or alias.name for alias in node.names if alias.name in modules)
+            base = _from_import_base(node, package)
+            names.update(alias.asname or alias.name for alias in node.names if ".".join([*base, alias.name]) in modules)
 
     return names
+
+
+def _from_import_base(node: ast.ImportFrom, package: List[str]) -> List[str]:
+    """The dotted module a `from ... import` reads from, a relative one resolved against `package`."""
+    module = node.module.split(".") if node.module else []
+    if not node.level:
+        return module
+    anchor = package[: len(package) - (node.level - 1)] if node.level - 1 <= len(package) else []
+    return [*anchor, *module]
 
 
 def _from_import_stmt(node: ast.Import, modules: Set[str]) -> Set[str]:
     """The local names a plain `import x.y` statement binds to a module."""
-    names: Set[str] = set()
-    for alias in node.names:
-        if alias.name in modules or alias.name.split(".")[-1] in modules:
-            names.add(alias.asname or alias.name.split(".")[0])
-    return names
+    return {alias.asname or alias.name.split(".")[0] for alias in node.names if alias.name in modules}
 
 
 def _module_bound_names(scanned: corpus.Corpus, modules: Set[str]) -> Dict[str, Set[str]]:
@@ -176,8 +208,9 @@ def _module_bound_names(scanned: corpus.Corpus, modules: Set[str]) -> Dict[str, 
     bound: Dict[str, Set[str]] = {}
 
     for path, tree in scanned.production_trees.items():
+        package = list(path.parent.relative_to(scanned.root).parts) if path.is_relative_to(scanned.root) else []
         # Unioned, not assigned: two modules can share a stem, and overwriting drops bindings.
-        bound.setdefault(path.stem, set()).update(_imported_module_names(tree, modules))
+        bound.setdefault(path.stem, set()).update(_imported_module_names(tree, modules, package))
 
     return bound
 
@@ -185,7 +218,7 @@ def _module_bound_names(scanned: corpus.Corpus, modules: Set[str]) -> Dict[str, 
 def nominate(scanned: corpus.Corpus) -> List[dict]:
     """Every unspecced patch whose target names a MODULE, not an attribute."""
     modules = _module_paths(scanned.root)
-    bound = _module_bound_names(scanned, modules)
+    bound = _module_bound_names(scanned, _qualified_modules(scanned.root))
     rows: List[dict] = []
     seen: Set[tuple] = set()
 

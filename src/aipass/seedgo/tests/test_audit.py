@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit.py
 # Description: Unit tests for handlers/audit/
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py, discovery.py and branch_audit.py."""
@@ -141,6 +141,28 @@ def test_discover_checkers_finds_check_files(tmp_path):
     )
     result = branch_audit.discover_checkers(tmp_path)
     assert "example" in result
+
+
+def test_discover_checkers_executes_each_checker_once_until_it_changes(tmp_path):
+    """Every audit re-executed the whole pack about four times per branch; a changed file still reloads."""
+    log = tmp_path / "loads.log"
+    checker = tmp_path / "pack" / "counted_check.py"
+    checker.parent.mkdir()
+    body = (
+        f"with open({str(log)!r}, 'a', encoding='utf-8') as f:\n    f.write('x')\n"
+        "def check_module(module_path, bypass_rules=None):\n    return {}\n"
+    )
+    checker.write_text(body, encoding="utf-8")
+
+    first = branch_audit.discover_checkers(checker.parent)
+    first["extra"] = object()
+    second = branch_audit.discover_checkers(checker.parent)
+    assert log.read_text(encoding="utf-8") == "x"
+    assert list(second) == ["counted"], "a caller's addition must not leak into the shared memo"
+
+    checker.write_text(body + "# edited\n", encoding="utf-8")
+    branch_audit.discover_checkers(checker.parent)
+    assert log.read_text(encoding="utf-8") == "xx"
 
 
 def test_collect_py_files_empty_branch(tmp_path, monkeypatch):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_content.py
 # Description: Windows Compatibility Standards Content Handler
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-05-10
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -114,7 +114,9 @@ def get_windows_compat_standards() -> str:
         '  [dim]if sys.platform != "win32":[/dim]',
         "  [dim]    pid, _ = os.waitpid(-1, os.WNOHANG)[/dim]",
         "",
-        "  [green]Good -- os.kill with OSError catch:[/green]",
+        "  [green]Good -- os.kill(pid, 0) behind a platform guard (signal 0 kills on Windows):[/green]",
+        '  [dim]if sys.platform == "win32":[/dim]',
+        "  [dim]    return _alive_via_openprocess(pid)[/dim]",
         "  [dim]try:[/dim]",
         "  [dim]    os.kill(pid, 0)[/dim]",
         "  [dim]except OSError:[/dim]",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_hygiene_plugin.py
 # Description: pytest write-hygiene gate - stdlib only, injected into a copy
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The write gate. A pytest plugin injected into a COPY of somebody else's tree.
@@ -60,6 +60,19 @@ PATH_ARGS: Dict[str, Tuple[int, ...]] = {
     "shutil.move": (0, 1),
     "shutil.rmtree": (0,),
     "shutil.unpack_archive": (1,),
+}
+
+#: (event, path index) -> index of the dir_fd that path is relative to; -1/None means the cwd.
+DIR_FD_ARGS: Dict[Tuple[str, int], int] = {
+    ("os.remove", 0): 1,
+    ("os.rmdir", 0): 1,
+    ("os.mkdir", 0): 2,
+    ("os.chmod", 0): 2,
+    ("os.chown", 0): 3,
+    ("os.rename", 0): 2,
+    ("os.rename", 1): 3,
+    ("os.link", 1): 3,
+    ("os.symlink", 1): 2,
 }
 
 #: Never violations, always counted: the gate's blind spots made numeric.
@@ -244,15 +257,17 @@ def is_write_open(args: tuple) -> bool:
     return isinstance(mode, str) and any(c in mode for c in "wax+")
 
 
-def _record_write(event: str, path: str) -> None:
-    """Classify one path and file it as allowed, canary or violation."""
+def _record_write(event: str, path: str, dir_fd: object = None) -> None:
+    """Classify one path as allowed, canary or violation; with no dir_fd a relative path is the cwd's."""
     state = STATE
     if not isinstance(path, str) or not path:
         return
     if not os.path.isabs(path):
-        # dir_fd-relative (shutil.rmtree's inner unlinks): unresolvable here, so counted.
-        state.relative_unattributable += 1
-        return
+        if isinstance(dir_fd, int) and not isinstance(dir_fd, bool) and dir_fd >= 0:
+            # dir_fd-relative (shutil.rmtree's inner unlinks): unresolvable here, so counted.
+            state.relative_unattributable += 1
+            return
+        path = os.path.join(os.getcwd(), path)
 
     path = os.path.normpath(path)
     verdict, reason = classify(path, state)
@@ -311,7 +326,9 @@ def audit_hook(event: str, args: tuple) -> None:
             return
         for index in indices:
             if index < len(args):
-                _record_write(event, args[index])
+                fd_index = DIR_FD_ARGS.get((event, index))
+                dir_fd = args[fd_index] if fd_index is not None and fd_index < len(args) else None
+                _record_write(event, args[index], dir_fd)
     except Exception as exc:  # a hook must never break the suite it measures
         logger.debug("audit hook failed on %s", event, exc_info=exc)
         _note_error(state, f"hook:{event}", exc)

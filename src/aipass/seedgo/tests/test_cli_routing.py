@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for seedgo's entry point routing, help and introspection
-# Version: 1.0.3
+# Version: 1.0.5
 # Created: 2026-09-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/seedgo.py, the entry point: routing, help and introspection."""
@@ -20,7 +20,7 @@ import sys
 import pytest
 
 from aipass.seedgo.apps import seedgo as branch_entry
-from aipass.seedgo.apps.modules import shadow_cycle
+from aipass.seedgo.apps.modules import CommandRefused, shadow_cycle
 
 
 class _StubModule:
@@ -140,15 +140,17 @@ def test_a_near_miss_of_a_declared_verb_is_not_claimed(verb, capsys):
 
 def test_no_mail_without_run_is_claimed_and_still_runs_no_cycle(capsys):
     """`shadow-cycle --no-mail` alone names the missing word, never an unknown option."""
-    assert shadow_cycle.handle_command("shadow-cycle", ["--no-mail"]) is True
+    with pytest.raises(CommandRefused) as refused:
+        shadow_cycle.handle_command("shadow-cycle", ["--no-mail"])
+    assert refused.value.code == 7
 
     out, err = capsys.readouterr()
     assert "does not know the option" not in out + err
     assert "shadow-cycle needs the word 'run'" in out + err
 
 
-def test_route_command_survives_a_raising_module(mock_logger):
-    """One exploding module must not take the router down with it."""
+def test_a_raising_module_is_a_crash_not_an_unknown_command(mock_logger, capsys):
+    """A module that raised was read as "not mine", so a crash printed "Unknown command" and exited 1."""
 
     class _Exploding:
         __name__ = "exploding"
@@ -156,10 +158,12 @@ def test_route_command_survives_a_raising_module(mock_logger):
         def handle_command(self, command, args):
             raise RuntimeError("boom")
 
-    result = branch_entry.route_command("probe", [], [_Exploding()])
+    with pytest.raises(CommandRefused) as refused:
+        branch_entry.route_command("probe", [], [_Exploding()])
 
-    assert result is False
-    assert any(level == "error" for level, _ in mock_logger)
+    assert refused.value.code == 2
+    assert any(level == "error" and "Traceback" in str(msg) for level, msg in mock_logger)
+    assert "RuntimeError: boom" in capsys.readouterr().err
 
 
 def test_known_command_exits_zero(monkeypatch, stub_module):

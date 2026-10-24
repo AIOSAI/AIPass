@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inventory.py
 # Description: the test-inventory verb - a ranked static report over every test
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -55,6 +55,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     try:
         _run(args)
+    except CommandRefused:
+        raise
     except Exception as exc:
         logger.error(f"[INVENTORY] the verb failed: {type(exc).__name__}: {exc}")
         error(f"test-inventory failed: {type(exc).__name__}: {exc}")
@@ -69,9 +71,13 @@ def _run(args: List[str]) -> None:
     argument, top, want_twins, unrecognized = _parse(args)
     if unrecognized:
         error(f"test-inventory does not know the option '{unrecognized}' - it accepts {', '.join(FLAGS)}")
-        return
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, unrecognized)
 
-    root = roots.resolve(argument, _branch_paths())
+    if want_twins and argument == roots.FLEET_ARGUMENT:
+        # The twins container comes off the package, so a host with no registry can still run it.
+        root = roots.Root(name=roots.FLEET_ARGUMENT, path=_fleet_container(), resolved_from="the aipass package")
+    else:
+        root = roots.resolve(argument, _branch_paths())
     json_handler.log_operation("test_inventory_invoked", {"target": argument, "root": str(root.path)})
 
     started = time.time()

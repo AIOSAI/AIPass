@@ -128,7 +128,7 @@ nothing.
 Acquitted by: a monkeypatch `setattr`/`delattr` of an attribute of that leaf name made
 **before the import** (memory's cure: `monkeypatch.setattr(handlers_pkg, "json",
 handlers_pkg.json)`); a `setattr(M, "leaf", ...)` or `M.leaf = ...` after the import or
-in a `finally`; a fixture teardown after its yield; an import inside
+in a `finally` or a fixture's teardown; an import inside
 `with pytest.raises(...)`, which fails and binds nothing (spawn's
 `test_the_denier_actually_denies`, the one false row of the first fleet run).
 **No cache restore acquits it** — monkeypatch, `patch.dict`, a `finally`, an autouse
@@ -158,7 +158,8 @@ package attribute, so a `delattr` inside the block is still read — backup's ow
 conftest says so in as many words.
 
 **An explicit restore** after the eviction, or in any `finally` of the same function:
-`sys.modules[K] = ...` or `sys.modules.update(...)` for the cache,
+`sys.modules[K] = saved` or `sys.modules.update(...)` for the cache (a call such as
+`MagicMock()` or `import_module(K)` caches a new object and is no restore),
 `setattr(M, "attr", ...)` or `M.attr = ...` for the attribute. A restore in a `finally`
 covers every eviction of that key in the function, which is how drone's registry test
 (pop, try, restore-or-pop in the finally) reads correctly.
@@ -166,10 +167,12 @@ covers every eviction of that key in the function, which is how drone's registry
 **A re-import is not a restore.** `importlib.import_module(K)` after the eviction
 mints a new module object and caches *that* — the pollution, not the cure.
 
-**A fixture with any statement after its last yield.** The teardown is where a fixture
-puts things back, and pytest runs it for a failing test too. This is `host_state`'s
-convention, adopted after demanding `try`/`finally` convicted thirty correct fixtures.
-A fixture that `return`s — memory's `verbs` — has no teardown at all.
+**A fixture whose teardown puts it back.** The teardown, after the last yield, is where a
+fixture puts things back, and pytest runs it for a failing test too, so a restore there
+counts like one in a `finally` without demanding `try`/`finally` (which convicted thirty
+correct fixtures). A teardown that restores nothing acquits nothing; an eviction inside
+the teardown is the cleanup itself and is not read. A fixture that `return`s — memory's
+`verbs` — has no teardown at all.
 
 **An autouse fixture in the same file that records the key.** `setitem`/`delitem` on
 `sys.modules` inside an `autouse=True` fixture runs around every test in the file, so

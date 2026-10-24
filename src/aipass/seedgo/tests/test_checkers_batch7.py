@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch7.py
 # Description: Unit tests for encapsulation_check sub-functions (the other checkers moved to test_checkers_batch7_*.py)
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-25
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/encapsulation_check.py and its sibling checkers (batch 7)."""
@@ -107,8 +107,8 @@ class TestGetFileHandlerPackage:
 class TestCheckHandlerGuard:
     """Tests for check_handler_guard."""
 
-    def test_guard_present_passes(self, tmp_path, monkeypatch):
-        """Branch with inspect.stack guard in handlers/__init__.py passes."""
+    def test_a_guard_defined_but_never_called_fails(self, tmp_path, monkeypatch):
+        """Text naming the guard (inspect.stack, ImportError) protects nothing until the module calls it."""
         monkeypatch.setattr(encapsulation_check, "_handler_guard_cache", {})
 
         branch = tmp_path / "mybranch"
@@ -131,8 +131,7 @@ class TestCheckHandlerGuard:
 
         result = encapsulation_check.check_handler_guard(str(handlers_dir / "json" / "handler.py"))
         assert result is not None
-        assert result["passed"] is True
-        assert "guard present" in result["message"]
+        assert result["passed"] is False
 
     def test_guard_missing_fails(self, tmp_path, monkeypatch):
         """Branch without guard in handlers/__init__.py fails."""
@@ -234,6 +233,15 @@ class TestCheckCrossBranchImports:
         )
         assert result["passed"] is False
         assert "flow" in result["message"]
+
+    def test_the_plain_import_form_is_caught_like_the_from_form(self, tmp_path):
+        """import aipass.drone.apps.handlers.x as y reaches into drone exactly as the from form does."""
+        lines = _lines("import aipass.drone.apps.handlers.x as y\n")
+        result = check_cross_branch_imports(
+            lines, (tmp_path / "seedgo" / "apps" / "modules" / "a.py").as_posix(), "seedgo"
+        )
+        assert result["passed"] is False
+        assert "drone" in result["message"]
 
     def test_same_branch_import_passes(self, tmp_path):
         """Importing own branch's handlers passes."""
@@ -433,6 +441,12 @@ class TestCheckDirectHandlerImports:
         lines = _lines("from apps.handlers.json.json_handler import log_op\n")
         result = check_direct_handler_imports(lines, (tmp_path / "branch" / "apps" / "branch.py").as_posix())
         assert result["passed"] is True
+
+    def test_a_name_that_merely_contains_an_allowed_handler_fails(self, tmp_path):
+        """profile_handler is not file_handler: the allow-list matches whole names."""
+        lines = _lines("from apps.handlers.users.profile_handler import load\n")
+        result = check_direct_handler_imports(lines, (tmp_path / "branch" / "apps" / "branch.py").as_posix())
+        assert result["passed"] is False
 
 
 class TestEncapsulationDerivesItsInfrastructureAllowList:

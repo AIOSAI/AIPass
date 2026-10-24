@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger_check.py
 # Description: Trigger Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -239,9 +239,8 @@ def check_trigger_import_pattern(content: str, _lines: List[str], _module_path: 
     has_trigger_fire = "trigger.fire(" in content
 
     valid_patterns = [
-        r"from\s+(?:aipass\.)?trigger\s+import\s+trigger",
-        r"from\s+(?:aipass\.)?trigger\.apps\.modules\.core\s+import\s+trigger",
-        r"from\s+(?:aipass\.)?trigger\.apps\.modules\.core\s+import\s+trigger\s+as\s+\w+",
+        r"from\s+aipass\.trigger\.apps\.modules\.core\s+import\s+trigger\b",
+        r"from\s+aipass\.trigger\.apps\.modules\s+import\s+(?:core|trigger)\b",
     ]
 
     for pattern in valid_patterns:

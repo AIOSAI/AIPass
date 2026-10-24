@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inert.py
 # Description: Detects bypass rules that can never match, for the audit info channel and the checklist
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-09
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Detects bypass rules whose declared scope can never be evaluated.
@@ -34,13 +34,13 @@ _SHARED_IMPORT = "aipass.seedgo.apps.handlers.bypass.utils"
 _SHARED_NAMES = ("is_bypassed", "matching_rule")
 _SCOPE_ARG = {"line": "lines", "name": "functions"}
 
-# The advisory is computed in the audit lane only (apps/, prose-reporting
+# The advisory is computed in the audit lane only (its corpus, prose-reporting
 # branch_level standards unseen), so it carries its own caveat in its output.
 ADVISORY_CAVEAT = (
     "UNVERIFIED — this bypass advisory is wrong in BOTH directions, so it cannot be pruned from on its "
-    "own. It calls LIVE rules dead: it is measured in the audit lane, which walks apps/ and never tests/, "
-    "so a tests/* rule reads as dead here while it still suppresses findings in the checklist lane the "
-    "edit hook runs; branch_level standards report in prose instead of violation records, so their live "
+    "own. It calls LIVE rules dead: it is measured in the audit lane, which walks apps/, shared/ and only "
+    "the test_*.py and conftest.py files under tests/, so a rule on any other tests/ file reads as dead "
+    "here while it still suppresses findings in the checklist lane the edit hook runs; branch_level standards report in prose instead of violation records, so their live "
     "rules read as dead too. And it is blind the other way: it never mentions dead rules outside the "
     "shapes it can see. Measured on @skills, 6 of the 7 checkable 'dead' rules were live; @aipass was "
     "told 41 and a control run proved 59.",
@@ -71,10 +71,7 @@ def _is_supplied(node: ast.expr | None) -> bool:
 
 
 def _binds_shared_matcher(tree: ast.AST) -> bool:
-    """Whether the matcher names in this module mean the shared utility.
-
-    ``bypass_handler.is_bypassed`` has the same name but a different parameter order.
-    """
+    """Whether the matcher names in this module mean the shared utility, not a local same-named function."""
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in _SHARED_NAMES:
             return False

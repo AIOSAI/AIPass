@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Per-File Standards Checklist Module
@@ -32,30 +32,27 @@ from aipass.seedgo.apps.handlers.checklist.verdicts import (
     format_failure as _format_failure,
     is_applicable as _is_applicable,
     is_skip_or_error as _is_skip_or_error,
+    judged_passed,
 )
 
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_prototype_file, is_throwaway_path
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import (
+    is_disabled_file,
+    is_prototype_file,
+    is_throwaway_path,
+)
 
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
 
-from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import audit_ignore_match, find_repo_root, is_seedgo_ignored
 
 from aipass.seedgo.apps.handlers.bypass import inert
 
+from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.audit_tests import refusal
 from aipass.seedgo.apps.modules import CommandRefused
 
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
-
-
-def _get_repo_root() -> Path | None:
-    """Return the git repo root derived from this file's location."""
-    current = Path(__file__).resolve().parent
-    for parent in (current, *current.parents):
-        if (parent / ".git").exists():
-            return parent
-    return None
 
 
 def not_judged_here(file_path: str, pack_name: str = "aipass") -> List[str]:
@@ -109,6 +106,9 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     branch_path = _resolve_branch_path(resolved)
     if branch_path is not None and is_seedgo_ignored(resolved, branch_path):
         return [{"standard": "(skip)", "passed": True, "detail": "Ignored via .seedgoignore"}]
+    ignored_by = _audit_ignore_pattern(resolved, branch_path)
+    if ignored_by is not None:
+        return [{"standard": "(skip)", "passed": True, "detail": f"Outside the audit (ignore pattern {ignored_by})"}]
 
     pack_path = _resolve_pack_path(pack_name)
     if pack_path is None:
@@ -118,7 +118,7 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
     if not checkers:
         return [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
 
-    bypass_rules = _load_bypass_for_file(resolved)
+    bypass_rules = load_bypass_rules(str(branch_path)) if branch_path is not None else []
 
     results = []
     for name, checker in sorted(checkers.items()):
@@ -132,7 +132,7 @@ def run_checklist(file_path: str, pack_name: str = "aipass", prototype: bool = F
             results.append({"standard": name, "passed": False, "detail": f"Checker error: {e}"})
             continue
 
-        passed = r.get("passed", True)
+        passed = judged_passed(r)
         detail = None
 
         if not passed:
@@ -187,12 +187,16 @@ def _resolve_branch_path(file_path: str) -> Optional[Path]:
     return bp
 
 
-def _load_bypass_for_file(file_path: str) -> list:
-    """Load bypass rules for the branch containing file_path."""
-    bp = _resolve_branch_path(file_path)
-    if bp is None:
-        return []
-    return load_bypass_rules(str(bp))
+def _audit_ignore_pattern(file_path: str, branch_path: Optional[Path]) -> Optional[str]:
+    """The audit ignore pattern that keeps this file out of the audit, or None (no branch, or not ignored)."""
+    if branch_path is None:
+        return None
+    try:
+        rel = Path(file_path).resolve().relative_to(branch_path.resolve())
+    except ValueError:
+        logger.info("[checklist] %s is not under its branch root %s", file_path, branch_path)
+        return None
+    return audit_ignore_match(rel.as_posix())
 
 
 # The token scripts count findings by: plain ASCII, one per finding, never on a pass.
@@ -296,7 +300,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     if resolved.is_absolute():
         resolved = resolved.resolve()
     else:
-        repo_root = _get_repo_root()
+        repo_root = find_repo_root(Path(__file__))
         candidate = (repo_root / resolved).resolve() if repo_root else None
         if candidate and candidate.exists():
             resolved = candidate
@@ -304,8 +308,10 @@ def handle_command(command: str, args: List[str]) -> bool:
             resolved = (Path.cwd() / resolved).resolve()
 
     if resolved.is_dir():
-        py_files = sorted(resolved.glob("*.py"))
-        py_files = [f for f in py_files if not f.name.startswith("_") and "(disabled)" not in f.name]
+        # The audit's corpus filter: package markers and (disabled) files out, every other _*.py in.
+        py_files = [
+            f for f in sorted(resolved.glob("*.py")) if f.name != "__init__.py" and not is_disabled_file(f.name)
+        ]
         if not py_files:
             error("No .py files found in directory", suggestion=f"Directory: {resolved}")
             raise CommandRefused(refusal.EXIT_NO_UNITS, str(resolved))
@@ -336,14 +342,10 @@ def print_introspection() -> None:
     console.print("Per-file standards check — quick pass/fail for hook consumption")
     console.print()
 
-    handlers_dir = Path(__file__).parent.parent / "handlers"
-    packs = {}
-    if handlers_dir.exists():
-        for d in sorted(handlers_dir.iterdir()):
-            if d.is_dir() and d.name.endswith("_standards"):
-                check_files = list(d.glob("*_check.py"))
-                if check_files:
-                    packs[d.name.removesuffix("_standards")] = len(check_files)
+    packs = {
+        name: len(list(path.glob("*_check.py")))
+        for name, path in discovery.discover_packs(Path(__file__).parent.parent / "handlers").items()
+    }
 
     console.print("[yellow]Discovered Packs:[/yellow]")
     for name, count in packs.items():

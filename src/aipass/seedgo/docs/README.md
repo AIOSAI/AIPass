@@ -11,7 +11,7 @@ this shelf is committed — write it as if it ships.
 
 | File | What it covers |
 |---|---|
-| [aipass_standards.md](aipass_standards.md) | The scored checker pack: the standards table, how a rule is added, the `ruff`/`ruff_check` split, the fleet json shim |
+| [aipass_standards.md](aipass_standards.md) | The scored checker pack: the standards table, how a rule is added, the `ruff` bypass key, the fleet json shim |
 | [aipass_standards_tests_1.md](aipass_standards_tests_1.md) | The pack's test-file rows, calendar_bound to literal_path |
 | [aipass_standards_tests_2.md](aipass_standards_tests_2.md) | The pack's test-file rows, module_scope_side_effect to weak_oracle |
 | [pytest_quality.md](pytest_quality.md) | The v5 test-quality pack — the AST rules, and why it scores without gating |

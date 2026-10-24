@@ -201,14 +201,13 @@ success("Operation complete!")
 
 **Operation Templates:**
 - `operation_start(operation, **details)` - Standard operation beginning
-- `operation_complete(success, results, **summary)` - Standard operation end
+- `operation_complete(**summary)` - Standard operation end
 
-**Error Handling:**
-- `error_handler` - Complete error handling service
-- `OperationResult` - Success/skip/fail result objects
-- `@track_operation` - Auto-logging decorator
-- `@continue_on_error` - Migration-style execution
-- `@collect_results` - Batch operation aggregation
+**Exit State:**
+- `mark_command_failed()` - Sets the process failure flag (`error()` calls it)
+- `command_failed()` - Whether the flag is set
+- `reset_command_state()` - Clears the flag (tests, `main()` entry)
+- `resolve_exit(handled)` - Exit code: 1 not handled, 2 failed, 0 clean
 
 ### Rich Formatting Quick Reference
 

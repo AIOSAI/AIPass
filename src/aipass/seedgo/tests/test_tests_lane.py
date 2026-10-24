@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_tests_lane.py
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-09-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -12,7 +12,7 @@
 # seedgo: no-test-needed(ruff) — that every file in handlers/tests_lane/ parses and imports
 # seedgo: no-test-needed(documentation) — that the public handler functions carry docstrings
 # seedgo: no-test-needed(constant) — RECEIPT_FILE's spelling, asserted BY NAME; the bump tests pin the event's string
-# seedgo: no-test-needed(stdlib) — shutil.move's ability to move a file
+# seedgo: no-test-needed(stdlib) — os.link's and shutil.copyfileobj's ability to move a file
 # seedgo: no-test-needed(cli) — Rich's rendering of the status table
 
 import json
@@ -194,8 +194,10 @@ class TestRestore:
         assert log["entries"] == []
 
     def test_a_name_that_was_never_retired_is_an_error_not_a_silent_pass(self, capsys, retired):
-        tests_lane.handle_command("tests", ["restore", "test_never_here.py"])
+        with pytest.raises(CommandRefused) as refused:
+            tests_lane.handle_command("tests", ["restore", "test_never_here.py"])
 
+        assert refused.value.code == tests_lane.EXIT_NOT_STAMPED
         assert "nothing retired under that name" in capsys.readouterr().err
 
     def test_a_file_with_no_log_line_refuses_rather_than_guess_a_destination(self, capsys, retired):
@@ -203,7 +205,8 @@ class TestRestore:
         folder = retired / ".backup" / "tests" / "alpha"
         (folder / "test_unlogged.py").write_text("# dropped in by hand\n", encoding="utf-8")
 
-        tests_lane.handle_command("tests", ["restore", "test_unlogged.py"])
+        with pytest.raises(CommandRefused):
+            tests_lane.handle_command("tests", ["restore", "test_unlogged.py"])
 
         assert "no log line" in capsys.readouterr().err
         assert (folder / "test_unlogged.py").exists()
@@ -212,11 +215,19 @@ class TestRestore:
         live = retired / "src" / "aipass" / "alpha" / "tests" / "test_old.py"
         live.write_text("# the file that is already there\n", encoding="utf-8")
 
-        tests_lane.handle_command("tests", ["restore", "test_old.py"])
+        with pytest.raises(CommandRefused):
+            tests_lane.handle_command("tests", ["restore", "test_old.py"])
 
         assert "already exists" in capsys.readouterr().err
         assert live.read_text(encoding="utf-8") == "# the file that is already there\n"
         assert (retired / ".backup" / "tests" / "alpha" / "test_old.py").exists()
+
+    def test_a_log_that_cannot_be_rewritten_is_a_refusal_not_a_success(self, capsys, retired, refused_receipts):
+        with pytest.raises(CommandRefused):
+            tests_lane.handle_command("tests", ["restore", "test_old.py"])
+
+        assert refused_receipts == [retired / ".backup" / "tests" / "alpha" / "retired.json"]
+        assert "could not be removed" in capsys.readouterr().err
 
     def test_restore_with_no_name_prints_the_usage_line(self, capsys, retired):
         tests_lane.handle_command("tests", ["restore"])
@@ -379,6 +390,14 @@ class TestTemplateBump:
         assert refusal.value.code == 2
         unwrapped = " ".join(capsys.readouterr().err.split())  # a long tmp path makes Rich wrap inside the phrase
         assert f"no page to distribute: {gold / 'test_template_v1.md'} is missing" in unwrapped
+
+    def test_a_bump_naming_no_registered_branch_exits_non_zero(self, capsys, fleet, gold):
+        """`@flwo` for `@flow` skipped every branch and exited 0, reading as done."""
+        with pytest.raises(CommandRefused) as refusal:
+            tests_lane.handle_command("tests", ["template", "bump", "@flwo", "--confirm"])
+
+        assert refusal.value.code == 2
+        assert "no registered branch named @flwo" in capsys.readouterr().err
 
     def test_a_test_body_is_never_distributed(self, fleet, gold, bus):
         """The one thing this lane must never do: a branch's tests stay its own."""

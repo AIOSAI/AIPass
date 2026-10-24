@@ -130,7 +130,7 @@ Result: ImportError on all drone commands, system broken
 - **300-500 lines:** Good - manageable for AI and humans (most Spawn modules here)
 - **500-700 lines:** Getting heavy - watch it
 - **700-1500 lines:** Advisory warning - consider splitting (does not dock score)
-- **1500+ lines:** Hard fail - must split (docks score)
+- **1500+ lines:** Hard fail - must split (fails the file whatever the other rows score)
 
 **WHY:** AI comprehension drops with file size. Small files mean faster processing, cleaner context, fewer errors. Read a summary in seconds vs spending minutes processing a massive file.
 

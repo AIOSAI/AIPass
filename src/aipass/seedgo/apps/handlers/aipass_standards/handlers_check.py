@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Handlers Standards Checker Handler"""
@@ -105,7 +105,7 @@ def _iter_import_modules(content: str) -> Iterator[Tuple[int, str, List[str]]]:
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipping import scan: SyntaxError during parse: %s", e)
         return
 
@@ -201,7 +201,7 @@ def _public_function_takes_module_name(content: str) -> bool:
     """True when a PUBLIC function accepts a ``module_name`` parameter."""
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("handlers: unparseable, falling back to the text scan for module_name: %s", exc)
         return bool(re.search(r"def\s+\w+\([^)]*module_name", content))
 
@@ -242,7 +242,7 @@ def _module_name_is_optional(content: str) -> Optional[bool]:
     """True when some public function lets ``module_name`` be omitted."""
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("handlers: unparseable, cannot read module_name defaults: %s", exc)
         return None
 
@@ -267,7 +267,7 @@ def _walks_the_caller_frame(content: str) -> Optional[bool]:
     """True when the file asks who called it, BY ANY MECHANISM."""
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("handlers: unparseable, cannot see a frame walk: %s", exc)
         return None
 

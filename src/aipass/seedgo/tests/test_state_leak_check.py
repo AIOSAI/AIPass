@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_state_leak_check.py
 # Description: state_leak_check — test template v1 item 18, no test leaks state into the next
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-22
-# Modified: 2026-10-16
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/state_leak_check.py."""
@@ -254,6 +254,35 @@ class TestWhatIsNeverConvicted:
         )
 
         assert _found(source) == []
+
+    def test_a_yield_fixture_that_puts_nothing_back_credits_nothing(self):
+        """A yield with no restore after it never undoes the setup write."""
+        source = (
+            "import os\nimport pytest\n\n"
+            "@pytest.fixture\n"
+            "def env():\n"
+            '    os.environ["X"] = "1"\n'
+            "    yield\n"
+            "\n"
+            'def test_a(env):\n    os.environ["K"] = "v"\n'
+        )
+
+        assert _lines(source) == [6, 10]
+
+    def test_a_finally_credits_only_what_it_restores(self):
+        """Closing a file in a finally restores no environment variable."""
+        source = (
+            "import os\n\n"
+            "def test_a(tmp_path):\n"
+            '    f = open(tmp_path / "x", "w")\n'
+            "    try:\n"
+            '        f.write("x")\n'
+            "    finally:\n"
+            "        f.close()\n"
+            '    os.environ["X"] = "1"\n'
+        )
+
+        assert _lines(source) == [9]
 
     def test_a_sys_modules_stub_naming_an_aipass_module_belongs_to_import_site(self):
         """Item 8 already convicts it, and one habit is never charged twice."""

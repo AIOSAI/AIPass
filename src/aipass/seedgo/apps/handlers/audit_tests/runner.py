@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: audit-tests orchestration - the nine-step pipeline
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -66,7 +66,7 @@ class RunResult:
 
     def summary_line(self) -> str:
         """One line per target, printed whether or not the fleet code hides it."""
-        if self.refused:
+        if self.refused and self.document.get("status") == "refused":
             block = self.document.get("refusal") or {}
             line = refusal.Refusal(
                 code=int(block.get("code", refusal.EXIT_UNPROVEN)),
@@ -77,6 +77,11 @@ class RunResult:
         hygiene = self.document.get("groups", {}).get("hygiene", {})
         score = hygiene.get("score")
         count = hygiene.get("violation_count", 0)
+        unproven = artifact.unproven_reasons(self.document)
+        if unproven:
+            return (
+                f"{self.target.name}: UNPROVEN ({'; '.join(unproven)}), hygiene {score} is not a verdict -> {self.path}"
+            )
         return f"{self.target.name}: hygiene {score} ({count} violation(s)) -> {self.path}"
 
 
@@ -195,18 +200,18 @@ def _measure(
     """
     started = datetime.now(timezone.utc)
     clock = time.monotonic()
-    spec = None
+    published: Optional[RunResult] = None
     m10.start_carrier_recording(target.path)
     before = None if options.get("no_m10_proof") else _fingerprint_target(target)
     _probe_live_writers(target, options)
 
     try:
-        with tempfile.TemporaryDirectory(prefix=SCRATCH_PREFIX) as scratch:
+        with tempfile.TemporaryDirectory(prefix=SCRATCH_PREFIX, ignore_cleanup_errors=True) as scratch:
             spec = adapter.build_env(target.path, Path(scratch) / "env", options)
             liveness = adapter.assert_env_is_live(spec)
             run = adapter.run_gated(spec, budget, options)
             nominations = adapter.nominate(spec)
-            return _publish(
+            published = _publish(
                 target,
                 adapter,
                 ecosystem,
@@ -219,7 +224,12 @@ def _measure(
                 time.monotonic() - clock,
                 m10_proof=_m10_proof(target, before, options, run),
             )
+        return published
     except Exception as exc:
+        if published is not None:
+            # The artifact is already on disk; a scratch-cleanup failure must not overwrite it with a refusal.
+            logger.warning(f"[AUDIT-TESTS] scratch cleanup for {target.name} failed after publish: {exc}")
+            return published
         # A crash mid-measurement is a refusal, never a zero.
         logger.error(f"[AUDIT-TESTS] measurement of {target.name} failed: {type(exc).__name__}: {exc}")
         return refuse(
@@ -236,8 +246,6 @@ def _measure(
     finally:
         # Closed on every path out, or the next target's writes are attributed to this run.
         m10.stop_carrier_recording()
-        if spec is not None:
-            adapter.teardown(spec)
 
 
 def _publish(

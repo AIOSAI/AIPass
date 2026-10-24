@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: statement_deletion.py
 # Description: delete one statement at a time and report which deletions the suite does not notice
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-20
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """One statement at a time, not the whole body.
@@ -200,22 +200,6 @@ def _is_bare_string(node: ast.stmt) -> bool:
     return isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
 
 
-def _is_ellipsis(node: ast.stmt) -> bool:
-    """Whether this is a bare `...` expression."""
-    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Constant):
-        return False
-    return node.value.value is Ellipsis
-
-
-def _is_return_none(node: ast.stmt) -> bool:
-    """Whether this is `return` or `return None`."""
-    if not isinstance(node, ast.Return):
-        return False
-    if node.value is None:
-        return True
-    return isinstance(node.value, ast.Constant) and node.value.value is None
-
-
 def _arid_reason_for(node: ast.stmt, ends_the_function: bool) -> Optional[str]:
     """Why deleting this statement could not change behaviour, or None.
 
@@ -225,9 +209,9 @@ def _arid_reason_for(node: ast.stmt, ends_the_function: bool) -> Optional[str]:
         return ARID_DOCSTRING
     if isinstance(node, ast.Pass):
         return ARID_PASS
-    if _is_ellipsis(node):
+    if gutting._is_ellipsis(node):
         return ARID_ELLIPSIS
-    if ends_the_function and _is_return_none(node):
+    if ends_the_function and gutting._is_bare_none_return(node):
         return ARID_SOLE_RETURN_NONE
     return None
 
@@ -432,8 +416,12 @@ def _probe(
     site: StatementSite,
     selection: Selection,
     timeout_seconds: int,
+    capped: bool = False,
 ) -> StatementResult:
-    """Write the mutant, run the selected tests, restore the file."""
+    """Write the mutant, run the selected tests, restore the file.
+
+    `capped`: the remaining budget, not the hang ceiling, set this timeout.
+    """
     path = target.target_copy / site.relpath
     try:
         original = path.read_bytes()
@@ -462,7 +450,7 @@ def _probe(
         return StatementResult(
             site=site,
             outcome=OUTCOME_NOT_RUN,
-            reason="mutant_timeout",
+            reason=REASON_BUDGET_EXHAUSTED if capped else gutting.REASON_MUTANT_TIMEOUT,
             elapsed_seconds=run.elapsed_seconds,
             selection_basis=selection.basis,
             selected_tests=selected,
@@ -560,7 +548,7 @@ def run_campaign(
             continue
 
         timeout = min(ceiling, int(remaining))
-        results.append(_probe(target, site, selection, timeout))
+        results.append(_probe(target, site, selection, timeout, capped=timeout < ceiling))
 
     return StatementCampaign(
         baseline=base,

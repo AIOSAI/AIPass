@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_cli.py
 # Description: cli_check rulings: relays, the pre-console window, the stream ruling (split from test_checkers_batch7.py)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/cli_check.py and cli_content.py."""
@@ -224,6 +224,13 @@ class TestCliReadsCodeLinesAndNeverDocstrings:
         result = cli_check.check_print_usage(source, source.split("\n"))
         assert result is not None
         assert result["passed"] is True
+
+    def test_a_print_after_a_hash_in_a_string_or_after_a_colon_is_found(self):
+        source = 'x = "#"; print(x)\n'
+        result = cli_check.check_print_usage(source, source.split("\n"))
+        assert result is not None
+        assert result["passed"] is False
+        assert check_handler_separation("def f(ok):\n    if ok: print('hi')\n")["passed"] is False
 
 
 class TestTheCliRulingsAreQueryableNotJustEnforced:

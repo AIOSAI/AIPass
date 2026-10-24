@@ -1,43 +1,21 @@
 # =================== AIPass ====================
 # Name: bypass_handler.py
 # Description: Bypass Configuration Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Bypass Configuration Handler"""
 
 import json
 from pathlib import Path
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers import registry_scan
-
-
-BYPASS_TEMPLATE = {
-    "metadata": {"version": "1.0.0", "created": "", "description": "Standards bypass configuration for this branch"},
-    "bypass": [],
-    "notes": {
-        "usage": "Add entries to 'bypass' list to exclude specific violations",
-        "example": {
-            "file": "apps/modules/logger.py",
-            "standard": "cli",
-            "lines": [146, 177],
-            "reason": "Circular dependency - logger cannot import CLI",
-        },
-        "fields": {
-            "file": "Relative path from branch root (required)",
-            "standard": "Standard name: cli, imports, naming, etc. (required)",
-            "lines": "Optional - specific line numbers to bypass",
-            "functions": "Optional - list of function names for name-scoped bypass (required for unused_function)",
-            "reason": "Required - why this bypass exists",
-        },
-    },
-}
+from aipass.seedgo.apps.handlers.audit.discovery import registry_branches
 
 
 def _find_registry() -> Path:
@@ -83,7 +61,7 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
 
         # Longest path first so a nested branch wins over its parent.
         branches = sorted(
-            registry.get("branches", []),
+            registry_branches(registry),
             key=lambda b: len(_resolve(b.get("path", ""))),
             reverse=True,
         )
@@ -100,32 +78,9 @@ def get_branch_from_path(file_path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def ensure_seedgo_config(branch_path: str) -> Path:
-    """Ensure .seedgo/bypass.json exists for a branch, create if missing."""
-    seedgo_dir = Path(branch_path) / ".seedgo"
-    bypass_file = seedgo_dir / "bypass.json"
-
-    try:
-        seedgo_dir.mkdir(exist_ok=True)
-
-        if not bypass_file.exists():
-            template = BYPASS_TEMPLATE.copy()
-            template["metadata"]["created"] = datetime.now().isoformat()
-
-            with open(bypass_file, "w", encoding="utf-8") as f:
-                json.dump(template, f, indent=2)
-
-            logger.info(f"[bypass_handler] Created {bypass_file}")
-
-        return bypass_file
-    except Exception as e:
-        logger.error(f"[bypass_handler] Error creating seedgo config: {e}")
-        return bypass_file
-
-
 def load_bypass_rules(branch_path: str) -> List[Dict[str, Any]]:
-    """Load bypass rules from branch's .seedgo/bypass.json."""
-    bypass_file = ensure_seedgo_config(branch_path)
+    """Load bypass rules from branch's .seedgo/bypass.json; a missing file is no rules, and nothing is written."""
+    bypass_file = Path(branch_path) / ".seedgo" / "bypass.json"
 
     try:
         if bypass_file.exists():
@@ -143,36 +98,3 @@ def load_bypass_rules(branch_path: str) -> List[Dict[str, Any]]:
         logger.error("[bypass_handler] Error loading bypass rules: %s", e)
 
     return []
-
-
-def is_bypassed(file_path: str, branch_path: str, standard: str, line: Optional[int], bypass_rules: List[Dict]) -> bool:
-    """
-    Check if a specific violation should be bypassed.
-
-    NOT the checkers' matcher (``bypass.utils.is_bypassed``): different parameter
-    ORDER, and exact branch-relative match rather than substring. Checkers call utils.
-    """
-    try:
-        rel_path = Path(file_path).relative_to(branch_path).as_posix()
-    except ValueError:
-        logger.info("File %s not relative to branch %s, using raw path", file_path, branch_path)
-        rel_path = Path(file_path).as_posix()
-
-    for rule in bypass_rules:
-        rule_file = rule.get("file") or ""
-        rule_standard = rule.get("standard") or ""
-
-        # Active only when it names both a file and a standard.
-        if not rule_file or rule_file != rel_path:
-            continue
-        if rule_standard != standard:
-            continue
-
-        rule_lines = rule.get("lines", [])
-        if rule_lines and line is not None:
-            if line in rule_lines:
-                return True
-        elif not rule_lines:
-            return True
-
-    return False

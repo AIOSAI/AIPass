@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_scope_side_effect_check.py
 # Description: Module Scope Side Effect Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Module Scope Side Effect Standards Checker Handler
 Reference: module_scope_side_effect.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, Iterator, List, Set, Tuple
@@ -20,6 +21,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import read_text, result
 
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
@@ -300,18 +302,8 @@ def _snippet(lines: List[str], line: int) -> str:
     return text if len(text) <= 80 else text[:77] + "..."
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[module_scope_side_effect] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="module_scope_side_effect", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:
@@ -339,7 +331,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(False, _one_check(False, f"Error reading file: {module_path}"), 0)
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[module_scope_side_effect] Unparseable %s: %s", module_path, exc)
         return _result(True, _one_check(True, "Not judged: the file does not parse (ruff convicts that)"), 100)
 

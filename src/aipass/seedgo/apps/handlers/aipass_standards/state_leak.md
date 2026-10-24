@@ -189,7 +189,9 @@ the file doing item 18's job by hand gets convicted for the `os.environ.update(s
 
 **A fixture with no teardown credits nothing** — no `yield`, no `finally`, so it never runs
 after the test. Its own setup write is convicted too: a setup-only autouse fixture leaks
-into the next file all by itself.
+into the next file all by itself. **Teardown is what runs after the `yield` or in a `finally`**:
+a fixture that writes `os.environ["X"]` and yields with nothing after it puts nothing back and
+credits nothing, and a test's own `finally` covers only the families it writes back.
 
 ---
 

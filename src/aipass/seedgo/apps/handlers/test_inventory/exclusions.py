@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: exclusions.py
 # Description: which collected-looking test files pytest actually refuses to run
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -115,10 +115,13 @@ def _joined_literal(node: ast.expr) -> Optional[str]:
 
 
 def _ignored_by_conftest(path: Path, ignores: Sequence[Tuple[Path, str]]) -> bool:
-    """True when a conftest ON THIS PATH declares a glob matching the file.
+    """True when a conftest ON THIS PATH declares a glob matching the file or a directory above it.
 
     Ancestors only, as pytest scopes it: a `parked/` conftest's `["*"]` silences its own directory."""
-    return any(_under(directory, path) and fnmatch.fnmatch(str(path), glob) for directory, glob in ignores)
+    candidates = [str(path), *(str(parent) for parent in path.parents)]
+    return any(
+        _under(directory, path) and any(fnmatch.fnmatch(c, glob) for c in candidates) for directory, glob in ignores
+    )
 
 
 def _under(directory: Path, path: Path) -> bool:

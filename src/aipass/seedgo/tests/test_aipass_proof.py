@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_proof.py
 # Description: Unit tests for handlers/aipass_proof/
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_proof/interface.py and apps/handlers/aipass_proof/triplet.py."""
@@ -14,6 +14,7 @@
 # seedgo: no-test-needed(stdlib) — ast.parse's ability to read a checker's source
 
 from aipass.seedgo.apps.handlers.aipass_proof.interface import scan as interface_scan
+from aipass.seedgo.apps.handlers.aipass_proof.readme_currency import scan as readme_currency_scan
 from aipass.seedgo.apps.handlers.aipass_proof.triplet import scan as triplet_scan
 
 
@@ -110,8 +111,28 @@ def test_triplet_scan_check_only(tmp_path):
     assert result["passed"] is False
 
 
+def test_triplet_scan_admits_a_helper_a_sibling_imports_and_flags_one_nothing_imports(tmp_path):
+    (tmp_path / "naming_check.py").write_text("from pack.shared import read\n", encoding="utf-8")
+    (tmp_path / "naming_content.py").write_text("# content", encoding="utf-8")
+    (tmp_path / "naming.md").write_text("# doc", encoding="utf-8")
+    (tmp_path / "shared.py").write_text("def read(): pass\n", encoding="utf-8")
+    (tmp_path / "stray.py").write_text("x = 1\n", encoding="utf-8")
+
+    assert triplet_scan(tmp_path)["orphaned"] == ["stray.py"]
+
+
 def test_triplet_scan_empty_directory(tmp_path):
     """triplet.scan on empty directory returns passed=True, total=0."""
     result = triplet_scan(tmp_path)
     assert result["total"] == 0
     assert result["passed"] is True
+
+
+def test_readme_currency_matches_names_exactly_not_by_substring(tmp_path):
+    pack = tmp_path / "apps" / "handlers" / "aipass_standards"
+    pack.mkdir(parents=True)
+    (pack / "cli_check.py").write_text("x = 1\n", encoding="utf-8")
+    (pack / "cli_flags_check.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("The pack checks: cli.\n", encoding="utf-8")
+
+    assert readme_currency_scan(pack)["undocumented"] == ["cli_flags"]

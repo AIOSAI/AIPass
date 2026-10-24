@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_generator.py
 # Description: README Section Auto-Generator
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -159,21 +159,10 @@ def _get_file_comment(file_path: Path) -> Optional[str]:
         return ""
 
     try:
-        content = _read_source(file_path)
-        name_match = re.search(r"^# Name:\s*\S+\s*-\s*(.+)$", content, re.MULTILINE)
-        if name_match:
-            return name_match.group(1).strip()
-
-        doc_match = re.search(r'^"""(.+?)"""', content, re.DOTALL)
-        if doc_match:
-            first_line = doc_match.group(1).strip().split("\n")[0].strip()
-            if first_line:
-                return first_line
+        return _extract_description_from_content(_read_source(file_path))
     except (OSError, UnicodeDecodeError):
         logger.info("Cannot read file for comment extraction: %s", file_path)
         return None
-
-    return ""
 
 
 def _get_dir_comment(dir_path: Path) -> str:
@@ -222,6 +211,10 @@ def _extract_description_from_content(content: str) -> str:
     name_match = re.search(r"^# Name:\s*\S+\s*-\s*(.+)$", content, re.MULTILINE)
     if name_match:
         return name_match.group(1).strip()
+
+    desc_match = re.search(r"^# Description:\s*(.+)$", content, re.MULTILINE)
+    if desc_match:
+        return desc_match.group(1).strip()
 
     doc_match = re.search(r'^"""(.*?)"""', content, re.DOTALL | re.MULTILINE)
     if doc_match:
@@ -461,8 +454,10 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
             replacement = f"{open_marker}\n{section_content}\n{close_marker}"
             # A callable hands the text over verbatim: as a template string, a Windows
             # path's "C:\Users" reads as the escape \U and raises re.error.
-            updated_content = pattern.sub(lambda _match: replacement, updated_content)
-            result["updated"].append(section_name)
+            new_content = pattern.sub(lambda _match: replacement, updated_content)
+            if new_content != updated_content:
+                result["updated"].append(section_name)
+            updated_content = new_content
         else:
             result["missing_markers"].append(section_name)
 
@@ -472,6 +467,7 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
         except OSError as e:
             logger.info("Cannot write README at %s: %s", readme_path, e)
             result["errors"].append(f"Failed to write README.md: {e}")
+            result["updated"] = []
 
     return result
 

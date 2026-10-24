@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_gateway_boundary.py
 # Description: Tests for the gateway boundary standards checker
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/gateway_boundary_check.py."""
@@ -102,6 +102,16 @@ class TestAFileThatDoesNotParse:
         result = _check(tmp_path, "def mute(:\n    FLAG.touch()\n")
         assert result["score"] == 100
         assert result["checks"][0]["message"] == "Not judged: the file does not parse (ruff convicts that)"
+
+
+class TestAFileThatIsNotUtf8:
+    def test_fails_as_unreadable_instead_of_crashing(self, tmp_path: Path):
+        """A latin-1 byte is a decode error, which the read must report like any unreadable file."""
+        target = tmp_path / "src" / "aipass" / "api" / "apps" / "handlers" / "mod.py"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"NAME = '\xe9'\n")
+        result = checker.check_module(str(target))
+        assert (result["passed"], result["checks"][0]["name"]) == (False, "File readable")
 
 
 class TestDoesNotFireOnLegitimateCode:

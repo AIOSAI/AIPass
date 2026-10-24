@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.3.4
+# Version: 1.3.5
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -213,6 +213,21 @@ def test_run_checklist_seedgo_ignore_skips(tmp_path, monkeypatch):
     assert "seedgoignore" in results[0]["detail"].lower()
 
 
+def test_run_checklist_skips_a_file_the_audit_ignore_list_removes(tmp_path, monkeypatch):
+    """apps/integrations/ never reaches the audit, so the hook must not convict it either."""
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: {"path": str(tmp_path)})
+    row = SimpleNamespace(AUDIT_SCOPE="all_files", check_module=lambda path, bypass_rules=None: {"passed": False})
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {"row": row})
+
+    f = tmp_path / "apps" / "integrations" / "driver.py"
+    f.parent.mkdir(parents=True)
+    f.write_text("x = 1\n", encoding="utf-8")
+    results = checklist.run_checklist(str(f))
+    assert [(r["standard"], r["passed"]) for r in results] == [("(skip)", True)]
+    assert "/apps/integrations/" in results[0]["detail"]
+
+
 def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
     """A normal file without markers/temp path is still fully audited."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
@@ -251,15 +266,17 @@ def test_is_entry_point_detection(tmp_path, monkeypatch):
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     entry = SimpleNamespace(AUDIT_SCOPE="entry_point", check_module=lambda path, bypass_rules=None: {"passed": True})
     monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {"entry": entry})
-    apps = tmp_path / "some" / "branch" / "apps"
+    apps = tmp_path / "some" / "flow" / "apps"
     (apps / "modules").mkdir(parents=True)
-    for target in (apps / "flow.py", apps / "modules" / "helper.py", apps / "readme.txt"):
+    for target in (apps / "flow.py", apps / "other.py", apps / "modules" / "helper.py", apps / "readme.txt"):
         target.write_text("x = 1\n", encoding="utf-8")
 
     def standards(target):
         return [r["standard"] for r in checklist.run_checklist(str(target))]
 
     assert standards(apps / "flow.py") == ["entry"]
+    # The audit judges entry_point rows on the branch's own entry file only, never on every apps/*.py.
+    assert standards(apps / "other.py") == ["(skip)"]
     assert standards(apps / "modules" / "helper.py") == ["(skip)"]
     assert standards(apps / "readme.txt") == ["(skip)"]
 

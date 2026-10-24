@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: audit-tests artifact assembly, provenance and write
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -208,6 +208,9 @@ def exit_code_for(document: dict) -> int:
         code = document.get("refusal", {}).get("code")
         return code if isinstance(code, int) else refusal.EXIT_UNPROVEN
 
+    if unproven_reasons(document):
+        return refusal.EXIT_UNPROVEN
+
     for name in document.get("group_list", []):
         group = document.get("groups", {}).get(name, {})
         score = group.get("score")
@@ -215,3 +218,17 @@ def exit_code_for(document: dict) -> int:
             return refusal.EXIT_SCORED_FAILED
 
     return refusal.EXIT_PASSED
+
+
+def unproven_reasons(document: dict) -> List[str]:
+    """Why a published measurement cannot be trusted; empty when nothing undermines it.
+
+    A score beside a failed self-check or a changed real tree is not a verdict.
+    """
+    reasons: List[str] = []
+    failed = (document.get("harness") or {}).get("failed")
+    if failed:
+        reasons.append(f"{failed} harness self-check(s) failed")
+    if (document.get("m10_proof") or {}).get("real_tree_unchanged") is False:
+        reasons.append("the real tree changed during the run")
+    return reasons

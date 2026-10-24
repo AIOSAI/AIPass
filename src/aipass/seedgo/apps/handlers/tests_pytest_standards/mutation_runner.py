@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mutation_runner.py
 # Description: runs the target's pytest and reads the verdict out of its output
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-09-19
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """The pytest subprocess, and everything read back out of what it printed.
@@ -14,9 +14,10 @@ Knows nothing about mutation, coverage or campaigns; imports only ``mutation_sha
 
 import os
 import re
+import signal
 import subprocess
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_shapes import BaselineResult, SuiteRun, SuiteTarget
@@ -84,6 +85,49 @@ def _pytest_environment(target: SuiteTarget, extra_env: Optional[Dict[str, str]]
     return environment
 
 
+def run_in_group(
+    command: Sequence[str], *, cwd: str, env: Dict[str, str], timeout: float
+) -> "subprocess.CompletedProcess[str]":
+    """`subprocess.run(capture_output=True, text=True)` whose timeout kills the whole process group.
+
+    Killing only the direct child leaves pytest's grandchildren holding the scratch tree.
+    Raises `subprocess.TimeoutExpired` / `OSError` like `subprocess.run`.
+    """
+    group: Dict[str, Any]
+    if os.name == "nt":
+        group = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    else:
+        group = {"start_new_session": True}
+    with subprocess.Popen(
+        list(command),
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        **group,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except BaseException:  # TimeoutExpired and KeyboardInterrupt both leave a live group behind
+            _kill_group(process)
+            raise
+    return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+
+def _kill_group(process: "subprocess.Popen[str]") -> None:
+    """Kill the child and everything it started, then reap the child."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True, check=False)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError as exc:
+            logger.warning(f"{LOG_TAG} process group {process.pid} already exited before the kill: {exc}")
+    process.kill()
+    process.wait()
+
+
 def _run_pytest(
     target: SuiteTarget,
     extra_args: Sequence[str],
@@ -99,12 +143,10 @@ def _run_pytest(
     started = time.monotonic()
     selected = (target.test_arg,) if test_args is None else test_args
     try:
-        completed = subprocess.run(
+        completed = run_in_group(
             _pytest_command(target, selected, extra_args),
             cwd=str(target.cwd),
             env=_pytest_environment(target, extra_env),
-            capture_output=True,
-            text=True,
             timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired:

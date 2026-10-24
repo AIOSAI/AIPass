@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: silent_catch_check.py
 # Description: Silent Catch Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -215,7 +215,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipped %s: SyntaxError during parse", path)
         return {
             "passed": False,

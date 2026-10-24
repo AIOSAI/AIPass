@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Branch Discovery Handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -53,6 +53,6 @@ def discover_branches() -> List[Dict]:
         json_handler.log_operation("diagnostics_discovered", {"count": len(branches)})
         return sorted(branches, key=lambda x: x["name"])
 
-    except (json.JSONDecodeError, IOError) as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         logger.warning(f"Error discovering branches: {e}")
         return branches

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_fresh_clone.py
 # Description: pytest_quality pack, fresh_clone checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/fresh_clone_check.py."""
@@ -493,6 +493,25 @@ class TestFreshCloneAcquittals:
 
         assert result["violations"] == []
         assert result["score"] == 100
+
+    def test_a_skip_on_another_condition_does_not_exempt_an_unguarded_read(self, tmp_path):
+        _write(
+            tmp_path,
+            "tests/test_memory_health.py",
+            """
+            class TestRealTrinityFiles:
+                BRANCH_ROOT = Path(__file__).resolve().parents[1]
+
+                def test_the_local_file_is_a_document(self, tmp_path):
+                    if sys.platform == "win32":
+                        pytest.skip("posix only")
+                    assert (tmp_path / "x").exists() is False
+                    local_file = self.BRANCH_ROOT / ".trinity" / "local.json"
+                    assert json.loads(local_file.read_text())["branch"] == "daemon"
+            """,
+        )
+
+        assert len(fresh_clone_check.check_branch(str(tmp_path))["violations"]) == 1
 
     def test_a_machine_root_carrying_a_literal_segment_is_not_a_candidate_at_all(self, tmp_path):
         """BARE IS THE WHOLE NARROWING, and this is the half that keeps fixtures legal."""

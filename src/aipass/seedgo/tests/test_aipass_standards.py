@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import aipass
 from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
+from aipass.seedgo.apps.handlers.aipass_standards import check_support
 from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
 from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check
 from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
@@ -160,8 +161,20 @@ def test_json_structure_no_json_dir_passes(tmp_path):
     branch = tmp_path / "mybranch"
     branch.mkdir()
 
-    violations = json_structure_check.check_branch_post(str(branch))[0]
-    assert violations == []
+    assert json_structure_check.check_branch_post(str(branch)) == ([], [])
+
+
+def test_json_handler_wiring_named_only_in_a_docstring_is_not_wiring(tmp_path):
+    """A docstring that names the import and the call wires nothing."""
+    module = tmp_path / "apps" / "modules" / "mod.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        '"""Use: from aipass.x.apps.handlers.json import json_handler; json_handler.log_operation(...)"""\n'
+        "def run():\n    return 1\n",
+        encoding="utf-8",
+    )
+    checks = json_structure_check.check_module(str(module))["checks"]
+    assert [c["passed"] for c in checks] == [False, False]
 
 
 def test_json_structure_check_branch_post(tmp_path):
@@ -1045,6 +1058,20 @@ def test_a_proc_literal_on_the_else_side_of_an_inline_guard_stays_convicted(tmp_
     assert _lines(violations) == [4]
 
 
+def test_a_path_that_merely_starts_with_the_letters_proc_is_not_a_proc_read(tmp_path):
+    """/processed/ is an ordinary directory; only /proc and paths under it are Linux-only."""
+    source = (
+        "from pathlib import Path\n"
+        'DATA = Path("/processed/data.csv").read_text(encoding="utf-8")\n'
+        'MORE = Path(f"/processed/{DATA}").read_text(encoding="utf-8")\n'
+        'REAL = Path("/proc/meminfo").read_text(encoding="utf-8")\n'
+    )
+
+    violations, _ = _scan_source(tmp_path, source)
+
+    assert _lines(violations) == [4]
+
+
 def test_a_function_level_inline_platform_guard_keeps_its_acquittal(tmp_path):
     """Inside a function the whole-function platform read already acquits (unchanged)."""
     source = _INLINE_GUARD_HEAD + 'def root():\n    return Path("/proc") if sys.platform == "linux" else None\n'
@@ -1706,6 +1733,14 @@ def test_the_slot_seeder_time_bomb_is_convicted(tmp_path):
     assert context == {"owned": 0, "spelled": 0}
 
 
+def test_a_fixture_whose_name_merely_contains_now_owns_no_clock(tmp_path):
+    """known_ids spells "now" inside a word; it is no clock fixture, so the time bomb stays convicted."""
+    source = _SLOTS_UNIT.replace("def test_the_slot_is_seeded(self):", "def test_the_slot_is_seeded(self, known_ids):")
+    violations, _context = _calendar_scan(tmp_path, source)
+
+    assert _lines(violations) == [_line_of(source, 'assert runstate["last_run"]')]
+
+
 def test_freezing_the_module_clock_in_a_same_file_helper_acquits(tmp_path):
     """daemon's own cure shape: a helper the unit calls monkeypatches the module's datetime."""
     source = """from datetime import datetime
@@ -1844,3 +1879,13 @@ def test_a_skills_own_tests_under_lib_are_in_the_corpus(tmp_path):
     assert result["score"] == 0
     failing = [c for c in result["checks"] if not c["passed"]]
     assert failing[0]["violations"][0]["file"] == "lib/reminder/tests/test_slots.py"
+
+
+def test_shared_parse_treats_a_valueerror_as_unparseable(monkeypatch):
+    """ast.parse raises ValueError, not SyntaxError, on a lone surrogate (and on a NUL byte before 3.12)."""
+    logged = MagicMock()
+    monkeypatch.setattr(check_support, "json_handler", logged)
+
+    assert check_support.parse("x = '\ud800'", tag="t") is None
+    assert check_support.parse("x = 1\0", tag="t") is None
+    assert logged.log_operation.call_count == 2

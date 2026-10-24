@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_host_state.py
 # Description: pytest_quality pack, host_state checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/host_state_check.py."""
@@ -12,6 +12,8 @@
 # seedgo: no-test-needed(constant) — the content page prose, pytest_quality_standards/host_state_content.py
 
 from pathlib import Path
+
+import pytest
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import host_state_check
 from aipass.seedgo.tests.support_pytest_quality_pack import _line_of, _write
@@ -276,6 +278,23 @@ class TestHostStateDetection:
 
         assert [row["species"] for row in result["violations"]] == ["ENV_MUTATION"]
         assert "monkeypatch.setenv is restored for you" in result["violations"][0]["detail"]
+
+    @pytest.mark.parametrize("decoy", ["snapshot = dict(os.environ)", 'patch("app.config.environment_name")'])
+    def test_a_builtin_call_or_a_longer_name_does_not_patch_os_environ(self, tmp_path, decoy):
+        _write(
+            tmp_path,
+            "tests/test_env.py",
+            f"""
+            def test_the_branch_is_read_from_the_environment():
+                {decoy}
+                os.environ["AIPASS_BRANCH"] = "daemon"
+                assert read_branch() == "daemon"
+            """,
+        )
+
+        result = host_state_check.check_branch(str(tmp_path))
+
+        assert [row["species"] for row in result["violations"]] == ["ENV_MUTATION"]
 
     def test_a_raw_chdir_with_no_restore_is_flagged(self, tmp_path):
         """CWD_CHANGE: os.chdir moves the whole process, not this test."""

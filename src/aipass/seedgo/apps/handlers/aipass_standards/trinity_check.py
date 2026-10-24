@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_check.py
 # Description: Trinity Memory File Standards Checker
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -111,7 +111,7 @@ def _read_json_file(path: Path) -> dict:
         return _fail_read("not found")
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning("trinity_check: cannot read %s: %s", path, exc)
         return _fail_read(f"unreadable ({exc})")
 

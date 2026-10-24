@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo.py
 # Description: SEEDGO - Standards Platform for AIPass
-# Version: 2.0.3
+# Version: 2.0.4
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ SEEDGO - Standards Platform for AIPass
 
 import sys
 import importlib.util
+import traceback
 from pathlib import Path
 from typing import List, Any
 
@@ -19,11 +20,14 @@ from aipass.prax import logger
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error
 from aipass.seedgo.apps.modules import CommandRefused
+from aipass.seedgo.apps.modules import standards_audit
 
 # The header and this constant both carry the version; --version and the README read this one.
-VERSION = "2.0.1"
+VERSION = "2.0.4"
 SEEDGO_ROOT = Path(__file__).parent
 MODULES_DIR = SEEDGO_ROOT / "modules"
+# refusal.EXIT_UNPROVEN, "the lane could not run"; spelled here because an entry point never imports handlers.
+EXIT_LANE_COULD_NOT_RUN = 2
 
 
 def discover_modules() -> List[Any]:
@@ -54,8 +58,8 @@ def discover_modules() -> List[Any]:
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """Route command to appropriate module.
 
-    A CommandRefused is the module's answer, not an error: it passes the catch-all untouched so its exit
-    code reaches the shell and no later module claims the same command.
+    A CommandRefused is the module's answer, not an error: it passes untouched so its exit code reaches the
+    shell. Any other raise is a crash, never "unknown command": it is logged whole and refused with exit 2.
     """
     for module in modules:
         try:
@@ -64,31 +68,26 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         except CommandRefused:
             raise
         except Exception as e:
-            logger.error(f"[SEEDGO] Module error: {e}")
+            name = getattr(module, "__name__", "unknown")
+            logger.error("[SEEDGO] Module %s crashed on '%s': %s\n%s", name, command, e, traceback.format_exc())
+            error(
+                f"'{command}' crashed in module {name}: {type(e).__name__}: {e}", suggestion="Traceback in seedgo's log"
+            )
+            raise CommandRefused(EXIT_LANE_COULD_NOT_RUN, command) from e
     return False
 
 
 def discover_handler_packs() -> list:
-    """Discover checker packs from handlers/*_standards/ directories."""
-    handlers_dir = SEEDGO_ROOT / "handlers"
-    packs = []
-    if not handlers_dir.exists():
-        return packs
-    for d in sorted(handlers_dir.iterdir()):
-        if not d.is_dir() or not d.name.endswith("_standards"):
-            continue
-        check_files = list(d.glob("*_check.py"))
-        content_files = list(d.glob("*_content.py"))
-        if check_files:
-            packs.append(
-                {
-                    "name": d.name,
-                    "path": d,
-                    "check_count": len(check_files),
-                    "content_count": len(content_files),
-                }
-            )
-    return packs
+    """The scoring checker packs, as the audit discovers them."""
+    return [
+        {
+            "name": d.name,
+            "path": d,
+            "check_count": len(list(d.glob("*_check.py"))),
+            "content_count": len(list(d.glob("*_content.py"))),
+        }
+        for d in standards_audit.scoring_packs().values()
+    ]
 
 
 def print_introspection() -> None:

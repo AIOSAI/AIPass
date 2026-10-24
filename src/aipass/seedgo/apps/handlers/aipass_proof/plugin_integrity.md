@@ -1,7 +1,7 @@
 # Plugin Integrity Proof — Dynamic Discovery Contract
-**Version:** 1.0.0
+**Version:** 1.0.1
 **Created:** 2026-03-22
-**Modified:** 2026-03-22
+**Modified:** 2026-10-23
 **Status:** Placeholder
 
 ---
@@ -62,7 +62,7 @@ elif standard_name == "encapsulation":
 ```python
 # GOOD — dynamic iteration
 for checker in discovered_checkers:
-    result = checker.check_module(file_path, module_name, branch_path)
+    result = checker.check_module(file_path, bypass_rules=bypass_rules)
 ```
 
 ### Cosmetic (upgrade target)

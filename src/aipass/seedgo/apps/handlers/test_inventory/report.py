@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: report.py
 # Description: assemble every row, declare the blind spots, publish the artifact
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -38,10 +38,6 @@ READABLE_NAME = "test_inventory.md"
 
 ARTIFACT_VERSION = "test-inventory/1"
 TOOL_VERSION = "1.0.0"
-
-#: Shorter strings are labels a skim-reader takes as verdicts; longer ones are
-#: prose, free to say the word the labels may not.
-CATEGORY_LENGTH = 40
 
 #: What this report cannot see; the writer refuses to publish an empty list.
 BLIND_SPOTS: tuple = (
@@ -330,34 +326,19 @@ def assert_publishable(summary: dict) -> None:
     if not summary.get("blind_spots"):
         raise ValueError("refusing to publish an inventory that declares no blind spots")
 
-    offenders = ranking.delete_language_in(" ".join(sorted(_vocabulary(summary))))
+    offenders = ranking.delete_language_in(" ".join(sorted(_keys(summary))))
     if offenders:
-        raise ValueError(f"refusing to publish: delete-family vocabulary in a published label: {offenders}")
+        raise ValueError(f"refusing to publish: delete-family vocabulary in a published key: {offenders}")
 
 
-def _vocabulary(summary: dict) -> List[str]:
-    """Every field name and label the summary publishes as a category.
+def _keys(value) -> List[str]:
+    """Every key name the summary publishes, at any depth.
 
-    Prose is told apart by CATEGORY_LENGTH alone: the blind-spot text says
-    "delete" on purpose, and a second skip-by-key guard would never be exercised.
-    """
-    found: List[str] = []
-
-    for key, value in summary.items():
-        found.append(key)
-        found.extend(_category_words(value))
-
-    return found
-
-
-def _category_words(value) -> List[str]:
-    """The keys and short string values nested under one summary entry."""
+    Values are data: a test named `test_remove` or prose that says the word is not a verdict."""
     if isinstance(value, dict):
-        return [key for key in value] + [word for nested in value.values() for word in _category_words(nested)]
+        return [name for key, child in value.items() for name in (str(key), *_keys(child))]
     if isinstance(value, list):
-        return [word for nested in value for word in _category_words(nested)]
-    if isinstance(value, str) and len(value) < CATEGORY_LENGTH:
-        return [value]
+        return [name for child in value for name in _keys(child)]
     return []
 
 

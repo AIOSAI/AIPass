@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -411,11 +411,11 @@ def _extract_test_counts(content: str) -> List[int]:
 
 
 def _count_test_functions(tests_dir: Path) -> int:
-    """Count `def test_` functions in all test_*.py files under tests/."""
+    """Count `def test_` and `async def test_` functions in all test_*.py files under tests/."""
     count = 0
     branch_root = tests_dir.parent
     ignore_entries = load_ignore_entries(branch_root)
-    test_func_pattern = re.compile(r"^\s*def\s+test_", re.MULTILINE)
+    test_func_pattern = re.compile(r"^\s*(?:async\s+)?def\s+test_", re.MULTILINE)
     for test_file in tests_dir.rglob("test_*.py"):
         if any(part in SOURCE_SKIP_DIRS for part in test_file.relative_to(tests_dir).parts):
             continue
@@ -426,7 +426,7 @@ def _count_test_functions(tests_dir: Path) -> int:
         try:
             source = test_file.read_text(encoding="utf-8")
             count += len(test_func_pattern.findall(source))
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             logger.info("Cannot read test file %s for count", test_file)
             continue
     return count
@@ -475,8 +475,9 @@ def _extract_relative_links(content: str) -> List[tuple]:
     links = []
     for match in link_pattern.finditer(content):
         text = match.group(1)
-        path = match.group(2)
-        if path.startswith(("http://", "https://", "mailto:", "#")):
+        # A link target may carry a "title" and a #fragment; only the file part exists on disk.
+        path = match.group(2).split()[0].split("#", 1)[0] if match.group(2).strip() else ""
+        if not path or path.startswith(("http://", "https://", "mailto:")):
             continue
         links.append((text, path))
     return links
@@ -604,7 +605,7 @@ def check_branch_info(branch_path: str) -> List[str]:
         return []
     try:
         content = readme_path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         logger.info("[readme] cannot read README for advisory lines at %s: %s", readme_path, e)
         return [f"{UNREAD}{readme_path} ({e})"]
 

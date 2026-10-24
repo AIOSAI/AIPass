@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch7_introspection.py
 # Description: introspection_check sub-functions (split from test_checkers_batch7.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/introspection_check.py."""
@@ -125,6 +125,18 @@ class TestCheckModuleHandleCommandGate:
         content = "def handle_command(command, args):\n    do_work(args)\n    return True\n"
         tree = ast.parse(content)
         result = check_module_handle_command_gate(tree, "test.py")
+        assert result is not None
+        assert result["passed"] is False
+
+    def test_a_has_arguments_test_is_no_no_args_gate(self):
+        content = (
+            "def handle_command(command, args):\n"
+            "    if len(args) > 0:\n"
+            "        print_introspection()\n"
+            "        return True\n"
+            "    return False\n"
+        )
+        result = check_module_handle_command_gate(ast.parse(content), "test.py")
         assert result is not None
         assert result["passed"] is False
 

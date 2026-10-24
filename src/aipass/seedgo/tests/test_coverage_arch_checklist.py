@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-26
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/architecture_check.py and apps/modules/checklist.py."""
@@ -869,13 +869,15 @@ class TestHandleCommandDirectoryMode:
         (d / "first.py").write_text("x = 1\n", encoding="utf-8")
         (d / "second.py").write_text("y = 2\n", encoding="utf-8")
         (d / "_private.py").write_text("z = 3\n", encoding="utf-8")
+        (d / "__init__.py").write_text("", encoding="utf-8")
         (d / "readme.txt").write_text("not python\n", encoding="utf-8")
 
         with patch.object(checklist, "run_checklist", return_value=[]) as ran:
             assert checklist.handle_command("checklist", [str(d)]) is True
 
         checked = sorted(Path(call.args[0]).name for call in ran.call_args_list)
-        assert checked == ["first.py", "second.py"], "directory mode must skip _private.py and readme.txt"
+        # The audit's corpus: _private.py is judged there, so it is judged here; the package marker is not.
+        assert checked == ["_private.py", "first.py", "second.py"]
 
     def test_directory_with_no_py_files(self, tmp_path, monkeypatch):
         """Directory with no .py files shows error."""
@@ -889,12 +891,13 @@ class TestHandleCommandDirectoryMode:
             checklist.handle_command("checklist", [str(d)])
         assert refused.value.code == refusal.EXIT_NO_UNITS
 
-    def test_directory_filters_underscore_files(self, tmp_path, monkeypatch):
-        """Directory mode filters files starting with underscore."""
+    def test_directory_filters_package_markers_and_disabled_files(self, tmp_path, monkeypatch):
+        """Directory mode drops what the audit drops: __init__.py and (disabled) files."""
 
         d = tmp_path / "onlypriv"
         d.mkdir()
-        (d / "_init.py").write_text("x = 1\n", encoding="utf-8")
+        (d / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+        (d / "old(disabled).py").write_text("x = 1\n", encoding="utf-8")
 
         # Filtered down to nothing is the same answer as empty, and it refuses
         # for the same reason.
@@ -1038,13 +1041,21 @@ class TestFormatFailureEdgeCases:
         results, _probe = _run_one(tmp_path, monkeypatch, {"passed": False})
         assert "no details" in results[0]["detail"].lower()
 
-    def test_format_failure_all_passed(self, tmp_path, monkeypatch):
-        """A failed result whose checks all passed gets the fallback."""
+    def test_a_false_passed_with_every_check_passed_is_a_pass(self, tmp_path, monkeypatch):
+        """The audit reports failed checks, not the checker's own passed; a row with none failed passes here too."""
 
         results, _probe = _run_one(
             tmp_path, monkeypatch, {"passed": False, "checks": [{"passed": True, "message": "OK"}]}
         )
-        assert "no details" in results[0]["detail"].lower()
+        assert (results[0]["passed"], results[0]["detail"]) == (True, None)
+
+    def test_a_true_passed_with_a_failed_check_is_a_finding(self, tmp_path, monkeypatch):
+        """A checker passing at score>=75 with a failed check showed a green tick the audit reports as a violation."""
+
+        results, _probe = _run_one(
+            tmp_path, monkeypatch, {"passed": True, "score": 90, "checks": [{"passed": False, "message": "bad name"}]}
+        )
+        assert (results[0]["passed"], results[0]["detail"]) == (False, "bad name")
 
     def test_format_failure_three_failures(self, tmp_path, monkeypatch):
         """Mutant: the +N more count off by one in apps/modules/checklist.py — killed."""
@@ -1238,7 +1249,7 @@ class TestHandleCommandPathResolution:
         """Mutant: the repo root never tried before CWD in apps/modules/checklist.py — killed."""
         # No git repo: the repo root is asked first and answers None.
         asked = []
-        monkeypatch.setattr(checklist, "_get_repo_root", lambda: asked.append("repo root"))
+        monkeypatch.setattr(checklist, "find_repo_root", lambda _start: asked.append("repo root"))
         monkeypatch.chdir(tmp_path)
 
         f = tmp_path / "sample.py"

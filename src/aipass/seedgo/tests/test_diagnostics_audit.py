@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_diagnostics_audit.py
 # Description: Unit tests for the diagnostics_audit module
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/diagnostics_audit.py."""
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 from rich.color import Color
 from rich.text import Text
 
-from aipass.seedgo.apps.modules import diagnostics_audit
+from aipass.seedgo.apps.modules import CommandRefused, diagnostics_audit
 
 
 def _console_lines(capsys, function_name: str, *args):
@@ -138,7 +138,9 @@ def test_handle_command_help_word():
 
 def test_handle_command_unknown_arg(capsys):
     """An unknown argument is named back, with the route that does work."""
-    assert diagnostics_audit.handle_command("diagnostics", ["some_unknown_arg"]) is True
+    with pytest.raises(CommandRefused) as refused:
+        diagnostics_audit.handle_command("diagnostics", ["some_unknown_arg"])
+    assert refused.value.code == 7
 
     diagnostics_audit.error.assert_called_once_with("Unknown argument: 'some_unknown_arg'")  # type: ignore[attr-defined]
     diagnostics_audit.warning.assert_called_once_with("This module has no subcommands.")  # type: ignore[attr-defined]
@@ -157,12 +159,12 @@ def test_print_introspection_runs(capsys):
 
 
 def test_print_help_runs(capsys):
-    """Help carries all three of its sections, and names pyright as the checker."""
+    """Help carries its sections, names pyright, and advertises only what the module accepts."""
     result, lines = _console_lines(capsys, "print_help")
 
     assert result is None
     assert "COMMANDS:" in lines
-    assert "EXAMPLES:" in lines
+    assert not [line for line in lines if "diagnostics_audit @" in line]
     assert "WHAT IT CHECKS:" in lines
     assert "  - Type errors (Pylance/pyright)" in lines
 
@@ -273,7 +275,8 @@ def test_unknown_argument_without_a_help_flag_still_errors(monkeypatch):
     complained = MagicMock()
     monkeypatch.setattr(diagnostics_audit, "error", complained)
 
-    assert diagnostics_audit.handle_command("diagnostics", ["aipass"]) is True
+    with pytest.raises(CommandRefused):
+        diagnostics_audit.handle_command("diagnostics", ["aipass"])
     assert complained.call_count == 1
 
 

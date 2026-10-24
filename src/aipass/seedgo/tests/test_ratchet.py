@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-12
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -147,6 +147,15 @@ class TestPick:
         _, err = capsys.readouterr()
         assert refused.value.code == refusal.EXIT_UNPROVEN
         assert "line 2" in err
+
+    def test_only_a_truncated_final_line_is_skipped(self, tmp_path):
+        """An append cut short loses nothing after it; a bad line in the middle would hide history."""
+        (tmp_path / series.SERIES_NAME).write_text('{"branch": "alpha"}\n{"branch": "be', encoding="utf-8")
+        assert series.read(tmp_path) == [{"branch": "alpha"}]
+
+        (tmp_path / series.SERIES_NAME).write_text('{"branch": "be\n{"branch": "alpha"}', encoding="utf-8")
+        with pytest.raises(ValueError, match="line 1"):
+            series.read(tmp_path)
 
 
 class TestRun:
