@@ -32,15 +32,15 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
                                      # no limit either place = CONFIG GAP, logged, skipped
                                      # unparseable file = logged, skipped — never a fallback
 → orchestrator.execute_rollover()
-  → create_rollover_backup()         # safety copy to branch/.backup/
   → extract_items()                  # the len - count oldest entries; none at exactly the limit
   → embed via subprocess             # fastembed (ONNX) — see vector_search.md re: venv
   → upsert in ChromaDB               # content-hash IDs (sha256[:16]), no duplicates
-  → trim source file                 # write back with oldest removed
+  → commit_trimmed()                 # the file is written LAST, only once the store holds the entries
 ```
 
-Rollover writes safety copies (`rollover_backup_*.json`) into `<branch>/.backup/` — a shared runtime
-namespace (see `@backup`'s README for all writers).
+A refused embed or store leaves the live file untouched; the next run upserts the same content-hash
+IDs, so a retry never duplicates. The watcher skips the rollover outright when the store's
+dependencies are missing.
 
 **Todos are not in this pipeline.** `detector.check_all_branches()` never counts them, so the fleet
 walk never rolls a pad. `rollover run` rolls ONE branch's pad before the walk (file only, no
@@ -142,8 +142,7 @@ archives the **tail** as "oldest", so a misordered array is silent memory loss.
   readable entries beside it are still ordered among the slots they occupy. One bad row does not
   forfeit protection for the whole container.
 - **Loud skip.** Every unreadable row is reported — `result["warnings"]` names the container and the
-  offending indices, a prax `WARNING` is logged, and `normalize_all_memory_files()` returns
-  `files_with_warnings` (also printed by the CLI). Warnings are *not* mutations, so a file with
+  offending indices and a prax `WARNING` is logged. Warnings are *not* mutations, so a file with
   nothing to change is left byte-identical.
 - **Type repair.** A `number` stored as a numeric string (`"171"`) or integral float is coerced to
   `int`, recorded in `changes`, and persisted, so a half-repaired container heals itself rather than raising `TypeError` inside

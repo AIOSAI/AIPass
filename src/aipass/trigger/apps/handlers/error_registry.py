@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_registry.py
 # Description: Structured error tracking and registry for Medic v2
-# Version: 2.5.1
+# Version: 2.6.0
 # Created: 2026-02-13
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -15,9 +15,10 @@ import json
 import re
 import time
 import uuid
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Iterator, Optional, Tuple
 
 
 from aipass.prax.apps.modules.logger import get_direct_logger
@@ -78,98 +79,96 @@ class CircuitBreakerState:
     half_open_allow: bool = True
 
 
-def _save_circuit_breaker_state() -> None:
-    """Persist full circuit breaker + per-fingerprint state to trigger_cb_state.json."""
+def _save_circuit_breaker_state(breaker: CircuitBreakerState, per_fingerprint: dict) -> None:
+    """Write breaker + per-fingerprint state to trigger_cb_state.json; the caller holds the lock."""
     try:
-        with json_file_lock(CB_STATE_FILE):
-            state_data = {
-                "circuit_breaker": {
-                    "state": _circuit_breaker.state,
-                    "opened_at": _circuit_breaker.opened_at,
-                    "cooldown_seconds": _circuit_breaker.cooldown_seconds,
-                    "recent_errors": _circuit_breaker.recent_errors,
-                    "summary_sent": _circuit_breaker.summary_sent,
-                    "half_open_allow": _circuit_breaker.half_open_allow,
-                },
-                "per_fingerprint": {
-                    fp: {
-                        "last_dispatch": max(times) if times else 0.0,
-                        "count": _fingerprint_dispatch_count.get(fp, 0),
-                    }
-                    for fp, times in _fingerprint_dispatch_times.items()
-                },
-            }
-            atomic_write_json(CB_STATE_FILE, state_data)
+        state_data = {
+            "circuit_breaker": {
+                "state": breaker.state,
+                "opened_at": breaker.opened_at,
+                "cooldown_seconds": breaker.cooldown_seconds,
+                "recent_errors": breaker.recent_errors,
+                "summary_sent": breaker.summary_sent,
+                "half_open_allow": breaker.half_open_allow,
+            },
+            "per_fingerprint": per_fingerprint,
+        }
+        atomic_write_json(CB_STATE_FILE, state_data)
     except Exception as exc:
         logger.warning("Failed to save circuit breaker state: %s", exc)
 
 
-def _restore_fingerprint_tracking(pf_data: dict) -> None:
-    """Restore per-fingerprint dispatch tracking from persisted data."""
-    global _fingerprint_dispatch_times, _fingerprint_dispatch_count
-    for fp, info in pf_data.items():
-        last = float(info.get("last_dispatch", 0.0))
-        count = int(info.get("count", 0))
-        if last > 0:
-            _fingerprint_dispatch_times[fp] = [last]
-        _fingerprint_dispatch_count[fp] = count
-
-
-def _load_circuit_breaker_state() -> CircuitBreakerState:
-    """Load full circuit breaker state from trigger_cb_state.json."""
+def _load_circuit_breaker_state() -> Tuple[CircuitBreakerState, dict]:
+    """Load the breaker and per-fingerprint {fp: {last_dispatch, count}} from trigger_cb_state.json."""
+    breaker = CircuitBreakerState()
+    per_fingerprint: dict = {}
     try:
         if not CB_STATE_FILE.exists():
-            return CircuitBreakerState()
-        raw = CB_STATE_FILE.read_text(encoding="utf-8").strip()
+            return breaker, per_fingerprint
+        raw = read_text_with_retry(CB_STATE_FILE).strip()
         if not raw:
-            return CircuitBreakerState()
+            return breaker, per_fingerprint
         data = json.loads(raw)
+        if isinstance(data.get("per_fingerprint"), dict):
+            per_fingerprint = data["per_fingerprint"]
         cb_data = data.get("circuit_breaker")
         if not isinstance(cb_data, dict) or cb_data.get("state") not in ("closed", "open", "half_open"):
-            return CircuitBreakerState()
-        breaker = CircuitBreakerState()
+            return breaker, per_fingerprint
         breaker.state = cb_data["state"]
         breaker.opened_at = float(cb_data.get("opened_at", 0.0))
         breaker.cooldown_seconds = int(cb_data.get("cooldown_seconds", breaker.base_cooldown))
         breaker.recent_errors = [float(t) for t in cb_data.get("recent_errors", [])]
         breaker.summary_sent = bool(cb_data.get("summary_sent", False))
         breaker.half_open_allow = bool(cb_data.get("half_open_allow", True))
-        _restore_fingerprint_tracking(data.get("per_fingerprint", {}))
-        return breaker
     except Exception as exc:
         logger.warning("Failed to load circuit breaker state: %s", exc)
-    return CircuitBreakerState()
+    return breaker, per_fingerprint
 
 
-def _clear_circuit_breaker_state() -> None:
-    """Remove persisted circuit breaker state file."""
+@contextmanager
+def _cb_state() -> Iterator[Tuple[CircuitBreakerState, dict]]:
+    """Load, let the caller change, and save the breaker file under its lock.
+
+    The file is the truth: the daemon, a CLI reset and a ci poll each see the others' writes.
+    """
+    stack = ExitStack()
     try:
-        if CB_STATE_FILE.exists():
-            CB_STATE_FILE.unlink()
+        stack.enter_context(json_file_lock(CB_STATE_FILE))
+        locked = True
     except Exception as exc:
-        logger.warning("Failed to clear circuit breaker state: %s", exc)
+        # Unlocked, the state is still read but never written: a blind write could drop another's change.
+        logger.warning("Failed to lock circuit breaker state: %s", exc)
+        locked = False
+    with stack:
+        breaker, per_fingerprint = _load_circuit_breaker_state()
+        before = (asdict(breaker), json.dumps(per_fingerprint, sort_keys=True))
+        yield breaker, per_fingerprint
+        if locked and before != (asdict(breaker), json.dumps(per_fingerprint, sort_keys=True)):
+            _save_circuit_breaker_state(breaker, per_fingerprint)
 
 
-_fingerprint_dispatch_times: Dict[str, List[float]] = {}
-_fingerprint_dispatch_count: Dict[str, int] = {}
-
-_circuit_breaker = _load_circuit_breaker_state()
-
-
-def _evaluate_state(now: Optional[float] = None) -> None:
-    """Evaluate circuit breaker state transitions on read.
+def _evaluate_state(breaker: CircuitBreakerState, now: Optional[float] = None) -> None:
+    """Move an open breaker whose cooldown has passed to half_open.
 
     Runs on status reads too, so the breaker self-heals while medic is off.
     """
-    global _circuit_breaker
-    if _circuit_breaker.state != "open":
+    if breaker.state != "open":
         return
-    elapsed = (time.time() if now is None else now) - _circuit_breaker.opened_at
-    if elapsed >= _circuit_breaker.cooldown_seconds:
-        _circuit_breaker.state = "half_open"
-        _circuit_breaker.half_open_allow = True
-        _circuit_breaker.summary_sent = False
-        _save_circuit_breaker_state()
+    elapsed = (time.time() if now is None else now) - breaker.opened_at
+    if elapsed >= breaker.cooldown_seconds:
+        breaker.state = "half_open"
+        breaker.half_open_allow = True
+        breaker.summary_sent = False
+
+
+def _close(breaker: CircuitBreakerState) -> None:
+    """Return the breaker to closed with the base cooldown."""
+    breaker.state = "closed"
+    breaker.opened_at = 0.0
+    breaker.cooldown_seconds = breaker.base_cooldown
+    breaker.recent_errors = []
+    breaker.summary_sent = False
+    breaker.half_open_allow = True
 
 
 def circuit_breaker_allows(now: Optional[float] = None) -> bool:
@@ -178,20 +177,14 @@ def circuit_breaker_allows(now: Optional[float] = None) -> bool:
     Half-open allows ONE probe; the caller must call circuit_breaker_probe_succeeded() to close.
     `now` is a test seam; product callers pass None.
     """
-    global _circuit_breaker
-    _evaluate_state(now)
-
-    if _circuit_breaker.state == "closed":
-        return True
-
-    if _circuit_breaker.state == "half_open":
-        if _circuit_breaker.half_open_allow:
-            _circuit_breaker.half_open_allow = False
-            _save_circuit_breaker_state()
+    with _cb_state() as (breaker, _):
+        _evaluate_state(breaker, now)
+        if breaker.state == "closed":
+            return True
+        if breaker.state == "half_open" and breaker.half_open_allow:
+            breaker.half_open_allow = False
             return True
         return False
-
-    return False
 
 
 def circuit_breaker_record_error(now: Optional[float] = None) -> None:
@@ -199,78 +192,54 @@ def circuit_breaker_record_error(now: Optional[float] = None) -> None:
 
     In half_open, any error re-opens with doubled cooldown. `now` is a test seam.
     """
-    global _circuit_breaker
     if now is None:
         now = time.time()
+    with _cb_state() as (breaker, _):
+        if breaker.state == "half_open":
+            breaker.state = "open"
+            breaker.opened_at = now
+            breaker.cooldown_seconds = min(breaker.cooldown_seconds * 2, breaker.max_cooldown)
+            breaker.summary_sent = False
+            breaker.recent_errors = [now]
+            return
 
-    if _circuit_breaker.state == "half_open":
-        new_cooldown = min(_circuit_breaker.cooldown_seconds * 2, _circuit_breaker.max_cooldown)
-        _circuit_breaker.state = "open"
-        _circuit_breaker.opened_at = now
-        _circuit_breaker.cooldown_seconds = new_cooldown
-        _circuit_breaker.summary_sent = False
-        _circuit_breaker.recent_errors = [now]
-        _save_circuit_breaker_state()
-        return
-
-    _circuit_breaker.recent_errors.append(now)
-    cutoff = now - _circuit_breaker.trip_window_seconds
-    _circuit_breaker.recent_errors = [t for t in _circuit_breaker.recent_errors if t >= cutoff]
-
-    if len(_circuit_breaker.recent_errors) >= _circuit_breaker.trip_threshold:
-        circuit_breaker_trip(reason="threshold_exceeded")
-
-
-def circuit_breaker_trip(reason: str = "") -> None:
-    """Manually trip the circuit breaker to open state."""
-    global _circuit_breaker
-    logger.info("Circuit breaker tripped: %s", reason or "manual")
-    _circuit_breaker.state = "open"
-    _circuit_breaker.opened_at = time.time()
-    _circuit_breaker.summary_sent = False
-    _save_circuit_breaker_state()
+        cutoff = now - breaker.trip_window_seconds
+        breaker.recent_errors = [t for t in breaker.recent_errors + [now] if t >= cutoff]
+        if len(breaker.recent_errors) >= breaker.trip_threshold:
+            logger.info("Circuit breaker tripped: threshold_exceeded")
+            breaker.state = "open"
+            breaker.opened_at = now
+            breaker.summary_sent = False
 
 
 def circuit_breaker_probe_succeeded() -> None:
     """Close the breaker after a successful dispatch during half_open probe."""
-    global _circuit_breaker
-    if _circuit_breaker.state != "half_open":
-        return
-    _circuit_breaker.state = "closed"
-    _circuit_breaker.opened_at = 0.0
-    _circuit_breaker.cooldown_seconds = _circuit_breaker.base_cooldown
-    _circuit_breaker.recent_errors = []
-    _circuit_breaker.summary_sent = False
-    _circuit_breaker.half_open_allow = True
-    _clear_circuit_breaker_state()
+    with _cb_state() as (breaker, _):
+        if breaker.state == "half_open":
+            _close(breaker)
 
 
 def circuit_breaker_reset() -> None:
-    """Reset circuit breaker to closed state."""
-    global _circuit_breaker
-    _circuit_breaker.state = "closed"
-    _circuit_breaker.opened_at = 0.0
-    _circuit_breaker.cooldown_seconds = _circuit_breaker.base_cooldown
-    _circuit_breaker.recent_errors = []
-    _circuit_breaker.summary_sent = False
-    _circuit_breaker.half_open_allow = True
-    _clear_circuit_breaker_state()
+    """Reset circuit breaker to closed state; per-fingerprint backoff is kept."""
+    with _cb_state() as (breaker, _):
+        _close(breaker)
 
 
 def get_circuit_breaker_status(now: Optional[float] = None) -> dict:
     """Get current circuit breaker state as a dictionary."""
     if now is None:
         now = time.time()
-    _evaluate_state(now)
+    with _cb_state() as (breaker, _):
+        _evaluate_state(breaker, now)
     remaining = 0
-    if _circuit_breaker.state == "open":
-        remaining = max(0, int(_circuit_breaker.cooldown_seconds - (now - _circuit_breaker.opened_at)))
+    if breaker.state == "open":
+        remaining = max(0, int(breaker.cooldown_seconds - (now - breaker.opened_at)))
     return {
-        "state": _circuit_breaker.state,
-        "opened_at": _circuit_breaker.opened_at,
-        "cooldown_seconds": _circuit_breaker.cooldown_seconds,
-        "recent_error_count": len(_circuit_breaker.recent_errors),
-        "summary_sent": _circuit_breaker.summary_sent,
+        "state": breaker.state,
+        "opened_at": breaker.opened_at,
+        "cooldown_seconds": breaker.cooldown_seconds,
+        "recent_error_count": len(breaker.recent_errors),
+        "summary_sent": breaker.summary_sent,
         "remaining_seconds": remaining,
     }
 
@@ -293,7 +262,7 @@ def get_dispatch_count(fingerprint: str) -> int:
 
     The escalation digest reads it to tell "owner told, still happening" from "not told yet".
     """
-    return _fingerprint_dispatch_count.get(fingerprint, 0)
+    return int(_load_circuit_breaker_state()[1].get(fingerprint, {}).get("count", 0))
 
 
 def is_suppressed(fingerprint: str) -> bool:
@@ -319,29 +288,21 @@ def should_dispatch(fingerprint: str, now: Optional[float] = None) -> bool:
     if is_suppressed(fingerprint):
         return False
 
-    count = _fingerprint_dispatch_count.get(fingerprint, 0)
-    if count == 0:
+    info = _load_circuit_breaker_state()[1].get(fingerprint, {})
+    count = int(info.get("count", 0))
+    last_dispatch = float(info.get("last_dispatch", 0.0))
+    if count == 0 or last_dispatch <= 0:
         return True
 
-    times = _fingerprint_dispatch_times.get(fingerprint, [])
-    if not times:
-        return True
-
-    last_dispatch = max(times)
-    backoff = get_backoff_seconds(count)
     elapsed = (time.time() if now is None else now) - last_dispatch
-
-    return elapsed >= backoff
+    return elapsed >= get_backoff_seconds(count)
 
 
 def record_dispatch(fingerprint: str) -> None:
     """Record that a dispatch was sent for this fingerprint."""
-    now = time.time()
-    if fingerprint not in _fingerprint_dispatch_times:
-        _fingerprint_dispatch_times[fingerprint] = []
-    _fingerprint_dispatch_times[fingerprint].append(now)
-    _fingerprint_dispatch_count[fingerprint] = _fingerprint_dispatch_count.get(fingerprint, 0) + 1
-    _save_circuit_breaker_state()
+    with _cb_state() as (_, per_fingerprint):
+        info = per_fingerprint.get(fingerprint, {})
+        per_fingerprint[fingerprint] = {"last_dispatch": time.time(), "count": int(info.get("count", 0)) + 1}
 
 
 def normalize_message(message: str) -> str:
@@ -568,10 +529,11 @@ def clear_resolved(days: int = 7) -> int:
         return -1
 
 
-def purge_stale(days: int = 30) -> int:
-    """Remove entries whose last_seen is older than N days regardless of status.
+def purge_stale(days: int = 30, keep_suppressed: bool = False) -> int:
+    """Remove entries whose last_seen is older than N days, of any status unless keep_suppressed.
 
-    Returns -1 when the registry could not be walked.
+    A dropped suppressed row would dispatch again on its next recurrence. Returns -1 when the
+    registry could not be walked.
     """
     try:
         with json_file_lock(REGISTRY_FILE):
@@ -582,7 +544,7 @@ def purge_stale(days: int = 30) -> int:
             fingerprints_to_remove = []
             for fp, entry in registry["errors"].items():
                 last_seen = entry.get("last_seen", "")
-                if last_seen and last_seen < cutoff:
+                if last_seen and last_seen < cutoff and not (keep_suppressed and entry.get("status") == "suppressed"):
                     fingerprints_to_remove.append(fp)
 
             for fp in fingerprints_to_remove:
@@ -644,13 +606,16 @@ def update_source_fix_status(fingerprint: str, fix_status: str) -> bool:
 
 
 def _find_entry(registry: dict, fingerprint: str) -> Optional[dict]:
-    """Find an entry by exact fingerprint or prefix match; returns the live dict."""
+    """Find an entry by exact fingerprint or a unique prefix; returns the live dict.
+
+    A prefix matching more than one row returns None, so a short prefix never acts on the wrong error.
+    """
     if fingerprint in registry["errors"]:
         return registry["errors"][fingerprint]
 
-    if len(fingerprint) < 40:
-        for fp, entry in registry["errors"].items():
-            if fp.startswith(fingerprint):
-                return entry
+    if fingerprint and len(fingerprint) < 40:
+        matches = [entry for fp, entry in registry["errors"].items() if fp.startswith(fingerprint)]
+        if len(matches) == 1:
+            return matches[0]
 
     return None

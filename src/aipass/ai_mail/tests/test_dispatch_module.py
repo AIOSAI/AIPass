@@ -3,17 +3,10 @@
 # Description: Tests for dispatch.py orchestrator functions
 # Version: 1.0.3
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
-
-# Covers: print_help, handle_command, _orchestrate_status,
-# _orchestrate_wake, _orchestrate_dispatch_send, _orchestrate_daemon,
-# print_introspection.
-#
-# All handler dependencies are mocked -- these tests verify orchestration
-# logic, not business logic.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the handler modules _orchestrate_dispatch_send reaches parse and import
@@ -46,16 +39,6 @@ def _wake(args):
     return handle_command("dispatch", ["wake", *args])
 
 
-def _status():
-    """`dispatch status`."""
-    return handle_command("dispatch", ["status"])
-
-
-def _daemon():
-    """`dispatch daemon`."""
-    return handle_command("dispatch", ["daemon"])
-
-
 # ---------------------------------------------------------------------------
 # Autouse fixture: suppress json_handler.log_operation
 # ---------------------------------------------------------------------------
@@ -77,15 +60,11 @@ MOD = "aipass.ai_mail.apps.modules.dispatch"
 
 # Source modules for lazy imports inside _orchestrate_dispatch_send
 _H_SEND = "aipass.ai_mail.apps.handlers.email.send"
-_H_CREATE = "aipass.ai_mail.apps.handlers.email.create"
-_H_DELIVERY = "aipass.ai_mail.apps.handlers.email.delivery"
-_H_HEADER = "aipass.ai_mail.apps.handlers.email.header"
-_H_ERR = "aipass.ai_mail.apps.handlers.email.error_dispatch"
 _H_USERS = "aipass.ai_mail.apps.handlers.users.user"
 _H_REG = "aipass.ai_mail.apps.handlers.registry.read"
-_H_CENTRAL = "aipass.ai_mail.apps.handlers.central_writer"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
-_H_TRIGGER = "aipass.trigger.apps.modules.core"
+# The send half runs through email_send._send_direct, which binds these names at import.
+_ES = "aipass.ai_mail.apps.modules.email_send"
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
 
@@ -112,8 +91,6 @@ class TestPrintHelp:
         print_help()
         combined = " ".join(printed)
         assert "dispatch" in combined.lower()
-        assert "status" in combined.lower()
-        assert "daemon" in combined.lower()
         assert "wake" in combined.lower()
 
 
@@ -168,51 +145,6 @@ class TestHandleCommand:
         assert result is True
         assert "COMMANDS" in " ".join(printed)
 
-    def test_dispatch_status_subcommand(self, monkeypatch):
-        """'dispatch status' delegates to _orchestrate_status, which reads the empty log."""
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: [])
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = handle_command("dispatch", ["status"])
-        assert result is True
-        assert "No dispatches recorded yet." in " ".join(printed)
-
-    def test_dispatch_status_with_an_unreadable_log_says_so(self, monkeypatch):
-        """An unreadable dispatch log is an error, never "No dispatches recorded yet.".
-
-        load_dispatch_log raises on a log it cannot parse since leg 10; status
-        reports that through error() and prints no empty-log line. Its proof is
-        the mutant that answers [] again.
-        """
-
-        def _unreadable():
-            raise json.JSONDecodeError("Expecting value", "{", 0)
-
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", _unreadable)
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-        errors: list[str] = []
-        monkeypatch.setattr(f"{MOD}.error", lambda message, *a, **k: errors.append(message))
-
-        result = handle_command("dispatch", ["status"])
-
-        assert result is True
-        assert "No dispatches recorded yet." not in " ".join(printed)
-        assert len(errors) == 1
-        assert errors[0].startswith("Dispatch log unreadable: ")
-
-    def test_dispatch_daemon_subcommand(self, monkeypatch):
-        """'dispatch daemon' delegates to _orchestrate_daemon."""
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-        daemon = MagicMock(return_value=True)
-        monkeypatch.setattr(f"{MOD}._orchestrate_daemon", daemon)
-
-        result = handle_command("dispatch", ["daemon"])
-        assert result is True
-        daemon.assert_called_once_with()
-
     def test_dispatch_wake_subcommand(self, monkeypatch):
         """'dispatch wake @branch' delegates to _orchestrate_wake."""
         printed: list[str] = []
@@ -245,13 +177,7 @@ class TestHandleCommand:
         send.assert_called_once_with(argv)
 
     def test_dispatch_unknown_subcommand(self, monkeypatch):
-        """Unknown subcommand prints its own error and still returns True.
-
-        "dispatch" WAS recognised — this module owns it and has already said
-        what is wrong with the subcommand. Returning False sent the router on
-        to print "Unknown command: dispatch" underneath, so one mistyped
-        subcommand produced two contradictory errors.
-        """
+        """Unknown subcommand prints its own error and returns True, so the router adds no second error."""
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
@@ -264,162 +190,6 @@ class TestHandleCommand:
     def test_non_dispatch_command_is_declined(self):
         """A command this module does not own returns False, unhandled."""
         assert handle_command("email", ["@target", "Subject", "Body"]) is False
-
-
-# ===========================================================================
-# _orchestrate_status
-# ===========================================================================
-
-
-class TestOrchestrateStatus:
-    """Tests for _orchestrate_status."""
-
-    def test_no_dispatches_prints_empty(self, monkeypatch):
-        """No dispatches prints 'No dispatches recorded yet.'."""
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: [])
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        assert any("No dispatches" in p for p in printed)
-
-    def test_running_status_display(self, monkeypatch):
-        """A spawned dispatch with a running PID shows RUNNING."""
-        dispatches = [
-            {
-                "branch": "@alpha",
-                "pid": 12345,
-                "timestamp": "2026-04-25T10:00:00",
-                "status": "spawned",
-            },
-        ]
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: dispatches)
-        monkeypatch.setattr(f"{MOD}.check_pid_status", lambda pid: "RUNNING")
-        monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "5m ago")
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        combined = " ".join(printed)
-        assert "RUNNING" in combined
-        assert "@alpha" in combined
-        assert "Active: 1" in combined
-
-    def test_completed_status_display(self, monkeypatch):
-        """A spawned dispatch with a completed PID shows COMPLETED."""
-        dispatches = [
-            {
-                "branch": "@beta",
-                "pid": 99999,
-                "timestamp": "2026-04-25T09:00:00",
-                "status": "spawned",
-            },
-        ]
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: dispatches)
-        monkeypatch.setattr(f"{MOD}.check_pid_status", lambda pid: "COMPLETED")
-        monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "1h ago")
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        combined = " ".join(printed)
-        assert "COMPLETED" in combined
-        assert "Active: 0" in combined
-
-    def test_failed_status_display(self, monkeypatch):
-        """A dispatch with status 'failed' shows FAILED."""
-        dispatches = [
-            {
-                "branch": "@gamma",
-                "pid": None,
-                "timestamp": "2026-04-25T08:00:00",
-                "status": "failed",
-            },
-        ]
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: dispatches)
-        monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "2h ago")
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        combined = " ".join(printed)
-        assert "FAILED" in combined
-        assert "NO PID" in combined
-
-    def test_unknown_status_display(self, monkeypatch):
-        """A dispatch with unknown status shows yellow UNKNOWN."""
-        dispatches = [
-            {
-                "branch": "@delta",
-                "pid": None,
-                "timestamp": "2026-04-25T07:00:00",
-                "status": "weird",
-            },
-        ]
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: dispatches)
-        monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "3h ago")
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        combined = " ".join(printed)
-        assert "UNKNOWN" in combined
-
-    def test_multiple_dispatches_shows_active_count(self, monkeypatch):
-        """Multiple dispatches shows correct active count."""
-        dispatches = [
-            {"branch": "@a", "pid": 100, "timestamp": "t1", "status": "spawned"},
-            {"branch": "@b", "pid": 200, "timestamp": "t2", "status": "spawned"},
-            {"branch": "@c", "pid": 300, "timestamp": "t3", "status": "spawned"},
-        ]
-        pid_map = {100: "RUNNING", 200: "COMPLETED", 300: "RUNNING"}
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: dispatches)
-        monkeypatch.setattr(
-            f"{MOD}.check_pid_status",
-            lambda pid: pid_map.get(pid, "UNKNOWN"),
-        )
-        monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "0m")
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        combined = " ".join(printed)
-        assert "Active: 2" in combined
-        assert "Total: 3" in combined
-
-    def test_more_than_five_dispatches_shows_last_five(self, monkeypatch):
-        """Only the last 5 dispatches are shown."""
-        dispatches = [
-            {
-                "branch": f"@b{i}",
-                "pid": None,
-                "timestamp": f"t{i}",
-                "status": "failed",
-            }
-            for i in range(8)
-        ]
-        monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: dispatches)
-        monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "0m")
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        result = _status()
-        assert result is True
-        combined = " ".join(printed)
-        assert "Total: 5" in combined
-        # The first 3 (b0, b1, b2) should NOT appear
-        assert "@b0" not in combined
-        assert "@b1" not in combined
-        assert "@b2" not in combined
-        # The last 5 (b3..b7) should appear
-        assert "@b7" in combined
-        assert "@b3" in combined
 
 
 # ===========================================================================
@@ -702,18 +472,18 @@ def _send_patches(overrides: dict | None = None) -> ExitStack:
 
     defaults = {
         f"{_H_SEND}.resolve_sender_info": MagicMock(return_value={"email_address": "@ai_mail"}),
-        f"{_H_HEADER}.prepend_dispatch_header": MagicMock(return_value="[DISPATCH] Body"),
-        f"{_H_SEND}.send_to_single": MagicMock(return_value=(True, None)),
-        f"{_H_ERR}.on_email_delivered": MagicMock(),
+        f"{_ES}.prepend_dispatch_header": MagicMock(return_value="[DISPATCH] Body"),
+        f"{_ES}.send_to_single": MagicMock(return_value=(True, None)),
+        f"{_ES}.on_email_delivered": MagicMock(),
         f"{_H_USERS}.get_current_user": MagicMock(return_value={"name": "test"}),
         f"{_H_REG}.get_branch_by_email": MagicMock(return_value={"email": "@target"}),
-        f"{_H_CENTRAL}.update_central": MagicMock(),
-        f"{_H_CREATE}.create_email_file": MagicMock(),
-        f"{_H_CREATE}.load_email_file": MagicMock(),
-        f"{_H_DELIVERY}.deliver_email_to_branch": MagicMock(),
-        f"{_H_ERR}.dispatch_send_error": MagicMock(),
+        f"{_ES}.update_central": MagicMock(),
+        f"{_ES}.create_email_file": MagicMock(),
+        f"{_ES}.load_email_file": MagicMock(),
+        f"{_ES}.deliver_email_to_branch": MagicMock(),
+        f"{_ES}.dispatch_send_error": MagicMock(),
         f"{_H_WAKE}.wake_branch": MagicMock(return_value=(mock_status, True)),
-        f"{_H_TRIGGER}.trigger": MagicMock(),
+        f"{_ES}.trigger": MagicMock(),
     }
     if overrides:
         defaults.update(overrides)
@@ -742,6 +512,7 @@ class TestOrchestrateDispatchSend:
         """Successful send + wake returns True."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+        monkeypatch.setattr(f"{_ES}.console", _mock_console(printed))
 
         patches = _send_patches()
         with patches:
@@ -760,22 +531,24 @@ class TestOrchestrateDispatchSend:
         """
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
+        monkeypatch.setattr(f"{_ES}.error", lambda msg: errors.append(msg))
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+        monkeypatch.setattr(f"{_ES}.console", _mock_console(printed))
 
         dispatch_error_calls: list[tuple] = []
         mock_dispatch_err = MagicMock(side_effect=lambda *a: dispatch_error_calls.append(a))
         patches = _send_patches(
             {
-                f"{_H_SEND}.send_to_single": MagicMock(return_value=(False, "Branch not found")),
-                f"{_H_ERR}.dispatch_send_error": mock_dispatch_err,
+                f"{_ES}.send_to_single": MagicMock(return_value=(False, "Branch not found")),
+                f"{_ES}.dispatch_send_error": mock_dispatch_err,
             }
         )
         with patches:
             result = _send(["@target", "Subject", "Body"])
 
         assert result is True
-        assert any("Dispatch to @target not sent" in e for e in errors)
+        assert any("Failed to deliver: Branch not found" in e for e in errors)
         assert len(dispatch_error_calls) == 1
         # The pre-send "Sending dispatch email to ..." announcement is gone.
         # drone replays stdout before stderr, so a progress line printed before
@@ -890,7 +663,7 @@ class TestOrchestrateDispatchSend:
 
         patches = _send_patches(
             {
-                f"{_H_HEADER}.prepend_dispatch_header": MagicMock(side_effect=tracking_header),
+                f"{_ES}.prepend_dispatch_header": MagicMock(side_effect=tracking_header),
             }
         )
         with patches:
@@ -909,7 +682,7 @@ class TestOrchestrateDispatchSend:
 
         patches = _send_patches(
             {
-                "aipass.trigger.apps.modules.core.trigger": mock_trigger,
+                f"{_ES}.trigger": mock_trigger,
             }
         )
         with patches:
@@ -937,32 +710,6 @@ class TestOrchestrateDispatchSend:
 
 
 # ===========================================================================
-# _orchestrate_daemon
-# ===========================================================================
-
-
-class TestOrchestrateDaemon:
-    """Tests for _orchestrate_daemon."""
-
-    def test_calls_run_daemon(self, monkeypatch):
-        """_orchestrate_daemon calls run_daemon and returns True."""
-        printed: list[str] = []
-        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        daemon_called: list[bool] = []
-        with patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.run_daemon",
-            side_effect=lambda: daemon_called.append(True),
-        ):
-            result = _daemon()
-
-        assert result is True
-        assert len(daemon_called) == 1
-        combined = " ".join(printed)
-        assert "daemon" in combined.lower()
-
-
-# ===========================================================================
 # print_introspection
 # ===========================================================================
 
@@ -979,9 +726,7 @@ class TestPrintIntrospection:
         combined = " ".join(printed)
         assert "dispatch Module" in combined
         assert "Connected Handlers" in combined
-        assert "status.py" in combined
         assert "wake.py" in combined
-        assert "daemon.py" in combined
 
 
 # ===========================================================================
@@ -1046,7 +791,7 @@ class TestWakeBackMessaging:
 
         patches = _send_patches(
             {
-                f"{_H_SEND}.send_to_single": MagicMock(return_value=(False, "error")),
+                f"{_ES}.send_to_single": MagicMock(return_value=(False, "error")),
             }
         )
         with patches:
@@ -1086,7 +831,7 @@ class TestSpoofedSenderRefusal:
 
         wake = MagicMock()
         send = MagicMock(return_value=(True, None))
-        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
+        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_ES}.send_to_single": send})
         with patches:
             result = _send(["@target", "Subject", "Body", "--from", "@daemon"])
 
@@ -1191,7 +936,7 @@ class TestSpoofedSenderRefusal:
 
         wake = MagicMock(return_value=(MagicMock(), True))
         send = MagicMock(return_value=(True, None))
-        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
+        patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_ES}.send_to_single": send})
         with patches:
             _send(["@target", "Subject", "Body", "--from", "@spawn"])
 

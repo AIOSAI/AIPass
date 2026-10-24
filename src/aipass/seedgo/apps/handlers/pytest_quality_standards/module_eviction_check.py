@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_eviction_check.py
 # Description: v5 - a test that evicts a cached module and does not put it back
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Does this test leave the import cache the way it found it?
@@ -261,9 +261,11 @@ def _in_a_finally(nodes: List[ast.AST]) -> Set[int]:
 
 
 def _restores_cache(node: ast.AST, eviction: Eviction) -> bool:
-    """True for `sys.modules[K] = ...` naming the evicted key, or `sys.modules.update(...)`."""
+    """True for `sys.modules[K] = saved` naming the evicted key, or `sys.modules.update(...)`.
+
+    A CALL IS NOT A RESTORE: `MagicMock()` or `import_module(K)` caches a new object, not the evicted module."""
     if isinstance(node, ast.Assign):
-        return any(
+        return not isinstance(node.value, ast.Call) and any(
             isinstance(t, ast.Subscript)
             and corpus.dotted_name(t.value) == SYS_MODULES
             and _same(t.slice, eviction.target)
@@ -308,17 +310,12 @@ def _is_fixture(node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
     return False
 
 
-def teardown_after_yield(function: Union[ast.FunctionDef, ast.AsyncFunctionDef], nodes: List[ast.AST]) -> bool:
-    """True when a fixture runs any statement after handing its value over.
+def before_teardown(function: Union[ast.FunctionDef, ast.AsyncFunctionDef], nodes: List[ast.AST], line: int) -> bool:
+    """False for a line in a fixture's teardown, after its last yield: an eviction there IS the cleanup.
 
-    ANY STATEMENT, NOT A TRY/FINALLY: pytest runs a yield fixture's teardown for a failing test too."""
-    if not _is_fixture(function):
-        return False
+    One before the yield still needs a restore, which may sit after it: pytest runs teardown for a failing test too."""
     yields = [getattr(n, "lineno", -1) for n in nodes if isinstance(n, (ast.Yield, ast.YieldFrom))]
-    if not yields:
-        return False
-    last_yield = max(yields)
-    return any(isinstance(n, ast.stmt) and n.lineno > last_yield for n in nodes)
+    return not (yields and _is_fixture(function) and line > max(yields))
 
 
 def _literal_strings(node: ast.AST) -> List[str]:
@@ -608,8 +605,8 @@ def rebinds_in(
     `patch.dict(sys.modules)` acquits nothing here: it restores the dict only."""
     known = facts or FileFacts()
     nodes = own_nodes(function)
-    clears = cache_clears_in(nodes, known)
-    if not clears or teardown_after_yield(function, nodes):
+    clears = [c for c in cache_clears_in(nodes, known) if before_teardown(function, nodes, c.line)]
+    if not clears:
         return []
     finally_ids = _in_a_finally(nodes)
     expected_to_fail = _inside_pytest_raises(nodes)
@@ -669,8 +666,12 @@ def unrestored_in(
     `facts` defaults to none: a function handed over without its file gets the strict reading, never a generous one."""
     known = facts or FileFacts()
     nodes = own_nodes(function)
-    candidates = evictions_in(nodes, provable_modules(function, nodes, known.imports))
-    if not candidates or teardown_after_yield(function, nodes):
+    candidates = [
+        c
+        for c in evictions_in(nodes, provable_modules(function, nodes, known.imports))
+        if before_teardown(function, nodes, c.line)
+    ]
+    if not candidates:
         return []
     guarded = _patch_dict_guarded(function, nodes)
     finally_ids = _in_a_finally(nodes)

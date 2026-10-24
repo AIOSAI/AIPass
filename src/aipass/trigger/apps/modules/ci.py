@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ci.py
 # Description: CI red lane - poll dev's runs, wake the owner, gate the cure through @seedgo, push it through drone
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-22
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.handlers.ci import git_door, ledger, outbound, replies, triage
 from aipass.trigger.apps.handlers.cli.help_flags import wants_help
-from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, RETRIED_STATES, run_url
+from aipass.trigger.apps.handlers.events.ci_red import PAYLOAD_KEYS, is_retried, run_url
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.modules.core import trigger
@@ -84,7 +84,8 @@ def _observe(data: Dict[str, Any], row: Dict[str, str], newest_id: str) -> bool:
     """Record one dev run; True when it is a red seen for the first time as its workflow's newest."""
     run = data["runs"].setdefault(row["run_id"], {"verdict": "running"})
     run.update({k: row[k] for k in ("workflow", "event", "title", "created", "status", "conclusion")})
-    if run.get("triaged") or row["status"] != "completed":
+    stale_claim = run.get("verdict") == "triaging" and not ledger.claim_is_live(run)
+    if (run.get("triaged") and not stale_claim) or row["status"] != "completed":
         return False
     if row["conclusion"] == "success":
         run.update(verdict="green", triaged=True)
@@ -92,6 +93,8 @@ def _observe(data: Dict[str, Any], row: Dict[str, str], newest_id: str) -> bool:
     if row["run_id"] != newest_id:
         run.update(verdict="superseded", triaged=True)
         return False
+    # Claimed under the poll's lock, so an overlapping poll skips it; a dead poll's claim goes stale.
+    run.update(verdict="triaging", triaged=True, claimed=ledger.utc_now())
     return True
 
 
@@ -153,6 +156,7 @@ def _triage_reds(reds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
             facts = triage.triage_log(git_door.run_view_failed(run_id)) if row["conclusion"] == "failure" else {}
         except git_door.DroneCallFailed as exc:
             logger.warning(f"[ci] run {run_id} log unread, retried next poll: {exc}")
+            verdicts[run_id] = "running"
             continue
         base = {"run_id": run_id, "workflow": row["workflow"], "url": run_url(run_id)}
         base.update(step=facts.get("step", ""), lines=facts.get("lines", []))
@@ -166,13 +170,13 @@ def _triage_reds(reds: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         payloads.extend({**base, "owner": owner} for owner in owners)
     with ledger.update() as data:
         for run_id, verdict in verdicts.items():
-            data["runs"][run_id].update(verdict=verdict, triaged=True)
+            data["runs"][run_id].update(verdict=verdict, triaged=verdict != "running")
     return payloads
 
 
 def _drain(data: Dict[str, Any]) -> tuple:
     """Cures waiting on a gate or the cap: owner wakes to re-fire, seedgo reviews to re-request."""
-    owners = [c for c in data["cures"].values() if c["state"] in RETRIED_STATES]
+    owners = [c for c in data["cures"].values() if is_retried(c)]
     reviews = [key for key, c in data["cures"].items() if c["state"] == "review_queued"]
     return owners, reviews
 

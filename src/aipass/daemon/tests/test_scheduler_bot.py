@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_scheduler_bot.py
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-25
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
@@ -191,10 +191,11 @@ class TestQueueJsonSchema:
         assert interval_entry["type"] == "interval"
 
     def test_schedule_human_formats(self, interval_job, monkeypatch, capsys):
-        """schedule_human renders each type correctly. Mutant killed: hourly drops its colon."""
+        """schedule_human renders each type; rotation reads daily, as `rotation` says. Mutant killed: hourly drops its colon."""
         schedules = {
             "once": {"type": "once", "due_date": "2026-07-02"},
             "daily": {"type": "daily", "time": "04:00"},
+            "rounds": {"type": "rotation", "time": "05:00"},
             "hourly": {"type": "hourly", "time": "30"},
             "two-hours": {"type": "interval", "interval_minutes": 120},
             "half-hour": {"type": "interval", "interval_minutes": 30},
@@ -206,10 +207,21 @@ class TestQueueJsonSchema:
         assert rendered == {
             "once": "2026-07-02",
             "daily": "daily @ 04:00",
+            "rounds": "daily @ 05:00",
             "hourly": "hourly @ :30",
             "two-hours": "every 2h",
             "half-hour": "every 30m",
         }
+
+    def test_a_disabled_job_shows_no_next_run(self, interval_job, monkeypatch, capsys):
+        """Disabled @vera jobs listed a stale next run, one in the past."""
+        job = dict(interval_job, enabled=False)
+        runstate = {
+            "jobs": {"@commons/rotation": {"last_run": "2026-09-21T07:45:00", "next_run": "2026-09-21T09:45:00"}}
+        }
+        (row,) = _queue_json(monkeypatch, capsys, [job], runstate)["jobs"]
+        assert row["next_run"] is None
+        assert row["last_run"] == "2026-09-21T07:45:00"
 
     @pytest.mark.parametrize("bad_interval", ["sixty", None, True], ids=["text", "null", "bool"])
     def test_an_unreadable_interval_renders_its_row(self, interval_job, monkeypatch, capsys, bad_interval):

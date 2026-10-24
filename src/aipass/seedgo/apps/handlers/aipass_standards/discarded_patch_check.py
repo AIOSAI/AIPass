@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discarded_patch_check.py
 # Description: Discarded Patch Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Discarded Patch Standards Checker Handler
@@ -11,13 +11,14 @@
 Reference: discarded_patch.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -46,15 +47,6 @@ _MONKEYPATCH = "monkeypatch"
 _THROWAWAY: frozenset[str] = frozenset({"Mock", "MagicMock", "AsyncMock"})
 
 CURE = "assert on the mock, or drop the patch and let the call stand"
-
-
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
 
 
 def _base_name(node: ast.expr) -> str:
@@ -119,7 +111,7 @@ def _tests(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.AST], Set[str]]]:
 
 def _is_patch(node: ast.AST) -> bool:
     """Whether this call is ``patch(...)`` or ``patch.object(...)``."""
-    return isinstance(node, ast.Call) and _tail_name(node.func) in _PATCH_VERBS
+    return isinstance(node, ast.Call) and tail_name(node.func) in _PATCH_VERBS
 
 
 def _targets_own_branch(call: ast.Call, branch: str, own: Set[str]) -> bool:
@@ -136,13 +128,13 @@ def _handed_over(call: ast.Call) -> bool:
     """Whether a replacement was handed to the patch rather than left as a bare mock."""
     if {keyword.arg for keyword in call.keywords} & _HANDED_OVER:
         return True
-    slot = 2 if _tail_name(call.func) == "patch" else 3
+    slot = 2 if tail_name(call.func) == "patch" else 3
     return len(call.args) >= slot
 
 
 def _is_monkeypatch(node: ast.AST) -> bool:
     """Whether this call is ``monkeypatch.setattr(...)``."""
-    if not isinstance(node, ast.Call) or _tail_name(node.func) != "setattr":
+    if not isinstance(node, ast.Call) or tail_name(node.func) != "setattr":
         return False
     return _base_name(node.func) == _MONKEYPATCH
 
@@ -154,7 +146,7 @@ def _anonymous_silence(call: ast.Call) -> bool:
         return isinstance(replacement.body, ast.Constant) and replacement.body.value is None
     if not isinstance(replacement, ast.Call):
         return False
-    return _tail_name(replacement.func) in _THROWAWAY and not replacement.args and not replacement.keywords
+    return tail_name(replacement.func) in _THROWAWAY and not replacement.args and not replacement.keywords
 
 
 def _discarded_monkeypatches(nodes: List[ast.AST], branch: str, own: Set[str]) -> List[Tuple[int, str]]:
@@ -189,7 +181,7 @@ def _seeds(node: ast.AST) -> Set[str]:
     """Names this one node puts in front of an oracle, or configures as an answer."""
     if isinstance(node, ast.Assert):
         return _loaded(node.test)
-    if isinstance(node, ast.Call) and _tail_name(node.func).startswith("assert"):
+    if isinstance(node, ast.Call) and tail_name(node.func).startswith("assert"):
         return _loaded(node)
     if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store):
         return _loaded(node.value)
@@ -268,17 +260,7 @@ def _discarded_in_decorators(function: ast.AST, branch: str, own: Set[str], body
     return findings
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[discarded_patch] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="discarded_patch")
 
 
 def scan(source: str, branch: str) -> List[Tuple[int, str]]:
@@ -297,18 +279,8 @@ def scan(source: str, branch: str) -> List[Tuple[int, str]]:
     return sorted(findings)
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[discarded_patch] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="discarded_patch", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

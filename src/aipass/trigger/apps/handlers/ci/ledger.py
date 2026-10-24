@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ledger.py
 # Description: CI red lane ledger - run verdicts and cure states in trigger_json/ci_ledger.json
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-10-22
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -24,11 +24,22 @@ LEDGER_FILE = TRIGGER_JSON_DIR / "ci_ledger.json"
 
 # Waiting for the two-awake cap: the next poll drains both.
 QUEUED = {"queued", "review_queued"}
+# Past this a claim belongs to a poll that died: the next poll takes the run or cure over.
+CLAIM_STALE_SECONDS = 3600
 
 
 def utc_now() -> str:
     """Now as GitHub stamps a run's creation, so the two compare as strings."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def claim_is_live(entry: Dict[str, Any]) -> bool:
+    """True while the entry's `claimed` stamp is younger than CLAIM_STALE_SECONDS; unreadable is stale."""
+    try:
+        claimed = datetime.strptime(entry.get("claimed", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc) - claimed).total_seconds() < CLAIM_STALE_SECONDS
 
 
 def _empty() -> Dict[str, Any]:
@@ -76,7 +87,7 @@ def set_cure(data: Dict[str, Any], run_id: Any, owner: str, state: str, /, **fie
 def supersede(data: Dict[str, Any], newest: Dict[str, Dict[str, str]]) -> list:
     """Mark every red that is no longer its workflow's newest run superseded.
 
-    Its queued and gated cures go with it; a cure already woken keeps its course, since the owner's work is real."""
+    Its queued and gated cures, and a dispatch claim whose poll died, go with it; a cure already woken keeps its course, since the owner's work is real."""
     newest_ids = {row["run_id"] for row in newest.values()}
     moved = []
     for run_id, run in data["runs"].items():
@@ -85,7 +96,8 @@ def supersede(data: Dict[str, Any], newest: Dict[str, Dict[str, str]]) -> list:
         run["verdict"] = "superseded"
         moved.append(run_id)
         for cure in data["cures"].values():
-            if cure["run_id"] == run_id and cure["state"] in ("queued", "gated"):
+            dead_claim = cure["state"] == "dispatching" and not claim_is_live(cure)
+            if cure["run_id"] == run_id and (cure["state"] in ("queued", "gated") or dead_claim):
                 cure["state"] = "superseded"
                 cure["updated"] = utc_now()
     return moved

@@ -1060,7 +1060,7 @@ if [ "$FAIL" -eq 0 ]; then
         echo "Add the appropriate directory to your PATH (see above)."
     elif [ "$IS_MACOS" -eq 1 ]; then
         echo "drone is available via ~/.local/bin symlink (on PATH)."
-    elif [ "$LINUX_SYMLINK_DIR" = "/usr/local/bin" ]; then
+    elif [ "${LINUX_SYMLINK_DIR:-}" = "/usr/local/bin" ]; then
         echo "drone is available globally via /usr/local/bin symlink."
     else
         echo "drone is available via ~/.local/bin symlink (on PATH)."

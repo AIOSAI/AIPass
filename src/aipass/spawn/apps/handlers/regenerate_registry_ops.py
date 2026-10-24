@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: regenerate_registry_ops.py
 # Description: Regenerate .template_registry.json for spawn template directories
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Regenerate template registry — walk template directory, hash files, build registry."""
@@ -14,14 +14,11 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.meta_ops import compute_file_hash, load_template_registry
 
 _SPAWN_DIR = ".spawn"
 _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
-
-# Directories to skip entirely during scan — must mirror file_ops.SKIP_NAMES,
-# or the registry tracks artifacts the copy engine refuses to copy.
-_SKIP_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git"}
 
 _SKIP_SPAWN_FILES = {".template_registry.json", ".branch_meta.json"}
 
@@ -160,7 +157,7 @@ def _scan_template_directory(
         rel = item.relative_to(template_dir)
         rel_str = rel.as_posix()
 
-        if any(part in _SKIP_DIRS for part in rel.parts):
+        if SKIP_NAMES.intersection(rel.parts):
             continue
 
         if ".spawn" in rel.parts and item.is_file() and item.name in _SKIP_SPAWN_FILES:

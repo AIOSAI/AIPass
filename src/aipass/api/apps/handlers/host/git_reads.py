@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_reads.py
 # Description: Host API Git Read Handler — the patch, the change list, the log, one commit
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-17
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -14,8 +14,9 @@ Reference: docs/git_surface.md, docs/git_remote.md
 
 import json
 import subprocess
+import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import IO, Any, Dict, Optional, cast
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
@@ -123,9 +124,49 @@ def _ran(command: Any, root: Path, lane: str) -> Any:
         logger.error("[host_api] drone not found for the %s lane: %s", lane, e)
         raise ReadUnavailable(f"drone is not available on PATH — the {lane} lane routes through it") from e
     except subprocess.TimeoutExpired as e:
-        # The root goes in the log only: the sentence travels to a handset, no host paths.
-        logger.error("[host_api] the %s lane timed out after %ss reading %s", lane, DIFF_TIMEOUT_SECONDS, root)
-        raise ReadUnavailable(f"The {lane} lane timed out after {DIFF_TIMEOUT_SECONDS}s") from e
+        raise _timed_out(root, lane) from e
+
+
+def _timed_out(root: Path, lane: str) -> ReadUnavailable:
+    """The refusal for a door that outran its timeout."""
+    # The root goes in the log only: the sentence travels to a handset, no host paths.
+    logger.error("[host_api] the %s lane timed out after %ss reading %s", lane, DIFF_TIMEOUT_SECONDS, root)
+    return ReadUnavailable(f"The {lane} lane timed out after {DIFF_TIMEOUT_SECONDS}s")
+
+
+def _streamed(command: Any, root: Path, lane: str) -> Any:
+    """
+    Run a door whose stdout is the patch, reading no more than MAX_DIFF_BYTES + 1 of it.
+
+    Past the cap the door is killed: its exit code is then ours, not a verdict.
+    """
+    try:
+        child = subprocess.Popen(command, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except FileNotFoundError as e:
+        logger.error("[host_api] drone not found for the %s lane: %s", lane, e)
+        raise ReadUnavailable(f"drone is not available on PATH — the {lane} lane routes through it") from e
+
+    expired = threading.Event()
+    timer = threading.Timer(DIFF_TIMEOUT_SECONDS, lambda: (expired.set(), child.kill()))
+    timer.start()
+    out_pipe, err_pipe = cast(IO[bytes], child.stdout), cast(IO[bytes], child.stderr)
+
+    try:
+        stdout = out_pipe.read(MAX_DIFF_BYTES + 1)
+        cut = len(stdout) > MAX_DIFF_BYTES
+        if cut:
+            child.kill()
+        stderr = err_pipe.read().decode("utf-8", errors="replace")
+        returncode = child.wait()
+    finally:
+        timer.cancel()
+        out_pipe.close()
+        err_pipe.close()
+
+    if expired.is_set():
+        raise _timed_out(root, lane)
+
+    return stdout.decode("utf-8", errors="ignore"), stderr, returncode, cut
 
 
 def _document(command: Any, root: Path, lane: str) -> Dict[str, Any]:
@@ -207,23 +248,27 @@ def read_diff(
     if ref:
         # The commit header is stripped: a renderer would paint it as a phantom first file.
         diff = _patch_of(str(_document(["drone", "@git", "show", ref], root, "commit").get(CONTENT_KEY) or ""))
+        cut = False
     else:
-        diff = _working_patch(root, branch, staged, grain)
+        diff, cut = _working_patch(root, branch, staged, grain)
 
     if path:
         prefix = _repo_relative_prefix(root) if grain == GRAIN_BRANCH else ""
         wanted = path if path.startswith(prefix) else prefix + path
-        block = _one_files_patch(diff, wanted)
-        if block is None and not ref and not staged:
-            staged, block = True, _one_files_patch(_working_patch(root, branch, True, grain), wanted)
+        block = _one_files_patch(_whole_blocks(diff, cut), wanted)
+        if block is None and not cut and not ref and not staged:
+            diff, cut = _working_patch(root, branch, True, grain)
+            staged, block = True, _one_files_patch(_whole_blocks(diff, cut), wanted)
+        if block is None and cut:
+            raise ReadRefused(f"This patch is over the {MAX_DIFF_BYTES} byte cap, so {path} could not be read whole")
         if block is None:
             raise ReadRefused(f"No changes to {path} in this patch")
-        diff = block
+        diff, cut = block, False
 
     raw_bytes = len(diff.encode("utf-8"))
     truncated = False
 
-    if raw_bytes > MAX_DIFF_BYTES:
+    if raw_bytes > MAX_DIFF_BYTES or cut:
         if path:
             raise ReadRefused(f"{path} is {raw_bytes} bytes of patch, over the {MAX_DIFF_BYTES} byte cap")
 
@@ -256,16 +301,28 @@ def read_diff(
     }
 
 
-def _working_patch(root: Path, branch: str, staged: bool, grain: str) -> str:
-    """A working-tree patch. The diff door has no --json, so its exit code is the verdict."""
-    result = _ran(_patch_command(staged=staged, grain=grain), root, "diff")
+def _working_patch(root: Path, branch: str, staged: bool, grain: str) -> Any:
+    """
+    A working-tree patch, and whether it was cut at the cap.
 
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        logger.warning("[host_api] diff returned %s for %s: %s", result.returncode, branch, stderr)
+    The diff door has no --json, so its exit code is the verdict.
+    """
+    stdout, stderr, returncode, cut = _streamed(_patch_command(staged=staged, grain=grain), root, "diff")
+
+    if returncode != 0 and not cut:
+        stderr = stderr.strip()
+        logger.warning("[host_api] diff returned %s for %s: %s", returncode, branch, stderr)
         raise ReadUnavailable(f"Diff failed: {stderr or 'no detail'}")
 
-    return result.stdout or ""
+    return stdout, cut
+
+
+def _whole_blocks(patch: str, cut: bool) -> str:
+    """A patch without its last file block when the cap may have severed it."""
+    if not cut:
+        return patch
+
+    return patch[: patch.rfind("\n" + FILE_HEADER) + 1]
 
 
 def _patch_command(staged: bool, grain: str) -> Any:
@@ -710,9 +767,10 @@ def _chosen_remote(document: Dict[str, Any]) -> Any:
 
 def _without_credentials(url: str) -> Any:
     """
-    The URL with any password replaced, and whether one was there.
+    The URL with any secret in its userinfo replaced, and whether one was there.
 
-    A bare user with no colon (git@) is not a credential and is not flagged.
+    A password goes and its user stays. A colonless userinfo is the secret itself
+    (`https://<token>@`), except over ssh, where `git@` is only the login name.
     """
     separator = url.find(SCHEME_SEPARATOR)
     if separator == -1:
@@ -726,13 +784,16 @@ def _without_credentials(url: str) -> Any:
         return url, False
 
     userinfo = rest[:at]
-    if ":" not in userinfo:
+    if ":" in userinfo:
+        kept = userinfo.split(":", 1)[0] + ":" + REDACTION
+    elif scheme in SSH_SCHEMES:
         return url, False
+    else:
+        kept = REDACTION
 
-    user = userinfo.split(":", 1)[0]
     logger.info("[host_api] a credential in a remote URL was redacted before it left this process")
 
-    return f"{scheme}{SCHEME_SEPARATOR}{user}:{REDACTION}@{rest[at + 1 :]}", True
+    return f"{scheme}{SCHEME_SEPARATOR}{kept}@{rest[at + 1 :]}", True
 
 
 def _browsable(url: str) -> Optional[str]:

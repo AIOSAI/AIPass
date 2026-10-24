@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot module — full-copy backup of a project
-# Version: 2.2.1
+# Version: 2.2.2
 # Created: 2026-04-17
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -27,6 +27,7 @@ from aipass.backup.apps.handlers.json.json_handler import WriteFailed
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
@@ -155,8 +156,13 @@ def _quick_check_early_return(
     return result
 
 
-def run_snapshot(project_root: str, show_panels: bool = True, verb: str = PRIMARY_COMMAND) -> BackupResult:
-    """Run a full snapshot backup for a project."""
+def run_snapshot(
+    project_root: str,
+    show_panels: bool = True,
+    verb: str = PRIMARY_COMMAND,
+    pre_scanned: list[tuple[str, str]] | None = None,
+) -> BackupResult:
+    """Run a full snapshot backup for a project; ``pre_scanned`` is a filtered set the caller already walked."""
     start = time.time()
 
     # Respect create_backup_dir's None refusal: the pipeline would otherwise mkdir the tree
@@ -165,7 +171,7 @@ def run_snapshot(project_root: str, show_panels: bool = True, verb: str = PRIMAR
         return refuse_missing_root("snapshot", project_root, show_panels)
 
     with catch_sigterm(), LaneProgress(project_root, PRIMARY_COMMAND, verb) as running:
-        return _snapshot_run(project_root, show_panels, verb, start, running)
+        return _snapshot_run(project_root, show_panels, verb, start, running, pre_scanned)
 
 
 def _snapshot_run(
@@ -174,19 +180,23 @@ def _snapshot_run(
     verb: str,
     start: float,
     running: LaneProgress,
+    pre_scanned: list[tuple[str, str]] | None = None,
 ) -> BackupResult:
     """The snapshot run proper, inside the stop handler and the running file."""
     if show_panels:
-        show_last_backups()
+        show_last_backups(project_root)
 
+    # Loaded on both paths: the ceiling below guards the 'all' path too.
     config = load_project_config(project_root)
 
-    spec = load_spec(project_root)
-    whitelist_entries = load_whitelist(project_root)
-    max_size = config.get("max_file_size_mb", 100)
-
-    all_files = list(walk_project(project_root))
-    filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
+    if pre_scanned is not None:
+        filtered = pre_scanned
+    else:
+        spec = load_spec(project_root)
+        whitelist_entries = load_whitelist(project_root)
+        max_size = config.get("max_file_size_mb", 100)
+        all_files = list(walk_project(project_root, spec, whitelist_entries))
+        filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
     # Ceiling before any copying: a run this large is an ignore-pattern miss, not a big project.
     breach = check_ceiling(filtered, config)
@@ -263,12 +273,14 @@ def _snapshot_run(
     logger.info(f"[backup] Snapshot complete: {result.files_copied} files")
 
     # Last: the copy is on disk and recorded before the map only the next run reads can fail anything.
-    _persist_timestamps(project_root, filtered, result)
+    # A run with failed copies keeps the old map, so the next quick-check cannot call it current.
+    if not result.errors:
+        _persist_timestamps(project_root, filtered, result)
 
     if show_panels:
         show_result_summary(result)
         if not result.errors:
-            show_backups_now("snapshot", project_root)
+            show_backups_now(project_root)
 
     return result
 
@@ -288,7 +300,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    project_root = args[0]
+    project_root = str(resolve_caller_path(args[0]))
     run_snapshot(project_root)
     return True
 

@@ -16,6 +16,24 @@ from typing import List, Dict, Optional, Any
 from aipass.ai_mail.apps.handlers.json import json_handler
 
 
+def _flag_error(error: str, **parsed: Any) -> Dict[str, Any]:
+    """The refused-parse result: every key present, the flags parsed so far carried over."""
+    result: Dict[str, Any] = {
+        "auto_execute": False,
+        "no_memory_save": False,
+        "reply_to": None,
+        "from_branch": None,
+        "recipients": [],
+        "subject": None,
+        "message": None,
+        "upsert_key": None,
+        "mode": "error",
+        "error": error,
+    }
+    result.update(parsed)
+    return result
+
+
 def parse_send_args(args: List[str]) -> Dict[str, Any]:
     """Parse send command arguments into structured result."""
     json_handler.log_operation("parse_send_args", {"arg_count": len(args)})
@@ -34,18 +52,11 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
             from_branch = working_args[idx + 1]
             working_args = working_args[:idx] + working_args[idx + 2 :]
         else:
-            return {
-                "auto_execute": auto_execute,
-                "no_memory_save": no_memory_save,
-                "reply_to": None,
-                "from_branch": None,
-                "recipients": [],
-                "subject": None,
-                "message": None,
-                "upsert_key": None,
-                "mode": "error",
-                "error": "--from requires a branch address (e.g., --from @spawn)",
-            }
+            return _flag_error(
+                "--from requires a branch address (e.g., --from @spawn)",
+                auto_execute=auto_execute,
+                no_memory_save=no_memory_save,
+            )
 
     reply_to = None
     if "--reply-to" in working_args:
@@ -54,18 +65,12 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
             reply_to = working_args[idx + 1]
             working_args = working_args[:idx] + working_args[idx + 2 :]
         else:
-            return {
-                "auto_execute": auto_execute,
-                "no_memory_save": no_memory_save,
-                "reply_to": None,
-                "from_branch": from_branch,
-                "recipients": [],
-                "subject": None,
-                "message": None,
-                "upsert_key": None,
-                "mode": "error",
-                "error": "--reply-to requires a branch address (e.g., --reply-to @devpulse)",
-            }
+            return _flag_error(
+                "--reply-to requires a branch address (e.g., --reply-to @devpulse)",
+                auto_execute=auto_execute,
+                no_memory_save=no_memory_save,
+                from_branch=from_branch,
+            )
 
     # --upsert-key: a repeat signature updates one message instead of stacking.
     upsert_key = None
@@ -75,18 +80,13 @@ def parse_send_args(args: List[str]) -> Dict[str, Any]:
             upsert_key = working_args[idx + 1]
             working_args = working_args[:idx] + working_args[idx + 2 :]
         else:
-            return {
-                "auto_execute": auto_execute,
-                "no_memory_save": no_memory_save,
-                "reply_to": reply_to,
-                "from_branch": from_branch,
-                "recipients": [],
-                "subject": None,
-                "message": None,
-                "upsert_key": None,
-                "mode": "error",
-                "error": "--upsert-key requires a signature (e.g., --upsert-key trigger:warn:disk)",
-            }
+            return _flag_error(
+                "--upsert-key requires a signature (e.g., --upsert-key trigger:warn:disk)",
+                auto_execute=auto_execute,
+                no_memory_save=no_memory_save,
+                reply_to=reply_to,
+                from_branch=from_branch,
+            )
 
     recipients = []
     rest = []

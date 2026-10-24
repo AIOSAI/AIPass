@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ci_red.py
 # Description: Tests for the ci_red event handler and medic's dispatch gates it runs
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-10-23
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/events/ci_red.py and the dispatch gates it runs."""
@@ -15,6 +15,8 @@
 
 import json
 
+from aipass.trigger.apps.handlers.ci import outbound
+from aipass.trigger.apps.handlers.events import error_detected as medic
 from aipass.trigger.apps.handlers.events.ci_red import handle_ci_red
 from aipass.trigger.apps.modules.core import Trigger
 
@@ -48,6 +50,20 @@ class TestGates:
         _fire()
         _fire()
         assert [w[0] for w in ci_lane.wakes] == ["@hooks"]
+
+    def test_a_fire_overlapping_a_dispatch_does_not_wake_the_owner_again(self, ci_lane, monkeypatch):
+        sends = []
+
+        def _send(**kwargs):
+            sends.append(kwargs)
+            if len(sends) == 1:
+                handle_ci_red(run_id=900, workflow="CI", step="audit", owner="hooks", lines=["hooks: 99%"])
+            return True
+
+        monkeypatch.setattr(outbound, "_send_email", _send)
+        _fire()
+        assert [m["to_branch"] for m in sends] == ["@hooks"]
+        assert _state(ci_lane)["state"] == "dispatched"
 
     def test_a_muted_owner_is_gated_and_the_refusal_logged(self, ci_lane):
         mute = {"config": {"muted_branches": [{"name": "hooks", "expires_at": None}]}}
@@ -87,6 +103,13 @@ class TestGates:
         ci_lane.backoff = True
         _fire()
         assert ci_lane.mails == [] and "backing off" in _state(ci_lane)["reason"]
+
+    def test_a_backing_off_red_leaves_the_half_open_probe_unspent(self, ci_lane, monkeypatch):
+        probes = []
+        monkeypatch.setattr(medic, "circuit_breaker_allows", lambda: probes.append(1) or True)
+        ci_lane.backoff = True
+        _fire()
+        assert probes == [] and "backing off" in _state(ci_lane)["reason"]
 
     def test_devpulse_as_owner_is_emailed_and_never_woken(self, ci_lane):
         _fire(owner="devpulse")

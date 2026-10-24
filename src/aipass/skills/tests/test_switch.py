@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_switch.py
 # Description: Skill off-switch tests
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-18
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -32,6 +32,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.skills.apps.handlers import registry
 from aipass.skills.apps.handlers import switch_handler as sh
 from aipass.skills.apps.handlers.json import json_handler as jh
 from aipass.skills.apps.modules import runner
@@ -98,7 +99,7 @@ def state_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def fake_units(monkeypatch):
     """Every declared-unit lookup answers with two fake units."""
-    monkeypatch.setattr(sh, "declared_units", lambda name: ["fake-bot@one", "fake-bot@two"])
+    monkeypatch.setattr(sh, "declared_units", lambda name, registry=None: ["fake-bot@one", "fake-bot@two"])
 
 
 class TestStatePersistence:
@@ -282,7 +283,7 @@ class TestTurnOff:
         assert "fake-bot@two" in result["error"]
 
     def test_a_skill_with_no_declared_units_never_calls_systemctl(self, state_dir, monkeypatch):
-        monkeypatch.setattr(sh, "declared_units", lambda name: [])
+        monkeypatch.setattr(sh, "declared_units", lambda name, registry=None: [])
         fake = FakeSystemctl()
         monkeypatch.setattr(sh, "_systemctl", fake)
 
@@ -311,7 +312,7 @@ class TestTurnOn:
 
     def test_on_unmasks_before_it_starts(self, state_dir, fake_units, monkeypatch):
         fake = FakeSystemctl(active=["fake-bot@one"])
-        monkeypatch.setattr(sh, "declared_units", lambda name: ["fake-bot@one"])
+        monkeypatch.setattr(sh, "declared_units", lambda name, registry=None: ["fake-bot@one"])
         monkeypatch.setattr(sh, "_systemctl", fake)
 
         sh.turn_off("telegram")
@@ -415,6 +416,15 @@ class TestDeclaredUnits:
 class TestSwitchRows:
     """Status has to show a dark skill, and has to show a lying one."""
 
+    def test_one_status_call_discovers_the_skills_once(self, state_dir, monkeypatch):
+        # Pins a shipped cost: every row re-ran the whole discovery, N+1 scans per call.
+        real = registry.build_registry
+        calls = []
+        monkeypatch.setattr(registry, "build_registry", lambda *a: calls.append(1) or real(*a))
+        rows = sh.switch_rows()
+        assert len(rows) > 1
+        assert len(calls) == 1
+
     def test_rows_carry_every_discovered_skill(self, state_dir):
         names = [row["name"] for row in sh.switch_rows()]
         assert "screen_lock" in names
@@ -429,7 +439,7 @@ class TestSwitchRows:
         assert row["reason"] == "retired 08-18"
 
     def test_a_skill_that_is_off_but_still_running_is_flagged(self, state_dir, monkeypatch):
-        monkeypatch.setattr(sh, "declared_units", lambda name: ["fake-bot@one"])
+        monkeypatch.setattr(sh, "declared_units", lambda name, registry=None: ["fake-bot@one"])
         monkeypatch.setattr(sh, "_systemctl", FakeSystemctl(active=["fake-bot@one"]))
         sh.set_enabled("screen_lock", False)
 

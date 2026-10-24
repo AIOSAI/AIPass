@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-29
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """The scratch environment a suite is measured inside. Law M10 made concrete.
@@ -348,13 +348,17 @@ def _build_plain_env(target: Path, env_root: Path) -> dict:
     """Copy an ordinary directory whole. Nothing is symlinked."""
     target_copy = env_root / target.name
     warning = rsync(target, target_copy)
+    src = target_copy / "src"
+    # src first on PYTHONPATH, or an editable install of a src-layout project imports the real package.
+    packages = sorted(init.parent.name for init in src.glob("*/__init__.py")) if src.is_dir() else []
     return {
         "target_copy": target_copy,
         "vanished_during_copy": [warning] if warning is not None else [],
         "run_cwd": env_root,
         "test_arg": target.name,
-        "target_module": "",
-        "pythonpath": str(env_root),
+        # shortcut: probes only a lone src package; several packages go unprobed until the probe takes a list.
+        "target_module": packages[0] if len(packages) == 1 else "",
+        "pythonpath": os.pathsep.join([str(src), str(env_root)]) if src.is_dir() else str(env_root),
         "copied_siblings": [],
         "symlinked_siblings": [],
     }

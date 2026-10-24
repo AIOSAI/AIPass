@@ -3,7 +3,7 @@
 # Description: Tests for update command and error message formatting
 # Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/update.py, the actions refusal and branch-health's bare summary."""
@@ -42,7 +42,6 @@ class TestUpdateCommand:
         """update with no args should run the digest, not show introspection. Mutant killed: digest not printed."""
         with (
             patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
-            patch.object(_update_mod, "load_local", return_value={}),
         ):
             result = _update_mod.handle_command("update", [])
         assert result is True
@@ -55,7 +54,6 @@ class TestUpdateCommand:
         mock_inbox = MagicMock(return_value={"messages": [], "total_messages": 7})
         with (
             patch.object(_update_mod, "load_inbox", mock_inbox),
-            patch.object(_update_mod, "load_local", return_value={}),
         ):
             _update_mod.handle_command("update", [])
         mock_inbox.assert_called_once_with()
@@ -92,7 +90,6 @@ class TestUpdateCommand:
         """
         with (
             patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
-            patch.object(_update_mod, "load_local", return_value={}),
             patch.object(_update_mod, "get_escalations", return_value=[]),
         ):
             _update_mod.handle_command("update", [])
@@ -104,7 +101,6 @@ class TestUpdateCommand:
         """A real escalation must still warn on stderr."""
         with (
             patch.object(_update_mod, "load_inbox", return_value={"messages": [], "total_messages": 0}),
-            patch.object(_update_mod, "load_local", return_value={}),
             patch.object(_update_mod, "get_escalations", return_value=[{"from": "@devpulse", "subject": "urgent"}]),
         ):
             _update_mod.handle_command("update", [])

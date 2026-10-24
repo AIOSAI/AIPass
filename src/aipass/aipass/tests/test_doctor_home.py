@@ -3,7 +3,7 @@
 # Description: Tests for doctor's home, owner-seating, preflight and citizen-count rows
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight and the drone count."""
@@ -242,12 +242,13 @@ class TestFixOwnerSeating:
         return [r for r in self.printed["Identity"] if r.label.startswith("owner")]
 
     def test_fix_success_returns_pass(self):
+        """A fix that exits 0 shows the re-check's row (here a clean, empty --check), not its own tick."""
         mock_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = self._fix_rows()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_PASS
-        assert "reconciled" in results[0].detail
+        assert results[0].label == "owner"
 
     def test_fix_failure_returns_fail(self):
         mock_proc = MagicMock(returncode=1, stdout="", stderr="owner conflict")

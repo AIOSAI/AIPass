@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_templates.py
 # Description: The templates module — operation_start, operation_complete, routing, demo
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-24
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/templates.py — the operation output templates."""
@@ -181,6 +181,7 @@ class TestOperationComplete:
             templates.operation_complete(files=10, time="2.5s")
         output = get_output()
         assert "Completed in 2.5s" in output
+        assert "time: " not in output
 
     def test_no_time_kwarg_omits_completion_line(self, plain_console):
         console, get_output = plain_console
@@ -249,8 +250,6 @@ class TestPrintHelpOutput:
         with (
             patch.object(templates, "CONSOLE", console),
             patch.object(display, "CONSOLE", console),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             templates.print_help()
         output = get_output()
@@ -261,8 +260,6 @@ class TestPrintHelpOutput:
         with (
             patch.object(templates, "CONSOLE", console),
             patch.object(display, "CONSOLE", console),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             templates.print_help()
         output = get_output()
@@ -274,8 +271,6 @@ class TestPrintHelpOutput:
         with (
             patch.object(templates, "CONSOLE", console),
             patch.object(display, "CONSOLE", console),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             templates.print_help()
         output = get_output()
@@ -287,8 +282,6 @@ class TestPrintHelpOutput:
         with (
             patch.object(templates, "CONSOLE", console),
             patch.object(display, "CONSOLE", console),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             templates.print_help()
         output = get_output()
@@ -299,8 +292,6 @@ class TestPrintHelpOutput:
         with (
             patch.object(templates, "CONSOLE", console),
             patch.object(display, "CONSOLE", console),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             templates.print_help()
         output = get_output()
@@ -311,8 +302,6 @@ class TestPrintHelpOutput:
         with (
             patch.object(templates, "CONSOLE", console),
             patch.object(display, "CONSOLE", console),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             templates.print_help()
         output = get_output()

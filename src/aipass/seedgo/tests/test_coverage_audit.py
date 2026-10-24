@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for branch_audit.py: checker discovery, the corpus, the file lane, diagnostics
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-26
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py."""
@@ -128,7 +128,7 @@ def _recording_checker(answer=None, scope: str = "all_files", include_init: bool
         return {"passed": True, "score": 100, "checks": [{"passed": True, "message": "OK"}]}
 
     return types.SimpleNamespace(
-        AUDIT_SCOPE=scope, FILE_FILTER=None, INCLUDE_INIT_FILES=include_init, check_module=check_module, seen=seen
+        AUDIT_SCOPE=scope, INCLUDE_INIT_FILES=include_init, check_module=check_module, seen=seen
     )
 
 
@@ -332,21 +332,21 @@ class TestRunAllFiles:
         assert result["scores"]["naming"] == 90
 
     def test_checker_raises_exception(self, tmp_path, monkeypatch):
-        """Checker that raises is skipped. Mutant: the per-file catch narrowed to KeyError in apps/handlers/audit/branch_audit.py — killed."""
+        """A crash is a failing file named in the violations, never a silently dropped one."""
 
-        def boom(name):
-            raise RuntimeError("boom")
+        def answer(name):
+            if name == "foo.py":
+                raise RuntimeError("boom")
+            return {"passed": True, "score": 100, "checks": [{"passed": True, "message": "OK"}]}
 
-        result = _audit_corpus(monkeypatch, tmp_path, {"naming": _recording_checker(boom)}, files=("apps/foo.py",))
-        assert result["naming_violations"] == []
-        assert result["scores"]["naming"] == 0
-
-    def test_file_filter(self, tmp_path, monkeypatch):
-        """FILE_FILTER skips non-matching files. Mutant: FILE_FILTER ignored in apps/handlers/audit/branch_audit.py — killed."""
-        checker = _recording_checker()
-        checker.FILE_FILTER = "handler"
-        _audit_corpus(monkeypatch, tmp_path, {"naming": checker}, files=("apps/handler.py", "apps/module.py"))
-        assert _checked(checker) == {"handler.py"}
+        result = _audit_corpus(
+            monkeypatch, tmp_path, {"naming": _recording_checker(answer)}, files=("apps/foo.py", "apps/bar.py")
+        )
+        (violation,) = result["naming_violations"]
+        assert (violation["file"], violation["score"]) == ("foo.py", 0)
+        assert "RuntimeError: boom" in violation["message"]
+        # Dropped, the crash averaged to 100 on bar.py alone; counted, it pulls the row to 50.
+        assert result["scores"]["naming"] == 50
 
     def test_a_declined_check_is_excluded_and_named(self, tmp_path, monkeypatch):
         """A file stands down on the declined field, never on its message's words. Mutant: declined files averaged in apps/handlers/audit/branch_audit.py — killed."""

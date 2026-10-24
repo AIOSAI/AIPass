@@ -3,9 +3,9 @@
 # Name: test_space_catchup.py - Space Ops, Room State Extras, Catchup & Search Tests
 # Description: Tests for apps/handlers/rooms/space_ops.py, room_state_ops.py and search/database queries
 # Date: 2026-03-29
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-09-28
+# Modified: 2026-10-24
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -43,6 +43,7 @@ from aipass.commons.apps.handlers.database.catchup_queries import (
     query_catchup_data,
     get_last_active,
     update_last_active,
+    mark_mentions_read,
 )
 from aipass.commons.apps.handlers.search.search_queries import (
     sync_post_to_fts,
@@ -247,6 +248,22 @@ def test_query_catchup_data_counts(mock_json: object, initialized_db: sqlite3.Co
     assert isinstance(result["unread_mentions"], list)
     assert isinstance(result["replies"], list)
     assert result["karma_change"] == 0
+
+
+@patch("aipass.commons.apps.handlers.database.catchup_queries.json_handler", autospec=True)
+def test_mark_mentions_read_clears_unread(mock_json: object, initialized_db: sqlite3.Connection) -> None:
+    """A mention shown once by catchup is not shown again after mark_mentions_read."""
+    post_id = _seed_agent_and_post(initialized_db)
+    initialized_db.execute(
+        "INSERT INTO mentions (post_id, mentioned_agent, mentioner_agent) VALUES (?, ?, ?)",
+        (post_id, "TEST_BRANCH", "TEST_BRANCH"),
+    )
+    initialized_db.commit()
+    assert len(query_catchup_data(initialized_db, "TEST_BRANCH", "2000-01-01T00:00:00Z")["unread_mentions"]) == 1
+
+    mark_mentions_read(initialized_db, "TEST_BRANCH")
+
+    assert query_catchup_data(initialized_db, "TEST_BRANCH", "2000-01-01T00:00:00Z")["unread_mentions"] == []
 
 
 def test_get_last_active_new_agent(initialized_db: sqlite3.Connection) -> None:

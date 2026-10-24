@@ -3,7 +3,7 @@
 # Description: Tests for prax config handlers (load + ignore_patterns)
 # Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
@@ -24,13 +24,11 @@ from aipass.prax.apps.handlers.json import json_service
 
 
 def _patch_load_world(monkeypatch, tmp_path):
-    """Point load.py's module-level paths at tmp_path and record its json_handler.
+    """Point load.py's module-level paths at tmp_path.
 
     PRAX_ROOT and ECOSYSTEM_ROOT go to tmp_path so directory creation lands there.
-    The redirect variable is cleared below so real path resolution runs, which is
-    why json_handler must be a recorder: with no redirect it would write prax_json.
+    The redirect variable is cleared below so real path resolution runs.
     """
-    monkeypatch.setattr(load_mod, "json_handler", MagicMock())
     # The warn-once latches are per process; each test starts with them clear, as a
     # fresh process does.
     monkeypatch.setattr(load_mod, "_config_schema_warned", False)
@@ -286,57 +284,6 @@ class TestLinesToBytes:
         assert load_mod.lines_to_bytes(1_000_000) == 1_000_000 * 200
 
 
-class TestGetDebugPrintsEnabled:
-    """Tests for get_debug_prints_enabled()."""
-
-    def test_returns_bool(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        result = load_mod.get_debug_prints_enabled()
-        assert isinstance(result, bool)
-        # Which bool: tmp_path carries no prax_logger_config.json, and the
-        # unconfigured answer is off.
-        assert result is False
-
-    def test_false_when_config_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        assert load_mod.get_debug_prints_enabled() is False
-
-    def test_true_when_enabled_in_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(json.dumps({"config": {"debug_prints_enabled": True}}), encoding="utf-8")
-        assert load_mod.get_debug_prints_enabled() is True
-
-    def test_false_when_disabled_in_config(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(json.dumps({"config": {"debug_prints_enabled": False}}), encoding="utf-8")
-        assert load_mod.get_debug_prints_enabled() is False
-
-    def test_false_when_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(json.dumps({"config": {}}), encoding="utf-8")
-        assert load_mod.get_debug_prints_enabled() is False
-
-    def test_false_on_invalid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text("{{not valid json", encoding="utf-8")
-        assert load_mod.get_debug_prints_enabled() is False
-
-    def test_false_on_empty_config_object(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        _patch_load_world(monkeypatch, tmp_path)
-        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(json.dumps({}), encoding="utf-8")
-        assert load_mod.get_debug_prints_enabled() is False
-
-
 class TestLoadLogConfig:
     """Tests for load_log_config()."""
 
@@ -405,6 +352,30 @@ class TestLoadLogConfig:
 
         result = load_mod.load_log_config()
         assert result["system_logs"]["max_lines"] == 3000
+        assert result["local_logs"] == load_mod.DEFAULT_LOCAL_LOGS
+
+    def test_a_partial_section_keeps_the_default_keys(self, mock_prax_infrastructure, monkeypatch, tmp_path):
+        """A section naming one key still carries the rest: the handler builders index them."""
+        _patch_load_world(monkeypatch, tmp_path)
+        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(json.dumps({"config": {"system_logs": {"log_level": "DEBUG"}}}), encoding="utf-8")
+
+        result = load_mod.load_log_config()
+
+        assert result["system_logs"] == {**load_mod.DEFAULT_SYSTEM_LOGS, "log_level": "DEBUG"}
+
+    @pytest.mark.parametrize("document", [[], "text", {"config": []}, {"config": {"local_logs": 7}}])
+    def test_a_config_that_is_not_an_object_falls_back(self, mock_prax_infrastructure, monkeypatch, tmp_path, document):
+        """JSON of the wrong shape reads as the defaults, never an AttributeError."""
+        _patch_load_world(monkeypatch, tmp_path)
+        config_file = load_mod.PRAX_LOGGER_CONFIG_FILE
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text(json.dumps(document), encoding="utf-8")
+
+        result = load_mod.load_log_config()
+
+        assert result["system_logs"] == load_mod.DEFAULT_SYSTEM_LOGS
         assert result["local_logs"] == load_mod.DEFAULT_LOCAL_LOGS
 
     def test_empty_config_object(self, mock_prax_infrastructure, monkeypatch, tmp_path):

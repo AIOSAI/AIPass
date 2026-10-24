@@ -2,7 +2,7 @@
 
 # logger — the logging API
 
-Both import patterns, log levels, the mocking contract every branch's tests rely on, and the lifecycle events.
+Both import patterns, log levels, the mocking contract every branch's tests rely on.
 
 ---
 
@@ -47,7 +47,6 @@ path constants built from `__file__`:
 ```
 config.load.PRAX_JSON_DIR         -> src/aipass/prax/prax_json     <- real tree
 registry.save.REGISTRY_FILE       -> …/prax_json/prax_registry.json <- real tree
-logging.operations.LOG_FILE       -> …/prax_json/prax_logger_log.json <- real tree
 config.load.get_system_logs_dir() -> /tmp/<redirect>/system         <- redirected
 ```
 
@@ -130,20 +129,3 @@ clear of it: a fresh interpreter that imports the logger and logs one line has
 `test_logger_module.py::TestLoggingPathIsTriggerFree`. The `startup` event still
 exists for whoever fires it deliberately (`drone @trigger fire startup`); error
 catch-up on start belongs to trigger's own `log_watcher_service`.
-
-## The lifecycle doors fire, the log line does not
-
-`initialize_logging_system()` fires `logging_system_initialized` (carrying
-`modules_count`) after `run_initialize` returns; `shutdown_logging_system()` fires
-`logging_system_shutdown` after `run_shutdown`, last, so the event says the
-system *is* down rather than that it is going down. seedgo's event table names no
-system-lifecycle event, so those two names are prax's, following the convention
-it does state: lowercase, underscore-separated, past tense.
-
-**Both imports are inside their function, and that is the design, not a style
-choice.** Every log line the fleet writes must stay clear of the `aipass.trigger`
-import graph; a door called deliberately, once, can afford what a hot path cannot.
-Each fire is guarded `(ImportError, OSError)`: these doors must work on a host
-where trigger cannot import or inotify is exhausted, so a failed fire is a warning
-and never a failed initialize. Nothing listens to either event, by design — the
-point of the standard is that a handler can plug in later without prax changing.

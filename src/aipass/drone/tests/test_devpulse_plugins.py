@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_plugins.py
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
@@ -181,6 +181,32 @@ class TestMergePrFailure:
         assert "Merge failed" in result["message"]
         assert "not mergeable" in result["message"]
 
+    @pytest.mark.parametrize(("failing", "expected"), [("stash", "git stash failed"), ("pop", "stash@{0}")])
+    @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
+    @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
+    def test_stash_or_pop_failure_is_a_failure(
+        self, mock_run: MagicMock, mock_root: MagicMock, failing: str, expected: str, tmp_path: Path
+    ) -> None:
+        """A failed stash never pulls or pops; a failed pop says where the changes are."""
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        mock_root.return_value = tmp_path
+        seen: list[list[str]] = []
+
+        def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
+            seen.append(cmd)
+            bad = cmd == ["git", "stash"] if failing == "stash" else cmd == ["git", "stash", "pop"]
+            stdout = "feature-x\n" if cmd[:3] == ["gh", "pr", "view"] else "Saved working directory\n"
+            return MagicMock(returncode=1 if bad else 0, stdout=stdout, stderr="boom" if bad else "")
+
+        mock_run.side_effect = side_effect
+
+        result = merge_pr("42", "devpulse")
+
+        assert result["success"] is False
+        assert expected in result["message"]
+        if failing == "stash":
+            assert ["git", "pull", "--rebase"] not in seen
+
 
 # ===========================================================================
 # 3. smart_sync tests
@@ -199,7 +225,10 @@ class TestSmartSyncUpToDate:
             proc = MagicMock()
             proc.returncode = 0
             proc.stderr = ""
-            if cmd[:3] == ["git", "fetch", "origin"]:
+            if cmd[:3] == ["git", "symbolic-ref", "-q"]:
+                proc.returncode = 0
+                proc.stdout = "refs/heads/main\n"
+            elif cmd[:3] == ["git", "fetch", "origin"]:
                 proc.stdout = ""
             elif cmd[:3] == ["git", "rev-list", "--left-right"]:
                 proc.stdout = "0\t0\n"
@@ -228,7 +257,10 @@ class TestSmartSyncBehind:
             proc = MagicMock()
             proc.returncode = 0
             proc.stderr = ""
-            if cmd[:3] == ["git", "fetch", "origin"]:
+            if cmd[:3] == ["git", "symbolic-ref", "-q"]:
+                proc.returncode = 0
+                proc.stdout = "refs/heads/main\n"
+            elif cmd[:3] == ["git", "fetch", "origin"]:
                 proc.stdout = ""
             elif cmd[:3] == ["git", "rev-list", "--left-right"]:
                 proc.stdout = "0\t3\n"
@@ -259,7 +291,10 @@ class TestSmartSyncDivergedMergeSuccess:
             proc = MagicMock()
             proc.returncode = 0
             proc.stderr = ""
-            if cmd[:3] == ["git", "fetch", "origin"]:
+            if cmd[:3] == ["git", "symbolic-ref", "-q"]:
+                proc.returncode = 0
+                proc.stdout = "refs/heads/main\n"
+            elif cmd[:3] == ["git", "fetch", "origin"]:
                 proc.stdout = ""
             elif cmd[:3] == ["git", "rev-list", "--left-right"]:
                 proc.stdout = "2\t5\n"
@@ -291,7 +326,10 @@ class TestSmartSyncMergeConflict:
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
             proc = MagicMock()
             proc.stderr = ""
-            if cmd[:3] == ["git", "fetch", "origin"]:
+            if cmd[:3] == ["git", "symbolic-ref", "-q"]:
+                proc.returncode = 0
+                proc.stdout = "refs/heads/main\n"
+            elif cmd[:3] == ["git", "fetch", "origin"]:
                 proc.returncode = 0
                 proc.stdout = ""
             elif cmd[:3] == ["git", "rev-list", "--left-right"]:
@@ -462,6 +500,64 @@ class TestFixCleanState:
         assert "nothing to fix" in result["message"].lower()
 
 
+def _git_answers(head: str, failing: tuple[str, ...] = (), seen: list[list[str]] | None = None):
+    """A subprocess stub: HEAD on *head*, main diverged from origin, the named git verbs failing."""
+
+    def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
+        if seen is not None:
+            seen.append(cmd)
+        stdout = {"symbolic-ref": f"refs/heads/{head}\n", "rev-list": "2\t3\n"}.get(cmd[1], "")
+        return MagicMock(returncode=1 if cmd[1] in failing else 0, stdout=stdout, stderr="boom")
+
+    return side_effect
+
+
+class TestNotOnMain:
+    """Divergence is measured for main, so nothing rebases or merges a checked-out dev."""
+
+    @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.find_repo_root")
+    @patch("aipass.drone.apps.plugins.devpulse_ops.sync_plugin.subprocess.run")
+    def test_smart_sync_refuses_on_dev(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
+        mock_root.return_value = tmp_path
+        seen: list[list[str]] = []
+        mock_run.side_effect = _git_answers("dev", seen=seen)
+
+        result = smart_sync("devpulse")
+
+        assert result["success"] is False
+        assert "main only" in result["message"]
+        assert not any(cmd[1] in ("rebase", "merge") for cmd in seen)
+
+    @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.find_repo_root")
+    @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.subprocess.run")
+    def test_fix_skips_divergence_on_dev(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
+        mock_root.return_value = tmp_path
+        (tmp_path / ".git").mkdir()
+        seen: list[list[str]] = []
+        mock_run.side_effect = _git_answers("dev", seen=seen)
+
+        result = fix_git_state("devpulse")
+
+        assert not any(cmd[1] == "merge" for cmd in seen)
+        assert any("not main" in a for a in result["actions_taken"])
+
+
+class TestFixReportsFailedSteps:
+    """A step that fails makes the whole fix a failure."""
+
+    @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.find_repo_root")
+    @patch("aipass.drone.apps.plugins.devpulse_ops.fix_plugin.subprocess.run")
+    def test_failed_rebase_abort_is_failure(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
+        mock_root.return_value = tmp_path
+        (tmp_path / ".git" / "rebase-merge").mkdir(parents=True)
+        mock_run.side_effect = _git_answers("main", failing=("rebase",))
+
+        result = fix_git_state("devpulse")
+
+        assert result["success"] is False
+        assert "Failed to abort rebase" in result["message"]
+
+
 # ===========================================================================
 # 5. Routing tests
 # ===========================================================================
@@ -589,7 +685,9 @@ class TestGitModuleRouting:
             proc = MagicMock()
             proc.returncode = 0
             proc.stderr = ""
-            if cmd[:3] == ["git", "rev-list", "--left-right"]:
+            if cmd[:3] == ["git", "symbolic-ref", "-q"]:
+                proc.stdout = "refs/heads/main\n"
+            elif cmd[:3] == ["git", "rev-list", "--left-right"]:
                 proc.stdout = "0\t0\n"
             else:
                 proc.stdout = ""

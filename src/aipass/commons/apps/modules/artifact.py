@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: Artifact Orchestration Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -39,9 +39,16 @@ from aipass.commons.apps.handlers.artifacts.artifact_ops import (
     inspect_artifact,
     collab_artifact,
     sign_artifact,
-    RARITY_COLORS,
 )
 from aipass.commons.apps.handlers.json import json_handler
+
+RARITY_COLORS = {
+    "common": "white",
+    "uncommon": "green",
+    "rare": "blue",
+    "legendary": "yellow",
+    "unique": "magenta",
+}
 
 
 def print_introspection():
@@ -59,7 +66,6 @@ def print_introspection():
     console.print("    - artifact_ops.py (inspect_artifact — show artifact details and provenance)")
     console.print("    - artifact_ops.py (collab_artifact — initiate a joint artifact requiring multiple signers)")
     console.print("    - artifact_ops.py (sign_artifact — add signature to a pending joint artifact)")
-    console.print("    - artifact_ops.py (RARITY_COLORS — color mapping for artifact rarity tiers)")
     console.print()
 
 

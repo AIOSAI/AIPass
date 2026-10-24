@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""
@@ -23,10 +23,15 @@ import pytest
 
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers import module_registry_handler
-from aipass.drone.apps.handlers.git import alerts_handler, label_handler, release_handler, untrack_handler
+from aipass.drone.apps.handlers.git import (
+    alerts_handler,
+    delete_branch_handler,
+    label_handler,
+    release_handler,
+    untrack_handler,
+)
 from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-from aipass.drone.apps.handlers.git.pr_handler import create_pr
 from aipass.drone.apps.modules.git_module import (
     DRONE_MODULE,
     get_help,
@@ -297,7 +302,13 @@ class TestGitModuleHelp:
         assert "lock_handler" in text
         assert "status_handler" in text
         assert "sync_handler" in text
-        assert "pr_handler" in text
+        assert "dev_pr_handler" in text
+
+    def test_introspective_tiers_read_off_the_gate(self) -> None:
+        """The tier line is the gate's own command lists, so it cannot drift from what is granted."""
+        text = get_introspective()
+        for tier in ("global", "owner", "ci-cure"):
+            assert f"{tier} ({','.join(GIT_ACCESS_TIERS[tier]['commands'])})" in text
 
 
 # ===========================================================================
@@ -327,36 +338,6 @@ class TestModuleRegistration:
 # ===========================================================================
 
 
-def _run_pr_created_success(cmd: list[str], **kwargs: object) -> MagicMock:
-    """Subprocess mock for a full successful pr_handler run (fires pr_created)."""
-    r = MagicMock()
-    r.returncode = 0
-    r.stderr = ""
-    r.stdout = ""
-    if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
-        r.stdout = "main\n"
-    elif cmd[1:3] == ["diff", "--cached"]:
-        r.returncode = 1
-    elif cmd[0] == "gh" and cmd[1] == "pr":
-        r.stdout = "https://github.com/org/repo/pull/99\n"
-    return r
-
-
-def _run_pr_trigger_resilience(cmd: list[str], **kwargs: object) -> MagicMock:
-    """Subprocess mock for pr_handler run where trigger.fire raises."""
-    r = MagicMock()
-    r.returncode = 0
-    r.stderr = ""
-    r.stdout = ""
-    if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
-        r.stdout = "main\n"
-    elif cmd[1:3] == ["diff", "--cached"]:
-        r.returncode = 1
-    elif cmd[0] == "gh" and cmd[1] == "pr":
-        r.stdout = "https://github.com/org/repo/pull/100\n"
-    return r
-
-
 def _run_merge_success(cmd: list[str], **kwargs: object) -> MagicMock:
     """Subprocess mock for a successful merge_plugin run (fires pr_merged)."""
     r = MagicMock()
@@ -376,52 +357,7 @@ def _run_merge_success(cmd: list[str], **kwargs: object) -> MagicMock:
 
 
 class TestTriggerFireIntegration:
-    """Verify trigger.fire() is called after successful PR/merge operations."""
-
-    def test_pr_handler_fires_pr_created(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pr_handler.create_pr fires pr_created event on success."""
-        registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text("{}", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
-
-        mock_trigger = MagicMock()
-        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
-
-        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_pr_created_success):
-            with patch(
-                "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
-                return_value={"success": True, "message": "ok"},
-            ):
-                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release:
-                    result = create_pr("api", "test trigger", tmp_path / "src" / "aipass" / "api")
-
-        assert result["success"] is True
-        mock_release.assert_called_once_with(force=True)
-        mock_trigger.fire.assert_any_call("pr_created", branch="api", pr_url="https://github.com/org/repo/pull/99")
-
-    def test_pr_handler_continues_if_trigger_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """pr_handler.create_pr succeeds even if trigger.fire raises."""
-        registry = tmp_path / "AIPASS_REGISTRY.json"
-        registry.write_text("{}", encoding="utf-8")
-        monkeypatch.chdir(tmp_path)
-
-        mock_trigger = MagicMock()
-        mock_trigger.fire.side_effect = RuntimeError("trigger broken")
-        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
-
-        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_pr_trigger_resilience):
-            with patch(
-                "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
-                return_value={"success": True, "message": "ok"},
-            ):
-                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release:
-                    result = create_pr("api", "test resilience", tmp_path / "src" / "aipass" / "api")
-
-        assert result["success"] is True  # PR still succeeds despite trigger failure
-        mock_release.assert_called_once_with(force=True)
-        mock_trigger.fire.assert_called_once_with(
-            "pr_created", branch="api", pr_url="https://github.com/org/repo/pull/100"
-        )
+    """Verify trigger.fire() is called after a successful merge."""
 
     def test_merge_plugin_fires_pr_merged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """merge_plugin.merge_pr fires pr_merged event on success."""
@@ -668,6 +604,29 @@ class TestMergeGate:
         assert result["exit_code"] == 1
         assert "Usage" in result["stderr"]
         mock_merge.assert_not_called()
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_short_flag_is_not_a_pr_number(self, _mock_auth: MagicMock) -> None:
+        """`merge -d --confirm` is a usage error, never `gh pr merge -d` on the current branch's PR."""
+        with patch(_MERGE_PR) as mock_merge:
+            result = handle_command("merge", ["-d", "--confirm"])
+
+        assert result["exit_code"] == 1
+        assert "Usage" in result["stderr"]
+        mock_merge.assert_not_called()
+
+
+class TestDeleteBranchGuard:
+    """delete-branch only ever hands git a plain branch name."""
+
+    @pytest.mark.parametrize("name", ["refs/heads/main", "-f", "--force", "x:main"])
+    def test_ref_or_flag_names_refused(self, name: str) -> None:
+        """Ref-qualified, flag-like or refspec names never reach git push."""
+        with patch(f"{delete_branch_handler.__name__}.subprocess.run") as mock_run:
+            result = delete_branch_handler.delete_remote_branch(name)
+
+        assert result["success"] is False
+        mock_run.assert_not_called()
 
 
 # ===========================================================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_creator.py
 # Description: Tests for creator module orchestration layer
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
@@ -21,17 +21,15 @@ from aipass.skills.apps.modules.creator import create_skill, handle_command, pri
 class TestHandleCommand:
     """Tests for handle_command — CLI routing logic."""
 
-    def test_no_args_shows_introspection(self, capsys):
-        result = handle_command("create", [])
-        assert result is True
-        output = capsys.readouterr().out
-        assert "creator Module" in output
+    def test_no_name_is_an_error_on_stderr(self, capsys):
+        assert handle_command("create", []) is False
+        assert "skill name required" in capsys.readouterr().err
 
-    def test_help_flag_shows_introspection(self, capsys):
-        result = handle_command("create", ["--help"])
-        assert result is True
-        output = capsys.readouterr().out
-        assert "creator Module" in output
+    def test_a_help_flag_after_the_name_prints_usage_and_scaffolds_nothing(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.chdir(tmp_path)
+        assert handle_command("create", ["test-skill", "--help"]) is True
+        assert "Skills Create - Scaffold a new skill from a template" in capsys.readouterr().out
+        assert not (tmp_path / ".aipass").exists()
 
     def test_create_with_valid_name(self, tmp_path, monkeypatch, capsys, bus_recorder):
         # Pins that create_skill runs and fire() carries the right event name and path.

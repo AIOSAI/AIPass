@@ -1,14 +1,15 @@
 # =================== AIPass ====================
 # Name: function_scanner.py
 # Description: AST-based public function scanner for branch test coverage mapping
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """AST-based public function scanner."""
 
 import ast
+import re
 from pathlib import Path
 
 from aipass.prax import logger
@@ -146,21 +147,6 @@ def _scan_source_files(branch_path: Path, unparsed: list[str] | None = None) -> 
     return all_functions
 
 
-def _test_files_source(branch_path: Path) -> str:
-    """Concatenate all test file sources for matching."""
-    tests_dir = branch_path / "tests"
-    if not tests_dir.is_dir():
-        return ""
-
-    sources = []
-    for test_file in sorted(tests_dir.rglob("test_*.py")):
-        source = _read_file_safe(test_file)
-        if source:
-            sources.append(source)
-
-    return "\n".join(sources)
-
-
 def scan_branch(branch_path: str) -> dict:
     """Scan a branch and build its custom function coverage map.
 
@@ -172,17 +158,14 @@ def scan_branch(branch_path: str) -> dict:
     unparsed: list[str] = []
     all_functions = _scan_source_files(bp, unparsed)
 
-    test_source = _test_files_source(bp)
-
     tests_dir = bp / "tests"
     test_files_map: dict[str, str] = {}  # function_name -> test_file_name
     if tests_dir.is_dir():
         for test_file in sorted(tests_dir.rglob("test_*.py")):
-            source = _read_file_safe(test_file)
-            if not source:
-                continue
+            # Whole identifiers only: a substring match counts `build` as tested by `rebuild`.
+            identifiers = set(re.findall(r"[A-Za-z_]\w*", _read_file_safe(test_file)))
             for func in all_functions:
-                if func["name"] in source and func["name"] not in test_files_map:
+                if func["name"] in identifiers and func["name"] not in test_files_map:
                     test_files_map[func["name"]] = test_file.name
 
     files_map: dict[str, list[dict]] = {}
@@ -190,7 +173,7 @@ def scan_branch(branch_path: str) -> dict:
 
     for func in all_functions:
         rel_path = func["relative_path"]
-        is_tested = func["name"] in test_source
+        is_tested = func["name"] in test_files_map
         if is_tested:
             tested_count += 1
 

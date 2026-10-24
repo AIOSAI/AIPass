@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_lane.py
 # Description: Admin-lane state reporting for doctor — read-only, never a verdict
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Admin-lane state for ``aipass doctor`` (DPLAN-0319 train, the owner's ruling).
@@ -88,7 +88,11 @@ def _holder_cert() -> dict | None:
     raw_path = entry.get("path")
     if not raw_path:
         return None
-    return _read_json(Path(str(raw_path)) / "artifacts" / "birth_certificate.json")
+    holder = Path(str(raw_path))
+    reg_path = None if holder.is_absolute() else _registry_path()
+    if reg_path is not None:
+        holder = reg_path.parent / holder  # relative registry paths are anchored at the registry, not cwd
+    return _read_json(holder / "artifacts" / "birth_certificate.json")
 
 
 def admin_lane_state() -> dict:

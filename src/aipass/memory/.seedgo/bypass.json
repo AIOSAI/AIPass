@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-09-15"
+    "last_updated": "2026-10-23"
   },
   "bypass": [
     {
@@ -107,11 +107,6 @@
       "reason": "Architectural: imports json.config_loader and json_handler for centralized config access and operation logging."
     },
     {
-      "file": "apps/handlers/tracking/line_counter.py",
-      "standard": "handlers",
-      "reason": "Architectural: imports json.memory_files for metadata updates and monitor.detector for registry reading."
-    },
-    {
       "file": "apps/handlers/tracking/tab_renderer.py",
       "standard": "handlers",
       "reason": "Architectural: imports json.memory_files, json.config_loader, and monitor.detector for config-driven tab rendering across all branches."
@@ -207,11 +202,6 @@
       "reason": "Multiline function signatures cause false-positive missing docstring detection."
     },
     {
-      "file": "apps/handlers/archive/indexer.py",
-      "standard": "documentation",
-      "reason": "Utility handler with descriptive function names. Multiline signatures cause false-positive detection."
-    },
-    {
       "file": "apps/handlers/rollover/orchestrator.py",
       "standard": "documentation",
       "reason": "Multiline function signatures cause false-positive missing docstring detection."
@@ -237,22 +227,12 @@
       "reason": "Local variables (target_lines, enriched, enriched_item) inside functions, not constants."
     },
     {
-      "file": "apps/handlers/archive/indexer.py",
-      "standard": "naming",
-      "reason": "Local variables inside functions, not constants."
-    },
-    {
       "file": "apps/handlers/central_writer.py",
       "standard": "naming",
       "reason": "Local variables inside functions, not constants."
     },
     {
       "file": "apps/handlers/monitor/detector.py",
-      "standard": "naming",
-      "reason": "Local variables inside functions, not constants."
-    },
-    {
-      "file": "apps/handlers/tracking/line_counter.py",
       "standard": "naming",
       "reason": "Local variables inside functions, not constants."
     },
@@ -423,13 +403,13 @@
     {
       "file": "tests/test_marker7_memory_lane.py",
       "standard": "import_site",
-      "lines": [774],
+      "lines": [731],
       "reason": "The trigger bus package is stood in through sys.modules because the test pins the event _announce_bump fires through its own `from aipass.trigger.apps.modules.core import trigger`; the next line asserts that import reaches the stand-in. It is the only edge between @memory and @trigger's bus that keeps a real event from firing. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "tests/test_trinity_standard.py",
       "standard": "import_site",
-      "lines": [379],
+      "lines": [375],
       "reason": "The subject is import time: memory_files is evicted and imported fresh to prove a removed attribute is not re-created by a fresh import. A top-of-file binding is the already-imported module and could not see that. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -441,19 +421,13 @@
     {
       "file": "apps/handlers/intake/plans_processor.py",
       "standard": "logged_fallback",
-      "lines": [200],
+      "lines": [183],
       "reason": "_is_stale answers 'process this plan again?'. True when the mtime cannot be compared is the decision, not a failure value: re-vectorizing is the safe answer when the manifest cannot vouch for the file. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
-    },
-    {
-      "file": "apps/handlers/monitor/detector.py",
-      "standard": "logged_fallback",
-      "lines": [245, 276],
-      "reason": "_recreate_trinity_file returns the Path it wrote or None; every None (fence refusal, no template, unreadable template, failed write) means 'not recreated', and the success path never returns None: the checker reads the other refusals as success. Each is logged. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
       "file": "apps/handlers/monitor/memory_watcher.py",
       "standard": "logged_fallback",
-      "lines": [79],
+      "lines": [74],
       "reason": "_check_vector_deps answers 'are chromadb and numpy confirmed importable'. A check that could not run has not confirmed them, so False is the true answer; the self-report reads it as degraded either way. Logged at warning. Leg 8 of DPLAN-0354, @memory's decision."
     },
     {
@@ -602,19 +576,19 @@
     {
       "file": "tests/test_rollover.py",
       "standard": "import_site",
-      "lines": [32, 33, 61, 62, 63, 131, 171, 188, 208],
+      "lines": [32, 33, 60, 61, 62, 130, 170, 187, 207],
       "reason": "Not stubs: each importlib.import_module fetches the REAL module. 54/55 first-import rollover_config and rollover_json before any stand-in lands, because what they bind at import they keep. 107-109 take the real cli flag helpers so the routing guards are real. 203/291 fetch the parent package to evict its cached attribute (monkeypatch restores it). 267/316 fetch the real handlers.cli package to compare with. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_rollover.py",
       "standard": "import_site",
-      "lines": [82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 105, 106, 128, 135],
+      "lines": [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 104, 105, 127, 134],
       "reason": "The stub is the cure (ruling (a)). rollover.py imports these at import time, and each far side writes. orchestrator.execute_rollover writes .trinity, the backups and the vector stores. memory_watcher.check_and_rollover runs that same rollover. detector's walk recreates a missing .trinity file. todo_report.roll_pad writes the .backup todo backlogs. plans_processor.process_plans embeds and writes the flow_plans store. 134-137 register the REAL cli flag helpers under the stand-in package, which has no __path__. 139/140 are the parent packages. 199 is the eviction of the cached rollover (del under the module constant _ROLLOVER_MODULE, after setitem so teardown restores it) that the re-import at 207 needs; the checker read the constant key from seedgo leg 17 on, and devpulse added the line on 2026-10-05 as part of this same ruling. 207 is the deliberate re-import of rollover against them. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_marker7_memory_lane.py",
       "standard": "through_the_command",
-      "lines": [95, 136, 157, 168, 276, 780],
+      "lines": [94, 135, 156, 167, 275, 737],
       "reason": "Contracts pinned, each with no public caller that leaves the disk alone. 149/284: detector._read_registry is the rollover WRITE scope (it stops at the repo edge); its public readers walk files and return counts, never rows, and read_scope adds the externals. 228/262: rollover._normalize_rolled never reaches another repository and names a branch whose frame could not be written; its public caller runs a real rollover first. 409: spawn_pusher._write_json refuses a path outside the root; its public caller pushes the spawn templates. 1015: templates._announce_bump fires on the bus; its public caller stamps the receipts. Leg 11 of DPLAN-0354."
     },
     {
@@ -632,19 +606,24 @@
     {
       "file": "tests/test_trinity_push.py",
       "standard": "through_the_command",
-      "lines": [1438],
+      "lines": [1446],
       "reason": "Ruling (b): tp._RULES_CACHE.clear() empties the module's cache of the global rules file so the test reads its own tmp copy and can count re-reads; there is no public reset, and no door is added for the test. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_trinity_standard.py",
       "standard": "through_the_command",
-      "lines": [301, 310, 319, 632, 648],
+      "lines": [301, 310, 319, 628, 644],
       "reason": "Contracts pinned on a tmp file: the meta line is tab then template semantics, a refresh restores _usage from the template and never leaves a bare tab, and the receipt is bumped after a refresh (or the refresh succeeds with no receipt). The public caller refreshes every live branch's .trinity files, which is live state. Leg 11 of DPLAN-0354."
     },
     {
       "file": "tests/test_declared_roots.py",
       "standard": "no_product_call",
       "reason": "File-wide because no_product_call passes no line (the checklist calls a lines rule inert); it covers TestWhatTheHostCanActuallyHold, lines 660 and 675. Host probes @devpulse asked for. They measure what the running file system holds (case-only names fold or not; a differing stem is always a second file), the premise every case-glob pin in this file is written on. No product code answers that question. Leg 11 of DPLAN-0354."
+    },
+    {
+      "file": "apps/handlers/templates/push_store.py",
+      "standard": "json_structure",
+      "reason": "Its two operations are logged by storage/lane.run_json, the one subprocess runner, as subprocess_lane rows labelled vectorize_and_store and get_by_ids."
     }
   ],
   "notes": {

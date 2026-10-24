@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: roots.py
 # Description: turn a target argument into the tree the inventory walks
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """WHICH TREE GETS WALKED.
@@ -45,8 +45,11 @@ def resolve(argument: str, branch_paths: Optional[Dict[str, Path]] = None) -> Ro
 
 
 def fleet_root() -> Path:
-    """The directory the registry sits in - the whole fleet, one tree."""
-    return registry_scan.find_registry().parent
+    """The directory the registry sits in - the whole fleet, one tree. No registry raises."""
+    registry = registry_scan.find_registry()
+    if not registry.is_file():
+        raise FileNotFoundError(f"no registry found at or above {registry.parent} - pass a directory path instead")
+    return registry.parent
 
 
 def _branch(name: str, branch_paths: Dict[str, Path]) -> Root:

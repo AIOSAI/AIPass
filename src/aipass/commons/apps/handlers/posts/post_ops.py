@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: post_ops.py
 # Description: Post operations handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -221,7 +221,7 @@ def delete_post(args: List[str]) -> dict:
                 "error": f"Permission denied: post #{post_id} belongs to {post_author}, not {author}",
             }
 
-        # Children first (votes and mentions hang off comment ids), the post row last.
+        # Children first (votes, mentions and reactions hang off comment ids), the post row last.
         comment_rows = conn.execute("SELECT id FROM comments WHERE post_id = ?", (post_id,)).fetchall()
         comment_ids = [r["id"] for r in comment_rows]
 
@@ -237,7 +237,14 @@ def delete_post(args: List[str]) -> dict:
                 comment_ids,
             )
 
+            conn.execute(
+                f"DELETE FROM reactions WHERE comment_id IN ({placeholders})",
+                comment_ids,
+            )
+
         conn.execute("DELETE FROM mentions WHERE post_id = ?", (post_id,))
+
+        conn.execute("DELETE FROM reactions WHERE post_id = ?", (post_id,))
 
         conn.execute("DELETE FROM comments WHERE post_id = ?", (post_id,))
 

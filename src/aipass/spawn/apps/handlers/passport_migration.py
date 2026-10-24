@@ -50,7 +50,7 @@ __all__ = [
 
 SCHEMA_VERSION = "2.0.0"
 TARGET_GIT_BRANCH = "dev"
-CANONICAL_REGISTRY_PATH = ".aipass/registry.json"
+CANONICAL_REGISTRY_PATH = "AIPASS_REGISTRY.json"
 BACKUP_SUFFIX = ".pre_v2_backup"
 
 BLOCK_ORDER = ("document_metadata", "branch_info", "citizenship", "identity")

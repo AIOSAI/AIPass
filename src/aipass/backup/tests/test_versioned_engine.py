@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-06-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
@@ -210,6 +210,26 @@ class TestDiffGenerator:
         assert should_create_diff(Path("image.png")) is False
         assert should_create_diff(Path("data.json")) is True
 
+    def test_a_stored_diff_is_a_patch_with_one_line_per_change_and_no_blank_lines_between(self, tmp_path: Path):
+        """Mutant: lines that keep their endings are joined with a second newline, so patch reads it as malformed."""
+        old, new = tmp_path / "old.txt", tmp_path / "new.txt"
+        old.write_text("a\nb\nc\n", encoding="utf-8")
+        new.write_text("a\nB\nc\n", encoding="utf-8")
+
+        body = generate_diff_content(old, new).splitlines(keepends=True)[2:]
+
+        assert body == ["@@ -1,3 +1,3 @@\n", " a\n", "-b\n", "+B\n", " c\n"]
+
+    def test_a_last_line_without_a_newline_gets_the_patch_marker_not_glued_to_the_next(self, tmp_path: Path):
+        """Mutant: "-b" and "+c" run together when the old and new last lines carry no ending."""
+        old, new = tmp_path / "old.txt", tmp_path / "new.txt"
+        old.write_text("a\nb", encoding="utf-8")
+        new.write_text("a\nc", encoding="utf-8")
+
+        body = generate_diff_content(old, new).splitlines(keepends=True)[4:]
+
+        assert body == ["-b\n", "\\ No newline at end of file\n", "+c\n", "\\ No newline at end of file\n"]
+
 
 class TestRestore:
     """The restore handlers — writing a file-folder's current copy out, and listing what the folder holds."""
@@ -276,6 +296,22 @@ class TestVersionedFilePath:
         assert result.name == long_name
         # name[:30] + "_" + md5(name)[:8], the digest read off the product once.
         assert result.parent.name == "a" * 30 + "_96e1cede"
+
+    def test_a_project_folder_named_root_never_shares_a_folder_with_a_root_level_file(self):
+        """Mutant: root/x.py and x.py both land in versioned/root/x.py/, one history overwriting the other."""
+        top = build_versioned_file_path(FAKE_PROJECT_ROOT, "x.py")
+        nested = build_versioned_file_path(FAKE_PROJECT_ROOT, "root/x.py")
+
+        assert top != nested
+        assert top.parent.parent.name == "root"
+
+    def test_the_store_path_maps_back_to_the_project_path_it_was_built_from(self):
+        """versioned_rel_path is the builder's inverse, a real root/ folder included."""
+        store = build_versioned_store(FAKE_PROJECT_ROOT)
+        for rel in ("x.py", "root/x.py", "root/root/x.py", "src/a/x.py"):
+            folder = build_versioned_file_path(FAKE_PROJECT_ROOT, rel).parent
+
+            assert path_builder.versioned_rel_path(folder.parent.relative_to(store).as_posix(), "x.py") == rel
 
 
 class TestRestoreModule:

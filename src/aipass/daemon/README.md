@@ -55,9 +55,9 @@ There is no command list on this page, deliberately: a hand-typed copy of a bran
 
 ## Architecture
 
-Three layers. `apps/daemon.py` is the entry point: it discovers the modules, routes a verb to one of them, and renders help. `apps/modules/` holds one module per verb — `run` for the scheduler tick, `queue` for the unified job view, `rotation` for the night watch, `inbox_sweep` for the unread-mail backstop, `activity_report` for the three reporting verbs, `update` for the status digest, `timer_install` for the systemd units, with `schedule` and `actions` kept only as retirement notices pointing at the schedule file, and `wakeup_ops` an orphaned facade recorded in the known issues.
+Three layers. `apps/daemon.py` is the entry point: it discovers the modules, routes a verb to one of them, and renders help. `apps/modules/` holds one module per verb — `run` for the scheduler tick, `queue` for the unified job view, `rotation` for the night watch, `inbox_sweep` for the unread-mail backstop, `activity_report` for the three reporting verbs, `update` for the status digest, `timer_install` for the systemd units, with `schedule` and `actions` kept only as retirement notices pointing at the schedule file.
 
-`apps/handlers/` holds the implementation, grouped one directory per concern: `schedule/` (job discovery, the runstate and due logic, command-job execution, the catch-up lane, the rounds roster, the tick lock, the authoring reference, the fail-soft notifier), `monitoring/` (activity collection, inbox scanning, memory health, red flags, report rendering), `cli/` (the argument gate that refuses unknown tokens), `update/` (data loading for the digest), and the json shim every branch shares.
+`apps/handlers/` holds the implementation, grouped one directory per concern: `schedule/` (job discovery, the runstate and due logic, command-job execution, the catch-up lane, the rounds roster, the tick lock, the authoring reference), `monitoring/` (activity collection, inbox scanning, memory health, red flags, report rendering), `cli/` (the argument gate that refuses unknown tokens), `update/` (data loading for the digest), and the json shim every branch shares.
 
 The directory tree and this branch's sharp edges live in its own prompt, `.aipass/aipass_local_prompt.md` — one place, so they cannot disagree with themselves.
 

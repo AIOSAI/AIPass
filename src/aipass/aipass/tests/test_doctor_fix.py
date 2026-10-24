@@ -3,7 +3,7 @@
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
 # Version: 1.2.1
 # Created: 2026-05-15
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/_doctor_fix.py."""
@@ -13,6 +13,7 @@
 # seedgo: no-test-needed(ruff) — that _doctor_fix.py and the modules it imports parse and import
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -190,6 +191,17 @@ class TestGenerateRemediation:
         root_items = [i for i in items if i.category == "root_artifact"]
         assert len(root_items) == 1
         assert root_items[0].severity == "info"
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+    def test_a_symlinked_venv_is_not_a_remediation_item(self, tmp_path: Path) -> None:
+        """The scanner passes a .venv linked to the AIPass runtime; it must not become a warning."""
+        _make_agent(tmp_path, "agent1", "uuid-1")
+        _make_registry(tmp_path, [{"name": "agent1", "path": str(tmp_path / "src" / "agent1")}])
+        (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
+        (tmp_path / "runtime").mkdir()
+        (tmp_path / ".venv").symlink_to(tmp_path / "runtime")
+        items = generate_remediation(tmp_path)
+        assert [i for i in items if i.category == "root_artifact"] == []
 
     def test_root_artifact_command(self, tmp_path: Path) -> None:
         """Root artifact fix command uses --relocate-root."""

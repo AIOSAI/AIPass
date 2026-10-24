@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_backup.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Backs up ~/.claude/settings*.json and appends a receipt before any tool writes it (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The tool doors of the settings-backup contract (FPLAN-0645).
@@ -80,7 +80,7 @@ def _settings_file(raw: str, cwd: str, claude_dir: Path) -> Path | None:
 
     A symlink counts from either end: a link in ~/.claude, or one elsewhere landing there.
     """
-    spelled = Path(raw).expanduser()
+    spelled = Path(os.path.expanduser(raw))
     if not spelled.is_absolute():
         spelled = Path(cwd) / spelled
     if not fnmatch.fnmatchcase(spelled.name.lower(), SETTINGS_PATTERN) and not spelled.is_symlink():

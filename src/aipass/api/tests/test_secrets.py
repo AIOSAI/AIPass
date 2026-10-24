@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_secrets.py
 # Description: Tests for the keyring-backed secrets handler, its module door, migrate and get_secret_cmd
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-15
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/auth/secrets.py, apps/modules/secrets.py, and api_key.get_secret_cmd."""
@@ -34,6 +34,8 @@ from aipass.api.apps.handlers.auth.secrets import (
     set_secret,
     list_secrets,
 )
+from aipass.api.apps.handlers.auth import secrets as secrets_handler
+from aipass.api.apps.handlers.auth.env import create_env_template
 from aipass.api.apps.modules.api_key import get_secret_cmd
 from aipass.api.apps.modules import secrets as secrets_module
 
@@ -41,6 +43,7 @@ from aipass.api.apps.modules import secrets as secrets_module
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_JSON_HANDLER = "aipass.api.apps.handlers.auth.secrets.json_handler"
 PATCH_LOGGER = "aipass.api.apps.handlers.auth.secrets.logger"
+PATCH_ENV = "aipass.api.apps.handlers.auth.env"
 
 PATCH_CMD_SECRETS = "aipass.api.apps.modules.api_key.secrets"
 PATCH_CMD_ERROR = "aipass.api.apps.modules.api_key.error"
@@ -560,6 +563,35 @@ class TestSecretsMigrate:
         assert get_secret("openrouter", "api_key") == ENV_KEY
         assert (store / ".env").exists()
         assert ".env" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("quote", ['"', "'"])
+    def test_a_quoted_env_value_is_stored_without_its_quotes(
+        self, store: Path, keyring_store: Any, quiet: dict, quote: str
+    ) -> None:
+        (store / ".env").write_text(f"OPENROUTER_API_KEY={quote}{ENV_KEY}{quote}\n", encoding="utf-8")
+
+        report = secrets_handler.migrate_store()
+
+        assert report["failed"] == []
+        assert get_secret("openrouter", "api_key") == ENV_KEY
+        assert not (store / ".env").exists()
+
+    def test_the_init_template_placeholders_are_not_imported_and_the_file_stays(
+        self, store: Path, keyring_store: Any, quiet: dict
+    ) -> None:
+        with patch(f"{PATCH_ENV}.json_handler"), patch(f"{PATCH_ENV}.logger"):
+            create_env_template(target_path=store / ".env")
+            create_env_template(provider="anthropic", target_path=store / "other" / ".env")
+        (store / ".env").write_text(
+            (store / ".env").read_text(encoding="utf-8") + (store / "other" / ".env").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+        report = secrets_handler.migrate_store()
+
+        assert report["moved"] == []
+        assert keyring_store.entries == {}
+        assert (store / ".env").exists()
 
     def test_an_unavailable_backend_is_an_error_and_moves_nothing(
         self, store: Path, quiet: dict, capsys: pytest.CaptureFixture

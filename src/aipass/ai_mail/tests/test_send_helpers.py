@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_helpers.py
 # Description: Tests for email send handler and send_args dispatch resolution
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""
@@ -20,7 +20,6 @@ import pytest
 from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
-import aipass.ai_mail.apps.handlers.email.send as send_mod
 from aipass.ai_mail.apps.handlers.email.send import (
     send_to_single,
     send_to_broadcast,
@@ -66,7 +65,6 @@ def test_send_to_single_happy_path(tmp_path, recorded_bus):
     mock_deliver = MagicMock(return_value=(True, ""))
     mock_callback = MagicMock()
     mock_log = MagicMock()
-    mock_update = MagicMock()
 
     success, error = send_to_single(
         to_branch="@backup",
@@ -82,7 +80,6 @@ def test_send_to_single_happy_path(tmp_path, recorded_bus):
         deliver_email_to_branch_fn=mock_deliver,
         on_delivered_callback=mock_callback,
         log_operation_fn=mock_log,
-        update_central_fn=mock_update,
     )
 
     assert success is True
@@ -92,33 +89,6 @@ def test_send_to_single_happy_path(tmp_path, recorded_bus):
     mock_deliver.assert_called_once()
     mock_log.assert_called_once_with("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})
     assert recorded_bus.fires == [("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})]
-
-
-def test_send_to_single_a_failed_central_update_is_logged_not_fatal(tmp_path, monkeypatch):
-    """The mail landed, so a failed central update keeps (True, None) and warns naming the recipient."""
-    logger = MagicMock()
-    monkeypatch.setattr(send_mod, "logger", logger)
-    failure = OSError("central unwritable")
-
-    success, error = send_to_single(
-        to_branch="@backup",
-        subject="Test subject",
-        message="Test body",
-        user_info=_make_user_info(tmp_path),
-        auto_execute=False,
-        no_memory_save=False,
-        reply_to=None,
-        dispatched_to=None,
-        create_email_file_fn=MagicMock(return_value=str(tmp_path / "email_file.json")),
-        load_email_file_fn=MagicMock(return_value={"subject": "Test", "message": "Body"}),
-        deliver_email_to_branch_fn=MagicMock(return_value=(True, "")),
-        on_delivered_callback=MagicMock(),
-        log_operation_fn=MagicMock(),
-        update_central_fn=MagicMock(side_effect=failure),
-    )
-
-    assert (success, error) == (True, None)
-    logger.warning.assert_called_once_with("[send] update_central_fn failed after send to %s: %s", "@backup", failure)
 
 
 def test_send_to_single_load_fails(tmp_path):
@@ -142,7 +112,6 @@ def test_send_to_single_load_fails(tmp_path):
         deliver_email_to_branch_fn=mock_deliver,
         on_delivered_callback=None,
         log_operation_fn=mock_log,
-        update_central_fn=None,
     )
 
     assert success is False
@@ -172,7 +141,6 @@ def test_send_to_single_delivery_fails(tmp_path, recorded_bus):
         deliver_email_to_branch_fn=mock_deliver,
         on_delivered_callback=None,
         log_operation_fn=mock_log,
-        update_central_fn=None,
     )
 
     assert success is False
@@ -206,7 +174,6 @@ def test_send_to_single_sets_auto_execute(tmp_path, recorded_bus):
         deliver_email_to_branch_fn=mock_deliver,
         on_delivered_callback=None,
         log_operation_fn=MagicMock(),
-        update_central_fn=None,
     )
 
     assert captured_data["auto_execute"] is True

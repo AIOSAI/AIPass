@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -11,7 +11,6 @@ Spawn Module — Create new AIPass agents from templates.
 Reference: docs/birth.md
 """
 
-from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
@@ -31,20 +30,14 @@ from aipass.spawn.apps.handlers.metadata import (
     get_branch_name as get_branch_name,
     normalize_branch_name as normalize_branch_name,
 )
-from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
     get_template_dir as get_template_dir,
     validate_class as validate_class,
     get_default_class as get_default_class,
     get_available_classes as get_available_classes,
-    refuse_forbidden_class as refuse_forbidden_class,
     refuse_retired_or_forbidden as refuse_retired_or_forbidden,
-    class_for_citizen_number as class_for_citizen_number,
 )
-from aipass.spawn.apps.handlers.mint_ops import spawn_at
-
-# One template for every citizen: the class no longer picks a scaffold.
-DEFAULT_TEMPLATE = Path(__file__).parents[2] / "templates" / "citizen"
+from aipass.spawn.apps.handlers.mint_ops import INCOMPLETE_MARKER as INCOMPLETE_MARKER, spawn_at
 
 _META_TAB_KEYS = {"TODOS_META", "KEY_LEARNINGS_META", "SESSIONS_META", "OBSERVATIONS_META"}
 
@@ -86,8 +79,7 @@ def print_introspection():
         "    [dim]- placeholders.py (build_replacements_dict, validate_no_placeholders — template substitution)[/dim]"
     )
     console.print(
-        "    [dim]- file_ops.py (copy_template, rename_placeholder_paths,"
-        " regenerate_template_registry, ensure_directory — filesystem ops)[/dim]"
+        "    [dim]- file_ops.py (copy_template, regenerate_template_registry, ensure_directory — filesystem ops)[/dim]"
     )
     console.print(
         "    [dim]- meta_ops.py"
@@ -118,9 +110,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if command == "create":
-        if not args:
-            logger.error("spawn create requires a target path")
-            return False
         target_path = args[0]
         kwargs = {}
         i = 1
@@ -183,11 +172,3 @@ def spawn_agent(
         registry_path=registry_path,
         citizen_class=citizen_class,
     )
-
-
-# Old private names re-exported from handlers/adoption_ops.py: tests and callers use them.
-_birth_from_seed = birth_from_seed
-
-
-_adopt_existing = adopt_existing
-_error = error_result

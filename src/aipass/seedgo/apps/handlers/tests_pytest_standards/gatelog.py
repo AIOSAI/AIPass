@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: gatelog.py
 # Description: reads the payload's JSONL gate log into a normalized measurement
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The gate log reader — and the exact place the pytest ecosystem stops.
@@ -46,15 +46,14 @@ def read_records(log_path: Path) -> List[dict]:
     records: List[dict] = []
     malformed = 0
     with open(log_path, encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
-            if not line:
+        for number, line in enumerate(handle, start=1):
+            if not line.strip():
                 continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                logger.debug(f"[AUDIT-TESTS] unparseable gate-log line in {log_path}: {exc}")
+            record = decode_line(line, Path(log_path), number)
+            if record is None:
                 malformed += 1
+            else:
+                records.append(record)
 
     if malformed:
         logger.warning(f"[AUDIT-TESTS] {malformed} malformed line(s) in {log_path}")
@@ -63,12 +62,28 @@ def read_records(log_path: Path) -> List[dict]:
     return records
 
 
-def _first(records: List[dict], kind: str) -> Optional[dict]:
-    """The first record of a kind, or None if the run never produced one."""
+def decode_line(line: str, path: Path, number: int) -> Optional[dict]:
+    """One JSONL line as a dict, or None (blank, not JSON, or not an object) with a warning naming where it broke."""
+    text = line.strip()
+    if not text:
+        return None
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError as exc:
+        logger.warning(f"[AUDIT-TESTS] log {path.name} line {number} is not JSON: {exc}")
+        return None
+    if not isinstance(decoded, dict):
+        logger.warning(f"[AUDIT-TESTS] log {path.name} line {number} is not an object")
+        return None
+    return decoded
+
+
+def first_record(records: List[dict], kind: str) -> dict:
+    """The first record of a kind, or an empty dict when the run never wrote one."""
     for record in records:
         if record.get("rec") == kind:
             return record
-    return None
+    return {}
 
 
 def _violations(records: List[dict]) -> List[dict]:
@@ -100,9 +115,9 @@ def measure(records: List[dict], *, timed_out: bool) -> dict:
 
     Decides no status or score: turning `proven` into `refused` is the core's ruling.
     """
-    header = _first(records, "header") or {}
-    summary = _first(records, "summary") or {}
-    copy_check = _first(records, "copy_check") or {}
+    header = first_record(records, "header")
+    summary = first_record(records, "summary")
+    copy_check = first_record(records, "copy_check")
     violations = _violations(records)
 
     canary = summary.get("canary") or {"attempted": False, "caught": False, "path": "", "error": ""}
@@ -139,7 +154,7 @@ def executed_order(records: List[dict]) -> List[str]:
 
     Read from the summary, not derived from violations, which would omit clean tests.
     """
-    summary = _first(records, "summary") or {}
+    summary = first_record(records, "summary")
     return [nodeid for nodeid in summary.get("executed_order", []) if isinstance(nodeid, str)]
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -61,7 +61,7 @@ def _handlers_dir() -> Path:
     return Path(__file__).parent.parent / "handlers"
 
 
-def _discover_packs() -> dict:
+def scoring_packs() -> dict:
     """Scoring packs available to the audit, name -> path."""
     return discovery.discover_packs(_handlers_dir())
 
@@ -89,7 +89,7 @@ def _print_non_scoring_packs() -> None:
 
 def _show_audit_introspection() -> None:
     """Show available packs and example commands when audit is run with no args."""
-    packs = _discover_packs()
+    packs = scoring_packs()
     console.print()
     header("SEEDGO AUDIT")
     console.print()
@@ -123,7 +123,7 @@ def print_introspection() -> None:
     console.print("Pack-aware audit — scans branches against checker packs")
     console.print()
 
-    packs = _discover_packs()
+    packs = scoring_packs()
     console.print("[yellow]Discovered Packs:[/yellow]")
     for name, pack_path in packs.items():
         check_files = list(pack_path.glob("*_check.py"))
@@ -221,7 +221,7 @@ def _dispatch_lane(args: List[str]) -> bool:
     Parsing only: the rest is forwarded untouched. A pack really named `tests` would give the word two
     meanings, so that collision refuses and names both.
     """
-    if LANE_WORD in _discover_packs():
+    if LANE_WORD in scoring_packs():
         _print_refusal(refusal.refusal_for_ambiguous_lane_word(LANE_WORD, "audit"))
     return lane_verb.handle_command("audit-tests", args[1:])
 
@@ -254,7 +254,6 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     pack_name = None
     specific_branch = None
-    show_bypasses = parsed.show_bypasses
     no_bypass = parsed.no_bypass
     force_full = parsed.force_full
     write_artifact = parsed.write_artifact
@@ -274,6 +273,13 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if len(positional) >= 1:
         if positional[0].startswith("@"):
+            if len(positional) >= 2:
+                # One branch per run: a second @branch would be dropped and the run read as covering both.
+                error(
+                    f"One branch per audit: {positional[0]} and {positional[1]} were both given",
+                    suggestion=f"Usage: drone @seedgo audit aipass {positional[0]}",
+                )
+                raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, positional[1])
             pack_name = "aipass"
             specific_branch = normalize_branch_arg(positional[0])
         else:
@@ -290,7 +296,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, branch_arg)
         specific_branch = normalize_branch_arg(branch_arg)
 
-    packs = _discover_packs()
+    packs = scoring_packs()
     if pack_name is None or pack_name not in packs:
         available = ", ".join(packs.keys())
         error(
@@ -300,10 +306,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, str(pack_name))
 
     pack_path = packs[pack_name]
-
-    if show_bypasses:
-        warning("--show-bypasses not yet implemented in seedgo")
-        return True
 
     # A private branch is auditable only from inside its own directory.
     if specific_branch and _is_branch_private(specific_branch):

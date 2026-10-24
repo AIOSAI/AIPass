@@ -1,14 +1,15 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: OpenRouter Client Handler
-# Version: 3.1.1
+# Version: 3.1.2
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 
 """OpenRouter Client Handler"""
 
+import threading
 import time
 from typing import Optional, Dict, List, Any
 
@@ -25,7 +26,6 @@ except ImportError as e:
 
 from aipass.api.apps.handlers.auth.keys import get_api_key
 from aipass.api.apps.handlers.openrouter.caller import get_caller_info
-from aipass.api.apps.handlers.openrouter.provision import ensure_caller_config
 from aipass.api.apps.handlers.usage.tracking import track_usage
 
 from aipass.api.apps.handlers.json import json_handler
@@ -185,11 +185,6 @@ def get_response(
             logger.warning("Could not detect caller - using 'unknown'")
             caller = "unknown"
 
-    try:
-        ensure_caller_config(caller)
-    except Exception as e:
-        logger.warning(f"Caller config provisioning failed (non-blocking): {e}")
-
     if not model:
         logger.error("No model specified.")
         logger.warning(
@@ -217,13 +212,19 @@ def get_response(
         return None
 
     if result.get("id"):
-        try:
-            track_usage(result["id"], caller if caller else "unknown", model, api_key)
-        except Exception as e:
-            logger.warning(f"Usage tracking failed: {e}")
+        # Off the caller's thread, but not daemon: a CLI that exits right after still records the usage.
+        threading.Thread(target=_track_in_background, args=(result["id"], caller, model, api_key)).start()
 
     logger.info(f"Successfully got response - caller: {caller}, model: {model}, length: {len(result['content'])} chars")
     return result
+
+
+def _track_in_background(generation_id: str, caller: str, model: str, api_key: str) -> None:
+    """Track one generation off the caller's thread; a failure is logged, never raised."""
+    try:
+        track_usage(generation_id, caller, model, api_key)
+    except Exception as e:
+        logger.warning(f"Usage tracking failed: {e}")
 
 
 def get_cache_stats() -> Dict[str, Any]:

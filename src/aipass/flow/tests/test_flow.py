@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_flow.py
 # Description: Tests for flow.py CLI entry point
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -346,31 +346,31 @@ class TestMain:
         assert result == 1
 
     def test_unknown_command_with_help_flag(self) -> None:
-        """Shows module help when unknown command is followed by --help."""
+        """Unknown command followed by --help still exits 1."""
         mod = _make_module("create_plan")  # handle_command returns False
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch(f"{_FLOW}.print_module_help") as mock_mod_help,
+            patch(f"{_FLOW}.print_module_help", return_value=False) as mock_mod_help,
             patch("sys.argv", ["flow", "bogus", "--help"]),
         ):
             result = main()
 
-        assert result == 0
+        assert result == 1
         mock_mod_help.assert_called_once_with("bogus", [mod])
 
     def test_unknown_command_with_short_help_flag(self) -> None:
-        """Shows module help when unknown command is followed by -h."""
+        """Unknown command followed by -h still exits 1."""
         mod = _make_module("create_plan")  # handle_command returns False
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch(f"{_FLOW}.print_module_help") as mock_mod_help,
+            patch(f"{_FLOW}.print_module_help", return_value=False) as mock_mod_help,
             patch("sys.argv", ["flow", "bogus", "-h"]),
         ):
             result = main()
 
-        assert result == 0
+        assert result == 1
         mock_mod_help.assert_called_once_with("bogus", [mod])
 
     def test_command_with_no_extra_args(self) -> None:
@@ -552,18 +552,18 @@ class TestPrintHelp:
 class TestPrintModuleHelp:
     """Tests for print_module_help()."""
 
-    def test_exact_match(self, capsys: pytest.CaptureFixture[str], header_bus) -> None:
+    def test_exact_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Finds module by exact name match, and the header names the module found.
 
         Mutant: header(f"Flow - {module_name} Command") -> header("Flow - Command") reddens this.
         """
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
-        print_module_help("create_plan", [mod])
+        assert print_module_help("create_plan", [mod]) is True
 
         out, err = capsys.readouterr()
         assert "Create plans" in out
         assert "Unknown command" not in out + err
-        assert header_bus.calls == [("cli_header_displayed", {"title": "Flow - create_plan Command"})]
+        assert "Flow - create_plan Command" in out
 
     def test_no_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows error for unknown command.
@@ -571,7 +571,7 @@ class TestPrintModuleHelp:
         The diagnostic goes to stderr and the pointer to stdout, so both channels are read.
         """
         mod = _make_module("create_plan")
-        print_module_help("nonexistent", [mod])
+        assert print_module_help("nonexistent", [mod]) is False
 
         out, err = capsys.readouterr()
         assert "Unknown command: nonexistent" in err

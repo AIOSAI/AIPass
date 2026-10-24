@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -16,23 +16,18 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-# POSIX only: Windows has no fcntl, so update_registry_path takes no lock there.
-try:
-    import fcntl
-except ImportError:
-    fcntl = None  # type: ignore[assignment]
-    logger.info("[repair] fcntl unavailable (Windows) — update_registry_path runs unlocked")
-
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
     is_protected,
     load_registry,
+    registry_lock,
     save_registry,
     branches_as_list,
 )
 from aipass.spawn.apps.handlers.json import json_handler
 
-ARCHIVE_EXCLUDE = {".venv", ".git", "__pycache__", ".chroma", "node_modules", ".pytest_cache"}
+# Rebuildable noise only: .git history and .chroma vectors go into the archive, since the original is removed.
+ARCHIVE_EXCLUDE = {".venv", "__pycache__", "node_modules", ".pytest_cache"}
 
 
 REGISTRY_SUFFIX = "_REGISTRY.json"
@@ -63,14 +58,7 @@ def update_registry_path(registry_path, branch_name, new_path):
     Returns False if the branch is not found; every other field is preserved.
     """
     registry_path = Path(registry_path)
-    lock_path = registry_path.parent / f".{registry_path.stem}.lock"
-
-    lock_fd = None
-    if fcntl is not None:
-        lock_fd = open(lock_path, "w", encoding="utf-8")
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-
-    try:
+    with registry_lock(registry_path):
         registry = load_registry(registry_path)
         branches = registry.get("branches", [])
         branch_list = branches_as_list(branches)
@@ -96,10 +84,6 @@ def update_registry_path(registry_path, branch_name, new_path):
 
         registry["branches"] = branch_list
         return save_registry(registry_path, registry)
-    finally:
-        if lock_fd is not None and fcntl is not None:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            lock_fd.close()
 
 
 def _update_passport_paths(branch_dir, new_relative_path, project_name=None):
@@ -181,7 +165,7 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         logger.error("[repair] %s", msg)
         return {"success": False, "error": msg, "moved": False, "registry_updated": False}
     registry_path = Path(registry_path)
-    project_root = registry_path.parent
+    project_root = registry_path.resolve().parent
 
     registry = load_registry(registry_path)
     branches = branches_as_list(registry.get("branches", []))
@@ -198,9 +182,8 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
     old_rel_path = entry.get("path", "")
     old_abs_path = (project_root / old_rel_path).resolve()
 
-    new_abs_path = Path(new_path)
-    if not new_abs_path.is_absolute():
-        new_abs_path = (project_root / new_path).resolve()
+    # Resolved before the containment check: /proj/../outside is lexically inside /proj.
+    new_abs_path = (project_root / new_path).resolve()
 
     try:
         new_rel_path = new_abs_path.relative_to(project_root).as_posix()
@@ -255,7 +238,15 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         logger.error("[repair] Move failed for %s: %s", branch_name, e)
         return {"success": False, "error": f"Move failed: {e}", "archive_path": str(archive_dir)}
 
-    reg_updated = update_registry_path(registry_path, branch_name, new_rel_path)
+    if not update_registry_path(registry_path, branch_name, new_rel_path):
+        # The registry still names the old path, so the tree goes back to where it points.
+        shutil.move(str(new_abs_path), str(old_abs_path))
+        logger.error("[repair] Registry not updated for %s — moved back to %s", branch_name, old_rel_path)
+        return {
+            "success": False,
+            "error": f"Registry could not be updated — {branch_name} moved back to {old_rel_path}",
+            "archive_path": str(archive_dir),
+        }
 
     # A helper's False is a skip; its failure raises and is named here, never read as a skip.
     project_name = _detect_project_package(new_rel_path)
@@ -287,7 +278,7 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         "old_path": old_rel_path,
         "new_path": new_rel_path,
         "archive_path": str(archive_dir),
-        "registry_updated": reg_updated,
+        "registry_updated": True,
         "passport_updated": passport_updated,
         "passport_error": passport_error,
         "chroma_relocated": chroma_relocated,
@@ -298,8 +289,11 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
 def _check_nested_pollution(nested_dir, label, project_root, registry_path):
     """Check if a nested duplicate directory is real pollution.
 
-    None when the directory is a protected branch (active passport, registry owner, infrastructure floor).
+    None when the directory is a protected branch (active passport, registry owner, infrastructure floor)
+    or a flat-layout package (holds __init__.py).
     """
+    if (nested_dir / "__init__.py").exists():
+        return None
     protected, _reason = is_protected(
         nested_dir.name,
         branch_dir=nested_dir,

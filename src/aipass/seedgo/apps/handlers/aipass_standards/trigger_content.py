@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger_content.py
 # Description: Trigger Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-09-12
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -36,19 +36,20 @@ def get_trigger_standards() -> str:
         "[bold cyan]IMPORT PATTERNS:[/bold cyan]",
         "",
         "  [yellow]Standard:[/yellow]",
-        "  [dim]from trigger import trigger[/dim]",
+        "  [dim]from aipass.trigger.apps.modules.core import trigger[/dim]",
         "  [dim]trigger.fire('event_name', key=value)[/dim]",
         "",
         "  [yellow]Lazy-load (for circular import safety):[/yellow]",
         "  [dim]try:[/dim]",
-        "  [dim]    from trigger.apps.modules.core import trigger[/dim]",
+        "  [dim]    from aipass.trigger.apps.modules.core import trigger[/dim]",
         "  [dim]except ImportError:[/dim]",
         "  [dim]    trigger = None[/dim]",
         "",
         "[bold cyan]EVENT NAMING:[/bold cyan]",
         "",
         "  [yellow]Format:[/yellow] {scope}_{action} or {action}",
-        "  [green]startup[/green], [green]plan_created[/green], [green]plan_closed[/green], [green]memory_saved[/green]",
+        "  [green]startup[/green], [green]plan_created[/green], [green]plan_closed[/green], "
+        "[green]memory_saved[/green]",
         "  [dim]All lowercase, underscore-separated, past tense for completed actions[/dim]",
         "",
         "[yellow]KEY RULES:[/yellow]",
@@ -132,7 +133,6 @@ def get_trigger_standards() -> str:
         "[bold cyan]CURRENT INTEGRATIONS:[/bold cyan]",
         "",
         "  [green]Prax:[/green] trigger.fire('logging_system_initialized') in modules/logger.py",
-        "  [green]CLI:[/green] trigger.fire('cli_header_displayed') in display.py",
         "  [yellow]Flow:[/yellow] JSON logging only - needs migration",
         "  [yellow]Drone:[/yellow] No events - ready to adopt",
         "",

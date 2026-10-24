@@ -1,15 +1,15 @@
 # =================== META ====================
 # Name: test_checkers_batch5.py
 # Description: Unit tests for ruff_check and clear_text_secret_logging checker handlers (batch 5)
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-04-16
-# Modified: 2026-10-11
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/ruff_check.py and clear_text_secret_logging_check.py."""
 
-# ruff_check is the 33rd seedgo standard. Its per-file lane, check_module, has no
-# test in this file.
+# ruff_check is the 33rd seedgo standard; check_module is pinned only on its
+# ruff-lookup and fail-closed paths.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — ruff's own lint and format verdicts; subprocess.run is sealed, its output built here
@@ -25,7 +25,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import clear_text_secret_logging_check as secret_logging
-from aipass.seedgo.apps.handlers.aipass_standards.ruff_check import check_branch
+from aipass.seedgo.apps.handlers.aipass_standards.ruff_check import check_branch, check_module
 
 _RUN = "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run"
 
@@ -77,6 +77,16 @@ def _make_violation(filename: str, code: str = "F401", row: int = 1) -> dict:
         "end_location": {"row": row, "column": 10},
         "message": f"Mock violation {code}",
     }
+
+
+def _hide_ruff(tmp_path: Path, monkeypatch) -> Path:
+    """Empty PATH and an interpreter whose own directory holds no ruff; returns the interpreter's directory."""
+    empty, venv_bin = tmp_path / "empty", tmp_path / "venv_bin"
+    empty.mkdir()
+    venv_bin.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    monkeypatch.setattr(sys, "executable", str(venv_bin / "python"))
+    return venv_bin
 
 
 def _put_ruff_on_path(tmp_path: Path, monkeypatch) -> None:
@@ -226,24 +236,26 @@ class TestCheckBranch:
         assert result["passed"] is False
         assert "1 file(s) need formatting — x.py" in result["checks"][1]["message"]
 
-    def test_standard_bypass_respected(self, mock_json, tmp_path: Path) -> None:
-        """Standard-level bypass via bypass_rules returns score 100."""
+    def test_standard_bypass_respected(self, mock_json, tmp_path: Path, monkeypatch) -> None:
+        """A rule naming the standard and the branch skips ruff entirely: with no ruff found, only the bypass reaches 100."""
         branch = _make_branch(tmp_path)
-        bypass = [{"standard": "ruff_check"}]
-        result = check_branch(str(branch), bypass_rules=bypass)
-        assert result["score"] == 100
-        assert result["passed"] is True
+        _hide_ruff(tmp_path, monkeypatch)
+        # Both keys: matching_rule treats a rule without "file" as inactive.
+        bypass = [{"standard": "ruff_check", "file": branch.as_posix()}]
+        with patch(_RUN) as run:
+            result = check_branch(str(branch), bypass_rules=bypass)
+        run.assert_not_called()
+        assert (result["passed"], result["score"]) == (True, 100)
+        assert "bypassed" in result["checks"][0]["message"]
 
-    def test_ruff_not_installed_skips(self, mock_json, tmp_path: Path, monkeypatch) -> None:
-        """Missing ruff binary returns score 100 with skipped status."""
+    def test_ruff_not_found_fails(self, mock_json, tmp_path: Path, monkeypatch) -> None:
+        """No ruff on PATH nor beside the interpreter is a 0, not a pass."""
         branch = _make_branch(tmp_path)
-        (tmp_path / "empty").mkdir()
-        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        _hide_ruff(tmp_path, monkeypatch)
         result = check_branch(str(branch))
-        assert result["score"] == 100
-        assert result["passed"] is True
-        assert result.get("status") == "skipped"
-        assert "not installed" in result["checks"][0]["message"]
+        assert result["score"] == 0
+        assert result["passed"] is False
+        assert "ruff not found" in result["checks"][0]["message"]
 
     def test_ruff_bypass_json_filters_violations(self, mock_json, tmp_path: Path, monkeypatch) -> None:
         """Violations listed in .seedgo/ruff_bypass.json are filtered out."""
@@ -923,3 +935,59 @@ class TestASecretReadersDocumentNameInTheMessageIsConvicted:
             1,
         )
         assert _secret_rows(source) == []
+
+
+# =============================================
+# 4. check_module — ruff lookup and fail-closed
+# =============================================
+
+
+@patch("aipass.seedgo.apps.handlers.aipass_standards.ruff_check.json_handler")
+class TestCheckModule:
+    def test_ruff_not_found_fails_the_file(self, mock_json, tmp_path: Path, monkeypatch) -> None:
+        """A file ruff never read must not score 100."""
+        target = tmp_path / "x.py"
+        _write_file(target, "x = 1\n")
+        _hide_ruff(tmp_path, monkeypatch)
+        result = check_module(str(target))
+        assert (result["passed"], result["score"]) == (False, 0)
+        assert "ruff not found" in result["checks"][0]["message"]
+
+    def test_ruff_beside_the_interpreter_is_found_when_path_lacks_it(
+        self, mock_json, tmp_path: Path, monkeypatch
+    ) -> None:
+        """drone runs the venv python unactivated: the venv's ruff is still the one run."""
+        target = tmp_path / "x.py"
+        _write_file(target, "x = 1\n")
+        venv_bin = _hide_ruff(tmp_path, monkeypatch)
+        for name in ("ruff", "ruff.exe"):
+            (venv_bin / name).write_text("", encoding="utf-8")
+            if sys.platform != "win32":
+                os.chmod(venv_bin / name, 0o755)
+        with patch(_RUN, side_effect=[_ruff_proc([], returncode=0), _fmt_proc()]) as run:
+            result = check_module(str(target))
+        assert Path(run.call_args_list[0].args[0][0]).parent == venv_bin
+        assert (result["passed"], result["score"]) == (True, 100)
+
+    def test_timeout_fails_the_file(self, mock_json, tmp_path: Path, monkeypatch) -> None:
+        """A ruff that never answered is a 0, matching check_branch."""
+        import subprocess
+
+        target = tmp_path / "x.py"
+        _write_file(target, "x = 1\n")
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        with patch(_RUN, side_effect=subprocess.TimeoutExpired("ruff", 15)):
+            result = check_module(str(target))
+        assert (result["passed"], result["score"]) == (False, 0)
+        assert "timed out" in result["checks"][0]["message"]
+
+    def test_unparseable_output_fails_the_file(self, mock_json, tmp_path: Path, monkeypatch) -> None:
+        """Garbage on stdout is not zero violations."""
+        target = tmp_path / "x.py"
+        _write_file(target, "x = 1\n")
+        _put_ruff_on_path(tmp_path, monkeypatch)
+        bad = _ruff_proc([])
+        bad.stdout = "not json"
+        with patch(_RUN, side_effect=[bad]):
+            result = check_module(str(target))
+        assert (result["passed"], result["score"]) == (False, 0)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_groups.py
 # Description: Trinity standard - the eight group checkers and their shared helpers
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-08-27
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -688,13 +688,13 @@ def _managed_by_item(name: str, meta: dict, branch: str) -> tuple:
 
 
 def _doc_meta_items(ctx: dict, file_key: str, data: dict) -> list:
-    """The four document_metadata items for one file."""
+    """The five document_metadata items for one file."""
     name = _FILE_NAMES[file_key]
     meta = data.get("document_metadata")
     if not isinstance(meta, dict):
         found = _found(data, "document_metadata")
         head = (False, f"{name}: document_metadata must be an object, found {found} -- its fields are unmeasurable")
-        return [head, (False, None), (False, None), (False, None)]
+        return [head] + [(False, None)] * 4
 
     missing = [field for field in _DOC_META_FIELDS if field not in meta]
     fields_item = (not missing, f"{name}: document_metadata missing {', '.join(missing)}" if missing else None)
@@ -720,12 +720,12 @@ def _extra_meta_fields_item(name: str, meta: dict) -> tuple:
 
 
 def _top_level_items(ctx: dict, file_key: str, order: list) -> list:
-    """The eight top-level items for one file."""
+    """The nine top-level items for one file."""
     name = _FILE_NAMES[file_key]
     fileref = ctx[file_key]
     if fileref["error"] is not None:
         head = (False, f"{name}: {fileref['error']} -- top-level structure unmeasurable")
-        return [head] + [(False, None)] * 7
+        return [head] + [(False, None)] * 8
 
     data = fileref["data"]
     return [

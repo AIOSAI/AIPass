@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-31
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -40,6 +40,12 @@ LEGACY_CACHE_FILE = _JSON_DIR / "audit_cache.json"
 MACHINERY_DIRS: Tuple[Path, ...] = (
     module_file(__file__).parent,
     module_file(__file__).parent.parent / "bypass",
+    module_file(__file__).parent.parent / "test_map",
+)
+# Inside the default pack (already stamped there) but they shape every other pack's output too.
+MACHINERY_FILES: Tuple[Path, ...] = (
+    module_file(__file__).parent.parent / "aipass_standards" / "applicability.py",
+    module_file(__file__).parent.parent / "aipass_standards" / "skip_dirs.py",
 )
 
 
@@ -141,7 +147,7 @@ def compute_bypass_stamp(branch_path: Path) -> str:
 
 
 def compute_machinery_stamp() -> str:
-    """Fingerprint the bypass/ and audit/ packages — the code that decides results."""
+    """Fingerprint the audit/, bypass/ and test_map/ packages plus MACHINERY_FILES — the code that decides results."""
     entries = []
     for directory in MACHINERY_DIRS:
         if not directory.exists():
@@ -151,6 +157,9 @@ def compute_machinery_stamp() -> str:
                 continue
             fp = fingerprint_file(f)
             entries.append([f"{directory.name}/{f.relative_to(directory).as_posix()}", fp[0], fp[1]])
+    for f in MACHINERY_FILES:
+        fp = fingerprint_file(f)
+        entries.append([f.name, fp[0], fp[1]])
     return hashlib.sha1(json.dumps(entries).encode("utf-8")).hexdigest()
 
 
@@ -187,13 +196,13 @@ def entry_path(cache_key: str) -> Path:
     return CACHE_DIR / entry_filename(cache_key)
 
 
-def _atomic_write(path: Path, doc: Dict[str, Any]) -> None:
+def atomic_write(path: Path, doc: Dict[str, Any]) -> None:
     """Write one JSON doc through a staging file (write-tmp-then-os.replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(doc, f, indent=2, default=str)
+            json.dump(doc, f, indent=2, ensure_ascii=False, default=str)
             f.write("\n")
         os.replace(tmp, path)
     finally:
@@ -234,7 +243,7 @@ def migrate_legacy_cache() -> int:
         for cache_key, entry in branches.items():
             if not isinstance(entry, dict) or entry_path(cache_key).exists():
                 continue
-            _atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
+            atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
             migrated += 1
     _retire_legacy_cache()
     logger.info("[incremental_cache] Migrated %d cache entries to %s", migrated, CACHE_DIR.name)
@@ -285,5 +294,5 @@ def load_branch_entry(cache_key: str) -> Dict[str, Any]:
 def save_branch_entry(cache_key: str, entry: Dict[str, Any]) -> None:
     """Atomically write one key's entry to its own file."""
     migrate_legacy_cache()
-    _atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
+    atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
     json_handler.log_operation("audit_cache_saved", {"cache_key": cache_key})

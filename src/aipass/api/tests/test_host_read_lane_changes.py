@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_changes.py
 # Description: Tests for the read lane's git-changes lane — the card contract, the stampede, grains, rows, refusals
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for read_git_changes() in apps/handlers/host/git_reads.py and its cache and refusal memory."""
@@ -25,6 +25,7 @@ import pytest
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import git_reads as host_git
+from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import refusals as host_refusals
 from aipass.api.tests.support_host_read_lane import GIT_STATUS_ALL_STDOUT, GIT_STATUS_STDOUT, status_document
 
@@ -278,6 +279,21 @@ class TestGitChangesCoalescesTheStampede:
             assert host_git.read_git_changes("demo")["branch"] == "demo"
 
         assert host_git._changes._failures == {}, "a recovered key must not keep its old failure"
+
+    def test_a_thousand_failing_keys_leave_no_locks_or_failures_behind(self) -> None:
+        """A read-scope caller sending a fresh ?branch= each time must not grow the server's memory."""
+
+        def broken() -> Any:
+            raise RuntimeError("no such branch")
+
+        cache = host_read_cache.ReadCache("probe", 1.5)
+        with patch(PATCH_CACHE_LOGGER):
+            for key in range(1000):
+                with pytest.raises(RuntimeError):
+                    cache.get(("branch", key), broken)
+
+        assert cache._flights == {}, "every key left its flight lock behind"
+        assert cache._failures == {}, "every key left its failure and traceback behind"
 
     def test_a_failed_flight_names_its_cache_key_in_the_log(self, fake_repo: dict) -> None:
         """6b7f72e9's same-second twins logged one root each: only the key can say if two keys ran."""

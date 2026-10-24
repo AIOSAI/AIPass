@@ -35,7 +35,7 @@ a logging system that takes the program down with it is worse than no logging sy
 - **Routes every branch's logs automatically** — one import, two-tier placement, self-healing
   directories, and a documented fallback when the caller cannot be identified.
 - **Runs Mission Control** — a real-time terminal console over file changes, log events and
-  live agent sessions, with a read-only feed of The Commons and an optional Telegram relay.
+  live agent sessions, with a read-only feed of The Commons.
 - **Watches for runaway logs** — growth rates per file, sustained-threshold alarms, and an
   event on the trigger bus when one goes off.
 - **Audits and rotates log files** — health summaries, truncation of oversized files, and a
@@ -109,8 +109,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 | Doc | What it covers |
 |---|---|
-| [docs/logging_api.md](docs/logging_api.md) | Both import patterns, log levels, the mocking contract other branches' tests rely on, the lifecycle events |
-| [docs/monitor.md](docs/monitor.md) | Mission Control: the threads, multi-CLI session reading, the commons feed, the Telegram relay |
+| [docs/logging_api.md](docs/logging_api.md) | Both import patterns, log levels, the mocking contract other branches' tests rely on |
+| [docs/monitor.md](docs/monitor.md) | Mission Control: the threads, multi-CLI session reading, the commons feed |
 | [docs/dashboard.md](docs/dashboard.md) | Refresh, template push and diff, and the write-through API services call |
 | [docs/dashboard_caps.md](docs/dashboard_caps.md) | The subject cap and whole-file budget every dashboard writer reads, including writers outside prax |
 | [docs/log_audit.md](docs/log_audit.md) | Health summaries, growth rates, truncation, and the weekly sweep the daemon runs |

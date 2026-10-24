@@ -3,7 +3,7 @@
 # Description: Load Ignore Patterns Handler
 # Version: 1.0.0
 # Created: 2025-11-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -34,7 +34,7 @@ DEFAULT_IGNORE_FOLDERS = {
     "External_Code_Sources",
     "WorkShop",
     ".claude-server-commander-logs",
-    "backup",
+    ".backup",
     "backups",
     "archive.local",
 }

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_audit_branch.py
 # Description: audit coverage, orchestration phase: audit_branch's lanes, post/info/observe hooks, output fields
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for audit_branch in apps/handlers/audit/branch_audit.py."""
@@ -52,7 +52,6 @@ def _make_checker(
     """Build a mock checker with configurable behavior."""
     checker = MagicMock()
     checker.AUDIT_SCOPE = scope
-    checker.FILE_FILTER = None
     checker.INCLUDE_INIT_FILES = False
 
     if has_check_module:
@@ -99,7 +98,6 @@ def _real_module_checker(**hooks) -> types.SimpleNamespace:
     """
     checker = types.SimpleNamespace(
         AUDIT_SCOPE="entry_point",
-        FILE_FILTER=None,
         INCLUDE_INIT_FILES=False,
         check_module=lambda module_path, bypass_rules=None: {"passed": True, "score": 100, "checks": []},
     )

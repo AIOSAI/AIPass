@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: import_site_check.py
 # Description: Import Site Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-09-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Import Site Standards Checker Handler
 Reference: import_site.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -20,6 +21,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards import module_constants
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -160,7 +162,7 @@ def scan(source: str, path: Path | None = None) -> List[Tuple[int, str, str]]:
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[import_site] Unparseable, nothing scanned: %s", exc)
         return []
     hits = [(ln, f"product import inside a function ({what})", FIX_IMPORT) for ln, what in _deferred_imports(tree)]
@@ -177,9 +179,7 @@ def _scan_path(path: Path) -> List[Tuple[int, str, str]]:
         return []
 
 
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

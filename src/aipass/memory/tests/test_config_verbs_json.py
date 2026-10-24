@@ -3,7 +3,7 @@
 # Description: The config verbs' --json machine surface - one document on stdout, payloads, in-band refusals
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/rollover_json.py — the `--json` surface of the config and rollover verbs."""
@@ -456,4 +456,4 @@ class TestJsonFlagPosition:
 
     def test_bare_json_flag_on_rollover_introspects(self, verbs, capsys) -> None:
         assert _run_rollover(verbs, "--json") is True
-        assert "report-lines" in _streams(capsys)
+        assert "status" in _streams(capsys)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -167,6 +167,17 @@ class TestLastUsedAnswersLiveOrDormant:
         host_tokens.touch_token(record["id"])
 
         assert _record(record["id"])["last_used"] == first
+
+    def test_a_fresh_stamp_the_caller_holds_takes_no_lock(self, store: Path) -> None:
+        """Every authenticated request touches: a stamp already inside the window must not lock the store."""
+        record, _ = host_tokens.issue_token("pixel-8", scope="read")
+        host_tokens.touch_token(record["id"])
+        stamp = _record(record["id"])["last_used"]
+
+        with patch.object(host_tokens, "_store_lock") as lock:
+            host_tokens.touch_token(record["id"], last_used=stamp)
+
+        lock.assert_not_called()
 
     def test_a_touch_after_the_window_rewrites(self, store: Path) -> None:
         """Coalescing must not become never-updating."""

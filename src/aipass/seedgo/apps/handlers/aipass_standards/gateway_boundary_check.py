@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: gateway_boundary_check.py
 # Description: Gateway Boundary Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Gateway Boundary Standards Checker Handler.
@@ -278,7 +278,7 @@ def _scan(source: str, branch: str) -> Optional[List[Tuple[int, str, str]]]:
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("[gateway_boundary] unparseable source: %s", e)
         return None
 
@@ -353,7 +353,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         source = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:
         logger.info("[gateway_boundary] cannot read %s: %s", path, e)
         return _result(False, "File readable", f"Error reading file: {e}", 0)
 

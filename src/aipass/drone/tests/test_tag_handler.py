@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tag_handler.py
 # Description: Tests for the tag handler — release tagging with safety guards
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-07-02
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/git/tag_handler.py, reached through apps/modules/git_module.py."""
@@ -269,10 +269,20 @@ class TestTagHappyPath:
         overrides = {
             ("git", "push", "origin"): _make_mock(returncode=1, stderr="permission denied"),
         }
-        with patch(_TAG_PATCH, side_effect=_mock_run_with_overrides(overrides)):
+        with patch(_TAG_PATCH, side_effect=_mock_run_with_overrides(overrides)) as mock_run:
             result = handle_command("tag", ["v2.6.1"])
         assert result["exit_code"] == 1
         assert "push failed" in result["stderr"].lower()
+        assert ["git", "tag", "-d", "v2.6.1"] in [c.args[0] for c in mock_run.call_args_list]
+
+    def test_unreachable_remote_refuses(self, devpulse_dir: Path) -> None:
+        """A failed ls-remote is not a remote with no such tag."""
+        overrides = {("git", "ls-remote"): _make_mock(returncode=128, stderr="could not read from remote")}
+        with patch(_TAG_PATCH, side_effect=_mock_run_with_overrides(overrides)) as mock_run:
+            result = handle_command("tag", ["v2.6.1"])
+        assert result["exit_code"] == 1
+        assert "remote tag check failed" in result["stderr"].lower()
+        assert not [c for c in mock_run.call_args_list if c.args[0][:3] == ["git", "tag", "-a"]]
 
 
 # ===========================================================================
@@ -440,10 +450,12 @@ class TestExternalRepoTagging:
     def test_push_failure_reports(self, baud_dir: Path) -> None:
         """A failed push is reported, never swallowed."""
         overrides = {("git", "push", "origin"): _make_mock(returncode=1, stderr="permission denied")}
-        with patch(_TAG_PATCH, side_effect=_recording_run([], overrides)):
+        calls: list[tuple[str, ...]] = []
+        with patch(_TAG_PATCH, side_effect=_recording_run(calls, overrides)):
             result = handle_command("tag", ["v0.1.0"])
         assert result["exit_code"] == 1
         assert "push failed" in result["stderr"].lower()
+        assert ("git", "tag", "-d", "v0.1.0") in calls
 
 
 class TestAipassSeatUnchanged:

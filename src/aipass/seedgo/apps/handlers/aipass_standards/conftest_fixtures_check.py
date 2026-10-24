@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest_fixtures_check.py
 # Description: Conftest Fixtures Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Conftest Fixtures Standards Checker Handler
@@ -11,13 +11,14 @@
 Reference: conftest_fixtures.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -42,15 +43,6 @@ CURES: Dict[str, str] = {
     ),
     C2: "@pytest.fixture(autouse=True) that yields, then calls display.reset_command_state()",
 }
-
-
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
 
 
 def _base_name(node: ast.expr) -> str:
@@ -131,20 +123,11 @@ def _resets_after_the_test(function: ast.AST) -> bool:
     yields = [n.lineno for n in ast.walk(function) if isinstance(n, (ast.Yield, ast.YieldFrom))]
     if not yields:
         return False
-    resets = [n.lineno for n in ast.walk(function) if isinstance(n, ast.Call) and _tail_name(n.func) == _RESET]
+    resets = [n.lineno for n in ast.walk(function) if isinstance(n, ast.Call) and tail_name(n.func) == _RESET]
     return any(reset > min(yields) for reset in resets)
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[conftest_fixtures] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="conftest_fixtures")
 
 
 def scan(source: str) -> List[Tuple[str, str]]:
@@ -178,18 +161,8 @@ def is_the_unit(module_path: str) -> bool:
     return Path(module_path).name == CONFTEST
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[conftest_fixtures] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="conftest_fixtures", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

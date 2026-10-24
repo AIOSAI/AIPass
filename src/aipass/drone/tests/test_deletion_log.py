@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
-"""Tests for apps/handlers/deletion_log.py, the safe_delete path that writes it, and apps/modules/door_deletion_log.py."""
+"""Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -382,7 +383,7 @@ class TestLogLocation:
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         monkeypatch.delenv("AIPASS_HOME", raising=False)
         monkeypatch.chdir(tmp_path)
-        with patch.object(deletion_log, "_find_project_root", return_value=None):
+        with patch.object(deletion_log, "find_project_root", return_value=None):
             assert deletion_log.deletion_log_path().name == "deletions.jsonl"
 
     def test_env_override_wins(self, project, monkeypatch, tmp_path):
@@ -451,7 +452,8 @@ class TestLogLocation:
 
 
 class TestAnotherBranchRecordsThroughTheDoor:
-    ROW = {
+    # Any, not the inferred dict[str, str]: unpacked, a str-valued dict reads to pyright as a str project_root.
+    ROW: dict[str, Any] = {
         "lane": "spawn_retire",
         "outcome": "retired",
         "caller": "spawn",

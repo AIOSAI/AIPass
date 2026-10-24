@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_eviction_content.py
 # Description: Module Eviction Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-15
-# Modified: 2026-10-10
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -70,9 +70,10 @@ def get_module_eviction_standards() -> str:
         "    or a decorator on the function — for sys.modules evictions only;",
         "    it never restores a package attribute",
         "  - [green]an explicit restore[/green] after the eviction or in a",
-        "    finally: sys.modules[K] = ..., sys.modules.update(...),",
+        "    finally: sys.modules[K] = saved (a call is no restore), sys.modules.update(...),",
         "    setattr(M, 'attr', ...), M.attr = ...",
-        "  - [green]a fixture with any statement after its last yield[/green]",
+        "  - [green]a restore in a fixture's teardown[/green] (after its last yield);",
+        "    an eviction inside the teardown is the cleanup itself",
         "  - [green]an autouse fixture in the same file records the key[/green] —",
         "    setitem/delitem on sys.modules in an autouse=True fixture, both",
         "    sides resolving to the same literal name (a string, a module-level",

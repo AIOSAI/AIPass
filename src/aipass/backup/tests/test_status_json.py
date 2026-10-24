@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_status_json.py
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/status.py's --json [--sizes], the backup door's status contract."""
@@ -25,7 +25,7 @@ import pytest
 
 from aipass.backup.apps import backup as entry
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
-from aipass.backup.apps.handlers.state import backup_timestamps, progress
+from aipass.backup.apps.handlers.state import progress
 from aipass.backup.apps.modules import display, status
 
 NO_RUN = {"last": None, "files": None}
@@ -99,15 +99,33 @@ class TestTheDriveLaneSaysWhetherItsLastRunCompleted:
 class TestTheBackupsNowPanel:
     """The panel after a run reads this project's lanes, the same source as status --json."""
 
+    def test_the_last_backups_panel_reads_this_project_too(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: the panel before the run reads a clock shared by every project."""
+        root = tmp_path / "proj"
+        now = datetime.now(timezone.utc).isoformat()
+        _store(root, entries=[{"timestamp": now, "mode": "versioned", "files_copied": 2}])
+        _store(tmp_path / "other", entries=[{"timestamp": now, "mode": "snapshot", "files_copied": 1}])
+
+        display.show_last_backups(str(root))
+
+        assert capsys.readouterr().out.splitlines()[-4:] == [
+            "Last backups:",
+            "  Snapshot:   never",
+            "  Versioned:  just now",
+            "  Drive sync: never",
+        ]
+
     def test_the_panel_reads_this_projects_lanes_not_another_projects_run_on_the_branch_clock(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         root = tmp_path / "proj"
         now = datetime.now(timezone.utc).isoformat()
         _store(root, entries=[{"timestamp": now, "mode": "snapshot", "files_copied": 3}])
-        backup_timestamps.update_timestamp("versioned")
+        _store(tmp_path / "other", entries=[{"timestamp": now, "mode": "versioned", "files_copied": 1}])
 
-        display.show_backups_now("snapshot", str(root))
+        display.show_backups_now(str(root))
 
         assert capsys.readouterr().out.splitlines()[-3:] == [
             "  Snapshot:   just now",

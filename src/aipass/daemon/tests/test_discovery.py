@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -24,13 +24,11 @@ from unittest.mock import patch
 import pytest
 
 from aipass.daemon.apps.handlers.schedule import discovery
+from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.schedule.discovery import (
     discover_jobs,
     active_citizens,
-    active_branch_map,
-    branch_path_for,
     citizen_class_for,
-    declared_residency,
     framework_root,
     REQUIRED_JOB_KEYS,
     RESIDENCY_CORE,
@@ -340,7 +338,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._SRC_AIPASS", src),
             patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -363,7 +360,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._SRC_AIPASS", src),
             patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -382,7 +378,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._SRC_AIPASS", src),
             patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -402,7 +397,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._SRC_AIPASS", src),
             patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -431,7 +425,6 @@ class TestDiscoverJobs:
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
-            patch(f"{DISCOVERY}._SRC_AIPASS", src),
             patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -459,7 +452,6 @@ class TestDiscoverJobs:
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
-            patch(f"{DISCOVERY}._SRC_AIPASS", src),
             patch(f"{DISCOVERY}._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -493,7 +485,6 @@ class TestDiscoverJobs:
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
-            patch("aipass.daemon.apps.handlers.schedule.discovery._SRC_AIPASS", src),
             patch("aipass.daemon.apps.handlers.schedule.discovery._REGISTRY_FILE", reg_file),
         ):
             jobs = discover_jobs()
@@ -528,14 +519,8 @@ def projects_tree(temp_src_aipass, sample_registry):
 
 @contextmanager
 def patched_roots(root: Path, src: Path):
-    """Point discovery at a temp repo tree.
-
-    _REPO_ROOT is the only seam the fleet lane needs; _SRC_AIPASS stays for branch_path_for's unregistered fallback.
-    """
-    with (
-        patch(f"{DISCOVERY}._REPO_ROOT", root),
-        patch(f"{DISCOVERY}._SRC_AIPASS", src),
-    ):
+    """Point discovery at a temp repo tree; _REPO_ROOT is the only seam the fleet lane needs."""
+    with patch(f"{DISCOVERY}._REPO_ROOT", root):
         yield
 
 
@@ -551,10 +536,8 @@ class TestProjectCitizens:
         root, src, citizen, decoy = projects_tree
         with patched_roots(root, src):
             found = [c for c in active_citizens() if c["email"] == "@proj"][0]
-            resolved = branch_path_for("proj")
         assert found["path"] == citizen
         assert found["path"] != decoy
-        assert resolved == citizen
 
     def test_project_schedule_files_are_discovered(self, projects_tree, sample_schedule):
         root, src, citizen, _decoy = projects_tree
@@ -734,57 +717,6 @@ def core_only(temp_src_aipass, sample_registry):
 def error_text(mock_logger) -> str:
     """Every error-level line the module logged, args included."""
     return "\n".join(str(call) for call in mock_logger.error.call_args_list)
-
-
-class TestDeclaredResidency:
-    """The single reader for citizenship.residency. Never raises."""
-
-    def test_reads_the_declared_value(self, tmp_path):
-        write_passport(tmp_path, residency=RESIDENCY_RESIDENT)
-        assert declared_residency(tmp_path) == RESIDENCY_RESIDENT
-
-    def test_missing_passport_declares_nothing(self, tmp_path):
-        assert declared_residency(tmp_path) is None
-
-    def test_unreadable_passport_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, raw="{not json")
-        assert declared_residency(tmp_path) is None
-
-    def test_absent_field_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, citizen_class="specialist")
-        assert declared_residency(tmp_path) is None
-
-    def test_non_string_value_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, raw=json.dumps({"citizenship": {"residency": 5}}))
-        assert declared_residency(tmp_path) is None
-
-    @pytest.mark.parametrize(
-        "raw, label",
-        [
-            ("[]", "list root"),
-            ('"core"', "string root"),
-            ("5", "number root"),
-            ("null", "null root"),
-            ("true", "bool root"),
-            ('{"citizenship": "core"}', "citizenship present but not a dict"),
-        ],
-    )
-    def test_a_malformed_passport_declares_nothing_and_does_not_raise(self, tmp_path, raw, label):
-        """Every shape that used to crash the whole fleet lane now returns None.
-
-        History, because the pin is worth more than the assertion: daemon's own
-        deleted copy guarded only the ROOT, registry_scope 2.1.0 guarded neither,
-        and 2.2.0 guards both after @memory found that the second `.get` in
-        `data.get("citizenship", {}).get("residency")` was unprotected — a shape
-        this branch never tested and could not have reported.
-
-        declared_residency is called once per citizen by fleet_branches, so a
-        raise here is not one refused branch: it is every lane in the fleet,
-        killed by one bad file. Parametrized rather than one case, because a fix
-        verified against a list alone leaves the other five alive.
-        """
-        write_passport(tmp_path, raw=raw)
-        assert declared_residency(tmp_path) is None, label
 
 
 class TestRegistryLedDiscovery:
@@ -987,7 +919,7 @@ class TestParkedProjectPolicyChange:
         root, src = core_only
         make_project(root, "marketstand", branch="marketstand", residency=None)
         with patched_roots(root, src):
-            assert active_branch_map() == {"testbranch": "@testbranch"}
+            assert [c["email"] for c in active_citizens()] == ["@testbranch"]
 
 
 @live_fleet
@@ -1005,7 +937,7 @@ class TestLiveFleet:
         citizens = [c for c in active_citizens() if c["source"].startswith("projects/")]
         assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
         for citizen in citizens:
-            assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
+            assert fleet.declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
 
     def test_an_external_citizen_is_labelled_external_never_core(self):
         # The fence. A citizen outside AIPass home may never read as core: the
@@ -1028,3 +960,58 @@ class TestLiveFleet:
         emails = {c["email"] for c in active_citizens()}
         assert "@marketstand" not in emails
         assert "@speakeasy" not in emails
+
+
+class TestTimeValidation:
+    @pytest.mark.parametrize(
+        "schedule",
+        [
+            {"type": "daily", "time": "25:00"},
+            {"type": "daily", "time": "4am"},
+            {"type": "rotation", "time": "05:60"},
+            {"type": "hourly", "time": "half"},
+            {"type": "hourly", "time": 75},
+            {"type": "hourly", "time": True},
+        ],
+    )
+    def test_an_unreadable_time_is_refused_and_named(self, schedule, one_branch, caplog):
+        job = {"id": "clock", "schedule": schedule, "prompt": "x"}
+        with caplog.at_level("WARNING"):
+            assert discovered_ids(one_branch, job) == ["keep"]
+        assert "Job 'clock' refused" in caplog.text
+
+    @pytest.mark.parametrize(
+        "schedule",
+        [
+            {"type": "daily", "time": "00:00"},
+            {"type": "daily", "time": "7:30"},
+            {"type": "rotation", "time": "23:59"},
+            {"type": "hourly", "time": "30"},
+            {"type": "hourly", "time": 0},
+        ],
+    )
+    def test_a_readable_time_is_accepted(self, schedule, one_branch):
+        job = {"id": "clock", "schedule": schedule, "prompt": "x"}
+        assert discovered_ids(one_branch, job) == ["keep", "clock"]
+
+
+class TestSkippedOwners:
+    def test_an_owner_with_an_unreadable_file_is_named(self, one_branch):
+        skipped = set()
+        (one_branch / "a_bad.json").write_text("{oops", encoding="utf-8")
+        (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP]}), encoding="utf-8")
+        assert [j["id"] for j in discover_jobs(skipped_owners=skipped)] == ["keep"]
+        assert skipped == {"@testbranch"}
+
+    def test_an_owner_with_a_refused_job_is_named(self, one_branch):
+        skipped = set()
+        bad = {"id": "bad", "schedule": {"type": "biweekly"}, "prompt": "x"}
+        (one_branch / "schedule.json").write_text(json.dumps({"jobs": [KEEP, bad]}), encoding="utf-8")
+        discover_jobs(skipped_owners=skipped)
+        assert skipped == {"@testbranch"}
+
+    def test_a_clean_owner_is_not_named(self, one_branch):
+        skipped = set()
+        discovered_ids(one_branch)
+        discover_jobs(skipped_owners=skipped)
+        assert skipped == set()

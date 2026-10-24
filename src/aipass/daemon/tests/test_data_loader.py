@@ -3,21 +3,19 @@
 # Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
-"""Tests for apps/handlers/update/data_loader.py, and apps/daemon_wakeup.py's shared inbox path and --help guard."""
+"""Tests for apps/handlers/update/data_loader.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json.load's own parse of a well-formed file
-# seedgo: no-test-needed(constant) — LOCAL_PATH's location; every test here redirects it to a temp file
 
 import json
 from pathlib import Path
 
 import pytest
 
-from aipass.daemon.apps import daemon_wakeup as _wakeup_mod
 from aipass.daemon.apps.handlers.update import data_loader as _dl_mod
 
 # Taken before isolate_paths patches INBOX_PATH: the path the code really reads.
@@ -25,20 +23,16 @@ _REAL_INBOX_PATH = _dl_mod.INBOX_PATH
 _BRANCH_MAILBOX = Path(__file__).resolve().parents[1] / ".ai_mail.local" / "inbox.json"
 
 load_inbox = _dl_mod.load_inbox
-load_local = _dl_mod.load_local
 categorize_messages = _dl_mod.categorize_messages
-get_session_summary = _dl_mod.get_session_summary
 get_escalations = _dl_mod.get_escalations
 
 
 @pytest.fixture(autouse=True)
 def isolate_paths(tmp_path, monkeypatch):
-    """Redirect INBOX_PATH and LOCAL_PATH to tmp_path for every test."""
+    """Redirect INBOX_PATH to tmp_path for every test."""
     inbox = tmp_path / "inbox.json"
-    local = tmp_path / "DAEMON.local.json"
     monkeypatch.setattr(_dl_mod, "INBOX_PATH", inbox)
-    monkeypatch.setattr(_dl_mod, "LOCAL_PATH", local)
-    yield {"inbox": inbox, "local": local}
+    yield {"inbox": inbox}
 
 
 @pytest.fixture()
@@ -52,18 +46,6 @@ def sample_inbox_data():
             {"id": "abc123", "status": "new", "subject": "Test", "from": "@devpulse", "priority": "normal"},
             {"id": "def456", "status": "opened", "subject": "FYI", "from": "@drone", "priority": "normal"},
         ],
-    }
-
-
-@pytest.fixture()
-def sample_local_data():
-    """Standard local.json payload for reuse across tests."""
-    return {
-        "document_metadata": {"version": "1.0.0"},
-        "sessions": [
-            {"session_number": 1, "date": "2026-03-01", "summary": "Initial setup", "status": "completed"},
-        ],
-        "active_tasks": {"current_plan": "Test plan"},
     }
 
 
@@ -94,10 +76,10 @@ class TestLoadInbox:
         assert result == {"messages": [], "total_messages": 0, "unread_count": 0}
 
     def test_load_inbox_malformed_json(self, isolate_paths):
-        """Malformed JSON falls back to empty default structure."""
+        """Malformed JSON raises: answered as empty, the digest would report a false zero."""
         isolate_paths["inbox"].write_text("{not valid json!!!", encoding="utf-8")
-        result = load_inbox()
-        assert result == {"messages": [], "total_messages": 0, "unread_count": 0}
+        with pytest.raises(json.JSONDecodeError):
+            load_inbox()
 
     def test_load_inbox_empty_messages(self, isolate_paths):
         """Inbox with zero messages returns its original data."""
@@ -109,42 +91,10 @@ class TestLoadInbox:
 
 
 class TestInboxPathIsTheRealMailbox:
-    """Both inbox readers must point at the branch's dotted .ai_mail.local mailbox (APLAN-0015)."""
+    """The inbox reader must point at the branch's dotted .ai_mail.local mailbox."""
 
     def test_data_loader_reads_the_dotted_mailbox(self):
         assert _REAL_INBOX_PATH == _BRANCH_MAILBOX
-
-    def test_daemon_wakeup_reads_the_dotted_mailbox(self):
-        assert _wakeup_mod.INBOX_PATH == _BRANCH_MAILBOX
-
-
-class TestLoadLocal:
-    def test_load_valid_local(self, isolate_paths, sample_local_data):
-        """Loading a well-formed local.json returns its full contents."""
-        _write_json(isolate_paths["local"], sample_local_data)
-        result = load_local()
-        assert result["document_metadata"]["version"] == "1.0.0"
-        assert len(result["sessions"]) == 1
-        assert result["active_tasks"]["current_plan"] == "Test plan"
-
-    def test_load_local_missing_file(self, isolate_paths):
-        """Missing local.json returns empty default structure."""
-        result = load_local()
-        assert result == {"sessions": [], "active_tasks": {}}
-
-    def test_load_local_malformed_json(self, isolate_paths):
-        """Malformed JSON falls back to empty default structure."""
-        isolate_paths["local"].write_text("<<<bad>>>", encoding="utf-8")
-        result = load_local()
-        assert result == {"sessions": [], "active_tasks": {}}
-
-    def test_load_local_empty_sessions(self, isolate_paths):
-        """Local file with empty sessions still loads correctly."""
-        data = {"sessions": [], "active_tasks": {}}
-        _write_json(isolate_paths["local"], data)
-        result = load_local()
-        assert result["sessions"] == []
-        assert result["active_tasks"] == {}
 
 
 class TestCategorizeMessages:
@@ -212,44 +162,6 @@ class TestCategorizeMessages:
         assert len(cats["opened"]) == 0
 
 
-class TestGetSessionSummary:
-    def test_summary_with_sessions(self, sample_local_data):
-        """Session summary extracts totals and latest session."""
-        result = get_session_summary(sample_local_data)
-        assert result["total_sessions"] == 1
-        assert result["latest_session"]["session_number"] == 1
-
-    def test_summary_empty_sessions(self):
-        """Empty sessions list yields zero count and None latest."""
-        result = get_session_summary({"sessions": [], "active_tasks": {}})
-        assert result["total_sessions"] == 0
-        assert result["latest_session"] is None
-
-    def test_summary_today_focus(self):
-        """today_focus is extracted from active_tasks when present."""
-        data = {"sessions": [], "active_tasks": {"today_focus": "Write tests"}}
-        result = get_session_summary(data)
-        assert result["today_focus"] == "Write tests"
-
-    def test_summary_today_focus_default(self):
-        """today_focus falls back to 'None' string when absent."""
-        data = {"sessions": [], "active_tasks": {}}
-        result = get_session_summary(data)
-        assert result["today_focus"] == "None"
-
-    def test_summary_recently_completed(self):
-        """recently_completed list is extracted from active_tasks."""
-        data = {"sessions": [], "active_tasks": {"recently_completed": ["task-a", "task-b"]}}
-        result = get_session_summary(data)
-        assert result["recently_completed"] == ["task-a", "task-b"]
-
-    def test_summary_recently_completed_default(self):
-        """recently_completed defaults to empty list when absent."""
-        data = {"sessions": [], "active_tasks": {}}
-        result = get_session_summary(data)
-        assert result["recently_completed"] == []
-
-
 class TestGetEscalations:
     def test_urgent_message_detected(self):
         """Messages with URGENT in subject are escalated."""
@@ -297,25 +209,3 @@ class TestGetEscalations:
         messages = [{"id": "1"}]
         result = get_escalations(messages)
         assert result == []
-
-
-class TestWakeupHelpAfterAnArgument:
-    """daemon_wakeup <arg> --help shows the help and runs nothing (daemon, fleet green leg 5)."""
-
-    def test_help_after_an_argument_prints_help_and_runs_nothing(self, tmp_path, monkeypatch, capsys):
-        """`daemon_wakeup run --help` must not run the wake-up job (main once read only args[0]).
-
-        Mutant killed: the --help guard on the arguments after the first removed.
-        """
-        from unittest.mock import patch
-
-        ran: list[bool] = []
-        monkeypatch.setattr(_wakeup_mod, "LOCK_FILE", tmp_path / "wakeup.lock")
-        monkeypatch.setattr(_wakeup_mod, "_run_locked", lambda: ran.append(True) or 0)
-        logged: list[tuple] = []
-        monkeypatch.setattr(_wakeup_mod.json_handler, "log_operation", lambda *a, **k: logged.append(a))
-        with patch("sys.argv", ["daemon_wakeup", "run", "--help"]):
-            assert _wakeup_mod.main() == 0
-        assert ran == [], "a --help after an argument must not run the wake-up job"
-        assert logged == [], f"a --help must not record a wake-up trigger: {logged}"
-        assert "USAGE:" in capsys.readouterr().out

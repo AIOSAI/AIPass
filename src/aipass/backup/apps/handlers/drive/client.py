@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Google Drive client.
@@ -38,6 +38,11 @@ BACKUP_FOLDER_NAME = "AIPass Backups"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
 
+def quoted(value: str) -> str:
+    """A string literal for a Drive search query: ' and \\ escaped, so "Bob's notes" stays one name."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 class DriveClient:
     """Google Drive v3 client backed by the @api gateway."""
 
@@ -48,6 +53,8 @@ class DriveClient:
         self.backup_folder_id: str | None = None
         self.project_folder_cache: dict[str, str] = {}
         self.file_tracker: dict[str, dict] = {}
+        # Workers write file_tracker while the batch saves it; the save copies it under this lock.
+        self.tracker_lock = threading.Lock()
         # (parent_id, name) -> id of every live file, from drive_sync's listing at run start; a create adopts a hit.
         self.live_files: dict[tuple[str, str], str] = {}
         self.last_error: str | None = None
@@ -144,7 +151,7 @@ class DriveClient:
         if not self.drive_service:
             return None
 
-        query = f"name='{BACKUP_FOLDER_NAME}' and mimeType='{FOLDER_MIME}' and trashed=false"
+        query = f"name={quoted(BACKUP_FOLDER_NAME)} and mimeType='{FOLDER_MIME}' and trashed=false"
         try:
             request = self.drive_service.files().list(
                 q=query,
@@ -198,18 +205,16 @@ class DriveClient:
     def get_or_create_project_folder(self, project_name: str) -> str | None:
         """Get or create a project subfolder; the lock spans check, search and create so threads make no duplicates."""
         with self._folder_cache_lock:
+            # The cache lives one run, and the run listed Drive at its start: a hit costs no call.
             if project_name in self.project_folder_cache:
-                folder_id = self.project_folder_cache[project_name]
-                if self._verify_folder_id(folder_id):
-                    return folder_id
-                del self.project_folder_cache[project_name]
+                return self.project_folder_cache[project_name]
 
             backup_folder_id = self.get_or_create_backup_folder()
             if not backup_folder_id:
                 return None
 
             query = (
-                f"name='{project_name}' "
+                f"name={quoted(project_name)} "
                 f"and mimeType='{FOLDER_MIME}' "
                 f"and '{backup_folder_id}' in parents "
                 f"and trashed=false"
@@ -257,7 +262,7 @@ class DriveClient:
 
     def _find_or_create_segment(self, parent_id: str, name: str) -> str | None:
         """Search for or create a single folder segment under parent_id."""
-        query = f"name='{name}' and mimeType='{FOLDER_MIME}' and '{parent_id}' in parents and trashed=false"
+        query = f"name={quoted(name)} and mimeType='{FOLDER_MIME}' and '{parent_id}' in parents and trashed=false"
         request = self.drive_service.files().list(
             q=query,
             spaces="drive",
@@ -289,10 +294,7 @@ class DriveClient:
         with self._folder_cache_lock:
             cache_key = f"{parent_id}:{folder_path}"
             if cache_key in self.project_folder_cache:
-                folder_id = self.project_folder_cache[cache_key]
-                if self._verify_folder_id(folder_id):
-                    return folder_id
-                del self.project_folder_cache[cache_key]
+                return self.project_folder_cache[cache_key]
 
             current_parent = parent_id
             segments = [s for s in folder_path.split("/") if s]
@@ -301,11 +303,8 @@ class DriveClient:
                 segment_key = f"{current_parent}:{segment}"
 
                 if segment_key in self.project_folder_cache:
-                    cached_id = self.project_folder_cache[segment_key]
-                    if self._verify_folder_id(cached_id):
-                        current_parent = cached_id
-                        continue
-                    del self.project_folder_cache[segment_key]
+                    current_parent = self.project_folder_cache[segment_key]
+                    continue
 
                 try:
                     folder_id = self._find_or_create_segment(current_parent, segment)
@@ -327,7 +326,7 @@ class DriveClient:
         parent_folder_id: str,
     ) -> dict | None:
         """Find a file by name in a folder (excludes trashed)."""
-        query = f"name='{filename}' and '{parent_folder_id}' in parents and trashed=false"
+        query = f"name={quoted(filename)} and '{parent_folder_id}' in parents and trashed=false"
         try:
             request = self.drive_service.files().list(
                 q=query,

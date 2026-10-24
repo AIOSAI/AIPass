@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: encapsulation_check.py
 # Description: Handler Encapsulation Standards Checker
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Handler Encapsulation Standards Checker"""
@@ -23,6 +23,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import Unparseable
 from aipass.seedgo.apps.handlers.aipass_standards.string_imports import STRING_IMPORT_NOTE, iter_string_imports
 
 AUDIT_SCOPE = "all_files"
+READS_BRANCH = True
 # A test file is asked ONE thing: reaching into its own branch's internals is what a
 # unit test is for, so a test is judged only on another branch's handlers (check_test_file).
 APPLIES_TO = "everywhere"
@@ -101,7 +102,7 @@ def extract_branch_from_import(import_line: str) -> Optional[str]:
         return match.group(1)
 
     # Handlers anywhere under a branch's tree are that branch's (aipass.skills.lib.telegram).
-    match = re.search(r"from\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
+    match = re.search(r"(?:from|import)\s+aipass\.(\w+)\.(?:\w+\.)*?apps\.handlers", import_line)
     if match:
         return match.group(1)
 
@@ -189,7 +190,7 @@ def _apps_package_imports_handlers(apps_init: Path) -> Optional[Dict]:
         return None
     try:
         tree = ast.parse(apps_init.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+    except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
         logger.info("encapsulation: cannot read %s: %s", apps_init, exc)
         return {"name": "Handler security guard", "passed": False, "message": f"Cannot read apps/__init__.py: {exc}"}
     if any(_imports_handlers(node) for node in ast.walk(tree) if isinstance(node, ast.stmt)):
@@ -201,7 +202,7 @@ def _calls_the_guard(content: str) -> bool:
     """Whether handlers/__init__.py calls _guard_branch_access() at module level (guard v2)."""
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("encapsulation: handlers/__init__.py unparseable, v2 marker unseen: %s", exc)
         return False
     return any(
@@ -261,20 +262,11 @@ def check_handler_guard(module_path: str, bypass_rules: list | None = None) -> O
 
     code_lines = [ln for ln in content.split("\n") if ln.strip() and not ln.strip().startswith("#")]
 
-    guard_patterns = ["_guard_branch_access", "inspect.stack", "ImportError"]
-    has_guard = any(pattern in content for pattern in guard_patterns)
-
     if _calls_the_guard(content):
         result = {
             "name": "Handler security guard",
             "passed": True,
             "message": "Handler security guard present (module-level _guard_branch_access() call)",
-        }
-    elif has_guard:
-        result = {
-            "name": "Handler security guard",
-            "passed": True,
-            "message": "Handler security guard present (inspect.stack guard active)",
         }
     elif len(code_lines) < 10:
         result = {
@@ -514,9 +506,16 @@ def _import_violations(
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("encapsulation: unparseable test file %s: %s", module_path, exc)
-        return [{"line": exc.lineno or 0, "code": "unparseable", "from_branch": "unknown", "to_branch": "?"}]
+        return [
+            {
+                "line": getattr(exc, "lineno", None) or 0,
+                "code": "unparseable",
+                "from_branch": "unknown",
+                "to_branch": "?",
+            }
+        ]
     found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and not node.level:
@@ -577,7 +576,7 @@ def _infrastructure_handlers(branch_root_str: str) -> frozenset:
             continue
         try:
             tree = ast.parse(source.read_text(encoding="utf-8"))
-        except (OSError, SyntaxError) as exc:
+        except (OSError, SyntaxError, ValueError) as exc:
             # Unreadable is not evidence: the branch keeps the ordinary rule.
             logger.info("encapsulation: cannot read %s for the infrastructure set: %s", source, exc)
             continue
@@ -655,13 +654,8 @@ def check_cross_package_imports(
         if imported_package == file_package:
             continue
 
-        is_allowed = False
-        for allowed in allowed_handlers:
-            if allowed in code_part:
-                is_allowed = True
-                break
-
-        if is_allowed:
+        # Whole names: profile_handler is not file_handler.
+        if allowed_handlers & set(re.findall(r"\w+", code_part)):
             continue
 
         violations.append(
@@ -720,13 +714,8 @@ def check_direct_handler_imports(lines: List[str], module_path: str, bypass_rule
         if is_bypassed(module_path, "encapsulation", line=i, bypass_rules=bypass_rules):
             continue
 
-        is_allowed = False
-        for allowed in allowed_handlers:
-            if allowed in code_part:
-                is_allowed = True
-                break
-
-        if is_allowed:
+        # Whole names: profile_handler is not file_handler.
+        if allowed_handlers & set(re.findall(r"\w+", code_part)):
             continue
 
         violations.append({"line": i, "code": code_part.strip()})

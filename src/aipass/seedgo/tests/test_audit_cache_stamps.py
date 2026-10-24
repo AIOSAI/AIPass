@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_audit_cache_stamps.py
 # Description: The audit cache's invalidation stamps and what its branch line reports
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/audit/incremental_cache.py's stamp functions."""
@@ -84,6 +84,21 @@ class TestStamps:
         utils.write_text("def is_bypassed(): ...  # comment only\n", encoding="utf-8")
         stamp2 = incremental_cache.compute_machinery_stamp()
         assert stamp1 != stamp2
+
+    def test_machinery_stamp_changes_when_a_shared_applicability_file_is_edited(self, tmp_path, monkeypatch):
+        """applicability.py shapes every pack's corpus; for a non-default pack only this stamp sees it."""
+        shared = tmp_path / "applicability.py"
+        shared.write_text("x = 1\n", encoding="utf-8")
+        monkeypatch.setattr(incremental_cache, "MACHINERY_DIRS", ())
+        monkeypatch.setattr(incremental_cache, "MACHINERY_FILES", (shared,))
+
+        stamp1 = incremental_cache.compute_machinery_stamp()
+        shared.write_text("x = 1  # widened\n", encoding="utf-8")
+        assert incremental_cache.compute_machinery_stamp() != stamp1
+
+    def test_the_test_map_scanner_is_machinery(self):
+        """scan_branch feeds the cached test_map field, so its package is stamped with audit/ and bypass/."""
+        assert {d.name for d in incremental_cache.MACHINERY_DIRS} == {"audit", "bypass", "test_map"}
 
     def test_current_stamp_includes_the_machinery_stamp(self, tmp_path, monkeypatch):
         pack_dir = tmp_path / "pack"

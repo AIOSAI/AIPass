@@ -1,9 +1,5 @@
 # Telegram is retired (the owner, 2026-09-14 and 2026-10-11): the code stays in
-# place, disabled, and nothing scans it. The monitoring relay and its test are
+# .archive/, and nothing scans it. The monitoring relay and its test are
 # out of the seedgo audit, as they are out of pytest collection (pyproject.toml
 # addopts) and the CodeQL scan (security.yml).
 *telegram*
-# The relay's single-instance lock. telegram_relay.py is its only reader, so
-# with the relay out of the corpus the dead_code and unused_function standards
-# convict an orphan. Its test (tests/test_instance_lock.py) still runs.
-apps/handlers/monitoring/instance_lock.py

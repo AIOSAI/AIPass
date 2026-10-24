@@ -163,12 +163,12 @@ def send_to_single(
     deliver_email_to_branch_fn,
     on_delivered_callback,
     log_operation_fn,
-    update_central_fn,
     upsert_key: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Execute single-recipient email send.
 
     upsert_key: delivery rewrites this sender's open message with the same key instead of stacking.
+    Central stats are refreshed once, by on_delivered_callback inside delivery.
     """
     email_file = create_email_file_fn(
         to_branch, subject, message, user_info, reply_to=reply_to, dispatched_to=dispatched_to
@@ -202,12 +202,6 @@ def send_to_single(
             trigger.fire("email_sent", to=to_branch, subject=subject, auto_execute=auto_execute)
         except ImportError as e:
             logger.warning("[send] trigger import unavailable for send event: %s", e)
-
-        try:
-            if update_central_fn:
-                update_central_fn()
-        except Exception as e:
-            logger.warning("[send] update_central_fn failed after send to %s: %s", to_branch, e)
 
         return True, None
     else:

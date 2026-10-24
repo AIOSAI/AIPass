@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.7.0
+# Version: 1.7.1
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -72,7 +72,8 @@ def _names(targets, *parts: str) -> bool:
 
 
 def _run(cwd: str, *, command: str | None = None, file_path: str | None = None, tool: str = "Bash") -> dict:
-    tool_input = {"command": command} if command is not None else {"file_path": file_path}
+    key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    tool_input = {"command": command} if command is not None else {key: file_path}
     return edit_gate.handle({"tool_name": tool, "tool_input": tool_input, "cwd": cwd})
 
 
@@ -181,12 +182,11 @@ class TestAdminIdentityIsVerifiedNotClaimed:
 
         The grant is given, so only the dark rail can refuse; a None sys.modules entry did not isolate it.
         """
-        real = edit_gate._import_module
 
         def _no_rail(name: str):
             if name.endswith("admin_seat") or name.startswith("aipass.ai_mail"):
                 raise ImportError("no ai_mail")
-            return real(name)
+            return importlib.import_module(name)
 
         with patch.object(edit_gate, "_import_module", side_effect=_no_rail):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
@@ -230,6 +230,38 @@ class TestScriptedLaneCatches:
 
     def test_appending_redirection(self, sibling_projects: dict, grant_withheld):
         assert _blocked(self._cmd_blocked(sibling_projects, f"echo x >> {sibling_projects['foreign_file']}"))
+
+    @pytest.mark.parametrize("op", ["&>", "&>>", "<>", "1<>", ">&"])
+    def test_every_writing_redirection(self, sibling_projects: dict, grant_withheld, op: str):
+        assert _blocked(self._cmd_blocked(sibling_projects, f"echo x {op} {sibling_projects['foreign_file']}"))
+
+    def test_a_word_the_reader_cannot_read_refuses_the_command(self, sibling_projects: dict, grant_withheld):
+        """bash_writes raises on what it cannot read (no dropped word, no silent allow); the gate refuses it."""
+        with patch("aipass.hooks.apps.modules.bash_writes.write_targets", side_effect=ValueError("unreadable operand")):
+            result = self._cmd_blocked(sibling_projects, "echo x > ./local.txt")
+        assert _blocked(result)
+        assert "could not check this call" in _reason(result) and "unreadable operand" in _reason(result)
+
+    @pytest.mark.parametrize(
+        "command", ["echo x > ~nosuchuser/x.txt", "touch ~nosuchuser/x.txt", "cat ~nosuchuser/x.txt"]
+    )
+    def test_an_unknown_users_tilde_is_read_literally_by_every_reader(self, sibling_projects: dict, command: str):
+        """bash leaves ~nosuchuser as typed; pathlib's expanduser raised on it and the gate refused as crashed."""
+        assert self._cmd_blocked(sibling_projects, command)["exit_code"] == 0
+
+    def test_a_target_directory_into_a_foreign_project(self, sibling_projects: dict, grant_withheld):
+        foreign_dir = Path(sibling_projects["foreign_file"]).parent
+        assert _blocked(self._cmd_blocked(sibling_projects, f"cp --target-directory={foreign_dir} ./local.json"))
+
+    def test_cp_t_writes_into_its_directory_never_its_source(self, tmp_path: Path):
+        """-t names the destination first: the last word is a source, read and never written."""
+        assert write_targets("cp -t backup /x/a.json", str(tmp_path)) == [
+            (tmp_path / "backup" / "a.json", "cp destination")
+        ]
+
+    @pytest.mark.parametrize("dup", ["2>&1", ">&2", ">&-"])
+    def test_a_descriptor_dup_writes_no_file(self, sibling_projects: dict, grant_withheld, dup: str):
+        assert self._cmd_blocked(sibling_projects, f"echo x {dup}")["exit_code"] == 0
 
     def test_tee(self, sibling_projects: dict, grant_withheld):
         assert _blocked(self._cmd_blocked(sibling_projects, f"echo x | tee {sibling_projects['foreign_file']}"))
@@ -286,6 +318,16 @@ class TestScriptedLaneCatches:
         result = _run(registered_projects["hooks"], command=f"sed -i s/a/b/ {target}")
         assert _blocked(result)
         assert "Cross-branch write blocked (sed -i): 'hooks' cannot write to 'memory'" in _reason(result)
+
+    def test_sed_w_into_another_branch(self, registered_projects: dict):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        for script in (f"w {target}", f"1W {target}", f"s/a/b/gw {target}"):
+            result = _run(registered_projects["hooks"], command=f"sed -n '{script}' ./README.md")
+            assert "Cross-branch write blocked (sed w): 'hooks' cannot write to 'memory'" in _reason(result), script
+
+    def test_a_sed_in_place_script_is_never_a_target(self, tmp_path):
+        assert write_targets("sed -i -e 's|/x/Other/y|z|' f.txt", str(tmp_path)) == [(tmp_path / "f.txt", "sed -i")]
+        assert write_targets("sed -i 's/a/b/' f.txt", str(tmp_path)) == [(tmp_path / "f.txt", "sed -i")]
 
     def test_redirection_into_a_project_level_file(self, registered_projects: dict):
         target = (registered_projects["aipass"] / "notes.md").as_posix()
@@ -845,16 +887,8 @@ class TestTargetSpellingIsNotPartOfTheContract:
 
 
 def _read_as(monkeypatch, pure: type) -> None:
-    """The platform oracle: bash_writes builds every path in *pure*'s flavour.
-
-    expanduser is the only concrete method the reader calls, and a pure path has none.
-    """
-
-    class Flavour(pure):
-        def expanduser(self):
-            return self
-
-    monkeypatch.setattr("aipass.hooks.apps.modules.bash_writes.Path", Flavour)
+    """The platform oracle: bash_writes builds every path in *pure*'s flavour; it calls no concrete method."""
+    monkeypatch.setattr("aipass.hooks.apps.modules.bash_writes.Path", pure)
 
 
 class TestTheGitBashDriveSpelling:

@@ -3,7 +3,7 @@
 # Description: Commons Live Social Feed (read-only monitor view)
 # Version: 1.1.0
 # Created: 2026-07-21
-# Modified: 2026-08-29
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -32,14 +32,7 @@ from rich.markup import escape as rich_escape
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, error, warning
 from aipass.prax.apps.handlers.json import json_handler
-from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent
 from aipass.prax.apps.handlers.repo_root import resolved_file
-from aipass.prax.apps.handlers.monitoring.telegram_relay import (
-    init_relay,
-    relay_event,
-    stop_relay,
-    is_relay_enabled_by_env,
-)
 
 # =============================================================================
 # CONFIGURATION
@@ -239,7 +232,7 @@ def event_room(event: dict) -> str:
 
 
 def format_event(event: dict) -> str:
-    """Plain-text (no Rich markup) description of an event — shared by console + relay."""
+    """Plain-text (no Rich markup) description of an event."""
     kind = event["kind"]
 
     if kind == "post":
@@ -267,20 +260,9 @@ def _print_feed_event(room: str, message: str, mood: Optional[str]) -> None:
 
 
 def _emit(event: dict, room_moods: Dict[str, str]) -> None:
-    """Render an event to the console and relay it (relay is a no-op when inactive)."""
+    """Render an event to the console."""
     room = event_room(event)
-    message = format_event(event)
-    _print_feed_event(room, message, room_moods.get(room))
-
-    relay_event(
-        MonitoringEvent(
-            priority=3,
-            event_type="log",
-            branch=room.upper(),
-            message=message,
-            level="info",
-        )
-    )
+    _print_feed_event(room, format_event(event), room_moods.get(room))
 
 
 # =============================================================================
@@ -402,7 +384,7 @@ def _interactive_feed_loop(state: FeedState) -> None:
 def _poll_worker(
     conn: sqlite3.Connection, cursors: Dict[str, int], state: FeedState, room_moods: Dict[str, str]
 ) -> None:
-    """Background thread: poll for new rows, display + relay the visible ones."""
+    """Background thread: poll for new rows, display the visible ones."""
     while not _stop_event.is_set():
         try:
             events, new_cursors = fetch_new_events(conn, cursors)
@@ -425,25 +407,14 @@ def _poll_worker(
 # =============================================================================
 
 
-def run_commons_feed(args: List[str], relay_config: Optional[dict] = None) -> bool:
-    """Launch the commons live social feed — read-only, room-tagged, monitor-style.
-
-    relay_config is loaded by monitor.py (the module layer, which owns the
-    cross-branch @api secrets lookup) and passed in — this handler never
-    reaches outside its own branch.
-    """
+def run_commons_feed(args: List[str]) -> bool:
+    """Launch the commons live social feed — read-only, room-tagged, monitor-style."""
     _stop_event.clear()
     json_handler.log_operation("commons_feed_started", {"args": args})
-
-    relay_enabled = "--relay" in args or is_relay_enabled_by_env()
-    init_relay(relay_enabled, relay_config if relay_enabled else None)
-    if relay_enabled:
-        console.print("[green]monitor → Telegram relay ON (prax_monitor)[/green]")
 
     db_path = _get_commons_db_path()
     if not db_path.exists():
         error(f"commons.db not found at {db_path}")
-        stop_relay()
         return True
 
     try:
@@ -459,7 +430,6 @@ def run_commons_feed(args: List[str], relay_config: Optional[dict] = None) -> bo
             f"Cannot open the commons database for reading, so the commons live feed did not start. "
             f"The database itself was not modified. Location: {db_path}"
         )
-        stop_relay()
         return True
 
     state = FeedState()
@@ -488,7 +458,6 @@ def run_commons_feed(args: List[str], relay_config: Optional[dict] = None) -> bo
 
     _stop_event.set()
     poll_thread.join(timeout=POLL_INTERVAL + 2.0)
-    stop_relay()
     conn.close()
 
     # sys.exit(0) prevents drone's post-execution json_handler from running

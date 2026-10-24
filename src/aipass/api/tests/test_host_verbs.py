@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
@@ -197,17 +197,20 @@ class TestAdminIsUnreachableNotJustUnset:
 
         assert not any("admin" in str(part).lower() for part in _argv(routed))
 
-    def test_the_caller_cannot_smuggle_admin_through_the_message(self, routed: Any) -> None:
-        """The message is opaque payload; it never becomes a flag."""
-        host_verbs.wake_branch("memory", PROJECT, message="--admin")
+    @pytest.mark.parametrize("message", ["--admin", "--fresh", "-h", "  --help"])
+    def test_a_message_that_reads_as_a_flag_is_refused(self, routed: Any, message: str) -> None:
+        """@ai_mail's dispatch scans every arg for flags, so a dash-led message never reaches it."""
+        with pytest.raises(host_verbs.VerbRefused):
+            host_verbs.wake_branch("memory", PROJECT, message=message)
+
+        routed.route_command.assert_not_called()
+
+    def test_a_dash_inside_the_message_still_reaches_the_trailing_positional(self, routed: Any) -> None:
+        """Only a leading dash reads as a flag; the message text stays opaque payload."""
+        host_verbs.wake_branch("memory", PROJECT, message="check the --admin docs")
 
         argv = _argv(routed)
-
-        assert "--admin" in argv, "the message text never reached the argv at all"
-
-        # The message is the trailing POSITIONAL (no --message flag), the slot drone reads as text.
-        assert argv.index("--admin") == len(argv) - 1, f"the message text is not the trailing positional: {argv}"
-        assert argv.index("--admin") > 3, f"the message value landed where drone reads options: {argv}"
+        assert argv[-1] == "check the --admin docs", f"the message text is not the trailing positional: {argv}"
 
     def test_this_module_never_imports_wake_branch_directly(self) -> None:
         """The in-process import is the one that CAN pass admin."""

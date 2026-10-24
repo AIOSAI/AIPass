@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_handlers.py
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -29,7 +29,7 @@ from aipass.drone.apps.handlers.git.log_handler import get_git_log
 from aipass.drone.apps.handlers.git.show_handler import show_object
 from aipass.prax.apps.modules import dashboard as prax_dashboard
 from aipass.drone.apps.handlers.git import commit_handler
-from aipass.drone.apps.handlers.git.commit_handler import commit_changes, stage_branch_dir
+from aipass.drone.apps.handlers.git.commit_handler import commit_changes
 from aipass.drone.apps.handlers.git.checkout_handler import checkout_branch
 from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
@@ -250,29 +250,6 @@ class TestShowCommandRouting:
         result = handle_command("show", [])
         assert result["exit_code"] == 1
         assert "Usage" in result["stderr"]
-
-
-class TestStageBranchDir:
-    """Shared staging utility tests."""
-
-    def test_stage_success(self, repo_dir: Path) -> None:
-        mock_result = MagicMock(returncode=0, stderr="")
-        branch_dir = repo_dir / "src" / "aipass" / "api"
-
-        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run", return_value=mock_result):
-            result = stage_branch_dir(branch_dir, repo_dir)
-
-        assert result["success"] is True
-
-    def test_stage_failure(self, repo_dir: Path) -> None:
-        mock_result = MagicMock(returncode=1, stderr="fatal: pathspec error")
-        branch_dir = repo_dir / "src" / "aipass" / "api"
-
-        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run", return_value=mock_result):
-            result = stage_branch_dir(branch_dir, repo_dir)
-
-        assert result["success"] is False
-        assert "failed" in result["message"].lower()
 
 
 @pytest.fixture()
@@ -498,6 +475,22 @@ class TestCommitChanges:
         assert result["exit_code"] == 1
         assert "failed" in result["stderr"].lower()
         _assert_ordered_calls(mock_run, [_GIT_DIFF_CACHED, _GIT_COMMIT])
+
+    def test_named_files_commit_alone(self, repo_dir: Path) -> None:
+        """`commit "msg" a.py` commits only a.py; what another agent staged does not ride along."""
+        mock_add = MagicMock(returncode=0, stderr="")
+        mock_diff = MagicMock(returncode=1, stdout="", stderr="")
+        mock_commit = MagicMock(returncode=0, stdout="[dev abc] scoped", stderr="")
+
+        with patch(
+            "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
+            side_effect=[mock_add, mock_diff, mock_commit],
+        ) as mock_run:
+            result = commit_changes("scoped", files=["a.py"])
+
+        assert result["exit_code"] == 0
+        assert mock_run.call_args_list[2].args[0] == ["git", "commit", "-m", "scoped", "--only", "--", "a.py"]
+        assert mock_run.call_args_list[1].args[0][-2:] == ["--", "a.py"]
 
 
 class TestCommitSubjectCap:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-05-10
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """Windows Compatibility Standards Checker Handler."""
@@ -13,6 +13,14 @@ from pathlib import Path
 from typing import Callable, Dict
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import (
+    collect_child_linenos,
+    find_enclosing_function,
+    is_platform_guard,
+    lines_in_guarded_blocks,
+    references_platform,
+)
 from aipass.seedgo.apps.handlers.aipass_standards.exclusive_create_race import find_exclusive_create_races
 from aipass.seedgo.apps.handlers.aipass_standards.mock_repr_path import find_mock_repr_paths
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
@@ -36,16 +44,6 @@ _POSIX_ONLY_OS_ATTRS = frozenset({"WNOHANG"})
 
 _POSIX_ONLY_OS_CALLS = frozenset({"fork", "setpgid", "killpg", "getpgid", "waitpid"})
 
-_GUARDED_EXCEPT_TYPES = frozenset(
-    {
-        "ImportError",
-        "ModuleNotFoundError",
-        "OSError",
-        "PermissionError",
-        "ProcessLookupError",
-    }
-)
-
 _TEST_POSIX_CALLS: dict[tuple[str, str], str] = {
     ("os", "chmod"): "os.chmod() — Windows ignores permission bits",
     ("os", "symlink"): "os.symlink() — Windows needs privileges",
@@ -54,58 +52,6 @@ _TEST_POSIX_CALLS: dict[tuple[str, str], str] = {
     ("os", "chown"): "os.chown() — not available on Windows",
     ("stat", "S_IMODE"): "stat.S_IMODE() — Unix permission assertion",
 }
-
-
-def _is_platform_guard(node: ast.expr) -> bool:
-    """Return True if the test expression is a sys.platform or os.name comparison."""
-    if isinstance(node, ast.Compare):
-        left = node.left
-        if isinstance(left, ast.Attribute) and isinstance(left.value, ast.Name):
-            if left.value.id == "sys" and left.attr == "platform":
-                return True
-            if left.value.id == "os" and left.attr == "name":
-                return True
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        if node.func.id == "hasattr":
-            return True
-    if isinstance(node, ast.BoolOp):
-        return any(_is_platform_guard(v) for v in node.values)
-    return False
-
-
-def _collect_child_linenos(node: ast.AST) -> set[int]:
-    """Walk all descendants and return line numbers where present."""
-    lines: set[int] = set()
-    for child in ast.walk(node):
-        lineno = getattr(child, "lineno", None)
-        if lineno is not None:
-            lines.add(lineno)
-    return lines
-
-
-def _handler_catches_guarded_type(handler: ast.ExceptHandler) -> bool:
-    """Return True if the except handler catches an import/OS error type."""
-    if handler.type is None:
-        return True
-    if isinstance(handler.type, ast.Name):
-        return handler.type.id in _GUARDED_EXCEPT_TYPES
-    if isinstance(handler.type, ast.Tuple):
-        return any(isinstance(elt, ast.Name) and elt.id in _GUARDED_EXCEPT_TYPES for elt in handler.type.elts)
-    return False
-
-
-def _lines_in_guarded_blocks(tree: ast.Module) -> set[int]:
-    """Collect line numbers inside platform guard blocks or try/except ImportError."""
-    guarded: set[int] = set()
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.If) and _is_platform_guard(node.test):
-            guarded.update(_collect_child_linenos(node))
-        if isinstance(node, ast.Try):
-            if any(_handler_catches_guarded_type(h) for h in node.handlers):
-                guarded.update(_collect_child_linenos(node))
-
-    return guarded
 
 
 def _check_import_node(node: ast.Import, guarded: set[int]) -> list[tuple[int, str]]:
@@ -372,27 +318,16 @@ def _platform_guarded_lines(tree: ast.Module) -> set[int]:
     """Collect line numbers inside platform guards only (NOT try/except)."""
     guarded: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.If) and _is_platform_guard(node.test):
-            guarded.update(_collect_child_linenos(node))
+        if isinstance(node, ast.If) and is_platform_guard(node.test):
+            guarded.update(collect_child_linenos(node))
     return guarded
-
-
-def _find_enclosing_function(tree: ast.Module, target_lineno: int) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
-    best: ast.FunctionDef | ast.AsyncFunctionDef | None = None
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if target_lineno in _collect_child_linenos(node):
-            if best is None or node.lineno > best.lineno:
-                best = node
-    return best
 
 
 def _has_early_platform_return(func_node: ast.FunctionDef | ast.AsyncFunctionDef, before_line: int) -> bool:
     for node in ast.walk(func_node):
         if not isinstance(node, ast.If) or node.lineno >= before_line:
             continue
-        if not _is_platform_guard(node.test):
+        if not is_platform_guard(node.test):
             continue
         for body_stmt in node.body:
             for child in ast.walk(body_stmt):
@@ -427,7 +362,7 @@ def _find_os_kill_signal0_violations(tree: ast.Module, platform_guarded: set[int
             continue
         if node.lineno in platform_guarded:
             continue
-        enclosing = _find_enclosing_function(tree, node.lineno)
+        enclosing = find_enclosing_function(tree, node.lineno)
         if enclosing and _has_early_platform_return(enclosing, node.lineno):
             continue
         violations.append(
@@ -452,12 +387,27 @@ _TMP_PREFIX = "/" + "tmp" + "/"
 _TMP_EXACT = "/" + "tmp"
 
 
+def _docstring_ids(tree: ast.Module) -> set[int]:
+    """Ids of the docstring constants: prose that names /tmp writes nothing there."""
+    scopes = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+    return {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(node, scopes)
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+        and isinstance(node.body[0].value.value, str)
+    }
+
+
 def _find_hardcoded_tmp_violations(tree: ast.Module, guarded: set[int]) -> list[tuple[int, str]]:
     """Flag hardcoded /tmp paths — use tempfile module instead."""
     violations: list[tuple[int, str]] = []
     seen_lines: set[int] = set()
+    docstrings = _docstring_ids(tree)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str) or id(node) in docstrings:
             continue
         val = node.value
         if node.lineno in guarded or node.lineno in seen_lines:
@@ -540,10 +490,6 @@ def _find_cp1252_entry_violations(tree: ast.Module) -> list[tuple[int, str]]:
     return []
 
 
-def _is_test_file(path: Path) -> bool:
-    return "tests" in path.parts or path.name.startswith("test_") or path.name.endswith("_test.py")
-
-
 def _is_pytest_mark(node: ast.expr) -> bool:
     return (
         isinstance(node, ast.Attribute)
@@ -551,16 +497,6 @@ def _is_pytest_mark(node: ast.expr) -> bool:
         and isinstance(node.value, ast.Name)
         and node.value.id == "pytest"
     )
-
-
-def _references_platform(node: ast.expr) -> bool:
-    for child in ast.walk(node):
-        if isinstance(child, ast.Attribute) and isinstance(child.value, ast.Name):
-            if (child.value.id == "sys" and child.attr == "platform") or (
-                child.value.id == "os" and child.attr == "name"
-            ):
-                return True
-    return False
 
 
 def _has_platform_skipif(decorators: list[ast.expr]) -> bool:
@@ -573,7 +509,7 @@ def _has_platform_skipif(decorators: list[ast.expr]) -> bool:
         if func.attr == "skip" and _is_pytest_mark(func.value):
             return True
         if func.attr == "skipif" and _is_pytest_mark(func.value):
-            if any(_references_platform(arg) for arg in dec.args):
+            if any(references_platform(arg) for arg in dec.args):
                 return True
     return False
 
@@ -790,7 +726,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipped %s: SyntaxError during parse", path)
         return {
             "passed": False,
@@ -805,7 +741,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "WINDOWS_COMPAT",
         }
 
-    guarded = _lines_in_guarded_blocks(tree)
+    guarded = lines_in_guarded_blocks(tree)
     platform_only = _platform_guarded_lines(tree)
 
     all_violations: list[tuple[int, str]] = []
@@ -822,7 +758,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     all_violations.extend(_find_shell_true_violations(tree, guarded))
     all_violations.extend(_find_cp1252_entry_violations(tree))
 
-    if _is_test_file(path):
+    if is_test_path(str(path)):
         all_violations.extend(_find_test_platform_violations(tree, guarded))
     elif path.name != "conftest.py":
         all_violations.extend(_find_import_time_stream_reads(tree))

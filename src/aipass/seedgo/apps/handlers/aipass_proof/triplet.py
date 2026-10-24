@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: triplet.py
 # Description: Verify standard triplet completeness (check + content + md)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Triplet Proof -- Verify every standard has all 3 files: *_check.py, *_content.py, *.md"""
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from aipass.prax import logger
@@ -26,11 +27,31 @@ def _top_level_files(pack_dir: Path) -> list[Path]:
     return [p for p in pack_dir.iterdir() if p.is_file() and p.name not in _SKIP_DIRS and not p.name.startswith("_")]
 
 
+def _imported_names(files: list[Path]) -> set[str]:
+    """Every module or name the pack's own .py files import: a sibling named here is a shared helper."""
+    names: set[str] = set()
+    for path in files:
+        if path.suffix != ".py":
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, UnicodeDecodeError, SyntaxError, ValueError) as exc:
+            logger.info(f"[triplet] Cannot read imports of {path.name}: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                names.update(alias.name for alias in node.names)
+                names.add((node.module or "").rsplit(".", 1)[-1])
+            elif isinstance(node, ast.Import):
+                names.update(alias.name.rsplit(".", 1)[-1] for alias in node.names)
+    return names
+
+
 def scan(pack_dir: Path) -> dict:
     """Run triplet completeness scan on a standards pack directory.
 
     Every standard should have three files: {name}_check.py, {name}_content.py, {name}.md.
-    Files that don't fit any triplet pattern are flagged as orphaned.
+    Files that don't fit any triplet pattern are flagged as orphaned, except a .py helper a sibling imports.
     """
     logger.info(f"[triplet] Scanning {pack_dir}")
 
@@ -38,8 +59,10 @@ def scan(pack_dir: Path) -> dict:
     contents: set[str] = set()
     docs: set[str] = set()
     orphaned_files: list[str] = []
+    files = _top_level_files(pack_dir)
+    imported = _imported_names(files)
 
-    for filepath in _top_level_files(pack_dir):
+    for filepath in files:
         name = filepath.name
 
         if name.endswith("_check.py"):
@@ -56,8 +79,8 @@ def scan(pack_dir: Path) -> dict:
                 docs.add(stem)
 
         elif name.endswith(".py"):
-            # .py files that are neither _check nor _content -- orphaned
-            orphaned_files.append(name)
+            if filepath.stem not in imported:
+                orphaned_files.append(name)
 
         elif name.endswith(".json"):
             # Config / ancillary JSON files -- not orphaned

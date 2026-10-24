@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.5.1
+# Version: 1.6.0
 # Created: 2026-07-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -21,21 +21,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from aipass.trigger.apps.config import (
-    TRIGGER_JSON_DIR,
-    TRIGGER_ROOT,
-    append_trail,
-    atomic_write_json,
-    json_file_lock,
-    migrate_json_file,
-    trail_logger,
-)
+from aipass.trigger.apps.config import TRIGGER_ROOT, append_trail, atomic_write_json, json_file_lock, trail_logger
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
+from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.json import json_handler
 
 DECISION_LOG = TRIGGER_ROOT / "logs" / "runaway_suppressed.jsonl"
-
-VOLUME_MUTE_KEY = "volume_muted_branches"
 
 
 # Not prax: the watchers would read its line and fire it back; they skip `.jsonl`.
@@ -44,8 +35,6 @@ logger = trail_logger(TRIGGER_ROOT / "logs" / "runaway_handler.jsonl")
 
 _REPO_ROOT = find_repo_root(caller="runaway_handler")
 ALERTS_FILE = _REPO_ROOT / ".aipass" / "alerts.json"
-MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
-LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
 _send_email: Optional[Callable[..., bool]] = None
 
@@ -71,31 +60,10 @@ def _record_file_dispatch(file_path: str) -> None:
     _file_cooldowns[file_path] = time.time()
 
 
-def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
-    """Check if a single mute entry matches the branch and is still active."""
-    if isinstance(entry, str):
-        return entry.lower() == branch_lower
-    if not isinstance(entry, dict):
-        return False
-    if entry.get("name", "").lower() != branch_lower:
-        return False
-    expires_at = entry.get("expires_at")
-    if expires_at is None:
-        return True
-    return datetime.fromisoformat(expires_at) > now
-
-
 def _is_branch_volume_muted(branch_name: str) -> Optional[bool]:
     """Check if a branch is VOLUME-muted for runaway dispatch; None means unreadable, never "not muted"."""
     try:
-        migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
-        if not MEDIC_STATE_FILE.exists():
-            return False
-        data = json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
-        muted = data.get("config", {}).get(VOLUME_MUTE_KEY, [])
-        branch_lower = branch_name.lower()
-        now = datetime.now()
-        return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
+        return branch_name.lstrip("@").lower() in medic_state.get_volume_muted_branches()
     except Exception as exc:
         logger.warning(f"_is_branch_volume_muted config read failed: {exc}")
         return None

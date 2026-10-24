@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -105,6 +105,29 @@ def _refuse_non_plan_file(plan_file: Path, plan_label: str, plan_key: str) -> Di
     }
 
 
+def _refresh_dashboards(
+    locations: List[str],
+    update_dashboard_local: Any,
+    push_to_plans_central: Any,
+    push_flow_to_branch_dashboard: Any,
+    messages: List[Dict[str, Any]],
+) -> None:
+    """Refresh flow's dashboard, PLANS.central.json and each location's branch dashboard. Never raises."""
+    try:
+        # None is "flow has no dashboard", not a failure.
+        if update_dashboard_local() is False:
+            logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
+        if not push_to_plans_central():
+            logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
+
+        for location in dict.fromkeys(loc for loc in locations if loc):
+            if push_flow_to_branch_dashboard(Path(location)) is False:
+                logger.warning(f"[{MODULE_NAME}] Failed to push flow section to branch dashboard at {location}")
+    except Exception as e:
+        logger.warning(f"[{MODULE_NAME}] Dashboard update error: {e}")
+        messages.append({"type": "warning", "text": f"  Dashboard update failed (non-critical): {e}"})
+
+
 def close_plan_impl(
     plan_num: Any = None,
     confirm: bool = False,
@@ -112,6 +135,7 @@ def close_plan_impl(
     spawn_background: bool = True,
     dry_run: bool = False,
     exclude_types: List[str] | None = None,
+    refresh_dashboards: bool = True,
     # Dependencies injected from module
     normalize_plan_number: Any = None,
     load_registry: Any = None,
@@ -130,7 +154,7 @@ def close_plan_impl(
     Implement plan closure workflow
 
     Auto-confirms by default - running 'close' IS the intent.
-    spawn_background=False from close_all avoids racing the single post-processing runner.
+    spawn_background=False and refresh_dashboards=False from close_all: it does both once, after the sweep.
     """
     messages: List[Dict[str, Any]] = []
 
@@ -183,7 +207,7 @@ def close_plan_impl(
                 logger.warning(f"[{MODULE_NAME}] {error_msg}")
                 return {
                     "success": False,
-                    "messages": [{"type": "error", "text": "not_found", "plan_num": plan_key}],
+                    "messages": [{"type": "error", "text": "not_found", "plan_num": plan_key, "prefix": prefix}],
                     "plan_key": plan_key,
                     "cancelled": False,
                 }
@@ -369,26 +393,14 @@ def close_plan_impl(
                 )
 
         messages.append({"type": "step", "text": "[4/5] Updating dashboards..."})
-        try:
-            dashboard_success = update_dashboard_local()
-            central_success = push_to_plans_central()
-
-            # None is "flow has no dashboard", not a failure.
-            if dashboard_success is False:
-                logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
-            if not central_success:
-                logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
-
-            plan_location = plan_info.get("location", "")
-            if plan_location:
-                branch_dashboard_success = push_flow_to_branch_dashboard(Path(plan_location))
-                if branch_dashboard_success is False:
-                    logger.warning(
-                        f"[{MODULE_NAME}] Failed to push flow section to branch dashboard at {plan_location}"
-                    )
-        except Exception as e:
-            logger.warning(f"[{MODULE_NAME}] Dashboard update error: {e}")
-            messages.append({"type": "warning", "text": f"  Dashboard update failed (non-critical): {e}"})
+        if refresh_dashboards:
+            _refresh_dashboards(
+                [plan_info.get("location", "")],
+                update_dashboard_local,
+                push_to_plans_central,
+                push_flow_to_branch_dashboard,
+                messages,
+            )
 
         messages.append({"type": "step", "text": "[5/5] Finalizing..."})
         messages.append({"type": "close_success", "plan_key": plan_key, "prefix": plan_prefix})
@@ -487,6 +499,9 @@ def close_all_plans_impl(
     close_plan_fn: Any = None,
     caller_project: Any = _UNSET,
     resolve_project_fn: Any = None,
+    update_dashboard_local: Any = None,
+    push_to_plans_central: Any = None,
+    push_flow_to_branch_dashboard: Any = None,
 ) -> Dict[str, Any]:
     """
     Close every open plan that belongs to the CALLER'S project
@@ -643,8 +658,9 @@ def close_all_plans_impl(
                 try:
                     response = input("Type 'yes' to confirm: ").strip().lower()
                 except EOFError:
-                    logger.warning("[%s] EOFError on stdin during close_all confirmation, auto-confirming", MODULE_NAME)
-                    response = "yes"
+                    # Ctrl-D at a prompt means back out, never yes.
+                    logger.warning("[%s] EOFError on stdin during close_all confirmation, cancelling", MODULE_NAME)
+                    response = "no"
 
             if response != "yes":
                 logger.info(f"[{MODULE_NAME}] close_all cancelled by user")
@@ -669,7 +685,9 @@ def close_all_plans_impl(
             )
 
             # The typed plan_id makes the resolve land on this row's registry, not fplan's.
-            result = close_plan_fn(plan_num=plan_id, confirm=False, all_plans=False, spawn_background=False)
+            result = close_plan_fn(
+                plan_num=plan_id, confirm=False, all_plans=False, spawn_background=False, refresh_dashboards=False
+            )
 
             if isinstance(result, dict):
                 plan_success = result.get("success", False)
@@ -692,6 +710,14 @@ def close_all_plans_impl(
             failed_ids.append(plan_num)
 
         if success_count > 0:
+            if update_dashboard_local is not None:
+                _refresh_dashboards(
+                    [info.get("location", "") for plan_id, info in resolved if plan_id in closed_ids],
+                    update_dashboard_local,
+                    push_to_plans_central,
+                    push_flow_to_branch_dashboard,
+                    messages,
+                )
             try:
                 _spawn_background_runner()
                 logger.info(f"[{MODULE_NAME}] Spawned single background process for {success_count} closed plan(s)")

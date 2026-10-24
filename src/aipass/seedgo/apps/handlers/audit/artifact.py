@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: Audit Artifact Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -25,12 +25,12 @@ Doc shape (schema_version 1)::
     }
 """
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.audit import incremental_cache
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.module_root import module_file
 
@@ -243,10 +243,7 @@ def write_audit_artifact(
     path = Path(output_path) if output_path else default_artifact_path(specific_branch, no_bypass, pack=pack)
     document = build_artifact(audit_results, pack=pack, specific_branch=specific_branch, no_bypass=no_bypass)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(document, f, indent=2, ensure_ascii=False, default=str)
-        f.write("\n")
+    incremental_cache.atomic_write(path, document)
 
     json_handler.log_operation(
         "audit_artifact_written",

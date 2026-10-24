@@ -10,8 +10,6 @@
 Plan Verification Module
 """
 
-import subprocess
-import json
 import os
 import sys
 from typing import List
@@ -23,28 +21,12 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, warning
+from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.repo_root import module_file
-
-# ChromaDB runs in the memory venv's python, in a subprocess.
-_HANDLERS_DIR = module_file(__file__).parent.parent / "handlers"
-CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
-
-_MEMORY_ROOT = module_file(__file__).parents[2]
-_MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
-
-
-def _get_memory_python() -> str:
-    """Get the Python executable for memory ML operations."""
-    env_override = os.environ.get("AIPASS_MEMORY_PYTHON")
-    if env_override:
-        return env_override
-    if _MEMORY_VENV_PYTHON.exists():
-        return str(_MEMORY_VENV_PYTHON)
-    return sys.executable
+from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, run_json
 
 
 def handle_command(command: str, args: List[str]) -> bool:
@@ -73,32 +55,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
 def _check_plan_subprocess(plan_label: str) -> dict:
     """Check plan vectorization via chroma_subprocess: success, found, count, source_files."""
-    python_path = _get_memory_python()
-    input_data = json.dumps(
-        {
-            "operation": "check_plan",
-            "plan_label": plan_label,
-        }
-    )
-
-    try:
-        result = subprocess.run(
-            [python_path, str(CHROMA_SUBPROCESS_SCRIPT)], input=input_data, capture_output=True, text=True, timeout=60
-        )
-
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Subprocess failed"}
-
-        return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        logger.warning("[verify] Plan check subprocess timed out")
-        return {"success": False, "error": "Check operation timed out"}
-    except json.JSONDecodeError as e:
-        logger.warning(f"[verify] Invalid JSON from plan check subprocess: {e}")
-        return {"success": False, "error": f"Invalid JSON response: {e}"}
-    except Exception as e:
-        logger.error(f"[verify] Plan check subprocess failed: {e}")
-        return {"success": False, "error": str(e)}
+    payload = {"operation": "check_plan", "plan_label": plan_label}
+    return run_json(CHROMA_SUBPROCESS_SCRIPT, payload, timeout=60, label="Check operation")
 
 
 def is_plan_vectorized(plan_label: str) -> dict:
@@ -111,6 +69,7 @@ def _verify_plan(plan_label: str) -> None:
     result = _check_plan_subprocess(plan_label)
 
     if not result.get("success"):
+        logger.warning(f"[verify] Plan check failed for {plan_label}: {result.get('error')}")
         error(result.get("error", "Unknown error"))
         json_handler.log_operation("verify_plan", {"plan_label": plan_label, "success": False})
         return

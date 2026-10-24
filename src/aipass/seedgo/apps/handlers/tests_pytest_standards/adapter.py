@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapter.py
-# Description: the pytest execution adapter - the 8-function contract
-# Version: 1.2.0
+# Description: the pytest execution adapter - the 6-function contract
+# Version: 1.2.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The pytest adapter. Eight functions, two constants, and nothing else.
@@ -16,11 +16,10 @@ runs inside the foreign copy and is stdlib-only (Law M10).
 """
 
 import os
-import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -30,6 +29,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     envdiff,
     gatelog,
     gutting,
+    mutation_runner,
     nominators,
     statement_deletion,
 )
@@ -231,12 +231,10 @@ def run_gated(spec: envcopy.EnvSpec, budget_seconds: int, options: dict) -> dict
 
     started = time.monotonic()
     try:
-        result = subprocess.run(
+        result = mutation_runner.run_in_group(
             command,
             cwd=str(spec.run_cwd),
             env=_gate_environment(spec, options),
-            capture_output=True,
-            text=True,
             timeout=budget_seconds,
         )
     except subprocess.TimeoutExpired:
@@ -299,37 +297,6 @@ def _config_note(spec: envcopy.EnvSpec) -> str:
         f"no xdist, with the target's own configuration in effect. This is NOT the CI "
         f"configuration and the two execute different test orders."
     )
-
-
-def fire_canary(spec: envcopy.EnvSpec) -> dict:
-    """The canary result from the run that just happened.
-
-    The payload fires the canary inside the gated session; a parent-side canary would
-    test a hook the suite never ran under.
-    """
-    try:
-        records = gatelog.read_records(spec.log_path)
-    except gatelog.GateLogError as exc:
-        # Not swallowed: an unreadable log leaves the gate unproven; the reason travels in `error`.
-        logger.warning(f"[AUDIT-TESTS] canary result unavailable for {spec.env_root}: {exc}")
-        return {"attempted": False, "caught": False, "path": "", "error": str(exc)}
-
-    for record in records:
-        if record.get("rec") == "summary":
-            canary = record.get("canary") or {}
-            return {
-                "attempted": bool(canary.get("attempted")),
-                "caught": bool(canary.get("caught")),
-                "path": canary.get("path", ""),
-                "error": canary.get("error", ""),
-            }
-
-    return {
-        "attempted": False,
-        "caught": False,
-        "path": "",
-        "error": "the session produced no summary record - it did not reach the end of the run",
-    }
 
 
 def nominate(spec: envcopy.EnvSpec) -> dict:
@@ -486,8 +453,8 @@ def _pseudo_tested_document(campaign: gutting.CampaignResult) -> Dict[str, objec
     return document
 
 
-def _campaign_outcome(campaign: gutting.CampaignResult) -> Tuple[str, str, bool]:
-    """`(status, reason, budget_exhausted)` for a finished campaign.
+def _campaign_outcome(campaign) -> Tuple[str, str, bool]:
+    """`(status, reason, budget_exhausted)` for a finished gutting or statement-deletion campaign.
 
     Unbuildable map, exhausted clock and finished run are three statuses; collapsing two breaks Law S1.
     """
@@ -516,7 +483,7 @@ def _campaign_outcome(campaign: gutting.CampaignResult) -> Tuple[str, str, bool]
     if unprobed:
         return (
             STATUS_REFUSED,
-            f"the {campaign.budget_seconds}s campaign budget expired with {unprobed} function(s) "
+            f"the {campaign.budget_seconds}s campaign budget expired with {unprobed} mutant(s) "
             f"still unprobed, so what was measured is a fragment of this tree and is published as "
             f"one rather than as a survivor count for it (Law T-BUDGET)",
             True,
@@ -541,6 +508,7 @@ def _statement_deletion_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[st
             f"the statement-deletion campaign raised {type(e).__name__}: {e}",
         )
 
+    status, reason, exhausted = _campaign_outcome(campaign)
     document: Dict[str, object] = {
         "tier": "exec",
         "kind": "measure_only",
@@ -551,15 +519,12 @@ def _statement_deletion_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[st
         # The scope changes the denominator, so it travels with the numbers.
         document["scope"] = spec.diff_scope.to_document()
         document["statements_in_tree"] = len(discovered)
-    if campaign.refusal_reason:
-        document["status"] = "not_applicable"
-        document["reason"] = campaign.refusal_reason
-    else:
-        document["status"] = "measured"
-        document["reason"] = (
-            f"{document['statements_executed']} statement deletions run, "
-            f"{document['survived_unobserved']} survived with a covering test watching"
-        )
+    document["status"] = status
+    document["reason"] = reason or (
+        f"{document['statements_executed']} statement deletions run, "
+        f"{document['survived_unobserved']} survived with a covering test watching"
+    )
+    document["budget_exhausted"] = exhausted
     return document
 
 
@@ -604,24 +569,3 @@ def _unbuilt_reason(group: str) -> str:
 def declared_groups() -> List[str]:
     """The bare group names this adapter contributes. The core namespaces them."""
     return list(ADAPTER_GROUPS)
-
-
-def teardown(spec: Optional[envcopy.EnvSpec]) -> None:
-    """Remove the scratch env. Idempotent, and never touches the real target.
-
-    Deletes a tree, so it refuses any path that is not the env it was handed (M10).
-    """
-    if spec is None:
-        return
-
-    root = Path(spec.env_root)
-    if not root.exists():
-        return
-    if root == root.parent or str(root) in ("/", str(Path.home())):
-        logger.error(f"[AUDIT-TESTS] refusing to tear down an implausible env root: {root}")
-        return
-
-    try:
-        shutil.rmtree(root)
-    except OSError as exc:
-        logger.warning(f"[AUDIT-TESTS] scratch env {root} could not be removed: {exc}")

@@ -3,7 +3,7 @@
 # Description: projects/* citizens resolve by registry and passport, not path shape
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""
@@ -13,9 +13,6 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — detect_from_log, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — detect_from_module, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — get_stats, covered by tests/test_monitoring_handlers.py
-# seedgo: no-test-needed(through_the_command) — reload_registry, covered by tests/test_monitoring_handlers.py
 # seedgo: no-test-needed(through_the_command) — get_detector, covered by tests/test_monitoring_handlers.py
 # seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
 # seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py

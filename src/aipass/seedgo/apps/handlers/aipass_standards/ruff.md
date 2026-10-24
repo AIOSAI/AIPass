@@ -22,7 +22,7 @@ This standard **gates** (since 2026-09-25, owner ruling 00:33): its score counts
 
 ## What the Checker Does
 
-1. Checks for ruff binary via `shutil.which("ruff")` — skips gracefully if not installed
+1. Finds ruff on PATH, else beside the running interpreter (an unactivated venv) — fails if neither has it
 2. Runs `ruff check <branch>/apps/ <branch>/tests/ --output-format=json` (the whole branch when neither directory exists), the same corpus CI's `ruff check src/ tests/` reaches
 3. Parses JSON output — a list of violation objects with `{code, filename, location, message}`
 4. Filters violations against `.seedgo/ruff_bypass.json` (ruff-specific bypass)
@@ -32,7 +32,7 @@ This standard **gates** (since 2026-09-25, owner ruling 00:33): its score counts
 
 | Condition | Behavior |
 |-----------|----------|
-| ruff not installed | SKIP — score 100, no penalty |
+| ruff not found | FAIL — score 0 |
 | subprocess timeout (60s) | FAIL — score 0 |
 | JSON parse failure | FAIL — score 0, stderr shown |
 
@@ -53,7 +53,7 @@ This standard **gates** (since 2026-09-25, owner ruling 00:33): its score counts
 
 ## Gating
 
-No `ADVISORY` flag — absence is how this family says "counts in the average" (`branch_audit.py` averages only standards without `ADVISORY = True`). `passed` is `False` on any active lint violation or any unformatted file; the score keeps its tiers (1–5 violations score 95, minus 2 per unformatted file, floor 25). Ruff not installed is a skip (`passed` True, score 100); a timeout or unreadable ruff output is a 0.
+No `ADVISORY` flag — absence is how this family says "counts in the average" (`branch_audit.py` averages only standards without `ADVISORY = True`). `passed` is `False` on any active lint violation or any unformatted file; the score keeps its tiers (1–5 violations score 95, minus 2 per unformatted file, floor 25). Ruff not found, a timeout, a crash, or unreadable ruff output is a 0, per file and per branch.
 
 The row covers `ruff format --check` too: on a machine where format finds unformatted files, the row fails and loses 2 points per file even with zero lint hits.
 
@@ -157,7 +157,7 @@ for line in lines:
 ## Reference
 
 - Checker: `ruff_check.py`
-- Content handler: `ruff_check_content.py`
-- Standards pack: seedgo standards (ruff_check)
+- Content handler: `ruff_content.py`
+- Standards pack: seedgo standards (ruff)
 - Ruff documentation: https://docs.astral.sh/ruff/
 - Ruff rules reference: https://docs.astral.sh/ruff/rules/

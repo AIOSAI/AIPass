@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -461,7 +461,7 @@ def _evaluate_digest(
 
     aged = _aged_owner(level, entry, cfg, now)
     if aged is not None:
-        return _send_aged_notice(signature, entry, window_count, window_seconds, siblings, aged)
+        return _send_aged_notice(signature, entry, cfg, window_count, window_seconds, siblings, aged)
 
     recipient = str(cfg.get("digest_recipient", "@devpulse"))
     subject, body = build_digest(signature, entry, window_count, window_seconds, reason, recipient, siblings)
@@ -544,6 +544,7 @@ def _evaluate_digest(
 def _send_aged_notice(
     signature: str,
     entry: Dict[str, Any],
+    cfg: Dict[str, Any],
     window_count: int,
     window_seconds: int,
     siblings: Optional[List[Tuple[str, Dict[str, Any]]]],
@@ -561,6 +562,9 @@ def _send_aged_notice(
         severity="low",
     )
     fingerprint = str(row.get("fingerprint", ""))
+    if row.get("status") == "suppressed" and not cfg.get("escalate_suppressed", False):
+        logger.info("aged notice withheld", signature=signature, branch=branch, outcome="not_eligible")
+        return "not_eligible"
 
     subject, body = build_aged_notice(
         signature, entry, window_count, window_seconds, recipient, siblings, age, fingerprint

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: generator.py
 # Description: Unified diff generation with binary detection and pattern filtering
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-10-24
 # =============================================
 
 """Diff generator — unified diffs between file versions with binary detection."""
@@ -132,10 +132,12 @@ def generate_diff_content(old_file: Path, new_file: Path) -> str:
             tofile=f"b/{new_file.name}",
             fromfiledate=datetime.datetime.fromtimestamp(old_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
             tofiledate=datetime.datetime.fromtimestamp(new_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-            lineterm="",
         )
 
-        result = "\n".join(diff_lines)
+        # readlines() keeps each line's ending; a last line without one gets patch's own marker.
+        result = "".join(
+            line if line.endswith("\n") else f"{line}\n\\ No newline at end of file\n" for line in diff_lines
+        )
         trail.log_operation("diff_generated", {"file": old_file.name})
         return result
     except Exception as e:

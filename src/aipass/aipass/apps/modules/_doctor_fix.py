@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_fix.py
 # Description: Structure remediation report for aipass doctor --fix
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.shared.registry_discovery import find_registry as _discover_registry
+from aipass.aipass.shared.project_home import _detect_aipass_home
 
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
@@ -109,7 +110,9 @@ def _build_registry_items(project_root: Path, agents: list, project: str) -> Lis
 def _build_root_artifact_items(project_root: Path, project: str) -> List[RemediationItem]:
     """Remediation items for stray root-level artifacts."""
     items: List[RemediationItem] = []
-    for hit in check_root_artifacts(project_root):
+    for hit in check_root_artifacts(project_root, aipass_home=_detect_aipass_home()):
+        if hit.severity == "pass":
+            continue
         severity = "info" if hit.severity == "info" else "warning"
         if hit.name == ".venv":
             # Hooks call AIPASS_HOME/.venv/bin/python3 by absolute path, so spawn repair

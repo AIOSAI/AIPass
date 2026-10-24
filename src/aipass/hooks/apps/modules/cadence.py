@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.11.0
+# Version: 2.12.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.hooks.apps.handlers.module_root import module_file
 from aipass.hooks.apps.modules.grounding_content import find_branch_root
@@ -994,7 +995,7 @@ def print_introspection() -> None:
 
 def handle_command(command: str, args: list) -> bool:
     """Route cadence commands from drone @hooks."""
-    if command in ("--help", "-h", "help"):
+    if command in ("--help", "-h", "help") or (command == "cadence" and wants_help(args)):
         CONSOLE.print("[bold cyan]cadence[/bold cyan] — Prompt injection cadence control")
         CONSOLE.print()
         CONSOLE.print("  drone @hooks cadence    Show cadence config and current turn state")

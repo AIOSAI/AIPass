@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_refused_sends.py
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/email/create.py, format.py and send.py."""
@@ -137,7 +137,6 @@ class TestSendToSingleRefusedBookkeeping:
             deliver_email_to_branch_fn=MagicMock(return_value=deliver_result),
             on_delivered_callback=MagicMock(),
             log_operation_fn=MagicMock(),
-            update_central_fn=MagicMock(),
         )
         return success, error_msg, created["path"]
 

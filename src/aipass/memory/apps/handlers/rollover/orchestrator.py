@@ -12,10 +12,6 @@ Rollover Orchestration Handler
 Reference: docs/rollover_pipeline.md
 """
 
-import subprocess
-import json
-import os
-import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -26,30 +22,7 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable
 from aipass.memory.apps.handlers.rollover import extractor
-from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
-from aipass.memory.apps.handlers.tracking import line_counter
-from aipass.memory.apps.handlers.repo_root import module_file
-
-# ML runs in the memory venv's python, in a subprocess.
-_HANDLERS_DIR = module_file(__file__).parent.parent
-CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
-EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
-
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
-
-
-def _get_memory_python() -> str:
-    """Get the Python executable for memory ML operations."""
-    env_override = os.environ.get("AIPASS_MEMORY_PYTHON")
-    if env_override:
-        return env_override
-    if _MEMORY_VENV_PYTHON.exists():
-        return str(_MEMORY_VENV_PYTHON)
-    return sys.executable
-
-
-MEMORY_PYTHON = _get_memory_python()
+from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 
 def _find_repo_root() -> Path:
@@ -82,59 +55,12 @@ def store_vectors_subprocess(
         "db_path": str(db_path) if db_path else None,
     }
 
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
-            input=json.dumps(input_data),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Subprocess failed"}
-
-        return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        logger.warning("[orchestrator] Vector storage operation timed out")
-        return {"success": False, "error": "Storage operation timed out"}
-    except json.JSONDecodeError as e:
-        logger.warning(f"[orchestrator] Invalid JSON from storage subprocess: {e}")
-        return {"success": False, "error": f"Invalid JSON response: {e}"}
-    except Exception as e:
-        logger.warning(f"[orchestrator] Vector storage subprocess error: {e}")
-        return {"success": False, "error": str(e)}
+    return run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=60, label="Storage operation")
 
 
 def encode_batch_subprocess(texts: list) -> dict:
     """Encode texts via subprocess using memory venv's fastembed."""
-    input_data = json.dumps({"texts": texts})
-
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(EMBED_SUBPROCESS_SCRIPT)],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
-            }
-
-        return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        logger.warning("[orchestrator] Embedding subprocess timed out")
-        return {"success": False, "error": "Embedding timed out"}
-    except json.JSONDecodeError as e:
-        logger.warning(f"[orchestrator] Invalid JSON from embedding subprocess: {e}")
-        return {"success": False, "error": f"Invalid JSON from embedder: {e}"}
-    except Exception as e:
-        logger.warning(f"[orchestrator] Embedding subprocess error: {e}")
-        return {"success": False, "error": str(e)}
+    return run_json(EMBED_SUBPROCESS_SCRIPT, {"texts": texts}, timeout=120, label="Embedding")
 
 
 # Why a lookup found no local store; the push report names which.
@@ -196,6 +122,8 @@ def extract_text_from_memories(memories: List[Dict]) -> List[str]:
             text = str(memory["text"])
         elif "message" in memory:
             text = str(memory["message"])
+        elif "note" in memory:
+            text = str(memory["note"])
         else:
             text = str(memory)
 
@@ -205,7 +133,10 @@ def extract_text_from_memories(memories: List[Dict]) -> List[str]:
 
 
 def execute_rollover() -> Dict[str, Any]:
-    """Execute rollover for all triggered branches: backup, extract, embed, store local + global."""
+    """Execute rollover for all triggered branches: extract, embed, store local + global, then trim the file.
+
+    The live file is written LAST. A failure anywhere before leaves it whole, so nothing needs restoring.
+    """
     triggers_result = detector.check_all_branches()
 
     if not triggers_result["success"]:
@@ -244,26 +175,11 @@ def execute_rollover() -> Dict[str, Any]:
     results = []
 
     for trigger in triggers:
-        backup_result = extractor.create_rollover_backup(trigger.file_path)
-
-        if not backup_result["success"]:
-            error_msg = backup_result.get("error", "Backup failed")
-            logger.error(f"[rollover] Backup failed for {trigger}: {error_msg}")
-            failed.append({"trigger": str(trigger), "stage": "backup", "error": error_msg})
-            continue  # Don't proceed without backup
-
-        logger.info(f"[rollover] {backup_result.get('message')}")
-
         extract_result = extractor.extract_with_metadata(trigger.file_path)
 
         if not extract_result["success"]:
             error_msg = extract_result.get("error", "Unknown error")
             logger.error(f"[rollover] Extraction failed for {trigger}: {error_msg}")
-
-            restore_result = extractor.restore_from_backup(trigger.file_path)
-            if restore_result["success"]:
-                logger.info("[rollover] Restored from backup after extraction failure")
-
             failed.append({"trigger": str(trigger), "stage": "extraction", "error": error_msg})
             continue
 
@@ -279,14 +195,13 @@ def execute_rollover() -> Dict[str, Any]:
         branch = extract_result.get("branch", "") or trigger.branch
         memory_type = extract_result.get("type", "unknown") or trigger.memory_type
         old_lines = extract_result.get("old_lines", 0)
-        new_lines = extract_result.get("new_lines", 0)
 
         if not branch:
             logger.error(f"[rollover] No branch found in extraction result for {trigger}")
             failed.append({"trigger": str(trigger), "stage": "extraction", "error": "No branch in result"})
             continue
 
-        logger.info(f"[rollover] Extracted {len(memories)} items from {trigger} ({old_lines} -> {new_lines} lines)")
+        logger.info(f"[rollover] Extracted {len(memories)} items from {trigger} ({old_lines} lines)")
 
         texts = extract_text_from_memories(memories)
 
@@ -295,25 +210,12 @@ def execute_rollover() -> Dict[str, Any]:
         if not embed_result["success"]:
             error_msg = embed_result.get("error", "Unknown error")
             logger.error(f"[rollover] Embedding failed for {trigger}: {error_msg}")
-
-            restore_result = extractor.restore_from_backup(trigger.file_path)
-            if restore_result["success"]:
-                logger.info("[rollover] Restored from backup after embedding failure")
-
             failed.append({"trigger": str(trigger), "stage": "embedding", "error": error_msg})
             continue
 
         embeddings = embed_result.get("embeddings", [])
         if not embeddings:
             logger.error(f"[rollover] No embeddings generated for {trigger}")
-
-            # The file is already trimmed; without a restore the entries are lost.
-            restore_result = extractor.restore_from_backup(trigger.file_path)
-            if restore_result["success"]:
-                logger.info("[rollover] Restored from backup after empty embeddings")
-            else:
-                logger.error(f"[rollover] CRITICAL: Failed to restore from backup: {restore_result.get('error')}")
-
             failed.append({"trigger": str(trigger), "stage": "embedding", "error": "No embeddings in result"})
             continue
 
@@ -359,25 +261,20 @@ def execute_rollover() -> Dict[str, Any]:
         if not global_store_result["success"]:
             error_msg = global_store_result.get("error", "Unknown error")
             logger.error(f"[rollover] Global storage failed for {trigger}: {error_msg}")
-
-            restore_result = extractor.restore_from_backup(trigger.file_path)
-            if restore_result["success"]:
-                logger.info("[rollover] Restored from backup after storage failure")
-            else:
-                logger.error(f"[rollover] CRITICAL: Failed to restore from backup: {restore_result.get('error')}")
-
             failed.append({"trigger": str(trigger), "stage": "global_storage", "error": error_msg})
             continue
 
         logger.info(f"[rollover] Stored {len(embeddings)} vectors in global Chroma for {branch}")
 
-        update_result = line_counter.update_line_count(trigger.file_path)
-        if update_result["success"]:
-            logger.info(f"[rollover] Updated line count metadata for {trigger.file_path.name}")
-        else:
-            logger.warning(
-                f"[rollover] Failed to update line count for {trigger.file_path.name}: {update_result.get('error')}"
-            )
+        # Stored, so the file may shrink. A refused write leaves the entries in place and the
+        # next run upserts the same content-hash ids: a retry, never a loss.
+        commit_result = extractor.commit_trimmed(trigger.file_path, extract_result.get("trimmed"))
+        if not commit_result["success"]:
+            error_msg = commit_result.get("error", "Unknown error")
+            logger.error(f"[rollover] Trim refused for {trigger} after storage: {error_msg}")
+            failed.append({"trigger": str(trigger), "stage": "commit", "error": error_msg})
+            continue
+        new_lines = commit_result.get("new_lines", 0)
 
         success_count += 1
         global_collection = global_store_result.get("collection")
@@ -462,15 +359,3 @@ def execute_rollover() -> Dict[str, Any]:
         "results": results,
         "undrainable": undrainable,
     }
-
-
-def sync_line_counts() -> Dict[str, Any]:
-    """Measure line counts for every branch memory file. READ-ONLY; the old name is the module's seam."""
-    result = line_counter.update_all_memory_files()
-
-    if result["success"]:
-        logger.info(f"[rollover] Measured line counts: {result['updated']} read, {result['failed']} failed")
-    else:
-        logger.error("[rollover] Failed to measure line counts")
-
-    return result

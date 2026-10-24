@@ -1,36 +1,30 @@
 # =================== AIPass ====================
 # Name: diagnostics_check.py
 # Description: Diagnostics Orchestrator
-# Version: 2.1.2
+# Version: 2.1.3
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
 Diagnostics Orchestrator
 
-Runners come from handlers/*_standards/diagnostics.json; none enabled falls back to pyright.
+Runs pyright over a branch's apps/ and scores the type errors it reports.
 """
 
 import sys
 import subprocess
 import json
-import importlib
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from rich.console import Console
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import audit_ignore_match
 from aipass.seedgo.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.module_root import module_file
 
 AUDIT_SCOPE = "branch_level"
-
-DIAGNOSTICS_DIR = module_file(__file__).parent
-
-HANDLERS_DIR = DIAGNOSTICS_DIR.parent
 
 
 def should_ignore_file(file_path: str, branch_root: Path) -> bool:
@@ -254,94 +248,8 @@ def check_directory(directory: str) -> Dict:
         }
 
 
-def _discover_pack_configs() -> List[Dict]:
-    """Find diagnostics.json files in handlers/*_standards/ directories."""
-    configs = []
-
-    if not HANDLERS_DIR.exists():
-        return configs
-
-    for subdir in sorted(HANDLERS_DIR.iterdir()):
-        if not subdir.is_dir():
-            continue
-        if not subdir.name.endswith("_standards"):
-            continue
-
-        config_file = subdir / "diagnostics.json"
-        if not config_file.exists():
-            continue
-
-        try:
-            with open(config_file, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            configs.append({"pack_name": subdir.name, "pack_path": subdir, "config": config})
-        except (json.JSONDecodeError, IOError):
-            logger.info("Skipped malformed diagnostics config: %s", config_file)
-            continue
-
-    return configs
-
-
-def _get_enabled_runners_from_config(config: Dict) -> List[str]:
-    """Enabled runner names from a diagnostics.json, as ``{"python": true}`` or ``{"python": {"enabled": true}}``."""
-    enabled = []
-    runners = config.get("runners", {})
-
-    for name, value in runners.items():
-        if isinstance(value, bool) and value:
-            enabled.append(name)
-        elif isinstance(value, dict) and value.get("enabled", False):
-            enabled.append(name)
-
-    return enabled
-
-
-def _run_runner(runner_name: str, branch_path: str, bypass_rules: Optional[list] = None) -> Optional[Dict]:
-    """Dispatch to ``{runner_name}_diagnostics.check_branch``; None when no runner answers."""
-    # The misspelt "_diognostics" stem is still accepted for older runner files.
-    candidate_names = [
-        f"{runner_name}_diagnostics",
-        f"{runner_name}_diognostics",
-    ]
-
-    for module_file_stem in candidate_names:
-        runner_path = DIAGNOSTICS_DIR / f"{module_file_stem}.py"
-        if not runner_path.exists():
-            continue
-
-        if runner_path.stat().st_size == 0:
-            continue
-
-        try:
-            content = runner_path.read_text(encoding="utf-8").strip()
-            if not content:
-                continue
-        except IOError:
-            logger.info("Cannot read runner file: %s", runner_path)
-            continue
-
-        module_name = f"aipass.seedgo.apps.handlers.diagnostics.{module_file_stem}"
-        try:
-            runner_module = importlib.import_module(module_name)
-        except (ImportError, Exception):
-            logger.info("Failed to import runner module: %s", module_name)
-            continue
-
-        check_fn = getattr(runner_module, "check_branch", None)
-        if check_fn is None:
-            continue
-
-        try:
-            return check_fn(branch_path, bypass_rules=bypass_rules)
-        except Exception:
-            logger.info("Runner %s failed for branch %s", runner_name, branch_path)
-            continue
-
-    return None
-
-
 def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
-    """Run diagnostics on a branch by discovering pack configs and dispatching runners."""
+    """Run pyright on a branch's apps/ and score its type errors."""
     apps_path = Path(branch_path) / "apps"
 
     if not apps_path.exists():
@@ -355,53 +263,21 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
             "error": f"No apps/ directory found in {branch_path}",
         }
 
-    pack_configs = _discover_pack_configs()
+    result = check_directory(str(apps_path))
+    total_errors = result.get("total_errors", 0)
+    total_warnings = result.get("total_warnings", 0)
+    total_files = result.get("total_files", 0)
+    all_results = result.get("results", [])
 
-    all_runners = []
-    for pack_info in pack_configs:
-        runners = _get_enabled_runners_from_config(pack_info["config"])
-        for runner in runners:
-            if runner not in all_runners:
-                all_runners.append(runner)
-
-    if not all_runners:
-        all_runners = ["python"]
-
-    merged_checks = []
-    total_errors = 0
-    total_warnings = 0
-    total_files = 0
-    all_results = []
-    runner_executed = False
-
-    for runner_name in all_runners:
-        runner_result = _run_runner(runner_name, branch_path, bypass_rules)
-
-        if runner_result is not None:
-            runner_executed = True
-            total_errors += runner_result.get("total_errors", 0)
-            total_warnings += runner_result.get("total_warnings", 0)
-            total_files += runner_result.get("total_files", 0)
-            merged_checks.extend(runner_result.get("checks", []))
-            all_results.extend(runner_result.get("results", []))
-
-    if not runner_executed:
-        result = check_directory(str(apps_path))
-
-        total_errors = result.get("total_errors", 0)
-        total_warnings = result.get("total_warnings", 0)
-        total_files = result.get("total_files", 0)
-        all_results = result.get("results", [])
-
-        for file_result in all_results:
-            if file_result["errors"] > 0:
-                merged_checks.append(
-                    {
-                        "name": f"Type errors in {Path(file_result['file']).name}",
-                        "passed": False,
-                        "message": f"{file_result['errors']} errors",
-                    }
-                )
+    merged_checks = [
+        {
+            "name": f"Type errors in {Path(file_result['file']).name}",
+            "passed": False,
+            "message": f"{file_result['errors']} errors",
+        }
+        for file_result in all_results
+        if file_result["errors"] > 0
+    ]
 
     if not merged_checks:
         merged_checks.append(
@@ -410,9 +286,7 @@ def check_branch(branch_path: str, bypass_rules: Optional[list] = None) -> Dict:
 
     score = 100 if total_errors == 0 else max(0, 100 - (total_errors * 5))
 
-    json_handler.log_operation(
-        "diagnostics_run", {"branch": branch_path, "total_errors": total_errors, "runners": len(all_runners)}
-    )
+    json_handler.log_operation("diagnostics_run", {"branch": branch_path, "total_errors": total_errors})
     return {
         "passed": total_errors == 0,
         "score": score,

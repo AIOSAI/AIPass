@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for the branch log watcher's parsing, detection and line pipeline
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-04-03
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py — parsing, detection and the line pipeline that fires events."""
@@ -426,8 +426,6 @@ class TestProcessLogLineDeeper:
         """Registry available: fires event with registry metadata."""
         fire = MagicMock()
         lw.set_event_callback(fire)
-        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
-
         mock_report = MagicMock(
             return_value={
                 "is_new": True,
@@ -452,73 +450,18 @@ class TestProcessLogLineDeeper:
         assert call_kwargs["fingerprint"] == "fp456"
         assert call_kwargs["count"] == 1
 
-    def test_registry_report_exception_falls_to_fallback(self, monkeypatch):
-        """Registry report raises: falls through to fallback path."""
+    def test_a_failing_registry_fires_nothing_and_counts_once(self, monkeypatch):
+        """report raising is contained: no event, and the line is never reported a second time."""
         fire = MagicMock()
         lw.set_event_callback(fire)
-        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
+        failing = MagicMock(side_effect=RuntimeError("registry down"))
+        monkeypatch.setattr(lw, "registry_report", failing)
+        monkeypatch.setattr(error_registry, "report", failing)
 
-        monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
+        lw.BranchLogWatcher()._process_log_line(self._make_error_line("Registry down"), _BRANCH_LOG_PATH)
 
-        # The lazy fallback fails too: the watcher keeps its own local count.
-        monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ImportError("registry gone")))
-        watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("Fallback triggered")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-
-        fire.assert_called_once()
-        call_kwargs = fire.call_args[1]
-        assert call_kwargs["message"] == "Fallback triggered"
-        assert call_kwargs["count"] == 1
-
-    def test_fallback_lazy_import_succeeds(self, monkeypatch):
-        """Fallback path: lazy import succeeds, fires event."""
-        fire = MagicMock()
-        lw.set_event_callback(fire)
-        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", False)
-
-        watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("Lazy import works")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-
-        fire.assert_called_once()
-        call_kwargs = fire.call_args[1]
-        assert call_kwargs["message"] == "Lazy import works"
-
-    def test_fallback_lazy_path_fires_every_occurrence_like_the_main_path(self, monkeypatch):
-        """A third occurrence still fires: the handler, not the watcher, owns threshold and backoff."""
-        fire = MagicMock()
-        lw.set_event_callback(fire)
-        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", False)
-        monkeypatch.setattr(
-            error_registry,
-            "report",
-            MagicMock(return_value={"is_new": False, "count": 3, "id": "reg789", "fingerprint": "fp789"}),
-        )
-
-        watcher = lw.BranchLogWatcher()
-        watcher._process_log_line(self._make_error_line("Third time"), _BRANCH_LOG_PATH)
-
-        fire.assert_called_once()
-        assert fire.call_args[1]["count"] == 3
-        assert fire.call_args[1]["registry_id"] == "reg789"
-
-    def test_local_count_tracking_increments(self, monkeypatch):
-        """Local count path: repeated errors increment counter."""
-        fire = MagicMock()
-        lw.set_event_callback(fire)
-        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
-        monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
-
-        monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ImportError("registry gone")))
-        watcher = lw.BranchLogWatcher()
-        line = self._make_error_line("Repeated failure")
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-        watcher._process_log_line(line, _BRANCH_LOG_PATH)
-
-        assert fire.call_count == 2
-        second_call = fire.call_args_list[1][1]
-        assert second_call["count"] == 2
+        fire.assert_not_called()
+        assert failing.call_count == 1
 
     def test_outer_exception_handler_catches_unexpected(self):
         """Outer try/except catches unexpected errors without raising."""
@@ -824,10 +767,19 @@ class TestSystemLogTwinIsNotProcessedTwice:
     def test_dual_written_system_log_is_skipped(self, monkeypatch, tmp_path):
         """The system_logs copy is dropped when its branch twin exists."""
         _point_at_tree(lw, monkeypatch, tmp_path)
+        branch_log, system_log = _dual_write_tree(tmp_path, "hooks", "edit_gate")
+        watcher = lw.BranchLogWatcher()
+        watcher.watched_dirs.add(branch_log.parent)
+
+        assert watcher._should_process(str(system_log)) is False
+
+    def test_system_log_is_kept_when_its_twin_dir_has_no_watch(self, monkeypatch, tmp_path):
+        """A logs/ dir made after start has no watch, so the system copy is the only one read."""
+        _point_at_tree(lw, monkeypatch, tmp_path)
         _, system_log = _dual_write_tree(tmp_path, "hooks", "edit_gate")
         watcher = lw.BranchLogWatcher()
 
-        assert watcher._should_process(str(system_log)) is False
+        assert watcher._should_process(str(system_log)) is True
 
     def test_the_branch_copy_is_the_one_kept(self, monkeypatch, tmp_path):
         """The attributed copy keeps being read — coverage is not lost."""
@@ -850,8 +802,9 @@ class TestSystemLogTwinIsNotProcessedTwice:
     def test_multi_word_branch_name_resolves_its_twin(self, monkeypatch, tmp_path):
         """ai_mail_dispatch_monitor.log resolves to ai_mail, not 'ai'."""
         _point_at_tree(lw, monkeypatch, tmp_path)
-        _, system_log = _dual_write_tree(tmp_path, "ai_mail", "dispatch_monitor")
+        branch_log, system_log = _dual_write_tree(tmp_path, "ai_mail", "dispatch_monitor")
         watcher = lw.BranchLogWatcher()
+        watcher.watched_dirs.add(branch_log.parent)
 
         assert watcher._should_process(str(system_log)) is False
 
@@ -879,6 +832,7 @@ class TestSystemLogTwinIsNotProcessedTwice:
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
+        watcher.watched_dirs.add(branch_log.parent)
         for path in (branch_log, system_log):
             watcher.on_modified(SimpleNamespace(is_directory=False, src_path=str(path)))
 

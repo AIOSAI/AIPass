@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 5.2.1
+# Version: 5.3.0
 # Description: Raw git and gh, GitHub writes, credentials and the secrets store for every seat; protected changes
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Blocks raw git and gh, GitHub writes without gh, the gh credential, and changes to the protected files.
@@ -104,6 +104,12 @@ GH_REDIRECT = (
     "\n"
     "Run `drone @git --help` for the full command list. No twin means it cannot be done: "
     "mail @devpulse to ask @drone for one."
+)
+
+HIDDEN_PROGRAM_REFUSED = (
+    "This command runs a program the gate cannot see ({what}). It could be git or gh, and those are refused "
+    "for every seat, the admin seat included (the owner's ruling, 2026-10-04). Caller: {caller}.\n"
+    "Spell the program out as a literal command word, or use its drone twin: drone @git --help."
 )
 
 INTERPRETER_GIT_REFUSED = (
@@ -248,19 +254,25 @@ def _twin_of(tail: list[str] | tuple[str, ...]) -> tuple[str, str | None]:
 def _git_refusal(invocations: list, seat: _Seat) -> dict | None:
     """Raw git, read or write, refused for every seat, the admin seat included; the refusal names the twin.
 
-    A bare ``git`` with no argument prints usage and touches nothing; a path-spelled
-    one with no verb is not a usage print anyone types, and is refused.
+    A bare ``git`` with no argument prints usage and touches nothing; a path-spelled one, or one a
+    launcher runs (xargs, find -exec, parallel append the verb at run time), is refused.
     """
     calls = [
         inv.argv[1:]
         for inv in invocations
-        if inv.program == "git" and (len(inv.argv) > 1 or "/" in inv.argv[0] or "\\" in inv.argv[0])
+        if inv.program == "git" and (len(inv.argv) > 1 or inv.via or "/" in inv.argv[0] or "\\" in inv.argv[0])
     ]
     if not calls:
         return None
     verb, twin = _twin_of(calls[0])
     line = TWIN_LINE.format(verb=verb, twin=twin) if twin else NO_TWIN_LINE.format(verb=verb)
     return _block(RAW_GIT_REFUSED.format(caller=seat.named, twin=line))
+
+
+def _hidden_refusal(invocations: list, seat: _Seat) -> dict | None:
+    """A program word the reader cannot see at all (an expansion, a pipe into a shell), for every seat."""
+    hidden = [inv.unread for inv in invocations if inv.hidden]
+    return _block(HIDDEN_PROGRAM_REFUSED.format(what=hidden[0], caller=seat.named)) if hidden else None
 
 
 def _next(args, index: int) -> str:
@@ -422,6 +434,7 @@ def _check_bash(tool_input: dict, cwd: str = "") -> dict:
     seat = _Seat(cwd)
     for check in (
         lambda: _git_refusal(invocations, seat),
+        lambda: _hidden_refusal(invocations, seat),
         lambda: _program_refusal(invocations, reader, seat),
         lambda: _gh_refusal(invocations, seat),
         lambda: _check_bash_protected(cmd, cwd, invocations, seat),

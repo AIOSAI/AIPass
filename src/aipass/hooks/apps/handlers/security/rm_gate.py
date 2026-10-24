@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 3.0.0
+# Version: 3.0.1
 # Description: Refuses every raw rm, and every other delete off the admin seat; records each refused one (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-02
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Refuses deletes on the agent Bash tool, and writes every refused one down.
@@ -77,10 +77,6 @@ UNREAD_REFUSED = (
 
 _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
 
-# Delete verbs besides rm, read where a program runs, never as any word: `grep unlink`
-# searches for the word, `unlink f` deletes f.
-_DELETE_VERBS = frozenset({"rmdir", "unlink", "shred", "srm", "wipe", "trash", "trash-put", "rimraf"})
-
 _DRONE = "drone"
 
 
@@ -143,7 +139,7 @@ def _lanes_of(reader, inv) -> list[str]:
         return ["rm", *found]
     if inv.program == _DRONE and len(inv.argv) > 1 and reader.verb_name(inv.argv[1]) == "rm":
         return ["drone rm", *found]
-    if inv.program in _DELETE_VERBS:
+    if inv.program in reader.DELETE_PROGRAMS:
         return [inv.program, *found]
     if inv.program == "find" and "-delete" in inv.argv[1:]:
         return ["find -delete", *found]

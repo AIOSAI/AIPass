@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mutation_selection.py
 # Description: the coverage pass and the per-mutant test selection it feeds
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The instrumented baseline pass, and which tests one mutant is allowed to run.
@@ -26,6 +26,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_runner import (
     _baseline_from_run,
     _pytest_environment,
     _run_pytest,
+    run_in_group,
 )
 from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_shapes import (
     BaselineResult,
@@ -194,12 +195,10 @@ def _launch_coverage_reader(target: SuiteTarget, request_path: Path, map_path: P
     """Run the reader child. Returns a refusal reason, or None on success."""
     command = [str(target.python), NO_BYTECODE_ARG, "-c", COVERAGE_READER_CODE, str(request_path), str(map_path)]
     try:
-        completed = subprocess.run(
+        completed = run_in_group(
             command,
             cwd=str(target.cwd),
             env=_pytest_environment(target),
-            capture_output=True,
-            text=True,
             timeout=COVERAGE_READER_TIMEOUT_SECONDS,
         )
     except (subprocess.TimeoutExpired, OSError) as exc:

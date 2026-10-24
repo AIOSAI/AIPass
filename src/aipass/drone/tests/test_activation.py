@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activation.py
 # Description: Tests for command activation, listing, removal, and custom execution
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-10-04
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/drone.py: activate, list, remove, target, and running a custom command."""
@@ -302,7 +302,7 @@ class TestHandleRemove:
 
         assert result == 0
         mock_format.assert_called_once_with("audit", True)
-        assert not ops.command_exists("audit")
+        assert "audit" not in ops.load_registry()["commands"]
 
     @patch("aipass.drone.apps.modules.commands.format_removal")
     def test_nonexistent_returns_1(self, mock_format: MagicMock) -> None:
@@ -312,6 +312,25 @@ class TestHandleRemove:
 
         assert result == 1
         mock_format.assert_called_once_with("ghost", False)
+
+
+class TestDamagedRegistryBuiltins:
+    """activate, list and remove name a registry that cannot load, exit 1, no traceback."""
+
+    @pytest.mark.parametrize("argv", [("activate", "@seedgo"), ("list",), ("remove", "audit")])
+    @patch("aipass.drone.apps.modules.scan.scan", return_value=[{"name": "audit"}])
+    def test_a_damaged_registry_is_named_and_exits_1(
+        self,
+        _scan: MagicMock,
+        argv: tuple[str, ...],
+        isolated_registry: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Not JSON: each built-in says so on stderr instead of raising or listing nothing."""
+        isolated_registry.write_text('{"commands": ', encoding="utf-8")
+
+        assert _drone(*argv) == 1
+        assert "command registry could not load" in capsys.readouterr().err
 
 
 # ===================================================================

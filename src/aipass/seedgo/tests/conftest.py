@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for seedgo tests
-# Version: 2.4.0
+# Version: 2.4.2
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Shared pytest fixtures for seedgo tests."""
@@ -59,7 +59,6 @@ def coverage_audit_seams(monkeypatch):
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
     mock_ignore_handler = MagicMock()
-    mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
     mock_ignore_handler.audit_ignore_match = MagicMock(return_value=None)
     mock_ignore_handler.ignored_tracked_source = MagicMock(return_value=[])
     mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
@@ -110,12 +109,9 @@ class BusRecorder:
 
 @pytest.fixture(autouse=True)
 def bus(monkeypatch) -> BusRecorder:
-    """No test fires a real event: a recorder stands at both homes of the bus."""
-    # The cli header caches its trigger in ``display._TRIGGER`` behind ``_TRIGGER_LOADED``;
+    """No test fires a real event: a recorder stands where the bus lives."""
     # ``tests_lane._announce_bump`` imports trigger from core on every call.
     recorder = BusRecorder()
-    monkeypatch.setattr(display, "_TRIGGER", recorder)
-    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
     monkeypatch.setattr(trigger_core, "trigger", recorder)
     return recorder
 

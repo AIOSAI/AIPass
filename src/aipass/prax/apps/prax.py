@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prax.py
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX Branch - Main Orchestrator"""
@@ -78,7 +78,7 @@ def print_introspection():
         for module_file in modules_dir.glob("*.py"):
             if module_file.name.startswith("_") or module_file.name == "logger.py":
                 continue
-            discovered_modules.append(module_file.stem)
+            discovered_modules.append(module_file.stem.replace("_", "-"))
 
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(discovered_modules)}")
     console.print()
@@ -164,22 +164,7 @@ def _run() -> int:
     """Parse the command line and route it. Refusals are raised, never returned."""
     parser = argparse.ArgumentParser(
         description="PRAX - System-Wide Logging Infrastructure",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,  # We route --help to modules when a command is given
-        epilog="""
-Available Commands:
-  monitor     Mission Control - unified real-time monitoring
-  status      Show PRAX system status
-  log-audit   Audit log file sizes and health
-  log-health  Log growth rates (scan / snapshot)
-  dashboard   System dashboard
-
-Examples:
-  drone @prax monitor run
-  drone @prax status
-  drone @prax log-health scan
-  drone @prax dashboard
-        """,
     )
 
     parser.add_argument("command", nargs="?", help="Command to execute")

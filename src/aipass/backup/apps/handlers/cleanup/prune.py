@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prune.py
 # Description: Prune handler — finds and removes stored copies whose project path the ignore spec now matches
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Prune handler — stored copies of paths the ignore spec now matches.
@@ -11,7 +11,6 @@
 Reference: docs/store_cleanup.md
 """
 
-import hashlib
 import os
 import shutil
 import stat
@@ -22,13 +21,13 @@ import pathspec
 from aipass.prax import logger
 
 from ..audit import trail
-from ..ignore.patterns import is_ignored, load_spec
-from ..ignore.whitelist import is_whitelisted, load_whitelist
-from ..path.builder import build_snapshot_path, build_versioned_store
+from ..ignore.patterns import load_spec
+from ..ignore.whitelist import load_whitelist
+from ..scan.filter import is_excluded
+from ..path.builder import build_snapshot_path, build_versioned_store, versioned_folder_name, versioned_rel_path
 
 #: The top-level group a root-level file is listed under.
 ROOT_GROUP = "(root files)"
-_LONG_NAME = 50
 
 
 def _raise_walk_error(err: OSError) -> None:
@@ -36,22 +35,10 @@ def _raise_walk_error(err: OSError) -> None:
     raise err
 
 
-def _folder_name(name: str) -> str:
-    """The file-folder name the versioned store gives a file called ``name``; mirrors path/builder.py."""
-    if len(name) > _LONG_NAME:
-        return name[:30] + "_" + hashlib.md5(name.encode()).hexdigest()[:8]
-    return name
-
-
 def _top_group(rel_path: str) -> str:
     """The top-level directory a project-relative path is listed under."""
     head, sep, _rest = rel_path.partition("/")
     return head if sep else ROOT_GROUP
-
-
-def _matched(rel_path: str, spec: pathspec.PathSpec, whitelist: list[str]) -> bool:
-    """True when the backup's own filter would now leave this path out."""
-    return is_ignored(rel_path, spec) and not is_whitelisted(rel_path, whitelist)
 
 
 def _snapshot_candidates(store: Path, spec: pathspec.PathSpec, whitelist: list[str]) -> list[dict]:
@@ -63,7 +50,7 @@ def _snapshot_candidates(store: Path, spec: pathspec.PathSpec, whitelist: list[s
         for filename in filenames:
             path = Path(dirpath) / filename
             rel_path = path.relative_to(store).as_posix()
-            if _matched(rel_path, spec, whitelist):
+            if is_excluded(rel_path, spec, whitelist):
                 found.append({"rel_path": rel_path, "path": path, "bytes": path.lstat().st_size})
     return found
 
@@ -71,7 +58,7 @@ def _snapshot_candidates(store: Path, spec: pathspec.PathSpec, whitelist: list[s
 def _current_name(folder: Path, filenames: list[str]) -> str | None:
     """The current copy's name when ``folder`` is a versioned file-folder, else None."""
     for filename in filenames:
-        if _folder_name(filename) == folder.name:
+        if versioned_folder_name(filename) == folder.name:
             return filename
     return None
 
@@ -98,9 +85,8 @@ def _versioned_candidates(store: Path, spec: pathspec.PathSpec, whitelist: list[
             continue
         # A file-folder's own diffs are part of it, never a folder of their own.
         dirnames[:] = [d for d in dirnames if d != f"{name}_diffs"]
-        parent = folder.parent.relative_to(store).as_posix()
-        rel_path = name if parent == "root" else f"{parent}/{name}"
-        if _matched(rel_path, spec, whitelist):
+        rel_path = versioned_rel_path(folder.parent.relative_to(store).as_posix(), name)
+        if is_excluded(rel_path, spec, whitelist):
             found.append(
                 {"rel_path": rel_path, "path": folder, "bytes": _folder_bytes(folder, name, filenames), "name": name}
             )

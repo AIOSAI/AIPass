@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_escalation_digest.py
 # Description: Tests for the escalation digest: sending, the mail it carries, reporting and the CLI
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/escalation.py's digest (send, mail, reporting) and apps/modules/escalation.py."""
@@ -268,6 +268,16 @@ class TestDigestEmail:
         assert rows[0]["component"] == "FLOW"
         assert rows[0]["message"] == WARNING_EVENT["message"]
         assert _entry(lane, signature)["registry_fingerprint"] == "abcdef0123456789"
+
+    def test_a_suppressed_row_gets_no_aged_notice(self, monkeypatch, lane, outbox) -> None:
+        """The notice tells a benign owner to suppress; once they do, it must stop."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
+        monkeypatch.setattr(lane, "_registry_report", lambda **kw: {"fingerprint": "ab" * 8, "status": "suppressed"})
+
+        decision = _fire_aged_warning(lane)
+
+        assert decision["outcome"] == "not_eligible"
+        assert outbox == []
 
     def test_an_unregistered_logging_branch_keeps_the_manager_digest(self, monkeypatch, lane, outbox, cfg) -> None:
         """Never drop the signal: with nobody to mail, the manager keeps hearing it."""

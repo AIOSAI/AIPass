@@ -50,7 +50,7 @@ apps/
 
 # Dispatch pipeline
 Sequential gates in handlers/events/error_detected.py, then one either/or. Depth: docs/medic.md.
- - medic enabled → branch not muted → count at least two → recipient is not the manager → branch is a registered citizen → circuit breaker closed → not suppressed and backoff elapsed.
+ - medic enabled → branch not muted → count at least two → recipient is not the manager → branch is a registered citizen → not suppressed and backoff elapsed → circuit breaker closed (last, so a half-open probe is only spent on a sendable error).
  - The last two are the v2 path and need a fingerprint and a reachable registry; without them the handler takes the v1 arm instead (per-branch rate limit). They never both run.
  - Escalation counting happens before every gate. A mute stops dispatch; it must never stop the counting.
 

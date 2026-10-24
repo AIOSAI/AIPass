@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: promote.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: The one step that makes edited hook code live: check, copy, smoke, then point (drone @hooks promote)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Hook code goes live through one explicit step, never by being saved (DPLAN-0356 item 3).
@@ -16,6 +16,7 @@ check leaves the last promoted copy live.
 """
 
 import compileall
+import hashlib
 import json
 import os
 import shutil
@@ -128,6 +129,17 @@ def copy_source(root: Path) -> str:
     return name
 
 
+def fingerprint(folder: Path) -> str:
+    """One hash over every file the copy keeps (its path and bytes), so two trees compare in one string."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+        relative = path.relative_to(folder)
+        if any(_SKIP("", [part]) for part in relative.parts):
+            continue
+        digest.update(relative.as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
 def _bridge_says(root: Path, name: str, payload: dict) -> tuple[int, str]:
     env = _hook_env(**{OVERRIDE_ENV: name})
     bridge = root / "apps" / "handlers" / "bridges" / "claude.py"
@@ -196,6 +208,7 @@ def promote(
     *checks* is a seam: the tests cannot run the suite from inside the suite.
     """
     report: list[str] = []
+    checked = fingerprint(root / "apps")
     for check in checks:
         ok, detail = check(root)
         report.append(f"{check.__name__}: {'ok' if ok else 'FAILED'} — {detail}")
@@ -203,6 +216,11 @@ def promote(
             logger.warning("[HOOKS] promote refused at %s: %s", check.__name__, detail[:300])
             return False, report
     name = copy_source(root)
+    if fingerprint(root / name) != checked:
+        _discard(root, name)
+        report.append("copy: FAILED — apps/ changed while the checks ran; the copy is not what was checked")
+        logger.warning("[HOOKS] promote refused: apps/ changed while the checks ran")
+        return False, report
     ok, detail = check_smoke(root, name)
     report.append(f"check_smoke: {'ok' if ok else 'FAILED'} — {detail}")
     if not ok:

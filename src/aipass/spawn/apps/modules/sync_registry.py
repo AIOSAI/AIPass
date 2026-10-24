@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_registry.py
 # Description: Registry repair — thin CLI layer for registry synchronization
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Registry synchronization for branch lifecycle management.
@@ -87,6 +87,10 @@ def handle_sync_registry(args: list[str]) -> int:
         from aipass.spawn.apps.handlers.registry import find_registry
 
         registry_path = find_registry(start_path=Path(project_path))
+        # A named project with no registry is an error; falling back to the cwd's would write the wrong project.
+        if registry_path is None:
+            error(f"No *_REGISTRY.json found at or above {project_path}")
+            return 1
 
     if "--check" in flags:
         return _handle_check(registry_path, json_output="--json" in flags)
@@ -95,10 +99,15 @@ def handle_sync_registry(args: list[str]) -> int:
     dry_run = "--dry-run" in flags
 
     try:
-        result = sync_registry(fix=fix and not dry_run)
+        result = sync_registry(fix=fix and not dry_run, registry_path=registry_path)
     except Exception as exc:
         logger.error(f"[sync-registry] Unexpected error: {exc}")
         error(str(exc))
+        return 1
+
+    # The owner/identity fix would load the same missing or unreadable registry as empty and save that.
+    if result.get("error"):
+        error(f"Registry sync: {result['error']}")
         return 1
 
     json_handler.log_operation("registry_synced")

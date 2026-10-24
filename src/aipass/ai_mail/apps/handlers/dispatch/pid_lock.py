@@ -11,8 +11,8 @@ Process liveness, branch occupancy and the dispatch lock.
 
 Split out of wake.py in leg 13, when wake.py
 passed the 1500-line line: these helpers ask the operating system about
-processes and own the .dispatch.lock file, and both the wake and the daemon
-call them. Their public names are the interface wake.py and daemon.py import.
+processes and own the .dispatch.lock file, and the wake calls them.
+Their public names are the interface wake.py imports.
 """
 
 import json
@@ -65,7 +65,7 @@ _CORRUPT_LOCK_GRACE_SECONDS = 30
 def check_lock(branch_path: Path) -> Optional[dict]:
     """Return the lock data while the dispatch lock is held, or None once it is free.
 
-    The one lock check of the wake and the daemon. A holder
+    The one lock check of the wake. A holder
     that is dead, a linux zombie included, frees the lock and it is removed.
     A corrupt lock is removed only past _CORRUPT_LOCK_GRACE_SECONDS; younger,
     and a lock that cannot be read at all, answer held with a "corrupt" or

@@ -3,7 +3,7 @@
 # Description: Tests for the fleet json service through prax's own shim
 # Version: 2.2.0
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py and apps/handlers/json/json_service.py."""
@@ -168,6 +168,21 @@ class TestWriteJson:
         handle.write_json(tmp_path / "doc.json", {"a": 1})
 
         assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_a_killed_writers_old_temp_file_is_swept_and_a_fresh_one_kept(self, handle, tmp_path):
+        """Only orphans over an hour old go: a fresh one may be another writer's in-flight stage."""
+        stale, fresh, foreign = tmp_path / ".111_0.tmp", tmp_path / ".222_0.tmp", tmp_path / ".other.tmp"
+        for path in (stale, fresh, foreign):
+            path.write_text("{}", encoding="utf-8")
+        two_hours_ago = stale.stat().st_mtime - 7200
+        os.utime(stale, (two_hours_ago, two_hours_ago))
+        os.utime(foreign, (two_hours_ago, two_hours_ago))
+
+        handle.write_json(tmp_path / "doc.json", {"a": 1})
+
+        assert not stale.exists()
+        assert fresh.exists()
+        assert foreign.exists()
 
     def test_a_non_serialisable_payload_raises_typeerror(self, handle, tmp_path):
         """A payload bug is not a write failure: serialising FIRST keeps it from collapsing to False."""

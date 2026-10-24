@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_ops.py
 # Description: Shared JSON operations — deep merge and backup
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Shared JSON operations — deep merge and backup utilities."""
@@ -75,6 +75,10 @@ def backup_json(file_path: Path, backup_dir: Path | None = None) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_name = f"{file_path.name}.{timestamp}.backup"
     backup_path = backup_dir / backup_name
+    counter = 1
+    while backup_path.exists():  # same-second backups must not overwrite each other
+        counter += 1
+        backup_path = backup_dir / f"{file_path.name}.{timestamp}-{counter}.backup"
 
     try:
         shutil.copy2(file_path, backup_path)

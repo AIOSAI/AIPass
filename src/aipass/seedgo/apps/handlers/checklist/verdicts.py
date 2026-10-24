@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verdicts.py
 # Description: Which checkers judge a file in the per-file checklist, and how a failure reads
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Which checkers judge a file in the per-file checklist, and how a failure reads.
@@ -18,13 +18,26 @@ from aipass.seedgo.apps.handlers.aipass_standards import applicability
 
 
 def is_entry_point(file_path: str) -> bool:
-    """Check if file is an entry point: apps/{name}.py (directly in apps/, not subdirectory)."""
+    """Whether the file is its branch's entry file by the audit's rule; the branch is the directory above apps/."""
     p = Path(file_path)
-    if not p.name.endswith(".py"):
+    if p.parent.name != "apps":
         return False
-    if "apps/" not in file_path.replace("\\", "/"):
-        return False
-    return p.parent.name == "apps"
+    preferred, fallback = applicability.entry_file_names(p.parent.parent.name)
+    if p.name == preferred:
+        return True
+    return p.name == fallback and not (p.parent / preferred).exists()
+
+
+def failed_checks(result: Dict) -> List[Dict]:
+    """The checks a result failed: what both lanes report, whatever the checker's own ``passed`` says."""
+    return [c for c in result.get("checks", []) if not c.get("passed", False)]
+
+
+def judged_passed(result: Dict) -> bool:
+    """A row passes when no check failed; a result with no checks answers with its own ``passed``."""
+    if result.get("checks"):
+        return not failed_checks(result)
+    return bool(result.get("passed", True))
 
 
 def reads_text_file(checker, file_path: str) -> bool:
@@ -60,8 +73,7 @@ def is_applicable(checker, file_path: str) -> bool:
 
 def format_failure(result: Dict) -> str:
     """Extract a concise one-line failure description from checker result."""
-    checks = result.get("checks", [])
-    failed = [c for c in checks if not c.get("passed", False)]
+    failed = failed_checks(result)
 
     if not failed:
         return "Failed (no details)"

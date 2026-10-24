@@ -3,7 +3,7 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.3.0
 # Created: 2026-05-04
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -656,3 +656,16 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
         rel = path.relative_to(target)
         content = path.read_text(encoding="utf-8")
         assert fake_home not in content, f"{rel} leaks machine-local AIPASS_HOME"
+
+
+def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monkeypatch):
+    """A .venv symlink to a home that moved is repointed, not a FileExistsError."""
+    host = _host(tmp_path, {".venv/pyvenv.cfg": ""})
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    target = tmp_path / "proj"
+    target.mkdir()
+    (target / ".venv").symlink_to(tmp_path / "old_home" / ".venv")
+
+    init_project(target, project_name="zeta")
+
+    assert (target / ".venv").resolve() == (host / ".venv").resolve()

@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: test_openrouter_client.py
 # Description: Tests for OpenRouter client module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — OPENROUTER_HEADERS' values; the test compares with the product's constant
-# seedgo: no-test-needed(duplicate_test) — detect_caller_from_stack() itself, tests/test_caller_detection.py
 # seedgo: no-test-needed(through_the_command) — the real network request behind make_call(), mocked at the edge
 
 import sys

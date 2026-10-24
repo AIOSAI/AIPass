@@ -3,7 +3,7 @@
 # Description: Tests for the rollover module's command routing and SUBCOMMANDS
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -44,7 +44,6 @@ def _prepare_rollover_mocks(monkeypatch):
 
     mock_orchestrator = MagicMock()
     mock_orchestrator.execute_rollover = MagicMock(return_value={"success": True, "triggers_count": 0})
-    mock_orchestrator.sync_line_counts = MagicMock(return_value={"success": True, "updated": 0, "failed": 0})
 
     mock_memory_watcher = MagicMock()
     mock_memory_watcher.check_and_rollover = MagicMock()
@@ -248,17 +247,10 @@ class TestSubcommands:
         rollover, _ = _import_rollover(monkeypatch)
         assert "check" in rollover.SUBCOMMANDS
 
-    def test_subcommands_has_report_lines(self, monkeypatch):
-        """`sync-lines` is renamed to `report-lines`; the old name maps to the new."""
+    def test_subcommands_are_the_published_four_with_one_line_help(self, monkeypatch):
+        """The map IS the help surface: the four verbs are named, each with a non-empty one-line text."""
         rollover, _ = _import_rollover(monkeypatch)
-        assert "report-lines" in rollover.SUBCOMMANDS
-        assert "sync-lines" not in rollover.SUBCOMMANDS
-        assert rollover.RENAMED_VERBS["sync-lines"] == "report-lines"
-
-    def test_subcommands_are_the_published_five_with_one_line_help(self, monkeypatch):
-        """The map IS the help surface: the five verbs are named, each with a non-empty one-line text."""
-        rollover, _ = _import_rollover(monkeypatch)
-        assert set(rollover.SUBCOMMANDS) == {"run", "status", "check", "report-lines", "push"}
+        assert set(rollover.SUBCOMMANDS) == {"run", "status", "check", "push"}
         for key, value in rollover.SUBCOMMANDS.items():
             assert value.strip(), f"{key} has no description — --help would print a bare verb"
             assert "\n" not in value, f"{key}'s description spans lines and would break the help table"
@@ -291,12 +283,6 @@ class TestHandleCommand:
         calls = _record(monkeypatch, rollover, "check_triggers")
         assert rollover.handle_command("rollover", ["check"]) is True
         assert calls == [((None,), {})]
-
-    def test_rollover_sync_lines_returns_true(self, monkeypatch):
-        rollover, _ = _import_rollover(monkeypatch)
-        calls = _record(monkeypatch, rollover, "report_line_counts")
-        assert rollover.handle_command("rollover", ["sync-lines"]) is True
-        assert calls == [((), {})]
 
     def test_rollover_no_args_returns_true(self, monkeypatch):
         """No args triggers introspection, still returns True."""
@@ -341,12 +327,6 @@ class TestHandleCommand:
         calls = _record(monkeypatch, rollover, "check_triggers")
         assert rollover.handle_command("check", []) is True
         assert calls == [((None,), {})]
-
-    def test_toplevel_sync_lines_returns_true(self, monkeypatch):
-        rollover, _ = _import_rollover(monkeypatch)
-        calls = _record(monkeypatch, rollover, "report_line_counts")
-        assert rollover.handle_command("sync-lines", []) is True
-        assert calls == [((), {})]
 
     def test_toplevel_process_plans_returns_true(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)
@@ -395,19 +375,6 @@ class TestSubcommandHelpFlag:
         with patch.object(rollover, "run_rollover") as ran:
             assert rollover.handle_command("rollover", ["run", "--help"]) is True
         ran.assert_not_called()
-
-    def test_report_lines_help_does_not_report(self, monkeypatch):
-        rollover, _ = _import_rollover(monkeypatch)
-        with patch.object(rollover, "report_line_counts") as reported:
-            assert rollover.handle_command("rollover", ["report-lines", "-h"]) is True
-        reported.assert_not_called()
-
-    def test_the_retired_name_help_does_not_report_either(self, monkeypatch):
-        """The rename must not smuggle a run past the help gate."""
-        rollover, _ = _import_rollover(monkeypatch)
-        with patch.object(rollover, "report_line_counts") as reported:
-            assert rollover.handle_command("rollover", ["sync-lines", "-h"]) is True
-        reported.assert_not_called()
 
     def test_check_help_prints_help_not_check(self, monkeypatch):
         rollover, _ = _import_rollover(monkeypatch)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_sync.py
 # Description: Drive sync module — uploads the snapshot store to Google Drive
-# Version: 2.6.1
+# Version: 2.6.2
 # Created: 2026-04-17
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.
@@ -27,11 +27,14 @@ if sys.platform == "win32":
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, mark_command_failed
 
-from aipass.backup.apps.handlers.ignore.patterns import is_ignored, load_spec
+from aipass.backup.apps.handlers.ignore.patterns import load_spec
+from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.path.builder import build_snapshot_path
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.scan.filter import is_excluded
 from aipass.backup.apps.handlers.state.changelog import append_changelog
 from aipass.backup.apps.handlers.state.metadata import build_metadata
 from aipass.backup.apps.handlers.state.progress import LaneProgress
@@ -170,8 +173,9 @@ def _drive_sync_run(
 
     # Re-filter through .backupignore: legacy stores hold files swept in before a rule was added.
     spec = load_spec(str(project_root))
+    whitelist = load_whitelist(str(project_root))
     raw_files = [f for f in store_path.rglob("*") if f.is_file()]
-    kept = [f for f in raw_files if not is_ignored(str(f.relative_to(store_path)), spec)]
+    kept = [f for f in raw_files if not is_excluded(f.relative_to(store_path).as_posix(), spec, whitelist)]
     ignored_count = len(raw_files) - len(kept)
     if ignored_count:
         logger.info(f"[backup] Drive sync: filtered {ignored_count} ignored files from store")
@@ -371,7 +375,7 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = args[0]
+    project_root = str(resolve_caller_path(args[0]))
     force = "--force" in args
     note = ""
     project_name = ""

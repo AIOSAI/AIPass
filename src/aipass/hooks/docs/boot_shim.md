@@ -21,6 +21,9 @@ documented rather than left to be discovered. Verified by reading the script, 20
   interpreter resolved from the repo's own `.venv` at install time (POSIX and Windows layouts both
   probed, falling back to `python3`). No user path is hardcoded.
 
+A fresh start opens a new tmux session named `<branch>-<id8>`, the first eight characters of the new
+session id. It never kills a tmux session: a bare `<branch>` name could belong to a live session.
+
 There is no uninstall script: remove the marked block from each rc file by hand.
 
 ---

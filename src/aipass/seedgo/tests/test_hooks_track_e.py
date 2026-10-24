@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_hooks_track_e.py
 # Description: DPLAN-0139 Track E — single-path enforcement tests
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-04-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 """Tests for apps/modules/permissions.py and apps/modules/inbox_audit.py, DPLAN-0139 Track E single-path enforcement."""
 
@@ -20,7 +20,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.drone.apps.plugins.devpulse_ops import auth
-from aipass.seedgo.apps.modules import inbox_audit, permissions
+from aipass.seedgo.apps.modules import CommandRefused, inbox_audit, permissions
 from aipass.seedgo.apps.modules.inbox_audit import handle_command
 from aipass.seedgo.apps.modules.permissions import TRUSTED_CROSS_WRITERS, identify_caller, is_trusted_caller
 
@@ -158,6 +158,15 @@ def _run_inbox_ids(root, monkeypatch, capsys):
     return capsys.readouterr()
 
 
+def _run_inbox_ids_red(root, monkeypatch, capsys):
+    """Run `audit inbox-ids` expecting violations: it refuses with exit 1; return (out, err)."""
+    monkeypatch.setattr(inbox_audit, "_find_repo_root", lambda: root)
+    with pytest.raises(CommandRefused) as refused:
+        handle_command("audit", ["inbox-ids"])
+    assert refused.value.code == 1
+    return capsys.readouterr()
+
+
 def _inbox(path, ids):
     """Write an inbox holding one message per id."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -193,7 +202,7 @@ def test_inbox_audit_scan_detects_bad_id(tmp_path, monkeypatch, capsys):
     """_scan_inbox flags message ids that are not 8-char lowercase hex."""
     _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["not-hex!", "a1b2c3d4"])
 
-    out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    out, err = _run_inbox_ids_red(tmp_path, monkeypatch, capsys)
     assert "Found 1 id violation(s)" in err
     assert "id='not-hex!'" in out
     assert "id='a1b2c3d4'" not in out
@@ -206,6 +215,27 @@ def test_inbox_audit_scan_passes_valid_ids(tmp_path, monkeypatch, capsys):
     out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
     assert "All message ids are valid 8-char hex strings." in out
     assert err == ""
+
+
+def test_inbox_audit_reads_a_list_inbox_as_unreadable_not_a_crash(tmp_path, monkeypatch, capsys):
+    """An inbox.json holding a JSON list crashed _scan_inbox on .get; it is named unreadable and skipped."""
+    target = tmp_path / "flow" / ".ai_mail.local" / "inbox.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("[]", encoding="utf-8")
+
+    _out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "Unreadable inbox (not a JSON object)" in err
+
+
+def test_inbox_audit_never_walks_a_virtualenv(tmp_path, monkeypatch, capsys):
+    """.venv and node_modules hold no mailbox: an inbox planted inside one is never scanned."""
+    _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4"])
+    for env in (".venv", "node_modules"):
+        _inbox(tmp_path / env / "pkg" / ".ai_mail.local" / "inbox.json", ["not-hex!"])
+
+    out, _err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
+    assert "Scanning 1 live inbox file(s)" in out
+    assert "Skipped" not in out
 
 
 # Load by file path to avoid cross-branch package import restriction.

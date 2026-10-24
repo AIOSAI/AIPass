@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.1.0
+# Version: 3.1.2
 # Created: 2026-06-12
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -29,7 +29,6 @@ from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import test as drive_test
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
 from aipass.backup.apps.handlers.drive import upload as drive_upload
-from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.modules import display, drive_check, drive_clear, drive_stats, drive_sync
 
 # The product is imported for real, not stubbed into sys.modules. The upload path
@@ -334,15 +333,34 @@ class TestDriveClient:
         assert client.get_or_create_project_folder("myproject") == "proj_folder_789"
         assert client.project_folder_cache["myproject"] == "proj_folder_789"
 
-    def test_project_folder_cached_costs_one_verify_and_no_search(self, drive_api: MagicMock) -> None:
-        """A cached project folder costs one verify and no search."""
+    def test_project_folder_cached_costs_no_call(self, drive_api: MagicMock) -> None:
+        """A cached project folder costs no call: the per-file verify serialized every upload behind the lock."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
         client.project_folder_cache["cached_proj"] = "cached_id"
-        drive_api.return_value = {"id": "cached_id", "trashed": False}
 
         assert client.get_or_create_project_folder("cached_proj") == "cached_id"
-        assert drive_api.call_count == 1
+        assert drive_api.call_count == 0
+
+    def test_nested_folder_cached_costs_no_call(self, drive_api: MagicMock) -> None:
+        """A second file in a resolved folder costs no call."""
+        client = drive_client.DriveClient()
+        client._drive_service = MagicMock(name="drive_service")
+        client.project_folder_cache["parent_id:a/b"] = "cached_b"
+
+        assert client.get_or_create_nested_folder("parent_id", "a/b") == "cached_b"
+        assert drive_api.call_count == 0
+
+    def test_folder_search_quotes_an_apostrophe(self, drive_api: MagicMock) -> None:
+        """A folder named Bob's notes is searched as one escaped literal, not a broken query."""
+        service = MagicMock(name="drive_service")
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        drive_api.return_value = {"files": [{"id": "bobs"}]}
+
+        assert client.get_or_create_nested_folder("parent_id", "Bob's notes") == "bobs"
+        query = service.files.return_value.list.call_args.kwargs["q"]
+        assert query.startswith("name='Bob\\'s notes' and ")
 
     def test_nested_folder_is_created_and_cached_segment_by_segment(self, drive_api: MagicMock) -> None:
         """A nested path is created segment by segment, and every segment is cached."""
@@ -637,7 +655,10 @@ class TestDriveUpload:
         self,
         tmp_path: Path,
         drive_api: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        upload_logger = MagicMock(name="logger")
+        monkeypatch.setattr(drive_upload, "logger", upload_logger)
         client = drive_client.DriveClient()
         service = MagicMock(name="drive_service")
         client._drive_service = service
@@ -651,8 +672,12 @@ class TestDriveUpload:
         service.files.return_value.create.assert_not_called()
         assert service.files.return_value.update.call_args.kwargs["fileId"] == "drive_has_it"
         assert client.file_tracker["hello.py"]["drive_id"] == "drive_has_it"
-        rows = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines() if line]
-        assert [row["action"] for row in rows if row.get("operation") == "upload_file"] == ["adopt"]
+        # The per-file line is a prax log line, never an audit row: a sync's thousands rotated the trail.
+        assert any("upload_file adopt" in call.args[0] for call in upload_logger.info.call_args_list)
+        audit = trail.log_path()
+        lines = audit.read_text(encoding="utf-8").splitlines() if audit.exists() else []
+        rows = [json.loads(line) for line in lines if line]
+        assert [row for row in rows if row.get("operation") == "upload_file"] == []
 
     def test_upload_single_file_refuses_a_missing_file_before_any_request(
         self,
@@ -747,6 +772,34 @@ class TestDriveUpload:
         tracked = set(saved) - {drive_tracker.LANE_KEY}
         assert len(tracked) >= 50 and tracked <= uploaded
 
+    def test_the_periodic_save_writes_a_copy_taken_under_the_lock_never_the_dict_workers_are_filling(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Mutant: the save serialises the live tracker while workers add to it, and dies on a resized dict."""
+        monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=MagicMock(name="drive_service")))
+        client = drive_client.DriveClient()
+        store = tmp_path / ".backup" / "snapshots"
+        store.mkdir(parents=True)
+        files = [store / f"f{index}.txt" for index in range(50)]
+        for path in files:
+            path.write_text("x", encoding="utf-8")
+        sent = MagicMock(name="upload_single_file", return_value=True)
+        monkeypatch.setattr(drive_upload, "upload_single_file", sent)
+        saved: list[tuple[dict, bool]] = []
+        monkeypatch.setattr(
+            drive_tracker, "save_tracker", lambda root, doc: saved.append((doc, client.tracker_lock.locked()))
+        )
+        tracker: dict = {}
+
+        drive_upload.upload_batch(client, files, "proj", store, tracker, max_workers=1, project_root=str(tmp_path))
+
+        assert sent.call_count == len(files) and len(saved) == 1
+        doc, locked_while_writing = saved[0]
+        assert doc is not tracker
+        assert locked_while_writing is False
+
     def test_upload_single_file_without_media_upload_fails_and_tracks_nothing(
         self,
         tmp_path: Path,
@@ -762,49 +815,6 @@ class TestDriveUpload:
 
         assert drive_upload.upload_single_file(client, test_file, "proj", tmp_path) is False
         assert client.file_tracker == {}
-
-
-# ---------------------------------------------------------------------------
-# build_drive_path — the destination the upload lane builds out of folder ids
-# ---------------------------------------------------------------------------
-
-
-class TestDriveDestinationPath:
-    """build_drive_path: <BACKUP_FOLDER_NAME>/<project dir name>/snapshot/<store-relative path>, pure computation."""
-
-    def test_drive_path_opens_with_the_root_project_and_lane_folders_the_lane_creates(self, tmp_path: Path) -> None:
-        """A store-root file lands under <root folder>/<project dir name>/snapshot/, not at the project folder."""
-        project = tmp_path / "myproject"
-
-        result = path_builder.build_drive_path(str(project), "notes.txt")
-
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "notes.txt"
-
-    def test_drive_path_keeps_the_relative_files_parent_folders_instead_of_flattening(self, tmp_path: Path) -> None:
-        """A nested store-relative file keeps every parent segment -- upload creates one folder each."""
-        # The shape is the snapshot store's own, a mirror of the project, which is
-        # what drive_sync hands the engine as store-relative. Flattening to the
-        # bare leaf is upload_single_file's not-relative fallback, and it is NOT
-        # this path.
-        project = tmp_path / "myproject"
-
-        result = path_builder.build_drive_path(str(project), "src/pkg/app.py")
-
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "src" / "pkg" / "app.py"
-
-    def test_drive_path_does_not_re_hash_a_long_name_the_store_already_hashed(self, tmp_path: Path) -> None:
-        """A >50-char name passes through untouched: the Drive lane has no hashing step."""
-        # The snapshot mirror keeps every name as the project has it, and nothing
-        # in handlers/drive/ hashes anything. Borrowing build_versioned_file_path's
-        # name[:30]_md5[:8] recipe here would publish under a name no tracker key
-        # matches.
-        project = tmp_path / "myproject"
-        long_name = "a" * 51 + ".txt"
-
-        result = path_builder.build_drive_path(str(project), f"docs/{long_name}")
-
-        assert result.name == long_name
-        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "snapshot" / "docs" / long_name
 
 
 # ---------------------------------------------------------------------------

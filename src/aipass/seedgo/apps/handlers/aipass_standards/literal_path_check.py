@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: literal_path_check.py
 # Description: Literal Absolute Path Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,14 +12,15 @@ Literal Absolute Path Standards Checker Handler
 Reference: literal_path.md
 """
 
+from functools import partial
 import ast
 import re
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -109,15 +110,6 @@ _STRING_OPS: frozenset[str] = frozenset(
 FIX = "build it from tmp_path; a literal absolute path is the next host's failure"
 
 
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
-
-
 def _is_path_literal(value: str) -> bool:
     """Whether this string is an absolute path this rule can judge.
 
@@ -186,21 +178,12 @@ def _path_bindings(tree: ast.Module) -> Dict[str, str]:
     return {name: value for name, value in bound.items() if name not in rejected}
 
 
-def _parse(source: str, what: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ruff already convicts a syntax error; a line number invented for an unparseable file misleads.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[literal_path] Unparseable, nothing %s: %s", what, exc)
-        return None
+_parse = partial(parse, tag="literal_path")
 
 
 def scan(source: str) -> List[Tuple[int, str, str]]:
     """(line, what was found, fix) for every literal absolute path in use."""
-    tree = _parse(source, "scanned")
+    tree = _parse(source)
     if tree is None:
         return []
 
@@ -210,7 +193,7 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        call_name = _tail_name(node.func)
+        call_name = tail_name(node.func)
         for keyword_name, argument in _arguments(node):
             value = _string_value(argument)
             if value is None and isinstance(argument, ast.Name):
@@ -232,7 +215,7 @@ def counted_drive_paths(source: str) -> List[Tuple[int, str]]:
 
     Counted, never convicted: ``tmp_path`` on a POSIX host cannot produce a drive-rooted path.
     """
-    tree = _parse(source, "counted")
+    tree = _parse(source)
     if tree is None:
         return []
 
@@ -241,7 +224,7 @@ def counted_drive_paths(source: str) -> List[Tuple[int, str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        call_name = _tail_name(node.func)
+        call_name = tail_name(node.func)
         for keyword_name, argument in _arguments(node):
             value = _string_value(argument)
             if value is None or not _is_drive_literal(value):
@@ -256,18 +239,8 @@ def counted_drive_paths(source: str) -> List[Tuple[int, str]]:
     return sorted(found)
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[literal_path] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="literal_path", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

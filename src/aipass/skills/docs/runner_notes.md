@@ -14,9 +14,14 @@ markdown-only skill has nothing to dispatch, so the runner renders its
 instructions for the agent to follow. Extra arguments are parsed as `key=value`
 pairs, and a bare word becomes a positional `arg0`, `arg1` and so on.
 
-`run <name> --help` is not an action. It prints the skill's own `SKILL.md`,
-so a handler that falls through to a default reading never sees `--help` as
-an argument.
+`--help` or `-h` anywhere after the name is not an action. It prints the
+skill's own `SKILL.md`, so a handler that falls through to a default reading
+never sees the flag as an argument. The bare word `help` is not a flag here:
+it reaches the handler as an action, because a skill may publish one
+(`drone_commands help module=<name>`).
+
+A skill's output is printed verbatim, never parsed as Rich markup, so
+`[opened]` or a stray `[/b]` in it reaches the terminal as written.
 
 ## Running a Skill
 

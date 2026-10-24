@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_content.py
 # Description: CLI Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -57,7 +57,7 @@ def get_cli_standards() -> str:
         "",
         "[bold cyan]CLI SERVICE PROVIDER:[/bold cyan]",
         "  [dim]from aipass.cli.apps.modules import console, header, success, error[/dim]",
-        "  [dim]from aipass.cli.apps.modules import operation_start, track_operation[/dim]",
+        "  [dim]from aipass.cli.apps.modules import operation_start, operation_complete[/dim]",
         "",
         "  • Consistent formatting across all branches",
         "  • Update CLI once → affects entire system",

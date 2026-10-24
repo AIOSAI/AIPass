@@ -1,14 +1,15 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.4
+# Version: 1.0.6
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
 
-# Every project here is built in tmp_path: no fleet count, Python version or platform, the species the tool exists to find.
+# Every project here is built in tmp_path: no fleet count, Python version or platform,
+# the species the tool exists to find.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — ast.parse's parsing; shape only walks the tree it returns
@@ -25,8 +26,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, ranking, report, shape
+from aipass.seedgo.apps.handlers import registry_scan
 from aipass.seedgo.apps.handlers.test_inventory import roots, twins
-from aipass.seedgo.apps.modules import inventory
+from aipass.seedgo.apps.modules import CommandRefused, inventory
 
 
 def _function(source: str) -> ast.AST:
@@ -216,6 +218,23 @@ class TestExclusions:
         assert statuses["tests/parked/test_parked.py"] == exclusions.STATUS_CONFTEST_IGNORE
         assert statuses["tests/other/test_live.py"] == exclusions.STATUS_COLLECTED
 
+    def test_a_directory_in_collect_ignore_silences_the_files_under_it(self, tmp_path):
+        _write(tmp_path, "tests/conftest.py", 'collect_ignore = ["legacy"]')
+        _write(tmp_path, "tests/legacy/deep/test_old.py", "def test_old():\n    assert True")
+        _write(tmp_path, "tests/test_live.py", "def test_live():\n    assert True")
+
+        found = collection.collect(tmp_path)
+        statuses = exclusions.classify(tmp_path, found.files, found.rules.norecursedirs)
+
+        assert statuses["tests/legacy/deep/test_old.py"] == exclusions.STATUS_CONFTEST_IGNORE
+        assert statuses["tests/test_live.py"] == exclusions.STATUS_COLLECTED
+
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="no tomllib below 3.11: read_rules reads no pyproject there")
+    def test_a_string_testpaths_is_split_on_whitespace_not_into_letters(self, tmp_path):
+        _write(tmp_path, "pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "tests checks"')
+
+        assert collection.read_rules(tmp_path).testpaths == ("tests", "checks")
+
     def test_importorskip_is_conditional_and_a_bare_skip_is_not(self, tmp_path):
         """THE MEASURED MISS. Whether an `importorskip` file runs is a HOST fact."""
         _write(
@@ -382,19 +401,18 @@ class TestScoring:
         with pytest.raises(ValueError, match="delete-family"):
             report.assert_publishable(summary)
 
-    def test_prose_may_say_the_word_a_label_may_not(self):
-        """The negative control, pinning CATEGORY_LENGTH from BOTH sides."""
-        explanation = (
-            "This report will never tell anyone to delete a test, because no static signal "
-            "measured here predicts what a removal would cost."
+    def test_values_may_say_the_word_a_key_may_not(self):
+        """Test names, file paths and prose are data; only a key is a published category."""
+        report.assert_publishable(
+            {
+                "blind_spots": ["something"],
+                "busiest_files": [{"file": "tests/test_remove.py", "tests": 3}],
+                "note": "delete",
+            }
         )
-        assert len(explanation) > report.CATEGORY_LENGTH
-        assert ranking.delete_language_in(explanation)
-
-        report.assert_publishable({"blind_spots": ["something"], "note": explanation})
 
         with pytest.raises(ValueError, match="delete-family"):
-            report.assert_publishable({"blind_spots": ["something"], "note": "delete"})
+            report.assert_publishable({"blind_spots": ["something"], "delete": 1})
 
     def test_the_real_published_prose_is_publishable(self):
         """The shipped strings pass their own gate."""
@@ -493,22 +511,25 @@ class TestTheTwinsSwitch:
 
     def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self, tmp_path: Path, monkeypatch) -> None:
         """`inventory._branch_container` descends from the repo root to the branches."""
-        fleet = roots.resolve(roots.FLEET_ARGUMENT)
+        repo_root = Path(_src_root()).parent
         [container] = _run_twins_verb(tmp_path, monkeypatch, roots.FLEET_ARGUMENT)
 
-        assert container != fleet.path
+        assert container != repo_root
         assert (container / "seedgo" / "tests").is_dir()
 
     def test_the_container_is_the_same_on_a_host_with_no_registry(self, tmp_path: Path, monkeypatch) -> None:
         """The fleet container never depends on AIPASS_REGISTRY.json existing."""
-        fleet = roots.resolve(roots.FLEET_ARGUMENT)
+        repo_root = Path(_src_root()).parent
+        registry = _write(tmp_path, f"registry/{registry_scan.DEFAULT_REGISTRY_NAME}", "{}")
+        monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
         [with_registry] = _run_twins_verb(tmp_path / "with", monkeypatch, roots.FLEET_ARGUMENT)
 
         monkeypatch.setattr(inventory, "_branch_paths", lambda: {})
+        monkeypatch.setattr(registry_scan, "find_registry", lambda: tmp_path / "AIPASS_REGISTRY.json")
         [without_registry] = _run_twins_verb(tmp_path / "without", monkeypatch, roots.FLEET_ARGUMENT)
 
         assert without_registry == with_registry
-        assert without_registry != fleet.path
+        assert without_registry != repo_root
         assert (without_registry / "seedgo" / "tests").is_dir()
 
     def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path, monkeypatch) -> None:
@@ -517,3 +538,18 @@ class TestTheTwinsSwitch:
         target.mkdir()
 
         assert _run_twins_verb(tmp_path, monkeypatch, str(target)) == [target]
+
+    def test_the_fleet_target_with_no_registry_raises_instead_of_walking_the_cwd(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(registry_scan, "find_registry", lambda: tmp_path / "AIPASS_REGISTRY.json")
+
+        with pytest.raises(FileNotFoundError, match="no registry"):
+            roots.resolve(roots.FLEET_ARGUMENT)
+
+    def test_an_unknown_option_is_refused_with_exit_code_seven(self, capsys) -> None:
+        with pytest.raises(CommandRefused) as refused:
+            inventory.handle_command("test-inventory", ["aipass", "--bogus"])
+
+        assert refused.value.code == 7
+        assert "does not know the option '--bogus'" in capsys.readouterr().err

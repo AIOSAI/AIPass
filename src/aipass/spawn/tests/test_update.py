@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-03-07
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -1037,6 +1037,7 @@ class TestHandleUpdate:
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+            patch("aipass.spawn.apps.modules.update.find_registry", return_value=mock_registry),
         ):
             result = handle_update(["specialist", "--all"])
 
@@ -1252,3 +1253,66 @@ class TestTemplateOwnedListsGrow:
 
         assert result == "unchanged"
         assert merged["permissions"]["deny"] == ["Bash(rm -rf*)"]
+
+
+class TestAuditFixes:
+    """ponytail audit 2026-10-24: findings 16, 17 and the update leftovers."""
+
+    def test_a_json_differing_only_in_key_order_is_unchanged_and_not_backed_up(self, tmp_path):
+        """Documents, not text: a reordered file once read as "updated" and grew .spawn/.recovery every run."""
+        rel = "config.json"
+        registry, dest = _one_file_world(
+            tmp_path, rel, json.dumps({"a": 1, "b": 2}, indent=2), json.dumps({"b": 2, "a": 1}, indent=2) + "\n"
+        )
+        before = dest.read_bytes()
+
+        assert _update_verdict(tmp_path, registry, rel) == "unchanged"
+        assert dest.read_bytes() == before
+        assert not (tmp_path / "test_branch" / ".spawn" / ".recovery").exists()
+
+    @pytest.mark.parametrize("cache", [".pytest_cache", ".ruff_cache", ".mypy_cache"])
+    def test_a_template_tool_cache_never_reaches_the_branch(self, tmp_path, cache):
+        """The skip set is file_ops.SKIP_NAMES: a cache create never copies, update must not copy either."""
+        registry, _dest = _one_file_world(tmp_path, "README.md", "x\n", "x\n")
+        (tmp_path / "template" / cache).mkdir()
+        (tmp_path / "template" / cache / "CACHEDIR.TAG").write_text("tag\n", encoding="utf-8")
+
+        _update_verdict(tmp_path, registry, cache)
+
+        assert not (tmp_path / "test_branch" / cache).exists()
+
+    def test_the_readme_preview_renders_the_passports_purpose_and_class(self, tmp_path):
+        """A README as create rendered it matches: purpose and class come from the passport, not defaults."""
+        registry, _dest = _one_file_world(
+            tmp_path,
+            "README.md",
+            "Purpose: {{PURPOSE_BRIEF}}\nClass: {{CITIZEN_CLASS}}\n",
+            "Purpose: Ships widgets\nClass: manager\n",
+        )
+        passport = tmp_path / "test_branch" / ".trinity" / "passport.json"
+        passport.write_text(
+            json.dumps({"identity": {"citizen_class": "manager", "purpose": "Ships widgets"}}), encoding="utf-8"
+        )
+
+        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=tmp_path / "template"):
+            result = update_branch("test_branch", dry_run=True, registry_path=registry)
+
+        assert result["_md_detail"] == [{"branch_path": "README.md", "state": "matches"}]
+
+    def test_a_quoted_purpose_never_breaks_the_passport_heal(self, tmp_path):
+        """Purpose is free text: rendered into the template passport, a quote would make it unparseable."""
+        rel = ".trinity/passport.json"
+        existing = {"identity": {"citizen_class": "specialist", "purpose": 'Ships "widgets"', "traits": []}}
+        registry, _dest = _one_file_world(
+            tmp_path, rel, json.dumps({"identity": {"purpose": "{{PURPOSE_BRIEF}}"}}), json.dumps(existing)
+        )
+
+        assert _update_verdict(tmp_path, registry, rel) != "error"
+
+    def test_class_all_with_no_registry_is_an_error_exit(self, tmp_path, monkeypatch, capsys):
+        """No registry is not "0 branches, all fine": it exits 1 and says why."""
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_update(["specialist", "--all", "--apply"]) == 1
+        captured = capsys.readouterr()
+        assert "REGISTRY" in captured.out + captured.err

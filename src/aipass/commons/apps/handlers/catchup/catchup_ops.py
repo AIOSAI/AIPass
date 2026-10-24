@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: catchup_ops.py
 # Description: Catchup Operations Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from aipass.commons.apps.handlers.database.catchup_queries import (
     query_catchup_data,
     get_last_active,
     update_last_active,
+    mark_mentions_read,
 )
 from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.json import json_handler
@@ -71,6 +72,7 @@ def run_catchup() -> dict:
         data = query_catchup_data(conn, branch_name, since_time)
 
         update_last_active(conn, branch_name)
+        mark_mentions_read(conn, branch_name)
 
         close_db(conn)
         conn = None

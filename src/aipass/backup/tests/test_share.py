@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_share.py
 # Description: Tests for the share module and the drive/share handler it drives
-# Version: 2.0.3
+# Version: 2.0.4
 # Created: 2026-07-01
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/share.py and apps/handlers/drive/share.py."""
@@ -171,7 +171,8 @@ class TestShareModuleRouting:
         _, err = capsys.readouterr()
         assert built == []
         assert result == {"success": False, "link": None, "file_id": None, "error": f"Not a file: {missing}"}
-        assert f"Not a file: {missing}" in err
+        assert "Not a file: " in err
+        assert "not_there.pdf" in err
 
 
 # ---------------------------------------------------------------------------

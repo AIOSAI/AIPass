@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_branch_dashboard.py
 # Description: Push flow section to branch dashboards
-# Version: 2.2.0
+# Version: 2.4.0
 # Created: 2026-03-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Push Flow Section to Branch Dashboard
@@ -13,6 +13,7 @@ must not carry (`drone @flow list open` is the full-detail door), and @prax's re
 """
 
 import json
+import os
 import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -22,7 +23,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # Import the caps, never retype them: `sections.flow` has two writers (prax's refresh and this push).
-from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject
+from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject, dashboard_lock
 
 from aipass.flow.apps.handlers.repo_root import module_file
 
@@ -31,8 +32,6 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
-
-DASHBOARD_TEMPLATE_FILE = _PKG_ROOT / "devpulse" / "templates" / "DASHBOARD.template.json"
 
 # Flow is the authority for these quick_status keys, so it always recomputes them.
 OWNED_KEYS = frozenset({"active_plans", "commons_mentions"})
@@ -58,67 +57,35 @@ def _warn_over_budget(branch_path: Path, rendered: str) -> None:
 
 
 def _write_dashboard_section(branch_path: Path, section_name: str, section_data: Dict[str, Any]) -> bool:
-    """Write a single section to a branch's DASHBOARD.local.json."""
+    """Write one section; an unreadable file is refused, since reseeding it drops every other section."""
     try:
         dashboard_path = branch_path / "DASHBOARD.local.json"
+        # prax's refresh holds the same lock, so neither writer replaces the file between the other's read and write.
+        with dashboard_lock(branch_path):
+            try:
+                dashboard = json.loads(dashboard_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.warning("Dashboard at '%s' unreadable, push refused: %s", dashboard_path, exc)
+                return False
 
-        # Load existing or create fresh
-        if dashboard_path.exists():
-            content = dashboard_path.read_text().strip()
-            if content:
-                try:
-                    dashboard = json.loads(content)
-                except json.JSONDecodeError as exc:
-                    logger.warning("Corrupt dashboard JSON at '%s', creating fresh: %s", dashboard_path, exc)
-                    dashboard = _create_fresh_dashboard(branch_path)
-            else:
-                dashboard = _create_fresh_dashboard(branch_path)
-        else:
-            dashboard = _create_fresh_dashboard(branch_path)
+            if "sections" not in dashboard:
+                dashboard["sections"] = {}
 
-        if "sections" not in dashboard:
-            dashboard["sections"] = {}
+            section_data["last_updated"] = datetime.now().isoformat()
+            dashboard["sections"][section_name] = section_data
+            dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], dashboard.get("quick_status"))
+            dashboard["last_updated"] = datetime.now().isoformat()
 
-        section_data["last_updated"] = datetime.now().isoformat()
-        dashboard["sections"][section_name] = section_data
-        dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], dashboard.get("quick_status"))
-        dashboard["last_updated"] = datetime.now().isoformat()
-
-        rendered = json.dumps(dashboard, indent=2)
-        _warn_over_budget(branch_path, rendered)
-        dashboard_path.write_text(rendered)
-        return True
+            rendered = json.dumps(dashboard, indent=2)
+            _warn_over_budget(branch_path, rendered)
+            tmp_path = dashboard_path.with_suffix(".tmp")
+            tmp_path.write_text(rendered, encoding="utf-8")
+            os.replace(tmp_path, dashboard_path)
+            return True
 
     except Exception as exc:
         logger.error("Failed to write dashboard section '%s' for branch '%s': %s", section_name, branch_path, exc)
         return False
-
-
-def _create_fresh_dashboard(branch_path: Path) -> Dict[str, Any]:
-    """Create fresh dashboard structure from template or fallback."""
-    if DASHBOARD_TEMPLATE_FILE.exists():
-        try:
-            template = json.loads(DASHBOARD_TEMPLATE_FILE.read_text())
-            dashboard = json.loads(json.dumps(template).replace("{{BRANCHNAME}}", branch_path.name.upper()))
-            dashboard["last_updated"] = datetime.now().isoformat()
-            return dashboard
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Failed to load dashboard template '%s', using fallback: %s", DASHBOARD_TEMPLATE_FILE, exc)
-
-    now = datetime.now().isoformat()
-    return {
-        "_warning": "AUTO-GENERATED FILE - DO NOT MANUALLY EDIT.",
-        "branch": branch_path.name.upper(),
-        "last_updated": now,
-        "quick_status": {"action_required": False},
-        "sections": {
-            "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
-            "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
-            "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
-            "devpulse": {"managed_by": "devpulse", "summary": {}, "last_updated": ""},
-            "commons_activity": {"managed_by": "commons", "mentions": 0, "last_updated": ""},
-        },
-    }
 
 
 def _as_count(value: Any) -> int:
@@ -149,10 +116,7 @@ def _counter_label(key: str) -> str:
 
 
 def _calculate_quick_status(sections: Dict[str, Any], existing: Any = None) -> Dict[str, Any]:
-    """Recalculate the quick_status keys Flow owns, preserving every other key.
-    @prax's refresh writes quick_status too; replacing the whole block lets the last writer delete the
-    other's fields, so OWNED keys are recomputed, MIRROR keys seeded only when absent, the rest kept.
-    """
+    """Recompute OWNED keys, seed MIRROR keys only when absent, keep the rest: @prax writes this block too."""
     existing = existing if isinstance(existing, dict) else {}
 
     ai_mail = sections.get("ai_mail", {})

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_mock_drift.py
 # Description: pytest_quality pack, mock_drift checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/mock_drift_check.py."""
@@ -141,6 +141,23 @@ class TestMockDriftTargetResolution:
 
         assert "src.mypkg.worker.console" not in [row["target"] for row in rows]
         assert len(rows) == 1
+
+    def test_another_packages_name_that_shares_a_local_stem_is_not_a_module_here(self, tmp_path):
+        _write(tmp_path, "src/mypkg/logger.py", "def log(msg):\n    return msg")
+        _write(tmp_path, "src/mypkg/worker.py", "from aipass.prax import logger\n\n\ndef run():\n    logger.info('x')")
+        _write(
+            tmp_path,
+            "tests/test_worker.py",
+            """
+            from unittest.mock import patch
+
+
+            @patch("src.mypkg.worker.logger")
+            def test_quiet(mock_logger):
+                assert mock_logger
+            """,
+        )
+        assert _drift_targets(tmp_path) == []
 
     def test_a_plain_import_with_an_alias_binds_the_alias_to_the_module(self, tmp_path):
         """`import mypkg.json_handler as json_handler` binds a module to a name."""

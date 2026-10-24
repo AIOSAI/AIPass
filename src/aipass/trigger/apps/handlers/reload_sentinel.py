@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reload_sentinel.py
 # Description: Restarts the log watcher when its own handler code changes on disk
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Reload sentinel — keeps the running watcher on the shipped code.
@@ -24,6 +24,11 @@ logger = trail_logger(TRIGGER_ROOT / "logs" / "reload_sentinel.jsonl")
 WATCHED_ROOTS: Tuple[Path, ...] = (
     TRIGGER_ROOT / "apps" / "handlers",
     TRIGGER_ROOT / "apps" / "modules",
+)
+
+WATCHED_FILES: Tuple[Path, ...] = (
+    TRIGGER_ROOT / "apps" / "config.py",
+    TRIGGER_ROOT / "apps" / "log_watcher_service.py",
 )
 
 # Outlasts an editor mid-save, so the watcher never restarts into a half-written module.
@@ -60,6 +65,11 @@ def snapshot() -> Dict[Path, float]:
     seen: Dict[Path, float] = {}
     for root in WATCHED_ROOTS:
         _scan_root(root, seen)
+    for path in WATCHED_FILES:
+        try:
+            seen[path] = path.stat().st_mtime
+        except OSError as exc:
+            logger.warning(f"cannot stat watched file {path}: {exc}")
     return seen
 
 

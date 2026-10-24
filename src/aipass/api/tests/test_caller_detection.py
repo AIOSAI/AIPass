@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_caller_detection.py
 # Description: Tests for caller detection internals (uncovered functions)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py, its internal detection functions."""
@@ -20,7 +20,6 @@ from aipass.api.apps.handlers.openrouter.caller import (
     _detect_flow_caller,
     _detect_prax_caller,
     _create_fallback_info,
-    detect_caller_from_stack,
     get_caller_info,
 )
 
@@ -135,34 +134,6 @@ class TestCreateFallbackInfo:
         result = _create_fallback_info(other_path)
 
         assert result["category"] == "unknown"
-
-
-class TestDetectCallerFromStack:
-    """Tests for caller.detect_caller_from_stack()."""
-
-    @patch("aipass.api.apps.handlers.openrouter.caller.get_caller_info")
-    def test_returns_name_and_folder_when_info_available(self, mock_get_info: MagicMock, tmp_path: Path) -> None:
-        """When get_caller_info returns data, extracts name and folder."""
-        json_folder = tmp_path / "flow" / "flow_json"
-        mock_get_info.return_value = {
-            "caller_name": "engine",
-            "json_folder": json_folder,
-        }
-
-        name, folder = detect_caller_from_stack()
-
-        assert name == "engine"
-        assert folder == json_folder
-
-    @patch("aipass.api.apps.handlers.openrouter.caller.get_caller_info")
-    def test_returns_none_tuple_when_no_info(self, mock_get_info: MagicMock) -> None:
-        """When get_caller_info returns None, returns (None, None)."""
-        mock_get_info.return_value = None
-
-        name, folder = detect_caller_from_stack()
-
-        assert name is None
-        assert folder is None
 
 
 class TestGetCallerInfo:

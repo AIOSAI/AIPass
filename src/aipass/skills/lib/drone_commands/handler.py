@@ -1,18 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: handler.py - Drone Commands skill handler
-# Date: 2026-03-07
-# Version: 1.0.0
-# Category: skills/lib/drone_commands
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-07): Initial implementation
-#
-# CODE STANDARDS:
-#   - Top-level handler: delegates to apps/modules/
-#   - Returns dicts, NEVER prints
-#   - stdlib only (no external deps)
-#   - Graceful error handling
+# =================== AIPass ====================
+# Name: handler.py
+# Description: Drone Commands skill handler, delegates to apps/modules/command_runner
+# Version: 1.1.0
+# Created: 2026-03-07
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -21,19 +12,7 @@ Drone Commands skill handler.
 Called by: drone @skills run drone_commands <action> [args]
 """
 
-import os
-import sys
-
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_APPS_DIR = os.path.join(_THIS_DIR, "apps")
-_MODULES_DIR = os.path.join(_APPS_DIR, "modules")
-
-if _MODULES_DIR not in sys.path:
-    sys.path.insert(0, _MODULES_DIR)
-if _APPS_DIR not in sys.path:
-    sys.path.insert(0, _APPS_DIR)
-
-from modules import command_runner
+from aipass.skills.lib.drone_commands.apps.modules import command_runner
 
 
 def run(action, args=None, config=None):
@@ -54,7 +33,7 @@ def run(action, args=None, config=None):
             return {
                 "success": False,
                 "output": "",
-                "error": "Missing 'command' argument. Usage: --args '{\"command\": \"drone @module action\"}'",
+                "error": "Missing 'command' argument. Usage: drone @skills run drone_commands run 'command=@module action'",
             }
         return command_runner.run_command(command, timeout=timeout)
 
@@ -67,7 +46,7 @@ def run(action, args=None, config=None):
             return {
                 "success": False,
                 "output": "",
-                "error": "Missing 'module' argument. Usage: --args '{\"module\": \"module_name\"}'",
+                "error": "Missing 'module' argument. Usage: drone @skills run drone_commands help module=<name>",
             }
         return command_runner.module_help(module_name, timeout=timeout)
 

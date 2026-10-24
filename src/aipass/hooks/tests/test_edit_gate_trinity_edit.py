@@ -3,7 +3,7 @@
 # Description: edit_gate's .trinity caps on the Edit lane: Edit, replace_all, MultiEdit, carried vs authored entries
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py: the .trinity character caps on Edit and MultiEdit."""
@@ -291,6 +291,26 @@ class TestTrinityEditCharNotByte:
             )
 
         assert result["exit_code"] == 2
+
+
+class TestTrinityBranchIsTheMemoryFolder:
+    """The caps are the memory folder's branch, whatever seat or path spelling makes the edit."""
+
+    def _over_cap_edit(self, tmp_path, file_path, cwd):
+        Path(_make_trinity_path(tmp_path)).write_text(json.dumps({"key_learnings": {"k1": "aaa"}}), encoding="utf-8")
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+            return handle(
+                _hook_data(file_path, tool_name="Edit", cwd=cwd, old_string='"aaa"', new_string='"' + "x" * 250 + '"')
+            )
+
+    def test_the_root_seat_is_capped_too(self, tmp_path):
+        result = self._over_cap_edit(tmp_path, _make_trinity_path(tmp_path), str(tmp_path))
+        assert "Unwritable" in json.loads(result["stdout"])["reason"]
+
+    def test_a_relative_path_is_read_from_the_seat(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        result = self._over_cap_edit(tmp_path, ".trinity/local.json", str(tmp_path / "src" / "aipass" / "hooks"))
+        assert "Unwritable" in json.loads(result["stdout"])["reason"]
 
 
 class TestTrinityMultiEdit:

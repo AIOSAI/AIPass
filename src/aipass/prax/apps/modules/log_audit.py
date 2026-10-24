@@ -3,7 +3,7 @@
 # Description: PRAX Log Audit Command
 # Version: 0.1.0
 # Created: 2026-02-26
-# Modified: 2026-03-09
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -174,11 +174,15 @@ def handle_command(command: str, args: List[str]) -> bool:
     )
 
     subcmd = args[0]
+    usage = "drone @prax log-audit --help"
+    # A stray flag like `enforce --dry-run` must not run the real thing.
+    if subcmd in ("audit", "enforce", "sweep") and len(args) > 1:
+        refuse("log-audit", args[1], usage)
     json_handler.log_operation("log_audit_executed", {"mode": subcmd})
 
     if subcmd == "audit":
         files = scan_log_files()
-        summary = log_health_summary()
+        summary = log_health_summary(files)
         _display_audit(files, summary)
 
         from aipass.prax.apps.handlers.logging.log_watchdog import (
@@ -187,7 +191,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         )
 
         branch_files = scan_branch_log_files()
-        branch_summary = branch_log_health_summary()
+        branch_summary = branch_log_health_summary(branch_files)
         _display_branch_audit(branch_files, branch_summary)
         return True
 
@@ -203,7 +207,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     # Refused, not "handled": this printed the right words and still exited 0,
     # so `drone @prax log-audit typo && next-step` ran next-step (devpulse's
     # 2026-09-07 CLI sweep). The raise carries the exit code back to prax.py.
-    refuse("log-audit", subcmd, "drone @prax log-audit --help")
+    refuse("log-audit", subcmd, usage)
 
 
 def _run_enforce():
@@ -252,13 +256,6 @@ def _run_branch_enforce():
     logger.info("[log-audit] Enforced branch log limits on %d files", len(actions))
 
 
-def sweep_stale_logs():
-    """Public re-export of the watchdog sweep for module-layer access."""
-    from aipass.prax.apps.handlers.logging.log_watchdog import sweep_stale_logs as _sweep
-
-    return _sweep()
-
-
 def _run_sweep():
     """Execute stale log sweep and display results."""
     from aipass.prax.apps.handlers.logging.log_watchdog import sweep_stale_logs
@@ -285,9 +282,8 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
     try:
-        handle_command("log-audit", args)
+        handle_command("log-audit", sys.argv[1:])
     except UnknownArgument as exc:
         error(str(exc), suggestion=exc.usage)
         sys.exit(1)

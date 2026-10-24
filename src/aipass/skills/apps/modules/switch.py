@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: switch.py
 # Description: Per-skill off-switch — on, off, and status
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Skill off-switch module."""
 
-from aipass.cli.apps.modules import console, error, warning
+from aipass.cli.apps.modules import console, error, escape, warning
 from aipass.prax import logger
 from aipass.skills.apps.handlers.switch_handler import (
     SwitchStateUnreadable,
@@ -21,25 +21,40 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point (on, off, switch)."""
+    """Handle on, off and switch routed by the entry point."""
+    if command not in ("on", "off", "switch"):
+        return False
     if not args:
+        # Bare `switch` is the status of every skill; bare on/off is missing its skill name.
+        if command == "switch":
+            return show_switch(None)
         print_introspection()
+        error(f"Error: skill name required. Usage: skills {command} <name>")
+        return False
+
+    # on/off record their argument, so a help flag read as a skill name would be written to the state.
+    if any(arg in ("--help", "-h", "help") for arg in args):
+        print_switch_help()
         return True
-    if "--help" in args:
-        print_introspection()
-        return True
+
+    if command == "switch":
+        return show_switch(args[0])
 
     if command == "on":
         return switch_on(args[0])
 
-    if command == "off":
-        reason = " ".join(args[1:]) if len(args) > 1 else None
-        return switch_off(args[0], reason)
+    reason = " ".join(args[1:]) if len(args) > 1 else None
+    return switch_off(args[0], reason)
 
-    if command == "switch":
-        return show_switch(args[0] if args else None)
 
-    return False
+def print_switch_help():
+    """Print the usage page for on, off and switch."""
+    console.print("Skills Switch - Disconnect and reconnect a skill")
+    console.print()
+    console.print("Usage:")
+    console.print("  drone @skills off <name> \\[reason]    Switch a skill off, stop its processes")
+    console.print("  drone @skills on <name>              Switch a skill on, start its processes")
+    console.print("  drone @skills switch \\[name]          Show each skill's on/off state")
 
 
 def switch_on(name: str) -> bool:
@@ -78,11 +93,11 @@ def show_switch(name: str | None = None) -> bool:
     console.print()
     for row in rows:
         mark = "[green]ON [/green]" if row["enabled"] else "[red]OFF[/red]"
-        console.print(f"  {mark}  {row['name']}")
+        console.print(f"  {mark}  {escape(row['name'])}")
         if row["units"]:
-            console.print(f"        units: {', '.join(row['units'])}")
+            console.print(f"        units: {escape(', '.join(row['units']))}")
         if row["reason"]:
-            console.print(f"        reason: {row['reason']}")
+            console.print(f"        reason: {escape(str(row['reason']))}")
         if row["live_units"]:
             # Off in state but alive on the machine: show the discrepancy, never hide it.
             warning(f"        STILL RUNNING: {', '.join(row['live_units'])}")
@@ -94,7 +109,7 @@ def _report(result: dict) -> None:
     """Print a handler result, routing failures to stderr."""
     if result["output"]:
         for line in result["output"].splitlines():
-            console.print(f"  {line}")
+            console.print(f"  {line}", markup=False)
     if result.get("error"):
         error(f"Error: {result['error']}")
 

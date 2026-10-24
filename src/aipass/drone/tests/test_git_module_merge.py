@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module_merge.py
 # Description: Tests for the merge, dev-pr and branches lanes — protected-branch merge, return to dev, external repos
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/merge_plugin.py and the merge, dev-pr and branches handlers it pairs with."""
@@ -17,12 +17,15 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from aipass.drone.apps.handlers.git import external_pr_handler
 from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches, prune_temp_branches
+from aipass.drone.apps.handlers.git.commit_handler import subject_refusal
+from aipass.drone.apps.handlers.git.dev_pr_handler import DEV_PR_OUTCOME
 from aipass.drone.apps.modules.git_module import handle_command
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.trigger.apps.modules import core as trigger_core
@@ -408,10 +411,10 @@ class _GitHub:
         self.calls: list[list[str]] = []
         self.origin_on_github = True
         self.pr = {"headRefName": "dev", "title": "feat: tier prompt"}
-        self.create = (0, f"{_PR_URL}\n", "")
-        self.merge = (0, "", "")
+        self.create: tuple[int, str, str] = (0, f"{_PR_URL}\n", "")
+        self.merge: tuple[int, str, str] = (0, "", "")
 
-    def __call__(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+    def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         if argv[:4] == ["git", "remote", "get-url", "origin"] and self.origin_on_github:
             return subprocess.CompletedProcess(argv, 0, f"{_GITHUB_URL}\n", "")
         if argv[0] != "gh":
@@ -536,6 +539,34 @@ class TestExternalDevPrRefusesBeforeAnyPush:
 
         assert result["stderr"] == "dev-pr failed: " + external_pr_handler.REFUSE_NO_GITHUB.format(repo=baud_repo)
         assert (github.calls, _origin_dev(baud_repo)) == ([], "")
+
+
+class TestDevPrTitleIsCappedAtHome:
+    """dev-pr measures its description against the commit subject cap before any push, in either lane."""
+
+    @pytest.mark.parametrize("registry_name", ["AIPASS_REGISTRY.json", "BAUD_REGISTRY.json"])
+    def test_a_257_char_description_is_refused_before_the_push(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, github: _GitHub, registry_name: str
+    ) -> None:
+        """Mutant: the subject_refusal call removed — dev is pushed and GitHub refuses the title after."""
+        work = _project(tmp_path, monkeypatch, registry_name)
+
+        result = handle_command("dev-pr", ["x" * 257])
+
+        assert result == {"stdout": "", "stderr": subject_refusal("x" * 257, DEV_PR_OUTCOME), "exit_code": 1}
+        assert result["stderr"].endswith("\n\nThe PR title was refused. Nothing was pushed.")
+        assert (github.calls, _origin_dev(work)) == ([], "")
+
+    def test_a_100_char_description_opens_the_pr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, github: _GitHub
+    ) -> None:
+        """Mutant: the cap measured with < instead of the shared refusal — a title under the cap refused."""
+        _project(tmp_path, monkeypatch, "AIPASS_REGISTRY.json")
+
+        result = handle_command("dev-pr", ["y" * 100])
+
+        assert result["exit_code"] == 0
+        assert github.calls[0][-3:] == ["y" * 100, "--body", ""]
 
 
 class TestExternalMergeBringsLocalDevUp:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: interface.py
 # Description: Verify checker interface (AUDIT_SCOPE + function signature)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Interface Proof -- Verify each checker declares AUDIT_SCOPE and correct function signature.
@@ -122,9 +122,9 @@ def scan(pack_dir: Path) -> dict:
         try:
             source = check_file.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(check_file))
-        except SyntaxError as exc:
+        except (SyntaxError, ValueError) as exc:
             logger.info("Skipped %s: SyntaxError during parse", check_file.name)
-            err = f"{check_file.name}: SyntaxError: {exc.msg} (line {exc.lineno})"
+            err = f"{check_file.name}: {type(exc).__name__}: {getattr(exc, 'msg', exc)} (line {getattr(exc, 'lineno', None)})"
             entry["issues"].append(err)
             issues.append(err)
             results.append(entry)

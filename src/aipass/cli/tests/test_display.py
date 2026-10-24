@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_display.py
 # Description: The display module — messages, header, routing, demo, exit seam, escape, live colour
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/display.py — the render surface every branch imports."""
@@ -16,7 +16,7 @@ import contextlib
 import importlib
 import io
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 from rich.markup import escape as rich_escape
@@ -141,8 +141,6 @@ class TestHeader:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.header("My Title")
         output = get_output()
@@ -152,8 +150,6 @@ class TestHeader:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.header("Build", details={"Branch": "main", "Status": "ok"})
         output = get_output()
@@ -166,8 +162,6 @@ class TestHeader:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.header("Solo Title")
         output = get_output()
@@ -181,8 +175,6 @@ class TestHeader:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.header("Solo Title", {"Name": "feature", "Type": "module"})
         output = get_output()
@@ -190,17 +182,6 @@ class TestHeader:
         assert len(detail_lines) == 2
         assert "Name: feature" in output
         assert "Type: module" in output
-
-    def test_header_fires_trigger_when_available(self):
-        cons, _get_output = _make_capture_console()
-        mock_trigger = MagicMock()
-        with (
-            patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", mock_trigger),
-            patch.object(display, "_TRIGGER_LOADED", True),
-        ):
-            display.header("Triggered Title")
-        mock_trigger.fire.assert_called_once_with("cli_header_displayed", title="Triggered Title")
 
 
 class TestSuccess:
@@ -294,8 +275,6 @@ class TestRunDemo:
         with (
             patch.object(display, "CONSOLE", cons),
             patch.object(display, "err_console", err_cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.run_demo()
         mock_log.assert_called_once_with("display_demo")
@@ -306,8 +285,6 @@ class TestRunDemo:
         with (
             patch.object(display, "CONSOLE", cons),
             patch.object(display, "err_console", err_cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.run_demo()
         output = get_output()
@@ -381,8 +358,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -392,8 +367,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -403,8 +376,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -416,8 +387,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -428,8 +397,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -440,8 +407,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -451,8 +416,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -463,8 +426,6 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
@@ -475,45 +436,24 @@ class TestPrintHelpOutput:
         cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
         ):
             display.print_help()
         output = get_output()
         assert "Commands:" in output
 
 
-class TestHeaderTriggerLoading:
-    """Verify header() lazy-loads trigger module."""
+class TestHeaderStaysOffTheTriggerBus:
+    """header() is called in every branch; it must not load or fire the trigger bus."""
 
-    def test_header_loads_trigger_on_first_call(self, monkeypatch):
-        """The first header() loads trigger and fires its event with the title.
-
-        Mutant: header() marks trigger loaded but never binds it — killed.
-        """
+    def test_header_fires_nothing(self, monkeypatch):
+        """Mutant: put the cli_header_displayed fire back in header() - killed."""
         fired = []
-        monkeypatch.setattr(display, "_TRIGGER_LOADED", False)
-        monkeypatch.setattr(display, "_TRIGGER", None)
-        monkeypatch.setattr(trigger_core.trigger, "fire", lambda event, **kw: fired.append((event, kw)))
-        cons, _get_output = _make_capture_console()
-        with patch.object(display, "CONSOLE", cons):
-            display.header("Test")
-        assert fired == [("cli_header_displayed", {"title": "Test"})]
-
-    def test_header_handles_import_error_for_trigger(self, monkeypatch):
-        """With trigger unimportable, header() still renders and does not raise.
-
-        Mutant: drop the except ImportError around the lazy import — killed.
-        """
-        monkeypatch.setattr(display, "_TRIGGER_LOADED", False)
-        monkeypatch.setattr(display, "_TRIGGER", None)
+        monkeypatch.setattr(trigger_core.Trigger, "fire", classmethod(lambda _cls, event, **kw: fired.append(event)))
         cons, get_output = _make_capture_console()
-        with (
-            patch.object(display, "CONSOLE", cons),
-            patch.dict("sys.modules", {"aipass.trigger.apps.modules.core": None}),
-        ):
-            display.header("Trigger Fail Test")
-        assert "Trigger Fail Test" in get_output()
+        with patch.object(display, "CONSOLE", cons):
+            display.header("Quiet Title")
+        assert "Quiet Title" in get_output()
+        assert fired == []
 
 
 class TestInfrastructureMocking:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_purge.py
 # Description: Tests for sent/deleted auto-purge handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/email/purge.py."""
@@ -265,3 +265,23 @@ class TestVectorizationFailureIsNotSuccess:
         assert result["success"] is True
         assert result["purged_count"] == 5
         assert sorted(f.name for f in folder.glob("*.json")) == [f"email_{i:03d}.json" for i in range(5, 15)]
+
+
+def test_a_file_that_failed_to_load_is_never_deleted(tmp_path, monkeypatch):
+    """A mail the purge could not read was never vectorized, so deleting it would lose it for good."""
+    _populate_folder(tmp_path / "sent", 12)
+    oldest = tmp_path / "sent" / "email_000.json"
+    kept_mtime = oldest.stat().st_mtime
+    oldest.write_text("{not json", encoding="utf-8")
+    os.utime(oldest, (kept_mtime, kept_mtime))
+    monkeypatch.setattr(
+        purge_mod, "_vectorize_emails", lambda emails, folder_type: {"success": True, "count": len(emails)}
+    )
+
+    result = purge_sent_folder(tmp_path)
+
+    assert result["success"] is True
+    assert result["purged_count"] == 1, "two files were past the threshold; only the readable one is purged"
+    assert not (tmp_path / "sent" / "email_001.json").exists(), "the vectorized mail is purged"
+    assert oldest.exists(), "the unreadable mail stays on disk: nothing holds a copy"
+    assert result["load_errors"] and oldest.name in result["load_errors"][0]

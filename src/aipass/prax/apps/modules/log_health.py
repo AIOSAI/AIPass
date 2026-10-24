@@ -3,7 +3,7 @@
 # Description: PRAX Log Health Command — rate overview
 # Version: 1.0.0
 # Created: 2026-07-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -139,7 +139,7 @@ def _get_event_callback():
         from aipass.trigger.apps.modules.core import trigger
 
         return trigger.fire
-    except ImportError as exc:
+    except (ImportError, OSError) as exc:
         logger.info("[log-health] trigger not available: %s", exc)
         return None
 
@@ -158,6 +158,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     if wants_help(args):
         print_help()
         return True
+
+    if args[0] in ("scan", "snapshot") and len(args) > 1:
+        refuse("log-health", args[1], "drone @prax log-health --help")
 
     from aipass.prax.apps.handlers.monitoring.rate_tracker import scan_rates, get_snapshot, configure
     from aipass.prax.apps.handlers.config.load import get_system_logs_dir
@@ -190,9 +193,8 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    args = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
     try:
-        handle_command("log-health", args)
+        handle_command("log-health", sys.argv[1:])
     except UnknownArgument as exc:
         error(str(exc), suggestion=exc.usage)
         sys.exit(1)

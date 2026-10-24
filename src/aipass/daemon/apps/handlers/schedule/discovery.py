@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2026-06-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ and returns validated Job dicts.
 Reference: docs/schedule_contract.md"""
 
 import json
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -24,7 +25,6 @@ from aipass.daemon.apps.handlers.module_root import module_file
 from aipass.daemon.apps.handlers.schedule import command_job
 
 _REPO_ROOT = module_file(__file__).parents[6]  # up to repo root
-_SRC_AIPASS = _REPO_ROOT / "src" / "aipass"
 _REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
 _PROJECTS_DIR_NAME = "projects"
 
@@ -52,12 +52,6 @@ _CORE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
 # Reads its mail live; must never be woken into an interactive session by a scheduled job.
 MANAGER_CLASS = "manager"
-
-
-def declared_residency(branch_path: Path) -> Optional[str]:
-    """What the passport at *branch_path* declares itself to be.
-    Delegates to @memory's fleet gateway; kept here because callers and tests import it from discovery."""
-    return fleet.declared_residency(branch_path)
 
 
 def _source_label(record: dict, repo_root: Path) -> str:
@@ -124,25 +118,11 @@ def active_citizens(repo_root: Optional[Path] = None) -> List[dict]:
     return records
 
 
-def active_branch_map(repo_root: Optional[Path] = None) -> dict:
-    """Return dir_name -> branch_email for every active, registered citizen."""
-    return {c["dir_name"]: c["email"] for c in active_citizens(repo_root)}
-
-
 def framework_root(repo_root: Optional[Path] = None) -> Path:
     """This install's src/aipass/ — the directory every framework citizen's branch lives in.
-    Computed per call, not frozen like _SRC_AIPASS, so a patched root moves fleet and boundary together."""
+    Computed per call, so a patched _REPO_ROOT moves fleet and boundary together."""
     root = Path(repo_root) if repo_root is not None else _REPO_ROOT
     return root / "src" / "aipass"
-
-
-def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
-    """Return the on-disk path for a branch directory name.
-    Falls back to src/aipass/<dir_name> for anything unregistered."""
-    for citizen in active_citizens(repo_root):
-        if citizen["dir_name"] == dir_name:
-            return citizen["path"]
-    return _SRC_AIPASS / dir_name
 
 
 def _stat_passport(passport_file: Path) -> None:
@@ -182,6 +162,28 @@ def citizen_class_for(branch_path: Path) -> Optional[str]:
         logger.warning("[discovery] Unreadable citizen_class in passport at %s", passport_file)
         return None
     return citizen_class
+
+
+_CLOCK_TIME = re.compile(r"(\d{1,2}):(\d{2})")
+
+
+def _time_problem(schedule: dict) -> str:
+    """'' when ``time`` is absent or readable for its type ("HH:MM", or an hourly minute 0-59), else why not."""
+    if "time" not in schedule:
+        return ""
+    raw = schedule["time"]
+    sched_type = schedule.get("type")
+    if sched_type in ("daily", "rotation"):
+        match = _CLOCK_TIME.fullmatch(raw) if isinstance(raw, str) else None
+        if not match or int(match[1]) > 23 or int(match[2]) > 59:
+            return f'time {raw!r} is not a clock time "HH:MM"'
+    elif sched_type == "hourly":
+        minute = raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+        if isinstance(raw, str) and raw.isdigit():
+            minute = int(raw)
+        if minute is None or not 0 <= minute <= 59:
+            return f"time {raw!r} is not a minute past the hour, 0-59"
+    return ""
 
 
 def _validate_job(job: dict, file_path: Path) -> bool:
@@ -226,6 +228,11 @@ def _validate_job(job: dict, file_path: Path) -> bool:
             )
             return False
 
+    problem = _time_problem(schedule)
+    if problem:
+        logger.warning("[discovery] Job '%s' refused in %s: %s", job.get("id"), file_path, problem)
+        return False
+
     if "command" not in job:
         if command_job.notify_email(job):
             logger.warning("[discovery] Job '%s' in %s: notify.email works on command jobs only", job["id"], file_path)
@@ -261,8 +268,8 @@ def _load_schedule_file(file_path: Path) -> Optional[dict]:
     return data
 
 
-def _jobs_for_citizen(citizen: dict) -> List[dict]:
-    """Read one citizen's .daemon/*.json files and return its validated jobs."""
+def _jobs_for_citizen(citizen: dict, skipped_owners: set) -> List[dict]:
+    """Return one citizen's validated jobs; an unreadable file or refused job adds it to *skipped_owners*."""
     daemon_dir = citizen["path"] / ".daemon"
     if not daemon_dir.is_dir():
         return []
@@ -274,10 +281,12 @@ def _jobs_for_citizen(citizen: dict) -> List[dict]:
 
         data = _load_schedule_file(sched_file)
         if data is None:
+            skipped_owners.add(citizen["email"])
             continue
 
         for job in data["jobs"]:
-            if not _validate_job(job, sched_file):
+            if not isinstance(job, dict) or not _validate_job(job, sched_file):
+                skipped_owners.add(citizen["email"])
                 continue
 
             entry = {
@@ -302,8 +311,10 @@ def _jobs_for_citizen(citizen: dict) -> List[dict]:
     return jobs
 
 
-def discover_jobs() -> list:
-    """Sweep every active citizen's .daemon/*.json and return validated Job dicts."""
+def discover_jobs(skipped_owners: Optional[set] = None) -> list:
+    """Sweep every active citizen's .daemon/*.json; *skipped_owners* collects owners that did not read cleanly."""
+    if skipped_owners is None:
+        skipped_owners = set()
     citizens = active_citizens()
 
     if not citizens:
@@ -314,7 +325,7 @@ def discover_jobs() -> list:
     for citizen in citizens:
         if citizen["dir_name"] in SKIP_DIRS or citizen["dir_name"].startswith("."):
             continue
-        jobs.extend(_jobs_for_citizen(citizen))
+        jobs.extend(_jobs_for_citizen(citizen, skipped_owners))
 
     logger.info("[discovery] Discovered %d job(s) across %d branch(es)", len(jobs), len({j["owner"] for j in jobs}))
     json_handler.log_operation("discover_jobs", {"count": len(jobs)})

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_conftest_fixture_check.py
 # Description: Unused Conftest Fixture Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Unused Conftest Fixture Standards Checker Handler
 Reference: unused_conftest_fixture.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path, PurePath
 from typing import Dict, List, Set, Tuple
@@ -20,6 +21,7 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import in_skipped_dir
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "branch_level"
@@ -54,7 +56,7 @@ def _parse(path: Path) -> ast.Module | None:
     """
     try:
         return ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, OSError) as exc:
+    except (SyntaxError, OSError, ValueError) as exc:
         logger.info("[unused_conftest_fixture] Unparseable, nothing scanned: %s", exc)
         return None
 
@@ -112,9 +114,7 @@ def reported_path(path: PurePath, root: PurePath) -> str:
     return path.relative_to(root).as_posix()
 
 
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

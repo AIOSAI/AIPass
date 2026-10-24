@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -120,63 +120,6 @@ def find_repo_root() -> Path:
         logger.warning("find_repo_root: git rev-parse fallback failed, using CWD: %s", exc)
 
     return cwd
-
-
-def _create_exclusive(path: str) -> int:
-    """Create the lock file exclusively and return its open fd.
-
-    O_CREAT | O_EXCL is the whole atomicity of the PR lock. Windows answers a lock
-    mid-removal with PermissionError, not FileExistsError.
-    """
-    return os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-
-
-def acquire_lock(branch_name: str) -> dict:
-    """Acquire an atomic lock for git PR workflow.
-
-    Never waits: a held lock answers blocked at once, naming the holder.
-    """
-    repo_root = find_repo_root()
-    lock_path = repo_root / _LOCK_FILENAME
-
-    lock_data = {
-        "branch": branch_name,
-        "feature_branch": "",
-        "started": datetime.now(timezone.utc).isoformat(),
-        "pid": os.getpid(),
-    }
-
-    try:
-        fd = _create_exclusive(str(lock_path))
-        try:
-            os.write(fd, json.dumps(lock_data, indent=2).encode("utf-8"))
-        finally:
-            os.close(fd)
-
-        json_handler.log_operation("acquire_lock", {"branch": branch_name})
-        logger.info("Lock acquired by %s", branch_name)
-        return {"success": True, "message": f"Lock acquired by {branch_name}"}
-
-    except FileExistsError:
-        holder_info = _read_lock_file(lock_path)
-        holder = holder_info.get("branch", "unknown") if holder_info else "unknown"
-        msg = f"Lock blocked: already held by {holder}"
-        logger.warning(msg)
-        return {"success": False, "message": msg}
-
-    except PermissionError as exc:
-        # Windows delete-pending: answer blocked, naming the holder or the denial, so a
-        # truly unwritable root does not pass for a merely busy lock.
-        holder_info = _read_lock_file(lock_path)
-        if holder_info:
-            msg = f"Lock blocked: already held by {holder_info.get('branch', 'unknown')}"
-        else:
-            msg = (
-                f"Lock blocked: create denied ({exc}) - a lock mid-release on Windows, retry; "
-                "if it repeats, the repo root is not writable"
-            )
-        logger.warning(msg)
-        return {"success": False, "message": msg}
 
 
 def release_lock(force: bool = False) -> dict:

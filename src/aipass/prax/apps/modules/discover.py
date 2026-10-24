@@ -3,7 +3,7 @@
 # Description: PRAX Discover Command
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX Discover Module
@@ -70,6 +70,8 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if args[0] != "run":
         refuse("discover", args[0], "drone @prax discover --help")
+    if len(args) > 1:
+        refuse("discover", args[1], "drone @prax discover --help")
 
     json_handler.log_operation("discover_invoked", {})
     console.print()

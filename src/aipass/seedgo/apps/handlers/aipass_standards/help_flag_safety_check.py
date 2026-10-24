@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_flag_safety_check.py
 # Description: Help-Flag Safety Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Help-Flag Safety Standards Checker Handler
@@ -13,13 +13,14 @@ Reference: help_flag_safety.md
 
 import ast
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import AbstractSet, Dict, Iterator, List, Optional, Sequence, Set, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
 AUDIT_SCOPE = "all_files"
+READS_BRANCH = True
 
 # CLI routing conventions live in production code. Test files build argument
 # lists as fixtures, never as a command surface a user can type into.
@@ -108,13 +109,12 @@ def _fixed_slot(node: ast.AST) -> Optional[Tuple[str, int]]:
     return None
 
 
-def _is_whole_sequence(node: ast.AST) -> bool:
-    """Whether *node* names a whole sequence rather than one fixed element."""
-    if isinstance(node, ast.Name):
-        return True
-    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
-        return True
-    return isinstance(node, ast.Attribute)
+def _is_whole_sequence(node: ast.AST, names: Set[str]) -> bool:
+    """Whether *node* is the whole argument list (or argv), not one element or an unrelated constant."""
+    whole = isinstance(node, (ast.Name, ast.Attribute)) or (
+        isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)
+    )
+    return whole and (_reads_argv(node) or bool(_names_used(node) & names))
 
 
 def _compares_against_help(node: ast.Compare) -> bool:
@@ -149,21 +149,22 @@ def find_fixed_gates(func: ast.AST) -> List[Tuple[str, int, int]]:
     return gates
 
 
-def _is_membership_scan(node: ast.Compare) -> bool:
+def _is_membership_scan(node: ast.Compare, names: Set[str]) -> bool:
     """``"--help" in args`` -- the flag tested against a whole sequence."""
     if not _is_help_constant(node.left):
         return False
     return any(
-        isinstance(op, ast.In) and _is_whole_sequence(comparator) for op, comparator in zip(node.ops, node.comparators)
+        isinstance(op, ast.In) and _is_whole_sequence(comparator, names)
+        for op, comparator in zip(node.ops, node.comparators)
     )
 
 
-def _is_comprehension_scan(node: ast.AST) -> bool:
+def _is_comprehension_scan(node: ast.AST, names: Set[str]) -> bool:
     """``any(a in ("--help", "-h") for a in args)`` and its comprehension kin."""
     if not isinstance(node, (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
         return False
     for generator in node.generators:
-        if not _is_whole_sequence(generator.iter):
+        if not _is_whole_sequence(generator.iter, names):
             continue
         tests = list(generator.ifs)
         if isinstance(node.elt, ast.Compare):
@@ -180,9 +181,9 @@ def _is_free_help_test(test: ast.AST) -> bool:
     return _compares_against_help(test) and _fixed_slot(test.left) is None
 
 
-def _is_loop_scan(node: ast.AST) -> bool:
+def _is_loop_scan(node: ast.AST, names: Set[str]) -> bool:
     """``for token in args: if token in ("--help", "-h")``."""
-    if not isinstance(node, ast.For) or not _is_whole_sequence(node.iter):
+    if not isinstance(node, ast.For) or not _is_whole_sequence(node.iter, names):
         return False
     return any(
         isinstance(inner, ast.Compare) and isinstance(inner.left, ast.Name) and _compares_against_help(inner)
@@ -202,15 +203,17 @@ def _scan_call_kind(node: ast.Call) -> Optional[str]:
     return None
 
 
-def has_whole_list_scan(func: ast.AST) -> Optional[str]:
+def has_whole_list_scan(func: ast.FunctionDef | ast.AsyncFunctionDef) -> Optional[str]:
     """Return a description of the whole-sequence help scan, or None."""
+    params = {a.arg for a in ast.walk(func.args) if isinstance(a, ast.arg)}
+    names = argv_tainted_names(func.body, params)
     for node in ast.walk(func):
         line = getattr(node, "lineno", 0)
-        if isinstance(node, ast.Compare) and _is_membership_scan(node):
+        if isinstance(node, ast.Compare) and _is_membership_scan(node, names):
             return f"membership test at line {line}"
-        if _is_comprehension_scan(node):
+        if _is_comprehension_scan(node, names):
             return f"comprehension scan at line {line}"
-        if _is_loop_scan(node):
+        if _is_loop_scan(node, names):
             return f"loop scan at line {line}"
         if isinstance(node, ast.Call):
             kind = _scan_call_kind(node)
@@ -250,6 +253,10 @@ def _binding_use(node: ast.AST, sequences: Set[str], line: int) -> List[Tuple[st
     if not isinstance(node, ast.Assign):
         return []
     value = node.value
+    unpacked = [t for t in node.targets if isinstance(t, (ast.Tuple, ast.List))]
+    if unpacked and isinstance(value, ast.Name) and value.id in sequences:
+        first = next((n.id for n in ast.walk(unpacked[0]) if isinstance(n, ast.Name)), value.id)
+        return [("value-slot", first, line)]
     if not isinstance(value, ast.Subscript) or not isinstance(value.value, ast.Name):
         return []
     if value.value.id not in sequences:
@@ -473,7 +480,7 @@ def find_unread_args_violation(closure: Sequence[ast.AST]) -> Optional[Tuple[str
     return (_ENTRY_FUNC, args_param, word, dispatch_line, call, call_line)
 
 
-def routing_closure(tree: ast.Module) -> List[ast.AST]:
+def routing_closure(tree: ast.Module) -> List[ast.FunctionDef | ast.AsyncFunctionDef]:
     """Return handle_command and the module-level helpers it routes through.
 
     Branches often keep ``handle_command`` as a one-line forwarder with the gate in
@@ -488,11 +495,11 @@ def routing_closure(tree: ast.Module) -> List[ast.AST]:
     if entry is None:
         return []
 
-    closure: List[ast.AST] = [entry]
+    closure: List[ast.FunctionDef | ast.AsyncFunctionDef] = [entry]
     seen = {_ENTRY_FUNC}
-    frontier: List[ast.AST] = [entry]
+    frontier: List[ast.FunctionDef | ast.AsyncFunctionDef] = [entry]
     for _ in range(_MAX_DELEGATE_DEPTH):
-        next_frontier: List[ast.AST] = []
+        next_frontier: List[ast.FunctionDef | ast.AsyncFunctionDef] = []
         for func in frontier:
             for node in ast.walk(func):
                 if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
@@ -520,7 +527,7 @@ def router_normalises(apps_dir: Path) -> Optional[str]:
             continue
         try:
             tree = ast.parse(entry_point.read_text(encoding="utf-8"), filename=str(entry_point))
-        except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+        except (OSError, SyntaxError, UnicodeDecodeError, ValueError) as exc:
             logger.info("[help_flag_safety] Cannot read router %s: %s", entry_point, exc)
             continue
         for node in ast.walk(tree):
@@ -612,14 +619,14 @@ def _assignments(scope: Sequence[ast.stmt]) -> Iterator[Tuple[List[ast.expr], as
             yield ([node.target], node.value)
 
 
-def argv_tainted_names(scope: Sequence[ast.stmt]) -> Set[str]:
+def argv_tainted_names(scope: Sequence[ast.stmt], seed: AbstractSet[str] = frozenset()) -> Set[str]:
     """Names on the standalone path that carry command-line text.
 
     ``args = sys.argv[1:]``, ``rest = [a for a in sys.argv[1:] if ...]`` and
     ``parsed, extra = parser.parse_known_args()`` all bind argv. Chains are
     followed to a fixpoint so a value renamed twice is still recognised.
     """
-    tainted: Set[str] = set()
+    tainted: Set[str] = set(seed)
     for _ in range(_MAX_DELEGATE_DEPTH):
         before = len(tainted)
         for targets, value in _assignments(scope):
@@ -652,11 +659,11 @@ def _help_constants(node: ast.AST) -> Set[str]:
     return {str(sub.value) for sub in ast.walk(node) if isinstance(sub, ast.Constant) and _is_help_constant(sub)}
 
 
-def _scan_tokens(node: ast.AST) -> Set[str]:
+def _scan_tokens(node: ast.AST, names: Set[str]) -> Set[str]:
     """Help tokens a single whole-sequence scan actually tests for."""
-    if isinstance(node, ast.Compare) and _is_membership_scan(node):
+    if isinstance(node, ast.Compare) and _is_membership_scan(node, names):
         return _help_constants(node.left)
-    if _is_comprehension_scan(node) or _is_loop_scan(node):
+    if _is_comprehension_scan(node, names) or _is_loop_scan(node, names):
         return _help_constants(node)
     if isinstance(node, ast.Call):
         return _scan_call_tokens(node)
@@ -699,8 +706,9 @@ def _argparse_tokens(scope: Sequence[ast.stmt]) -> Set[str]:
 def screened_help_tokens(scope: Sequence[ast.stmt]) -> Set[str]:
     """Help tokens the standalone path itself catches anywhere on the line."""
     tokens: Set[str] = _argparse_tokens(scope)
+    names = argv_tainted_names(scope)
     for node in _walk_all(scope):
-        tokens |= _scan_tokens(node)
+        tokens |= _scan_tokens(node, names)
     return tokens
 
 
@@ -839,7 +847,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[help_flag_safety] Skipped %s: SyntaxError during parse", path)
         return _result(False, "File parseable", f"Syntax error: {exc}", 0)
 

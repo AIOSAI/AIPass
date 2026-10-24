@@ -178,7 +178,7 @@ def main():
             return 0
 
         if args[0] in ["--version", "-V"]:
-            console.print("AI_MAIL v1.0.0")
+            console.print("AI_MAIL v2.0.0")
             return 0
 
         if args[0] in ["--help", "-h", "help"]:

@@ -2,7 +2,7 @@
 
 # monitor — Mission Control
 
-The real-time terminal console: threads, multi-CLI session reading, the commons feed, the Telegram relay.
+The real-time terminal console: threads, multi-CLI session reading, the commons feed.
 
 ---
 
@@ -14,7 +14,6 @@ drone @prax monitor run                  # Launch Mission Control (all branches)
 drone @prax monitor run seedgo,cli       # Monitor specific branches
 drone @prax monitor run commons          # Live social feed of The Commons
 drone @prax monitor run commons --logs   # Tail commons' technical logs instead
-drone @prax monitor run --relay          # Mirror to Telegram (prax_monitor bot)
 drone @prax monitor --help               # Monitor usage
 ```
 
@@ -74,14 +73,11 @@ dynamic value is escaped before it reaches Rich — a tailed line containing
 `[/usr/bin]` is shown, not parsed. If a line still cannot be drawn, the failure
 costs that one line: the display thread reports it (rate-limited, in plain
 language) and keeps consuming. It is the queue's only consumer, and a consumer
-that dies leaves the queue permanently full with nobody to empty it. The
-Telegram relay is fed before the console for the same reason — one sink failing
-must not take the other with it.
+that dies leaves the queue permanently full with nobody to empty it.
 
 **Commons feed mode** (`monitor run commons`) is a different watcher, not a branch
 filter — it renders live social activity in The Commons (posts, comments, votes,
 reactions) read-only, instead of file/log events. `--logs` opts back out to tailing
 the commons branch's technical logs. Feed mode adds two interactive commands of its
-own: `filter <room>` (comma-separated) and `filter clear`. `--relay` works in both
-modes, and is also enabled by `AIPASS_PRAX_MONITOR_RELAY=1`.
+own: `filter <room>` (comma-separated) and `filter clear`.
 

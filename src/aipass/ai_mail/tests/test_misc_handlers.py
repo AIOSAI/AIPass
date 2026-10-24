@@ -3,27 +3,22 @@
 # Description: Tests for miscellaneous small handlers
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
-"""Tests for apps/handlers/central_writer.py and four other small handlers it sits beside."""
+"""Tests for apps/handlers/central_writer.py and two other small handlers it sits beside."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — CENTRAL_FILE, CONFIG_FILE and DAEMON_STATE_FILE path constants
+# seedgo: no-test-needed(constant) — the CENTRAL_FILE path constant
 
 import json
-import os
-import subprocess
-import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.handlers.central_writer as central_mod
-import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
 import aipass.ai_mail.apps.handlers.email.delivery as delivery_mod
 from aipass.ai_mail.apps.handlers.central_writer import update_central
-from aipass.ai_mail.apps.handlers.dispatch.status import check_pid_status
 from aipass.ai_mail.apps.handlers.email.delivery import deliver_to_inbox_file
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
 
@@ -32,22 +27,6 @@ from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_targe
 def _silence_json_handler_central():
     """Prevent log_operation in central_writer from writing real JSON files."""
     with patch("aipass.ai_mail.apps.handlers.central_writer.json_handler") as mock_jh:
-        mock_jh.log_operation.return_value = True
-        yield mock_jh
-
-
-@pytest.fixture(autouse=True)
-def _silence_json_handler_status():
-    """Prevent log_operation in dispatch status from writing real JSON files."""
-    with patch("aipass.ai_mail.apps.handlers.dispatch.status.json_handler") as mock_jh:
-        mock_jh.log_operation.return_value = True
-        yield mock_jh
-
-
-@pytest.fixture(autouse=True)
-def _silence_json_handler_daemon():
-    """Prevent log_operation in daemon from writing real JSON files."""
-    with patch("aipass.ai_mail.apps.handlers.dispatch.daemon.json_handler") as mock_jh:
         mock_jh.log_operation.return_value = True
         yield mock_jh
 
@@ -91,83 +70,6 @@ def test_update_central_propagates_error():
         pytest.raises(RuntimeError, match="scan failed"),
     ):
         update_central()
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (ps command)")
-def test_check_pid_status_running():
-    """Returns RUNNING for the current process PID."""
-    result = check_pid_status(os.getpid())
-
-    assert result == "RUNNING"
-
-
-def test_check_pid_status_completed():
-    """Returns COMPLETED for a dead/nonexistent PID."""
-    with patch("aipass.ai_mail.apps.handlers.dispatch.status.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(returncode=1)
-        result = check_pid_status(999999999)
-
-    assert result == "COMPLETED"
-
-
-def test_check_pid_status_unknown_on_error():
-    """Returns UNKNOWN when subprocess raises an error."""
-    with patch("aipass.ai_mail.apps.handlers.dispatch.status.subprocess.run") as mock_run:
-        mock_run.side_effect = subprocess.SubprocessError("ps failed")
-        result = check_pid_status(12345)
-
-    assert result == "UNKNOWN"
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only process API (os.WNOHANG)")
-@pytest.mark.usefixtures("daemon_signals_restored")
-def test_daemon_poll_cycle_is_called(tmp_path, monkeypatch):
-    """run_daemon calls poll_cycle and save_daemon_state in the loop."""
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
-    monkeypatch.setattr(daemon_mod, "CONFIG_FILE", tmp_path / "safety_config.json")
-    monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", tmp_path / "daemon_state.json")
-
-    poll_calls = []
-    # _remove_pid_file runs for real against the tmp_path pid file this process owns
-    pid_file = tmp_path / "daemon.pid"
-    pid_file.write_text(str(os.getpid()), encoding="utf-8")
-
-    def mock_poll_cycle(config, state):
-        """Track poll_cycle invocations and trigger shutdown."""
-        poll_calls.append(True)
-        daemon_mod.SHUTDOWN = True
-        return 0
-
-    with (
-        patch.object(daemon_mod, "_write_pid_file", return_value=True),
-        patch.object(daemon_mod, "poll_cycle", side_effect=mock_poll_cycle),
-        patch.object(daemon_mod, "is_kill_switch_active", return_value=False),
-        patch("os.waitpid", side_effect=ChildProcessError),
-    ):
-        daemon_mod.SHUTDOWN = False
-        daemon_mod.run_daemon()
-
-    assert len(poll_calls) == 1
-    # save_daemon_state runs for real: its only write is the tmp_path state file
-    saved = json.loads((tmp_path / "daemon_state.json").read_text(encoding="utf-8"))
-    assert "last_updated" in saved
-    assert not pid_file.exists()
-
-    daemon_mod.SHUTDOWN = False
-
-
-@pytest.mark.usefixtures("daemon_signals_restored")
-def test_daemon_exits_if_pid_file_blocked(tmp_path, monkeypatch):
-    """run_daemon returns immediately when _write_pid_file returns False."""
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", tmp_path / "daemon.pid")
-
-    with (
-        patch.object(daemon_mod, "_write_pid_file", return_value=False),
-        patch.object(daemon_mod, "poll_cycle") as mock_poll,
-    ):
-        daemon_mod.run_daemon()
-
-    mock_poll.assert_not_called()
 
 
 @pytest.fixture

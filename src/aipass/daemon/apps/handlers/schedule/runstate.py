@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-06-15
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Daemon runstate — tracks last_run/next_run per job and evaluates due-ness.
 
 import json
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import AbstractSet, Optional
 
 from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
@@ -27,28 +27,46 @@ def _empty_runstate() -> dict:
     return {"version": 1, "jobs": {}}
 
 
+class RunstateUnreadable(Exception):
+    """The runstate file exists but cannot be read. Never answered as empty: the tick would save that."""
+
+
 def load_runstate() -> dict:
-    """Load daemon_runstate.json. Returns empty runstate if missing."""
+    """Load daemon_runstate.json. Returns empty runstate if missing; raises RunstateUnreadable if unreadable."""
     if not RUNSTATE_FILE.exists():
         return _empty_runstate()
     try:
         with open(RUNSTATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        if "jobs" not in data:
-            data["jobs"] = {}
-        return data
     except (json.JSONDecodeError, OSError) as e:
-        logger.error("[runstate] Failed to load: %s", e)
-        return _empty_runstate()
+        logger.error("[runstate] Failed to load %s: %s", RUNSTATE_FILE, e)
+        raise RunstateUnreadable(f"{RUNSTATE_FILE} is unreadable ({e}) — repair or restore it") from e
+    if not isinstance(data, dict):
+        logger.error("[runstate] Non-dict root in %s", RUNSTATE_FILE)
+        raise RunstateUnreadable(f"{RUNSTATE_FILE} does not hold a JSON object — repair or restore it")
+    data.setdefault("jobs", {})
+    return data
+
+
+def _dump(data: dict, f) -> None:
+    """The JSON write itself; a seam so a test can kill a save mid-write."""
+    json.dump(data, f, indent=2)
+    f.write("\n")
+
+
+def write_atomic(target, write) -> None:
+    """Call write(f) on a sibling tmp file, then replace target. A reader never sees a partial file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        write(f)
+    tmp.replace(target)
 
 
 def save_runstate(data: dict) -> bool:
-    """Save daemon_runstate.json. Returns True on success."""
+    """Save daemon_runstate.json atomically. Returns True on success."""
     try:
-        RUNSTATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(RUNSTATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-            f.write("\n")
+        write_atomic(RUNSTATE_FILE, lambda f: _dump(data, f))
         return True
     except OSError as e:
         logger.error("[runstate] Failed to save: %s", e)
@@ -65,28 +83,28 @@ def get_job_state(runstate: dict, owner: str, job_id: str) -> dict:
     return runstate.get("jobs", {}).get(job_key(owner, job_id), {})
 
 
-def _already_ran_today(last_run: Optional[str], now: datetime) -> bool:
-    """Check if a daily job already ran today; an unreadable last_run answers no (one early fire)."""
+def _ran_since(last_run: Optional[str], edge: datetime) -> bool:
+    """Did last_run land at or after *edge*? An unreadable last_run answers no (one early fire)."""
     if not last_run:
         return False
     try:
-        last_dt = datetime.fromisoformat(last_run)
-        return last_dt.date() == now.date()
+        return datetime.fromisoformat(last_run) >= edge
     except (ValueError, TypeError) as e:
-        logger.info("[runstate] Daily last_run parse failed: %s", e)
+        logger.info("[runstate] last_run parse failed: %s", e)
         return False
 
 
-def _already_ran_this_hour(last_run: Optional[str], now: datetime) -> bool:
-    """Check if an hourly job already ran this hour; an unreadable last_run answers no (one early fire)."""
-    if not last_run:
-        return False
-    try:
-        last_dt = datetime.fromisoformat(last_run)
-        return last_dt.hour == now.hour and last_dt.date() == now.date()
-    except (ValueError, TypeError) as e:
-        logger.info("[runstate] Hourly last_run parse failed: %s", e)
-        return False
+def _nearest_target(now: datetime, today_target: datetime, period: timedelta) -> datetime:
+    """The occurrence of a repeating target closest to *now*: a window wrapping midnight is ONE window."""
+    return min((today_target + k * period for k in (-1, 0, 1)), key=lambda t: abs(t - now))
+
+
+def _fired_occurrence(fired: datetime, today_target: datetime, period: timedelta) -> datetime:
+    """The occurrence a fire at *fired* served: the window it sat in, else the last target before it (catch-up)."""
+    nearest = _nearest_target(fired, today_target, period)
+    if abs(fired - nearest) <= timedelta(minutes=WINDOW_MINUTES):
+        return nearest
+    return max(t for t in (today_target + k * period for k in (-1, 0, 1)) if t <= fired)
 
 
 # Firing-window half-width; window_closed_unrun reads the same name, so fire and catch-up edge move together.
@@ -111,12 +129,12 @@ def _is_daily_due(schedule: dict, last_run: Optional[str], now: datetime) -> boo
     target_minutes = _target_minutes(schedule)
     if target_minutes is None:
         return False
-    current_minutes = now.hour * 60 + now.minute
-    minutes_diff = abs(current_minutes - target_minutes)
-    minutes_diff = min(minutes_diff, MINUTES_PER_DAY - minutes_diff)
-    if minutes_diff > WINDOW_MINUTES:
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    target = _nearest_target(now, midnight + timedelta(minutes=target_minutes), timedelta(days=1))
+    window = timedelta(minutes=WINDOW_MINUTES)
+    if abs(now - target) > window:
         return False
-    return not _already_ran_today(last_run, now)
+    return not _ran_since(last_run, target - window)
 
 
 def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
@@ -127,11 +145,12 @@ def _is_hourly_due(schedule: dict, last_run: Optional[str], now: datetime) -> bo
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Hourly time parse failed for %r: %s", target_m_str, e)
         return False
-    minutes_diff = abs(now.minute - target_m)
-    minutes_diff = min(minutes_diff, 60 - minutes_diff)
-    if minutes_diff > WINDOW_MINUTES:
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    target = _nearest_target(now, hour + timedelta(minutes=target_m), timedelta(hours=1))
+    window = timedelta(minutes=WINDOW_MINUTES)
+    if abs(now - target) > window:
         return False
-    return not _already_ran_this_hour(last_run, now)
+    return not _ran_since(last_run, target - window)
 
 
 def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
@@ -155,7 +174,7 @@ def _is_interval_due(schedule: dict, last_run: Optional[str], now: datetime) -> 
 
 
 def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> bool:
-    """Check if a one-shot job is due (due_date <= today, not completed).
+    """Check if a one-shot job is due (due_date reached, not completed). A date alone is due from midnight.
 
     An unreadable due_date is never due: a one-shot fired early cannot be taken back.
     """
@@ -165,12 +184,10 @@ def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> boo
     if not due_date:
         return False
     try:
-        due_dt = (
-            datetime.fromisoformat(due_date).date()
-            if "T" in due_date
-            else datetime.strptime(due_date, "%Y-%m-%d").date()
-        )
-        return now.date() >= due_dt
+        due_dt = datetime.fromisoformat(due_date)
+        if due_dt.tzinfo is not None:
+            due_dt = due_dt.astimezone().replace(tzinfo=None)  # now is naive local time
+        return now >= due_dt
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Once due_date parse failed for %r: %s", due_date, e)
         return False
@@ -208,7 +225,8 @@ def window_closed_unrun(schedule: dict, last_run: Optional[str], now: datetime) 
     if now.hour * 60 + now.minute <= close_minutes:
         return False
 
-    return not _already_ran_today(last_run, now)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return not _ran_since(last_run, midnight + timedelta(minutes=target_minutes - WINDOW_MINUTES))
 
 
 def catch_up_on(schedule: dict) -> bool:
@@ -235,7 +253,8 @@ def _hourly_window_closed_unrun(schedule: dict, last_run: Optional[str], now: da
         return False
     if now.minute <= close_minute:
         return False
-    return not _already_ran_this_hour(last_run, now)
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    return not _ran_since(last_run, hour + timedelta(minutes=target_m - WINDOW_MINUTES))
 
 
 def _is_catch_up_due(schedule: dict, last_run: Optional[str], now: datetime) -> bool:
@@ -463,7 +482,7 @@ def is_job_due(job: dict, runstate: dict, now: Optional[datetime] = None) -> boo
     schedule = job.get("schedule", {})
     sched_type = schedule.get("type", "")
 
-    # _already_ran_today bounds both arms, so a caught-up run never double-fires its day.
+    # _ran_since bounds both arms, so a caught-up run never double-fires its day.
     checkers = {
         "daily": lambda: _is_daily_due(schedule, since_success, now) or _is_catch_up_due(schedule, since_success, now),
         "rotation": lambda: (
@@ -502,8 +521,8 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         except (ValueError, TypeError) as e:
             logger.info("[runstate] calc_next_run daily last_run parse failed: %s", e)
             return None
-        next_dt = (last_dt + timedelta(days=1)).replace(hour=target_h, minute=target_m, second=0, microsecond=0)
-        return next_dt.isoformat()
+        today_target = last_dt.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
+        return (_fired_occurrence(last_dt, today_target, timedelta(days=1)) + timedelta(days=1)).isoformat()
 
     if sched_type == "hourly":
         target_m_str = schedule.get("time", "0")
@@ -517,8 +536,8 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
         except (ValueError, TypeError) as e:
             logger.info("[runstate] calc_next_run hourly last_run parse failed: %s", e)
             return None
-        next_dt = (last_dt + timedelta(hours=1)).replace(minute=target_m, second=0, microsecond=0)
-        return next_dt.isoformat()
+        this_hour = last_dt.replace(minute=target_m, second=0, microsecond=0)
+        return (_fired_occurrence(last_dt, this_hour, timedelta(hours=1)) + timedelta(hours=1)).isoformat()
 
     if sched_type == "interval":
         interval = schedule.get("interval_minutes", 60)
@@ -619,10 +638,13 @@ def record_job_blocked(
     json_handler.log_operation("record_job_blocked", {"key": key})
 
 
-def prune_orphans(runstate: dict, active_keys: set) -> int:
-    """Remove runstate entries for jobs that no longer exist. Returns count pruned."""
+def prune_orphans(runstate: dict, active_keys: set, keep_owners: AbstractSet[str] = frozenset()) -> int:
+    """Remove runstate entries for jobs that no longer exist. Returns count pruned.
+
+    keep_owners: owners whose schedule did not read cleanly this tick; a job missing there may only be mid-edit.
+    """
     jobs = runstate.get("jobs", {})
-    orphans = set(jobs.keys()) - active_keys
+    orphans = {key for key in set(jobs) - active_keys if key.split("/", 1)[0] not in keep_owners}
     for key in orphans:
         del jobs[key]
     if orphans:

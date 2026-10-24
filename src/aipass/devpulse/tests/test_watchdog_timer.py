@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_timer.py
 # Description: Tests for the watchdog timer handler + router integration
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-14
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/watchdog/timer.py and the watchdog timer command that drives it."""
@@ -110,8 +110,9 @@ def test_wake_in_short_duration():
     assert result["state"] == "woke"
     assert result["reason"] == "timer fired"
     assert result["duration"] == "1s"
-    assert 1 <= result["elapsed"] <= 3
-    assert elapsed_real < 3
+    # 5 s, not 3: a 1 s sleep took 3.2 s under the fleet suite's four workers.
+    assert 1 <= result["elapsed"] <= 5
+    assert elapsed_real < 5
 
 
 # ─────────────────────────────────────────────────────────────────────────────

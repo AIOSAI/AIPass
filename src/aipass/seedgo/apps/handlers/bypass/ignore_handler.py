@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: ignore_handler.py
 # Description: Ignore Pattern Configuration Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Ignore Pattern Configuration Handler"""
 
+import functools
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -37,9 +38,6 @@ AUDIT_IGNORE_RULES: Tuple[Tuple[str, str], ...] = (
 )
 AUDIT_IGNORE_PATTERNS = [pattern for pattern, _reason in AUDIT_IGNORE_RULES]
 
-# standards_verify.py flags leftover usage; --full is live (forces a full re-scan), not deprecated.
-DEPRECATED_PATTERNS = {"--verbose": "removed from audit (v0.4.0)"}
-
 
 def get_template_ignore_patterns() -> List[str]:
     """Return list of template files to skip in architecture baseline check"""
@@ -47,19 +45,16 @@ def get_template_ignore_patterns() -> List[str]:
     return TEMPLATE_IGNORE_PATTERNS.copy()
 
 
-def get_audit_ignore_patterns() -> List[str]:
-    """Return list of patterns for files/directories to skip during audit"""
-    json_handler.log_operation("config_accessed", {"config": "audit_ignore_patterns"})
-    return AUDIT_IGNORE_PATTERNS.copy()
-
-
 def audit_ignore_match(rel_path: str) -> Optional[str]:
     """The AUDIT_IGNORE_PATTERNS entry that removes a branch-relative path from the audit, or None."""
     posix = Path(rel_path).as_posix()
-    return next(
-        (p for p in AUDIT_IGNORE_PATTERNS if pathspec.GitIgnoreSpec.from_lines([p]).match_file(posix)),
-        None,
-    )
+    return next((p for p, spec in _compiled_patterns(tuple(AUDIT_IGNORE_PATTERNS)) if spec.match_file(posix)), None)
+
+
+@functools.lru_cache(maxsize=8)
+def _compiled_patterns(patterns: Tuple[str, ...]) -> List[Tuple[str, pathspec.GitIgnoreSpec]]:
+    """Each pattern compiled once, not once per file asked about."""
+    return [(p, pathspec.GitIgnoreSpec.from_lines([p])) for p in patterns]
 
 
 def find_repo_root(path: Path) -> Optional[Path]:
@@ -70,6 +65,13 @@ def find_repo_root(path: Path) -> Optional[Path]:
 
 def _gitignore_spec(gitignore: Path) -> pathspec.GitIgnoreSpec:
     """One .gitignore file compiled the way git reads it; an unreadable one raises, never reads as empty."""
+    st = gitignore.stat()
+    return _compiled_gitignore(gitignore, st.st_mtime_ns, st.st_size)
+
+
+@functools.lru_cache(maxsize=256)
+def _compiled_gitignore(gitignore: Path, _mtime_ns: int, _size: int) -> pathspec.GitIgnoreSpec:
+    """Compiled once per file version: ignored_tracked_source asks per removed file."""
     return pathspec.GitIgnoreSpec.from_lines(gitignore.read_text(encoding="utf-8").splitlines())
 
 
@@ -102,12 +104,6 @@ def ignored_tracked_source(branch_path: Path, ignored_rel_paths: List[str]) -> L
     if repo_root is None:
         return list(ignored_rel_paths)
     return [rel for rel in ignored_rel_paths if not gitignored(branch_path / rel, repo_root)]
-
-
-def get_deprecated_patterns() -> dict:
-    """Return dict of deprecated patterns and their removal reasons"""
-    json_handler.log_operation("config_accessed", {"config": "deprecated_patterns"})
-    return DEPRECATED_PATTERNS.copy()
 
 
 # Scoped to its own directory's subtree, exactly like a real .gitignore.

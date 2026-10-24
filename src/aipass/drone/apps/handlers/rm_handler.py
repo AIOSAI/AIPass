@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.4.4
+# Version: 1.4.5
 # Created: 2026-06-02
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Contained safe-delete handler.
@@ -25,28 +25,10 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.drone.apps.handlers import deletion_log
-from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
+from aipass.drone.apps.handlers.router_handler import caller_cwd, find_project_root
 from aipass.drone.apps.handlers.json import json_handler
 
 _CARVEOUT_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
-
-
-def _find_project_root() -> Path | None:
-    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
-
-    With no cwd (the caller deleted it) the walk is skipped and AIPASS_HOME answers.
-    """
-    cwd = caller_cwd()
-    if cwd is not None:
-        for parent in [cwd, *cwd.parents]:
-            if registries_in(parent):
-                return parent.resolve()
-    aipass_home = os.environ.get("AIPASS_HOME")
-    if aipass_home:
-        home = Path(aipass_home)
-        if home.is_dir() and registries_in(home):
-            return home.resolve()
-    return None
 
 
 def get_allowed_roots() -> list[Path]:
@@ -54,7 +36,7 @@ def get_allowed_roots() -> list[Path]:
     seen: set[Path] = set()
     roots: list[Path] = []
 
-    project_root = _find_project_root()
+    project_root = find_project_root()
     if project_root is not None and project_root not in seen:
         seen.add(project_root)
         roots.append(project_root)
@@ -100,37 +82,11 @@ def _current_branch_root(project_root: Path | None) -> Path | None:
     return _find_branch_root(cwd.resolve(), project_root)
 
 
-def _detect_current_branch(project_root: Path | None) -> str | None:
-    """Return the branch name the CWD lives in, or None."""
-    branch_root = _current_branch_root(project_root)
-    return branch_root.name if branch_root else None
-
-
-def _resolve_git_dir(path: Path) -> Path | None:
-    """If *path* is a ``.git`` file (worktree pointer), return the resolved gitdir."""
-    try:
-        if path.is_file():
-            text = path.read_text(encoding="utf-8", errors="replace").strip()
-            if text.startswith("gitdir:"):
-                return Path(text.split(":", 1)[1].strip()).resolve()
-    except OSError as exc:
-        logger.warning("Failed to read .git file at %s: %s", path, exc)
-    return None
-
-
 def check_protected_dirs(resolved: Path) -> tuple[bool, str]:
     """The carve-out half of the fence, apart so stale mode can keep it. Returns ``(blocked, reason)``."""
-    parts = resolved.parts
-    for i, part in enumerate(parts):
+    for part in resolved.parts:
         if part in _CARVEOUT_DIRS:
             return True, f"Protected directory: path is inside {part}/"
-
-        if part == ".git":
-            git_path = Path(*parts[: i + 1]) if i > 0 else Path(part)
-            real_gitdir = _resolve_git_dir(git_path)
-            if real_gitdir and resolved.is_relative_to(real_gitdir):
-                return True, "Protected: path resolves inside .git worktree gitdir"
-
     return False, ""
 
 
@@ -140,22 +96,25 @@ def check_carveouts(resolved: Path, project_root: Path | None) -> tuple[bool, st
     if blocked:
         return blocked, reason
 
+    own = _current_branch_root(project_root)
     if project_root is not None:
         target_branch_root = _find_branch_root(resolved, project_root)
-        if target_branch_root is not None:
-            current_branch = _detect_current_branch(project_root)
-            if current_branch is None or target_branch_root.name != current_branch:
-                return True, f"Protected: path is inside sibling branch {target_branch_root.name}/"
+        if target_branch_root is not None and target_branch_root != own:
+            return True, f"Protected: path is inside sibling branch {target_branch_root.name}/"
 
-    return check_contained_citizens(resolved, project_root)
+    blocked, reason = check_contained_citizens(resolved, project_root, own)
+    if not blocked and own is not None and own.is_relative_to(resolved):
+        return True, f"Protected: path is your own branch {own.name}/ or holds it"
+    return blocked, reason
 
 
-def check_contained_citizens(resolved: Path, project_root: Path | None) -> tuple[bool, str]:
+def check_contained_citizens(resolved: Path, project_root: Path | None, own: Path | None) -> tuple[bool, str]:
     """Refuse a project directory that CONTAINS a citizen other than the caller.
 
     The sibling fence walks UP, so a target ABOVE the branches (``drone rm ..`` = ``src/aipass/``)
     passes it; this walks DOWN. A target inside a branch, the caller's own branch and symlinks
-    are skipped. A folder the walk cannot list refuses. Returns ``(blocked, reason)``.
+    are skipped. *own* is the caller's branch root, or None. A folder the walk cannot list refuses.
+    Returns ``(blocked, reason)``.
     """
     if project_root is None or not resolved.is_relative_to(project_root) or not resolved.is_dir():
         return False, ""
@@ -164,7 +123,6 @@ def check_contained_citizens(resolved: Path, project_root: Path | None) -> tuple
     if _find_branch_root(resolved, project_root) is not None:
         return False, ""
 
-    own = _current_branch_root(project_root)
     unreadable: list[OSError] = []
     for dirpath, dirnames, _filenames in os.walk(resolved, onerror=unreadable.append):
         if unreadable:
@@ -234,7 +192,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     if not roots:
         return [(p, False, "No allowed roots found (no project registry, no temp dir)") for p in paths]
 
-    project_root = _find_project_root()
+    project_root = find_project_root()
     json_handler.log_operation("rm", {"paths": paths, "roots": [str(r) for r in roots]})
 
     results: list[tuple[str, bool, str]] = []
@@ -484,7 +442,7 @@ def stale_sweep(request: StaleRequest) -> StaleReport:
         "rm_stale",
         {"dirs": list(request.dirs), "age": request.age, "dry_run": request.dry_run},
     )
-    project_root = _find_project_root()
+    project_root = find_project_root()
     cwd = caller_cwd()
     now = time.time()
     visited: set[Path] = set()

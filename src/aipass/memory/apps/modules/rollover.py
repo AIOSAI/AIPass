@@ -33,10 +33,7 @@ from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 
 
 from aipass.memory.apps.handlers.monitor import detector
-from aipass.memory.apps.handlers.rollover.orchestrator import (
-    execute_rollover as _handler_execute_rollover,
-    sync_line_counts as _handler_sync_line_counts,
-)
+from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover as _handler_execute_rollover
 from aipass.memory.apps.handlers.rollover import todo_report
 from aipass.memory.apps.handlers.repo_root import module_file
 
@@ -110,7 +107,6 @@ _SUBCOMMANDS = {
     "run": "Execute rollover for files exceeding limits (fleet-wide), plus one branch's todo pad",
     "status": "Show rollover statistics for all branches",
     "check": "Check which files need rollover (dry run, fleet-wide), plus one branch's todo pad",
-    "report-lines": "Report physical line counts per memory file (read-only)",
     "push": "Overwrite all per_branch limits to defaults (system-wide reset)",
 }
 
@@ -130,9 +126,6 @@ UNDRAINABLE_NOTE = (
     "Rollover drains lists only. These need their container migrated to the 3.0.0 list shape - "
     "another run changes nothing."
 )
-
-# The old name still routes, so a caller learns what replaced it; the new verb writes nothing.
-RENAMED_VERBS = {"sync-lines": "report-lines"}
 
 # The `verb` field of every JSON payload; one constant so payload and routing cannot drift.
 _VERB_ROLLOVER = "rollover"
@@ -175,15 +168,6 @@ def _handle_rollover_verb(args: List[str]) -> bool:
             check_triggers(branch)
         return True
 
-    if sub in RENAMED_VERBS:
-        _announce_rename(sub)
-        report_line_counts()
-        return True
-
-    if sub == "report-lines":
-        report_line_counts()
-        return True
-
     if sub == "push":
         push_defaults(json_mode)
         return True
@@ -224,15 +208,6 @@ def handle_command(command: str, args: List[str]) -> bool:
             check_triggers(branch)
         return True
 
-    if command in RENAMED_VERBS:
-        _announce_rename(command)
-        report_line_counts()
-        return True
-
-    if command == "report-lines":
-        report_line_counts()
-        return True
-
     if command == "process-plans":
         process_plans_command()
         return True
@@ -262,7 +237,6 @@ def print_help() -> None:
     console.print("  [cyan]status[/cyan]      Show rollover statistics for all branches")
     console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run), plus ONE branch's todo pad")
     console.print("              The file list is fleet-wide; only the todo pad follows --branch.")
-    console.print("  [cyan]report-lines[/cyan] Report line counts per memory file (read-only)")
     console.print("  [cyan]push[/cyan]        Reset ALL per_branch limits to defaults (system-wide, use with caution)")
     console.print("  [cyan]help[/cyan]        Show this help message")
     console.print()
@@ -498,40 +472,6 @@ def process_plans_command() -> None:
     json_handler.log_operation(
         "process_plans_command", {"files_processed": files_processed, "total_chunks": total_chunks}
     )
-
-
-def _announce_rename(old_verb: str) -> None:
-    """Tell a caller of a renamed verb what it is running and why."""
-    new_verb = RENAMED_VERBS[old_verb]
-    console.print()
-    warning(
-        f"'{old_verb}' is now '{new_verb}' — it never synced anything: its only write was a "
-        f"health stamp deleted from the standard on 2026-08-25. Running the reporter."
-    )
-
-
-def report_line_counts() -> None:
-    """Report physical line counts for every branch memory file. Read-only: not the files, not the tabs."""
-    console.print()
-    console.print(Panel.fit("[bold cyan]Memory - Line Count Report[/bold cyan]", border_style="cyan", box=box.ROUNDED))
-    console.print()
-
-    console.print("[cyan]Measuring every branch memory file (read-only)...[/cyan]")
-    console.print()
-
-    result = _handler_sync_line_counts()
-
-    if result["success"]:
-        console.print(f"[green]>[/green] Measured {result['updated']} files")
-        if result["failed"] > 0:
-            warning(f"{result['failed']} files could not be read")
-            for branch, mem_type, err_msg in result.get("failures", []):
-                error(f"{branch}.{mem_type}: {err_msg}")
-        json_handler.log_operation("rollover_report_lines", {"measured": result["updated"], "failed": result["failed"]})
-    else:
-        error("Failed to measure line counts")
-
-    console.print()
 
 
 def push_defaults(json_mode: bool = False) -> None:

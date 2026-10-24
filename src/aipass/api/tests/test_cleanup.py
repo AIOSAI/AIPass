@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cleanup.py
 # Description: Tests for usage data cleanup handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
@@ -23,6 +23,7 @@ from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage det
     _write_json,
     cleanup_old_data,
 )
+from aipass.api.apps.handlers.usage import cleanup
 
 _CLEANUP_MOD = "aipass.api.apps.handlers.usage.cleanup"
 
@@ -103,6 +104,35 @@ class TestCleanupOldData:
             cleanup_old_data(file_path)
 
         assert file_path.read_text(encoding="utf-8") == "{truncated"
+
+    @pytest.mark.parametrize("days", [0, -1])
+    def test_a_retention_of_zero_or_less_is_refused_and_the_store_kept(self, tmp_path: Path, days: int):
+        """Zero or negative days would wipe every entry, so the handler refuses them on its own."""
+        file_path = tmp_path / "usage.json"
+        file_path.write_text(
+            json.dumps({"data": {"generation_tracking": {"g": {"timestamp": "2000-01-01T00:00:00"}}}}), encoding="utf-8"
+        )
+        before = file_path.read_bytes()
+
+        with pytest.raises(ValueError):
+            cleanup_old_data(file_path, retention_days=days)
+
+        assert file_path.read_bytes() == before
+
+    def test_a_held_lock_raises_and_leaves_the_store(self, tmp_path: Path, monkeypatch):
+        """Another process mid read-modify-write holds the lock: cleanup raises rather than racing it."""
+        monkeypatch.setattr(cleanup, "LOCK_WAIT_SECONDS", 0.05, raising=False)
+        file_path = tmp_path / "usage.json"
+        file_path.write_text(
+            json.dumps({"data": {"generation_tracking": {"g": {"timestamp": "2000-01-01T00:00:00"}}}}), encoding="utf-8"
+        )
+        before = file_path.read_bytes()
+        (tmp_path / "usage.json.lock").write_text("", encoding="utf-8")
+
+        with pytest.raises(OSError):
+            cleanup_old_data(file_path)
+
+        assert file_path.read_bytes() == before
 
     def test_no_old_entries(self, tmp_path: Path):
         """Returns 0 when all generation entries are within retention period."""

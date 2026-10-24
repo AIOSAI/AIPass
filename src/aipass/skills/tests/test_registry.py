@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Unit tests for skills registry
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-10
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # Category: skills/tests
 # =============================================
 
@@ -16,7 +16,7 @@
 import tempfile
 from pathlib import Path
 
-from aipass.skills.apps.handlers.registry import build_registry, get_skill, get_skill_names
+from aipass.skills.apps.handlers.registry import build_registry, get_skill
 
 
 class TestBuildRegistry:
@@ -143,23 +143,3 @@ class TestGetSkill:
         result = get_skill("dup", registry)
         assert result is not None
         assert result["description"] == "First"
-
-
-class TestGetSkillNames:
-    def test_returns_sorted_names(self):
-        registry = [
-            {"name": "charlie"},
-            {"name": "alpha"},
-            {"name": "bravo"},
-        ]
-        names = get_skill_names(registry)
-        assert names == ["alpha", "bravo", "charlie"]
-
-    def test_empty_registry(self):
-        names = get_skill_names([])
-        assert names == []
-
-    def test_single_skill(self):
-        registry = [{"name": "only"}]
-        names = get_skill_names(registry)
-        assert names == ["only"]

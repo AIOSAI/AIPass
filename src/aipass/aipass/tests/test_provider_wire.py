@@ -3,7 +3,7 @@
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
 # Version: 1.7.1
 # Created: 2026-08-01
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -630,6 +630,44 @@ class TestSettingsBackup:
         _wire(manifest, settings_path)
 
         assert [r["actor"] for r in _receipts(settings_path)] == ["scout", str(outside)]
+
+    @pytest.mark.parametrize("door", ["doctor", "setup-sh"])
+    def test_an_unparseable_settings_file_refuses_and_stays_byte_identical(self, tmp_path, door) -> None:
+        manifest, settings_path = _backup_world(tmp_path, None)
+        settings_path.write_text('{"env": {},}', encoding="utf-8")
+        original = settings_path.read_bytes()
+
+        with pytest.raises(SettingsBackupError, match="unreadable"):
+            if door == "doctor":
+                plan_wire_provider(manifest, settings_path)
+            else:
+                refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        assert settings_path.read_bytes() == original
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+    def test_a_symlinked_settings_file_stays_a_symlink_after_the_wire(self, tmp_path) -> None:
+        manifest, real = _backup_world(tmp_path, {"env": {}})
+        link = tmp_path / "link" / "settings.json"
+        link.parent.mkdir()
+        link.symlink_to(real)
+
+        _wire(manifest, link)
+
+        assert link.is_symlink()
+        assert json.loads(real.read_text(encoding="utf-8"))["includeGitInstructions"] is False
+
+    def test_a_settings_file_changed_after_the_plan_refuses_the_write(self, tmp_path) -> None:
+        manifest, settings_path = _backup_world(tmp_path, {"env": {}})
+        plan = plan_wire_provider(manifest, settings_path)
+        assert plan is not None
+        settings_path.write_text(json.dumps({"env": {"MINE": "1"}}), encoding="utf-8")
+        edited = settings_path.read_bytes()
+
+        with pytest.raises(SettingsBackupError, match="changed since planned"):
+            apply_settings_plan(plan)
+
+        assert settings_path.read_bytes() == edited
 
 
 # =============================================================================

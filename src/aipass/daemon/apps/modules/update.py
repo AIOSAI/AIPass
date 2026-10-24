@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: DAEMON Status Digest Module
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-01-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -28,9 +28,7 @@ from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.cli.arg_gate import gate
 from aipass.daemon.apps.handlers.update.data_loader import (
     load_inbox,
-    load_local,
     categorize_messages,
-    get_session_summary,
     get_escalations,
 )
 
@@ -54,15 +52,12 @@ def print_introspection():
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  handlers/update/")
     console.print(
-        "  [cyan]*[/cyan] data_loader.py"
-        " [dim](load_inbox, load_local,"
-        " categorize_messages, get_session_summary,"
-        " get_escalations — inbox and session data)[/dim]"
+        "  [cyan]*[/cyan] data_loader.py [dim](load_inbox, categorize_messages, get_escalations — inbox data)[/dim]"
     )
     console.print()
 
 
-def _print_digest(inbox_data: Dict[str, Any], local_data: Dict[str, Any]) -> None:
+def _print_digest(inbox_data: Dict[str, Any]) -> None:
     """Print formatted digest to console."""
     console.print()
     _header("DAEMON Status Digest")
@@ -86,18 +81,6 @@ def _print_digest(inbox_data: Dict[str, Any], local_data: Dict[str, Any]) -> Non
             console.print(f"  [{status}] {from_addr}: {subject}")
     else:
         console.print("  [dim]None pending[/dim]")
-    console.print()
-
-    session_summary = get_session_summary(local_data)
-    console.print("[bold cyan]SESSION INFO[/bold cyan]")
-    console.print(f"  Total sessions:      {session_summary['total_sessions']}")
-    console.print(f"  Today's focus:       {session_summary['today_focus']}")
-
-    recently_completed = session_summary.get("recently_completed", [])
-    if recently_completed:
-        console.print(f"  Recently completed:  {len(recently_completed)} tasks")
-    else:
-        console.print("  Recently completed:  [dim]None[/dim]")
     console.print()
 
     # Warn only when there is something to escalate: an unconditional warning is a false alarm on stderr.
@@ -129,7 +112,6 @@ def print_help() -> None:
     console.print("  Gathers and displays:")
     console.print("    - Inbox status (total, unread, opened)")
     console.print("    - Actionable items (tasks, builds, requests)")
-    console.print("    - Session info (focus, completed tasks)")
     console.print("    - Escalations needed (blocked, urgent)")
     console.print()
 
@@ -150,9 +132,7 @@ def handle_command(command: str, args: list) -> bool:
 
     try:
         json_handler.log_operation("update_digest")
-        inbox_data = load_inbox()
-        local_data = load_local()
-        _print_digest(inbox_data, local_data)
+        _print_digest(load_inbox())
 
         logger.info("[DAEMON] Update digest generated successfully")
         return True

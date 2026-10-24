@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tag_handler.py
 # Description: Tag handler — create, push, and list release tags
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-02
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tag handler — create, push, and list release tags.
@@ -87,10 +87,10 @@ def _tag_external(name: str, repo_root: Path) -> dict:
         return {"success": False, "message": f"Tag creation failed: {result.stderr.strip()}"}
 
     result, err = _run_git(["git", "push", "origin", name], repo_root)
-    if result is None:
-        return {"success": False, "message": f"Tag push failed: {err}"}
-    if result.returncode != 0:
-        return {"success": False, "message": f"Tag push failed: {result.stderr.strip()}"}
+    if result is None or result.returncode != 0:
+        _run_git(["git", "tag", "-d", name], repo_root)
+        reason = err if result is None else result.stderr.strip()
+        return {"success": False, "message": f"Tag push failed (local tag removed, safe to retry): {reason}"}
 
     json_handler.log_operation("tag_release", {"version": name, "sha": sha, "repo": repo_root.name, "seat": "external"})
     logger.info("Tagged %s at %s HEAD (%s)", name, repo_root.name, sha)
@@ -194,6 +194,8 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
         logger.error("git ls-remote --tags origin %s failed: %s", version, exc)
         return {"success": False, "message": f"Remote tag check failed: {exc}"}
 
+    if result.returncode != 0:
+        return {"success": False, "message": f"Remote tag check failed: {result.stderr.strip()}"}
     if result.stdout.strip():
         return {"success": False, "message": f"Tag '{version}' already exists on remote."}
 
@@ -227,19 +229,11 @@ def tag_release(version: str, repo_root: Path | None = None) -> dict:
     if result.returncode != 0:
         return {"success": False, "message": f"Tag creation failed: {result.stderr.strip()}"}
 
-    try:
-        result = subprocess.run(
-            ["git", "push", "origin", version],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_root),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.error("git push origin %s failed: %s", version, exc)
-        return {"success": False, "message": f"Tag push failed: {exc}"}
-
-    if result.returncode != 0:
-        return {"success": False, "message": f"Tag push failed: {result.stderr.strip()}"}
+    result, err = _run_git(["git", "push", "origin", version], repo_root)
+    if result is None or result.returncode != 0:
+        _run_git(["git", "tag", "-d", version], repo_root)
+        reason = err if result is None else result.stderr.strip()
+        return {"success": False, "message": f"Tag push failed (local tag removed, safe to retry): {reason}"}
 
     json_handler.log_operation("tag_release", {"version": version, "sha": sha})
     logger.info("Tagged %s at %s", version, sha)

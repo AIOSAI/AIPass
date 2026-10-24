@@ -3,7 +3,7 @@
 # Description: Tests for the PID cache handler
 # Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-10-03
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
@@ -43,14 +43,14 @@ class TestParseLockPid:
         mod = _import_pid_cache()
         new_cache: dict[str, int] = {}
         entry = {"path": str(tmp_path / "somebranch"), "name": "flow"}
-        mod.parse_lock_pid(entry, new_cache)
+        mod.parse_lock_pid(entry, new_cache, tmp_path)
         assert new_cache == {}
 
     def test_lock_file_with_live_pid_on_linux(self, tmp_path):
         """Lock file with a PID that has a /proc entry adds to cache."""
         mod = _import_pid_cache()
         branch_dir = tmp_path / "mybranch"
-        mail_dir = branch_dir / "ai_mail.local"
+        mail_dir = branch_dir / ".ai_mail.local"
         mail_dir.mkdir(parents=True)
         lock_data = {"pid": 12345}
         (mail_dir / ".dispatch.lock").write_text(json.dumps(lock_data), encoding="utf-8")
@@ -67,7 +67,7 @@ class TestParseLockPid:
                 side_effect=lambda self, **kw: self.name == "12345" or real_exists(self, **kw),
             ),
         ):
-            mod.parse_lock_pid(entry, new_cache)
+            mod.parse_lock_pid(entry, new_cache, tmp_path)
 
         assert new_cache.get("FLOW") == 12345
 
@@ -75,34 +75,34 @@ class TestParseLockPid:
         """Lock file with pid=0 skips entry."""
         mod = _import_pid_cache()
         branch_dir = tmp_path / "mybranch"
-        mail_dir = branch_dir / "ai_mail.local"
+        mail_dir = branch_dir / ".ai_mail.local"
         mail_dir.mkdir(parents=True)
         lock_data = {"pid": 0}
         (mail_dir / ".dispatch.lock").write_text(json.dumps(lock_data), encoding="utf-8")
 
         new_cache: dict[str, int] = {}
         entry = {"path": str(branch_dir), "name": "flow"}
-        mod.parse_lock_pid(entry, new_cache)
+        mod.parse_lock_pid(entry, new_cache, tmp_path)
         assert new_cache == {}
 
     def test_lock_file_with_invalid_json(self, tmp_path):
         """Lock file with invalid JSON logs warning and continues."""
         mod = _import_pid_cache()
         branch_dir = tmp_path / "mybranch"
-        mail_dir = branch_dir / "ai_mail.local"
+        mail_dir = branch_dir / ".ai_mail.local"
         mail_dir.mkdir(parents=True)
         (mail_dir / ".dispatch.lock").write_text("{bad json}", encoding="utf-8")
 
         new_cache: dict[str, int] = {}
         entry = {"path": str(branch_dir), "name": "flow"}
-        mod.parse_lock_pid(entry, new_cache)
+        mod.parse_lock_pid(entry, new_cache, tmp_path)
         assert new_cache == {}
 
     def test_lock_file_with_empty_name(self, tmp_path):
         """Branch entry with empty name skips cache update."""
         mod = _import_pid_cache()
         branch_dir = tmp_path / "mybranch"
-        mail_dir = branch_dir / "ai_mail.local"
+        mail_dir = branch_dir / ".ai_mail.local"
         mail_dir.mkdir(parents=True)
         lock_data = {"pid": 99999}
         (mail_dir / ".dispatch.lock").write_text(json.dumps(lock_data), encoding="utf-8")
@@ -114,7 +114,7 @@ class TestParseLockPid:
             patch("sys.platform", "linux"),
             patch("pathlib.Path.exists", return_value=True),
         ):
-            mod.parse_lock_pid(entry, new_cache)
+            mod.parse_lock_pid(entry, new_cache, tmp_path)
         assert new_cache == {}
 
 
@@ -222,3 +222,32 @@ class TestGetPidForBranch:
         with patch.object(mod, "refresh"):
             result = mod.get_pid_for_branch("nonexistent")
         assert result is None
+
+
+class TestDefaultRoot:
+    """refresh() with no argument finds the real repo root and its repo-relative registry paths."""
+
+    def test_default_root_resolves_relative_branch_paths(self, tmp_path, monkeypatch):
+        """Registry path "src/aipass/flow" joins the repo root, never the cwd; the lock is ai_mail's real shape."""
+        mod = _import_pid_cache()
+        monkeypatch.setattr(mod, "find_repo_root", lambda: tmp_path)
+        monkeypatch.chdir(tmp_path.parent)
+        mail_dir = tmp_path / "src" / "aipass" / "flow" / ".ai_mail.local"
+        mail_dir.mkdir(parents=True)
+        (mail_dir / ".dispatch.lock").write_text(
+            json.dumps({"pid": 12345, "timestamp": "2026-10-23T10:00:00", "branch": "flow"}), encoding="utf-8"
+        )
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "flow", "path": "src/aipass/flow"}]}), encoding="utf-8"
+        )
+        real_exists = Path.exists
+        with (
+            patch("sys.platform", "linux"),
+            patch(
+                "pathlib.Path.exists",
+                autospec=True,
+                side_effect=lambda self, **kw: self.name == "12345" or real_exists(self, **kw),
+            ),
+        ):
+            mod.refresh()
+        assert mod._pid_cache == {"FLOW": 12345}

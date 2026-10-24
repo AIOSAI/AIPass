@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deep_nesting_check.py
 # Description: Deep Nesting Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -50,7 +50,7 @@ def _scan_file(file_path: Path) -> list[dict]:
     try:
         source = file_path.read_text(encoding="utf-8", errors="ignore")
         tree = ast.parse(source, filename=str(file_path))
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         logger.info("Skipped %s: SyntaxError during parse", file_path)
         return violations
 

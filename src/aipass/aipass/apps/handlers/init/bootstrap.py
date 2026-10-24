@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-03-14
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -52,6 +52,16 @@ _MANIFEST_TRACKED: tuple = (
     ".claude/commands/prep.md",
     "AGENTS.md",
 )
+
+
+def _link_venv(link: Path, dest: Path) -> None:
+    """Point `link` at `dest`; a dangling link (its home moved) is swapped for a fresh one by rename."""
+    if not link.is_symlink():
+        link.symlink_to(dest)
+        return
+    fresh = link.with_name(link.name + ".repoint")
+    fresh.symlink_to(dest)
+    fresh.replace(link)
 
 
 def _sanitize_name(raw: str) -> str:
@@ -353,7 +363,7 @@ def init_project(
     if not venv_link.exists() and aipass_home:
         aipass_venv = Path(aipass_home) / ".venv"
         if aipass_venv.is_dir():
-            venv_link.symlink_to(aipass_venv)
+            _link_venv(venv_link, aipass_venv)
             created.append(f".venv (symlink to AIPass runtime: {aipass_venv})")
 
     # The manifest lets `init update` tell "the template moved on" from "the project edited this file".
@@ -743,6 +753,6 @@ def _apply_writes(target: Path, writes: list, retires: list, symlinks: list) -> 
         logger.info("Retired managed file: %s -> %s", stale_path, disabled)
 
     for link, dest in symlinks:
-        link.symlink_to(dest)
+        _link_venv(link, dest)
 
     return backup_root if used else None

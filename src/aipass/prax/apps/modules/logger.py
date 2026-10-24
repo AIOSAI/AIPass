@@ -3,7 +3,7 @@
 # Description: PRAX Public API
 # Version: 1.4.1
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -19,11 +19,7 @@ __all__ = [
     "get_direct_logger",
     "direct_log",
     "DirectLogger",
-    "initialize_logging_system",
-    "shutdown_logging_system",
     "get_system_status",
-    "enable_terminal_output",
-    "disable_terminal_output",
     "print_introspection",
     "handle_command",
     "MODULE_NAME",
@@ -32,21 +28,15 @@ __all__ = [
 ]
 
 import logging
+import sys
 from typing import Dict, Any
 
 # CLI imports prax logger, so CLI is imported lazily inside functions, never here.
 from aipass.prax.apps.handlers.logging.setup import (
     setup_individual_logger,
     get_captured_loggers_count,
-    enable_terminal_output as _enable_terminal,
-    disable_terminal_output as _disable_terminal,
 )
 from aipass.prax.apps.handlers.logging.introspection import get_caller_info
-from aipass.prax.apps.handlers.logging.override import is_override_active
-from aipass.prax.apps.handlers.discovery.watcher import (
-    is_file_watcher_active,
-    check_file_watcher_liveness,
-)
 from aipass.prax.apps.handlers.registry.load import load_module_registry, load_last_scan
 from aipass.prax.apps.handlers.config.load import get_system_logs_dir, get_module_logs_dir, PRAX_JSON_DIR
 from aipass.prax.apps.handlers.logging.direct import get_direct_logger, direct_log, DirectLogger
@@ -77,12 +67,14 @@ class SystemLogger:
     def _ensure_watcher(self):
         """Keep an explicitly started discovery watcher honest. Starts nothing.
 
-        Only a process that called initialize_logging_system() has a watcher; this
-        reports one that died under it. `_watcher_started` means "past the first log
-        line"; unlocked, since a racing double-set writes the same value.
+        Only a process that imported and started the watcher has one; never imported here,
+        since that pulls the watchdog library into every logging process. `_watcher_started`
+        means "past the first log line"; unlocked, since a racing double-set writes the same value.
         """
         if SystemLogger._watcher_started:
-            check_file_watcher_liveness()  # Throttled; ~1 real check/60s.
+            watcher = sys.modules.get("aipass.prax.apps.handlers.discovery.watcher")
+            if watcher is not None:
+                watcher.check_file_watcher_liveness()  # Throttled; ~1 real check/60s.
             return
         SystemLogger._watcher_started = True
 
@@ -116,53 +108,12 @@ class SystemLogger:
 
 system_logger = SystemLogger()
 
-# The lifecycle doors import trigger inside themselves: the log path must stay clear
-# of the aipass.trigger import graph. See docs/logging_api.md.
-
-
-def initialize_logging_system():
-    """Initialize the complete logging system"""
-    from aipass.cli.apps.modules import console
-    from aipass.prax.apps.handlers.logging.lifecycle import run_initialize
-
-    console.print(f"\\[{MODULE_NAME}] Initializing system-wide logging...")
-
-    result = run_initialize(MODULE_NAME)
-
-    console.print(f"\\[{MODULE_NAME}] System initialized - {result['modules_count']} modules, individual logging")
-
-    try:
-        from aipass.trigger.apps.modules.core import trigger
-
-        trigger.fire("logging_system_initialized", modules_count=result["modules_count"])
-    except (ImportError, OSError) as e:
-        logger.warning("Trigger logging_system_initialized fire skipped (not available or inotify full): %s", e)
-
-
-def shutdown_logging_system():
-    """Shutdown logging system cleanly
-
-    Fires last on purpose: the event says the system IS down, not going down.
-    """
-    from aipass.cli.apps.modules import console
-    from aipass.prax.apps.handlers.logging.lifecycle import run_shutdown
-
-    console.print(f"\\[{MODULE_NAME}] Shutting down logging system...")
-
-    run_shutdown(MODULE_NAME)
-
-    console.print(f"\\[{MODULE_NAME}] Shutdown complete")
-
-    try:
-        from aipass.trigger.apps.modules.core import trigger
-
-        trigger.fire("logging_system_shutdown")
-    except (ImportError, OSError) as e:
-        logger.warning("Trigger logging_system_shutdown fire skipped (not available or inotify full): %s", e)
-
 
 def get_system_status() -> Dict[str, Any]:
     """Get current logging system status"""
+    from aipass.prax.apps.handlers.discovery.watcher import is_file_watcher_active
+    from aipass.prax.apps.handlers.registry.load import REGISTRY_FILE
+
     modules = load_module_registry()
 
     return {
@@ -171,21 +122,10 @@ def get_system_status() -> Dict[str, Any]:
         "individual_loggers": get_captured_loggers_count(),
         "system_logs_dir": str(get_system_logs_dir()),
         "module_logs_dir": str(get_module_logs_dir("prax")),
-        "registry_file": str(DATA_FILE),
+        "registry_file": str(REGISTRY_FILE),
         "file_watcher_active": is_file_watcher_active(),
         "last_scan": load_last_scan(),
-        "logger_override_active": is_override_active(),
     }
-
-
-def enable_terminal_output():
-    """Enable terminal output for all future loggers"""
-    _enable_terminal()
-
-
-def disable_terminal_output():
-    """Disable terminal output"""
-    _disable_terminal()
 
 
 def print_introspection():
@@ -200,17 +140,14 @@ def print_introspection():
 
     console.print()
     console.print("[bold cyan]logger Module[/bold cyan]")
-    console.print("Public API for PRAX system-wide logging with auto-routing and lifecycle management")
+    console.print("Public API for PRAX system-wide logging with auto-routing")
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print()
     console.print("  [cyan]handlers/logging/[/cyan]")
     console.print("    [dim]→ setup.py (setup_individual_logger — creates per-module log files)[/dim]")
     console.print("    [dim]→ setup.py (get_captured_loggers_count — returns active logger count)[/dim]")
-    console.print("    [dim]→ setup.py (enable_terminal_output — enables live terminal log output)[/dim]")
-    console.print("    [dim]→ setup.py (disable_terminal_output — disables terminal log output)[/dim]")
-    console.print("    [dim]→ introspection.py (get_calling_module — resolves caller module name)[/dim]")
-    console.print("    [dim]→ override.py (is_override_active — checks logger override status)[/dim]")
+    console.print("    [dim]→ introspection.py (get_caller_info — resolves caller module name)[/dim]")
     console.print("    [dim]→ direct.py (get_direct_logger — bypasses event pipeline for infrastructure logging)[/dim]")
     console.print("    [dim]→ direct.py (direct_log — shorthand for direct logging calls)[/dim]")
     console.print("    [dim]→ direct.py (DirectLogger — direct logger class)[/dim]")

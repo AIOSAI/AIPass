@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-10-08
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -34,7 +34,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     statement_deletion,
     unread_redirect_check as R,
 )
-from aipass.seedgo.tests.support_audit_tests_lane import _records, _spec_for
+from aipass.seedgo.tests.support_audit_tests_lane import _spec_for
 
 
 class TestAdapterShape:
@@ -275,69 +275,6 @@ class TestCampaignBudget:
         assert spec.to_document()["campaign_budget_seconds"] == 3600
 
 
-class TestTeardown:
-    """A function that deletes a tree must refuse an implausible root."""
-
-    def test_teardown_removes_the_scratch_env(self, tmp_path):
-        env = tmp_path / "env"
-        env.mkdir()
-        adapter.teardown(_spec_for(env))
-        assert not env.exists()
-
-    def test_teardown_is_idempotent(self, tmp_path):
-        env = tmp_path / "env"
-        env.mkdir()
-        spec = _spec_for(env)
-        adapter.teardown(spec)
-        assert not env.exists()
-
-        assert adapter.teardown(spec) is None
-        assert not env.exists()
-
-    def test_teardown_refuses_the_home_directory(self, monkeypatch, tmp_path):
-        # Path.home() reads HOME on POSIX and USERPROFILE on Windows; the env is the seam.
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setenv("USERPROFILE", str(tmp_path))
-        tmp_path.mkdir(exist_ok=True)
-        adapter.teardown(_spec_for(tmp_path))
-        assert tmp_path.exists()
-
-    def test_teardown_accepts_no_spec_at_all(self, tmp_path):
-        """No env was ever built, so teardown returns None having deleted nothing."""
-        assert adapter.teardown(None) is None
-        assert tmp_path.exists()
-
-
-class TestFireCanary:
-    """fire_canary reports the canary the gated session recorded; it runs no second experiment."""
-
-    def test_fire_canary_reports_the_summary_record_from_the_gate_log(self, tmp_path):
-        """The summary record's canary comes back field by field, booleans coerced."""
-        spec = _spec_for(tmp_path)
-        spec.log_path.parent.mkdir(parents=True)
-        lines = [json.dumps(record) for record in _records(canary_caught=False)]
-        spec.log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-        reported = adapter.fire_canary(spec)
-
-        assert reported["attempted"] is True
-        assert reported["caught"] is False
-        assert reported["path"] == "/env/c"
-        assert reported["error"] == ""
-        assert set(reported) == {"attempted", "caught", "path", "error"}
-
-    def test_fire_canary_names_an_unreadable_log_in_error(self, tmp_path):
-        """No log on disk leaves the gate unproven, and the error names the missing log."""
-        spec = _spec_for(tmp_path)
-
-        reported = adapter.fire_canary(spec)
-
-        assert reported["attempted"] is False
-        assert reported["caught"] is False
-        assert reported["path"] == ""
-        assert reported["error"] == f"the gate wrote no log at {spec.log_path} - the plugin did not run"
-
-
 class TestEnvLayout:
     """The aipass layout has to be mirrored or the copy is not what loads."""
 
@@ -353,6 +290,19 @@ class TestEnvLayout:
 
     def test_a_plain_target_has_no_repo_root(self, tmp_path):
         assert envcopy.detect_layout(tmp_path)[1] is None
+
+    def test_a_plain_src_layout_puts_the_copy_first_and_probes_its_package(self, tmp_path):
+        """An editable install of a src-layout project would otherwise import the real package."""
+        project = tmp_path / "project"
+        (project / "src" / "pkg").mkdir(parents=True)
+        (project / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+        plugin = tmp_path / "plugin.py"
+        plugin.write_text("", encoding="utf-8")
+
+        spec = envcopy.build_env(project, tmp_path / "env", plugin)
+
+        assert spec.pythonpath.split(os.pathsep)[0] == str((tmp_path / "env" / "project" / "src").resolve())
+        assert spec.target_module == "pkg"
 
 
 class TestRootFiles:
@@ -469,6 +419,28 @@ class TestRedBaselineNamesItsFailures:
         base = mutation_runner.baseline(self._target(tmp_path, "def test_ok():\n    pass\n"), timeout_seconds=120)
 
         assert base.green is True and base.to_document()["failing"] == []
+
+
+class TestTimeoutKillsTheGroup:
+    """A timeout reaps everything the child started, not just the child."""
+
+    def test_a_grandchild_dies_with_its_timed_out_parent(self, tmp_path):
+        import subprocess
+        import time
+
+        marker = tmp_path / "grandchild_survived"
+        grandchild = f"import time; time.sleep(1.5); open({str(marker)!r}, 'w').close()"
+        parent = (
+            f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {grandchild!r}]); time.sleep(60)"
+        )
+
+        with pytest.raises(subprocess.TimeoutExpired):
+            mutation_runner.run_in_group(
+                [sys.executable, "-c", parent], cwd=str(tmp_path), env=dict(os.environ), timeout=0.5
+            )
+        time.sleep(2.0)
+
+        assert not marker.exists()
 
 
 class TestM10Completeness:

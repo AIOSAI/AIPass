@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_usage_tracker.py
 # Description: Tests for usage tracker module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -19,6 +19,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.handlers.usage import cleanup as cleanup_handler
 from aipass.api.apps.modules import usage_tracker
 from aipass.api.apps.modules.usage_tracker import handle_command
 from aipass.api.apps.modules.usage_tracker import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
@@ -334,6 +335,7 @@ def test_cleanup_without_a_store_warns_and_writes_nothing(mock_header, mock_succ
 @patch(TRIGGER_HOME)
 def test_cleanup_default_30_days(mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, tmp_path):
     """Orchestration alone, cleanup patched: no args means 30 days, handed to the handler with the store."""
+    mock_cleanup_handler.parse_retention_days.side_effect = cleanup_handler.parse_retention_days
     mock_cleanup_handler.cleanup_old_data.return_value = 3
     store = _usage_store(tmp_path, {})
 
@@ -352,6 +354,7 @@ def test_cleanup_default_30_days(mock_trigger, mock_cleanup_handler, mock_header
 @patch(TRIGGER_HOME)
 def test_cleanup_custom_days(mock_trigger, mock_cleanup_handler, mock_header, mock_success, mock_error, tmp_path):
     """Orchestration alone, cleanup patched: the days argument reaches the handler."""
+    mock_cleanup_handler.parse_retention_days.side_effect = cleanup_handler.parse_retention_days
     mock_cleanup_handler.cleanup_old_data.return_value = 7
     store = _usage_store(tmp_path, {})
 
@@ -361,6 +364,19 @@ def test_cleanup_custom_days(mock_trigger, mock_cleanup_handler, mock_header, mo
     mock_cleanup_handler.cleanup_old_data.assert_called_once_with(store, 90)
     mock_success.assert_called_once_with("Cleaned up 7 entries older than 90 days")
     mock_trigger.fire.assert_called_once_with("usage_data_cleaned", days=90, data_path=str(store))
+
+
+@pytest.mark.parametrize("days", ["0", "-5", "abc", "1.5"])
+@patch(f"{PATCH_ROOT}.error")
+@patch(f"{PATCH_ROOT}.header")
+def test_cleanup_refuses_days_that_are_not_a_whole_number_above_zero(mock_header, mock_error, tmp_path, days):
+    """Zero or less would wipe all history and a non-number used to raise: both are refused through error()."""
+    store = _usage_store(tmp_path, {"gen-old": {"timestamp": _LONG_AGO}})
+
+    usage_tracker.cleanup_data([days], data_path=store)
+
+    assert _generations_on_disk(store) == {"gen-old": {"timestamp": _LONG_AGO}}
+    mock_error.assert_called_once()
 
 
 @patch(f"{PATCH_ROOT}.aggregation", autospec=True)

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -238,6 +238,24 @@ class TestReadOnlyModulesStillAnswerHelp:
     def test_verify_help_after_operand(self, capsys):
         assert wire_verify.handle_command("verify", ["anything", "--help"]) is True
         assert "drone @hooks verify     Cross-check provider settings" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("verb", ["cadence", "context_window", "diagnostics_state", "engine"])
+    def test_verb_help_answers_help_not_unknown_command(self, verb, capsys):
+        assert hooks.handle_command(verb, ["--help"]) is True
+        assert f"{verb} — " in capsys.readouterr().err
+
+
+class TestHelpListsWhatRuns:
+    def test_help_lists_closure_list_not_the_module_name(self, capsys):
+        hooks.print_help()
+        out, _ = capsys.readouterr()
+        assert "closure list" in out
+        assert "engine_closure" not in out
+
+    def test_every_module_description_is_a_whole_sentence(self):
+        for module in hooks.discover_modules():
+            first = (module.__doc__ or "").strip().split("\n")[0]
+            assert first.endswith((".", "?")), module.__name__
 
 
 class TestHelpGateDoesNotHijackOtherModules:

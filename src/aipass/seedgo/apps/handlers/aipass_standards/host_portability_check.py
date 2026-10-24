@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-09-12
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -19,16 +19,17 @@ from typing import Dict, Iterable, List, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_retired_path
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
-from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import (
-    _collect_child_linenos,
-    _find_enclosing_function,
-    _is_platform_guard,
-    _lines_in_guarded_blocks,
-    _references_platform,
-)
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import (
+    collect_child_linenos,
+    find_enclosing_function,
+    is_platform_guard,
+    lines_in_guarded_blocks,
+    references_platform,
+    tail_name,
+)
 
 # APPLIES_TO: its own corpus already reads tests/; a /proc read in a test is real.
 APPLIES_TO = "everywhere"
@@ -73,7 +74,7 @@ _FS_METHODS = frozenset(
 _PATH_CONSTRUCTORS = frozenset({"Path", "PosixPath", "PurePath"})
 
 #: Except types that make a missing /proc (or a missing binary) a handled fact
-#: rather than a crash. `_lines_in_guarded_blocks` already covers OSError and
+#: rather than a crash. `lines_in_guarded_blocks` already covers OSError and
 #: the import family; FileNotFoundError and the broad catches are added here.
 _FS_EXCEPT_TYPES = frozenset(
     {
@@ -154,10 +155,10 @@ _SPELLING_FIX = (
 def _reads_platform(node: ast.expr) -> bool:
     """True when the expression consults the host platform.
 
-    ``_references_platform`` (windows_compat_check) knows ``sys.platform`` and ``os.name``; this adds the
+    ``references_platform`` (check_support) knows ``sys.platform`` and ``os.name``; this adds the
     ``platform`` module.
     """
-    if _references_platform(node):
+    if references_platform(node):
         return True
     for child in ast.walk(node):
         if isinstance(child, ast.Attribute) and isinstance(child.value, ast.Name):
@@ -186,7 +187,7 @@ def _platform_predicate_names(tree: ast.Module) -> frozenset:
 
 def _is_platform_test(test: ast.expr, predicates: frozenset) -> bool:
     """True for a platform comparison, a hasattr probe, or a named predicate."""
-    if _is_platform_guard(test) or _reads_platform(test):
+    if is_platform_guard(test) or _reads_platform(test):
         return True
     for child in ast.walk(test):
         if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id in predicates:
@@ -199,7 +200,7 @@ def _platform_branch_lines(tree: ast.Module, predicates: frozenset) -> Set[int]:
     lines: Set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.If) and _is_platform_test(node.test, predicates):
-            lines.update(_collect_child_linenos(node))
+            lines.update(collect_child_linenos(node))
     return lines
 
 
@@ -244,15 +245,15 @@ def _handler_catches(handler: ast.ExceptHandler, wanted: frozenset) -> bool:
 def _fs_except_lines(tree: ast.Module) -> Set[int]:
     """Lines inside a try that catches a missing-file / broad error.
 
-    Union this with ``_lines_in_guarded_blocks``, which already covers OSError
+    Union this with ``lines_in_guarded_blocks``, which already covers OSError
     and the import family but not FileNotFoundError or ``except Exception``.
     """
     lines: Set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Try) and any(_handler_catches(h, _FS_EXCEPT_TYPES) for h in node.handlers):
-            lines.update(_collect_child_linenos(node))
+            lines.update(collect_child_linenos(node))
         if isinstance(node, (ast.With, ast.AsyncWith)) and any(_expects_missing(i.context_expr) for i in node.items):
-            lines.update(_collect_child_linenos(node))
+            lines.update(collect_child_linenos(node))
     return lines
 
 
@@ -261,11 +262,11 @@ def _expects_missing(context: ast.expr) -> bool:
 
     A /proc read or missing binary inside it raises where the host lacks them, which is what the test claims.
     """
-    if not (isinstance(context, ast.Call) and _tail_name(context.func) == RAISES and context.args):
+    if not (isinstance(context, ast.Call) and tail_name(context.func) == RAISES and context.args):
         return False
     expected = context.args[0]
     names = expected.elts if isinstance(expected, ast.Tuple) else [expected]
-    return any(_tail_name(name) in _FS_EXCEPT_TYPES | {"OSError"} for name in names)
+    return any(tail_name(name) in _FS_EXCEPT_TYPES | {"OSError"} for name in names)
 
 
 def _calls_existence(node: ast.AST) -> bool:
@@ -301,15 +302,6 @@ _FS_PRIMITIVES = frozenset(
 )
 
 _PATCH_CALLS = frozenset({"setattr", "patch", "object"})
-
-
-def _tail_name(node: ast.expr) -> str:
-    """The last name in ``a.b.c`` or ``c``, else ""."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
 
 
 def _mark_kind(mark: ast.expr) -> str:
@@ -359,7 +351,7 @@ def _names_recipe_host(predicate: ast.expr) -> bool:
         if isinstance(child, ast.Constant) and isinstance(child.value, str):
             if child.value.lower() in _RECIPE_HOSTS or child.value.startswith((_PROC_ROOT, _SYS_ROOT)):
                 return True
-        if isinstance(child, ast.Call) and _tail_name(child.func) == "which":
+        if isinstance(child, ast.Call) and tail_name(child.func) == "which":
             return True
     return False
 
@@ -374,19 +366,19 @@ def _is_guard_mark(mark: ast.expr) -> bool:
 def _guarded_unit_lines(tree: ast.Module, aliases: Dict[str, ast.expr], module_marks: List[ast.expr]) -> Set[int]:
     """Every line of every unit (or class) whose skip names the recipe host."""
     if any(_is_guard_mark(mark) for mark in module_marks):
-        return _collect_child_linenos(tree)
+        return collect_child_linenos(tree)
     lines: Set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         if any(_is_guard_mark(mark) for mark in _skip_marks(node.decorator_list, aliases)):
-            lines.update(_collect_child_linenos(node))
+            lines.update(collect_child_linenos(node))
     return lines
 
 
 def _patched_pair(call: ast.Call) -> Tuple[str, str]:
     """(owner, attribute) a monkeypatch.setattr / patch / patch.object call replaces."""
-    if _tail_name(call.func) not in _PATCH_CALLS or not call.args:
+    if tail_name(call.func) not in _PATCH_CALLS or not call.args:
         return "", ""
     first = call.args[0]
     if isinstance(first, ast.Constant) and isinstance(first.value, str):
@@ -394,7 +386,7 @@ def _patched_pair(call: ast.Call) -> Tuple[str, str]:
         return (parts[-2] if len(parts) > 1 else ""), parts[-1]
     second = call.args[1] if len(call.args) > 1 else None
     if isinstance(second, ast.Constant) and isinstance(second.value, str):
-        return _tail_name(first), second.value
+        return tail_name(first), second.value
     return "", ""
 
 
@@ -428,13 +420,18 @@ def _caller_guarded_functions(tree: ast.Module, platform_lines: Set[int]) -> fro
     return frozenset(name for name, lines in call_lines.items() if lines and all(ln in platform_lines for ln in lines))
 
 
+def _is_proc_path(text: str) -> bool:
+    """``/proc`` itself or a path under it; ``/processed/...`` is an ordinary directory."""
+    return text == _PROC_ROOT or text.startswith(_PROC_ROOT + "/")
+
+
 def _proc_literal(node: ast.expr) -> str:
     """The ``/proc...`` text of this node, or "" when it is not one."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith(_PROC_ROOT):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and _is_proc_path(node.value):
         return node.value
     if isinstance(node, ast.JoinedStr) and node.values:
         head = node.values[0]
-        if isinstance(head, ast.Constant) and isinstance(head.value, str) and head.value.startswith(_PROC_ROOT):
+        if isinstance(head, ast.Constant) and isinstance(head.value, str) and _is_proc_path(head.value):
             return head.value + "{...}"
     return ""
 
@@ -451,7 +448,7 @@ def _is_fs_call(node: ast.Call) -> bool:
 
 def _unwrap_path(node: ast.expr) -> ast.expr:
     """The argument of ``Path(x)`` and its kin, or the node itself."""
-    if isinstance(node, ast.Call) and _tail_name(node.func) in _PATH_CONSTRUCTORS and node.args:
+    if isinstance(node, ast.Call) and tail_name(node.func) in _PATH_CONSTRUCTORS and node.args:
         return node.args[0]
     return node
 
@@ -516,14 +513,14 @@ def _proc_violations(tree: ast.Module, skipped: Set[int], predicates: frozenset)
         return []
 
     platform_lines = _platform_branch_lines(tree, predicates)
-    handled = _lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
+    handled = lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
     caller_guarded = _caller_guarded_functions(tree, platform_lines)
 
     violations: List[Tuple[int, str]] = []
     for lineno, text in nominations:
         if lineno in handled or lineno in skipped:
             continue
-        enclosing = _find_enclosing_function(tree, lineno)
+        enclosing = find_enclosing_function(tree, lineno)
         if enclosing is not None:
             if _function_tests_platform(enclosing) or _has_existence_exit(enclosing):
                 continue
@@ -602,7 +599,7 @@ def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tu
         return [], 0
 
     platform_lines = _platform_branch_lines(tree, predicates)
-    handled = _lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
+    handled = lines_in_guarded_blocks(tree) | _fs_except_lines(tree) | platform_lines
 
     violations: List[Tuple[int, str]] = []
     acquitted = 0
@@ -610,7 +607,7 @@ def _binary_violations(tree: ast.Module, predicates: frozenset) -> Tuple[List[Tu
         if lineno in handled:
             acquitted += 1
             continue
-        enclosing = _find_enclosing_function(tree, lineno)
+        enclosing = find_enclosing_function(tree, lineno)
         if enclosing is not None:
             if name in _which_guarded_names(enclosing) or _function_tests_platform(enclosing):
                 acquitted += 1
@@ -714,7 +711,7 @@ def _flavourless_subclasses(tree: ast.Module) -> List[Tuple[int, str]]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        bases = {_tail_name(base) for base in node.bases} & _FLAVOURLESS_BASES
+        bases = {tail_name(base) for base in node.bases} & _FLAVOURLESS_BASES
         carried = any("_flavour" in ast.dump(statement) for statement in node.body)
         if bases and not carried:
             violations.append((node.lineno, f"class {node.name}({min(bases)}) - {_FLAVOUR_FIX}"))
@@ -750,7 +747,7 @@ def _call_spelling(call: ast.Call, env: Dict[str, str], funcs: Dict[str, str]) -
         return AS_GIVEN
     if isinstance(func, ast.Name) and func.id in funcs:
         return funcs[func.id]
-    if (_dotted(func) in _CARRYING_WRAPPERS or _tail_name(func) in _CARRYING_WRAPPERS) and call.args:
+    if (_dotted(func) in _CARRYING_WRAPPERS or tail_name(func) in _CARRYING_WRAPPERS) and call.args:
         return _spelling(call.args[0], env, funcs)
     if isinstance(func, ast.Attribute) and func.attr in _CARRYING_METHODS:
         return _spelling(func.value, env, funcs)
@@ -959,7 +956,7 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
         return [], 0
     try:
         tree = ast.parse(source, filename=str(path))
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[host_portability] skipped %s: %s", path, exc)
         return [], 0
 

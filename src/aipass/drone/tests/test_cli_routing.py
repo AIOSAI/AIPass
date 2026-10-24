@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-27
-# Modified: 2026-10-13
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -365,12 +365,14 @@ class TestMainModuleRouting:
     def test_discovered_module_exception(
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A module that cannot import returns 1 and is named on stderr; mutant killed: the except returns 0.
+        """A module whose handle_command raises returns 1 and is named on stderr; mutant killed: the except returns 0."""
 
-        None in sys.modules is the import system's own "halted" answer: the real
-        import_module raises ImportError for it.
-        """
-        monkeypatch.setitem(sys.modules, self._CONFIG, None)
+        def handle_command(cmd: Any, args: Any) -> Any:
+            raise RuntimeError("stand-in: module failed")
+
+        mod = type(sys)(self._CONFIG)
+        mod.handle_command = handle_command
+        monkeypatch.setitem(sys.modules, self._CONFIG, mod)
 
         with (
             patch("sys.argv", ["drone", "config", "list"]),
@@ -396,6 +398,17 @@ class TestMainCustomCommand:
         ):
             result = main()
         assert result == 0
+
+    def test_a_shortcut_does_not_import_every_module(self) -> None:
+        """A name with no module file goes to the shortcut lane without module discovery."""
+        with (
+            patch("sys.argv", ["drone", "audit", "aipass"]),
+            patch(f"{_DRONE}._discover_modules", side_effect=AssertionError("discovery ran")),
+            patch(f"{_DRONE}._handle_custom_command", return_value=0) as custom,
+        ):
+            result = main()
+        assert result == 0
+        custom.assert_called_once_with(["audit", "aipass"])
 
     def test_custom_command_not_matched(self) -> None:
         """Unmatched command falls through to unknown."""
@@ -1033,6 +1046,14 @@ class TestExtractTimeout:
         _, mock_route, _ = _route(["@memory", "close", "--drone-timeout", "abc"])
         assert mock_route.call_args == call(
             "@memory", "close", args=["--drone-timeout", "abc"], timeout=None, interactive=False
+        )
+
+    @pytest.mark.parametrize("value", ["0", "-5"])
+    def test_flag_non_positive_value(self, value: str) -> None:
+        """A zero or negative value is left to the target, never a cap that kills the child at once."""
+        _, mock_route, _ = _route(["@memory", "close", "--drone-timeout", value])
+        assert mock_route.call_args == call(
+            "@memory", "close", args=["--drone-timeout", value], timeout=None, interactive=False
         )
 
     def test_empty_args(self) -> None:

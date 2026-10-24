@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: loader_handler.py
 # Description: Skill loading handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -15,39 +15,9 @@ import sys
 from pathlib import Path
 
 from aipass.prax import logger
-from aipass.skills.apps.handlers.discovery_handler import parse_frontmatter
+from aipass.skills.apps.handlers.discovery_handler import read_skill_md
 from aipass.skills.apps.handlers.json import json_handler
-
-
-def parse_full_skill_md(skill_md_path):
-    """Parse a SKILL.md file into frontmatter metadata and body text."""
-    try:
-        content = Path(skill_md_path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        logger.warning(f"Failed to read SKILL.md: {skill_md_path}")
-        return None, None
-
-    lines = content.strip().splitlines()
-    if not lines or lines[0].strip() != "---":
-        return None, None
-
-    end_idx = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            end_idx = i
-            break
-
-    if end_idx is None:
-        return None, None
-
-    metadata = parse_frontmatter(skill_md_path)
-    if metadata is None:
-        return None, None
-
-    body_lines = lines[end_idx + 1 :]
-    body = "\n".join(body_lines).strip()
-
-    return metadata, body
+from aipass.skills.apps.handlers.registry import get_skill
 
 
 def import_handler(skill_path, skill_name):
@@ -74,17 +44,9 @@ def import_handler(skill_path, skill_name):
     return module
 
 
-def find_skill_in_registry(name, registry):
-    """Find a skill entry in the registry by name."""
-    for skill in registry:
-        if skill["name"] == name:
-            return skill
-    return None
-
-
 def load_skill(name, registry):
     """Load a skill by name from a pre-built registry."""
-    skill_entry = find_skill_in_registry(name, registry)
+    skill_entry = get_skill(name, registry)
 
     if skill_entry is None:
         return {
@@ -99,7 +61,7 @@ def load_skill(name, registry):
     skill_path = Path(skill_entry["path"])
     skill_md = skill_path / "SKILL.md"
 
-    metadata, body = parse_full_skill_md(skill_md)
+    metadata, body = read_skill_md(skill_md)
     if metadata is None:
         return {
             "success": False,

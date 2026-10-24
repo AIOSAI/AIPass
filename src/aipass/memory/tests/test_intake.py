@@ -3,7 +3,7 @@
 # Description: Tests for the intake/pool_processor handler
 # Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/intake/pool_processor.py."""
@@ -14,7 +14,6 @@
 # seedgo: no-test-needed(external) — the real chromadb and fastembed write path of process_file_to_vectors()
 
 import json
-import sys
 from unittest.mock import MagicMock
 
 from aipass.memory.apps.handlers.intake import pool_processor
@@ -37,14 +36,17 @@ class TestFindSourceFile:
         assert result == target
 
     def test_found_in_archive(self, monkeypatch, tmp_path):
-        """Test finding a file in the archive subdirectory of the pool."""
+        """The archive is the configured archive_path under the memory root, where archive_old_files moves to."""
         mod = pool_processor
         pool = tmp_path / "memory_pool"
-        archive = pool / ".archive"
-        archive.mkdir(parents=True)
+        pool.mkdir()
+        archive = tmp_path / "memory_pool_archive"
+        archive.mkdir()
         target = archive / "old_notes.md"
         target.write_text("archived content", encoding="utf-8")
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
+        monkeypatch.setattr(mod, "_MEMORY_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "load_config", lambda: {"archive_path": "memory_pool_archive"})
 
         result = mod.find_source_file("old_notes.md")
 
@@ -285,37 +287,32 @@ class TestChunkContent:
 
 
 class TestProcessFileToVectors:
-    """Test process_file_to_vectors with mocked chromadb."""
+    """Test process_file_to_vectors through the subprocess lane, which is stubbed."""
 
-    def test_processes_file_with_mocked_chromadb(self, monkeypatch, tmp_path):
-        """Test processing a file into vectors with mocked chromadb."""
+    def test_processes_file_through_the_lane(self, monkeypatch, tmp_path):
+        """The chunks go to <branch>_<memory_type> split off the collection name, each salted by source_file."""
         mod = pool_processor
-        monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
 
         test_file = tmp_path / "test.md"
         test_file.write_text("Test content for vectorization.", encoding="utf-8")
 
-        mock_collection = MagicMock()
-        mock_collection.upsert = MagicMock()
-        mock_client = MagicMock()
-        mock_client.get_or_create_collection.return_value = mock_collection
-        mock_chromadb = MagicMock()
-        mock_chromadb.PersistentClient.return_value = mock_client
+        stored = []
 
-        mock_model = MagicMock()
-        mock_model.embed.return_value = iter([MagicMock(tolist=MagicMock(return_value=[0.1, 0.2]))])
-        mock_fastembed = MagicMock()
-        mock_fastembed.TextEmbedding.return_value = mock_model
+        def fake_store(branch, memory_type, texts, metadatas):
+            stored.append((branch, memory_type, texts, metadatas))
+            return {"success": True, "count": len(texts)}
 
-        monkeypatch.setitem(sys.modules, "chromadb", mock_chromadb)
-        monkeypatch.setitem(sys.modules, "fastembed", mock_fastembed)
+        monkeypatch.setattr(mod, "vectorize_and_store_subprocess", fake_store)
 
         result = mod.process_file_to_vectors(test_file, "test_collection")
 
         assert result["success"] is True
-        assert result["chunks_stored"] >= 1
+        assert result["chunks_stored"] == 1
         assert result["collection"] == "test_collection"
-        mock_collection.upsert.assert_called_once()
+        branch, memory_type, texts, metadatas = stored[0]
+        assert (branch, memory_type) == ("test", "collection")
+        assert texts == ["Test content for vectorization."]
+        assert metadatas[0]["source_file"] == "test.md"
 
     def test_returns_failure_when_file_unreadable(self, monkeypatch, tmp_path):
         """Test that unreadable files return failure status."""
@@ -326,17 +323,15 @@ class TestProcessFileToVectors:
 
         assert result["success"] is False
 
-    def test_returns_failure_when_chromadb_import_fails(self, monkeypatch, tmp_path):
-        """Test that chromadb import failures return failure status."""
+    def test_returns_failure_when_the_lane_refuses(self, monkeypatch, tmp_path):
+        """A refused store is the file's failure, named."""
         mod = pool_processor
 
         test_file = tmp_path / "test.md"
         test_file.write_text("Some content here.", encoding="utf-8")
 
-        # A None entry in sys.modules is the interpreter's own "not installed":
-        # the function-local `import chromadb` raises ImportError, and nothing
-        # process-wide (builtins.__import__) is replaced to get there.
-        monkeypatch.setitem(sys.modules, "chromadb", None)
+        refused = {"success": False, "error": "vectorize_and_store failed (exit 1): No module named 'chromadb'"}
+        monkeypatch.setattr(mod, "vectorize_and_store_subprocess", lambda *a, **k: refused)
 
         result = mod.process_file_to_vectors(test_file, "test_collection")
 
@@ -559,17 +554,14 @@ class TestProcessMemoryPool:
 
 
 class TestGetPoolStatus:
-    """Test get_pool_status function."""
+    """Test get_pool_status; the count comes through the lane, which is stubbed."""
 
-    def test_returns_status_with_mocked_chromadb(self, monkeypatch, tmp_path):
-        """Test returning pool status with mocked chromadb backend."""
+    def test_returns_status_with_the_counted_collection(self, monkeypatch, tmp_path):
         mod = pool_processor
         pool = tmp_path / "memory_pool"
         pool.mkdir()
         (pool / "recent.md").write_text("content", encoding="utf-8")
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
-        monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
-
         monkeypatch.setattr(
             mod,
             "load_config",
@@ -580,19 +572,17 @@ class TestGetPoolStatus:
                 "supported_extensions": [".md"],
             },
         )
+        asked = []
 
-        mock_collection = MagicMock()
-        mock_collection.name = "test_pool"
-        mock_collection.count.return_value = 42
-        mock_client = MagicMock()
-        mock_client.list_collections.return_value = [mock_collection]
-        mock_client.get_collection.return_value = mock_collection
-        mock_chromadb = MagicMock()
-        mock_chromadb.PersistentClient.return_value = mock_client
-        monkeypatch.setitem(sys.modules, "chromadb", mock_chromadb)
+        def fake_run(script, payload, timeout, label):
+            asked.append(payload)
+            return {"success": True, "count": 42, "exists": True}
+
+        monkeypatch.setattr(mod, "run_json", fake_run)
 
         result = mod.get_pool_status()
 
+        assert asked == [{"operation": "count_vectors", "collection_name": "test_pool"}]
         assert result["enabled"] is True
         assert result["files_in_pool"] == 1
         assert result["vectors_stored"] == 42
@@ -600,18 +590,14 @@ class TestGetPoolStatus:
         assert result["newest_file"] == "recent.md"
         assert result["oldest_file"] == "recent.md"
 
-    def test_returns_zero_vectors_when_chromadb_fails(self, monkeypatch, tmp_path):
-        """Test that chromadb import failures return zero vectors gracefully."""
+    def test_returns_zero_vectors_when_the_lane_fails(self, monkeypatch, tmp_path):
+        """A store that cannot be asked reports zero vectors, never a crash."""
         mod = pool_processor
         pool = tmp_path / "memory_pool"
         pool.mkdir()
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
-        monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
-
         monkeypatch.setattr(mod, "load_config", lambda: {"enabled": False, "supported_extensions": [".md"]})
-
-        # Make chromadb import raise: a None module entry is "not installed".
-        monkeypatch.setitem(sys.modules, "chromadb", None)
+        monkeypatch.setattr(mod, "run_json", lambda *a, **k: {"success": False, "error": "count_vectors could not run"})
 
         result = mod.get_pool_status()
 
@@ -621,24 +607,16 @@ class TestGetPoolStatus:
         assert result["oldest_file"] is None
 
     def test_returns_zero_vectors_when_collection_not_found(self, monkeypatch, tmp_path):
-        """Test that missing collection returns zero vectors."""
         mod = pool_processor
         pool = tmp_path / "memory_pool"
         pool.mkdir()
         monkeypatch.setattr(mod, "MEMORY_POOL_PATH", pool)
-        monkeypatch.setattr(mod, "CHROMA_PATH", tmp_path / ".chroma")
-
         monkeypatch.setattr(
             mod,
             "load_config",
             lambda: {"enabled": True, "supported_extensions": [".md"], "collection_name": "test_pool"},
         )
-
-        mock_client = MagicMock()
-        mock_client.list_collections.return_value = []
-        mock_chromadb = MagicMock()
-        mock_chromadb.PersistentClient.return_value = mock_client
-        monkeypatch.setitem(sys.modules, "chromadb", mock_chromadb)
+        monkeypatch.setattr(mod, "run_json", lambda *a, **k: {"success": True, "count": 0, "exists": False})
 
         result = mod.get_pool_status()
 

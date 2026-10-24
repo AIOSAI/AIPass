@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_key.py
 # Description: Tests for API Key Management Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -366,6 +366,16 @@ def test_list_providers_prints_openrouter(mock_header, mock_console):
     assert found, f"Expected 'openrouter' in console output, got: {print_calls}"
 
 
+@patch(PATCH_CONSOLE)
+@patch(PATCH_HEADER)
+def test_list_providers_names_every_provider_the_key_rules_know(_mock_header, mock_console):
+    """Anthropic has a key rule, so it is listed; the generic fallback is not a provider."""
+    api_key.list_providers()
+
+    printed = [c.args[0] for c in mock_console.print.call_args_list if c.args]
+    assert printed == ["  - anthropic", "  - openai", "  - openrouter"]
+
+
 @pytest.mark.parametrize(
     "command, args",
     [
@@ -408,7 +418,7 @@ def test_print_introspection_shows_handlers(mock_header, mock_console):
     found_provider = any("config.provider" in c for c in print_calls)
     assert found_keys, "Expected auth.keys handler listed"
     assert found_env, "Expected auth.env handler listed"
-    assert found_provider, "Expected config.provider handler listed"
+    assert not found_provider, "config.provider is no longer read by this module"
 
 
 @patch(PATCH_KEYS)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for CLI branch tests
-# Version: 4.2.0
+# Version: 4.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""
@@ -25,7 +25,6 @@ from rich.console import Console
 from aipass.cli.apps import cli as branch_entry
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import display
-from aipass.trigger.apps.modules import core as trigger_core
 
 # .archive/ holds verbatim disposal copies of old suites; they must never be collected.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
@@ -65,28 +64,6 @@ def pinned_console_width() -> None:
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
-
-
-class TriggerRecorder:
-    """Stands where display keeps its trigger and records what header() fires."""
-
-    def __init__(self) -> None:
-        self.fired: List[Tuple[str, dict]] = []
-
-    def fire(self, event: str, **data) -> None:
-        self.fired.append((event, data))
-
-
-@pytest.fixture(autouse=True)
-def trigger_recorder(monkeypatch) -> TriggerRecorder:
-    """header() fires cli_header_displayed on the live trigger bus, which has a live
-    handler; the recorder replaces display's cached _TRIGGER and trigger's own names."""
-    recorder = TriggerRecorder()
-    monkeypatch.setattr(display, "_TRIGGER", recorder)
-    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
-    monkeypatch.setattr(trigger_core, "trigger", recorder)
-    monkeypatch.setattr(trigger_core.Trigger, "fire", lambda _self, event, **data: recorder.fire(event, **data))
-    return recorder
 
 
 @pytest.fixture(autouse=True)

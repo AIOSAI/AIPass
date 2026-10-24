@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler's Codex session lane
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its Codex session lane."""
@@ -442,16 +442,15 @@ class TestParseCodexActivity:
         assert result is True
         queue.enqueue.assert_called()
 
-    def test_no_new_lines(self):
+    def test_no_new_lines(self, tmp_path):
         """Should return True when no new lines."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 50
-        mock_path.__str__ = MagicMock(return_value="/fake/codex.jsonl")
-        handler._jsonl_positions["/fake/codex.jsonl"] = 50
-        result = handler._parse_codex_activity(mock_path, "CODEX")
+        path = _on_disk(tmp_path, '{"type": "old"}\n', "codex.jsonl")
+        handler._jsonl_positions[str(path)] = path.stat().st_size
+        result = handler._parse_codex_activity(path, "CODEX")
         assert result is True
+        queue.enqueue.assert_not_called()
 
     def test_malformed_json_skipped(self, tmp_path):
         """Should skip malformed JSON lines."""

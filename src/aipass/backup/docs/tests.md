@@ -20,10 +20,9 @@ parametrised, so case counts run well ahead of function counts there.
 ## What the suite is careful about
 
 - **Live files.** `tests/conftest.py` sets `AIPASS_TEST_LOG_DIR` to a temp
-  directory, and both the audit trail (`handlers/audit/trail.py`) and the
-  run-timestamps map (`handlers/state/backup_timestamps.py`) honour it, so a
+  directory, and the audit trail (`handlers/audit/trail.py`) honours it, so a
   test run writes into a sandbox rather than the branch's own
-  `logs/operations.jsonl` and `backup_json/backup_timestamps.json`.
+  `logs/operations.jsonl`.
 - **Real credentials.** No test may reach live OAuth: a help-gate test that
   patches only one lane lets `all` fall through to the machine's real Google
   credentials file. `TestNoWriteEscapesToRealSecrets` in

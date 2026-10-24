@@ -27,7 +27,7 @@
     "residency": "{{RESIDENCY}}",
     "registry_id": "{{REGISTRY_ID}}",
     "citizen_id": "{{CITIZEN_ID}}",
-    "registry_path": ".aipass/registry.json",
+    "registry_path": "AIPASS_REGISTRY.json",
     "communications": true,
     "memory": true
   },

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plugin_integrity.py
 # Description: Verify core audit modules don't hardcode standard names
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-22
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Plugin Integrity Proof -- Verify plugin architecture stays clean.
@@ -205,7 +205,7 @@ def _scan_file_ast(
     source = file_path.read_text(encoding="utf-8")
     try:
         tree = ast.parse(source, filename=str(file_path))
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         logger.info("Skipped %s: SyntaxError during parse", file_path.name)
         return []
 
@@ -393,7 +393,7 @@ def scan(pack_dir: Path) -> dict:
     cosmetic_count = sum(1 for m in module_results if m["status"] == "cosmetic")
     missing_count = sum(1 for m in module_results if m["status"] == "missing")
 
-    passed = flagged_count == 0
+    passed = flagged_count == 0 and missing_count == 0
 
     total = len(module_results)
     parts: list[str] = [f"{clean_count}/{total} clean"]

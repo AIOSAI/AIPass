@@ -3,9 +3,9 @@
 # Name: test_artifacts.py - Artifact, Trade, and Capsule Tests
 # Description: Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py
 # Date: 2026-03-28
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -406,8 +406,7 @@ def test_gift_trade_mint_collab_name_an_unreadable_registry(tmp_path) -> None:
     registry = tmp_path / "AIPASS_REGISTRY.json"
     registry.write_text("{not json", encoding="utf-8")
     with (
-        patch("aipass.commons.apps.handlers.artifacts.trade_ops.BRANCH_REGISTRY_PATH", str(registry)),
-        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch("aipass.commons.apps.handlers.identity.identity_ops.BRANCH_REGISTRY_PATH", registry),
     ):
         results = [
             gift_artifact(["1", "@ghost"]),
@@ -453,6 +452,43 @@ def test_find_command_says_the_expired_sweep_failed_and_still_finds(
     captured = capsys.readouterr()
     assert "Item Found!" in captured.out
     assert "sweep of expired items failed" in " ".join(captured.err.split())
+    row = initialized_db.execute("SELECT owner FROM artifacts WHERE id = ?", (int(artifact_id),)).fetchone()
+    assert row["owner"] == "FINDER"
+
+
+def test_find_refuses_an_item_already_found(initialized_db: sqlite3.Connection) -> None:
+    """A second find of a picked-up item is refused; the owner-guarded update keeps the first finder."""
+    _insert_test_agent(initialized_db)
+    _insert_test_agent(initialized_db, "FINDER")
+    _insert_test_agent(initialized_db, "LATECOMER")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cursor = initialized_db.execute(
+        "INSERT INTO artifacts (name, type, creator, owner, rarity, description, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("Lost Coin", "found", "TEST_BRANCH", "TEST_BRANCH", "common", "Shiny", future),
+    )
+    initialized_db.commit()
+    artifact_id = str(cursor.lastrowid)
+
+    def find_as(name: str) -> dict:
+        with (
+            patch("aipass.commons.apps.handlers.artifacts.trade_ops.sweep_expired", return_value=0),
+            patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db", return_value=initialized_db),
+            patch("aipass.commons.apps.handlers.artifacts.trade_ops.close_db") as close,
+            patch(
+                "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
+                return_value={"name": name},
+            ),
+        ):
+            result = trade_module.find_item([artifact_id])
+        close.assert_called_once_with(initialized_db)
+        return result
+
+    assert find_as("FINDER")["success"] is True
+    second = find_as("LATECOMER")
+
+    assert second["success"] is False
+    assert "already found" in second["error"]
     row = initialized_db.execute("SELECT owner FROM artifacts WHERE id = ?", (int(artifact_id),)).fetchone()
     assert row["owner"] == "FINDER"
 
@@ -505,7 +541,7 @@ def test_trade_commands_refuse_naming_a_failed_caller_lookup(tmp_path, command, 
     registry = tmp_path / "AIPASS_REGISTRY.json"
     registry.write_text(json.dumps({"branches": [{"name": "PAL"}]}), encoding="utf-8")
     with (
-        patch("aipass.commons.apps.handlers.artifacts.trade_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch("aipass.commons.apps.handlers.identity.identity_ops.BRANCH_REGISTRY_PATH", registry),
         # find_item sweeps expired drops (its own get_db) before the lookup; stubbed so only the lookup is guarded.
         patch("aipass.commons.apps.handlers.artifacts.trade_ops.sweep_expired", return_value=0),
         patch(
@@ -535,7 +571,7 @@ def test_artifact_commands_refuse_naming_a_failed_caller_lookup(tmp_path, comman
     registry = tmp_path / "AIPASS_REGISTRY.json"
     registry.write_text(json.dumps({"branches": [{"name": "PAL"}]}), encoding="utf-8")
     with (
-        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch("aipass.commons.apps.handlers.identity.identity_ops.BRANCH_REGISTRY_PATH", registry),
         patch(
             "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
             side_effect=OSError("registry unreadable"),

@@ -12,15 +12,6 @@
       "reason": "Conditional import holder — 'yaml = None' (line 26 as of 2026-08-09) is reassigned by 'import yaml' on success or stays None. Not a constant, just a module reference variable. FILE-WIDE BY NECESSITY, not scope drift: the constant check emits one file-level verdict listing every offender (here only 'yaml') and naming_check.py:56 is the standard's only bypass gate, passing line=None — a lines-scoped rule can never match once the is_bypassed fall-through is fixed (verified against post-fix semantics 2026-08-09). Re-scope to lines:[26] the moment that gate threads a line number through."
     },
     {
-      "file": "apps/handlers/registry.py",
-      "standard": "unused_function",
-      "functions": [
-        "get_skill",
-        "get_skill_names"
-      ],
-      "reason": "Public API functions — used by test_registry.py and available for external callers; part of the registry module's contract"
-    },
-    {
       "file": "apps/handlers/module_paths.py",
       "standard": "json_structure",
       "reason": "DPLAN-0325 - this is the branch's stdlib-only dead-cwd helper and MUST NOT carry the json seam: importing prax puts the logger's own construction (which reads the cwd) onto the very path the helper exists to protect, and log_operation() writes, so wiring it here would put a file write on the import path of every skills module. seedgo's own _is_prelogging_bootstrap names this class and exempted this file until 2026-09-03. Clause 1 (holds no aipass import) still passes. Clause 2 (the logging substrate's imports reach it) passed only because the OLD apps/handlers/json/json_handler.py imported module_file, and _bootstrap_chain is seeded from every branch's json_handler. The canonical shim imports 'from aipass.prax import json_handler' and nothing branch-local, so the chain now reaches the shim and stops - measured 2026-09-03: the chain holds 128 modules and skills' only member is the shim itself. skills is the ONLY branch in the fleet carrying apps/handlers/module_paths.py, so no other sweep leg hits this. Remove the moment clause 2 learns a module-scope importer that is itself in the corpus - reported to @devpulse and @seedgo on 2026-09-03."
@@ -33,6 +24,11 @@
         "machine_processes"
       ],
       "reason": "FPLAN-0561 row 1 (2026-09-12) - the published in-process door for @api's /v1/machine route (row 2), the screen_lock pattern. Its consumer lives in src/aipass/api, outside this per-branch scan, which states it cannot see cross-branch callers. Pinned by tests/test_machine_vitals.py (45 cases). Remove if a branch-local caller lands (text actions as renderings of the dict, a later row). machine_processes (DPLAN-0414 T3, 2026-10-16) is the same door's sibling: its only caller is @api's handlers/host/machine_route.py (/v1/machine/processes), pinned by the same test file."
+    },
+    {
+      "file": "apps/modules/discovery.py",
+      "standard": "introspection",
+      "reason": "list is the one verb that takes no arguments: a no-args gate would print introspection in place of `drone @skills list`, the branch's main verb. The module's introspection is reached by `list --help` (pinned in tests/test_discovery.py). Remove if the entry point ever passes list a filter argument."
     }
   ],
   "notes": {

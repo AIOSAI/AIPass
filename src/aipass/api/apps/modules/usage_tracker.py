@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: usage_tracker.py
 # Description: Usage Tracking Module
-# Version: 1.0.2
+# Version: 1.0.4
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Usage Tracking Module"""
@@ -24,7 +24,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.usage import tracking, aggregation, cleanup
-from aipass.api.apps.handlers.usage.cleanup import DEFAULT_RETENTION_DAYS
 
 
 def print_introspection():
@@ -219,7 +218,11 @@ def cleanup_data(args: List[str], data_path: Optional[Path] = None):
 
     data_path=None is the branch's api_json store; tests pass a tmp_path store instead.
     """
-    days = int(args[0]) if args else DEFAULT_RETENTION_DAYS
+    try:
+        days = cleanup.parse_retention_days(args)
+    except ValueError as e:
+        error(str(e), suggestion="drone @api cleanup 30")
+        return
 
     header(f"Cleanup Old Data (retain {days} days)")
     console.print()

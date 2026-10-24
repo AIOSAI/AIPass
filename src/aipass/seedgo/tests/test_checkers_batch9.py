@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_checkers_batch9.py
 # Description: Unit tests for readme_check and trigger_check
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and apps/handlers/aipass_standards/trigger_check.py."""
@@ -384,12 +384,23 @@ def test_no_print_in_main_block_ok(tmp_path):
 
 def test_trigger_import_pattern_correct(tmp_path):
     """Correct trigger import pattern passes."""
-    content = 'from trigger import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
+    content = 'from aipass.trigger.apps.modules.core import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
     lines = _lines(content)
 
     result = check_trigger_import_pattern(content, lines, (tmp_path / "fake" / "module.py").as_posix())
     assert result is not None
     assert result["passed"] is True
+
+
+def test_the_fleets_core_module_import_passes_and_the_unexported_name_fails(tmp_path):
+    path = (tmp_path / "fake" / "module.py").as_posix()
+    real = 'from aipass.trigger.apps.modules import core\n\ndef do_work():\n    core.trigger.fire("event")\n'
+    broken = 'from aipass.trigger import trigger\n\ndef do_work():\n    trigger.fire("event")\n'
+    real_result = check_trigger_import_pattern(real, _lines(real), path)
+    broken_result = check_trigger_import_pattern(broken, _lines(broken), path)
+    assert real_result is not None and broken_result is not None
+    assert real_result["passed"] is True
+    assert broken_result["passed"] is False
 
 
 def test_trigger_import_pattern_missing(tmp_path):

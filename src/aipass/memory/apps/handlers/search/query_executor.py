@@ -11,78 +11,27 @@ Search Query Execution Handler
 """
 
 import re
-import subprocess
-import json
-import os
-import sys
 from pathlib import Path
 from typing import Dict, Any
 
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
-from aipass.memory.apps.handlers.repo_root import module_file
-from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
-
-_HANDLERS_DIR = module_file(__file__).parent.parent
-CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
-EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
-
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
-
-
-def _get_memory_python() -> str:
-    """Get the Python executable for memory ML operations."""
-    env_override = os.environ.get("AIPASS_MEMORY_PYTHON")
-    if env_override:
-        return env_override
-    if _MEMORY_VENV_PYTHON.exists():
-        return str(_MEMORY_VENV_PYTHON)
-    return sys.executable
-
-
-MEMORY_PYTHON = _get_memory_python()
+from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 MIN_SIMILARITY_THRESHOLD = 0.40
 
 
 def encode_query_subprocess(query: str) -> dict:
     """Encode query text via subprocess using memory venv's fastembed."""
-    input_data = json.dumps({"texts": [query]})
+    data = run_json(EMBED_SUBPROCESS_SCRIPT, {"texts": [query]}, timeout=120, label="Embedding")
+    if not data.get("success"):
+        return data
 
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(EMBED_SUBPROCESS_SCRIPT)],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+    embeddings = data.get("embeddings", [])
+    if not embeddings:
+        return {"success": False, "error": "No embedding generated"}
 
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
-            }
-
-        data = json.loads(result.stdout)
-        if not data.get("success"):
-            return data
-
-        embeddings = data.get("embeddings", [])
-        if not embeddings:
-            return {"success": False, "error": "No embedding generated"}
-
-        return {"success": True, "embedding": embeddings[0], "dimension": data.get("dimension", 384)}
-    except subprocess.TimeoutExpired:
-        logger.warning("[query_executor] Embedding subprocess timed out")
-        return {"success": False, "error": "Embedding timed out"}
-    except json.JSONDecodeError as e:
-        logger.warning(f"[query_executor] Invalid JSON from embedder: {e}")
-        return {"success": False, "error": f"Invalid JSON from embedder: {e}"}
-    except Exception as e:
-        logger.error(f"[query_executor] Embedding subprocess failed: {e}")
-        return {"success": False, "error": str(e)}
+    return {"success": True, "embedding": embeddings[0], "dimension": data.get("dimension", 384)}
 
 
 def search_vectors_subprocess(
@@ -102,28 +51,7 @@ def search_vectors_subprocess(
         "db_path": str(db_path) if db_path else None,
     }
 
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
-            input=json.dumps(input_data),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Subprocess failed"}
-
-        return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        logger.warning("[query_executor] Search subprocess timed out")
-        return {"success": False, "error": "Search operation timed out"}
-    except json.JSONDecodeError as e:
-        logger.warning(f"[query_executor] Invalid JSON from search subprocess: {e}")
-        return {"success": False, "error": f"Invalid JSON response: {e}"}
-    except Exception as e:
-        logger.error(f"[query_executor] Search subprocess failed: {e}")
-        return {"success": False, "error": str(e)}
+    return run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=60, label="Search operation")
 
 
 def _calculate_similarity(distance: float) -> float:
@@ -176,24 +104,11 @@ def _fetch_plan_by_metadata(plan_id: str, n_results: int) -> list | None:
         "source_pattern": plan_id,
         "n_results": n_results,
     }
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
-            input=json.dumps(input_data),
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        # Every way the store fails meets the one handler below; none leaves this function.
-        if result.returncode != 0:
-            raise RuntimeError(f"store exited {result.returncode}")
-        data = json.loads(result.stdout)
-        if not data.get("success"):
-            raise RuntimeError(data.get("error", "store refused"))
-        return data.get("results", [])
-    except Exception as e:
-        logger.warning(f"{skipped}: {e} — exact-ID pin skipped")
+    data = run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=30, label="store")
+    if not data.get("success"):
+        logger.warning(f"{skipped}: {data.get('error', 'store refused')} — exact-ID pin skipped")
         return None
+    return data.get("results", [])
 
 
 def _pin_plan_id_matches(query: str, filtered: list, n_results: int) -> list:

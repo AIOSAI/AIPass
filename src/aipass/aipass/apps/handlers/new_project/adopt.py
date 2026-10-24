@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-20
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -25,7 +25,7 @@ from aipass.aipass.apps.handlers.new_project import (
     _write_registry,
 )
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
-from aipass.aipass.apps.handlers.init.bootstrap import _managed_manifest_entries
+from aipass.aipass.apps.handlers.init.bootstrap import _link_venv, _managed_manifest_entries
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
     claude_local_settings,
@@ -109,67 +109,76 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
         registry_id, registry_filename = _write_registry(target, name)
     files.append(registry_filename)
 
-    aipass_dir = target / ".aipass"
-    if aipass_home:
-        for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-            src_path = Path(aipass_home) / ".aipass" / tier_file
-            if src_path.is_file():
+    # A half-adopted tree keeps no registry, so a rerun is not refused as already adopted.
+    try:
+        aipass_dir = target / ".aipass"
+        if aipass_home:
+            for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
+                src_path = Path(aipass_home) / ".aipass" / tier_file
+                if src_path.is_file():
+                    _write_if_missing(
+                        aipass_dir / tier_file,
+                        src_path.read_text(encoding="utf-8"),
+                        dry_run=dry_run,
+                        planned=files,
+                    )
+
+            hooks_template = Path(aipass_home) / ".aipass" / "project_hooks.json"
+            if hooks_template.is_file():
+                hooks_dest = aipass_dir / "hooks.json"
+                already_had_hooks = hooks_dest.exists()
                 _write_if_missing(
-                    aipass_dir / tier_file,
-                    src_path.read_text(encoding="utf-8"),
-                    dry_run=dry_run,
-                    planned=files,
+                    hooks_dest, hooks_template.read_text(encoding="utf-8"), dry_run=dry_run, planned=files
                 )
+                if not already_had_hooks and not dry_run:
+                    _enroll_project(target)
 
-        hooks_template = Path(aipass_home) / ".aipass" / "project_hooks.json"
-        if hooks_template.is_file():
-            hooks_dest = aipass_dir / "hooks.json"
-            already_had_hooks = hooks_dest.exists()
-            _write_if_missing(hooks_dest, hooks_template.read_text(encoding="utf-8"), dry_run=dry_run, planned=files)
-            if not already_had_hooks and not dry_run:
-                _enroll_project(target)
+        for md_name in sm.SEED_FILES:
+            _write_if_missing(target / md_name, agents_md_seed(reg, aipass_home), dry_run=dry_run, planned=files)
 
-    for md_name in sm.SEED_FILES:
-        _write_if_missing(target / md_name, agents_md_seed(reg, aipass_home), dry_run=dry_run, planned=files)
+        claude_dir = target / ".claude"
+        _write_if_missing(claude_dir / "settings.json", _claude_settings(), dry_run=dry_run, planned=files)
 
-    claude_dir = target / ".claude"
-    _write_if_missing(claude_dir / "settings.json", _claude_settings(), dry_run=dry_run, planned=files)
+        # nested=True holds: adopt only runs on <host>/projects/<name>, checked above.
+        if aipass_home and not is_throwaway_path(aipass_home):
+            _write_if_missing(
+                claude_dir / "settings.local.json",
+                claude_local_settings(aipass_home, nested=True),
+                dry_run=dry_run,
+                planned=files,
+            )
 
-    # nested=True holds: adopt only runs on <host>/projects/<name>, checked above.
-    if aipass_home and not is_throwaway_path(aipass_home):
-        _write_if_missing(
-            claude_dir / "settings.local.json",
-            claude_local_settings(aipass_home, nested=True),
-            dry_run=dry_run,
-            planned=files,
-        )
+        _write_if_missing(claude_dir / "commands" / "prep.md", sc.prep_md(), dry_run=dry_run, planned=files)
 
-    _write_if_missing(claude_dir / "commands" / "prep.md", sc.prep_md(), dry_run=dry_run, planned=files)
+        if aipass_home:
+            venv = Path(aipass_home) / ".venv"
+            venv_link = target / ".venv"
+            if venv.is_dir() and not venv_link.exists():
+                if not dry_run:
+                    _link_venv(venv_link, venv)
+                files.append(str(venv_link))
 
-    if aipass_home:
-        venv = Path(aipass_home) / ".venv"
-        venv_link = target / ".venv"
-        if venv.is_dir() and not venv_link.exists():
-            if not dry_run:
-                venv_link.symlink_to(venv)
-            files.append(str(venv_link))
+        # The manifest lets `init update` tell a template change from a project edit; adopt
+        # stamps only what it wrote, since the tree's pre-existing files are the project's.
+        if not dry_run:
+            written = {rel: h for rel, h in _managed_manifest_entries(target).items() if str(target / rel) in files}
+            manifest_file = sm.write_manifest(target, written)
+            files.append(str(manifest_file))
+        else:
+            files.append(str(sm.manifest_path(target)))
 
-    # The manifest lets `init update` tell a template change from a project edit; adopt
-    # stamps only what it wrote, since the tree's pre-existing files are the project's.
-    if not dry_run:
-        manifest_file = sm.write_manifest(target, _managed_manifest_entries(target))
-        files.append(str(manifest_file))
-    else:
-        files.append(str(sm.manifest_path(target)))
-
-    spawn_result = None
-    agent_created = False
-    will_have_agent = not no_agent
-    if will_have_agent and not dry_run:
-        spawn_result = _spawn_project_agent(target, name)
-        agent_created = True
-    elif will_have_agent and dry_run:
-        files.append(f"{agent_home} (resident agent — planned)")
+        spawn_result = None
+        agent_created = False
+        will_have_agent = not no_agent
+        if will_have_agent and not dry_run:
+            spawn_result = _spawn_project_agent(target, name)
+            agent_created = True
+        elif will_have_agent and dry_run:
+            files.append(f"{agent_home} (resident agent — planned)")
+    except BaseException:
+        if not dry_run:
+            (target / registry_filename).unlink(missing_ok=True)
+        raise
 
     json_handler.log_operation(
         "adopt_project",

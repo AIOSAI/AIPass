@@ -1,33 +1,22 @@
 # =================== AIPass ====================
 # Name: compact.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Injects live state for post-compact recovery (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-10-24
 # =============================================
 
 """Reads branch state and injects recovery context before compaction."""
 
+import importlib
 import json
 import os
 import subprocess
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
-
-
-def _find_branch_dir(cwd: str) -> Path | None:
-    parts = Path(cwd).parts
-    for i, part in enumerate(parts):
-        if part == "aipass" and i > 0 and parts[i - 1] == "src":
-            branch_dir = Path(*parts[: i + 2])
-            if branch_dir.is_dir():
-                return branch_dir
-    if (Path(cwd) / ".trinity").is_dir():
-        return Path(cwd)
-    return None
 
 
 def _read_last_session(branch_dir: Path) -> str | None:
@@ -85,8 +74,6 @@ def _get_git_info() -> str | None:
 def handle(hook_data: dict) -> dict:
     """Inject live branch state for post-compact recovery."""
     try:
-        import importlib
-
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         cadence.reset_counter(hook_data=hook_data, caller="compact")
     except Exception as exc:
@@ -94,7 +81,8 @@ def handle(hook_data: dict) -> dict:
 
     try:
         cwd = hook_data.get("cwd", "") or str(Path.cwd())
-        branch_dir = _find_branch_dir(cwd)
+        context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
+        branch_dir = context_window.find_branch_dir(cwd)
         branch_name = branch_dir.name if branch_dir else "unknown"
 
         sections: list[str] = []

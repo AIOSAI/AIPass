@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.20.0
+# Version: 1.20.2
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -249,14 +249,6 @@ def _where_memory_is_written() -> str:
         "measured here either way; the rule stands because a shell write is invisible to every reader that "
         "would measure one."
     )
-
-
-def _get_package_from_cwd(cwd: str) -> str:
-    parts = Path(cwd).parts
-    for i, part in enumerate(parts):
-        if part == "src" and i + 2 < len(parts):
-            return parts[i + 1]
-    return ""
 
 
 def _get_branch(file_path: str, package: str = "") -> str:
@@ -758,17 +750,15 @@ def _unparseable_refusal(fp: Path, exc: ValueError) -> dict:
 def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: str) -> dict | None:
     """Check .trinity Write/Edit/MultiEdit for unparseable results, over-limit entries and newest-first violations."""
     try:
-        resolved_path = str(fp.resolve()) if not fp.is_absolute() else str(fp)
-
         if tool_name == "Write":
             after_text = tool_input.get("content", "")
             current_text = None
-            if Path(resolved_path).exists():
-                current_text = Path(resolved_path).read_text(encoding="utf-8")
+            if fp.exists():
+                current_text = fp.read_text(encoding="utf-8")
         else:
-            if not Path(resolved_path).exists():
+            if not fp.exists():
                 return None
-            current_text = Path(resolved_path).read_text(encoding="utf-8")
+            current_text = fp.read_text(encoding="utf-8")
             resolved_after = _resolve_after_text(tool_name, tool_input, current_text)
             if resolved_after is None:
                 return None
@@ -933,7 +923,7 @@ def handle(hook_data: dict) -> dict:
     tool_name = hook_data.get("tool_name", "") if isinstance(hook_data, dict) else ""
     try:
         tool_input = hook_data.get("tool_input", {})
-        file_path = tool_input.get("file_path", "")
+        file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
 
         # The scripted lane: project fence, memory rule, ownership. Inbox and daemon checks need a named file;
         # what the reader cannot see (bash_writes.NOT_CAUGHT) the tripwire reports after the call.
@@ -956,12 +946,12 @@ def handle(hook_data: dict) -> dict:
         if not file_path:
             return {"stdout": "", "exit_code": 0}
 
-        fp = Path(file_path)
+        cwd = hook_data.get("cwd", "") or os.getcwd()
+        # Resolved against the seat, not this process: a relative path or a `..` decides the branch.
+        fp = (Path(cwd) / file_path).resolve()
         if fp.name == "inbox.json" and ".ai_mail.local" in fp.parts:
             reason = 'Direct writes to inbox.json are blocked.\nUse: drone @ai_mail email @<branch> "Subject" "Body"'
             return _refuse(reason)
-
-        cwd = hook_data.get("cwd", "") or os.getcwd()
 
         # Outermost boundary first, then daemon confinement, then whose file it is.
         wo = _ownership()
@@ -970,12 +960,12 @@ def handle(hook_data: dict) -> dict:
         if block:
             return block
 
-        package = _get_package_from_cwd(cwd)
+        package = wo.package_of(Path(cwd))
         cwd_branch = _get_branch(cwd, package)
 
         session_type = os.environ.get("AIPASS_SESSION_TYPE", "interactive")
         if session_type == "daemon" and cwd_branch:
-            target_branch = _get_branch(str(fp.resolve()) if not fp.is_absolute() else str(fp), package)
+            target_branch = _get_branch(str(fp), package)
             if target_branch and target_branch != cwd_branch:
                 reason = (
                     f"Dispatched agent confined to own branch: '{cwd_branch}' "
@@ -989,12 +979,9 @@ def handle(hook_data: dict) -> dict:
                     break
             if repo_root and not target_branch:
                 allowed_prefix = str(repo_root / "src" / package / cwd_branch)
-                resolved = str(fp.resolve()) if not fp.is_absolute() else str(fp)
-                if not resolved.startswith(allowed_prefix):
+                if not str(fp).startswith(allowed_prefix):
                     reason = f"Dispatched agent restricted to {allowed_prefix}. Cannot write to: {file_path}"
                     return _refuse(reason)
-
-        target_branch = _get_branch(str(fp.resolve()) if not fp.is_absolute() else str(fp), package)
 
         reason = wo.ownership_refusal(caller, landing, cwd, fp)
         if reason:
@@ -1002,10 +989,10 @@ def handle(hook_data: dict) -> dict:
 
         trinity_tools = ("Write", "Edit", "MultiEdit")
         if tool_name in trinity_tools and fp.parent.name == ".trinity" and fp.name in _TRINITY_MEMORY_FILES:
-            if target_branch:
-                block = _check_trinity_change(fp, tool_name, tool_input, target_branch)
-                if block:
-                    return block
+            # The branch is the memory's own folder: a seat outside src/ (the root) is capped the same.
+            block = _check_trinity_change(fp, tool_name, tool_input, fp.parent.parent.name)
+            if block:
+                return block
 
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}

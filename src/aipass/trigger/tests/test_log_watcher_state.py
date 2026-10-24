@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher_state.py
 # Description: Tests for the branch log watcher's state: positions, seen hashes, start/stop and the debounced writer
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/log_watcher.py's persisted state and lifecycle (trigger_data.json, start/stop)."""
@@ -59,6 +59,14 @@ class TestStartStopStatus:
         monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", False)
         result = lw.start_branch_log_watcher()
         assert result is None
+
+    def test_start_records_each_scheduled_logs_dir(self, monkeypatch):
+        """The twin rule reads this set: a logs/ dir is in it only when it got a watch."""
+        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", True)
+        logs_dir = _a_branch_log().parent
+        observer = lw.start_branch_log_watcher()
+        watcher = observer.schedule.call_args_list[0].args[0]
+        assert watcher.watched_dirs == {logs_dir}
 
     def test_is_branch_log_watcher_active_returns_false_when_not_started(self, monkeypatch):
         """is_branch_log_watcher_active returns False when no observer is set."""

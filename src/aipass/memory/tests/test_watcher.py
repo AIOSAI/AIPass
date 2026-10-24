@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -43,9 +43,6 @@ def _prepare_watcher_mocks(monkeypatch):
 
     The two lazy imports (normalize, rollover orchestrator) are patched on their real modules, where they read.
     """
-    mock_update_line_count = MagicMock(return_value={"success": True, "lines": 150})
-    monkeypatch.setattr(memory_watcher, "update_line_count", mock_update_line_count)
-
     mock_check_single_file = MagicMock(return_value={"success": True, "should_rollover": False})
     monkeypatch.setattr(memory_watcher, "check_single_file", mock_check_single_file)
 
@@ -68,7 +65,6 @@ def _prepare_watcher_mocks(monkeypatch):
     monkeypatch.setattr(_pin_lazy_import(monkeypatch, orchestrator), "execute_rollover", mock_execute_rollover)
 
     return {
-        "update_line_count": mock_update_line_count,
         "check_single_file": mock_check_single_file,
         "observer_instance": mock_observer_instance,
         "observer_cls": mock_observer_cls,
@@ -292,7 +288,7 @@ class TestMemoryFileWatcherOnModified:
 
         watcher.on_modified(event)
 
-        mocks["update_line_count"].assert_not_called()
+        mocks["check_single_file"].assert_not_called()
 
     def test_ignores_non_memory_files(self, monkeypatch, tmp_path):
         """Non-memory files (not in .trinity/) are ignored."""
@@ -305,10 +301,10 @@ class TestMemoryFileWatcherOnModified:
 
         watcher.on_modified(event)
 
-        mocks["update_line_count"].assert_not_called()
+        mocks["check_single_file"].assert_not_called()
 
     def test_processes_memory_file_modification(self, monkeypatch, tmp_path):
-        """Valid memory file modification triggers line count update and check."""
+        """Valid memory file modification triggers the rollover check."""
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
@@ -318,7 +314,6 @@ class TestMemoryFileWatcherOnModified:
 
         watcher.on_modified(event)
 
-        mocks["update_line_count"].assert_called_once_with(Path(event.src_path))
         mocks["check_single_file"].assert_called_once_with(Path(event.src_path))
 
     def test_rollover_triggered_when_threshold_exceeded(self, monkeypatch, tmp_path):
@@ -358,28 +353,9 @@ class TestMemoryFileWatcherOnModified:
 
         watcher.on_modified(event)
 
-        mocks["update_line_count"].assert_not_called()
+        mocks["check_single_file"].assert_not_called()
         # The file key should be removed from recent modifications after skip
         assert file_key not in watcher._recent_modifications
-
-    def test_handles_line_count_update_failure(self, monkeypatch, tmp_path):
-        """When update_line_count fails, check_single_file is not called."""
-        mod, mocks = _import_watcher(monkeypatch)
-
-        mocks["update_line_count"].return_value = {
-            "success": False,
-            "error": "File not found",
-        }
-
-        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
-        event = MagicMock()
-        event.is_directory = False
-        event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
-
-        watcher.on_modified(event)
-
-        mocks["update_line_count"].assert_called_once()
-        mocks["check_single_file"].assert_not_called()
 
     def test_handles_check_failure(self, monkeypatch, tmp_path):
         """When check_single_file fails, rollover is not triggered."""
@@ -411,7 +387,7 @@ class TestMemoryFileWatcherOnModified:
 
         watcher.on_modified(event)
 
-        mocks["update_line_count"].assert_called_once_with(Path(event.src_path))
+        mocks["check_single_file"].assert_called_once_with(Path(event.src_path))
 
     def test_rollover_exception_does_not_propagate(self, monkeypatch, tmp_path):
         """If execute_rollover raises, the exception is caught."""
@@ -437,7 +413,7 @@ class TestMemoryFileWatcherOnModified:
         assert any("Rollover crashed" in str(call) for call in log.error.call_args_list)
 
     def test_normalize_called_on_modification(self, monkeypatch, tmp_path):
-        """on_modified calls normalize_memory_file before update_line_count."""
+        """on_modified calls normalize_memory_file before the rollover check."""
         mod, mocks = _import_watcher(monkeypatch)
 
         watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
@@ -448,7 +424,6 @@ class TestMemoryFileWatcherOnModified:
         watcher.on_modified(event)
 
         mocks["normalize_memory_file"].assert_called_once_with(Path(event.src_path))
-        mocks["update_line_count"].assert_called_once_with(Path(event.src_path))
 
     def test_normalize_changes_guard_write_loop(self, monkeypatch, tmp_path):
         """When normalize makes changes, file_key is added to _recent_modifications to prevent write-loop."""
@@ -526,7 +501,6 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         self._modify(handler, branch.joinpath(*sandbox, "local.json"))
 
         mocks["normalize_memory_file"].assert_not_called()
-        mocks["update_line_count"].assert_not_called()
         mocks["check_single_file"].assert_not_called()
 
     def test_the_branch_own_memory_file_is_handled_as_before(self, monkeypatch, tmp_path):
@@ -538,7 +512,6 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         self._modify(handler, own)
 
         mocks["normalize_memory_file"].assert_called_once_with(own)
-        mocks["update_line_count"].assert_called_once_with(own)
         mocks["check_single_file"].assert_called_once_with(own)
 
     def test_a_root_reached_through_a_symlink_is_heard_at_its_real_path(self, monkeypatch, tmp_path):
@@ -560,7 +533,6 @@ class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
         self._modify(handler, reported)
 
         mocks["normalize_memory_file"].assert_called_once_with(reported)
-        mocks["update_line_count"].assert_called_once_with(reported)
         mocks["check_single_file"].assert_called_once_with(reported)
 
 
@@ -702,6 +674,26 @@ class TestAnUnreadableRegistryIsAnsweredByEveryEntry:
         deps.assert_called_once_with()
         assert result["success"] is False
         assert str(registry) in result["error"]
+
+    def test_degraded_vector_deps_skip_the_rollover(self, monkeypatch, tmp_path):
+        """An over-limit file keeps its entries when the store cannot take them: no rollover, and said so."""
+        mod, mocks = _import_watcher(monkeypatch)
+        monkeypatch.setattr(mod, "_startup_check_done", False)
+        monkeypatch.setattr(mod, "_check_vector_deps", MagicMock(return_value=False))
+        monkeypatch.setattr(mod, "_check_memory_pool", lambda: None)
+        monkeypatch.setattr(mod, "_check_plans", lambda: None)
+        trinity = tmp_path / "b" / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "local.json").write_text('{"sessions": []}', encoding="utf-8")
+        monkeypatch.setattr(mod, "_get_branch_paths", lambda: [tmp_path / "b"])
+        monkeypatch.setattr(detector, "_should_rollover", lambda path: (True, 9, "3.0.0", "16/15 sessions"))
+
+        result = mod.check_and_rollover()
+
+        mocks["execute_rollover"].assert_not_called()
+        assert result["rollover_triggered"] is False
+        assert result["rollover_skipped"] == "vector storage degraded"
+        assert len(result["files_over_limit"]) == 1
 
     def test_the_start_refuses_and_names_it(self, monkeypatch, tmp_path):
         mod, mocks = _import_watcher(monkeypatch)

@@ -28,7 +28,7 @@ After (event-driven):
 ## Core API
 
 ```python
-from aipass.trigger import trigger
+from aipass.trigger.apps.modules.core import trigger
 
 # Fire an event (branches do this)
 trigger.fire('event_name', **data)
@@ -46,7 +46,7 @@ trigger.status()  # Returns {'startup': 1, 'plan_closed': 2, ...}
 
 ### Standard Import (Most Modules)
 ```python
-from aipass.trigger import trigger
+from aipass.trigger.apps.modules.core import trigger
 
 def some_function():
     trigger.fire('event_name', key=value)
@@ -78,7 +78,6 @@ def fire_event(name, **data):
 - `prax/apps/modules/logger.py` - Fires `logging_system_initialized` / `logging_system_shutdown`
   from the two explicit lifecycle doors (it stopped firing `startup` on the first log line of
   every process on 2026-09-12, DPLAN-0339 step 3 — that fire was 94% of the cost of that line)
-- `cli/apps/modules/display.py` - Fires `cli_header_displayed`
 
 ---
 
@@ -93,7 +92,6 @@ def fire_event(name, **data):
 | `plan_closed` | flow | PLAN marked as closed |
 | `memory_saved` | memory | Memory file updated |
 | `backup_completed` | backup | Backup operation finished |
-| `cli_header_displayed` | cli | Header printed to console |
 | `logging_system_initialized` | prax | The logging system is up |
 | `logging_system_shutdown` | prax | The logging system is down |
 
@@ -245,7 +243,7 @@ def close_plan():
 ### After: Event-Driven
 ```python
 # flow/close_plan.py - CORRECT
-from aipass.trigger import trigger
+from aipass.trigger.apps.modules.core import trigger
 
 def close_plan():
     # ... close logic ...
@@ -391,7 +389,6 @@ belongs elsewhere — a handler the module orchestrates, another branch — that
 | Branch | Integration | Events |
 |--------|-------------|--------|
 | Prax | `trigger.fire('logging_system_initialized')` / `('logging_system_shutdown')` in modules/logger.py | logging_system_initialized, logging_system_shutdown |
-| CLI | `trigger.fire('cli_header_displayed')` in display.py | cli_header_displayed |
 | Flow | JSON logging only | needs migration |
 | Drone | No events | ready to adopt |
 | Backup | No events | needs events |
@@ -403,7 +400,7 @@ belongs elsewhere — a handler the module orchestrates, another branch — that
 
 For branches using Trigger:
 
-- [ ] Import pattern correct (`from aipass.trigger import trigger` or lazy-load)
+- [ ] Import pattern correct (`from aipass.trigger.apps.modules.core import trigger` or lazy-load)
 - [ ] Events named correctly (lowercase, underscore, past tense)
 - [ ] Handlers have no logger imports
 - [ ] Handlers have no print statements

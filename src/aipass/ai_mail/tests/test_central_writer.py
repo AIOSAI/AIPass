@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.1.2
+# Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -12,13 +12,12 @@
 # seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
 
 import json
-import os
-import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.central_writer as mod
+from aipass.ai_mail.apps.handlers.registry.read import RegistryUnreadable
 
 
 @pytest.fixture(autouse=True)
@@ -116,122 +115,68 @@ def test_build_central_data_includes_totals():
     assert result["system_totals"]["total_messages"] == 12
 
 
-def test_find_all_inbox_files_discovers_inboxes(tmp_path, monkeypatch):
-    """Finds inbox.json files inside .ai_mail.local directories."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-
-    for branch in ("seedgo", "drone"):
-        mail_dir = tmp_path / "src" / "aipass" / branch / ".ai_mail.local"
-        mail_dir.mkdir(parents=True)
-        (mail_dir / "inbox.json").write_text("{}", encoding="utf-8")
-
-    result = mod.find_all_inbox_files()
-    assert len(result) == 2
-    names = {p.parent.parent.name for p in result}
-    assert names == {"seedgo", "drone"}
+def _registry(rows) -> Path:
+    """Write the sandbox registry the autouse sandboxed_central fixture points the scan at."""
+    registry = mod.BRANCH_REGISTRY
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(json.dumps({"branches": rows}), encoding="utf-8")
+    return registry
 
 
-def test_find_all_inbox_files_never_enters_a_sandbox_or_output_dir(tmp_path, monkeypatch):
-    """A mailbox planted under dropbox, .archive, docs.local, artifacts or system_logs is not counted.
-    The prune judges the names below the repo root, never the root's own path (here inside a dropbox).
-    """
-    root = tmp_path / "dropbox" / "repo"
-    monkeypatch.setattr(mod, "_REPO_ROOT", root)
-    live = root / "src" / "aipass" / "live" / ".ai_mail.local"
-    live.mkdir(parents=True)
-    (live / "inbox.json").write_text("{}", encoding="utf-8")
-    for pruned in ("dropbox", ".archive", "docs.local", "artifacts", "system_logs"):
-        planted = root / "src" / "aipass" / "live" / pruned / "planted" / ".ai_mail.local"
-        planted.mkdir(parents=True)
-        (planted / "inbox.json").write_text("{}", encoding="utf-8")
-
-    result = mod.find_all_inbox_files()
-
-    assert [p.parent.parent.name for p in result] == ["live"]
+def _inbox(branch_dir: Path) -> Path:
+    inbox = branch_dir / ".ai_mail.local" / "inbox.json"
+    inbox.parent.mkdir(parents=True)
+    inbox.write_text("{}", encoding="utf-8")
+    return inbox
 
 
-# The only route to an unlistable directory is a permission bit: Windows
-# ignores mode 000 on directories and root reads through it, so both skip.
-@pytest.mark.skipif(
-    sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
-    reason="mode 000 does not deny a directory listing on Windows or to root",
-)
-def test_find_all_inbox_files_raises_on_an_unreadable_subtree(tmp_path, monkeypatch):
-    """An unlistable directory raises; it never drops out of a list that looks complete."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-    for branch in ("readable", "locked"):
-        mail_dir = tmp_path / branch / ".ai_mail.local"
-        mail_dir.mkdir(parents=True)
-        (mail_dir / "inbox.json").write_text("{}", encoding="utf-8")
-    locked = tmp_path / "locked"
-    locked.chmod(0o000)
-    try:
-        with pytest.raises(PermissionError) as excinfo:
-            mod.find_all_inbox_files()
-    finally:
-        locked.chmod(0o755)
-    assert excinfo.value.filename == str(locked)
+def test_find_all_inbox_files_follows_registry_order(tmp_path):
+    """One inbox per registry row, in the order the registry lists them."""
+    drone = _inbox(tmp_path / "elsewhere" / "drone")
+    seedgo = _inbox(mod.BRANCH_REGISTRY.parent / "src" / "aipass" / "seedgo")
+    _registry(
+        [
+            {"name": "SEEDGO", "path": "src/aipass/seedgo"},
+            {"name": "DRONE", "path": str(drone.parent.parent)},
+        ]
+    )
+
+    assert mod.find_all_inbox_files() == [seedgo, drone]
 
 
-def test_find_all_inbox_files_skips_archive(tmp_path, monkeypatch):
-    """Skips .ai_mail.local dirs inside .archive paths."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+def test_find_all_inbox_files_roots_a_relative_path_at_the_repo_root(tmp_path, monkeypatch):
+    """A relative registry path is read under _REPO_ROOT, never under the working directory."""
+    cwd = tmp_path / "cwd"
+    _inbox(cwd / "src" / "aipass" / "prax")
+    monkeypatch.chdir(cwd)
+    rooted = _inbox(mod.BRANCH_REGISTRY.parent / "src" / "aipass" / "prax")
+    _registry([{"name": "PRAX", "path": "src/aipass/prax"}])
 
-    valid = tmp_path / "branch" / ".ai_mail.local"
-    valid.mkdir(parents=True)
-    (valid / "inbox.json").write_text("{}", encoding="utf-8")
-
-    archived = tmp_path / ".archive" / "old" / ".ai_mail.local"
-    archived.mkdir(parents=True)
-    (archived / "inbox.json").write_text("{}", encoding="utf-8")
-
-    result = mod.find_all_inbox_files()
-    assert len(result) == 1
+    assert mod.find_all_inbox_files() == [rooted]
 
 
-def test_find_all_inbox_files_skips_backup(tmp_path, monkeypatch):
-    """Skips .ai_mail.local dirs inside .backup paths."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+def test_find_all_inbox_files_skips_a_branch_without_an_inbox():
+    """A registry branch with no inbox.json, or no directory at all, is left out."""
+    (mod.BRANCH_REGISTRY.parent / "empty" / ".ai_mail.local").mkdir(parents=True)
+    kept = _inbox(mod.BRANCH_REGISTRY.parent / "kept")
+    _registry(
+        [
+            {"name": "EMPTY", "path": "empty"},
+            {"name": "GONE", "path": "gone"},
+            {"name": "KEPT", "path": "kept"},
+        ]
+    )
 
-    valid = tmp_path / "branch" / ".ai_mail.local"
-    valid.mkdir(parents=True)
-    (valid / "inbox.json").write_text("{}", encoding="utf-8")
-
-    backup = tmp_path / ".backup" / "snap" / ".ai_mail.local"
-    backup.mkdir(parents=True)
-    (backup / "inbox.json").write_text("{}", encoding="utf-8")
-
-    result = mod.find_all_inbox_files()
-    assert len(result) == 1
-
-
-def test_find_all_inbox_files_skips_backups_dir(tmp_path, monkeypatch):
-    """Skips .ai_mail.local dirs inside a `backups/` tree, on every platform.
-    Exclusions are path components, so no OS separator can make the count differ.
-    """
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-
-    valid = tmp_path / "branch" / ".ai_mail.local"
-    valid.mkdir(parents=True)
-    (valid / "inbox.json").write_text("{}", encoding="utf-8")
-
-    backup = tmp_path / "backups" / "snap" / ".ai_mail.local"
-    backup.mkdir(parents=True)
-    (backup / "inbox.json").write_text("{}", encoding="utf-8")
-
-    result = mod.find_all_inbox_files()
-    assert len(result) == 1
+    assert mod.find_all_inbox_files() == [kept]
 
 
-def test_find_all_inbox_files_ignores_dir_without_inbox(tmp_path, monkeypatch):
-    """Skips .ai_mail.local dirs that don't contain inbox.json."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+def test_find_all_inbox_files_refuses_an_unreadable_registry():
+    """An unreadable registry raises; it never reads as a fleet with no inboxes."""
+    _inbox(mod.BRANCH_REGISTRY.parent / "seedgo")
+    mod.BRANCH_REGISTRY.write_text("{not json", encoding="utf-8")
 
-    empty_mail = tmp_path / "branch" / ".ai_mail.local"
-    empty_mail.mkdir(parents=True)
-
-    result = mod.find_all_inbox_files()
-    assert len(result) == 0
+    with pytest.raises(RegistryUnreadable):
+        mod.find_all_inbox_files()
 
 
 def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
@@ -395,50 +340,3 @@ def test_write_central_file_overwrites_existing(tmp_path, monkeypatch):
     written = json.loads(central_file.read_text(encoding="utf-8"))
     assert written == new_data
     assert "old" not in written
-
-
-# Excluded trees must be pruned from the walk, not filtered after it: update_central() walks on every delivery.
-
-
-def test_find_all_inbox_files_does_not_descend_into_excluded_dirs(tmp_path, monkeypatch):
-    """The excluded trees must never be WALKED, not merely filtered from results."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-
-    valid = tmp_path / "branch" / ".ai_mail.local"
-    valid.mkdir(parents=True)
-    (valid / "inbox.json").write_text("{}", encoding="utf-8")
-
-    for excluded in (".backup", ".archive", "backups"):
-        deep = tmp_path / excluded / "a" / "b" / "c" / ".ai_mail.local"
-        deep.mkdir(parents=True)
-        (deep / "inbox.json").write_text("{}", encoding="utf-8")
-
-    visited = []
-    real_walk = mod.os.walk
-
-    def spy_walk(top, *args, **kwargs):
-        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
-            visited.append(dirpath)
-            yield dirpath, dirnames, filenames
-
-    monkeypatch.setattr(mod.os, "walk", spy_walk)
-
-    result = mod.find_all_inbox_files()
-
-    assert len(result) == 1, "only the non-excluded inbox may be returned"
-    # Without this the test is blind: an implementation that never calls os.walk trespasses nowhere.
-    assert Path(visited[0]) == tmp_path, "find_all_inbox_files must walk the root via os.walk so descent can be pruned"
-    trespassed = [d for d in visited if any(part in Path(d).parts for part in (".backup", ".archive", "backups"))]
-    assert not trespassed, f"walk descended into excluded trees: {trespassed}"
-
-
-def test_find_all_inbox_files_excludes_are_named_not_substrings(tmp_path, monkeypatch):
-    """A directory merely CONTAINING an excluded name is a real branch, not a backup."""
-    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
-
-    legit = tmp_path / "my.backup.tools" / ".ai_mail.local"
-    legit.mkdir(parents=True)
-    (legit / "inbox.json").write_text("{}", encoding="utf-8")
-
-    result = mod.find_all_inbox_files()
-    assert len(result) == 1, "a path containing 'backup' as a substring is not an excluded tree"

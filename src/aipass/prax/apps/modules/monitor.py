@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2025-11-23
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX Monitor Module - Mission Control for Autonomous Branches."""
@@ -30,30 +30,18 @@ from aipass.cli.apps.modules import console, header, error
 
 from aipass.prax.apps.handlers.json import json_handler
 
-from aipass.prax.apps.handlers.monitoring import (
-    print_event,  # unified_stream.py
-    print_command_separator,  # unified_stream.py - command headers
-    print_hook_event,  # unified_stream.py - hook fire/skip display
-    MonitoringQueue,  # event_queue.py
-    ModuleTracker,  # module_tracker.py
-)
-from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent
-from aipass.prax.apps.handlers.monitoring.telegram_relay import (
-    init_relay,
-    relay_event,
-    stop_relay,
-    is_relay_enabled_by_env,
-)
+from aipass.prax.apps.handlers.monitoring.unified_stream import print_event, print_command_separator, print_hook_event
+from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
+from aipass.prax.apps.handlers.monitoring import instance_lock
 from aipass.prax.apps.handlers.monitoring.pid_cache import get_pid_for_branch as _get_pid_for_branch
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
-from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument, refuse, unknown_option
 
 import json as _json
 
 
 _stop_event = threading.Event()  # Thread-safe shutdown signal
 _event_queue: Optional[MonitoringQueue] = None
-_module_tracker: Optional[ModuleTracker] = None
 _display_thread: Optional[threading.Thread] = None
 _file_watcher_thread: Optional[threading.Thread] = None
 _log_watcher_thread: Optional[threading.Thread] = None
@@ -75,8 +63,7 @@ def print_introspection():
         ("3. interactive_filter.py", "parse_command(), get_help_text() - Interactive command parsing"),
         ("4. monitoring_filters.py", "should_monitor(), get_priority() - Event filtering"),
         ("5. event_queue.py", "MonitoringEvent, MonitoringQueue - Event buffering"),
-        ("6. module_tracker.py", "ModuleTracker - Module execution tracking"),
-        ("7. branch_scope.py", "BranchScope, parse_scope() - Launch-time branch scoping"),
+        ("6. branch_scope.py", "BranchScope, parse_scope() - Launch-time branch scoping"),
     ]
     console.print()
     console.print("[bold cyan]PRAX Monitor Module[/bold cyan]")
@@ -88,10 +75,10 @@ def print_introspection():
     console.print("[yellow]Connected Handlers (apps/handlers/monitoring/):[/yellow]")
     for name, desc in _handlers:
         console.print(f"\n  [cyan]{name}[/cyan]\n     [dim]{desc}[/dim]")
-    console.print("\n  [cyan]8. file watcher (threaded)[/cyan]")
+    console.print("\n  [cyan]7. file watcher (threaded)[/cyan]")
     console.print("     [dim]Real-time file change detection using watchdog[/dim]")
     console.print("     [green]STATUS: Active - monitors ECOSYSTEM_ROOT recursively[/green]")
-    console.print("\n  [cyan]9. log monitor (threaded)[/cyan]")
+    console.print("\n  [cyan]8. log monitor (threaded)[/cyan]")
     console.print("     [dim]Log stream processing from SYSTEM_LOGS_DIR[/dim]")
     console.print("     [green]STATUS: Active - watches *.log files for new entries[/green]")
     console.print("\n[dim]Run 'drone @prax monitor --help' for usage[/dim]\n")
@@ -116,11 +103,6 @@ def print_help():
         (
             "drone @prax monitor run commons --logs",
             "Old behavior — tail commons branch's technical prax logs instead of the feed",
-        ),
-        (
-            "drone @prax monitor run --relay",
-            "Enable Telegram relay (mirrors feed to prax_monitor bot)"
-            "\n    Also enabled by env AIPASS_PRAX_MONITOR_RELAY=1",
         ),
         ("drone @prax monitor --help", "Show this help"),
     ]
@@ -175,6 +157,9 @@ def _dispatch_run(run_args: List[str]) -> bool:
     (e.g. 'seedgo,commons') keep treating commons as a branch (feed is
     standalone-only in v1).
     """
+    bad_flag = unknown_option(run_args, ("--logs",))
+    if bad_flag:
+        refuse("monitor run", bad_flag, "drone @prax monitor --help")
     positional = [a for a in run_args if not a.startswith("--")]
     target = positional[0] if positional else None
     logs_escape = "--logs" in run_args
@@ -182,23 +167,9 @@ def _dispatch_run(run_args: List[str]) -> bool:
     if target == "commons" and not logs_escape:
         from aipass.prax.apps.handlers.monitoring.commons_feed import run_commons_feed
 
-        feed_args = [a for a in run_args if a != target]
-        relay_enabled = "--relay" in feed_args or is_relay_enabled_by_env()
-        relay_config = _load_relay_config() if relay_enabled else None
-        return run_commons_feed(feed_args, relay_config=relay_config)
+        return run_commons_feed([a for a in run_args if a != target])
 
     return _run_monitor([a for a in run_args if a != "--logs"])
-
-
-def _load_relay_config() -> Optional[dict]:
-    """Load Telegram relay config from @api secrets."""
-    try:
-        from aipass.api.apps.modules.secrets import get_secret
-
-        return get_secret("telegram", "prax_monitor", as_json=True)
-    except Exception as e:
-        logger.info("[monitor] Could not load relay config: %s", e)
-        return None
 
 
 def _known_branch_names() -> set:
@@ -246,7 +217,7 @@ def _mode_line(scope) -> str:
 
 def _run_monitor(args: List[str]) -> bool:
     """Launch Mission Control live monitoring, optionally scoped to branches."""
-    global _event_queue, _module_tracker, _active_scope
+    global _event_queue, _active_scope
     global _display_thread, _file_watcher_thread, _log_watcher_thread, _rate_tracker_thread
 
     from aipass.prax.apps.handlers.monitoring.branch_scope import parse_scope
@@ -259,16 +230,8 @@ def _run_monitor(args: List[str]) -> bool:
 
     _event_queue = MonitoringQueue()
     _event_queue.set_scope(_active_scope)
-    _module_tracker = ModuleTracker()
     _stop_event.clear()
     _reset_render_failure_state()
-
-    _relay_enabled = "--relay" in args or is_relay_enabled_by_env()
-    if _relay_enabled:
-        args = [a for a in args if a != "--relay"]
-    init_relay(_relay_enabled, _load_relay_config() if _relay_enabled else None)
-    if _relay_enabled:
-        console.print("[green]monitor → Telegram relay ON (prax_monitor)[/green]")
 
     _is_tty = sys.stdin.isatty()
 
@@ -312,18 +275,21 @@ def _start_threads():
     _log_watcher_thread = threading.Thread(target=_log_watcher_worker, daemon=True)
     _log_watcher_thread.start()
 
-    _rate_tracker_thread = threading.Thread(target=_rate_tracker_worker, daemon=True)
-    _rate_tracker_thread.start()
+    # One rate tracker fleet-wide: a second monitor would double every runaway alert.
+    if instance_lock.try_acquire():
+        _rate_tracker_thread = threading.Thread(target=_rate_tracker_worker, daemon=True)
+        _rate_tracker_thread.start()
+    else:
+        logger.info("[monitor] Another monitor runs the log rate tracker; this one only displays events")
 
     logger.info("All monitoring threads started")
 
 
 def _stop_threads():
-    """Stop all monitoring threads and Telegram relay"""
+    """Stop all monitoring threads"""
     global _event_queue
 
     _stop_event.set()
-    stop_relay()
 
     if _event_queue:
         _event_queue.stop()
@@ -331,6 +297,7 @@ def _stop_threads():
     for t in (_display_thread, _file_watcher_thread, _log_watcher_thread, _rate_tracker_thread):
         if t is not None and t.is_alive():
             t.join(timeout=2.0)
+    instance_lock.release()
 
     logger.info("All monitoring threads stopped")
 
@@ -348,15 +315,7 @@ def _print_event_to_console(event) -> None:
     elif event.event_type == "hook":
         print_hook_event(event.branch, event.message, event.action)
     else:
-        print_event(event.event_type, event.branch, event.message, event.level, pid=_get_pid_for_branch(event.branch))
-
-
-def _render_event(event) -> None:
-    """Send one event to both sinks: the Telegram relay and the console.
-
-    Relay first, so a line the terminal cannot draw still reaches the chat."""
-    relay_event(event)
-    _print_event_to_console(event)
+        print_event(event.branch, event.message, event.level, pid=_get_pid_for_branch(event.branch))
 
 
 def _reset_render_failure_state() -> None:
@@ -394,7 +353,7 @@ def _display_worker():
             continue
 
         try:
-            _render_event(event)
+            _print_event_to_console(event)
         except Exception as exc:
             logger.debug("[monitor] Event render failed: %s (%s from %s)", exc, event.event_type, event.branch)
             _render_failures += 1

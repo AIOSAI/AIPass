@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -51,7 +51,7 @@ from aipass.cli.apps.modules.display import reset_command_state, resolve_exit
 MODULE_ROOT = Path(__file__).parent
 MODULES_DIR = MODULE_ROOT / "modules"
 # The one version: the file header and the README header must quote this same value.
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 # Only these modules read --help themselves; any other module would run with it as an
 # ordinary argument. Missing from this set costs contextual help, never a run.
@@ -209,7 +209,6 @@ def print_help() -> None:
     console.print()
     console.print("  [green]whoami[/green]       Show the branch identity commons resolved for you")
     console.print("  [green]database[/green]     Database module introspection")
-    console.print("  [green]push-central[/green] Aggregate branch stats into the central file")
     console.print()
     console.print("-" * 70)
     console.print()

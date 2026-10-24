@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_plan.py
 # Description: PLAN restore module (reopen closed plans)
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -43,7 +43,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, warning
 
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
-from aipass.flow.apps.handlers.registry.save_registry import save_registry
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
 
 from aipass.flow.apps.handlers.plan.validator import normalize_plan_number, validate_plan_exists
 from aipass.flow.apps.handlers.plan.display import (
@@ -160,17 +160,23 @@ def restore_plan(plan_num: str | None) -> bool:
     # Lazy: a module-level import is circular.
     from aipass.flow.apps.modules.registry_monitor import scan_plan_files
 
-    result = restore_plan_impl(
-        plan_num=plan_num,
-        normalize_plan_number=normalize_plan_number,
-        load_registry=load_registry,
-        save_registry=save_registry,
-        validate_plan_exists=validate_plan_exists,
-        recover_plan_from_backup_fn=recover_plan_from_backup,
-        scan_plan_files=scan_plan_files,
-        update_dashboard_local=update_dashboard_local,
-        push_to_plans_central=push_to_plans_central,
-    )
+    # Restore heals, reads and writes several registries; nobody else may write in between.
+    try:
+        with registry_lock():
+            result = restore_plan_impl(
+                plan_num=plan_num,
+                normalize_plan_number=normalize_plan_number,
+                load_registry=load_registry,
+                save_registry=save_registry,
+                validate_plan_exists=validate_plan_exists,
+                recover_plan_from_backup_fn=recover_plan_from_backup,
+                scan_plan_files=scan_plan_files,
+                update_dashboard_local=update_dashboard_local,
+                push_to_plans_central=push_to_plans_central,
+            )
+    except TimeoutError as exc:
+        warning(str(exc))
+        return False
 
     _display_messages(result.get("messages", []))
     return result.get("success", False)

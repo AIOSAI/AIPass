@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_service_control.py
 # Description: Tests for the systemd unit lifecycle of the log watcher
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-10-02
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""
@@ -127,6 +127,25 @@ class TestIsServiceActive:
         assert asked == ["is-active"]
 
 
+class TestServiceState:
+    """service_state names the unit's state; a silent systemctl is unknown, never stopped."""
+
+    @pytest.mark.parametrize("active, word", [(True, "running"), (False, "stopped"), (None, "unknown")])
+    def test_each_answer_maps_to_its_own_word(
+        self, monkeypatch: pytest.MonkeyPatch, systemd_present, active, word
+    ) -> None:
+        monkeypatch.setattr(service_control, "is_service_active", lambda: active)
+
+        assert service_control.service_state() == word
+
+    def test_no_systemd_is_unavailable_and_asks_nothing(self, monkeypatch: pytest.MonkeyPatch, systemd_absent) -> None:
+        asked: list[str] = []
+        monkeypatch.setattr(service_control, "is_service_active", lambda: asked.append("asked"))
+
+        assert service_control.service_state() == "unavailable"
+        assert asked == []
+
+
 class TestGetAipassHome:
     """Env var wins; the walk is the last resort and never reads the cwd."""
 
@@ -141,24 +160,14 @@ class TestGetAipassHome:
 
         assert service_control.get_aipass_home() == home
 
-    def test_git_toplevel_is_used_when_no_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        toplevel = str(Path(tempfile.gettempdir()) / "repo_from_git")
+    def test_the_marker_walk_wins_over_the_cwds_git_checkout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Run from inside another checkout, the unit still points at this repo; never Path.cwd()."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
+        other_checkout = str(Path(tempfile.gettempdir()) / "repo_from_git")
         monkeypatch.setattr(
             service_control.subprocess,
             "run",
-            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, toplevel + "\n", ""),
-        )
-
-        assert service_control.get_aipass_home() == Path(toplevel)
-
-    def test_falls_back_to_the_marker_walk_when_git_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Never Path.cwd(): the round-4 ruling, still holding after the move."""
-        monkeypatch.delenv("AIPASS_HOME", raising=False)
-        monkeypatch.setattr(
-            service_control.subprocess,
-            "run",
-            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 128, "", "not a git repository"),
+            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, other_checkout + "\n", ""),
         )
         sentinel = Path(tempfile.gettempdir()) / "walked_root"
         monkeypatch.setattr(service_control, "find_repo_root", lambda **kw: sentinel)

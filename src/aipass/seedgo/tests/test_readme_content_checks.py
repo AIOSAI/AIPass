@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_readme_content_checks.py
 # Description: Unit tests for readme content accuracy checks and the docs page standard
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-05-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/readme_check.py and docs_page_check.py beside it."""
@@ -218,6 +218,22 @@ def test_markdown_links_external_only(tmp_path):
     result = check_markdown_links(lines, tmp_path, "fake.py")
     assert result["passed"] is True
     assert "skipped" in result["message"].lower()
+
+
+def test_markdown_links_strip_the_fragment_and_title(tmp_path):
+    """docs/guide.md#setup and docs/guide.md "Guide" both point at docs/guide.md."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    lines = _lines('[g](docs/guide.md#setup)\n[h](docs/guide.md "Guide")\n')
+    result = check_markdown_links(lines, tmp_path, "fake.py")
+    assert result == {"name": "Markdown link validity", "passed": True, "message": "All 2 relative links verified"}
+
+
+def test_count_test_functions_counts_async_tests(tmp_path):
+    """An async def test_ is a test pytest collects."""
+    files = {"test_a.py": "def test_one(): pass\nasync def test_two(): pass\n"}
+
+    assert "of actual (2)" in _count_check(tmp_path, "2 tests", files)["message"]
 
 
 def test_markdown_links_all_valid(tmp_path):

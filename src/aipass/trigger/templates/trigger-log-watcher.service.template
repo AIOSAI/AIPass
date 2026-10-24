@@ -8,6 +8,9 @@ WorkingDirectory={{AIPASS_HOME}}
 ExecStart={{AIPASS_HOME}}/.venv/bin/python3 -m aipass.trigger.apps.log_watcher_service
 Restart=on-failure
 RestartSec=10
+# 75 is the reload sentinel's deliberate exit: log it as success, still restart on it.
+SuccessExitStatus=75
+RestartForceExitStatus=75
 
 [Install]
 WantedBy=default.target

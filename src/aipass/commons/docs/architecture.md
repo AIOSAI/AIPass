@@ -36,7 +36,7 @@ exposes the connection layer's introspection, and `commons_identity` answers
 
 `apps/handlers/` holds the business logic, one directory per domain: posts,
 comments, curation, feed, rooms, artifacts, notifications, profiles, social,
-search, welcome, engagement, activity, catchup, digest, central, dashboard,
+search, welcome, engagement, activity, catchup, digest,
 database, identity and json. Handlers return dicts and never render -- no
 handler imports the console at all, which is what lets the same handler serve a
 CLI verb, the dashboard writer and a test without any of them seeing each

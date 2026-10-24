@@ -3,7 +3,7 @@
 # Description: Integration tests for citizen class system
 # Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -405,7 +405,7 @@ class TestClassAwareUpdate:
         result = handle_update(["--all"])
         assert result == 1
 
-    def test_update_cli_accepts_class_with_all(self):
+    def test_update_cli_accepts_class_with_all(self, tmp_path):
         """update specialist --all should parse correctly and call update_all with class filter."""
         from unittest.mock import patch
 
@@ -422,7 +422,12 @@ class TestClassAwareUpdate:
                 "dry_run": True,
             }
         ]
-        with patch("aipass.spawn.apps.modules.update.update_all", return_value=mock_results) as mock_ua:
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text('{"branches": []}', encoding="utf-8")
+        with (
+            patch("aipass.spawn.apps.modules.update.update_all", return_value=mock_results) as mock_ua,
+            patch("aipass.spawn.apps.modules.update.find_registry", return_value=registry),
+        ):
             result = handle_update(["specialist", "--all", "--dry-run"])
 
         assert result == 0

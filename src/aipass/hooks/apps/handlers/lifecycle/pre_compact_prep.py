@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.1.2
+# Version: 1.1.3
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -26,6 +26,7 @@ import subprocess
 from datetime import date
 from pathlib import Path
 
+from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 _DEFAULT_SUMMARY_CAP = 300
@@ -223,7 +224,7 @@ def _stamp_session_entry(branch_dir: Path, summary: str, cap: int) -> bool:
     data["sessions"] = sessions
 
     try:
-        local_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        json_files.write_json_file(local_path, data)
     except OSError as exc:
         logger.warning("[HOOKS] pre_compact_prep: local.json write failed: %s", exc)
         return False

@@ -54,7 +54,9 @@ body a reader only reads (a mail body) is data, not a command.
 
 What the reader cannot name with confidence — a command word that is an unfolded expansion
 (`$UNSET x`, `$(cat verb)`), a shell fed through a pipe, a script that exists but is unreadable, not
-a regular file, or over 512 KB — is refused off the admin seat (`rm_gate`'s `UNREAD_REFUSED`). A script
+a regular file, or over 512 KB — is refused off the admin seat (`rm_gate`'s `UNREAD_REFUSED`). A
+program word the reader cannot see at all (an unfolded expansion, a shell fed through a pipe) could be
+git, so `git_gate` refuses it on every seat, the admin seat included. A script
 that does not exist yet is allowed and logged at INFO: writing a helper and running it in
 one command is everyday work, and there is nothing to read.
 

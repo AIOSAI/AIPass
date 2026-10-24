@@ -30,20 +30,17 @@ is real and it is allowed to take the time it takes. What is **not** allowed is
 paying a global cost per recipient.
 
 - **One central aggregation per broadcast, not one per recipient.**
-  `update_central()` takes no arguments — it rescans every branch inbox from the
-  repo root and derives the whole answer itself. Running it per delivery
+  `update_central()` takes no arguments — it rereads every registry branch's inbox
+  and derives the whole answer itself. Running it per delivery
   recomputes one global result N times, and only the last run is ever read.
   `send_to_broadcast` therefore passes **no** `on_delivered` callback and calls
   `update_central_fn()` once after the loop. The central file is byte-identical
   either way; the discarded recomputations are not.
-- **The inbox scan prunes, it does not filter.** `find_all_inbox_files()` walks
-  with `os.walk` and drops excluded directories from `dirnames` in place, which
-  is what stops the descent: discarding a result after the walk does not save the
-  walk, and `.backup` and `projects/` hold tens of gigabytes.
-- **Exclusions are path components, not substrings** (`EXCLUDED_DIR_NAMES`). A
-  substring would hide any branch whose directory merely contains the word
-  (`my.backup.tools/`), and component names have no separator to disagree on
-  between POSIX and Windows.
+- **The inbox scan reads the registry, not the disk.** `find_all_inbox_files()`
+  takes each `get_all_branches()` row, roots a relative path at the repo root, and
+  keeps `<branch>/.ai_mail.local/inbox.json` when it exists, in registry order. An
+  unreadable registry raises `RegistryUnreadable`, so the central file stays as it
+  was rather than reporting no mail.
 
 **The router's timeout is a limit on broadcasts.** A broadcast that outruns
 drone's routing timeout is killed after its deliveries land, and the caller sees a

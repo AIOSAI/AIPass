@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_console_check.py
 # Description: Mock Console Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,14 +12,15 @@ Mock Console Standards Checker Handler
 Reference: mock_console.md
 """
 
+from functools import partial
 import ast
 import re
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -56,15 +57,6 @@ _RECORDING = "a recording Rich Console"
 _FAKE = "a fake console class"
 
 FIX = "read the channel with capsys.readouterr()"
-
-
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
 
 
 def _is_console_name(name: str | None) -> bool:
@@ -107,7 +99,7 @@ def _direct_substitute(node: ast.expr, fakes: Set[str]) -> str | None:
     """What stand-in this expression builds, or None when it builds none."""
     if not isinstance(node, ast.Call):
         return None
-    name = _tail_name(node.func)
+    name = tail_name(node.func)
     if name in _MOCK_FACTORIES:
         return _MOCK
     if name in fakes:
@@ -155,7 +147,7 @@ def _bindings(nodes: List[ast.AST], fakes: Set[str], helpers: Dict[str, str]) ->
         target = node.targets[0]
         kind = _direct_substitute(node.value, fakes)
         if kind is None and isinstance(node.value, ast.Call):
-            kind = helpers.get(_tail_name(node.value.func))
+            kind = helpers.get(tail_name(node.value.func))
         names: List[str] = []
         if isinstance(target, ast.Name):
             names = [target.id]
@@ -225,7 +217,7 @@ def _install_findings(nodes: List[ast.AST], fakes: Set[str], bound: Dict[str, st
                     found.append((node.lineno, f"{kind} installed over the product's console"))
         if not isinstance(node, ast.Call):
             continue
-        name = _tail_name(node.func)
+        name = tail_name(node.func)
         kind = None
         if name in _PATCH_CALLS:
             kind = _patch_install(node, fakes, bound)
@@ -251,21 +243,12 @@ def _handoff_findings(nodes: List[ast.AST], fakes: Set[str], bound: Dict[str, st
     return found
 
 
-def _parse(source: str, what: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ruff already convicts a syntax error; a line number invented for an unparseable file misleads.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[mock_console] Unparseable, nothing %s: %s", what, exc)
-        return None
+_parse = partial(parse, tag="mock_console")
 
 
 def scan(source: str) -> List[Tuple[int, str, str]]:
     """(line, what was found, fix) for every console stand-in the product gets."""
-    tree = _parse(source, "scanned")
+    tree = _parse(source)
     if tree is None:
         return []
 
@@ -291,7 +274,7 @@ def counted_renderer_consoles(source: str) -> List[int]:
     ``capsys`` cannot capture an output the product never wrote. Only ever read
     for a file with no hits, which is what makes "never installs" true.
     """
-    tree = _parse(source, "counted")
+    tree = _parse(source)
     if tree is None:
         return []
 
@@ -299,23 +282,13 @@ def counted_renderer_consoles(source: str) -> List[int]:
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and _tail_name(node.func) == "Console"
+        and tail_name(node.func) == "Console"
         and any(keyword.arg == "file" for keyword in node.keywords)
     )
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[mock_console] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="mock_console", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

@@ -3,7 +3,7 @@
 # Description: Tests for aipass init_flow Phase 3
 # Version: 1.2.8
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -470,12 +470,27 @@ class TestHandleCommand:
         assert exc_info.value.code == 0
         mock_scaffold.assert_called_once_with(["test-proj"])
 
+    def test_a_target_is_scaffolded_from_inside_an_agent_branch(self, tmp_path, monkeypatch) -> None:
+        """The branch guard reads the target, so `init <target>` works from a citizen's seat."""
+        seat = tmp_path / "seat"
+        (seat / ".trinity").mkdir(parents=True)
+        (seat / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(seat)
+        with patch("aipass.aipass.apps.modules.init_flow._handle_init_scaffold", return_value=0) as mock_scaffold:
+            with pytest.raises(SystemExit) as exc_info:
+                handle_command("init", [str(tmp_path / "proj")])
+        assert exc_info.value.code == 0
+        mock_scaffold.assert_called_once_with([str(tmp_path / "proj")])
+
 
 @pytest.fixture(autouse=True)
 def _bypass_preflight():
     """All TestRunInit tests run outside a real AIPass project — bypass the guard."""
     with patch("aipass.aipass.apps.modules.init_flow._preflight_check", return_value=None):
         yield
+
+
+_MOD_RUN = "aipass.aipass.apps.modules.init_flow"
 
 
 class TestRunInit:
@@ -587,6 +602,41 @@ class TestRunInit:
             run_init(non_interactive=True, template=TEMPLATE_AIPASS)
         stage_1_mock.assert_not_called()
         stage_4_mock.assert_called_once()
+
+    @staticmethod
+    def _paused_after_stage_5(tmp_local_json: Path, tmp_path: Path) -> None:
+        """A framework run paused after stage 5: its scaffold registry is in cwd, the cli choice saved."""
+        (tmp_path / "DEMO_REGISTRY.json").write_text("{}", encoding="utf-8")
+        stages = {str(n): {"status": "done", "timestamp": "t"} for n in range(1, 6)}
+        stages["5"].update({"cli": "codex", "flag_variant": "skip-permissions"})
+        data = {"setup_progress": {"last_completed_stage": 5, "stages": stages}}
+        tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_resume_is_not_refused_by_its_own_registry(self, tmp_local_json, tmp_path) -> None:
+        """The registry stage 4 wrote does not make the pre-flight refuse the resume."""
+        self._paused_after_stage_5(tmp_local_json, tmp_path)
+        later = ("stage_6_first_agent", "stage_7_ping_sweep", "stage_8_smoke_test", "stage_9_handoff", "stage_10_done")
+        with (
+            patch.multiple(_MOD_RUN, warning=MagicMock(), **{name: MagicMock(return_value={}) for name in later}),
+            patch(f"{_MOD_RUN}._preflight_check", return_value="Already inside an AIPass project"),
+        ):
+            assert run_init(non_interactive=True, template=TEMPLATE_AIPASS) == 0
+
+    def test_resume_keeps_the_saved_cli_choice(self, tmp_local_json, tmp_path) -> None:
+        """Stage 9 hands off with the cli picked at stage 5 before the pause, not the default."""
+        self._paused_after_stage_5(tmp_local_json, tmp_path)
+        handoff = MagicMock(return_value={})
+        with patch.multiple(
+            _MOD_RUN,
+            warning=MagicMock(),
+            stage_6_first_agent=MagicMock(return_value={}),
+            stage_7_ping_sweep=MagicMock(return_value={}),
+            stage_8_smoke_test=MagicMock(return_value={}),
+            stage_9_handoff=handoff,
+            stage_10_done=MagicMock(return_value={}),
+        ):
+            run_init(non_interactive=True, template=TEMPLATE_AIPASS)
+        assert handoff.call_args.args[:2] == ("codex", "skip-permissions")
 
 
 _MOD = "aipass.aipass.apps.modules.init_flow"
@@ -858,6 +908,8 @@ class TestProviderGaps:
 
 
 _MOD_UPDATE = "aipass.aipass.apps.modules.init_flow"
+# The owner check runs in install's _check_and_fix_owner, so its lines print through install's success.
+_MOD_INSTALL = "aipass.aipass.apps.modules.install"
 
 
 def _init_update(args: list[str]) -> int:
@@ -889,7 +941,7 @@ class TestInitUpdateRegistrySync:
             ),
             patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0),
             patch(f"{_MOD_UPDATE}.subprocess.run", return_value=check_proc) as mock_run,
-            patch(f"{_MOD_UPDATE}.success") as mock_success,
+            patch(f"{_MOD_INSTALL}.success") as mock_success,
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _init_update([str(tmp_path)])
@@ -897,6 +949,7 @@ class TestInitUpdateRegistrySync:
         mock_run.assert_called_once()
         args = mock_run.call_args[0][0]
         assert "--check" in args
+        assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
         ok_calls = [c for c in mock_success.call_args_list if "Owner/identity OK" in str(c)]
         assert len(ok_calls) == 1
 
@@ -914,8 +967,8 @@ class TestInitUpdateRegistrySync:
                 f"{_MOD_UPDATE}.subprocess.run",
                 side_effect=[check_proc, fix_proc],
             ) as mock_run,
-            patch(f"{_MOD_UPDATE}.success") as mock_success,
-            patch(f"{_MOD_UPDATE}.warning"),
+            patch(f"{_MOD_INSTALL}.success") as mock_success,
+            patch(f"{_MOD_INSTALL}.warning"),
             patch(f"{_MOD_UPDATE}.json_handler", autospec=True),
         ):
             rc = _init_update([str(tmp_path)])

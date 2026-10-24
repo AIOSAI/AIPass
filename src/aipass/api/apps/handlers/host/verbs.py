@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: verbs.py
 # Description: Host API Verb Handler — wake, kill, lock and new-project, each a proxy
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -60,6 +60,10 @@ def wake_branch(branch: str, project: str, message: str = "", fresh: bool = Fals
     # Before resolving: else an oversized message answers VerbUnavailable when the registry is down.
     if len(message) > MAX_MESSAGE_CHARS:
         raise VerbRefused(f"Message is {len(message)} characters, over the {MAX_MESSAGE_CHARS} character cap")
+
+    # @ai_mail's dispatch scans every arg for flags: a dash-led message would become --fresh or --help.
+    if message.strip().startswith("-"):
+        raise VerbRefused("Message cannot start with '-': it would be read as a flag")
 
     target = citizen_address(branch, project)
 

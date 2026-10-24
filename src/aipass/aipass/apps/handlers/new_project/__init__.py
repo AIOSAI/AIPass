@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-17
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -67,6 +67,17 @@ def _git(args: list[str], cwd: Path) -> str:
     if r.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
     return r.stdout.strip()
+
+
+def _require_git_identity(cwd: Path) -> None:
+    """Refuse before anything is built when git has no committer identity: the birth commit would fail."""
+    try:
+        _git(["var", "GIT_COMMITTER_IDENT"], cwd)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"{exc}. Set a git identity first: "
+            'git config --global user.name "Your Name" && git config --global user.email you@example.com'
+        ) from exc
 
 
 def _write_registry(target: Path, name: str) -> tuple[str, str]:
@@ -279,6 +290,7 @@ def create_project(
     if target.exists():
         raise RuntimeError(f"Project already exists: {target}")
 
+    _require_git_identity(host)
     target.mkdir(parents=True)
 
     try:

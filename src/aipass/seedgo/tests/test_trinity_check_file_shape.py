@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check_file_shape.py
 # Description: trinity_check file shape: metadata, guidelines, file set, receipt (split from test_trinity_check.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/trinity_check.py and trinity_groups.py."""
@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
 from aipass.seedgo.tests.support_trinity_check import (
     _BRANCH,
     _TABS,
@@ -622,3 +623,11 @@ class TestTheMintStampIsNotAViolation:
         """The checker's docstring says passports are existence-only, so a new passport rule fails here first."""
         assert "EXISTENCE only" in trinity.__doc__
         assert "nothing inside a passport is read or judged" in trinity.__doc__
+
+
+def test_an_unmeasurable_file_counts_as_many_top_level_items_as_a_measured_one():
+    def ctx(error, data):
+        return {"branch": "b", "local": {"error": error, "data": data, "duplicates": []}}
+
+    shapes = (ctx(None, {"document_metadata": {}}), ctx("unreadable", None), ctx(None, {"document_metadata": "x"}))
+    assert {len(trinity_groups._top_level_items(c, "local", [])) for c in shapes} == {9}

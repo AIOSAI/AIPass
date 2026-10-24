@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: attach.py
 # Description: Host API Attach Handler — a real PTY running a tmux client, for the phone
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 # pyright: reportOptionalMemberAccess=false
 # fcntl/pty/termios are None off POSIX; every use sits behind PTY_AVAILABLE, which the checker cannot narrow.
@@ -353,12 +353,17 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str, close_fd: Any
 
     _reserve_session(room)
 
-    master, slave = pty.openpty()
-
-    # openpty gives 0x0, which tmux reads at startup: stamped before the child exists.
-    set_winsize(master, DEFAULT_COLS, DEFAULT_ROWS)
+    try:
+        master, slave = pty.openpty()
+    except OSError as e:
+        _release_session()
+        logger.error("[host_api] could not open a terminal for %s: %s", room, e)
+        raise AttachUnavailable(f"Could not open a terminal for {room}: {e}") from e
 
     try:
+        # openpty gives 0x0, which tmux reads at startup: stamped before the child exists.
+        set_winsize(master, DEFAULT_COLS, DEFAULT_ROWS)
+
         process = subprocess.Popen(
             command,
             stdin=slave,

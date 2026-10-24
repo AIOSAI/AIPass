@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_ops.py
 # Description: Tests for registry_ops handler — template registry CRUD
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
@@ -12,9 +12,7 @@
 # seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
-import os
-import sys
-import re
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +20,7 @@ import pytest
 
 from aipass.flow.apps.handlers.registry import load_registry as plan_load
 from aipass.flow.apps.handlers.registry import save_registry as plan_reg
+from aipass.flow.apps.handlers.runner import lock_ops
 from aipass.flow.apps.handlers.template import registry_ops
 
 
@@ -60,29 +59,6 @@ class TestPlanRegistryLoadRefusesWhatItCannotRead:
 
 _MOD = "aipass.flow.apps.handlers.template.registry_ops"
 # The PLAN registry writer has no test class of its own; its lock cases ride in TestSaveRegistry.
-_PLAN_REG_MOD = "aipass.flow.apps.handlers.registry.save_registry"
-
-
-def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """A stand-in for save_registry's _create_exclusive seam that answers the
-    way Windows does mid-release.
-
-    Windows denies a create on a delete-pending lock with PermissionError; Linux cannot, so it is manufactured.
-    The first ``denials`` creates are denied (None = never clears); returns (side_effect, attempts, raised).
-    """
-    attempts: list[int] = []
-    raised: list[PermissionError] = []
-
-    def fake_create(path):
-        if str(path) == str(lock_path):
-            attempts.append(len(attempts) + 1)
-            if denials is None or len(attempts) <= denials:
-                denial = PermissionError(13, "Access is denied")
-                raised.append(denial)
-                raise denial
-        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-    return fake_create, attempts, raised
 
 
 @pytest.fixture
@@ -361,97 +337,39 @@ class TestSaveRegistry:
             module_name="registry_ops",
         )
 
-    def test_plan_registry_save_retries_a_delete_pending_denial(self, tmp_path, monkeypatch):
-        """handlers/registry/save_registry.py: a Windows delete-pending denial on
-        the lock is a held lock, retried on the same budget, and the write lands.
+    def test_plan_registry_save_refuses_while_another_holder_keeps_the_lock(self, tmp_path, monkeypatch, mock_logger):
+        """A held write lock is waited out to its timeout, then the save fails and writes nothing.
+
+        Mutant: dropping `with registry_lock():` from save_registry reddens this.
         """
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
-        target = tmp_path / "fplan_registry.json"
-        lock = target.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
-        data = {"plans": {"7": {"subject": "landed", "status": "open"}}, "next_number": 8}
-
-        with (
-            patch(f"{_PLAN_REG_MOD}._create_exclusive", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
-        ):
-            result = plan_reg.save_registry(data, registry_file="fplan_registry.json")
-
-        assert result is True
-        assert len(attempts) == 2
-        sleep.assert_called_once()
-        assert sleep.call_args.args[0] > 0
-        saved = json.loads(target.read_text(encoding="utf-8"))
-        assert saved["plans"]["7"]["subject"] == "landed"
-        assert not lock.exists()
-
-    def test_plan_registry_save_fails_honestly_at_the_budget(self, tmp_path, monkeypatch, mock_logger):
-        """handlers/registry/save_registry.py: a denial that never clears fails
-        after exactly the budget, the caller returns False and logs the denial,
-        and the helper's PermissionError is chained to the last denial.
-        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
-        Mutant: MODULE_NAME, target, e, exc_info=True) -> MODULE_NAME, target, str(e), exc_info=True) reddens this.
-        """
-        monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
+        monkeypatch.setattr(plan_reg, "os_file_lock", partial(lock_ops.os_file_lock, timeout=0.0))
         target = tmp_path / "fplan_registry.json"
         before = {"plans": {}, "next_number": 1}
         target.write_text(json.dumps(before), encoding="utf-8")
-        lock = target.with_suffix(".lock")
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
-        with (
-            patch(f"{_PLAN_REG_MOD}._create_exclusive", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
-        ):
+        with lock_ops.os_file_lock(tmp_path / plan_reg.LOCK_NAME, timeout=0.0):
             result = plan_reg.save_registry({"plans": {"1": {}}, "next_number": 2}, registry_file=target.name)
 
         assert result is False
         assert json.loads(target.read_text(encoding="utf-8")) == before
-        # Never str(call): its repr doubles every backslash, hiding a Windows path.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
-        assert str(lock) in logged
-        reported = re.search(r"still denied after (\d+) attempts", logged)
-        assert reported, logged
-        budget = int(reported.group(1))
-        assert budget > 1
-        assert len(attempts) == budget
-        # Mutant: `_sleep(delay)` -> `_sleep(0.0)`, or dropping `(2**attempt)`, reddens this.
-        delays = [c.args[0] for c in sleep.call_args_list]
-        assert len(delays) == budget
-        assert delays[0] > 0
-        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
-        assert f"({sum(delays):.2f}s waited)" in logged
-        # save_registry logs the exception itself, so the cause chain is read from the log.
-        logged_errors = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
-        assert len(logged_errors) == 1
-        assert isinstance(logged_errors[0], PermissionError)
-        assert logged_errors[0].__cause__ is raised[-1]
+        assert plan_reg.LOCK_NAME in logged
 
-    def test_plan_registry_lock_create_error_is_logged_as_itself(
-        self, tmp_path, monkeypatch, mock_logger, platform_create_answer
-    ):
-        """A lock create that fails with neither contention nor denial is not "after N retries".
+    def test_registry_lock_is_reentrant_and_released(self, tmp_path, monkeypatch):
+        """A nested holder never waits on itself, and the lock is free once the outer holder leaves.
 
-        The .lock sibling's 257-byte name fails on disk; which error is the platform's choice, so it is asked first.
-        Mutant: `except OSError as exc:` + `raise` -> `return False` reddens this.
+        Mutant: dropping the depth check in registry_lock reddens this (the inner take times out).
         """
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
-        name = "a" * 252 + ".js"
-        answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
-        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
-            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
-        )
+        monkeypatch.setattr(plan_reg, "os_file_lock", partial(lock_ops.os_file_lock, timeout=0.0))
 
-        result = plan_reg.save_registry({"plans": {}, "next_number": 1}, registry_file=name)
+        with plan_reg.registry_lock():
+            with plan_reg.registry_lock():
+                assert plan_reg.save_registry({"plans": {}, "next_number": 1}, registry_file="x_registry.json")
 
-        assert result is False
-        assert not (tmp_path / name).exists()
-        text = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
-        assert "retries" not in text
-        logged = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
-        assert len(logged) == 1
-        assert type(logged[0]) is type(answer)
-        assert logged[0].errno == answer.errno
+        with lock_ops.os_file_lock(tmp_path / plan_reg.LOCK_NAME, timeout=0.0):
+            pass
 
 
 class TestAddType:
@@ -853,8 +771,11 @@ class TestPruneOrphanedTypes:
 
         assert result is False
 
-    def test_deletes_orphan_plan_registry_json(self, setup_flow_root):
-        """Deletes the associated plan registry JSON when pruning."""
+    def test_keeps_the_plan_registry_and_its_rows(self, setup_flow_root):
+        """A type whose template directory is missing loses its entry, never its plan rows.
+
+        Mutant: deleting <shorthand>_registry.json in _prune_orphaned_types reddens this.
+        """
         mod = registry_ops
         _create_template_dir(setup_flow_root, "flow_plans", ["default.md"])
         _create_template_dir(setup_flow_root, "dev_plans", ["default.md"])
@@ -868,11 +789,13 @@ class TestPruneOrphanedTypes:
         }
         data = _valid_registry(extra_types=extra)
         plan_reg = setup_flow_root / "flow_json" / "tplan_registry.json"
-        plan_reg.write_text(json.dumps({"next_number": 1, "plans": {}}), encoding="utf-8")
+        rows = {"next_number": 3, "plans": {"0001": {"status": "open"}, "0002": {"status": "closed"}}}
+        plan_reg.write_text(json.dumps(rows), encoding="utf-8")
 
-        mod._prune_orphaned_types(data)
+        assert mod._prune_orphaned_types(data) is True
 
-        assert not plan_reg.exists()
+        assert "task_plans" not in data["types"]
+        assert json.loads(plan_reg.read_text(encoding="utf-8")) == rows
 
 
 class TestAutoRegisterNewTypes:

@@ -4,7 +4,7 @@
 # Description: Tests for git_gate: raw git, gh and the secrets store refused for every seat; protected writes
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -351,6 +351,14 @@ class TestPathSpelledExecutable:
         """No verb is not a read verb, and a path is nobody's usage print."""
         _assert_blocked(_bash("/usr/bin/git"))
 
+    @pytest.mark.parametrize(
+        "command",
+        ["echo push | xargs git", "xargs -a args.txt git", "find . -name x -exec git \\;", "parallel git ::: push"],
+    )
+    def test_a_bare_git_a_launcher_runs_is_blocked(self, command):
+        """xargs, find -exec and parallel append the verb at run time: their bare git is no usage print."""
+        _assert_blocked(_bash(command))
+
     def test_the_word_git_alone_stays_allowed(self):
         """What the `/` requirement in _path_exec_tail is actually for.
 
@@ -673,6 +681,26 @@ class TestRawGitIsRefusedForEverySeat:
 
     def test_a_write_from_the_admin_seat_is_still_refused(self, tmp_path):
         _assert_blocked(self._run("git " + "push", _seat(tmp_path, "devpulse"), grant=True))
+
+    @pytest.mark.parametrize("command", ["$(echo git) push", "$G push", "echo 'git push' | bash", "cat x | python3"])
+    def test_a_program_the_reader_cannot_see_is_refused_on_the_admin_seat(self, tmp_path, command):
+        """rm_gate lets the admin seat run what it cannot read; a hidden program word could still be git."""
+        reason = _reason(self._run(command, _seat(tmp_path, "devpulse"), grant=True))
+        assert "runs a program the gate cannot see" in reason and "@devpulse" in reason
+
+    @pytest.mark.parametrize(
+        "command", ['declare -A a; a[x]=$(echo 1); echo "${a[x]}"', "base[$b]=$(grep -c x f)", "a[i+1]+=2"]
+    )
+    def test_an_array_element_assignment_is_no_hidden_program(self, tmp_path, command):
+        _assert_allowed(self._run(command, _seat(tmp_path, "devpulse"), grant=True))
+
+    def test_an_array_assignment_still_reads_its_substitution(self, tmp_path):
+        _assert_blocked(self._run("a[x]=$(git log -1)", _seat(tmp_path, "devpulse"), grant=True))
+
+    def test_a_script_too_large_to_read_is_no_hidden_program(self, tmp_path):
+        seat = Path(_seat(tmp_path, "devpulse"))
+        (seat / "huge.py").write_text("x = 1\n" * 200_000, encoding="utf-8")
+        _assert_allowed(self._run("python3 huge.py", str(seat), grant=True))
 
 
 class TestTheFilesThatSwitchTheGatesAreTheAdminSeats:

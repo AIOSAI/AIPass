@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_platform_oracle.py
 # Description: pytest_quality pack, platform_oracle checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/platform_oracle_check.py."""
@@ -12,6 +12,8 @@
 # seedgo: no-test-needed(constant) — the content page prose, pytest_quality_standards/platform_oracle_content.py
 
 from pathlib import Path
+
+import pytest
 
 from aipass.seedgo.apps.handlers.pytest_quality_standards import platform_oracle_check
 from aipass.seedgo.tests.support_pytest_quality_pack import _write
@@ -196,6 +198,23 @@ class TestPlatformOracleDetection:
         assert [r["species"] for r in result["violations"]] == ["MODE_INJECTOR"]
         assert "chmod to 0o444" in result["violations"][0]["detail"]
 
+    def test_a_chmod_mode_given_by_keyword_is_flagged(self, tmp_path):
+        _write(
+            tmp_path,
+            "tests/test_writer.py",
+            """
+            def test_a_read_only_target_is_reported(tmp_path):
+                target = tmp_path / "log.jsonl"
+                os.chmod(target, mode=0o444)
+                with pytest.raises(PermissionError):
+                    _write_delivery_log(target)
+            """,
+        )
+
+        result = platform_oracle_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["MODE_INJECTOR"]
+
     def test_a_stat_constant_carrying_no_write_name_is_flagged(self, tmp_path):
         """The mode arm's second reading: a symbolic mode, read by its NAMES."""
         _write(
@@ -319,14 +338,18 @@ class TestPlatformOracleDetection:
 
         assert [r["species"] for r in result["nominations"]] == ["SHALLOW_SANDBOX"]
 
-    def test_a_dispatch_call_is_not_read_as_a_patch(self, tmp_path):
-        """THE ALIAS TEST IS `_patch`, NOT `patch`, AND THE DIFFERENCE IS `dispatch`."""
+    @pytest.mark.parametrize(
+        "call",
+        ['dispatch("pathlib.Path.cwd"', 'dict("pathlib.Path.cwd"', 'patch("app.os.getcwd_label"'],
+    )
+    def test_a_dispatch_call_is_not_read_as_a_patch(self, tmp_path, call):
+        """THE ALIAS TEST IS `_patch`, NOT `patch`, AND THE DIFFERENCE IS `dispatch`; a builtin or a longer name is no seal either."""
         _write(
             tmp_path,
             "tests/test_operations.py",
-            """
+            f"""
             def test_the_refresh_is_dispatched(tmp_path, capsys):
-                with dispatch("pathlib.Path.cwd", return_value=tmp_path):
+                with {call}, return_value=tmp_path):
                     mod._handle_refresh([])
                 assert tmp_path.name.upper() in capsys.readouterr().out
             """,

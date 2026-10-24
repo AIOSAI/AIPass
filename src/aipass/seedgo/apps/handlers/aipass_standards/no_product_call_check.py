@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: no_product_call_check.py
 # Description: No Product Call Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,14 +12,15 @@ No Product Call Standards Checker Handler
 Reference: no_product_call.md
 """
 
+from functools import partial
 import ast
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Union
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -39,15 +40,6 @@ TEST_PREFIX = "test_"
 CURE = "call the product, or delete the test and let the library test itself"
 
 _FUNCTIONS: Tuple[type, ...] = (ast.FunctionDef, ast.AsyncFunctionDef)
-
-
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
 
 
 def _base_name(node: ast.expr) -> str:
@@ -153,7 +145,7 @@ def _reaches(
     for node in ast.walk(function):
         # A call into the file's own apparatus, or the branch's: a control for
         # an in-file detector is a meta-test, not a test pointed at nothing.
-        if isinstance(node, ast.Call) and _tail_name(node.func) in local:
+        if isinstance(node, ast.Call) and tail_name(node.func) in local:
             return True
     for name in _requested(function):
         if name in local:
@@ -195,16 +187,7 @@ def _acquitted_by_class(tree: ast.Module, bound: Set[str]) -> Set[int]:
     return acquitted
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ruff already convicts a syntax error; a verdict invented for an unparseable file misleads.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[no_product_call] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="no_product_call")
 
 
 @lru_cache(maxsize=64)
@@ -243,18 +226,8 @@ def scan(source: str, shared: frozenset[str] = frozenset()) -> List[Tuple[int, s
     return sorted(findings)
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[no_product_call] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="no_product_call", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

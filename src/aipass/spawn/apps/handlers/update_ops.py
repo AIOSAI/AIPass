@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.3.2
+# Version: 2.4.0
 # Created: 2026-03-07
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -19,14 +19,15 @@ from typing import Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
+from aipass.aipass.shared.json_ops import backup_json, deep_merge
+from aipass.spawn.apps.handlers.class_registry import get_template_dir, resolve_template_class
 from aipass.spawn.apps.handlers.meta_ops import (
     generate_branch_meta,
-    get_template_dir,
     load_template_registry,
     save_branch_meta,
 )
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
-from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
+from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, replace_placeholders
 from aipass.spawn.apps.handlers.registry import find_registry, load_registry, branches_as_list
 from aipass.spawn.apps.handlers.update_ignore import IGNORE_NAME, is_ignored, read_ignore
@@ -45,12 +46,8 @@ _NEVER_UPDATE_FILES = frozenset(
 )
 # A file below either name is handed in when absent and never judged after.
 _SANDBOX_DIRS = frozenset({"dropbox", ".archive"})
-_SKIP_TRACKING = frozenset(
-    {
-        ".spawn/.template_registry.json",
-        ".spawn/.branch_meta.json",
-    }
-)
+# .template_registry.json is already in SKIP_NAMES.
+_SKIP_TRACKING = frozenset({".spawn/.branch_meta.json"})
 
 # deep_merge keeps a non-empty existing list whole. Lists named here are spawn's own machinery and
 # grow by the template's new entries; every other list stays existing-wins. Permissions are NOT
@@ -117,7 +114,8 @@ def update_branch(
     if trace:
         logger.info("[update] Resolved %s -> %s", branch_name, branch_dir)
 
-    citizen_class = _read_citizen_class(branch_dir)
+    identity = _read_identity(branch_dir)
+    citizen_class = identity["citizen_class"]
     template_dir = get_template_dir(citizen_class)
 
     if not template_dir.is_dir():
@@ -126,7 +124,9 @@ def update_branch(
     if trace:
         logger.info("[update] Citizen class: %s, template: %s", citizen_class, template_dir)
 
-    replacements = build_replacements_dict(branch_dir, branch_name)
+    replacements = build_replacements_dict(branch_dir, branch_name, citizen_class=citizen_class)
+    # Free text renders into the read-only .md preview only: a quote in it would break every template JSON parse.
+    md_replacements = {**replacements, "PURPOSE_BRIEF": identity.get("purpose") or replacements["PURPOSE_BRIEF"]}
 
     # Checked before every other rule in both walks: nothing downstream may reconsider the owner's call.
     ignore_patterns = read_ignore(branch_dir)
@@ -136,7 +136,7 @@ def update_branch(
     for template_subdir in sorted(template_dir.rglob("*")):
         if not template_subdir.is_dir():
             continue
-        if "__pycache__" in template_subdir.parts:
+        if SKIP_NAMES.intersection(template_subdir.relative_to(template_dir).parts):
             continue
         rel_dir = template_subdir.relative_to(template_dir).as_posix()
         resolved_dir = replace_placeholders(rel_dir, replacements)
@@ -145,8 +145,6 @@ def update_branch(
                 logger.info("[update] SKIP (%s): %s/", IGNORE_NAME, resolved_dir)
             continue
         if _is_never_update(resolved_dir + "/"):
-            continue
-        if resolved_dir in _SKIP_TRACKING:
             continue
         dest_dir = branch_dir / resolved_dir
         if not dest_dir.exists():
@@ -160,7 +158,7 @@ def update_branch(
     for template_file in sorted(template_dir.rglob("*")):
         if not template_file.is_file():
             continue
-        if "__pycache__" in template_file.parts:
+        if SKIP_NAMES.intersection(template_file.relative_to(template_dir).parts):
             continue
 
         rel_path = template_file.relative_to(template_dir).as_posix()
@@ -224,7 +222,7 @@ def update_branch(
 
         elif dest.suffix == ".md":
             # Read-only, always: .md content is the owner's judgment; update reports, never writes.
-            state = _md_state(template_file, dest, replacements)
+            state = _md_state(template_file, dest, md_replacements)
             counts[f"md_{state}"] += 1
             md_detail.append({"branch_path": resolved_path, "state": state})
             if trace:
@@ -344,12 +342,15 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
 
 
 def _read_citizen_class(branch_dir: Path) -> str:
-    """Read a branch's passport.json and resolve it to a template class.
+    """Read a branch's passport.json and resolve it to a template class (raises as _read_identity)."""
+    return _read_identity(branch_dir)["citizen_class"]
+
+
+def _read_identity(branch_dir: Path) -> dict:
+    """Read a branch passport's identity block, its citizen_class resolved to a template class.
 
     No fallback: a missing, corrupt, unknown-class or retired-class passport raises, naming the path.
     """
-    from aipass.spawn.apps.handlers.class_registry import resolve_template_class
-
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
         raise FileNotFoundError(f"No passport.json at {passport_path} — cannot resolve template class.")
@@ -359,8 +360,9 @@ def _read_citizen_class(branch_dir: Path) -> str:
     except (json.JSONDecodeError, IOError) as e:
         raise ValueError(f"Corrupt or unreadable passport.json at {passport_path}: {e}") from e
 
+    identity = data.get("identity", {})
     try:
-        return resolve_template_class(data.get("identity", {}))
+        return {**identity, "citizen_class": resolve_template_class(identity)}
     except ValueError as e:
         raise ValueError(f"{e} (passport: {passport_path})") from e
 
@@ -504,7 +506,8 @@ def _merge_json(
             _grow_template_owned_lists(merged, template_data, owned_lists)
         merged_text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
 
-        if merged_text == existing_text:
+        # Documents, not text: key order or escaping alone must not rewrite and back up every run.
+        if merged == existing_data:
             if trace:
                 logger.info("[update] JSON unchanged: %s", dest.name)
             return "unchanged"

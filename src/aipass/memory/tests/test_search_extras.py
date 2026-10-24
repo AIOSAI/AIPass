@@ -3,7 +3,7 @@
 # Description: Tests for search query_executor subprocess encoding and vector search
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — query_executor._pin_plan_id_matches(); tests/test_chroma_source_match.py
-# seedgo: no-test-needed(external) — the memory venv interpreter _get_memory_python() finds; every subprocess is stubbed
+# seedgo: no-test-needed(external) — the memory venv interpreter lane.memory_python() finds; every subprocess is stubbed
 
 import json
 import subprocess
@@ -234,14 +234,17 @@ class TestAFailedPlanFetchIsSaidNotReadAsNoMatch:
         said = []
         monkeypatch.setattr(query_executor.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
         result = query_executor.execute_search("DPLAN-0012 hooks")
-        assert operations == ["search_execute"]
+        assert [op for op in operations if op != "subprocess_lane"] == ["search_execute"]
         return result, said
 
     def test_a_store_that_exits_non_zero_is_named(self, monkeypatch, tmp_path):
         result, said = self._search(monkeypatch, tmp_path, "import sys\nsys.stdin.read()\nsys.exit(3)\n")
 
         assert result["results"] == []
-        assert said == ["[search] Plan metadata fetch failed for DPLAN-0012: store exited 3 — exact-ID pin skipped"]
+        assert said[-1] == (
+            "[search] Plan metadata fetch failed for DPLAN-0012: store failed (exit 3): no reason given"
+            " — exact-ID pin skipped"
+        )
 
     def test_a_store_that_answers_no_match_says_nothing(self, monkeypatch, tmp_path):
         """The control: an honest empty answer is not a failure."""

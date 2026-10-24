@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
-# Version: 2.3.2
+# Version: 2.3.3
 # Created: 2026-03-08
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from rich import box
 
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
-VERSION = "2.3.2"
+VERSION = "2.3.3"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -79,21 +79,22 @@ def print_introspection() -> None:
     console.print("[dim]Universal Display & Output Service Provider[/dim]")
     console.print()
 
+    def print_module_lines(group: List[Any]) -> None:
+        """One bullet per module: its name and the first line of its docstring."""
+        for module in group:
+            name = getattr(module, "__name__", "unknown").split(".")[-1]
+            desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
+            console.print(f"  [cyan]\u2022[/cyan] {name} \u2014 {desc}")
+
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(command_modules)}")
-    for module in command_modules:
-        name = getattr(module, "__name__", "unknown").split(".")[-1]
-        desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
-        console.print(f"  [cyan]\u2022[/cyan] {name} \u2014 {desc}")
+    print_module_lines(command_modules)
     if not command_modules:
         console.print("  [dim]No command modules discovered[/dim]")
     console.print()
 
     if service_modules:
         console.print(f"[yellow]Services:[/yellow] {len(service_modules)}")
-        for module in service_modules:
-            name = getattr(module, "__name__", "unknown").split(".")[-1]
-            desc = (module.__doc__ or "").strip().split("\n")[0] if module.__doc__ else "No description"
-            console.print(f"  [cyan]\u2022[/cyan] {name} \u2014 {desc}")
+        print_module_lines(service_modules)
         console.print()
 
     console.print("[yellow]Next:[/yellow]  Explore a module")

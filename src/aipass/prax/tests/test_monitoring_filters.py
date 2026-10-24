@@ -3,21 +3,15 @@
 # Description: Unit tests for monitoring_filters.py
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/monitoring_filters.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — the HIGHLIGHT_PATTERNS entries beyond those the get_priority() tests sample
-# seedgo: no-test-needed(dead_code) — EVENT_TYPES and DEFAULT_EVENT_TYPES, which no product module reads
-
-from pathlib import Path
 
 from aipass.prax.apps.handlers.monitoring.monitoring_filters import (
-    apply_content_filter,
-    filter_log_content,
-    get_content_filter,
     get_priority,
     should_monitor,
 )
@@ -170,117 +164,14 @@ class TestGetPriority:
         assert result == "medium"
 
 
-class TestGetContentFilter:
-    """Tests for get_content_filter(path)."""
+class TestShortIgnoreNamesMatchWholeSegments:
+    """lib/bin/env/build/dist/install hide only a folder of that exact name, never a name containing them."""
 
-    def test_log_file_returns_errors_only(self):
-        """*.log files should return errors_only filter config."""
+    def test_a_name_containing_lib_or_env_is_monitored(self, tmp_path):
+        assert should_monitor(tmp_path / "robin" / "notes.txt") is True
+        assert should_monitor(tmp_path / "seven" / "environment" / "notes.txt") is True
+        assert should_monitor(tmp_path / "rebuild" / "distance" / "notes.txt") is True
 
-        result = get_content_filter(Path("system.log"))
-        assert result is not None
-        assert result["filter_mode"] == "errors_only"
-        assert "ERROR" in result["show_patterns"]
-
-    def test_py_file_returns_none(self):
-        """Python files should have no content filter."""
-
-        result = get_content_filter(Path("module.py"))
-        assert result is None
-
-    def test_data_json_returns_structure_only(self):
-        """*_data.json files should return structure_only filter."""
-
-        result = get_content_filter(Path("user_data.json"))
-        assert result is not None
-        assert result["filter_mode"] == "structure_only"
-
-    def test_registry_json_returns_keys_only(self):
-        """*_registry.json files should return keys_only filter."""
-
-        result = get_content_filter(Path("AIPASS_REGISTRY.json"))
-        assert result is not None
-        assert result["filter_mode"] == "keys_only"
-
-
-class TestFilterLogContent:
-    """Tests for filter_log_content(content, ...)."""
-
-    def test_error_lines_pass_errors_only(self):
-        """ERROR lines should pass through errors_only filtering."""
-
-        content = "ERROR: something broke"
-        result = filter_log_content(content, show_errors=True, show_warnings=False, show_info=False)
-        assert result == "ERROR: something broke"
-
-    def test_info_lines_blocked_by_default(self):
-        """INFO lines should be blocked when show_info is False (default)."""
-
-        content = "INFO: routine message"
-        result = filter_log_content(content, show_errors=True, show_warnings=True, show_info=False)
-        assert result is None
-
-    def test_warning_lines_pass_by_default(self):
-        """WARNING lines should pass through with default settings."""
-
-        content = "WARNING: disk space low"
-        result = filter_log_content(content)
-        assert result == "WARNING: disk space low"
-
-    def test_multiline_filtering(self):
-        """Multi-line content should filter each line independently."""
-
-        content = "INFO: starting up\nERROR: connection failed\nINFO: retrying\nWARNING: timeout"
-        result = filter_log_content(content, show_errors=True, show_warnings=True, show_info=False)
-        assert result == "ERROR: connection failed\nWARNING: timeout"
-
-    def test_empty_content_returns_none(self):
-        """Empty content should return None."""
-
-        result = filter_log_content("")
-        assert result is None
-
-    def test_all_filtered_returns_none(self):
-        """Content with no matching lines should return None."""
-
-        content = "INFO: step 1\nINFO: step 2\nDEBUG: details"
-        result = filter_log_content(content, show_errors=True, show_warnings=True, show_info=False)
-        assert result is None
-
-    def test_critical_passes_with_errors(self):
-        """CRITICAL lines should pass through when show_errors is True."""
-
-        content = "CRITICAL: system failure"
-        result = filter_log_content(content, show_errors=True, show_warnings=False, show_info=False)
-        assert result == "CRITICAL: system failure"
-
-    def test_info_passes_when_enabled(self):
-        """INFO lines should pass through when show_info is True."""
-
-        content = "INFO: all systems go"
-        result = filter_log_content(content, show_errors=False, show_warnings=False, show_info=True)
-        assert result == "INFO: all systems go"
-
-
-class TestApplyContentFilter:
-    """Tests for apply_content_filter(path, content, ...)."""
-
-    def test_py_file_returns_original(self):
-        """Python files have no filter -- content should be returned unchanged."""
-
-        content = "def hello():\n    print('world')"
-        result = apply_content_filter(Path("module.py"), content)
-        assert result == content
-
-    def test_log_file_filters_errors(self):
-        """Log files should apply errors_only filter."""
-
-        content = "INFO: booting\nERROR: disk full\nINFO: shutting down"
-        result = apply_content_filter(Path("app.log"), content)
-        assert result == "ERROR: disk full"
-
-    def test_log_file_all_info_returns_none(self):
-        """Log files with only INFO lines should return None after filtering."""
-
-        content = "INFO: step 1\nINFO: step 2"
-        result = apply_content_filter(Path("system.log"), content)
-        assert result is None
+    def test_the_exact_folder_is_still_ignored(self, tmp_path):
+        for folder in ("lib", "bin", "env", "build", "dist", "install"):
+            assert should_monitor(tmp_path / folder / "notes.txt") is False, folder

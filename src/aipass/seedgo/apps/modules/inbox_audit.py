@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_audit.py
 # Description: Inbox ID validator — scans all inbox.json files for non-8-hex ids
-# Version: 1.1.1
+# Version: 1.1.3
 # Created: 2026-04-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Inbox ID validator for the drone @seedgo audit inbox-ids command.
@@ -15,21 +15,27 @@ when violations are found.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import List
 
 from aipass.prax import logger
 from aipass.cli import console, header
-from aipass.cli.apps.modules import error, success
+from aipass.cli.apps.modules import error, success, warning
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 
 _HEX8_RE = re.compile(r"^[0-9a-f]{8}$")
 
 # Trees whose inboxes are snapshots, not live mail: deleted-branch archives
 # and @backup's versioned store. A bad id in either is nobody's to fix.
 _DEAD_TREE_DIRS = frozenset({".backup", ".archive"})
+
+# Environments and VCS internals hold no mailbox, and walking them dominates the scan.
+_PRUNED_DIRS = frozenset({".git", ".venv", "venv", "node_modules", "site-packages", "__pycache__"})
 
 
 def _is_live_inbox(inbox_path: Path) -> bool:
@@ -50,12 +56,23 @@ def _find_repo_root() -> Path:
     return current
 
 
+def _find_inboxes(repo_root: Path) -> List[Path]:
+    """Every `.ai_mail.local/inbox.json` entry under the root, file or directory, pruning _PRUNED_DIRS."""
+    found: List[Path] = []
+    for dirpath, dirnames, filenames in os.walk(repo_root, onerror=lambda e: logger.warning("[inbox_audit] %s", e)):
+        dirnames[:] = [d for d in dirnames if d not in _PRUNED_DIRS]
+        if Path(dirpath).name == ".ai_mail.local" and "inbox.json" in (*filenames, *dirnames):
+            found.append(Path(dirpath) / "inbox.json")
+    return found
+
+
 def _scan_inbox(inbox_path: Path) -> List[dict]:
     """Return a list of violation dicts for messages with bad ids in *inbox_path*."""
     violations: List[dict] = []
     data = json_handler.read_json(inbox_path)
-    if data is None:
-        logger.warning("[inbox_audit] could not read %s", inbox_path)
+    if not isinstance(data, dict):
+        logger.warning("[inbox_audit] could not read %s as an inbox object", inbox_path)
+        warning("Unreadable inbox (not a JSON object), not scanned", str(inbox_path))
         return violations
 
     for msg in data.get("messages", []):
@@ -76,7 +93,7 @@ def _run_inbox_id_scan() -> int:
     """Scan all inbox.json files; return number of violations found."""
     json_handler.log_operation("inbox_audit_scan", {})
     repo_root = _find_repo_root()
-    matched = list(repo_root.rglob(".ai_mail.local/inbox.json"))
+    matched = _find_inboxes(repo_root)
     inbox_files = [p for p in matched if _is_live_inbox(p)]
     skipped = len(matched) - len(inbox_files)
 
@@ -139,5 +156,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     if wants_help(None, args):
         print_introspection()
         return True
-    _run_inbox_id_scan()
+    if _run_inbox_id_scan():
+        raise CommandRefused(refusal.EXIT_SCORED_FAILED, "inbox-ids")
     return True

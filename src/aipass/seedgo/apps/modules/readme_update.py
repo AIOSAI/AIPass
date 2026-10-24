@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_update.py
 # Description: README Auto-Update Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -19,6 +19,8 @@ from typing import List
 from aipass.prax import logger
 
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 
 from aipass.cli import console, header
 from aipass.cli.apps.modules import error as display_error, warning
@@ -90,30 +92,37 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print()
         console.print(f"[dim]Module: {Path(__file__)}[/dim]")
         console.print()
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, subcommand)
 
     return True
 
 
-def _handle_update(args: List[str]) -> None:
-    """Orchestrate the 'update' subcommand"""
-    if load_generator is None:
-        display_error("readme_ops handler not available")
-        console.print("[dim]Handler is in .sorting_unprocessed/ — needs migration to handlers/[/dim]")
-        return
+def _load_run(args: List[str]) -> tuple:
+    """The generator and the target branches, or a CommandRefused once the reason is printed."""
     try:
         generator = load_generator()
     except Exception as exc:
         logger.error(f"README generator failed to load: {exc}")
         display_error(f"Failed to load README generator: {exc}")
-        return
+        raise CommandRefused(refusal.EXIT_UNPROVEN, "readme generator") from exc
     if not generator:
         display_error("Failed to load README generator")
-        return
+        raise CommandRefused(refusal.EXIT_UNPROVEN, "readme generator")
 
     branches, error = resolve_targets(args)
     if error:
         _print_target_error(error)
-        return
+        if error == "no_branches":
+            raise CommandRefused(refusal.EXIT_NO_UNITS, error)
+        if error.startswith("unreadable_registry:"):
+            raise CommandRefused(refusal.EXIT_UNPROVEN, error)
+        raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, error)
+    return generator, branches
+
+
+def _handle_update(args: List[str]) -> None:
+    """Orchestrate the 'update' subcommand"""
+    generator, branches = _load_run(args)
 
     json_handler.log_operation("readme_update_started", {"targets": [b["name"] for b in branches]})
 
@@ -151,24 +160,7 @@ def _handle_update(args: List[str]) -> None:
 
 def _handle_check(args: List[str]) -> None:
     """Orchestrate the 'check' subcommand (dry run)"""
-    if load_generator is None:
-        display_error("readme_ops handler not available")
-        console.print("[dim]Handler is in .sorting_unprocessed/ — needs migration to handlers/[/dim]")
-        return
-    try:
-        generator = load_generator()
-    except Exception as exc:
-        logger.error(f"README generator failed to load: {exc}")
-        display_error(f"Failed to load README generator: {exc}")
-        return
-    if not generator:
-        display_error("Failed to load README generator")
-        return
-
-    branches, error = resolve_targets(args)
-    if error:
-        _print_target_error(error)
-        return
+    generator, branches = _load_run(args)
 
     for branch in branches:
         branch_name = branch["name"]
@@ -210,9 +202,9 @@ def _print_result(result: dict, is_check: bool = False) -> None:
     missing = result.get("missing_markers", [])
     errors = result.get("errors", [])
 
-    if errors:
-        for err in errors:
-            display_error(str(err))
+    for err in errors:
+        display_error(str(err))
+    if errors and not updated:
         return
 
     for section_key, display_name in SECTION_NAMES.items():

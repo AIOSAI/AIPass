@@ -3,7 +3,7 @@
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
 # Version: 1.1.4
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/admin_lane.py."""
@@ -102,6 +102,19 @@ def test_all_four_facts_present_reads_lit(world):
         True,
         True,
     )
+
+
+def test_a_relative_registry_path_resolves_against_the_registry_not_cwd(world, tmp_path, monkeypatch):
+    """A registry entry `src/aipass/devpulse` finds the cert from any cwd."""
+    registry = world()
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["branches"][0]["path"] = f"src/aipass/{ADMIN_HOLDER}"
+    registry.write_text(json.dumps(data), encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    assert admin_lane_state()["state"] == "lit"
 
 
 def test_fresh_install_reads_dark(world):

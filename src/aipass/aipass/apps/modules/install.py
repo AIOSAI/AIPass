@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-07-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict
+from urllib.parse import urlsplit, urlunsplit
 
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
@@ -28,7 +29,6 @@ from aipass.aipass.apps.handlers.baud import LATEST, FetchError, validate_tag
 from aipass.aipass.apps.handlers.init.bootstrap import is_throwaway_path
 from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.handlers.ui.progress import render_step_header
-from aipass.aipass.shared.registry_discovery import registries_in
 
 COMMAND = "install"
 TOTAL_STEPS = 5
@@ -55,11 +55,15 @@ def _prompt(msg: str, default: str = "") -> str:
 
 def _looks_like_aipass_tree(home: Path) -> bool:
     """True if `home` already holds an AIPass source tree (idempotent re-install)."""
-    if not home.is_dir():
-        return False
-    if (home / "setup.sh").is_file():
-        return True
-    return bool(registries_in(home))
+    return (home / "setup.sh").is_file() and (home / "AIPASS_REGISTRY.json").is_file()
+
+
+def _redact_url(url: str) -> str:
+    """`url` with any user:token@ userinfo removed, safe to print and log."""
+    parts = urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    return urlunsplit(parts._replace(netloc=parts.netloc.rsplit("@", 1)[1]))
 
 
 def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
@@ -277,7 +281,7 @@ def _clone_repo(
     if which is None:
         which = shutil.which
     if dry_run:
-        console.print(f"[yellow]\\[dry-run][/yellow] would run: git clone --depth 1 {source} {home}")
+        console.print(f"[yellow]\\[dry-run][/yellow] would run: git clone --depth 1 {_redact_url(source)} {home}")
         return True
     if home.exists() and any(home.iterdir()):
         warning(f"{home} exists and is not empty — pass an empty --path, or remove it first.")
@@ -297,7 +301,7 @@ def _clone_repo(
         logger.warning("[install] git clone exited %s", proc.returncode)
     except subprocess.TimeoutExpired as exc:
         warning("git clone timed out.")
-        logger.warning("[install] git clone timed out: %s", exc)
+        logger.warning("[install] git clone timed out after %ss", exc.timeout)
     return False
 
 
@@ -519,11 +523,11 @@ def _phone_print(dry_run: bool, face_installed: bool, non_interactive: bool = Fa
     return lambda: finish_phone(ready, dry_run=dry_run, non_interactive=non_interactive)
 
 
-def _check_and_fix_owner(home: Path) -> None:
-    """Run sync-registry --check; if issues found, auto-heal with --fix."""
+def _check_and_fix_owner(home: Path, drone_bin: str = "drone") -> None:
+    """Run sync-registry --check in `home`; if issues found, auto-heal with --fix."""
     try:
         check_proc = subprocess.run(
-            ["drone", "@spawn", "sync-registry", "--check"],
+            [drone_bin, "@spawn", "sync-registry", "--check"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -532,7 +536,7 @@ def _check_and_fix_owner(home: Path) -> None:
         if check_proc.returncode != 0:
             warning("Owner/identity issues detected — auto-repairing…")
             fix_proc = subprocess.run(
-                ["drone", "@spawn", "sync-registry", "--fix"],
+                [drone_bin, "@spawn", "sync-registry", "--fix"],
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -619,7 +623,7 @@ def run_install(
         return 1
     console.print(f"  Home: [cyan]{home}[/cyan]")
     if source is not None:
-        console.print(f"  Source: [cyan]{clone_from}[/cyan]")
+        console.print(f"  Source: [cyan]{_redact_url(clone_from)}[/cyan]")
 
     if is_throwaway_path(home):
         warning(
@@ -660,7 +664,7 @@ def run_install(
         bins = _verify_binaries(home) if not dry_run else {"drone": "dry-run", "aipass": "dry-run"}
 
         if not dry_run:
-            _check_and_fix_owner(home)
+            _check_and_fix_owner(home, bins["drone"] or "drone")
     finally:
         release_install_lock(install_lock)
 
@@ -807,7 +811,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             "non_interactive": non_interactive,
             "dry_run": dry_run,
             "chat_only": chat_only,
-            "source": source or "default",
+            "source": _redact_url(source) if source else "default",
             "exit": result,
         },
     )

@@ -3,16 +3,15 @@
 # Description: Monitoring Filter Patterns
 # Version: 1.1.0
 # Created: 2025-11-23
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Monitoring Filter Patterns"""
 
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Optional
 
 from aipass.prax.apps.handlers.discovery.filtering import in_sandbox
-from aipass.prax.apps.handlers.json import json_handler
 
 MONITOR_IGNORE_PATTERNS = [
     "__pycache__",
@@ -140,17 +139,6 @@ MONITOR_ALWAYS_PATTERNS = [
     ".gitkeep",
 ]
 
-CONTENT_FILTER_PATTERNS = {
-    "*.log": {
-        "filter_mode": "errors_only",
-        "show_patterns": ["ERROR", "CRITICAL", "WARNING", "Failed", "Exception"],
-        "description": "Only show error-level log entries",
-    },
-    "*_data.json": {"filter_mode": "structure_only", "description": "Show only structural changes, not data updates"},
-    "*_registry.json": {"filter_mode": "keys_only", "description": "Show only new/deleted keys, not value changes"},
-    "snapshot_*.json": {"filter_mode": "summary", "description": "Show summary of changes, not full content"},
-}
-
 HIGHLIGHT_PATTERNS = {
     "critical": [
         "*.id.json",  # Branch identity - system core
@@ -173,20 +161,11 @@ HIGHLIGHT_PATTERNS = {
     ],
 }
 
-EVENT_TYPES = {
-    "all": ["created", "modified", "deleted", "moved"],
-    "changes_only": ["modified", "deleted"],
-    "structure_only": ["created", "deleted", "moved"],
-}
-
-DEFAULT_EVENT_TYPES = EVENT_TYPES["all"]
-
 
 def should_monitor(path: Path, root: Optional[Path] = None) -> bool:
     """Check if path should be monitored
 
     A dropbox, an .archive or a __pycache__ below root is never watched; ALWAYS beats IGNORE."""
-    json_handler.log_operation("monitoring_started", {"path": str(path)})
     import os
 
     if root is not None and in_sandbox(path, root):
@@ -212,7 +191,23 @@ def should_monitor(path: Path, root: Optional[Path] = None) -> bool:
     return True
 
 
-_PARTS_ONLY_IGNORE = {"backups", ".cache", ".git", "node_modules", ".local", ".config", ".var", ".backup"}
+# Whole path segments only: as substrings "lib" would hide "/robin/" and "env" hide "/seven/".
+_PARTS_ONLY_IGNORE = {
+    "backups",
+    ".cache",
+    ".git",
+    "node_modules",
+    ".local",
+    ".config",
+    ".var",
+    ".backup",
+    "lib",
+    "bin",
+    "env",
+    "build",
+    "dist",
+    "install",
+}
 
 
 def _matches_always_patterns(path_str: str, parts: set, name: str) -> bool:
@@ -269,63 +264,3 @@ def _pattern_matches_event(pattern: str, name: str, path_str: str, event_type: s
     if pattern.startswith("*") and name.endswith(pattern[1:]):
         return True
     return pattern == name or pattern in path_str
-
-
-def get_content_filter(path: Path) -> Optional[Dict[str, Any]]:
-    """Get content filter configuration for a path"""
-    name = path.name
-    name_lower = name.lower()
-
-    for pattern, config in CONTENT_FILTER_PATTERNS.items():
-        bare = pattern.replace("*", "")
-        if pattern.startswith("*") and name_lower.endswith(pattern[1:]):
-            return config
-        if pattern == name or bare in name_lower:
-            return config
-
-    return None
-
-
-def filter_log_content(
-    content: str, show_errors: bool = True, show_warnings: bool = True, show_info: bool = False
-) -> Optional[str]:
-    """Filter log content based on level preferences"""
-    lines = content.split("\n")
-    filtered_lines = []
-
-    for line in lines:
-        line_upper = line.upper()
-
-        if show_errors and any(kw in line_upper for kw in ["ERROR", "CRITICAL", "EXCEPTION", "TRACEBACK", "FAILED"]):
-            filtered_lines.append(line)
-            continue
-
-        if show_warnings and any(kw in line_upper for kw in ["WARNING", "WARN"]):
-            filtered_lines.append(line)
-            continue
-
-        if show_info and "INFO" in line_upper:
-            filtered_lines.append(line)
-            continue
-
-    if filtered_lines:
-        return "\n".join(filtered_lines)
-    return None
-
-
-def apply_content_filter(
-    path: Path, content: str, show_errors: bool = True, show_warnings: bool = True, show_info: bool = False
-) -> Optional[str]:
-    """Apply appropriate content filter based on file type"""
-    filter_config = get_content_filter(path)
-
-    if not filter_config:
-        return content
-
-    filter_mode = filter_config.get("filter_mode")
-
-    if filter_mode == "errors_only":
-        return filter_log_content(content, show_errors, show_warnings, show_info)
-
-    # Other filter modes not yet implemented - return original
-    return content

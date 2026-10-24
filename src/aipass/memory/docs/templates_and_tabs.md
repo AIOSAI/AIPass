@@ -112,7 +112,7 @@ all of it, including a guard that fails if a `count` fallback is ever reintroduc
 
 | Scenario | How tabs arrive |
 |---|---|
-| **Live branches** | `refresh_all_tabs(branches=…)` renders tabs from config with per-branch overrides and writes them into `.trinity/` files. It has two callers under `apps/`, both scoped: after `rollover run`, **to the branches that run actually rolled** (the same rollover then re-renders those branches' whole frame through `rollover/normalizer.py`); and after a `config` limit write, through `tab_renderer.refresh_moved_limits()`, to the branches whose enforced count moved. `report-lines` writes nothing. |
+| **Live branches** | `refresh_all_tabs(branches=…)` renders tabs from config with per-branch overrides and writes them into `.trinity/` files. It has two callers under `apps/`, both scoped: after `rollover run`, **to the branches that run actually rolled** (the same rollover then re-renders those branches' whole frame through `rollover/normalizer.py`); and after a `config` limit write, through `tab_renderer.refresh_moved_limits()`, to the branches whose enforced count moved. |
 | **New branches** | Templates carry `{{TODOS_META}}`, `{{KEY_LEARNINGS_META}}`, `{{SESSIONS_META}}`, `{{OBSERVATIONS_META}}` placeholders. `spawn_pusher` propagates these (unresolved) from memory templates → spawn template sets. At branch creation, @spawn calls `render_all_meta_tabs()` to get rendered defaults and resolves the placeholders. |
 
 ### Public API

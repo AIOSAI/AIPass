@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: loader.py
-# Description: Load SKILL.md and handlers
-# Version: 1.1.0
+# Description: Load SKILL.md and handlers; the info command
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Skill loader module."""
 
-from aipass.cli.apps.modules import console, warning
+from aipass.cli.apps.modules import console, error, escape, warning
 from aipass.prax import logger
 from aipass.skills.apps.modules.discovery import discover_all
 from aipass.skills.apps.handlers.loader_handler import load_skill as _handler_load_skill
@@ -16,15 +16,53 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point; loader is a service module with no CLI commands."""
+    """Handle the info command routed by the entry point."""
+    if command != "info":
+        return False
     if not args:
         print_introspection()
-        return True
-    if "--help" in args:
+        error("Error: skill name required. Usage: skills info <name>")
+        return False
+    if any(arg in ("--help", "-h", "help") for arg in args):
         print_introspection()
         return True
+    return print_skill_info(args[0])
 
-    return False
+
+def print_skill_info(name):
+    """Print a skill's metadata and SKILL.md body; False when it cannot be loaded."""
+    loaded = load_skill(name)
+    if not loaded["success"]:
+        error(f"Error: {loaded['error']}")
+        return False
+
+    metadata = loaded["metadata"]
+    # SKILL.md text is the author's, not ours: escaped so Rich prints its brackets.
+    console.print(f"  Skill: {escape(str(metadata.get('name', name)))}")
+    console.print(f"  Version: {escape(str(metadata.get('version', 'unknown')))}")
+    console.print(f"  Description: {escape(str(metadata.get('description', 'No description')))}")
+    console.print(f"  Path: {escape(str(loaded['path']))}")
+    console.print(f"  Has Handler: {metadata.get('has_handler', False)}")
+
+    tags = metadata.get("tags") or []
+    if tags:
+        console.print(f"  Tags: {escape(', '.join(map(str, tags)))}")
+
+    requires = metadata.get("requires") or {}
+    if isinstance(requires, dict):
+        for key in ("pip", "bins", "config"):
+            values = requires.get(key) or []
+            if values:
+                console.print(f"  Requires {key}: {escape(', '.join(map(str, values)))}")
+
+    if loaded["body"]:
+        console.print()
+        console.print("  --- SKILL.md Body ---")
+        for line in loaded["body"].splitlines():
+            console.print(f"  {line}", markup=False)
+
+    logger.info(f"info: loaded skill '{name}'")
+    return True
 
 
 def load_skill(name):
@@ -57,8 +95,7 @@ def print_introspection():
     console.print("[bold]Connected Handlers:[/bold]")
     console.print("  [cyan]handlers/[/cyan]")
     console.print(
-        "    [dim]- loader_handler.py (load_skill, parse_full_skill_md, import_handler"
-        " — skill loading and dynamic handler import)[/dim]"
+        "    [dim]- loader_handler.py (load_skill, import_handler — skill loading and dynamic handler import)[/dim]"
     )
     console.print()
     console.print("[bold]Connected Modules:[/bold]")

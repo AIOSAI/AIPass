@@ -93,7 +93,7 @@ Seedgo + devpulse have **system-wide file access**. "No cross-branch edits" rule
 - `audit` strips `_standards` suffix: `aipass_standards/` → `audit aipass`
 - `standards_query` uses full dir name: `standards_query aipass_standards`
 - Rich markup only — never bare `print()`, never captured ANSI drone output
-- `standard ruff` answers "Unknown standard": the audit shows `ruff` (file `ruff_check.py` minus `_check`), the query surface takes `ruff_check` (its content/md names). Two names, one checker
+- `standard ruff` is the query name; a ruff bypass rule still uses the key `"ruff_check"`
 - The tree above is the ONLY copy — README is the face, not the map, and is off the startup read
 - Depth is `docs/` (indexed from README): standards pack, v5 pack, startup budget, audit engine, checklist+hooks, proof+coverage, tech debt
 - `templates/` is the fleet's GOLD test template: `templates.json` versions it, `test_template_v1.md` is the page, `readme_update_model.py` is the model. Never collected by pytest. A branch's receipt is its `tests/.template_version.json`; a test's BODY is never distributed

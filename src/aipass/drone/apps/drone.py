@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -80,6 +80,9 @@ def _extract_timeout(args: list[str]) -> tuple[list[str], int | None]:
         timeout = int(args[idx + 1])
     except ValueError:
         logger.info("--drone-timeout value %r is not an integer, ignoring", args[idx + 1])
+        return args, None
+    if timeout <= 0:
+        logger.info("--drone-timeout value %r is not positive, ignoring", args[idx + 1])
         return args, None
     return args[:idx] + args[idx + 2 :], timeout
 
@@ -312,6 +315,13 @@ def _handle_module(name: str, args: List[str]) -> int:
     return result.get("exit_code", 0)
 
 
+def _registry_unloadable(exc: Exception) -> int:
+    """Name a command registry that cannot load, on stderr; the exit code is 1."""
+    logger.error("[drone] command registry could not load: %s", exc)
+    err_console.print(f"drone: command registry could not load: {exc}")
+    return 1
+
+
 def _handle_activate(target: str) -> int:
     """Handle `drone activate @branch` -- scan and register all discovered commands."""
     from aipass.drone.apps.modules.scan import scan
@@ -334,13 +344,16 @@ def _handle_activate(target: str) -> int:
     for cmd in results:
         name = cmd["name"]
         description = cmd.get("description", "")
-        success = add(
-            name=name,
-            target=f"@{branch_name}",
-            command=name,
-            description=description,
-            source_branch=branch_name,
-        )
+        try:
+            success = add(
+                name=name,
+                target=f"@{branch_name}",
+                command=name,
+                description=description,
+                source_branch=branch_name,
+            )
+        except RegistryError as exc:
+            return _registry_unloadable(exc)
         if success:
             added.append(name)
         else:
@@ -355,7 +368,10 @@ def _handle_list() -> int:
     from aipass.drone.apps.modules.commands import list_all
     from aipass.drone.apps.modules.commands import format_command_list
 
-    commands = list_all()
+    try:
+        commands = list_all()
+    except RegistryError as exc:
+        return _registry_unloadable(exc)
     format_command_list(commands)
     return 0
 
@@ -365,7 +381,10 @@ def _handle_remove(name: str) -> int:
     from aipass.drone.apps.modules.commands import remove
     from aipass.drone.apps.modules.commands import format_removal
 
-    success = remove(name)
+    try:
+        success = remove(name)
+    except RegistryError as exc:
+        return _registry_unloadable(exc)
     format_removal(name, success)
     return 0 if success else 1
 
@@ -390,9 +409,7 @@ def _handle_custom_command(args: list[str]) -> int:
     try:
         matched = match(args)
     except Exception as exc:
-        logger.error("[drone] command registry could not load: %s", exc)
-        err_console.print(f"drone: command registry could not load: {exc}")
-        return 1
+        return _registry_unloadable(exc)
     if matched is None:
         return -1  # Signal: not a custom command
 
@@ -653,14 +670,18 @@ def main() -> int:
     if command.startswith("@"):
         return _handle_target(args)
 
-    discovered = _discover_modules()
-    module_names = [m[0] for m in discovered]
-    if command in module_names:
+    # Import only the named module, not all of them: a shortcut must not pay for discovery.
+    mod = None
+    if not command.startswith("_") and command in {p.stem for p in MODULES_DIR.glob("*.py")}:
+        try:
+            mod = importlib.import_module(f"aipass.drone.apps.modules.{command}")
+        except Exception as exc:
+            logger.warning("Failed to discover module %s: %s", command, exc)
+    if mod is not None and hasattr(mod, "handle_command"):
         remaining = args[1:]
         cmd = remaining[0] if remaining else None
         cmd_args = remaining[1:] if len(remaining) > 1 else None
         try:
-            mod = importlib.import_module(f"aipass.drone.apps.modules.{command}")
             result = mod.handle_command(cmd, cmd_args)
         except Exception as exc:
             logger.error("Module %s failed: %s", command, exc)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_drive_snapshot_lane.py
 # Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor and Drive headroom
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-10-16
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""
@@ -104,6 +104,21 @@ class TestTheLaneUploadsTheSnapshotStore:
         snapshots = project / ".backup" / "snapshots"
         assert result["location"] == str(snapshots)
         assert sorted(f.relative_to(snapshots).as_posix() for f in uploads[0]) == ["notes.txt", "src/app.py"]
+
+    def test_a_whitelisted_file_the_spec_ignores_is_uploaded_as_the_snapshot_kept_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uploads: list
+    ) -> None:
+        """Mutant: the Drive re-filter reads .backupignore alone, so a whitelisted file never leaves the machine."""
+        project = tmp_path / "project"
+        _seed(project / ".backup" / "snapshots", ("logs/keep.log", "logs/noise.log", "notes.txt"))
+        (project / ".backupignore").write_text("logs/\n", encoding="utf-8")
+        (project / ".backup" / "config.json").write_text(json.dumps({"whitelist": ["logs/keep.log"]}), encoding="utf-8")
+        _offline_client(monkeypatch)
+
+        drive_sync.run_drive_sync(str(project), show_panels=False)
+
+        snapshots = project / ".backup" / "snapshots"
+        assert sorted(f.relative_to(snapshots).as_posix() for f in uploads[0]) == ["logs/keep.log", "notes.txt"]
 
     def test_the_project_root_reaches_the_upload_engine_so_its_periodic_tracker_save_can_fire(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

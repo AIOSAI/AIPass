@@ -6,7 +6,6 @@ from . import show_handler as show_handler
 from . import blame_handler as blame_handler
 from . import sync_handler as sync_handler
 from . import merge_main_handler as merge_main_handler
-from . import pr_handler as pr_handler
 from . import diff_handler as diff_handler
 from . import log_handler as log_handler
 from . import tracked_handler as tracked_handler

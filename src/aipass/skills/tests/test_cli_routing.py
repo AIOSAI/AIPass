@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Unit tests for skills.py CLI routing
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-10
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # Category: skills/tests
 # =============================================
 
@@ -16,7 +16,6 @@
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -118,7 +117,7 @@ class TestHandleCommand:
         assert result is False
 
     def test_info_with_valid_skill(self, capsys):
-        # Mutant killed: the info branch returns True without calling _cmd_info.
+        # Mutant killed: the info branch returns True without calling loader.print_skill_info.
         result = handle_command("info", ["github"])
         assert result is True
         assert "Skill: github" in capsys.readouterr().out
@@ -128,7 +127,7 @@ class TestHandleCommand:
         assert result is False
 
     def test_run_with_valid_skill(self, capsys):
-        # Mutant killed: the run branch returns True without calling _cmd_run.
+        # Mutant killed: the run branch returns True without calling runner.run_skill.
         result = handle_command("run", ["system_status", "disk"])
         assert result is True
         assert "Disk Usage (" in capsys.readouterr().out
@@ -138,7 +137,7 @@ class TestHandleCommand:
         assert result is False
 
     def test_validate_with_valid_skill(self, capsys):
-        # Mutant killed: the validate branch returns True without calling _cmd_validate.
+        # Mutant killed: the validate branch returns True without calling validator.validate_skill.
         result = handle_command("validate", ["github"])
         assert result is True
         assert "Skill 'github' - all requirements met." in capsys.readouterr().out
@@ -258,12 +257,12 @@ class TestOutputCapture:
         captured = capsys.readouterr()
         assert captured.out != ""
 
-    def test_output_capture_version_command(self, capsys):
-        """output_capture: --version produces version string."""
+    def test_version_prints_the_version_the_file_header_declares(self, capsys):
+        # Pins a shipped drift: --version printed 1.1.1 while the header said 1.1.3.
+        header = Path(entry.__file__).read_text(encoding="utf-8")
+        declared = next(line.split(":", 1)[1].strip() for line in header.splitlines() if line.startswith("# Version:"))
         handle_command("--version")
-        captured = capsys.readouterr()
-        assert captured.out.strip() == f"SKILLS v{entry.VERSION}"
-        assert entry.VERSION == "1.1.1"
+        assert capsys.readouterr().out.strip() == f"SKILLS v{declared}"
 
     def test_output_capture_unknown_command(self, capsys):
         """output_capture: unknown command names itself and points at help."""
@@ -315,27 +314,47 @@ class TestExitCodes:
 
 
 class TestRunHelpDoesNotDispatch:
-    """`run <skill> --help` must document the skill, not dispatch "--help" (read as a branch name)."""
+    """`run <skill> --help` documents the skill; it never dispatches "--help" as an action."""
 
-    def test_run_help_is_not_passed_as_an_action(self):
-        with patch("aipass.skills.apps.skills._cmd_run") as mock_run:
-            with patch("aipass.skills.apps.skills._cmd_info", return_value=True) as mock_info:
-                handle_command("run", ["telegram", "--help"])
-        mock_run.assert_not_called()
-        mock_info.assert_called_once_with("telegram")
+    @pytest.fixture
+    def dispatched(self, monkeypatch):
+        calls = []
 
-    def test_run_h_short_flag_also_documents(self):
-        with patch("aipass.skills.apps.skills._cmd_run") as mock_run:
-            with patch("aipass.skills.apps.skills._cmd_info", return_value=True):
-                handle_command("run", ["telegram", "-h"])
-        mock_run.assert_not_called()
+        def recorder(name, action=None, args=None):
+            calls.append((name, action))
+            return {"success": True, "output": "", "error": None}
 
-    def test_real_action_still_dispatches(self):
-        """The guard must not swallow legitimate actions."""
-        with patch("aipass.skills.apps.skills._cmd_run", return_value=True) as mock_run:
-            handle_command("run", ["telegram", "status"])
-        mock_run.assert_called_once()
-        assert mock_run.call_args[0][1] == "status"
+        monkeypatch.setattr(runner, "run_skill", recorder)
+        return calls
+
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_a_help_flag_prints_the_skill_md_and_dispatches_nothing(self, capsys, dispatched, flag):
+        assert handle_command("run", ["github", flag]) is True
+        assert "Skill: github" in capsys.readouterr().out
+        assert dispatched == []
+
+    def test_a_real_action_still_dispatches(self, dispatched):
+        assert handle_command("run", ["github", "status"]) is True
+        assert dispatched == [("github", "status")]
+
+    def test_the_bare_word_help_is_dispatched_as_an_action(self, capsys, dispatched):
+        # Pins a shipped defect: drone_commands publishes "help" and the entry showed SKILL.md instead.
+        assert handle_command("run", ["drone_commands", "help", "module=flow"]) is True
+        assert dispatched == [("drone_commands", "help")]
+        assert "Skill: drone_commands" not in capsys.readouterr().out
+
+
+class TestSkillOutputIsPrintedVerbatim:
+    """A skill's output is its own text: Rich must neither eat nor choke on its brackets."""
+
+    def test_bracketed_words_and_a_stray_closing_tag_reach_stdout(self, capsys, monkeypatch):
+        # Pins a shipped defect: "[opened]" vanished and "[/b]" raised MarkupError.
+        output = "[opened] from @devpulse\nclosing [/b] tag"
+        monkeypatch.setattr(
+            runner, "run_skill", lambda name, action=None, args=None: {"success": True, "output": output, "error": None}
+        )
+        assert handle_command("run", ["inbox_check", "skills"]) is True
+        assert capsys.readouterr().out == "  [opened] from @devpulse\n  closing [/b] tag\n"
 
 
 class TestSwitchVerbsHelpWritesNothing:
@@ -347,6 +366,20 @@ class TestSwitchVerbsHelpWritesNothing:
         assert handle_command(verb, [flag]) is True
         assert "Skills Switch - Disconnect and reconnect a skill" in capsys.readouterr().out
         assert read_state() == {}
+
+    def test_a_bare_switch_lists_every_skill(self, capsys):
+        # The module's old copy printed its introspection here instead of the status.
+        assert handle_command("switch", []) is True
+        out = capsys.readouterr().out
+        assert "github" in out
+        assert "switch Module" not in out
+
+    @pytest.mark.parametrize("verb", ["info", "run", "create", "validate", "on", "off"])
+    def test_a_verb_missing_its_skill_name_shows_the_module_map_and_fails(self, capsys, verb):
+        assert handle_command(verb, []) is False
+        out, err = capsys.readouterr()
+        assert "Module" in out
+        assert "skill name required" in err
 
     def test_a_skill_name_is_still_recorded(self, capsys):
         assert handle_command("off", ["github"]) is True

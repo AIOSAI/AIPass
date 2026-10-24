@@ -166,15 +166,11 @@ that the writers stay gone.
 
 ---
 
-## Line counts are reported, not stored
+## Line counts are not stored
 
-`line_counter.update_line_count()` is **read-only**, and the line count is computed and returned,
-never persisted. The verb is **`rollover report-lines`**, and it writes **nothing at all**: a
-reporter that rewrites every branch's files would be a lie in the other direction. `sync-lines` still
-routes (`modules/rollover.RENAMED_VERBS`): it prints a notice naming `report-lines` and runs the
-reporter, since a removed verb tells a caller nothing about what replaced it. Meta lines are
-re-rendered by the lanes that have a reason to: the trinity push, and a rollover's own scoped
-normalize.
+Nothing counts or persists physical lines; the rollover trigger is the entry count against the keep
+count. Meta lines are re-rendered by the lanes that have a reason to: the trinity push, and a
+rollover's own scoped normalize.
 
 ---
 

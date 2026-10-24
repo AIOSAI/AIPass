@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_assert_check.py
 # Description: Router Assert Standards Checker Handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-20
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -126,7 +126,7 @@ def find_violations(source: str) -> Optional[List[Tuple[int, str]]]:
     """
     try:
         tree = ast.parse(source)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("[router_assert] Unparseable source: %s", exc)
         return None
 

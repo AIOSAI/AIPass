@@ -1,16 +1,16 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module in handlers/bypass/ parses and imports
-# seedgo: no-test-needed(constant) — BYPASS_TEMPLATE's metadata strings and ADVISORY_CAVEAT's wording
+# seedgo: no-test-needed(constant) — ADVISORY_CAVEAT's wording
 
 import json
 
@@ -18,14 +18,9 @@ import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import trigger_check
 from aipass.seedgo.apps.handlers.bypass import inert
-from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
-    ensure_seedgo_config,
-    is_bypassed as bypass_handler_is_bypassed,
-    load_bypass_rules,
-)
+from aipass.seedgo.apps.handlers.bypass import bypass_handler
+from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
-    get_audit_ignore_patterns,
-    get_deprecated_patterns,
     get_template_ignore_patterns,
     is_seedgo_ignored,
     load_ignore_entries,
@@ -68,75 +63,24 @@ def test_load_bypass_rules_empty_when_no_rules(tmp_path):
     assert rules == []
 
 
-def test_load_bypass_rules_creates_config_if_missing(tmp_path):
-    """load_bypass_rules creates .seedgo/bypass.json if it does not exist."""
-    rules = load_bypass_rules(str(tmp_path))
-    assert isinstance(rules, list)
-    # Config should now exist
-    assert (tmp_path / ".seedgo" / "bypass.json").exists()
+def test_load_bypass_rules_reads_a_missing_file_as_no_rules_and_writes_nothing(tmp_path):
+    """Reading rules created .seedgo/bypass.json inside the audited branch; a read never writes."""
+    assert load_bypass_rules(str(tmp_path)) == []
+    assert not (tmp_path / ".seedgo").exists()
 
 
-def test_is_bypassed_matching_rule(tmp_path):
-    """is_bypassed returns True when file and standard match a rule."""
-    rules = [{"file": "apps/foo.py", "standard": "naming", "reason": "legacy"}]
-    result = bypass_handler_is_bypassed(
-        file_path=str(tmp_path / "apps" / "foo.py"),
-        branch_path=str(tmp_path),
-        standard="naming",
-        line=None,
-        bypass_rules=rules,
-    )
-    assert result is True
+def test_get_branch_from_path_reads_a_dict_shaped_registry(tmp_path, monkeypatch):
+    """A name-keyed "branches" dict crashed the lookup (.get on a str key) and read as an unreadable registry."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": {"FLOW": {"name": "FLOW", "path": "flow"}}}), encoding="utf-8")
+    monkeypatch.setattr(bypass_handler, "_find_registry", lambda: registry)
+    monkeypatch.setattr(bypass_handler, "UNREADABLE_REGISTRIES", {})
 
-
-def test_is_bypassed_no_match(tmp_path):
-    """is_bypassed returns False when no rule matches."""
-    rules = [{"file": "apps/foo.py", "standard": "naming", "reason": "legacy"}]
-    result = bypass_handler_is_bypassed(
-        file_path=str(tmp_path / "apps" / "bar.py"),
-        branch_path=str(tmp_path),
-        standard="naming",
-        line=None,
-        bypass_rules=rules,
-    )
-    assert result is False
-
-
-def test_is_bypassed_line_specific(tmp_path):
-    """is_bypassed respects line-specific bypass rules."""
-    rules = [{"file": "apps/foo.py", "standard": "cli", "lines": [10, 20], "reason": "circular"}]
-    foo_path = str(tmp_path / "apps" / "foo.py")
-    branch_path = str(tmp_path)
-    assert bypass_handler_is_bypassed(foo_path, branch_path, "cli", 10, rules) is True
-    assert bypass_handler_is_bypassed(foo_path, branch_path, "cli", 99, rules) is False
-
-
-def test_is_bypassed_empty_rules(tmp_path):
-    """is_bypassed returns False with empty rules list."""
-    assert bypass_handler_is_bypassed(str(tmp_path / "apps" / "foo.py"), str(tmp_path), "naming", None, []) is False
-
-
-def test_ensure_seedgo_config_creates_dir(tmp_path):
-    """ensure_seedgo_config creates .seedgo directory and bypass.json."""
-    result = ensure_seedgo_config(str(tmp_path))
-    assert result == tmp_path / ".seedgo" / "bypass.json"
-    assert result.exists()
-
-
-def test_ensure_seedgo_config_idempotent(tmp_path):
-    """Calling ensure_seedgo_config twice does not corrupt the file."""
-    ensure_seedgo_config(str(tmp_path))
-    ensure_seedgo_config(str(tmp_path))
-    bypass_file = tmp_path / ".seedgo" / "bypass.json"
-    data = json.loads(bypass_file.read_text(encoding="utf-8"))
-    assert "bypass" in data
-
-
-def test_get_audit_ignore_patterns_returns_list():
-    """get_audit_ignore_patterns returns a list of strings."""
-    patterns = get_audit_ignore_patterns()
-    assert isinstance(patterns, list)
-    assert all(isinstance(p, str) for p in patterns)
+    assert bypass_handler.get_branch_from_path(str(tmp_path / "flow" / "apps" / "flow.py")) == {
+        "name": "FLOW",
+        "path": "flow",
+    }
+    assert bypass_handler.UNREADABLE_REGISTRIES == {}
 
 
 def test_get_template_ignore_patterns_returns_copy():
@@ -152,16 +96,6 @@ def test_template_ignore_excludes_test_scaffold():
     """test_scaffold.py is in TEMPLATE_IGNORE_PATTERNS so branches don't require it."""
     patterns = get_template_ignore_patterns()
     assert "test_scaffold.py" in patterns
-
-
-def test_get_deprecated_patterns_returns_dict():
-    """get_deprecated_patterns returns a dict of string keys and string values."""
-    patterns = get_deprecated_patterns()
-    assert isinstance(patterns, dict)
-    assert patterns["--verbose"] == "removed from audit (v0.4.0)"
-    for key, value in patterns.items():
-        assert isinstance(key, str)
-        assert isinstance(value, str)
 
 
 def test_global_default_ignores_tools_dir_with_no_dotfile(tmp_path):
@@ -728,7 +662,7 @@ def test_a_functions_rule_on_a_name_blind_standard_is_still_reported():
 # run (re-audit with bypass_rules=[]) proved 59 -- including 22 non-test rules
 # the advisory structurally cannot mention. @spawn: told 21, measured 41, and
 # one rule was dead in both lanes and named by neither. The cause is structural:
-# this list is computed in the audit lane, which walks apps/ and never tests/,
+# this list is computed in the audit lane, which walks only test_*.py/conftest.py under tests/,
 # and reads violation RECORDS, which branch_level standards do not produce. A
 # branch pruning on it alone deletes live rules AND keeps dead ones.
 

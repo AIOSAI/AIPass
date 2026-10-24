@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tracking.py
 # Description: Tests for usage tracking handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
@@ -13,12 +13,13 @@
 # seedgo: no-test-needed(constant) — DEFAULT_REQUEST_TIMEOUT's value
 
 import json
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from aipass.api.apps.handlers.usage import tracking
+from aipass.api.apps.handlers.usage import cleanup, tracking
 from aipass.api.apps.handlers.usage.tracking import (
     MetricsUnavailable,
     get_generation_metrics,
@@ -294,8 +295,15 @@ def test_store_usage_data_stores_into_a_data_leg_with_no_data_key(mock_dir: Magi
 
 
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
-def test_store_usage_data_writes_back_the_keys_it_does_not_own(mock_dir: MagicMock, tmp_path: Path):
+def test_store_usage_data_writes_back_the_keys_it_does_not_own(mock_dir: MagicMock, tmp_path: Path, monkeypatch):
     """A store after the service bumped the document keeps the bump."""
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 23, 12, 0, 0)
+
+    monkeypatch.setattr(tracking, "datetime", _Frozen)
     # The json service keeps lifetime operations_total and last_operation in the same document.
     mock_dir.__truediv__ = lambda self, other: tmp_path / other
     mock_dir.mkdir = MagicMock()
@@ -434,3 +442,56 @@ def test_store_usage_data_returns_false_on_exception(mock_dir: MagicMock, tmp_pa
     result = store_usage_data("caller", "model", "gen-err", metrics)
 
     assert result is False
+
+
+_METRICS = {
+    "total_cost": 0.01,
+    "tokens_prompt": 10,
+    "tokens_completion": 5,
+    "generation_time": 100,
+    "latency": 200,
+    "provider_name": "test",
+}
+
+
+@patch(f"{_TRACKING_MOD}.API_JSON_DIR")
+def test_store_usage_data_same_generation_twice_counts_once(mock_dir: MagicMock, tmp_path: Path):
+    """Re-tracking a generation already in the store adds nothing to any total."""
+    mock_dir.__truediv__ = lambda self, other: tmp_path / other
+    mock_dir.mkdir = MagicMock()
+
+    assert store_usage_data("caller", "model/a", "gen-same", _METRICS) is True
+    assert store_usage_data("caller", "model/a", "gen-same", _METRICS) is True
+
+    data = json.loads((tmp_path / "usage_tracker_data.json").read_text(encoding="utf-8"))["data"]
+    assert data["usage_by_caller"]["caller"]["requests"] == 1
+    assert data["usage_by_caller"]["caller"]["total_cost"] == 0.01
+    assert data["current_session"]["total_requests"] == 1
+    assert list(data["daily_totals"].values())[0]["requests"] == 1
+
+
+@patch(f"{_TRACKING_MOD}.API_JSON_DIR")
+def test_store_usage_data_a_failed_dump_leaves_the_store_whole(mock_dir: MagicMock, tmp_path: Path):
+    """A dump that raises mid-way leaves the previous store byte-equal, so later tracks still parse it."""
+    mock_dir.__truediv__ = lambda self, other: tmp_path / other
+    mock_dir.mkdir = MagicMock()
+    store_usage_data("caller", "model/a", "gen-ok", _METRICS)
+    store = tmp_path / "usage_tracker_data.json"
+    before = store.read_bytes()
+
+    assert store_usage_data("caller", "model/a", "gen-bad", {**_METRICS, "provider_name": object()}) is False
+
+    assert store.read_bytes() == before
+
+
+@patch(f"{_TRACKING_MOD}.API_JSON_DIR")
+def test_store_usage_data_waits_out_a_held_lock_and_writes_nothing(mock_dir: MagicMock, tmp_path: Path, monkeypatch):
+    """Another process holding the store's lock means no read-modify-write here: False, store untouched."""
+    mock_dir.__truediv__ = lambda self, other: tmp_path / other
+    mock_dir.mkdir = MagicMock()
+    monkeypatch.setattr(cleanup, "LOCK_WAIT_SECONDS", 0.05, raising=False)
+    (tmp_path / "usage_tracker_data.json.lock").write_text("", encoding="utf-8")
+
+    assert store_usage_data("caller", "model/a", "gen-locked", _METRICS) is False
+
+    assert not (tmp_path / "usage_tracker_data.json").exists()

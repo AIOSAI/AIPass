@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lookup.py
 # Description: Command lookup and matching for custom command shortcuts
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Command Lookup and Matching for Custom Commands."""
@@ -63,26 +63,13 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
 
 
 def list_commands() -> list[dict[str, Any]]:
-    """List all registered custom commands, sorted by name."""
-    try:
-        registry = load_registry()
-        commands = registry.get("commands", {})
-        return sorted(commands.values(), key=lambda c: c.get("name", ""))
-    except Exception as exc:
-        logger.error("[%s] Failed to list commands: %s", MODULE_NAME, exc)
-        return []
+    """List all registered custom commands, sorted by name; raises what ``load_registry`` raises."""
+    commands = load_registry().get("commands", {})
+    return sorted(commands.values(), key=lambda c: c.get("name", ""))
 
 
 def list_commands_by_branch(branch_name: str) -> list[dict[str, Any]]:
-    """List custom commands filtered by source branch.
-
-    *branch_name* is bare (``seedgo``, no @), matched exactly against ``source_branch``.
-    """
-    try:
-        registry = load_registry()
-        commands = registry.get("commands", {})
-        filtered = [cmd for cmd in commands.values() if cmd.get("source_branch") == branch_name]
-        return sorted(filtered, key=lambda c: c.get("name", ""))
-    except Exception as exc:
-        logger.error("[%s] Failed to list commands for branch '%s': %s", MODULE_NAME, branch_name, exc)
-        return []
+    """List commands whose ``source_branch`` is exactly *branch_name* (bare, no @); raises as load_registry."""
+    commands = load_registry().get("commands", {})
+    filtered = [cmd for cmd in commands.values() if cmd.get("source_branch") == branch_name]
+    return sorted(filtered, key=lambda c: c.get("name", ""))

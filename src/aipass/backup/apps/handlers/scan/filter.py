@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: filter.py
 # Description: Post-walk path filtering against ignore/whitelist/size rules
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Path filter."""
@@ -17,6 +17,11 @@ from aipass.prax import logger
 from ..ignore.patterns import is_ignored
 from ..ignore.whitelist import is_whitelisted
 from ..audit import trail
+
+
+def is_excluded(rel_path: str, spec: pathspec.PathSpec, whitelist: list[str]) -> bool:
+    """True when the ignore spec matches a path and no whitelist entry rescues it; filter_paths' own rule."""
+    return is_ignored(rel_path, spec) and not is_whitelisted(rel_path, whitelist)
 
 
 def filter_paths(

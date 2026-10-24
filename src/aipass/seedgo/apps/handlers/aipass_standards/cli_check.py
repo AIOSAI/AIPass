@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """CLI Standards Checker Handler"""
@@ -11,7 +11,7 @@
 import ast
 import re
 from pathlib import Path
-from typing import AbstractSet, Dict, List, Optional
+from typing import AbstractSet, Dict, Optional, Sequence
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -45,7 +45,7 @@ def _console_import_line(content: str) -> Optional[int]:
     """Line number of the module's OWN module-level import of the cli console."""
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         # A file this checker cannot parse gets no window and keeps every
         # finding. Ignorance is not evidence of a bootstrap.
         logger.info("cli: no console-import window, unparseable: %s", exc)
@@ -186,7 +186,7 @@ def _stderr_directed_print_lines(content: str) -> set:
     r"""Lines holding a ``print(..., file=sys.stderr)`` call."""
     try:
         tree = ast.parse(content)
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         return set()
 
     lines = set()
@@ -202,10 +202,31 @@ def _stderr_directed_print_lines(content: str) -> set:
     return lines
 
 
+def _print_call_lines(content: str) -> Optional[set]:
+    """Lines where a bare ``print(`` call starts, or None when the source does not parse."""
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return None
+    return {
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print"
+    }
+
+
+def _is_print_line(i: int, line: str, calls: Optional[set]) -> bool:
+    """A print call on line *i*; an unparseable source falls back to the code before any ``#``."""
+    if calls is not None:
+        return i in calls
+    return bool(re.search(r"(?<![.\w])print\s*\(", line.split("#")[0]))
+
+
 def check_handler_separation(content: str) -> Dict:
     """Check that handlers don't have console output"""
     lines = content.split("\n")
     stderr_prints = _stderr_directed_print_lines(content)
+    print_calls = _print_call_lines(content)
 
     prose = _prose(content)
     console_print_lines = []
@@ -244,7 +265,7 @@ def check_handler_separation(content: str) -> Dict:
 
         # Look for print() calls. A print DIRECTED AT stderr is a diagnostic,
         # not display, and the raw-write spelling of it has always passed.
-        if re.search(r"^\s*print\s*\(", line) and i not in stderr_prints:
+        if _is_print_line(i, line, print_calls) and i not in stderr_prints:
             print_lines.append(i)
 
     if console_print_lines:
@@ -306,11 +327,12 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
 
 
 def check_print_usage(
-    content: str, lines: List[str], module_path: str = "", bypass_rules: list | None = None
+    content: str, lines: Sequence[str], module_path: str = "", bypass_rules: list | None = None
 ) -> Optional[Dict]:
     """Check for bare print() statements (should use console.print() instead)"""
     console_line = _console_import_line(content)
     prose = _prose(content)
+    print_calls = _print_call_lines(content)
     print_lines = []
     parser_print_help_lines = []
     format_help_lines = []
@@ -360,13 +382,8 @@ def check_print_usage(
         if _is_raw_write_violation(line) and not _is_pre_console_bootstrap(i, console_line):
             raw_write_lines.append(i)
 
-        if re.search(r"(?<![.\w])print\s*\(", line):
-            if "#" in line:
-                code_part = line.split("#")[0]
-                if re.search(r"(?<![.\w])print\s*\(", code_part):
-                    print_lines.append(i)
-            else:
-                print_lines.append(i)
+        if _is_print_line(i, line, print_calls):
+            print_lines.append(i)
 
     from pathlib import Path
 
@@ -451,7 +468,7 @@ def _module_level_function_names(content: str) -> set:
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipping display-function scan: SyntaxError during parse: %s", e)
         return set()
 

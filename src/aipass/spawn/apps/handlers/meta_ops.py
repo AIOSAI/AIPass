@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: meta_ops.py
 # Description: Branch metadata operations for update tracking
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Branch metadata operations — manages .spawn/.branch_meta.json for per-branch tracking."""
@@ -16,22 +16,11 @@ from typing import Any, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
-from aipass.spawn.apps.handlers.class_registry import DEFAULT_CLASS
 from aipass.spawn.apps.handlers.json import json_handler
 
 _BRANCH_META_DIR = ".spawn"
 _BRANCH_META_FILE = ".branch_meta.json"
 _TEMPLATE_REGISTRY_FILE = ".template_registry.json"
-
-
-def get_template_dir(citizen_class: str = DEFAULT_CLASS) -> Path:
-    """Return path to the template directory for a citizen class.
-
-    Every class resolves to the same directory: the class is validated, it does not pick a scaffold.
-    """
-    from aipass.spawn.apps.handlers.class_registry import get_template_dir as _class_get_template_dir
-
-    return _class_get_template_dir(citizen_class)
 
 
 def compute_file_hash(file_path: Path) -> str:

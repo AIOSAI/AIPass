@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: retire_ops.py
 # Description: The retire lane — a test file leaves by a logged move and can come back
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Retire lane operations.
@@ -13,6 +13,7 @@ the moved file is the only copy. The repo root is the registry's directory, neve
 cwd: drone runs a branch from the branch's own directory.
 """
 
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -110,19 +111,34 @@ def restore(name: str, branch: str, root: Optional[Path] = None) -> Tuple[bool, 
 
     base = Path(root) if root is not None else repo_root()
     target = base / origin
-    if target.exists():
-        return False, f"{filename} already exists at {target.parent} — move it aside first"
-
-    target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.move(str(source), str(target))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _move_without_overwrite(source, target)
+    except FileExistsError:
+        logger.info("Restore of %s refused: %s already exists", filename, target)
+        return False, f"{filename} already exists at {target.parent} — move it aside first"
     except OSError as exc:
         logger.info("Cannot restore %s to %s: %s", source, target, exc)
         return False, f"could not move {filename}: {exc}"
 
-    _drop_entry(filename, branch, root)
     json_handler.log_operation("test_restored", {"file": filename, "branch": branch})
+    if not _drop_entry(filename, branch, root):
+        return False, f"{filename} restored to {target}, but its line in {log_path(branch, root)} could not be removed"
     return True, f"{filename} restored to {target}"
+
+
+def _move_without_overwrite(source: Path, target: Path) -> None:
+    """Move `source` to `target`; FileExistsError, never an overwrite, when `target` exists (checked atomically)."""
+    try:
+        os.link(source, target)
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        logger.info("No hard link for %s (%s); copying with exclusive create", target, exc)
+        with open(source, "rb") as reader, open(target, "xb") as writer:
+            shutil.copyfileobj(reader, writer)
+        shutil.copystat(source, target)
+    source.unlink()
 
 
 def _recorded_origin(filename: str, branch: str, root: Optional[Path]) -> Optional[str]:
@@ -134,15 +150,15 @@ def _recorded_origin(filename: str, branch: str, root: Optional[Path]) -> Option
     return None
 
 
-def _drop_entry(filename: str, branch: str, root: Optional[Path]) -> None:
-    """Remove a restored file's line from the log; the file is no longer retired."""
+def _drop_entry(filename: str, branch: str, root: Optional[Path]) -> bool:
+    """Remove a restored file's line from the log; False when the log could not be written."""
     path = log_path(branch, root)
     if not path.exists():
-        return
+        return True
     document = read_log(branch, root)
     document["entries"] = [e for e in document.get("entries", []) if e.get("what") != filename]
     document.setdefault("document_metadata", {})["last_restored"] = datetime.now().isoformat(timespec="seconds")
-    try:
-        json_handler.write_json(path, document)
-    except Exception as exc:
-        logger.error("Restored %s but could not update %s: %s", filename, path, exc)
+    if json_handler.write_json(path, document):
+        return True
+    logger.error("Restored %s but could not update %s", filename, path)
+    return False

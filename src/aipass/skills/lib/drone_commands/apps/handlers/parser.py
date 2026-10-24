@@ -1,17 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: parser.py - Parses drone command output
-# Date: 2026-03-07
-# Version: 1.0.0
-# Category: skills/lib/drone_commands/apps/handlers
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-07): Initial implementation
-#
-# CODE STANDARDS:
-#   - Handlers layer: returns dicts, NEVER prints
-#   - stdlib only (no external deps)
-#   - Pure functions, no side effects
+# =================== AIPass ====================
+# Name: parser.py
+# Description: Parses drone command output (ANSI, line endings, module names)
+# Version: 1.0.1
+# Created: 2026-03-07
+# Modified: 2026-10-24
 # =============================================
 
 """

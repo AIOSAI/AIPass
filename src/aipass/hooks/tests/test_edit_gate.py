@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -144,6 +144,30 @@ class TestEditGateHandler:
             )
         assert result["exit_code"] == 0
 
+    def test_a_dot_dot_out_of_the_own_branch_is_a_cross_branch_write(self):
+        """The path names api, then climbs into hooks: the branch is where it lands."""
+        with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
+            result = handle(
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/api/../hooks/apps/test.py"},
+                    "cwd": "/srv/example/AIPass/src/aipass/api",
+                }
+            )
+        assert "daemon mode" in json.loads(result["stdout"])["reason"]
+
+    def test_a_relative_path_lands_under_the_seat_not_this_process(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
+            result = handle(
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": "../hooks/apps/test.py"},
+                    "cwd": "/srv/example/AIPass/src/aipass/api",
+                }
+            )
+        assert "daemon mode" in json.loads(result["stdout"])["reason"]
+
     def test_skip_non_edit_tool(self):
         result = handle(
             {
@@ -262,7 +286,10 @@ class TestEditGateProjectBoundary:
         result = handle(
             {
                 "tool_name": tool,
-                "tool_input": {"file_path": str(nested_projects["core_file"])},
+                # NotebookEdit names its file notebook_path, never file_path
+                "tool_input": {
+                    ("notebook_path" if tool == "NotebookEdit" else "file_path"): str(nested_projects["core_file"])
+                },
                 "cwd": str(nested_projects["baud_seat"]),
             }
         )

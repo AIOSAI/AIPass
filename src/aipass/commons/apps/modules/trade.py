@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade.py
 # Description: Trade Orchestration Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -37,9 +37,9 @@ from aipass.commons.apps.handlers.artifacts.trade_ops import (
     drop_item,
     find_item,
     mint_event_artifact,
-    RARITY_COLORS,
 )
 from aipass.commons.apps.handlers.json import json_handler
+from aipass.commons.apps.modules.artifact import RARITY_COLORS
 
 
 def print_introspection():
@@ -57,7 +57,6 @@ def print_introspection():
     console.print("    - trade_ops.py (drop_item — drop an artifact in a room for others to find)")
     console.print("    - trade_ops.py (find_item — pick up a dropped artifact)")
     console.print("    - trade_ops.py (mint_event_artifact — mint event badge artifacts for participants)")
-    console.print("    - trade_ops.py (RARITY_COLORS — color mapping for artifact rarity tiers)")
     console.print()
 
 

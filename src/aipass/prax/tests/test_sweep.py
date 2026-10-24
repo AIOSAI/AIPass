@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sweep.py
 # Description: Tests for stale log sweep in log_audit
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
@@ -141,6 +141,22 @@ class TestSweepIntegration:
         assert not (sys_logs / "module.log").exists()
         assert not (sys_logs / "module.log.1").exists()
 
+    def test_deletes_every_numbered_backup(self, tmp_path):
+        """backup_count is 3, so .log.2/.log.3 and branch .jsonl.3 are swept too."""
+        sys_logs = tmp_path / "system_logs"
+        logs = tmp_path / "src" / "aipass" / "hooks" / "logs"
+        for path in (sys_logs / "m.log.2", sys_logs / "m.log.3", logs / "e.jsonl.3", logs / "e.log.2"):
+            _make_old_file(path, 40)
+
+        with (
+            patch.object(lw, "_get_system_logs_dir", return_value=sys_logs),
+            patch.object(lw, "_get_ecosystem_root", return_value=tmp_path / "src" / "aipass"),
+            patch.object(lw, "json_handler", MagicMock()),
+        ):
+            result = lw.sweep_stale_logs()
+
+        assert result["files_removed"] == 4
+
     def test_returns_structured_summary(self, tmp_path):
         """Verify sweep returns summary with counts and reclaimed size."""
         sys_logs = tmp_path / "system_logs"
@@ -188,3 +204,38 @@ class TestSweepCommand:
         warning.assert_called_once_with("DELETED old.log: 45.2 days old, 12.5 KB")
         json_handler.log_operation.assert_called_once_with("log_audit_executed", {"mode": "sweep"})
         logger.info.assert_called_once_with("[log-audit] Sweep removed %d stale files", 1)
+
+
+class TestTruncateAndHome:
+    """The watchdog's truncate and the system_logs home it watches."""
+
+    def test_truncate_keeps_the_tail_and_leaves_no_temp(self, tmp_path):
+        """The last N lines survive behind a marker, written by replace, not in place."""
+        log = tmp_path / "big.log"
+        log.write_text("".join(f"line {i}\n" for i in range(50)), encoding="utf-8")
+
+        assert lw.truncate_log_file(log, keep_lines=5) == (50, 6)
+        lines = log.read_text(encoding="utf-8").splitlines()
+        assert lines[0].startswith("--- LOG TRUNCATED")
+        assert lines[1:] == [f"line {i}" for i in range(45, 50)]
+        assert [p.name for p in tmp_path.iterdir()] == ["big.log"]
+
+    def test_a_failed_write_leaves_the_log_whole(self, tmp_path, monkeypatch):
+        """A crash before the replace never leaves the log empty or short."""
+        log = tmp_path / "big.log"
+        original = "".join(f"line {i}\n" for i in range(50))
+        log.write_text(original, encoding="utf-8")
+        # A directory where the temp file goes: the write fails on every OS, root included.
+        (tmp_path / ".big.log.trunc").mkdir()
+
+        assert lw.truncate_log_file(log, keep_lines=5) == (0, 0)
+        assert log.read_text(encoding="utf-8") == original
+
+    def test_system_logs_home_honours_the_test_log_dir(self, tmp_path, monkeypatch):
+        """The watchdog watches where the loggers write, AIPASS_TEST_LOG_DIR included."""
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
+
+        (tmp_path / "system").mkdir()
+        (tmp_path / "system" / "probe.log").write_text("one\n", encoding="utf-8")
+
+        assert [row["name"] for row in lw.scan_log_files()] == ["probe.log"]

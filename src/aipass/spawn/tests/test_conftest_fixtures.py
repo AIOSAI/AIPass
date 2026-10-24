@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_conftest_fixtures.py
 # Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""
@@ -107,16 +107,15 @@ class TestTemplateWalksWatchTheTemplate:
 
 
 class TestTheHeaderNeverReachesTheRealBus:
-    """cli's header fires cli_header_displayed; under spawn's tests it lands on a recorder."""
+    """cli's header fires no event, so spawn's tests need no stand-in bus."""
 
-    def test_the_real_header_fires_into_the_recorder_only(self, cli_trigger_bus, monkeypatch):
-        """Ran red before the fixture existed (fixture not found)."""
+    def test_the_real_header_fires_nothing_on_the_real_bus(self, monkeypatch):
+        """Ran red with header() firing cli_header_displayed again (one call on the real bus)."""
         real_fire = Mock()
         monkeypatch.setattr(trigger_core.Trigger, "fire", real_fire)
 
         display.header("Probe Title")
 
-        assert cli_trigger_bus.fired == [("cli_header_displayed", {"title": "Probe Title"})]
         assert real_fire.call_count == 0
 
 

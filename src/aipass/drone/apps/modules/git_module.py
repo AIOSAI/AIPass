@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.13.0
+# Version: 1.13.1
 # Created: 2026-03-17
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -132,6 +132,9 @@ _FAILED_CONCLUSIONS = ("failure", "timed_out")
 _RUN_VIEW_VALUE_FLAGS = ("-R", "--repo", "-j", "--job", "-a", "--attempt", "-q", "--jq", "-t", "--template", "--json")
 _JOB_ROW_JQ = '"\\(.id)\\t\\(.conclusion)\\t\\(.name)"'
 _GH_TIMEOUT = 60
+# A CI run takes about 30 min; watch outlives it, streams gh's own poll lines live, then gives up.
+_RUN_WATCH_TIMEOUT = 45 * 60
+_RUN_WATCH_INTERVAL = "60"
 
 _DIFF_FLAGS = ("--staged", "--all", "--stat")
 
@@ -201,7 +204,12 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     cmd: str = command
     if cmd == "tag" and (not args or args[0] == "--list"):
         cmd = "tag-list"
-    from aipass.drone.apps.plugins.devpulse_ops.auth import GH_SUBCOMMANDS, gh_access_key, verify_git_access
+    from aipass.drone.apps.plugins.devpulse_ops.auth import (
+        GH_SUBCOMMANDS,
+        NoPassportError,
+        gh_access_key,
+        verify_git_access,
+    )
 
     if command in _GH_PASSTHROUGH_COMMANDS:
         # An unknown subcommand is refused here, before the gate and before gh.
@@ -219,8 +227,8 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     try:
         caller = verify_git_access(cmd)
     except PermissionError as exc:
-        # WARNING, not ERROR: auth.py already logged this denial at ERROR.
-        logger.warning("git access denied: %s", exc)
+        # Never ERROR: auth.py already logged the denial; a passport-less caller is a designed refusal.
+        (logger.info if isinstance(exc, NoPassportError) else logger.warning)("git access denied: %s", exc)
         if command == "ci-cure":
             ci_cure_handler.record(
                 caller=UNKNOWN_CALLER, args=args, outcome=ci_cure_handler.OUTCOME_REFUSED, reason=str(exc)
@@ -524,14 +532,13 @@ def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
     """Pass through to gh CLI for issue, run, and workflow subcommands."""
     if subcommand == "issue":
         args = _rewrite_issue_view(args)
+    watch = subcommand == "run" and args[:1] == ["watch"]
+    if watch and not any(arg in ("-i", "--interval") or arg.startswith("--interval=") for arg in args):
+        args = [*args, "--interval", _RUN_WATCH_INTERVAL]
+    timeout = _RUN_WATCH_TIMEOUT if watch else _GH_TIMEOUT
     cmd = ["gh", subcommand] + args
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        result = subprocess.run(cmd, capture_output=not watch, text=True, timeout=timeout)
         if (
             subcommand == "run"
             and args[:1] == ["view"]
@@ -541,8 +548,8 @@ def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
         ):
             return _run_log_via_job_api(args)
         return {
-            "stdout": result.stdout,
-            "stderr": result.stderr,
+            "stdout": result.stdout or "",
+            "stderr": result.stderr or "",
             "exit_code": result.returncode,
         }
     except FileNotFoundError as exc:
@@ -556,7 +563,7 @@ def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
         logger.warning("gh %s timed out: %s", subcommand, exc)
         return {
             "stdout": "",
-            "stderr": f"gh {subcommand} timed out after 60s",
+            "stderr": f"gh {subcommand} timed out after {timeout}s",
             "exit_code": 1,
         }
 
@@ -675,7 +682,7 @@ def _handle_merge(args: list[str], caller: str) -> dict:
     """Handle the merge subcommand (owner-tier, auth pre-checked)."""
     confirmed = "--confirm" in args
     pr_args = [a for a in args if not a.startswith("--")]
-    if not pr_args:
+    if not pr_args or not pr_args[0].isdigit():
         return {"stdout": "", "stderr": "Usage: drone @git merge <PR#> [--confirm]", "exit_code": 1}
 
     refusal = _confirm_merge(pr_args[0], caller, confirmed)
@@ -1326,6 +1333,7 @@ def _gh_verb_help(command: str) -> str:
     )
     log_line = (
         "  view <id> --log | --log-failed reads a run's log (job API fallback)\n"
+        "  watch <id> streams gh's poll every 60 s (or -i), gives up after 45 min\n"
         "  list | view | watch --repo <path> reads another repo's runs (admin seat)\n"
         if command == "run"
         else ""
@@ -1356,10 +1364,9 @@ def get_introspective() -> str:
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
         "  gh passthrough: issue, run, workflow\n"
         "Machine surface: --json on status, log, show, remote\n"
-        "Tiers: global (status,diff,log,show,blame,tracked,export,remote,lock,branches,tag --list,"
-        "issue,run,workflow,release)"
-        " | owner (pr,commit,untrack,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
-        "unlock,merge,smart-sync,fix,tag) | ci-cure (ci-cure)\n"
+        f"Tiers: global ({','.join(_tier_commands('global'))})"
+        f" | owner ({','.join(_tier_commands('owner'))})"
+        f" | ci-cure ({','.join(_tier_commands('ci-cure'))})\n"
     )
 
 

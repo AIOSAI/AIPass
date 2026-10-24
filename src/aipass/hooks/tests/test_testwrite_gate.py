@@ -4,7 +4,7 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -193,11 +193,17 @@ class TestBothLanesAnswerTheSame:
             "tee {new}",
             "cp /etc/hostname {new}",
             "touch {new}",
+            "echo 'def test_a(): pass' &> {new}",
+            "cp /x/test_brand_new.py {tests}/",
+            "mv /x/test_brand_new.py {tests}",
+            "cp -t {tests} /x/test_brand_new.py",
+            "cp --target-directory={tests} /x/test_brand_new.py",
+            "rsync /x/test_brand_new.py {tests}/",
         ],
     )
     def test_scripted_creation_is_blocked(self, project: dict, command: str):
         _policy(project)
-        result = _run(project["seat"], command=command.format(new=project["new_test"]))
+        result = _run(project["seat"], command=command.format(new=project["new_test"], tests=project["tests_dir"]))
         assert _blocked(result)
         assert "scripted" in _reason(result)
 

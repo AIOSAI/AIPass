@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_lock_ops.py
 # Description: Tests for lock_ops handler — atomic lock file management
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""
@@ -431,3 +431,32 @@ class TestReleaseLock:
         assert "Failed to release lock file" in args[0]
         assert lock in args
         assert any(isinstance(arg, OSError) for arg in args)
+
+
+class TestOsFileLock:
+    """os_file_lock: the OS lock every flow write shares."""
+
+    def test_times_out_while_another_handle_holds_it(self, tmp_path):
+        """Another holder keeps the lock: TimeoutError naming the file, the body never runs.
+
+        Mutant: `if time.monotonic() >= deadline: raise` -> `break` reddens this.
+        """
+        lock = tmp_path / ".flow_writes.lock"
+        ran = []
+        with lock_ops.os_file_lock(lock, timeout=0.0):
+            with pytest.raises(TimeoutError, match=".flow_writes.lock"):
+                with lock_ops.os_file_lock(lock, timeout=0.0):
+                    ran.append(True)
+        assert ran == []
+
+    def test_is_free_again_after_the_holder_leaves(self, tmp_path):
+        """Leaving the block drops the lock, and the lock file stays: it is never deleted.
+
+        Mutant: dropping `_os_unlock(fh)` reddens this on Windows; on POSIX closing the file also unlocks.
+        """
+        lock = tmp_path / ".flow_writes.lock"
+        with lock_ops.os_file_lock(lock, timeout=0.0):
+            pass
+        assert lock.exists()
+        with lock_ops.os_file_lock(lock, timeout=0.0):
+            pass

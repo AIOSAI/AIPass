@@ -27,11 +27,10 @@ not when it is registered; nothing outside prax reads the registry, and nothing
 anywhere reads `discovered_time`. What the registry feeds is prax's own dedupe
 and the module count in `drone @prax status`.
 
-**What still starts a watcher.** `initialize_logging_system()` →
-`run_initialize` → `start_file_watcher()`, synchronously, for the life of that
-process. That door is deliberate, and it is why the liveness check, the `died`
-record and the `file_watcher_died` fire exist: a process that opens it can lose
-its watchdog dispatcher and must find out.
+**What starts a watcher.** Only a process that calls `start_file_watcher()`
+itself; nothing in production does. A process that opens it can lose its watchdog
+dispatcher, which is why the liveness check, the `died` record and the
+`file_watcher_died` fire exist.
 
 ## The watcher's own events
 
@@ -40,8 +39,7 @@ The watcher fires `module_discovered` and `file_watcher_died` on the trigger bus
 site, not at module level: a module-level import cannot succeed, because trigger's
 `core.py` imports prax's logger, which imports this watcher while it is still
 initialising. By the time a fire site runs, this module is fully imported and the
-cycle is gone. The same shape serves the lifecycle doors in
-[logging_api.md](logging_api.md).
+cycle is gone.
 
 The import is guarded `(ImportError, OSError)` to a warning and returns `None`
 when the host cannot give a bus. The guard is that wide because trigger's own

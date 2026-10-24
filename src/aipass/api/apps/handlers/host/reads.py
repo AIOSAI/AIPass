@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reads.py
 # Description: Host API Read Handler — file and directory reads behind the name fence
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -398,6 +398,10 @@ def _fence(root: Path, file: str) -> Path:
         raise ReadRefused("A file name is required")
 
     candidate = file.strip()
+
+    # Before realpath, which raises ValueError on a NUL.
+    if "\x00" in candidate:
+        raise ReadRefused("File name may not contain a NUL byte")
 
     if candidate.startswith(("/", "\\")) or (len(candidate) > 1 and candidate[1] == ":"):
         raise ReadRefused("File must be relative to the root, not an absolute path")

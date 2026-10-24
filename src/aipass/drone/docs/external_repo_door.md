@@ -106,8 +106,8 @@ remote can carry a token. `rerun`, `cancel`, `delete` and `download` stay home-o
 directory, absolute or relative to the AIPass root, is the door's. Anything else reaches gh
 untouched. A mistyped path therefore comes back as gh's own "could not resolve"
 error, not as a door refusal. gh's `-R` is refused in every spelling beside the door's path:
-`-R VALUE`, `-R=VALUE` and the attached `-RVALUE`. `run watch` keeps the passthrough's 60-second
-timeout, at home and through the door alike.
+`-R VALUE`, `-R=VALUE` and the attached `-RVALUE`. `run watch` keeps the passthrough's 45-minute
+ceiling and 60-second poll, at home and through the door alike.
 
 The refusal texts are constants in `repo_door.py`, and `drone @git --help` renders those same
 constants — one wording, two places, no copy. Pinned by `TestRepoDoorRefusals`,

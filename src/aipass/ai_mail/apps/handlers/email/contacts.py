@@ -87,6 +87,10 @@ def register_contact(branch_name: str, project: str, inbox_path: str) -> bool:
     except RuntimeError as e:
         logger.error("[contacts] register_contact(%s) refused, book left as found: %s", name_key, e)
         return False
+    # Every delivery registers its recipient: an unchanged row is not worth an unlocked rewrite of the book.
+    existing = data["contacts"].get(name_key)
+    if existing and existing.get("project") == project and existing.get("inbox") == inbox_path:
+        return True
     data["contacts"][name_key] = {
         "project": project,
         "inbox": inbox_path,

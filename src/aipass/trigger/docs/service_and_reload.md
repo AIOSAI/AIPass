@@ -29,7 +29,7 @@ because the host has no systemd, not that it is stopped.
 
 **The service reloads itself when handler code changes** (`handlers/reload_sentinel.py`). It is a long-running process that imports trigger's handlers once and holds them for its whole life, so a fix shipped to disk does nothing until it restarts. Remembering to restart after shipping depends on a human remembering, so the process notices for itself.
 
-Every 30s it compares the mtimes of `apps/handlers/**.py` and `apps/modules/**.py` against the snapshot taken when it started. On a change it exits `75` (`EX_TEMPFAIL`) and systemd's `Restart=on-failure` brings up a fresh interpreter that imports everything from disk. Deliberately a restart, not `importlib.reload()`: handlers register callbacks on the event bus, and reloading in place leaves the bus holding the old function objects.
+Every 30s it compares the mtimes of `apps/handlers/**.py`, `apps/modules/**.py`, `apps/config.py` and `apps/log_watcher_service.py` against the snapshot taken when it started. On a change it exits `75` (`EX_TEMPFAIL`); the unit lists 75 under `SuccessExitStatus` so the journal records a success, and `RestartForceExitStatus=75` brings up a fresh interpreter that imports everything from disk. Deliberately a restart, not `importlib.reload()`: handlers register callbacks on the event bus, and reloading in place leaves the bus holding the old function objects.
 
 Two guards keep it from making things worse:
 

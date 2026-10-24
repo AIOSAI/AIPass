@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery_handler.py
 # Description: Handler for module and command discovery
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -61,7 +61,8 @@ def parse_help_for_commands(help_text: str) -> List[str]:
     for line in help_text.splitlines():
         stripped = line.strip()
 
-        if any(marker in stripped.lower() for marker in section_markers):
+        # Whole-line match: "Audit all commands" or "run with subcommands below" is not a header.
+        if stripped.rstrip(":").strip().lower() in section_markers:
             in_commands_section = True
             continue
 
@@ -156,15 +157,14 @@ def get_system_help(active_branches: List[str]) -> Dict[str, HelpResult]:
     *active_branches* are @-prefixed; the result is keyed by bare name.
     """
     # Import here to avoid circular imports - resolver needs registry_handler
-    from aipass.drone.apps.handlers.registry_handler import load_registry
+    from aipass.drone.apps.handlers.registry_handler import get_branch_by_name
 
     results: Dict[str, HelpResult] = {}
 
     for symbolic_name in active_branches:
         branch_name = symbolic_name.lstrip("@")
         try:
-            registry = load_registry()
-            branch = registry.get("branches", {}).get(branch_name.lower())
+            branch = get_branch_by_name(branch_name)
             if branch is None:
                 continue
             branch_path = branch["path"]

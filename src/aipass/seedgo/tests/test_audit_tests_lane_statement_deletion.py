@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_statement_deletion.py
 # Description: audit-tests statement deletion operator and its diff scope (split from test_audit_tests_lane.py)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/statement_deletion.py and diff_scope.py."""
@@ -12,6 +12,9 @@
 # seedgo: no-test-needed(ruff) — that every file in handlers/audit_tests/ and handlers/tests_pytest_standards/ parses
 # seedgo: no-test-needed(documentation) — that the public lane functions carry docstrings
 
+from types import SimpleNamespace
+from typing import cast
+
 import pytest
 
 from aipass.seedgo.apps.handlers.audit_tests import spine
@@ -19,6 +22,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     adapter,
     diff_scope,
     envcopy,
+    mutation_shapes,
     statement_deletion as SD,
 )
 from aipass.seedgo.apps.modules import audit_tests
@@ -289,6 +293,26 @@ class TestStatementDeletionHangTimeout:
     def test_the_floor_still_holds_for_a_fast_suite(self, tmp_path):
         assert SD.hang_timeout(0.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
         assert SD.hang_timeout(1.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
+
+    def test_a_mutant_cut_short_by_the_budget_refuses_the_group(self, tmp_path, monkeypatch):
+        """The remaining budget, not the hang ceiling, stopped this mutant: that is a fragment, not a measurement."""
+        (tmp_path / "apps").mkdir()
+        (tmp_path / "apps" / "mod.py").write_text("def f():\n    x = 1\n    return x\n", encoding="utf-8")
+        sites = SD.discover_statements(tmp_path)
+        base = SimpleNamespace(green=True, elapsed_seconds=100.0, refusal_reason=None)
+        monkeypatch.setattr(SD, "coverage_baseline", lambda *a, **k: (base, SimpleNamespace(refusal_reason=None)))
+        monkeypatch.setattr(SD, "_selection_for", lambda *a: SD.Selection(basis="whole_suite"))
+        monkeypatch.setattr(
+            SD, "_run_pytest", lambda *a, **k: mutation_shapes.SuiteRun(None, "", "", 60.0, timed_out=True)
+        )
+
+        campaign = SD.run_campaign(
+            cast(mutation_shapes.SuiteTarget, SimpleNamespace(target_copy=tmp_path)), sites, budget_seconds=60
+        )
+
+        assert campaign.results[0].reason == SD.REASON_BUDGET_EXHAUSTED
+        status, _, exhausted = adapter._campaign_outcome(campaign)
+        assert (status, exhausted) == (adapter.STATUS_REFUSED, True)
 
 
 class TestStatementDeletionMutant:

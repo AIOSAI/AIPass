@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_ops.py
 # Description: Plan Creation Implementation Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Plan Creation Operations Handler
@@ -172,9 +172,13 @@ def create_plan_impl(
         registry["next_number"] = NEXT_NUM + 1
 
         if not save_registry(registry, registry_file=registry_file):
-            error_msg = "Failed to save registry after plan creation"
+            # The file exists but no row names it, so the next create would reissue this number.
+            error_msg = (
+                f"{PLAN_FILE.name} was written but the registry was not saved; "
+                "run 'drone @flow registry scan' to register it"
+            )
             logger.error(f"[{MODULE_NAME}] {error_msg}")
-            messages.append({"type": "warning", "text": f"[WARNING] {error_msg}"})
+            return False, 0, "", "", error_msg, messages
 
         dashboard_success = update_dashboard_local()
         central_success = push_to_plans_central()

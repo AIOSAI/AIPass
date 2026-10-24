@@ -3,7 +3,7 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -35,7 +35,6 @@ from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.json import memory_files
 from aipass.memory.apps.handlers import write_fence
-from aipass.memory.apps.handlers.tracking import line_counter
 from aipass.memory.apps.handlers.templates import spawn_pusher
 from aipass.memory.apps.modules import rollover
 from aipass.memory.apps.modules import templates
@@ -493,8 +492,8 @@ class TestRolloverHealsWhatItTouches:
 # =============================================================================
 
 
-class TestSyncLinesTellsTheTruth:
-    """`sync-lines` wrote nothing after the health stamp was deleted, so the verb is renamed and read-only."""
+class TestPushDefaultsWritesOnlyItsConfig:
+    """push_defaults rewrites per_branch in the redirected config and touches nothing else."""
 
     @staticmethod
     def _tmp_fleet(tmp_path: Path, monkeypatch) -> tuple[list[Path], MagicMock]:
@@ -512,34 +511,9 @@ class TestSyncLinesTellsTheTruth:
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
-        monkeypatch.setattr(line_counter, "json_handler", MagicMock())
         recorder = MagicMock()
         monkeypatch.setattr(rollover, "json_handler", recorder)
         return [local, observations], recorder
-
-    def test_the_reporter_verb_exists_under_a_true_name(self):
-        assert "report-lines" in rollover.SUBCOMMANDS
-
-    def test_the_old_name_still_routes_and_says_what_changed(self, tmp_path, monkeypatch, capsys):
-        """Never a silent removal: the old verb answers, names its successor, and still measures."""
-        self._tmp_fleet(tmp_path, monkeypatch)
-
-        assert rollover.handle_command("rollover", ["sync-lines"]) is True
-
-        said = capsys.readouterr()
-        assert "'sync-lines' is now 'report-lines'" in said.err, said.err
-        assert "Measured 2 files" in said.out, said.out
-
-    def test_the_reporter_measures_the_fleet_and_writes_nothing(self, tmp_path, monkeypatch, capsys):
-        """report_line_counts, run for real over a tmp_path fleet."""
-        files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
-        before = [path.read_bytes() for path in files]
-
-        rollover.report_line_counts()
-
-        assert "Measured 2 files" in capsys.readouterr().out
-        assert [path.read_bytes() for path in files] == before
-        recorder.log_operation.assert_called_once_with("rollover_report_lines", {"measured": 2, "failed": 0})
 
     def test_push_defaults_rewrites_per_branch_in_a_redirected_config(self, tmp_path, monkeypatch, capsys):
         """push_defaults, run for real — against a tmp_path config, never the operator's.
@@ -568,23 +542,6 @@ class TestSyncLinesTellsTheTruth:
         assert written["rollover"]["per_branch"]["guinea"]["local"]["todos"] == {"count": 10}
         assert "Pushed defaults to 1 branches" in capsys.readouterr().out
         recorder.log_operation.assert_called_once_with("push_defaults", {"branches": 1, "json": False})
-
-    def test_the_reporter_does_not_re_render_the_fleets_tabs(self):
-        """A read-only reporter that rewrites 22 branches' files is the old lie again."""
-        source = (_MEMORY_ROOT / "apps" / "modules" / "rollover.py").read_text(encoding="utf-8")
-        body = source.split("def report_line_counts")[1].split("\ndef ")[0]
-
-        assert "refresh_all_tabs" not in body
-
-    def test_the_line_counter_still_writes_nothing(self, tmp_path):
-        target = tmp_path / "local.json"
-        target.write_text(json.dumps({"sessions": []}), encoding="utf-8")
-        before = target.read_bytes()
-
-        result = line_counter.update_line_count(target)
-
-        assert result["success"] is True
-        assert target.read_bytes() == before
 
 
 # =============================================================================

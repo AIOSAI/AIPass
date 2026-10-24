@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: duplicate_test_check.py
 # Description: Duplicate Test Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Duplicate Test Standards Checker Handler
@@ -11,13 +11,14 @@
 Reference: duplicate_test.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -127,16 +128,7 @@ def _subsumed(tests: List[Tuple[int, str, Dict[str, ast.AST]]], claimed: Set[str
     return findings
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error; a verdict invented here misdirects its author.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[duplicate_test] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="duplicate_test")
 
 
 def scan(source: str) -> List[Tuple[int, str, str, str]]:
@@ -151,18 +143,8 @@ def scan(source: str) -> List[Tuple[int, str, str, str]]:
     return sorted(clones + subsumed)
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[duplicate_test] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="duplicate_test", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

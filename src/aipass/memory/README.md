@@ -4,7 +4,6 @@
 
 **Purpose:** The central memory archive for AIPass. Archives a branch's `.trinity/` entries into searchable vectors when the files outgrow their keep counts, answers semantic queries across every branch's history, holds the entry shape and the character caps the whole fleet writes against, and keeps each branch's todo pad and its backlog.
 **Module:** `aipass.memory`
-**Version:** 1.2.0
 **Created:** 2026-03-07
 
 ---
@@ -23,8 +22,8 @@ drone @memory push --dry-run            # The trinity push — report what would
 ## What It Does
 
 - **Archives, never trims.** When a `.trinity/` file passes its keep count, rollover vectorizes the
-  oldest entries, verifies the ingestion by reading it back, and only then removes them from the live
-  file. Absent locally is not gone — `search` recalls it.
+  oldest entries into the store, and only then removes them from the live file; a store that
+  refuses leaves the file whole. Absent locally is not gone — `search` recalls it.
 - **Answers across the whole fleet.** One semantic index over every citizen's sessions, learnings and
   observations, filterable by branch and by memory type.
 - **Owns the entry shape and the caps.** `memory.config.json` publishes the closed field shape — every

@@ -89,17 +89,8 @@ that has already spent three minutes of pytest teaches nothing. The external-rep
 unchanged: `--repo <path> commit` routes through the same function, and its ledger line records the
 refusal like any other outcome.
 
-`pr_handler.create_pr()` composes its own commit message and measures it **before** it acquires the
-PR lock — a PR commit lands in the same oneline log as any other, and a refusal holding the
-repo-wide lock would block every other citizen while it teaches.
-
-The lock is a non-blocking exclusive create of `.git_pr.lock`, and on Windows a create racing
-another process's release answers access denied rather than file exists, so that arm answers
-`Lock blocked` too — the holder if the file still reads, else the denial named with a retry.
-
 Pinned by `TestCommitSubjectCap` in `tests/test_git_access_handlers.py` (including the boundary: a
-subject exactly at the cap commits) and by two cases in `TestPRHandler` in
-`tests/test_git_module_handlers.py`.
+subject exactly at the cap commits).
 
 ---
 
@@ -183,9 +174,10 @@ AIPass lane argv-for-argv so translation elsewhere cannot move it.
 
 ---
 
-## gh passthrough, and the two rewrites
+## gh passthrough, the two rewrites and the long watch
 
-`issue`, `run` and `workflow` pass straight through to the `gh` CLI. Two exceptions:
+`issue`, `run` and `workflow` pass straight through to the `gh` CLI with a 60-second timeout. Three
+exceptions:
 
 **`issue view <n>`.** gh's default view is a GraphQL query requesting `repository.issue.projectCards`,
 a Projects-classic field GitHub rejects outright, so the call returns the deprecation notice and no
@@ -202,6 +194,11 @@ through `gh api`: each job's full log (only the failed jobs for `--log-failed`),
 the job name and a tab, with a notice on stderr saying so. `-R/--repo`, `--job` and `--attempt` are
 honoured, and a job whose log the API refuses fails the command by name (`TestRunLogFallback` in
 `tests/test_git_module.py`).
+
+**`run watch <id>`.** A CI run takes about 30 minutes, so watch waits up to 45 before it gives up,
+and gh polls every 60 seconds unless the caller passes its own `-i/--interval`. Its output is not
+captured: gh's own run state reaches the terminal on every poll, so a human sees it is alive. Past
+the ceiling the command fails with `gh run timed out after 2700s`.
 
 These three verbs take gh's **own** `--repo OWNER/NAME`, which is why they are not external-repo
 door verbs.

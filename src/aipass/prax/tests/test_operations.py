@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-24
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the dashboard file and its budget: apps/handlers/dashboard/operations.py."""
@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.prax.apps.handlers.dashboard.status import calculate_quick_status
 from aipass.prax.tests.support_test_operations import _load_ops
 
 pytestmark = pytest.mark.usefixtures("_dashboard_quiet")
@@ -58,106 +59,6 @@ class TestGetDashboardPath:
         nested = tmp_path / "src" / "aipass" / "flow"
         result = ops.get_dashboard_path(nested)
         assert result == nested / "DASHBOARD.local.json"
-
-
-# =============================================
-# load_dashboard
-# =============================================
-
-
-class TestLoadDashboard:
-    """Tests for load_dashboard -- file I/O with fallback to template."""
-
-    def _make_template(self):
-        """Build a minimal dashboard template for test use."""
-        return {
-            "branch": "TEMPLATE",
-            "last_updated": "",
-            "sections": {
-                "ai_mail": {"new": 0},
-                "flow": {"active_plans": 0},
-            },
-        }
-
-    def test_loads_existing_dashboard(self, tmp_path):
-        """Existing dashboard file is loaded and returned as dict."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "mybranch"
-        branch_dir.mkdir()
-        dashboard_data = {
-            "branch": "MYBRANCH",
-            "last_updated": "2026-01-01",
-            "sections": {"flow": {"active_plans": 5}},
-        }
-        (branch_dir / "DASHBOARD.local.json").write_text(json.dumps(dashboard_data), encoding="utf-8")
-
-        result = ops.load_dashboard(branch_dir, self._make_template())
-        assert result["branch"] == "MYBRANCH"
-        assert result["sections"]["flow"]["active_plans"] == 5
-
-    def test_returns_template_when_file_missing(self, tmp_path):
-        """Missing dashboard file triggers template fallback with branch name set."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "nobranch"
-        branch_dir.mkdir()
-        template = self._make_template()
-
-        result = ops.load_dashboard(branch_dir, template)
-        # Branch name should be set from directory name uppercased
-        assert result["branch"] == "NOBRANCH"
-        assert "sections" in result
-
-    def test_returns_template_on_corrupted_json(self, tmp_path):
-        """Corrupted JSON falls back to template."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "broken"
-        branch_dir.mkdir()
-        (branch_dir / "DASHBOARD.local.json").write_text("{not valid json!!!", encoding="utf-8")
-        template = self._make_template()
-
-        result = ops.load_dashboard(branch_dir, template)
-        assert result["branch"] == "BROKEN"
-        assert result["sections"] == template["sections"]
-
-    def test_returns_template_on_empty_file(self, tmp_path):
-        """Empty file is treated as missing and falls back to template."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "empty"
-        branch_dir.mkdir()
-        (branch_dir / "DASHBOARD.local.json").write_text("", encoding="utf-8")
-        template = self._make_template()
-
-        result = ops.load_dashboard(branch_dir, template)
-        assert result["branch"] == "EMPTY"
-
-    def test_load_dashboard_with_non_dict_json(self, tmp_path):
-        """A file containing valid JSON that is not a dict returns the template."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "arrayfile"
-        branch_dir.mkdir()
-        (branch_dir / "DASHBOARD.local.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
-        template = self._make_template()
-
-        result = ops.load_dashboard(branch_dir, template)
-        # Non-dict JSON falls back to template
-        assert result["branch"] == "ARRAYFILE"
-        assert result["sections"] == template["sections"]
-
-    def test_adds_sections_when_missing_from_existing_file(self, tmp_path):
-        """Valid JSON dict missing the sections key gets sections from template."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "nosections"
-        branch_dir.mkdir()
-        # Valid JSON but missing "sections" key
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            json.dumps({"branch": "NOSECTIONS", "last_updated": "2026-01-01"}),
-            encoding="utf-8",
-        )
-        template = self._make_template()
-
-        result = ops.load_dashboard(branch_dir, template)
-        assert "sections" in result
-        assert result["sections"] == template["sections"]
 
 
 # =============================================
@@ -389,17 +290,16 @@ class TestWriteSection:
 
 
 # =============================================
-# _calculate_quick_status_standalone
+# calculate_quick_status (the one write_section uses)
 # =============================================
 
 
-class TestCalculateQuickStatusStandalone:
-    """Tests for _calculate_quick_status_standalone -- pure calculation."""
+class TestCalculateQuickStatus:
+    """Tests for status.calculate_quick_status -- pure calculation."""
 
     def test_empty_sections_returns_defaults(self, tmp_path):
         """Empty sections produce zeroed counters and 'All clear' summary."""
-        ops = _load_ops()
-        result = ops._calculate_quick_status_standalone({}, tmp_path)
+        result = calculate_quick_status({}, tmp_path)
         assert result["new_mail"] == 0
         assert result["opened_mail"] == 0
         assert result["active_plans"] == 0
@@ -408,7 +308,6 @@ class TestCalculateQuickStatusStandalone:
 
     def test_new_mail_triggers_action_required(self, tmp_path):
         """New mail count > 0 sets action_required to True (sourced from inbox.json)."""
-        ops = _load_ops()
         mail_dir = tmp_path / ".ai_mail.local"
         mail_dir.mkdir()
         inbox = {
@@ -419,23 +318,21 @@ class TestCalculateQuickStatusStandalone:
             ]
         }
         (mail_dir / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
-        result = ops._calculate_quick_status_standalone({}, tmp_path)
+        result = calculate_quick_status({}, tmp_path)
         assert result["new_mail"] == 3
         assert result["action_required"] is True
         assert "3 new emails" in result["summary"]
 
     def test_active_plans_triggers_action_required(self, tmp_path):
         """Active plans > 0 sets action_required to True."""
-        ops = _load_ops()
         sections = {"flow": {"active_plans": 2}}
-        result = ops._calculate_quick_status_standalone(sections, tmp_path)
+        result = calculate_quick_status(sections, tmp_path)
         assert result["active_plans"] == 2
         assert result["action_required"] is True
         assert "2 active plans" in result["summary"]
 
     def test_combined_summary_includes_all_parts(self, tmp_path):
         """Summary string includes all active counts."""
-        ops = _load_ops()
         mail_dir = tmp_path / ".ai_mail.local"
         mail_dir.mkdir()
         inbox = {
@@ -447,7 +344,7 @@ class TestCalculateQuickStatusStandalone:
         }
         (mail_dir / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
         sections = {"flow": {"active_plans": 3}}
-        result = ops._calculate_quick_status_standalone(sections, tmp_path)
+        result = calculate_quick_status(sections, tmp_path)
         assert result["action_required"] is True
         assert "2 new emails" in result["summary"]
         assert "1 opened" in result["summary"]
@@ -455,7 +352,6 @@ class TestCalculateQuickStatusStandalone:
 
     def test_mail_counts_from_inbox_json(self, tmp_path):
         """Mail counts sourced from inbox.json status fields."""
-        ops = _load_ops()
         mail_dir = tmp_path / ".ai_mail.local"
         mail_dir.mkdir()
         inbox = {
@@ -470,7 +366,7 @@ class TestCalculateQuickStatusStandalone:
             ]
         }
         (mail_dir / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
-        result = ops._calculate_quick_status_standalone({}, tmp_path)
+        result = calculate_quick_status({}, tmp_path)
         assert result["new_mail"] == 7
         assert result["action_required"] is True
 
@@ -501,7 +397,7 @@ class TestCreateFreshDashboard:
             assert result["last_updated"] != ""
             assert "_warning" in result
             assert "sections" in result
-            assert "ai_mail" in result["sections"]
+            assert "ai_mail" not in result["sections"]
             assert "flow" in result["sections"]
             assert "memory" in result["sections"]
             assert "commons_activity" not in result["sections"]

@@ -3,7 +3,7 @@
 # Description: Rollover pipeline - the orchestrator's subprocess lanes and chroma path, and extraction
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -28,7 +28,6 @@ def _import_orchestrator(monkeypatch):
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
 
     mock_extractor = MagicMock()
-    mock_line_counter = MagicMock()
 
     monitor_pkg = MagicMock()
 
@@ -38,15 +37,9 @@ def _import_orchestrator(monkeypatch):
 
     rollover_pkg.extractor = mock_extractor
 
-    tracking_pkg = MagicMock()
-
-    tracking_pkg.line_counter = mock_line_counter
-
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.extractor", mock_extractor)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking", tracking_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking.line_counter", mock_line_counter)
 
     # Through monkeypatch: a bare pop left the mock-built copy cached for later files.
     monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", raising=False)
@@ -59,7 +52,6 @@ def _import_orchestrator(monkeypatch):
     return orchestrator, {
         "detector": mock_detector,
         "extractor": mock_extractor,
-        "line_counter": mock_line_counter,
     }
 
 
@@ -366,6 +358,13 @@ class TestExtractTextFromMemories:
         memories = [{"message": "a message"}]
         texts = orch.extract_text_from_memories(memories)
         assert texts == ["a message"]
+
+    def test_extracts_from_note_field(self, monkeypatch):
+        """An observation's text is its note; the dict repr is what 758 live vectors held instead."""
+        orch, _ = _import_orchestrator(monkeypatch)
+        memories = [{"date": "2026-10-23", "note": "the note", "tags": ["t"], "number": 58}]
+        texts = orch.extract_text_from_memories(memories)
+        assert texts == ["the note"]
 
     def test_fallback_to_string_representation(self, monkeypatch):
         orch, _ = _import_orchestrator(monkeypatch)

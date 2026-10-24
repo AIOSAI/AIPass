@@ -3,8 +3,8 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-10-23
-# Version: 1.6.0
+# Modified: 2026-10-24
+# Version: 1.6.2
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -255,10 +255,9 @@ def log_watcher_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "fake_aipass_pkg")
     monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
-    # Both the import-time binding and the lazy fallback import answer from this recorder.
+    # The watcher's import-time binding and the module attribute answer from one recorder.
     registry_answer = MagicMock(return_value={"is_new": True, "count": 1, "id": "abc123"})
     monkeypatch.setattr(lw, "registry_report", registry_answer)
-    monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
     monkeypatch.setattr(error_registry, "report", registry_answer)
 
     monkeypatch.setattr(config_loader, "section", MagicMock(return_value={}))
@@ -268,7 +267,6 @@ def log_watcher_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(lw, "_branch_log_observer", None)
     monkeypatch.setattr(lw, "_active_watcher", None)
     monkeypatch.setattr(lw, "_seen_error_hashes", set())
-    monkeypatch.setattr(lw, "_fallback_error_counts", {})
     monkeypatch.setattr(lw, "_data_dirty", False)
     monkeypatch.setattr(lw, "_last_flush_time", 0.0)
     monkeypatch.setattr(lw, "_branch_names_cache", (0.0, ()))
@@ -321,8 +319,9 @@ def ci_lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     emails = ["@hooks", "@spawn", "@seedgo", "@devpulse", "@trigger"]
     registry.write_text(json.dumps({"branches": [{"email": e} for e in emails]}), encoding="utf-8")
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", registry)
-    monkeypatch.setattr(error_detected, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
-    monkeypatch.setattr(error_detected, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
+    monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
     lane.breaker_open = False
     lane.backoff = False

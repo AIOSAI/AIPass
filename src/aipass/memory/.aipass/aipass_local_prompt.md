@@ -26,7 +26,7 @@ memory/
 │   │   ├── lint.py              # Entry scanner: the cap lane and the fields lane
 │   │   ├── pool.py              # Pool vectorization + auto-process
 │   │   ├── push.py              # The trinity push (dry-run + gated execute)
-│   │   ├── rollover.py          # Rollover orchestration, status, report-lines, config verbs
+│   │   ├── rollover.py          # Rollover orchestration, status, config verbs
 │   │   ├── roots.py             # Declared repository roots — list/init/add/remove/heal
 │   │   ├── search.py            # Semantic query routing
 │   │   ├── symbolic.py          # PARKED — refusal stub, impl in tests/parked/
@@ -35,7 +35,6 @@ memory/
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher
 │   └── handlers/
-│       ├── archive/             # indexer.py
 │       ├── cli/                 # help_flags.py, json_flag.py, branch_flag.py
 │       ├── governance/          # engine.py
 │       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
@@ -47,11 +46,11 @@ memory/
 │       │                        #   todo_roll.py (pad → backlog file), todo_report.py
 │       ├── schema/              # normalize.py
 │       ├── search/              # query_executor.py
-│       ├── storage/             # chroma_subprocess.py
+│       ├── storage/             # chroma_subprocess.py, lane.py (the one subprocess runner)
 │       ├── symbolic/            # PARKED — __init__ raises
 │       ├── templates/           # trinity_push.py, push_store.py, push_report.py,
 │       │                        #   receipt.py, template_bump.py, spawn_pusher.py
-│       ├── tracking/            # line_counter.py, tab_renderer.py
+│       ├── tracking/            # tab_renderer.py
 │       ├── vector/              # embed_subprocess.py
 │       └── central_writer.py
 ├── docs/                        # Tracked depth, one file per handler group, indexed from README

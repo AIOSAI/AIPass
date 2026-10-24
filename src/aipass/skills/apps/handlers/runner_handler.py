@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner_handler.py
 # Description: Skill execution handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -48,25 +48,6 @@ def run_handler(handler, name, action, args, config):
 
     try:
         result = handler.run(action, args=args, config=config)
-        json_handler.log_operation(
-            "handler_executed",
-            {
-                "name": name,
-                "action": action,
-                "success": True,
-            },
-        )
-        if isinstance(result, dict):
-            return {
-                "success": result.get("success", False),
-                "output": result.get("output", ""),
-                "error": result.get("error"),
-            }
-        return {
-            "success": True,
-            "output": str(result),
-            "error": None,
-        }
     except Exception as exc:
         logger.error(f"Skill {name} action '{action}' failed: {exc}")
         return {
@@ -74,6 +55,17 @@ def run_handler(handler, name, action, args, config):
             "output": "",
             "error": f"Skill {name} action '{action}' failed: {exc}",
         }
+
+    if isinstance(result, dict):
+        outcome = {
+            "success": result.get("success", False),
+            "output": result.get("output", ""),
+            "error": result.get("error"),
+        }
+    else:
+        outcome = {"success": True, "output": str(result), "error": None}
+    json_handler.log_operation("handler_executed", {"name": name, "action": action, "success": outcome["success"]})
+    return outcome
 
 
 def run_markdown(name, metadata, body):

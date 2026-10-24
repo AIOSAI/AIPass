@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ci_red.py
 # Description: ci_red event handler - wakes the owner of a red CI run through medic's dispatch gates
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-10-22
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -27,6 +27,11 @@ logger = trail_logger(TRIGGER_ROOT / "logs" / "ci_lane.jsonl")
 PAYLOAD_KEYS = ("run_id", "workflow", "step", "owner", "lines", "url", "fingerprint")
 # Cures still waiting on a gate or the cap: every poll fires them again until one dispatches.
 RETRIED_STATES = ("queued", "gated")
+
+
+def is_retried(cure: Dict[str, Any]) -> bool:
+    """A cure the next fire may take: waiting on a gate or the cap, or a dispatch claim whose poll died."""
+    return cure["state"] in RETRIED_STATES or (cure["state"] == "dispatching" and not ledger.claim_is_live(cure))
 
 
 def run_url(run_id: str) -> str:
@@ -66,10 +71,10 @@ def _gate_reason(owner: str, fingerprint: str, fresh: bool = True) -> str:
         return f"Unknown branch skipped: @{owner}"
     if fresh:
         medic.circuit_breaker_record_error()
-    if not medic.circuit_breaker_allows():
-        return "Circuit breaker OPEN - suppressed dispatch for"
     if fingerprint and not medic.registry_should_dispatch(fingerprint):
         return f"Suppressed or backing off {fingerprint[:12]} - no dispatch for"
+    if not medic.circuit_breaker_allows():
+        return "Circuit breaker OPEN - suppressed dispatch for"
     return ""
 
 
@@ -109,9 +114,13 @@ def _dispatch_owner(payload: Dict[str, Any]) -> str:
     """Gate, then wake the owner with its brief; answers the cure's new state."""
     owner = payload["owner"] = payload["owner"].lstrip("@").lower()
     key = ledger.cure_key(payload["run_id"], owner)
-    existing = ledger.load()["cures"].get(key)
-    if existing and existing["state"] not in RETRIED_STATES:
-        return existing["state"]
+    # Claimed under the lock: two overlapping polls must not both wake the owner.
+    with ledger.update() as data:
+        existing = data["cures"].get(key)
+        if existing and not is_retried(existing):
+            return existing["state"]
+        claim = {k: payload.get(k) for k in PAYLOAD_KEYS}
+        ledger.set_cure(data, payload["run_id"], owner, "dispatching", claimed=ledger.utc_now(), **claim)
     if not payload.get("fingerprint"):
         payload["fingerprint"] = _fingerprint(owner, payload["workflow"], payload["step"])
     message = f"CI red: {payload['workflow']} / {payload['step']}"

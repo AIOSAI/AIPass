@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Project config handler — load/save per-project backup config
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Project configuration handler."""
@@ -16,12 +16,9 @@ from ..path import builder
 
 DEFAULTS = {
     "version": "1.0.0",
-    "backup_mode": "snapshot",
-    "max_versions": 10,
     "max_file_size_mb": 100,
     "max_backup_files": 25000,
     "max_backup_size_gb": 10,
-    "auto_ignore_git": True,
     "drive_sync": False,
     "whitelist": [],
 }

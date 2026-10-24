@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Shared pytest fixtures for flow tests"""
@@ -17,7 +17,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 from pathlib import Path
-from typing import Callable, Generator
+from typing import Generator
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -28,8 +28,7 @@ from aipass.flow.apps.handlers.json import json_handler as json_handler_module
 import aipass.cli.apps.modules  # noqa: F401
 from aipass.cli.apps.modules import display
 
-# find_repo_root() at import logs a fallback on registry-less checkouts, which mock_json_handler
-# would count in some test window. TestThePreImportListIsComplete keeps this list complete.
+# Import-time find_repo_root() fallback logs would leak into mock_json_handler counts; pinned complete.
 import aipass.flow.apps.handlers.dashboard.push_central  # noqa: F401
 import aipass.flow.apps.handlers.mbank.process  # noqa: F401
 import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
@@ -44,42 +43,6 @@ def pinned_console_width() -> None:
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
-
-
-class HeaderBusRecorder:
-    """Stands in for the trigger module display.header() fires through."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, dict]] = []
-
-    def fire(self, event: str, **kwargs) -> None:
-        """Record one event instead of firing it on the live bus."""
-        self.calls.append((event, kwargs))
-
-
-@pytest.fixture(autouse=True)
-def header_bus(monkeypatch) -> HeaderBusRecorder:
-    """Keep display.header() off the live trigger bus in every flow test."""
-    recorder = HeaderBusRecorder()
-    monkeypatch.setattr(display, "_TRIGGER", recorder)
-    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
-    return recorder
-
-
-@pytest.fixture
-def platform_create_answer() -> Callable[[Path], OSError | None]:
-    """Ask the platform what an exclusive create of a path answers, before the product does."""
-
-    def ask(path: Path) -> OSError | None:
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except OSError as exc:
-            return exc
-        os.close(fd)
-        path.unlink()
-        return None
-
-    return ask
 
 
 @pytest.fixture(autouse=True)
@@ -100,10 +63,7 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True)
 def mock_logger(request, monkeypatch):
-    """Mock the prax logger every flow module actually calls.
-
-    Patches each consumer's own binding, since names are bound at import. Opt out: real_logger.
-    """
+    """Mock the prax logger at each flow consumer's own binding (bound at import); opt out: real_logger."""
     if request.node.get_closest_marker("real_logger"):
         yield None
         return

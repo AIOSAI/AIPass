@@ -3,7 +3,7 @@
 # Description: Tests for the unified entry schema: normalize, extractor trim, entry_limits
 # Version: 1.0.2
 # Created: 2026-06-13
-# Modified: 2026-09-27
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -17,7 +17,6 @@
 #   - entry_limits.py: list-kind key_learnings char-limit enforcement via changed_entries
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — create_rollover_backup(), restore_from_backup(): tests/test_handlers.py
 # seedgo: no-test-needed(covered_elsewhere) — entry_limits.check_file_budget(): tests/test_entry_limits.py
 # seedgo: no-test-needed(covered_elsewhere) — entry_limits.check_fields() per-field rules: tests/test_changed_entries.py
 
@@ -380,33 +379,6 @@ class TestNormalizerUnsortableEntries:
 
         assert norm._read_entry_number({}) is None
         assert norm._read_entry_number("corrupt-scalar") is None
-
-    def test_all_files_run_counts_warned_files(self, monkeypatch, tmp_path):
-        """normalize_all surfaces warned files instead of reporting clean."""
-        norm, _ = _import_normalize(monkeypatch)
-        branch_dir = tmp_path / "branch"
-        branch_dir.mkdir()
-        _write_json(
-            branch_dir / "BRANCH.local.json",
-            {
-                "document_metadata": {"status": {"last_health_check": "2026-08-12"}},
-                "sessions": [
-                    {"number": 9, "date": "2026-01-09", "summary": "Ninth"},
-                    {"date": "2026-01-05", "summary": "NO NUMBER"},
-                    {"number": 2, "date": "2026-01-02", "summary": "Second"},
-                ],
-            },
-        )
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(
-            json.dumps({"branches": [{"name": "BRANCH", "path": str(branch_dir)}]}), encoding="utf-8"
-        )
-
-        with patch.object(norm, "_find_repo_root", return_value=tmp_path):
-            result = norm.normalize_all_memory_files()
-
-        assert result["files_with_warnings"] == 1
-        assert result["details"][0]["warnings"]
 
 
 # ===========================================================================

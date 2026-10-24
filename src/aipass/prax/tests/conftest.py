@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2025-11-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Shared pytest fixtures for prax tests."""
@@ -83,9 +83,9 @@ def _resync_module_attrs() -> Generator[None, None, None]:
 
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
-    """Pin the consoles: Rich sizes an unpinned one per print (80 POSIX, 79 Windows, -s, COLUMNS)."""
+    """Pin the consoles past any tmp_path line (macOS's passed 200): unpinned, Rich sizes per print."""
     for console in (display.CONSOLE, display.err_console):
-        console.width = 200
+        console.width = 1000
 
 
 @pytest.fixture(autouse=True)

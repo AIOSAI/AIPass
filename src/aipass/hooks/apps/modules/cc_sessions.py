@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.3.0
+# Version: 3.4.1
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -39,6 +39,10 @@ def _claude_home() -> Path:
 
 
 CC_SESSIONS_DIR = _claude_home() / ".claude" / "sessions"
+
+# Seams read at call time, so a test can stand in without replacing os.kill / sys.platform process-wide.
+_kill = os.kill
+_PLATFORM = sys.platform
 
 HELP_COMMANDS = [
     ("sessions", "List all CC sessions (PID · branch · short-id · kind · age)"),
@@ -125,7 +129,7 @@ def _proc_start_ticks(pid: int) -> str | None:
     clock ticks since boot. Linux only — returns None elsewhere or on any
     read failure, so callers can fall back to liveness-only checking.
     """
-    if sys.platform != "linux":
+    if _PLATFORM != "linux":
         return None
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
@@ -155,16 +159,16 @@ def _session_pid_matches(session: dict) -> bool:
 
 def _is_pid_alive(pid: int) -> bool:
     """Check if a process with the given PID exists."""
-    if pid <= 1:
+    if not isinstance(pid, int) or pid <= 1:
         return False
-    if sys.platform == "win32":
+    if _PLATFORM == "win32":
         try:
             return _pid_alive_windows(pid)
         except Exception as exc:
             logger.info("[CC_SESSIONS] PID %d Windows check failed (assuming alive): %s", pid, exc)
             return True
     try:
-        os.kill(pid, 0)
+        _kill(pid, 0)
         return True
     except ProcessLookupError:
         logger.info("[CC_SESSIONS] PID %d not found (dead)", pid)
@@ -313,7 +317,7 @@ def _stop_session(session: dict) -> str:
 
     if pid and _is_pid_alive(pid):
         try:
-            os.kill(pid, signal.SIGTERM)
+            _kill(pid, signal.SIGTERM)
         except OSError as exc:
             logger.warning("[CC_SESSIONS] Failed to SIGTERM PID %d: %s", pid, exc)
             return f"PID {pid} ({branch}): SIGTERM failed ({exc})"
@@ -326,7 +330,7 @@ def reclaim(branch_filter: str | None = None) -> list[str]:
     actions = []
     for session in read_all_sessions():
         pid = session.get("pid")
-        if not pid or not _is_pid_alive(pid):
+        if not pid or not _is_pid_alive(pid) or not _session_pid_matches(session):
             continue
         if branch_filter and _session_branch(session) != branch_filter:
             continue

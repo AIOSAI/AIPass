@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane_feed.py
 # Description: Tests for the read lane's feed cursor and name fence — limits, robustness, branch roots, the seat
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/host/feed.py (the cursor) and the name fence in apps/handlers/host/reads.py."""
@@ -85,6 +85,15 @@ class TestFeedCursor:
         assert result["gap"] is True
         assert result["gap_reason"] == host_feed.GAP_TRIMMED
         assert len(result["events"]) == 2
+
+    def test_an_empty_cursor_reads_as_first_contact(self, feed_file: Path) -> None:
+        """`?since=` with nothing after it is no cursor, not one older than every event."""
+        _write_feed(feed_file, [_event("2026-08-14T10:00:00"), _event("2026-08-14T11:00:00")])
+
+        result = host_feed.read_feed(since="")
+
+        assert result["gap"] is False
+        assert result["cursor"] == "2026-08-14T11:00:00"
 
     def test_cursor_ahead_of_feed_clamps_and_returns_empty(self, feed_file: Path) -> None:
         """The outage species: ahead of the feed clamps and delivers, never spins."""
@@ -203,6 +212,13 @@ class TestFence:
             host_reads.read_file("demo", "/etc/passwd")
 
         assert str(exc.value) == "File must be relative to the root, not an absolute path"
+
+    def test_a_nul_byte_is_refused_not_a_crash(self, fake_repo: dict) -> None:
+        """realpath raises ValueError on a NUL, which would surface as a raw 500."""
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "hello\x00.txt")
+
+        assert str(exc.value) == "File name may not contain a NUL byte"
 
     def test_parent_traversal_refused(self, fake_repo: dict) -> None:
         """'..' never survives, checked before the filesystem is touched."""

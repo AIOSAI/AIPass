@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.5
+# Version: 1.3.6
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -849,7 +849,9 @@ def run_init(
     if not sys.stdin.isatty():
         non_interactive = True
 
-    err = _preflight_check()
+    # A paused run's own stage-4 scaffold wrote a registry here; resuming is not a nested init.
+    resuming = _get_local_json_path().is_file() and _get_last_completed_stage() < TOTAL_STAGES
+    err = None if resuming else _preflight_check()
     if err:
         cli_error(str(err))
         return 1
@@ -885,7 +887,11 @@ def run_init(
     if last_done > 0:
         warning(f"Resuming from stage {last_done + 1}...")
 
-    accumulated: Dict[str, Any] = {"template": template}
+    accumulated: Dict[str, Any] = {}
+    if last_done > 0:
+        for saved in _get_setup_progress().get("stages", {}).values():
+            accumulated.update({k: v for k, v in saved.items() if k not in ("status", "timestamp", "error")})
+    accumulated["template"] = template
     if template != TEMPLATE_AIPASS:
         accumulated["agent_path"] = "."
 
@@ -1192,33 +1198,9 @@ def _handle_init_update(args: list[str]) -> int:
         elif "trust_enrolled" in result and result["trust_enrolled"] is None:
             # None is project_home's 'registry unavailable', distinct from a refusal.
             warning(f"Trust registry unavailable — not enrolled. Run 'aipass trust {target}' once AIPass is installed.")
-        try:
-            check_proc = subprocess.run(
-                ["drone", "@spawn", "sync-registry", "--check"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if check_proc.returncode != 0:
-                warning("Owner/identity issues detected — auto-repairing…")
-                fix_proc = subprocess.run(
-                    ["drone", "@spawn", "sync-registry", "--fix"],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                if fix_proc.returncode == 0:
-                    success("Registry owner/identity reconciled.")
-                else:
-                    logger.warning("[init_flow] sync-registry --fix exit %s", fix_proc.returncode)
-            else:
-                success("Owner/identity OK.")
-        except FileNotFoundError:
-            logger.info("[init_flow] drone not on PATH — skipping owner check")
-        except subprocess.TimeoutExpired:
-            logger.warning("[init_flow] sync-registry timed out during update")
-        except Exception as sync_exc:
-            logger.warning("[init_flow] registry sync during update skipped: %s", sync_exc)
+        from aipass.aipass.apps.modules.install import _check_and_fix_owner
+
+        _check_and_fix_owner(target)
 
         json_handler.log_operation("aipass_init_update", {"target": str(target), "result": result})
     except Exception as exc:
@@ -1322,10 +1304,6 @@ def handle_command(command: str, args: list[str]) -> bool:
         sys.exit(result)
         return True
 
-    err = _preflight_check()
-    if err:
-        cli_error(str(err))
-        sys.exit(1)
     sys.exit(_handle_init_scaffold(args))
     return True
 

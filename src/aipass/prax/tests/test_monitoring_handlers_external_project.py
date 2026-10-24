@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch detector's external project and path strategies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, its external project detection and path strategies."""
@@ -12,8 +12,8 @@
 # - BranchDetector: _resolve_external_project_name, _parse_external_project_path,
 #   _detect_from_claude_project, _detect_from_compound_parts,
 #   _detect_from_external_project_path, _extract_branch_from_central,
-#   detect_from_path strategies, detect_from_log and detect_from_module caches
-# - branch_detector: detect_branch_from_path, detect_branch_from_log, reload_registry
+#   detect_from_path strategies, detect_from_log caches
+# - branch_detector: detect_branch_from_path, detect_branch_from_log
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — _load_registry, covered by tests/test_monitoring_handlers.py
@@ -719,19 +719,6 @@ class TestDetectFromLogAdditional:
         assert result == "CACHED"
 
 
-class TestDetectFromModuleAdditional:
-    """Additional tests for detect_from_module covering uncovered lines."""
-
-    def test_module_cache_hit(self):
-        """Should return cached module from module_map."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector.module_map["cached.module"] = "CACHED"
-
-        result = detector.detect_from_module("cached.module")
-        assert result == "CACHED"
-
-
 class TestPublicAPIFunctions:
     """Tests for module-level public API functions."""
 
@@ -757,12 +744,3 @@ class TestPublicAPIFunctions:
         result = mod.detect_branch_from_log("flow_plan.log")
         assert result == "FLOW"
         mock_detector.detect_from_log.assert_called_once_with("flow_plan.log")
-
-    def test_reload_registry_delegates(self):
-        """reload_registry should delegate to get_detector."""
-        mod = _import_branch_detector()
-        mock_detector = MagicMock()
-        setattr(mod, "_detector_instance", mock_detector)
-
-        mod.reload_registry()
-        mock_detector.reload_registry.assert_called_once_with()

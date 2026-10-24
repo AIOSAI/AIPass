@@ -3,7 +3,7 @@
 # Description: Branch Attribution Handler
 # Version: 0.1.1
 # Created: 2025-11-23
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -34,14 +34,13 @@ def _exact_case_registries(project_dir: Path) -> list:
 
 class BranchDetector:
     """
-    Detects branch ownership for files, logs, and modules.
+    Detects branch ownership for files and logs.
     """
 
     def __init__(self):
         """Initialize detector with empty caches"""
         self.branch_map: Dict[str, str] = {}  # path -> branch
         self.log_map: Dict[str, str] = {}  # log file -> branch
-        self.module_map: Dict[str, str] = {}  # module -> branch
         self.known_branches: Set[str] = set()
         self._repo_root: Optional[Path] = None
         self._external_project_cache: Dict[str, str] = {}  # dir_name -> project_name
@@ -508,55 +507,6 @@ class BranchDetector:
             logger.info(f"Error detecting branch from log {log_file}: {e}")
             return "UNKNOWN"
 
-    def detect_from_module(self, dotted_name: str) -> str:
-        """
-        Detect branch from Python module name.
-        """
-        try:
-            if dotted_name in self.module_map:
-                return self.module_map[dotted_name]
-
-            parts = dotted_name.split(".")
-            if parts:
-                first_part = parts[0].upper()
-
-                if first_part in self.known_branches:
-                    self.module_map[dotted_name] = first_part
-                    return first_part
-
-            logger.info(f"Could not detect branch from module: {dotted_name}")
-            return "UNKNOWN"
-
-        except Exception as e:
-            logger.error(
-                f"[branch_detector] Branch labelling failed for a module name — unexpected "
-                f"{type(e).__name__} on {dotted_name}; the live monitor will show this one as "
-                f"UNKNOWN. The event is still displayed."
-            )
-            return "UNKNOWN"
-
-    def reload_registry(self):
-        """
-        Reload AIPASS_REGISTRY.json.
-        """
-        self.branch_map.clear()
-        self.log_map.clear()
-        self.module_map.clear()
-        self.known_branches.clear()
-        self._load_registry()
-        logger.info("Registry reloaded")
-
-    def get_stats(self) -> Dict[str, int]:
-        """
-        Get cache statistics.
-        """
-        return {
-            "branch_paths": len(self.branch_map),
-            "cached_lookups": len(self.log_map),
-            "cached_modules": len(self.module_map),
-            "known_branches": len(self.known_branches),
-        }
-
 
 _detector_instance: Optional[BranchDetector] = None
 
@@ -583,11 +533,6 @@ def detect_branch_from_log(log_file: str) -> str:
     Public API - detect branch from log filename.
     """
     return get_detector().detect_from_log(log_file)
-
-
-def reload_registry():
-    """Public API - reload AIPASS_REGISTRY.json"""
-    get_detector().reload_registry()
 
 
 if __name__ == "__main__":
@@ -618,19 +563,3 @@ if __name__ == "__main__":
     for log in test_logs:
         branch = detector.detect_from_log(log)
         print(f"  {log} -> {branch}")
-
-    test_modules = [
-        "aipass.prax.apps.handlers.monitoring",
-        "seedgo.core.validator",
-        "flow.planners.daily",
-    ]
-
-    print("\nModule Detection:")
-    for module in test_modules:
-        branch = detector.detect_from_module(module)
-        print(f"  {module} -> {branch}")
-
-    print("\nCache Stats:")
-    stats = detector.get_stats()
-    for key, value in stats.items():
-        print(f"  {key}: {value}")

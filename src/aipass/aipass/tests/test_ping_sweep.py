@@ -3,7 +3,7 @@
 # Description: Tests for aipass ping_sweep handler Phase 3
 # Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/ping_sweep/__init__.py — Phase 3 (FPLAN-0188)."""
@@ -49,10 +49,12 @@ def _run_rc(returncode: int) -> MagicMock:
     return MagicMock(return_value=MagicMock(returncode=returncode, stderr="error msg" if returncode else ""))
 
 
-def _ack_inbox(tmp_path: Path, sender: str, status: str) -> Path:
-    """Write an inbox.json under tmp_path holding one ack message from sender with status."""
+def _ack_inbox(
+    tmp_path: Path, sender: str, status: str, text: str = "ack", timestamp: str = "9999-12-31 23:59:59"
+) -> Path:
+    """Write an inbox.json under tmp_path holding one message from sender with status (default: a fresh ack)."""
     inbox = tmp_path / "inbox.json"
-    msg = {"from": f"@{sender}", "subject": "ack", "message": "ack", "status": status}
+    msg = {"from": f"@{sender}", "subject": text, "message": text, "status": status, "timestamp": timestamp}
     inbox.write_text(json.dumps({"messages": [msg]}), encoding="utf-8")
     return inbox
 
@@ -148,6 +150,17 @@ class TestWaitForAck:
     def test_ignores_non_new_message(self, tmp_path) -> None:
         """Does not match already-read messages."""
         results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "read"), 1, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
+
+    def test_ignores_ack_older_than_send(self, tmp_path) -> None:
+        """An ack left over from an earlier sweep does not count."""
+        inbox = _ack_inbox(tmp_path, "seedgo", "new", timestamp="2000-01-01 00:00:00")
+        results, _run = _sweep_one("seedgo", inbox, 1, _run_rc(0))
+        assert results == {"seedgo": "timeout"}
+
+    def test_ignores_ack_inside_other_word(self, tmp_path) -> None:
+        """'feedback' contains 'ack' but is not an ack."""
+        results, _run = _sweep_one("seedgo", _ack_inbox(tmp_path, "seedgo", "new", text="feedback"), 1, _run_rc(0))
         assert results == {"seedgo": "timeout"}
 
     def test_handles_corrupt_inbox(self, tmp_path) -> None:

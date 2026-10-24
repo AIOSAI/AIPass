@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_refresh.py
 # Description: Unit tests for the dashboard refresh and section writes
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the refresh and section writes: apps/handlers/dashboard/refresh.py and status.py."""
@@ -20,65 +20,9 @@ from pathlib import Path
 import pytest
 
 from aipass.prax.apps.handlers.dashboard import refresh, status
-from aipass.prax.tests.support_test_operations import _load_dashboard_module, _load_ops
+from aipass.prax.tests.support_test_operations import _load_dashboard_module
 
 pytestmark = pytest.mark.usefixtures("_dashboard_quiet")
-
-
-class TestUpdateSectionLegacy:
-    """Tests for update_section -- legacy interface with template and status func."""
-
-    def test_updates_section_and_calls_status_func(self, tmp_path):
-        """Section is written and calculate_status_func is invoked with live data."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "testbranch"
-        branch_dir.mkdir()
-        template = {
-            "branch": "",
-            "last_updated": "",
-            "sections": {"ai_mail": {"new": 0}},
-        }
-        status_called_with: dict[str, object] = {}
-
-        def mock_status(sections, branch_path=None):
-            """Capture sections passed to status calculator."""
-            status_called_with.update(sections)
-            return {"action_required": True, "summary": "test"}
-
-        result = ops.update_section(branch_dir, "ai_mail", {"new": 5}, template, mock_status)
-        assert result is True
-        assert "ai_mail" in status_called_with
-        assert status_called_with["ai_mail"]["new"] == 5  # type: ignore[union-attr]
-
-        data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        assert data["sections"]["ai_mail"]["new"] == 5
-        assert data["quick_status"]["action_required"] is True
-
-    def test_creates_sections_dict_if_missing(self, tmp_path):
-        """Dashboard without sections key gets one created during update."""
-        ops = _load_ops()
-        branch_dir = tmp_path / "nosections"
-        branch_dir.mkdir()
-        (branch_dir / "DASHBOARD.local.json").write_text(
-            json.dumps({"branch": "NOSECTIONS", "last_updated": ""}),
-            encoding="utf-8",
-        )
-        template = {
-            "branch": "",
-            "last_updated": "",
-            "sections": {},
-        }
-
-        result = ops.update_section(
-            branch_dir,
-            "flow",
-            {"active_plans": 2},
-            template,
-            lambda s, bp=None: {"action_required": False},
-        )
-        assert result is True
-        data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        assert data["sections"]["flow"]["active_plans"] == 2
 
 
 def _load_refresh() -> types.ModuleType:
@@ -418,29 +362,6 @@ class TestResolveBranchPath:
 
 
 DASHBOARD_MODULE_PATH = "aipass.prax.apps.modules.dashboard"
-
-
-class TestDashboardModuleUpdateSection:
-    """Tests for dashboard.py module-level update_section wrapper."""
-
-    def test_delegates_to_handler_update_section(self, tmp_path):
-        """Module wrapper calls handler and writes section to disk."""
-        mod = _load_dashboard_module()
-        branch_dir = tmp_path / "wrapper_branch"
-        branch_dir.mkdir()
-
-        result = mod.update_section(branch_dir, "flow", {"active_plans": 3})
-        assert result is True
-        data = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        assert data["sections"]["flow"]["active_plans"] == 3
-
-    def test_returns_false_on_handler_error(self, tmp_path):
-        """Non-writable path causes wrapper to return False."""
-        mod = _load_dashboard_module()
-        bad_path = tmp_path / "no" / "such" / "deep" / "branch"
-
-        result = mod.update_section(bad_path, "flow", {"active_plans": 1})
-        assert result is False
 
 
 class TestResolveBranchPathWrapper:

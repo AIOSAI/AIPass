@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_tests.py
 # Description: the audit-tests verb - execution-tier test quality measurement
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The `audit-tests` verb. Measures how much a test suite proves, by running it.
@@ -135,8 +135,11 @@ def _parse(args: List[str]) -> tuple:
     while index < len(args):
         token = args[index]
         if token == "--budget":
-            # A trailing bare '--budget' keeps the default: the flag is known, only its value is missing.
-            options["budget_seconds"] = _as_int(args[index + 1] if index + 1 < len(args) else "")
+            value = args[index + 1] if index + 1 < len(args) else ""
+            if not value.isdigit():
+                error(f"--budget needs a whole number of seconds, got {value!r}")
+                raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, "--budget")
+            options["budget_seconds"] = int(value)
             index += 2
             continue
         if token == "--prove-refusal":
@@ -182,15 +185,6 @@ def _request_execution_group(options: dict, group: str) -> None:
     requested = options.setdefault(OPTION_EXECUTION_GROUPS, [])
     if group not in requested:
         requested.append(group)
-
-
-def _as_int(raw: str) -> int:
-    """A budget in seconds, or the default when the token is not a number."""
-    try:
-        return int(raw)
-    except ValueError:
-        logger.warning(f"[AUDIT-TESTS] --budget {raw!r} is not a number; using the default")
-        return runner.DEFAULT_BUDGET_SECONDS
 
 
 def _report(results: list, worst: int) -> None:

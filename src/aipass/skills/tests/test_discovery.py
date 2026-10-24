@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Unit tests for skills discovery
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # Category: skills/tests
 # =============================================
 
-"""Tests for apps/handlers/discovery_handler.py and the skill discovery it powers."""
+"""Tests for apps/modules/discovery.py, apps/handlers/discovery_handler.py and the skill discovery they power."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that discovery_handler.py and module_paths.py parse and import
@@ -18,11 +18,26 @@ import tempfile
 from pathlib import Path
 
 from aipass.skills.apps.handlers import discovery_handler
+from aipass.skills.apps.modules import discovery
 from aipass.skills.apps.handlers.discovery_handler import (
     discover_skills_in_path,
     get_search_paths,
     parse_frontmatter,
 )
+
+
+class TestTheListCommand:
+    """`list` takes no arguments, so a bare call lists and only a help flag shows the module map."""
+
+    def test_a_bare_list_prints_the_skills_not_the_module_map(self, capsys):
+        assert discovery.handle_command("list", []) is True
+        out = capsys.readouterr().out
+        assert "skill(s):" in out
+        assert "discovery Module" not in out
+
+    def test_list_help_prints_the_module_map(self, capsys):
+        assert discovery.handle_command("list", ["--help"]) is True
+        assert "discovery Module" in capsys.readouterr().out
 
 
 class TestGetSearchPaths:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_function_check.py
 # Description: Unused Function Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-03-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -151,7 +151,7 @@ def _field_names(literal: str) -> list[str] | None:
     """Every identifier an f-string's replacement fields name; None when it does not parse."""
     try:
         tree = ast.parse(literal, mode="eval")
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("Could not parse an f-string for its fields, blanked whole: %s", exc)
         return None
     names: list[str] = []
@@ -257,7 +257,7 @@ def _base_methods(dotted: str) -> set[str]:
         if source_file is not None:
             try:
                 tree = ast.parse(source_file.read_text(encoding="utf-8", errors="ignore"))
-            except SyntaxError:
+            except (SyntaxError, ValueError):
                 logger.info("Skipped base %s: SyntaxError in %s", dotted, source_file)
                 tree = ast.Module(body=[], type_ignores=[])
             for node in tree.body:
@@ -290,20 +290,31 @@ def _overrides(tree: ast.AST) -> set[int]:
     return found
 
 
-def _extract_functions(py_file: Path) -> list[tuple[str, int]] | None:
-    """(name, line) of each judged function; None when the file does not parse.
+def _self_references(func: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+    """Times a function names itself inside its own body: recursion is no caller."""
+    return sum(
+        1
+        for stmt in func.body
+        for node in ast.walk(stmt)
+        if (isinstance(node, ast.Name) and node.id == func.name)
+        or (isinstance(node, ast.Attribute) and node.attr == func.name)
+    )
+
+
+def _extract_functions(py_file: Path) -> list[tuple[str, int, int]] | None:
+    """(name, line, self-references) of each judged function; None when the file does not parse.
 
     None is not "no functions": check_branch names the file under ``unparsed``.
     """
     try:
         source = py_file.read_text(encoding="utf-8", errors="ignore")
         tree = ast.parse(source, filename=str(py_file))
-    except SyntaxError:
+    except (SyntaxError, ValueError):
         logger.info("Skipped %s: SyntaxError during parse", py_file)
         return None
 
     overrides = _overrides(tree)
-    results: list[tuple[str, int]] = []
+    results: list[tuple[str, int, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if _is_excluded(node.name):
@@ -312,7 +323,7 @@ def _extract_functions(py_file: Path) -> list[tuple[str, int]] | None:
                 continue
             if id(node) in overrides:
                 continue
-            results.append((node.name, node.lineno))
+            results.append((node.name, node.lineno, _self_references(node)))
     return results
 
 
@@ -401,15 +412,15 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     corpus = "\n".join(file_sources.values())
 
-    all_functions: list[tuple[str, int, Path]] = []
+    all_functions: list[tuple[str, int, int, Path]] = []
     unparsed: list[str] = []
     for py_file in py_files:
         functions = _extract_functions(py_file)
         if functions is None:
             unparsed.append(py_file.relative_to(branch).as_posix())
             continue
-        for func_name, lineno in functions:
-            all_functions.append((func_name, lineno, py_file))
+        for func_name, lineno, self_refs in functions:
+            all_functions.append((func_name, lineno, self_refs, py_file))
 
     total_functions = len(all_functions)
 
@@ -435,7 +446,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     unused_functions: list[dict] = []
     word_counts, def_counts = _corpus_counts(corpus)
 
-    for func_name, lineno, py_file in all_functions:
+    for func_name, lineno, self_refs, py_file in all_functions:
         if is_bypassed(str(py_file), "unused_function", lineno, bypass_rules, name=func_name):
             continue
 
@@ -445,7 +456,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
         else:
             total_refs = _count_references_in_corpus(func_name, corpus)
             def_count = _count_def_lines(func_name, corpus)
-        call_refs = total_refs - def_count
+        call_refs = total_refs - def_count - self_refs
 
         if call_refs <= 0:
             try:

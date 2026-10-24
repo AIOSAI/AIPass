@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dashboard_merge.py
 # Description: quick_status has many writers — none may delete another's key
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
@@ -11,7 +11,7 @@
 # Invariant: no quick_status writer deletes a key it did not write. The calculator's copies are pinned to agree.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(through_the_command) — load_dashboard and save_dashboard, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — save_dashboard, covered by tests/test_operations.py
 # seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
 # seedgo: no-test-needed(through_the_command) — get_branch_paths, covered by tests/test_operations.py
 # seedgo: no-test-needed(through_the_command) — resolve_branch_path, covered by tests/test_operations.py
@@ -21,7 +21,6 @@
 # seedgo: no-test-needed(through_the_command) — get_template_status, covered by tests/test_operations.py
 # seedgo: no-test-needed(through_the_command) — _extract_flow_section, covered by tests/test_flow_section_contract.py
 # seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
-# seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save and nothing reads
 # seedgo: no-test-needed(json_structure) — the log_operation records of the refresh, push and diff, covered by that row
 
 import json
@@ -107,11 +106,6 @@ class TestForeignKeysSurviveEveryWriter:
         ops.write_section(branch, "memory", {"managed_by": "memory", "vectors_stored": 7})
         assert _read_quick_status(branch)["commons_mentions"] == 4
 
-    def test_update_section_preserves_foreign_key(self, tmp_path):
-        branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
-        ops.update_section(branch, "memory", {"managed_by": "memory"}, {}, status.calculate_quick_status)
-        assert _read_quick_status(branch)["commons_mentions"] == 4
-
     def test_refresh_single_preserves_foreign_key(self, tmp_path):
         """The live path: `drone @prax dashboard refresh @prax`."""
         branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
@@ -194,31 +188,8 @@ FLOW_LIST_SECTION = {
 }
 
 
-def _calculators():
-    """Every entry point that computes a quick_status block."""
-    return [
-        ("status.calculate_quick_status", status.calculate_quick_status),
-        ("refresh._calculate_quick_status", refresh._calculate_quick_status),
-        ("operations._calculate_quick_status_standalone", ops._calculate_quick_status_standalone),
-        ("template_pusher._calculate_quick_status", pusher._calculate_quick_status),
-    ]
-
-
-# Names spelled out: an empty parametrize reports SKIPPED, so a lost copy must fail collection loudly.
-CALCULATOR_NAMES = (
-    "status.calculate_quick_status",
-    "refresh._calculate_quick_status",
-    "operations._calculate_quick_status_standalone",
-    "template_pusher._calculate_quick_status",
-)
-
-CALCULATORS = _calculators()
-
-assert len(CALCULATORS) == len(CALCULATOR_NAMES), (
-    f"expected {len(CALCULATOR_NAMES)} quick_status calculators, collected {len(CALCULATORS)}"
-)
-assert tuple(name for name, _calc in CALCULATORS) == CALCULATOR_NAMES
-assert all(callable(calc) for _name, calc in CALCULATORS)
+# One calculator: every writer calls it, so there is no copy to drift.
+CALCULATORS = [("status.calculate_quick_status", status.calculate_quick_status)]
 
 
 class TestListShapedActivePlans:
@@ -238,12 +209,6 @@ class TestListShapedActivePlans:
     def test_missing_flow_section_is_zero(self, name, calc, tmp_path):
         branch = _seed_branch(tmp_path, {})
         assert calc({}, branch)["active_plans"] == 0, name
-
-    def test_every_calculator_agrees(self, tmp_path):
-        """One calculation, four doors. Drift here is what lost the guard."""
-        branch = _seed_branch(tmp_path, {})
-        results = [calc(FLOW_LIST_SECTION, branch) for _name, calc in _calculators()]
-        assert all(r == results[0] for r in results[1:])
 
 
 class TestPushTemplateIsNotAWreckingBall:
@@ -322,3 +287,64 @@ class TestActionRequiredMatchesItsOwnSummary:
         result = calc({}, branch)
         assert result["summary"] == "All clear", name
         assert result["action_required"] is False, name
+
+
+class TestUnreadableInboxKeepsTheLastMailCount:
+    """A mid-write inbox.json must not publish 0 new mail and 'All clear'."""
+
+    def test_unreadable_inbox_drops_mail_keys_so_the_merge_keeps_them(self, tmp_path):
+        branch = _seed_branch(tmp_path, {"new_mail": 3, "opened_mail": 1}, todos=0)
+        (branch / ".ai_mail.local" / "inbox.json").write_text('{"messages": [', encoding="utf-8")
+
+        computed = status.calculate_quick_status({}, branch)
+
+        assert "new_mail" not in computed and "opened_mail" not in computed
+        assert computed["summary"] == "mail unreadable"
+        assert status.merge_quick_status({"new_mail": 3}, computed)["new_mail"] == 3
+
+
+class TestDashboardWritesAreAtomicAndLocked:
+    """A reader or a second writer never sees, or rebuilds over, a half-written dashboard."""
+
+    def test_a_failed_save_leaves_the_old_file_whole(self, tmp_path, monkeypatch):
+        branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
+        before = (branch / "DASHBOARD.local.json").read_text(encoding="utf-8")
+
+        def _boom(*args):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(ops.os, "replace", _boom)
+
+        assert ops.write_section(branch, "dispatch", {"agents_active": []}) is False
+        assert (branch / "DASHBOARD.local.json").read_text(encoding="utf-8") == before
+
+    @pytest.mark.parametrize("content", ["", '{"sections": {', "[1, 2]"])
+    def test_write_section_refuses_an_unreadable_dashboard(self, tmp_path, content):
+        """Rebuilding from the template here wiped every other service's sections."""
+        branch = _seed_branch(tmp_path, {})
+        (branch / "DASHBOARD.local.json").write_text(content, encoding="utf-8")
+
+        assert ops.write_section(branch, "dispatch", {"agents_active": []}) is False
+        assert (branch / "DASHBOARD.local.json").read_text(encoding="utf-8") == content
+
+    @pytest.mark.skipif(ops.fcntl is None, reason="no advisory lock on this platform")
+    @pytest.mark.parametrize(
+        "writer",
+        [
+            lambda b: ops.write_section(b, "dispatch", {"agents_active": []}),
+            lambda b: refresh.refresh_single_dashboard(b),
+        ],
+        ids=["write_section", "refresh"],
+    )
+    def test_writers_wait_for_the_dashboard_lock(self, tmp_path, writer):
+        import threading
+
+        branch = _seed_branch(tmp_path, {})
+        done = threading.Event()
+        with patch.object(refresh, "read_all_centrals", return_value={}):
+            with ops.dashboard_lock(branch):
+                worker = threading.Thread(target=lambda: (writer(branch), done.set()))
+                worker.start()
+                assert not done.wait(0.3)
+            worker.join(10)
+        assert done.is_set()

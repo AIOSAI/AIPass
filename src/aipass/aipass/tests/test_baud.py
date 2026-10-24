@@ -3,7 +3,7 @@
 # Description: Tests for aipass baud's command line: each value flag reaches the function it feeds
 # Version: 1.6.0
 # Created: 2026-10-08
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/baud.py: the install and status flags as a user types them, and the phone print."""
@@ -22,19 +22,30 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
+import hashlib
 import http.server
 import io
 import os
 import socket
 import stat
 import sys
+import tarfile
 import threading
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from email.message import Message
 from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.handlers.baud.binary import bin_marker_path, bin_path, install_binary
+from aipass.aipass.apps.handlers.baud.fetch import FetchError, fetch_release
+from aipass.aipass.apps.handlers.baud.phone_ready import server_answers
+from aipass.aipass.apps.handlers.baud.unpack import UnpackError, validate_members
+from aipass.aipass.apps.handlers.baud.verify import VerifyError, verify_tarball
+from aipass.aipass.apps.handlers.json import json_handler
 from aipass.aipass.apps.modules import baud
 from aipass.aipass.apps.modules.install import handle_command as install_command
 
@@ -244,6 +255,80 @@ class TestPhoneReadiness:
     def test_an_unreadable_api_config_is_no_api_not_a_loopback_bind(self):
         assert baud.phone_readiness(host_config=_ApiStore(broken=True)).api is False
         assert baud.phone_readiness(host_config=object()).api is False
+
+    def test_the_probe_ignores_a_proxy_in_the_environment(self, monkeypatch, face_server, closed_port):
+        for var in ("no_proxy", "NO_PROXY"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("http_proxy", f"http://127.0.0.1:{closed_port}")
+        assert server_answers("127.0.0.1", face_server) == "serving"
+
+
+def _member(name: str, kind: bytes = tarfile.REGTYPE) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.type = kind
+    return info
+
+
+_BUNDLE = [_member("phone.html"), _member("assets", tarfile.DIRTYPE)]
+
+
+class TestReleaseSafety:
+    @pytest.mark.parametrize(
+        ("member", "refusal"),
+        [
+            (_member("assets/x", tarfile.SYMTYPE), "is a link"),
+            (_member("assets/x", tarfile.LNKTYPE), "is a link"),
+            (_member("../x"), "climbs out"),
+            (_member("C:x"), "absolute or non-POSIX"),
+            (_member("assets\\x"), "absolute or non-POSIX"),
+            (_member("assets/tty", tarfile.CHRTYPE), "special file"),
+        ],
+    )
+    def test_a_hostile_member_is_refused(self, member, refusal):
+        with pytest.raises(UnpackError, match=refusal):
+            validate_members([*_BUNDLE, member])
+
+    def test_a_checksum_mismatch_deletes_the_download(self, tmp_path):
+        tarball = tmp_path / "baud-phone-v0.2.1.tar.gz"
+        tarball.write_bytes(b"tampered")
+        sums = tmp_path / "SHA256SUMS.txt"
+        sums.write_text(f"{'0' * 64}  {tarball.name}\n", encoding="utf-8")
+        with pytest.raises(VerifyError, match="mismatch"):
+            verify_tarball(tarball, sums, delete_on_mismatch=True)
+        assert not tarball.exists()
+
+    def test_an_absolute_member_is_refused(self, tmp_path):
+        with pytest.raises(UnpackError, match="absolute or non-POSIX"):
+            validate_members([*_BUNDLE, _member(str(tmp_path / "x"))])
+
+    def test_the_token_never_follows_a_redirect(self, monkeypatch, tmp_path):
+        seen: list[urllib.request.Request] = []
+
+        def not_found(req: urllib.request.Request, timeout: float) -> None:
+            seen.append(req)
+            raise urllib.error.HTTPError(req.full_url, 404, "Not Found", Message(), None)
+
+        monkeypatch.setattr(urllib.request, "urlopen", not_found)
+        with pytest.raises(FetchError):
+            fetch_release("v0.2.1", tmp_path, token_provider=lambda: "tok")
+        api = seen[-1]
+        assert api.full_url.startswith("https://api.github.com/")
+        assert api.unredirected_hdrs.get("Authorization") == "Bearer tok"
+        assert "Authorization" not in api.headers
+
+    def test_a_failed_marker_write_leaves_no_binary_to_refuse_the_next_install(self, monkeypatch, tmp_path):
+        source = tmp_path / "baud-cli-src"
+        source.write_bytes(b"#!/bin/sh\n")
+        record = {"tag": "v0.2.1", "sha256": hashlib.sha256(b"#!/bin/sh\n").hexdigest()}
+        root = tmp_path / "baud"
+        tried: list[Path] = []
+        monkeypatch.setattr(json_handler, "write_json", lambda path, data: tried.append(path))
+        with pytest.raises(UnpackError, match="could not be written"):
+            install_binary(source, root, record)
+        assert tried == [bin_marker_path(root)]
+        assert not bin_path(root).exists()
+        monkeypatch.undo()
+        assert install_binary(source, root, record) == bin_path(root)
 
 
 _PAIR = "drone @api host-api pair phone --scope operate"

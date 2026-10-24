@@ -3,9 +3,9 @@
 # Name: test_comments_posts.py - Comment and Post Operations Tests
 # Description: Tests for apps/handlers/comments/comment_ops.py and apps/handlers/posts/post_ops.py
 # Date: 2026-04-03
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-10-24
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -672,10 +672,20 @@ class TestDeletePost:
             "INSERT INTO votes (agent_name, target_id, target_type, direction) VALUES (?, ?, ?, ?)",
             ("test-branch", comment_id, "comment", 1),
         )
+        # Reactions on the post and on its comment: both block the delete if left behind
+        mock_db.execute(
+            "INSERT INTO reactions (agent_name, post_id, reaction) VALUES (?, ?, ?)",
+            ("other-branch", post_id, "agree"),
+        )
+        mock_db.execute(
+            "INSERT INTO reactions (agent_name, comment_id, reaction) VALUES (?, ?, ?)",
+            ("test-branch", comment_id, "agree"),
+        )
         mock_db.commit()
 
         result = delete_post([str(post_id)])
         assert result["success"] is True
+        assert mock_db.execute("SELECT COUNT(*) FROM reactions").fetchone()[0] == 0
 
         # Verify cascade: comments gone
         comments = mock_db.execute("SELECT id FROM comments WHERE post_id = ?", (post_id,)).fetchall()

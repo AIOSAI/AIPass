@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_resolver.py
 # Description: Branch resolution, @name to path, and the resolver commands
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-14
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/resolver.py: @name to path resolution and its commands."""
@@ -17,7 +17,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from aipass.drone.apps.handlers.exceptions import BranchNotFoundError
+from aipass.drone.apps.handlers.exceptions import BranchNotFoundError, RegistryError
 from aipass.drone.apps.handlers.registry_handler import (
     reset_registry_path,
     set_registry_path,
@@ -549,6 +549,36 @@ class TestCrossProjectResolution:
         try:
             result = resolve_branch("@mybranch")
             assert "mybranch" in result
+        finally:
+            reset_registry_path()
+
+    def test_get_branch_info_agrees_with_resolve_branch_on_a_home_branch(self, tmp_path: Path, monkeypatch):
+        """A branch only the AIPASS_HOME registry lists is found by get_branch_info, as resolve_branch finds it."""
+        ext_reg = tmp_path / "external_project" / "EXT_REGISTRY.json"
+        ext_reg.parent.mkdir()
+        _write_registry(ext_reg, [])
+        aipass_root = tmp_path / "aipass"
+        target_dir = aipass_root / "src" / "aipass" / "target"
+        target_dir.mkdir(parents=True)
+        _write_registry(aipass_root / "AIPASS_REGISTRY.json", [_make_branch("target", str(target_dir))])
+
+        set_registry_path(ext_reg)
+        monkeypatch.setenv("AIPASS_HOME", str(aipass_root))
+        try:
+            assert get_branch_info("@target")["name"] == "target"
+        finally:
+            reset_registry_path()
+
+    def test_get_branch_info_on_a_corrupt_registry_is_not_branch_not_found(self, tmp_path: Path, monkeypatch):
+        """A corrupt local registry raises a RegistryError, which @api reports apart from an unknown branch."""
+        reg_file = tmp_path / "AIPASS_REGISTRY.json"
+        reg_file.write_text("{not json", encoding="utf-8")
+
+        set_registry_path(reg_file)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        try:
+            with pytest.raises(RegistryError):
+                get_branch_info("@alpha")
         finally:
             reset_registry_path()
 

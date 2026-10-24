@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -83,7 +83,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
     try:
         tree = ast.parse(content, filename=module_path)
-    except SyntaxError as e:
+    except (SyntaxError, ValueError) as e:
         logger.info("Skipped %s: SyntaxError during parse", path)
         return {
             "passed": False,
@@ -551,18 +551,20 @@ def _is_no_args_check(node: ast.If) -> bool:
             if left.args:
                 arg = left.args[0]
                 if isinstance(arg, ast.Name) and arg.id == "args":
-                    if test.comparators and isinstance(test.comparators[0], ast.Constant):
-                        val = test.comparators[0].value
-                        if val in (0, 1):
-                            return True
+                    return _counts_none(test, 0)
                 if isinstance(arg, ast.Attribute):
                     if isinstance(arg.value, ast.Name) and arg.value.id == "sys" and arg.attr == "argv":
-                        if test.comparators and isinstance(test.comparators[0], ast.Constant):
-                            val = test.comparators[0].value
-                            if val in (1, 2):
-                                return True
+                        return _counts_none(test, 1)
 
     return False
+
+
+def _counts_none(test: ast.Compare, empty: int) -> bool:
+    """``len(x) == empty``, ``< empty + 1`` or ``<= empty`` -- a length that can only be empty."""
+    if len(test.ops) != 1 or not isinstance(test.comparators[0], ast.Constant):
+        return False
+    op, val = test.ops[0], test.comparators[0].value
+    return (isinstance(op, (ast.Eq, ast.LtE)) and val == empty) or (isinstance(op, ast.Lt) and val == empty + 1)
 
 
 # Names that stand for the caller's argument list. A delegated help predicate

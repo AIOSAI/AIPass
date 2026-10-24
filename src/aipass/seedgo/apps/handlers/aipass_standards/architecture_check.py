@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: architecture_check.py
 # Description: Architecture Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Architecture Standards Checker Handler
@@ -43,6 +43,8 @@ SPAWN_TEMPLATES_DIR = _SRC_PKG_ROOT / "spawn" / "templates"
 # shared/ beside apps/ is a branch's pre-install library (it runs before prax can be
 # imported); branch_audit reads it as product, so this checker names it a layer.
 LIBRARY_LAYER = "Library layer (shared/, beside apps/)"
+
+_PASS_LINE = 75
 
 # Template subtrees that are local-only and therefore never scored — see _is_local_only()
 LOCAL_ONLY_TEMPLATE_ROOTS = (".trinity",)
@@ -119,8 +121,11 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     passed_checks = sum(1 for check in checks if check["passed"])
     total_checks = len(checks)
     score = int((passed_checks / total_checks * 100)) if total_checks > 0 else 0
+    # 1500+ lines is a hard fail in architecture.md, not one row among four.
+    if not size_check["passed"]:
+        score = min(score, _PASS_LINE - 1)
 
-    overall_passed = score >= 75
+    overall_passed = score >= _PASS_LINE
 
     json_handler.log_operation(
         "check_completed", {"file": str(module_path), "score": score, "standard": "architecture"}
@@ -180,8 +185,9 @@ def check_handler_independence(lines: List[str], module_path: str) -> Optional[D
     parent_branch = None
     if module_path:
         path_parts = Path(module_path).parts
-        for i, part in enumerate(path_parts):
-            if part == "apps" and i > 0:
+        # The LAST apps: a checkout under some other .../apps/ directory must not name the branch.
+        for i in range(len(path_parts) - 1, 0, -1):
+            if path_parts[i] == "apps":
                 parent_branch = path_parts[i - 1]
                 break
 
@@ -230,7 +236,7 @@ def check_domain_organization(module_path: str) -> Optional[Dict]:
     handler_domain = None
     for i, part in enumerate(path_parts):
         if part == "handlers" and i + 1 < len(path_parts):
-            handler_domain = path_parts[i + 1]
+            handler_domain = Path(path_parts[i + 1]).stem
             break
 
     if not handler_domain:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sleep_in_test_check.py
 # Description: Sleep In Test Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,13 +12,14 @@ Sleep In Test Standards Checker Handler
 Reference: sleep_in_test.md
 """
 
+from functools import partial
 import ast
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -32,33 +33,14 @@ SLEEP = "sleep"
 CURE = "os.utime for an mtime, a deadline poll on the real condition for an event"
 
 
-def _tail_name(node: ast.AST) -> str:
-    """The last name in a call target: ``a.b.c`` -> ``c``, ``f`` -> ``f``."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
 def _spelling(node: ast.Call) -> str:
     """How this call names the module, for the finding: ``time_mod.sleep``."""
     if isinstance(node.func, ast.Attribute):
-        return f"{_tail_name(node.func.value)}.{SLEEP}"
+        return f"{tail_name(node.func.value)}.{SLEEP}"
     return SLEEP
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it.
-
-    ``ruff`` already convicts a syntax error, and a verdict invented for a file
-    Python cannot parse sends its author to the wrong place.
-    """
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[sleep_in_test] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="sleep_in_test")
 
 
 def scan(source: str) -> List[Tuple[int, str]]:
@@ -69,22 +51,12 @@ def scan(source: str) -> List[Tuple[int, str]]:
     return sorted(
         (node.lineno, _spelling(node))
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and _tail_name(node.func) == SLEEP
+        if isinstance(node, ast.Call) and tail_name(node.func) == SLEEP
     )
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[sleep_in_test] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="sleep_in_test", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

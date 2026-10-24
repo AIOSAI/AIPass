@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_srt_resolve.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/_srt_resolve.mjs, the resolver apps/modules/sandbox.py calls (DPLAN-0279)."""
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — the script's header comment, the documentation standard covers it
-# seedgo: no-test-needed(generated) — the full-mode wrapped command; sandbox-runtime builds it for sandbox.py
+# seedgo: no-test-needed(generated) — the full-mode wrapped command resolve_bwrap_command returns; sandbox-runtime builds it
 # seedgo: no-test-needed(stdlib) — subprocess.run's process launch, the stdlib's own
 
 import os

@@ -126,7 +126,7 @@ trigger/apps/handlers/events/
 ```
 memory/apps/handlers/vector/embedder.py
 memory/apps/handlers/rollover/extractor.py
-memory/apps/handlers/tracking/line_counter.py
+memory/apps/handlers/tracking/tab_renderer.py
 memory/apps/handlers/central_writer.py
 ```
 

@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py and template handler functions
 # Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -18,11 +18,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.flow.apps.handlers.mbank.process import (
-    cleanup_temp_files,
     get_closed_plans,
-    load_flow_registry,
     process_closed_plans,
-    save_flow_registry,
     verify_and_heal_orphaned_plans,
 )
 from aipass.flow.apps.handlers.template import plan_type_loader as loader
@@ -45,114 +42,6 @@ def _unlink_answer(path: Path) -> OSError | None:
     except OSError as exc:
         return exc
     return None
-
-
-# ===================================================================
-# 1. mbank/process.py — load_flow_registry
-# ===================================================================
-
-
-class TestLoadFlowRegistry:
-    def test_loads_valid_registry(self, tmp_path):
-        """Load a valid JSON registry file and return its contents."""
-        registry_data = {
-            "next_number": 3,
-            "plans": {"1": {"subject": "a", "status": "open"}},
-            "last_updated": "2026-03-01",
-        }
-        reg_file = tmp_path / "fplan_registry.json"
-        reg_file.write_text(json.dumps(registry_data), encoding="utf-8")
-
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
-            patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
-        ):
-            result = load_flow_registry()
-
-        assert result["next_number"] == 3
-        assert "1" in result["plans"]
-        assert result["plans"]["1"]["subject"] == "a"
-
-    def test_loads_named_registry_file(self, tmp_path):
-        """When registry_file is given, load from FLOW_JSON_DIR / registry_file."""
-        data = {"plans": {}, "next_number": 1}
-        (tmp_path / "dplan_registry.json").write_text(json.dumps(data), encoding="utf-8")
-
-        with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            result = load_flow_registry(registry_file="dplan_registry.json")
-
-        assert result["next_number"] == 1
-
-    def test_raises_when_file_missing(self, tmp_path):
-        """Raise Exception when registry file does not exist."""
-        missing = tmp_path / "nonexistent.json"
-
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
-            patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", missing),
-        ):
-            with pytest.raises(Exception, match="Flow registry not found"):
-                load_flow_registry()
-
-    def test_raises_on_invalid_json(self, tmp_path):
-        """Raise Exception when registry contains invalid JSON."""
-        bad_file = tmp_path / "fplan_registry.json"
-        bad_file.write_text("{not valid json", encoding="utf-8")
-
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
-            patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", bad_file),
-        ):
-            with pytest.raises(Exception, match="Failed to load flow registry"):
-                load_flow_registry()
-
-
-# ===================================================================
-# 2. mbank/process.py — save_flow_registry
-# ===================================================================
-
-
-class TestSaveFlowRegistry:
-    def test_saves_registry_with_last_updated(self, tmp_path):
-        """Save registry and verify last_updated is set."""
-        reg_file = tmp_path / "fplan_registry.json"
-        data = {"next_number": 5, "plans": {}}
-
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
-            patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
-        ):
-            save_flow_registry(data)
-
-        saved = json.loads(reg_file.read_text(encoding="utf-8"))
-        assert saved["next_number"] == 5
-        assert "last_updated" in saved
-        # last_updated should be an ISO timestamp string
-        assert "T" in saved["last_updated"]
-
-    def test_saves_to_named_file(self, tmp_path):
-        """When registry_file arg is given, save to that filename inside FLOW_JSON_DIR."""
-        data = {"next_number": 1, "plans": {"1": {"status": "open"}}}
-
-        with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            save_flow_registry(data, registry_file="dplan_registry.json")
-
-        saved = json.loads((tmp_path / "dplan_registry.json").read_text(encoding="utf-8"))
-        assert saved["plans"]["1"]["status"] == "open"
-
-    def test_raises_on_write_failure(self, tmp_path):
-        """Raise Exception when the target path is not writable."""
-        bad_path = tmp_path / "no_such_dir" / "sub" / "fplan_registry.json"
-
-        with (
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR",
-                tmp_path / "no_such_dir" / "sub",
-            ),
-            patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", bad_path),
-        ):
-            with pytest.raises(Exception, match="Failed to save flow registry"):
-                save_flow_registry({"plans": {}})
 
 
 # ===================================================================
@@ -179,7 +68,8 @@ class TestGetClosedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
@@ -214,7 +104,8 @@ class TestGetClosedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
@@ -243,7 +134,8 @@ class TestGetClosedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
@@ -278,7 +170,8 @@ class TestGetClosedPlans:
         mock_heal = MagicMock(side_effect=heal)
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
@@ -293,82 +186,6 @@ class TestGetClosedPlans:
 
         mock_heal.assert_called_once_with()
         assert [(p["number"], p["path"]) for p in result] == [("7", healed_file)]
-
-
-# ===================================================================
-# 4. mbank/process.py — cleanup_temp_files
-# ===================================================================
-
-
-class TestCleanupTempFiles:
-    def test_deletes_temp_files(self, tmp_path):
-        """Delete -TEMP- files from MEMORY_PATH and report counts."""
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        (memory_dir / "some-TEMP-20260301.md").write_text("t", encoding="utf-8")
-        (memory_dir / "other-TEMP-20260302.md").write_text("t", encoding="utf-8")
-        (memory_dir / "real-plan-20260303.md").write_text("keep", encoding="utf-8")
-
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir):
-            result = cleanup_temp_files()
-
-        assert result["files_found"] == 2
-        assert result["files_deleted"] == 2
-        assert result["failed_deletes"] == 0
-        # Real plan file survives
-        assert (memory_dir / "real-plan-20260303.md").exists()
-
-    def test_no_temp_files_found(self, tmp_path):
-        """Return zeros when no -TEMP- files exist."""
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        (memory_dir / "normal-plan.md").write_text("ok", encoding="utf-8")
-
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir):
-            result = cleanup_temp_files()
-
-        assert result["files_found"] == 0
-        assert result["files_deleted"] == 0
-
-    def test_handles_missing_memory_path(self, tmp_path):
-        """Return zeros when MEMORY_PATH does not exist."""
-        nonexistent = tmp_path / "no_such_dir"
-
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", nonexistent):
-            result = cleanup_temp_files()
-
-        assert result["files_found"] == 0
-        assert result["files_deleted"] == 0
-
-    def test_reports_failed_deletes(self, tmp_path):
-        """Report failed_deletes when unlink raises.
-
-        The refusal is a real one on disk: the TEMP-shaped name is a directory,
-        and a file unlink of a directory fails on every platform. Which error it
-        is (IsADirectoryError, PermissionError) is the platform's answer, so the
-        test makes the same unlink on a twin first and asserts only that one
-        was refused.
-        Mutant: the except's `"status": "delete_failed"` -> `"deleted"` reddens this.
-        """
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
-        temp_file = memory_dir / "broken-TEMP-20260301.md"
-        temp_file.mkdir()
-        (temp_file / "inside.txt").write_text("t", encoding="utf-8")
-        twin = tmp_path / "twin-TEMP-20260301.md"
-        twin.mkdir()
-        answer = _unlink_answer(twin)
-        assert isinstance(answer, OSError), "premise: this platform unlinked a directory as a file"
-
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir):
-            result = cleanup_temp_files()
-
-        assert result["files_found"] == 1
-        assert result["files_deleted"] == 0
-        assert result["failed_deletes"] == 1
-        assert result["details"][0]["status"] == "delete_failed"
-        assert result["details"][0]["error"]
-        assert temp_file.is_dir()
 
 
 # ===================================================================
@@ -395,7 +212,8 @@ class TestVerifyAndHealOrphanedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR",
@@ -426,7 +244,8 @@ class TestVerifyAndHealOrphanedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR",
@@ -455,7 +274,8 @@ class TestVerifyAndHealOrphanedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR",
@@ -488,7 +308,8 @@ class TestVerifyAndHealOrphanedPlans:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch(
                 "aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR",
@@ -523,15 +344,6 @@ class TestProcessClosedPlans:
             patch(
                 "aipass.flow.apps.handlers.mbank.process.get_closed_plans",
                 return_value=[],
-            ),
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={
-                    "files_found": 0,
-                    "files_deleted": 0,
-                    "failed_deletes": 0,
-                    "details": [],
-                },
             ),
         ):
             result = process_closed_plans()
@@ -576,21 +388,12 @@ class TestProcessClosedPlans:
                 return_value=True,
             ) as mock_archive,
             patch(
-                "aipass.flow.apps.handlers.mbank.process.load_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.load_registry",
                 return_value=registry,
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.save_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.save_registry",
             ) as mock_save,
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={
-                    "files_found": 0,
-                    "files_deleted": 0,
-                    "failed_deletes": 0,
-                    "details": [],
-                },
-            ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
         ):
             result = process_closed_plans()
@@ -640,21 +443,12 @@ class TestProcessClosedPlans:
                 return_value=False,
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.load_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.load_registry",
                 return_value=registry,
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.save_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.save_registry",
             ) as mock_save,
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={
-                    "files_found": 0,
-                    "files_deleted": 0,
-                    "failed_deletes": 0,
-                    "details": [],
-                },
-            ),
             patch(
                 "aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE",
                 tmp_path / "fplan_registry.json",
@@ -681,32 +475,6 @@ class TestProcessClosedPlans:
 
         assert result["success"] is False
         assert "unexpected boom" in result["error"]
-
-    def test_process_calls_cleanup(self, tmp_path):
-        """cleanup_temp_files is called after processing closed plans."""
-        mock_cleanup = MagicMock(
-            return_value={
-                "files_found": 1,
-                "files_deleted": 1,
-                "failed_deletes": 0,
-                "details": [],
-            }
-        )
-
-        with (
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.get_closed_plans",
-                return_value=[],
-            ),
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                mock_cleanup,
-            ),
-        ):
-            result = process_closed_plans()
-
-        mock_cleanup.assert_called_once()
-        assert result["cleanup"]["files_deleted"] == 1
 
 
 # ===================================================================

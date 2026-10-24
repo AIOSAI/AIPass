@@ -118,18 +118,13 @@ measure for a week, then gate.
 
 ---
 
-## The `ruff` / `ruff_check` naming split
+## The `ruff` standard and its bypass key
 
-The checker file is `ruff_check.py`, so stripping the `_check.py` suffix yields the standard
-name **`ruff`** — that is what the audit and the checklist display. Its content and doc files
-are `ruff_check_content.py` / `ruff_check.md`, so the query surface lists and accepts
-**`ruff_check`**: `drone @seedgo standard ruff` answers "Unknown standard". The name the audit
-shows you is not the name the query takes, and the `triplet` proof reports the pair as two
-half-standards.
-
-`drone @seedgo standard` is pack-agnostic and lists the union of all four packs;
-`drone @seedgo standards_query aipass_standards` lists this one. Both read names from
-`*_content.py`, which is why `ruff_check` appears there and `ruff` does not.
+The checker file is `ruff_check.py` and its content and doc files are `ruff_content.py` /
+`ruff.md`, so the audit, the checklist and `drone @seedgo standard ruff` all use one name:
+**`ruff`**. The bypass rule keeps the key `"ruff_check"`
+(`{"standard": "ruff_check", "file": "src/aipass/<branch>"}`) because the checker reads that
+key itself.
 
 ---
 

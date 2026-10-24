@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api_key.py
 # Description: API Key Management Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2025-11-15
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """API Key Management Module"""
@@ -40,7 +40,6 @@ def print_introspection():
     console.print("[cyan]Connected Handlers:[/cyan]")
     console.print("  • api.apps.handlers.auth.keys")
     console.print("  • api.apps.handlers.auth.env (template creation)")
-    console.print("  • api.apps.handlers.config.provider")
     console.print("  • api.apps.handlers.json.json_handler")
     console.print()
 
@@ -144,12 +143,10 @@ def validate_key(args: List[str]):
 
 def list_providers():
     """Orchestrate list providers workflow"""
-    from aipass.api.apps.handlers.config.provider import PROVIDER_DEFAULTS
-
     header("Available Providers")
     console.print()
 
-    for provider_name in sorted(PROVIDER_DEFAULTS):
+    for provider_name in sorted(set(keys.VALIDATION_RULES) - {"generic"}):
         console.print(f"  - {provider_name}")
     console.print()
 

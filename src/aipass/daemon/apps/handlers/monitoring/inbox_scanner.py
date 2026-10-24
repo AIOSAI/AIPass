@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_scanner.py
 # Description: Cheap cross-branch scan for unread mail sitting past a staleness threshold
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -20,8 +20,7 @@ from aipass.prax import logger
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.schedule.discovery import (
     MANAGER_CLASS,
-    active_branch_map,
-    branch_path_for,
+    active_citizens,
     citizen_class_for,
 )
 
@@ -142,20 +141,16 @@ def find_stale_inboxes(
     now: Optional[datetime] = None,
 ) -> List[dict]:
     """Scan every active, registered branch for stale unread mail.
-    Sorted oldest-first so the stalest mailbox is served first when the sweep caps wakes."""
-    branch_map = active_branch_map()
-    if not branch_map:
+    Sorted oldest-first so the stalest mailbox is served first when the sweep caps wakes.
+    Path and email come from the same record: two citizens can share a directory name."""
+    citizens = active_citizens()
+    if not citizens:
         logger.warning("[inbox_scanner] No active branches found in registry")
         return []
 
     entries = []
-    for dir_name in sorted(branch_map):
-        entry = scan_branch_inbox(
-            branch_path_for(dir_name),
-            branch_map[dir_name],
-            now=now,
-            stale_hours=stale_hours,
-        )
+    for citizen in citizens:
+        entry = scan_branch_inbox(Path(citizen["path"]), citizen["email"], now=now, stale_hours=stale_hours)
         if entry is not None:
             entries.append(entry)
 
@@ -165,7 +160,7 @@ def find_stale_inboxes(
         "[inbox_scanner] %d branch(es) with mail unread past %dh (of %d scanned)",
         len(entries),
         stale_hours,
-        len(branch_map),
+        len(citizens),
     )
-    json_handler.log_operation("scan_stale_inboxes", {"stale": len(entries), "scanned": len(branch_map)})
+    json_handler.log_operation("scan_stale_inboxes", {"stale": len(entries), "scanned": len(citizens)})
     return entries

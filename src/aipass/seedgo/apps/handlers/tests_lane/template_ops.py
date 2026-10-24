@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_ops.py
 # Description: Test-template distribution — gold manifest, per-branch receipts, the bump
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-21
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Test-template distribution, on @memory's trinity pattern.
@@ -117,7 +117,12 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
         outcome["error"] = f"page unreadable: {page}: {exc}"
         return outcome
 
-    for branch in discovery.discover_branches():
+    branches = discovery.discover_branches()
+    if only is not None and only.lstrip("@").lower() not in {b["name"].lower() for b in branches}:
+        outcome["error"] = f"no registered branch named {only}: nothing to stamp"
+        return outcome
+
+    for branch in branches:
         name = branch["name"].lower()
         if only is not None and name != only.lstrip("@").lower():
             outcome["branches"].append({"branch": name, "action": "skipped", "carries": None})

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: *_REGISTRY.json discovery and CRUD operations
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """*_REGISTRY.json discovery and CRUD operations.
@@ -12,18 +12,19 @@ metadata.id is the project credential; an entry's registry_id is a per-citizen U
 Entry flags owner and admin are the sealed authority; a passport never is."""
 
 import uuid
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.json import json_handler
 
-# POSIX only: Windows has no fcntl, so add_to_registry takes no lock there.
+# POSIX only: Windows has no fcntl, so registry_lock is a no-op there.
 try:
     import fcntl
 except ImportError:
     fcntl = None  # type: ignore[assignment]
-    logger.info("[registry] fcntl unavailable (Windows) — add_to_registry runs unlocked")
+    logger.info("[registry] fcntl unavailable (Windows) — registry writers run unlocked")
 
 
 _PROTECTED_FLOOR = frozenset({"spawn", "devpulse", "drone"})
@@ -157,6 +158,22 @@ def resolve_project_credential(registry_path) -> str:
     return load_registry(registry_path).get("metadata", {}).get("id", "") or ""
 
 
+@contextmanager
+def registry_lock(registry_path):
+    """Hold the registry's exclusive lock for one read-modify-write; load inside it, never before.
+
+    flock is per open file, so a nested registry_lock on the same registry in one process deadlocks."""
+    registry_path = Path(registry_path)
+    if fcntl is None:
+        yield
+        return
+    lock_path = registry_path.parent / f".{registry_path.stem}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w", encoding="utf-8") as lock_fd:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        yield
+
+
 def save_registry(registry_path, data):
     """Save registry to JSON file. Auto-updates timestamp and sorts branches."""
     registry_path = Path(registry_path)
@@ -198,23 +215,14 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
 
     citizen_id: pass the id already in the passport; minting twice gives one citizen two ids.
     credential: written only into a registry being created here, never over an existing metadata.id.
-    Returns True if added, False if already present or on error. Locked with fcntl on POSIX only."""
+    Returns True if added, False if already present or on error."""
     registry_path = Path(registry_path)
 
     if not _validate_path_containment(branch_path, registry_path):
         logger.error("[registry] Path containment violation: %s escapes project root", branch_path)
         return False
 
-    lock_path = registry_path.parent / f".{registry_path.stem}.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if fcntl is None:
-        lock_fd = None
-    else:
-        lock_fd = open(lock_path, "w", encoding="utf-8")
-        fcntl.flock(lock_fd, fcntl.LOCK_EX)
-
-    try:
+    with registry_lock(registry_path):
         # Whether the file existed, not whether the dict has an id, decides who owns the credential.
         registry_existed = registry_path.exists()
 
@@ -266,10 +274,6 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
         json_handler.log_operation("registry_updated", data={"branch": branch_name})
 
         return save_registry(registry_path, registry)
-    finally:
-        if lock_fd is not None and fcntl is not None:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-            lock_fd.close()
 
 
 def fix_passport_registry_id(branch_dir: Path, registry_path: Path) -> bool | None:
@@ -341,21 +345,24 @@ def pick_owner_branch(branches, project_root):
 def ensure_project_has_owner(registry_path):
     """Ensure exactly one branch entry in the registry has owner:true (the entry, never the passport)."""
     registry_path = Path(registry_path)
-    reg_data = load_registry(registry_path)
-    branches = branches_as_list(reg_data.get("branches", []))
-    if not branches:
-        return False
-
-    for branch in branches:
-        if branch.get("owner") is True:
+    with registry_lock(registry_path):
+        reg_data = load_registry(registry_path)
+        branches = branches_as_list(reg_data.get("branches", []))
+        if not branches:
             return False
 
-    owner_branch = pick_owner_branch(branches, registry_path.parent)
-    if owner_branch is None:
-        return False
+        for branch in branches:
+            if branch.get("owner") is True:
+                return False
 
-    owner_branch["owner"] = True
-    save_registry(registry_path, reg_data)
+        owner_branch = pick_owner_branch(branches, registry_path.parent)
+        if owner_branch is None:
+            return False
+
+        owner_branch["owner"] = True
+        if not save_registry(registry_path, reg_data):
+            logger.error("[registry] Could not write owner=true on %s", owner_branch.get("name", "?"))
+            return False
     logger.info("[registry] Set owner=true on %s (registry entry)", owner_branch.get("name", "?"))
     return True
 
@@ -394,64 +401,38 @@ def _seal_seat_flag(flag, seat, registry_path, branch_name, sole=False):
         logger.warning("[registry] %s", reason)
         return "refused", reason
 
-    reg_data = load_registry(registry_path)
-    branches = branches_as_list(reg_data.get("branches", []))
+    with registry_lock(registry_path):
+        reg_data = load_registry(registry_path)
+        branches = branches_as_list(reg_data.get("branches", []))
 
-    others = [b.get("name", "?") for b in branches if b.get(flag) is True and b.get("name", "").lower() != seat]
-    if sole and others:
-        reason = f"REFUSED: {', '.join(others)} already carries {flag}:true in {registry_path.name} — nothing written"
-        logger.warning("[registry] %s", reason)
-        return "refused", reason
+        others = [b.get("name", "?") for b in branches if b.get(flag) is True and b.get("name", "").lower() != seat]
+        if sole and others:
+            reason = (
+                f"REFUSED: {', '.join(others)} already carries {flag}:true in {registry_path.name} — nothing written"
+            )
+            logger.warning("[registry] %s", reason)
+            return "refused", reason
 
-    for branch in branches:
-        if branch.get("name", "").lower() != seat:
-            continue
-        if branch.get(flag) is True:
-            reason = f"{seat} entry already carries {flag}:true in {registry_path.name}"
+        for branch in branches:
+            if branch.get("name", "").lower() != seat:
+                continue
+            if branch.get(flag) is True:
+                reason = f"{seat} entry already carries {flag}:true in {registry_path.name}"
+                logger.info("[registry] %s", reason)
+                return "already", reason
+            branch[flag] = True
+            if not save_registry(registry_path, reg_data):
+                reason = f"REFUSED: {registry_path.name} could not be written — {flag} is not granted"
+                logger.error("[registry] %s", reason)
+                return "refused", reason
+            reason = f"Granted {flag}:true to the {seat} entry in {registry_path.name}"
             logger.info("[registry] %s", reason)
-            return "already", reason
-        branch[flag] = True
-        save_registry(registry_path, reg_data)
-        reason = f"Granted {flag}:true to the {seat} entry in {registry_path.name}"
-        logger.info("[registry] %s", reason)
-        json_handler.log_operation(f"{flag}_granted", data={"branch": seat})
-        return "granted", reason
+            json_handler.log_operation(f"{flag}_granted", data={"branch": seat})
+            return "granted", reason
 
     reason = f"REFUSED: no {seat} entry in {registry_path} — nothing written"
     logger.warning("[registry] %s", reason)
     return "refused", reason
-
-
-def backfill_owner_and_registry_id(registry_path):
-    """Backfill owner and per-citizen registry_id into branch entries.
-
-    Re-mints a missing or duplicated registry_id; an already-unique UUID is never touched."""
-    registry_path = Path(registry_path)
-    reg_data = load_registry(registry_path)
-    branches = branches_as_list(reg_data.get("branches", []))
-    if not branches:
-        return False
-
-    changed = False
-
-    seen_ids: dict[str, int] = {}
-    for branch in branches:
-        rid = branch.get("registry_id", "")
-        if rid:
-            seen_ids[rid] = seen_ids.get(rid, 0) + 1
-
-    for branch in branches:
-        rid = branch.get("registry_id", "")
-        if not rid or seen_ids.get(rid, 0) > 1:
-            branch["registry_id"] = str(uuid.uuid4())
-            changed = True
-
-    if changed:
-        save_registry(registry_path, reg_data)
-        logger.info("[registry] Backfilled per-citizen registry_id into entries")
-
-    owner_seated = ensure_project_has_owner(registry_path)
-    return changed or owner_seated
 
 
 def get_owner(start_path=None):

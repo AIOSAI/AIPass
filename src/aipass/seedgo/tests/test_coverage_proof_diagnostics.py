@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_coverage_proof_diagnostics.py
 # Description: Line-coverage tests for plugin_integrity.py and diagnostics_check.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-04-26
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_proof/plugin_integrity.py and apps/handlers/diagnostics/diagnostics_check.py."""
@@ -15,18 +15,14 @@
 # judged by the finding scan() reports for it, not by a direct call.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — importlib.import_module's loading of a runner module from a path on __path__
 
 import json
 import subprocess
-import sys
 import textwrap
 
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from aipass.seedgo.apps.handlers import diagnostics as diagnostics_package
 from aipass.seedgo.apps.handlers.aipass_proof import plugin_integrity
 from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import scan
 from aipass.seedgo.apps.handlers.bypass import ignore_handler as real_ignore_handler
@@ -405,12 +401,12 @@ class TestPluginIntegrityScan:
     """Tests for the public scan() function."""
 
     def test_all_modules_missing(self, tmp_path):
-        """All target modules missing results in 'missing' status."""
+        """All target modules missing results in 'missing' status, and a proof that scanned nothing fails."""
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
         result = scan(pack_dir)
-        assert result["passed"] is True
+        assert result["passed"] is False
         assert result["missing_count"] == 5
         assert result["flagged_count"] == 0
 
@@ -815,260 +811,19 @@ class TestCheckDirectory:
         assert "unexpected" in result["error"]
 
 
-# ---------------------------------------------------------------------------
-# Helpers -- check_branch over a handlers/ tree under tmp_path
-# ---------------------------------------------------------------------------
-
-_RUNNER_PREFIX = diagnostics_package.__name__ + "."
-
-
-@pytest.fixture
-def handlers_dir(tmp_path, monkeypatch):
-    """tmp_path as check_branch's handlers/ and diagnostics/ dirs, and as a branch with an apps/."""
-    # A runner written here imports for real, under the diagnostics package's own
-    # name, exactly as _run_runner imports it; it leaves sys.modules afterwards.
-    monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
-    monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-    monkeypatch.setattr(diagnostics_package, "__path__", [*diagnostics_package.__path__, str(tmp_path)])
-    (tmp_path / "apps").mkdir()
-    yield tmp_path
-    for name in [
-        n
-        for n, m in list(sys.modules.items())
-        if n.startswith(_RUNNER_PREFIX) and str(getattr(m, "__file__", "")).startswith(str(tmp_path))
-    ]:
-        del sys.modules[name]
-
-
-class _Fallback:
-    """Stands in for check_directory, the pyright subprocess check_branch falls back to."""
-
-    RESULT = {"total_errors": 0, "total_warnings": 0, "total_files": 42, "results": []}
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def __call__(self, directory: str) -> dict:
-        self.calls.append(directory)
-        return self.RESULT
-
-
-def _config(handlers: Path, config: dict, pack: str = "x_standards") -> None:
-    """A *_standards pack under *handlers* whose diagnostics.json is *config*."""
-    pack_dir = handlers / pack
-    pack_dir.mkdir(exist_ok=True)
-    (pack_dir / "diagnostics.json").write_text(json.dumps(config), encoding="utf-8")
-
-
-def _requested(branch: Path, monkeypatch) -> list[str]:
-    """The runner names check_branch asks for on *branch*, each answered clean."""
-    asked: list[str] = []
-
-    def runner(name: str, branch_path: str, bypass_rules: list | None = None) -> dict:
-        asked.append(name)
-        return {"total_errors": 0, "total_warnings": 0, "total_files": 1, "checks": [], "results": []}
-
-    monkeypatch.setattr(diagnostics_check, "_run_runner", runner)
-    check_branch(str(branch))
-    return asked
-
-
-def _through_runner(handlers: Path, monkeypatch, runner: str) -> tuple[dict, _Fallback]:
-    """check_branch with only *runner* enabled: its result, and the pyright fallback it may call."""
-    _config(handlers, {"runners": {runner: True}})
-    fallback = _Fallback()
-    monkeypatch.setattr(diagnostics_check, "check_directory", fallback)
-    return check_branch(str(handlers)), fallback
-
-
-# ===========================================================================
-# DIAGNOSTICS CHECK -- pack config discovery, through check_branch
-# ===========================================================================
-
-
-class TestDiscoverPackConfigs:
-    """Which diagnostics.json files check_branch reads its runners from."""
-
-    def test_no_handlers_dir(self, tmp_path, monkeypatch):
-        """No HANDLERS_DIR means no config: only the python fallback runs. Mutant: the missing-dir guard dropped in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path / "nonexistent")
-        (tmp_path / "apps").mkdir()
-        assert _requested(tmp_path, monkeypatch) == ["python"]
-
-    def test_no_standards_dirs(self, handlers_dir, monkeypatch):
-        """A config outside a *_standards dir is not read. Mutant: the _standards name check dropped in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        _config(handlers_dir, {"runners": {"rust": True}}, pack="other_dir")
-        assert _requested(handlers_dir, monkeypatch) == ["python"]
-
-    def test_standards_dir_without_config(self, handlers_dir, monkeypatch):
-        """A *_standards dir with no diagnostics.json adds no runner. Mutant: any *.json read as the config in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        pack_dir = handlers_dir / "aipass_standards"
-        pack_dir.mkdir()
-        (pack_dir / "other.json").write_text(json.dumps({"runners": {"rust": True}}), encoding="utf-8")
-        assert _requested(handlers_dir, monkeypatch) == ["python"]
-
-    def test_valid_config(self, tmp_path, monkeypatch):
-        """Returns config when valid diagnostics.json exists."""
-        # HELD (no public seam): check_branch reads only each config's runners, never
-        # the pack_name and pack_path this pins.
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
-        std_dir = tmp_path / "aipass_standards"
-        std_dir.mkdir()
-        config = {"runners": {"python": True}}
-        (std_dir / "diagnostics.json").write_text(json.dumps(config), encoding="utf-8")
-
-        result = diagnostics_check._discover_pack_configs()
-        assert len(result) == 1
-        assert result[0]["pack_name"] == "aipass_standards"
-        assert result[0]["config"] == config
-
-    def test_malformed_config_skipped(self, handlers_dir, monkeypatch):
-        """Malformed JSON is skipped gracefully. Mutant: JSONDecodeError not caught in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        std_dir = handlers_dir / "test_standards"
-        std_dir.mkdir()
-        (std_dir / "diagnostics.json").write_text("not json", encoding="utf-8")
-        assert _requested(handlers_dir, monkeypatch) == ["python"]
-
-    def test_non_directory_skipped(self, tmp_path, monkeypatch):
-        """Files (not directories) in HANDLERS_DIR are skipped."""
-        # HELD (pins nothing): a file's diagnostics.json never exists, so no mutant
-        # of the is_dir() skip reddens this, through check_branch or directly.
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
-        (tmp_path / "some_standards").write_text("file", encoding="utf-8")
-        result = diagnostics_check._discover_pack_configs()
-        assert result == []
-
-
-# ===========================================================================
-# DIAGNOSTICS CHECK -- enabled runners, through check_branch
-# ===========================================================================
-
-
-class TestGetEnabledRunners:
-    """Which runners a diagnostics.json enables."""
-
-    # python is check_branch's fallback, so an enabled runner is named rust here:
-    # a python-only answer could not tell the config from the fallback.
-
-    def test_simple_bool_format(self, handlers_dir, monkeypatch):
-        """Simple bool format: {'rust': true}. Mutant: a false bool read as enabled in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        _config(handlers_dir, {"runners": {"rust": True, "typescript": False}})
-        assert _requested(handlers_dir, monkeypatch) == ["rust"]
-
-    def test_detailed_dict_format(self, handlers_dir, monkeypatch):
-        """Detailed format: {'rust': {'enabled': true, ...}}. Mutant: every dict read as enabled in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        _config(handlers_dir, {"runners": {"rust": {"enabled": True, "timeout": 60}, "go": {"enabled": False}}})
-        assert _requested(handlers_dir, monkeypatch) == ["rust"]
-
-    def test_empty_runners(self, handlers_dir, monkeypatch):
-        """Empty runners section enables nothing: only the fallback runs. Mutant: an empty section answers a runner in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        _config(handlers_dir, {"runners": {}})
-        assert _requested(handlers_dir, monkeypatch) == ["python"]
-
-    def test_no_runners_key(self, handlers_dir, monkeypatch):
-        """Missing 'runners' key enables nothing: only the fallback runs. Mutant: 'runners' read without a default in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        _config(handlers_dir, {})
-        assert _requested(handlers_dir, monkeypatch) == ["python"]
-
-    def test_mixed_formats(self, handlers_dir, monkeypatch):
-        """Mix of bool and dict format works. Mutant: the dict format never read in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        config = {
-            "runners": {
-                "python": True,
-                "rust": {"enabled": True},
-                "go": False,
-                "java": {"enabled": False},
-            }
-        }
-        _config(handlers_dir, config)
-        result = _requested(handlers_dir, monkeypatch)
-        assert "python" in result
-        assert "rust" in result
-        assert "go" not in result
-        assert "java" not in result
-
-
-# ===========================================================================
-# DIAGNOSTICS CHECK -- runner dispatch, through check_branch
-# ===========================================================================
-
-
-class TestRunRunner:
-    """A runner that does not answer sends check_branch to its pyright fallback."""
-
-    def test_runner_not_found(self, handlers_dir, monkeypatch):
-        """A missing runner file falls back. Mutant: a missing runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "nonexistent")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-    def test_runner_empty_file(self, handlers_dir, monkeypatch):
-        """An empty (0 bytes) runner file falls back. Mutant: an empty runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "empty_diagnostics.py").write_text("", encoding="utf-8")
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "empty")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-    def test_runner_whitespace_only(self, handlers_dir, monkeypatch):
-        """A whitespace-only runner file falls back. Mutant: a blank runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "blank_diagnostics.py").write_text("   \n\n  \n", encoding="utf-8")
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "blank")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-    def test_runner_import_failure(self, handlers_dir, monkeypatch):
-        """A runner module that fails to import falls back. Mutant: an import failure answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "broken_diagnostics.py").write_text("import nonexistent_module_xyz\n", encoding="utf-8")
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "broken")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-    def test_runner_no_check_branch(self, handlers_dir, monkeypatch):
-        """A runner module with no check_branch falls back. Mutant: a runner without check_branch answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "nofunc_diagnostics.py").write_text("x = 1\n", encoding="utf-8")
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "nofunc")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-    def test_runner_check_branch_raises(self, handlers_dir, monkeypatch):
-        """A runner whose check_branch raises falls back. Mutant: a raising runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "crashing_diagnostics.py").write_text(
-            "def check_branch(b, bypass_rules=None):\n    raise RuntimeError('boom')\n",
-            encoding="utf-8",
-        )
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "crashing")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-    def test_runner_success(self, handlers_dir, monkeypatch):
-        """A runner that answers is merged and pyright never runs. Mutant: the runner's answer dropped in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "good_diagnostics.py").write_text(
-            "def check_branch(b, bypass_rules=None):\n"
-            "    return {'total_errors': 3, 'total_warnings': 0, 'total_files': 7, 'checks': [], 'results': []}\n",
-            encoding="utf-8",
-        )
-        result, fallback = _through_runner(handlers_dir, monkeypatch, "good")
-        assert (result["total_errors"], result["total_files"]) == (3, 7)
-        assert fallback.calls == []
-
-    def test_runner_typo_variant(self, handlers_dir, monkeypatch):
-        """Falls back to *_diognostics.py typo variant. Mutant: the typo variant not tried in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        (handlers_dir / "legacy_diognostics.py").write_text(
-            "def check_branch(b, bypass_rules=None):\n"
-            "    return {'total_errors': 0, 'total_warnings': 0, 'total_files': 5, 'checks': [], 'results': []}\n",
-            encoding="utf-8",
-        )
-        result, fallback = _through_runner(handlers_dir, monkeypatch, "legacy")
-        assert result["total_files"] == 5
-        assert fallback.calls == []
-
-    def test_runner_ioerror_on_read(self, handlers_dir, monkeypatch):
-        """A runner file that cannot be read falls back. Mutant: a read error answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-        # A directory under the runner's file name is a real read failure on every
-        # OS: POSIX raises IsADirectoryError, Windows PermissionError (or stats it
-        # at size 0, which falls back one check earlier).
-        (handlers_dir / "ioerr_diagnostics.py").mkdir()
-        _, fallback = _through_runner(handlers_dir, monkeypatch, "ioerr")
-        assert fallback.calls == [str(handlers_dir / "apps")]
-
-
 # ===========================================================================
 # DIAGNOSTICS CHECK -- check_branch
 # ===========================================================================
+
+
+def _scored(tmp_path: Path, monkeypatch, dir_result: dict) -> dict:
+    """check_branch over a branch whose pyright pass (check_directory) reports *dir_result*."""
+    (tmp_path / "apps").mkdir()
+    seen: list[str] = []
+    monkeypatch.setattr(diagnostics_check, "check_directory", lambda d: (seen.append(d), dir_result)[1])
+    result = check_branch(str(tmp_path))
+    assert seen == [str(tmp_path / "apps")]
+    return result
 
 
 class TestCheckBranch:
@@ -1082,132 +837,24 @@ class TestCheckBranch:
         assert result["score"] == 100
         assert "error" in result
 
-    def test_with_runner_configs(self, tmp_path, monkeypatch):
-        """Uses runner configs when packs are discovered."""
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_discover_pack_configs",
-            lambda: [
-                {
-                    "pack_name": "test_standards",
-                    "pack_path": tmp_path,
-                    "config": {"runners": {"python": True}},
-                }
-            ],
-        )
-
-        runner_result = {
-            "total_errors": 2,
-            "total_warnings": 1,
-            "total_files": 5,
-            "checks": [
-                {
-                    "name": "Type errors in a.py",
-                    "passed": False,
-                    "message": "2 errors",
-                }
-            ],
-            "results": [{"file": "a.py", "errors": 2}],
-        }
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_run_runner",
-            lambda name, bp, bypass_rules=None: runner_result,
-        )
-
-        result = diagnostics_check.check_branch(str(tmp_path))
-        assert result["passed"] is False
-        assert result["total_errors"] == 2
-        assert result["total_warnings"] == 1
-        assert result["total_files"] == 5
-        assert result["score"] == 90
-
-    def test_fallback_to_python_runner(self, tmp_path, monkeypatch):
-        """Falls back to 'python' runner when no configs found."""
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-
-        monkeypatch.setattr(diagnostics_check, "_discover_pack_configs", lambda: [])
-
-        runner_result = {
-            "total_errors": 0,
-            "total_warnings": 0,
-            "total_files": 3,
-            "checks": [{"name": "Type check", "passed": True, "message": "OK"}],
-            "results": [],
-        }
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_run_runner",
-            lambda name, bp, bypass_rules=None: runner_result,
-        )
-
-        result = diagnostics_check.check_branch(str(tmp_path))
-        assert result["passed"] is True
-        assert result["score"] == 100
-
-    def test_no_runner_executed_fallback_to_pyright(self, tmp_path, monkeypatch):
-        """Falls back to direct pyright check when no runner executes. Mutant: the fallback runner renamed in apps/handlers/diagnostics/diagnostics_check.py — killed."""
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-
-        monkeypatch.setattr(diagnostics_check, "_discover_pack_configs", lambda: [])
-        asked: list[str] = []
-
-        def runner(name: str, branch_path: str, bypass_rules: list | None = None) -> None:
-            asked.append(name)
-
-        monkeypatch.setattr(diagnostics_check, "_run_runner", runner)
-
+    def test_pyright_errors_become_failed_rows(self, tmp_path, monkeypatch):
+        """Each file pyright reports errors in is one failed row, and the errors dock the score."""
         dir_result = {
             "total_errors": 1,
             "total_warnings": 0,
             "total_files": 2,
-            "results": [
-                {
-                    "file": "a.py",
-                    "errors": 1,
-                    "warnings": 0,
-                    "diagnostics": [],
-                },
-            ],
+            "results": [{"file": "a.py", "errors": 1, "warnings": 0, "diagnostics": []}],
         }
-        monkeypatch.setattr(diagnostics_check, "check_directory", lambda d: dir_result)
-
-        result = diagnostics_check.check_branch(str(tmp_path))
+        result = _scored(tmp_path, monkeypatch, dir_result)
         assert result["passed"] is False
         assert result["total_errors"] == 1
-        assert any("Type errors" in c["name"] for c in result["checks"])
-        assert asked == ["python"]
+        assert result["score"] == 95
+        assert [c["name"] for c in result["checks"]] == ["Type errors in a.py"]
 
     def test_no_errors_default_check(self, tmp_path, monkeypatch):
         """Default passing check is added when nothing failed."""
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-
-        monkeypatch.setattr(diagnostics_check, "_discover_pack_configs", lambda: [])
-
-        runner_result = {
-            "total_errors": 0,
-            "total_warnings": 0,
-            "total_files": 10,
-            "checks": [],
-            "results": [],
-        }
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_run_runner",
-            lambda name, bp, bypass_rules=None: runner_result,
-        )
-
-        result = diagnostics_check.check_branch(str(tmp_path))
+        dir_result = {"total_errors": 0, "total_warnings": 0, "total_files": 10, "results": []}
+        result = _scored(tmp_path, monkeypatch, dir_result)
         assert result["passed"] is True
         assert len(result["checks"]) == 1
         assert result["checks"][0]["passed"] is True
@@ -1215,80 +862,13 @@ class TestCheckBranch:
 
     def test_score_clamped_at_zero(self, tmp_path, monkeypatch):
         """Score does not go below 0 even with many errors."""
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-
-        monkeypatch.setattr(diagnostics_check, "_discover_pack_configs", lambda: [])
-
-        runner_result = {
+        dir_result = {
             "total_errors": 100,
             "total_warnings": 0,
             "total_files": 50,
-            "checks": [
-                {
-                    "name": "errors",
-                    "passed": False,
-                    "message": "100 errors",
-                }
-            ],
             "results": [{"file": f"f{i}.py", "errors": 1} for i in range(100)],
         }
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_run_runner",
-            lambda name, bp, bypass_rules=None: runner_result,
-        )
-
-        result = diagnostics_check.check_branch(str(tmp_path))
-        assert result["score"] == 0
-
-    def test_multiple_runners_deduplicated(self, tmp_path, monkeypatch):
-        """Duplicate runner names across packs are deduplicated."""
-
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_discover_pack_configs",
-            lambda: [
-                {
-                    "pack_name": "a_standards",
-                    "pack_path": tmp_path,
-                    "config": {"runners": {"python": True}},
-                },
-                {
-                    "pack_name": "b_standards",
-                    "pack_path": tmp_path,
-                    "config": {"runners": {"python": True}},
-                },
-            ],
-        )
-
-        call_count = 0
-
-        def _mock_run_runner(
-            name: str,
-            bp: str,
-            bypass_rules: list | None = None,
-        ) -> dict:
-            """Track runner invocations and return clean result."""
-            nonlocal call_count
-            call_count += 1
-            return {
-                "total_errors": 0,
-                "total_warnings": 0,
-                "total_files": 1,
-                "checks": [],
-                "results": [],
-            }
-
-        monkeypatch.setattr(diagnostics_check, "_run_runner", _mock_run_runner)
-
-        result = diagnostics_check.check_branch(str(tmp_path))
-        assert call_count == 1
-        assert result["passed"] is True
+        assert _scored(tmp_path, monkeypatch, dir_result)["score"] == 0
 
 
 # ===========================================================================

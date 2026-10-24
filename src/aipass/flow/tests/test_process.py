@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_process.py
 # Description: Tests for mbank/process.py — additional coverage
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
@@ -12,23 +12,16 @@
 # seedgo: no-test-needed(ruff) — that mbank/process.py parses and imports
 
 import json
-import os
 import shutil
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
-import aipass.flow.apps.handlers.mbank.process as proc
 from aipass.flow.apps.handlers.mbank.process import (
     archive_plan,
-    cleanup_temp_files,
     get_closed_plans,
     is_template_content,
-    load_flow_registry,
     process_closed_plans,
-    save_flow_registry,
     verify_and_heal_orphaned_plans,
 )
 
@@ -51,27 +44,6 @@ def _mkdir_answer(path: Path) -> OSError | None:
     except OSError as exc:
         return exc
     return None
-
-
-def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """A stand-in for process's _create_exclusive seam that answers the way
-    Windows does mid-release.
-
-    Linux cannot produce delete-pending PermissionError, so it is manufactured; denials=None never clears.
-    """
-    attempts: list[int] = []
-    raised: list[PermissionError] = []
-
-    def fake_create(path):
-        if str(path) == str(lock_path):
-            attempts.append(len(attempts) + 1)
-            if denials is None or len(attempts) <= denials:
-                denial = PermissionError(13, "Access is denied")
-                raised.append(denial)
-                raise denial
-        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-    return fake_create, attempts, raised
 
 
 class TestIsTemplateContent:
@@ -319,128 +291,6 @@ class TestArchivePlan:
         assert not plan_file.exists()
 
 
-class TestLoadFlowRegistryAdditional:
-    """Additional edge cases for load_flow_registry."""
-
-    def test_loads_with_explicit_registry_file_arg(self, tmp_path):
-        """Loading with an explicit registry_file name uses FLOW_JSON_DIR / name."""
-        data = {"plans": {"1": {"status": "open"}}, "next_number": 2}
-        (tmp_path / "custom_reg.json").write_text(json.dumps(data), encoding="utf-8")
-
-        with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            result = load_flow_registry(registry_file="custom_reg.json")
-
-        assert result["next_number"] == 2
-
-
-class TestSaveFlowRegistryAdditional:
-    """Additional edge cases for save_flow_registry."""
-
-    def test_preserves_existing_data(self, tmp_path):
-        """All existing registry keys are preserved after save."""
-        data = {"next_number": 10, "plans": {"1": {"subject": "keep me", "status": "open"}}}
-        reg_file = tmp_path / "fplan_registry.json"
-
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
-            patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
-        ):
-            save_flow_registry(data)
-
-        saved = json.loads(reg_file.read_text(encoding="utf-8"))
-        assert saved["plans"]["1"]["subject"] == "keep me"
-        assert saved["next_number"] == 10
-
-    def test_delete_pending_denial_is_retried_and_processed_flag_lands(self, tmp_path):
-        """A Windows delete-pending denial on the registry lock is a held lock:
-        retried on the same budget, and the "processed" update reaches disk.
-        """
-
-        reg_file = tmp_path / "fplan_registry.json"
-        lock = reg_file.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
-        data = {"next_number": 2, "plans": {"1": {"status": "closed", "processed": True}}}
-
-        with (
-            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
-            patch(f"{_PROC}._sleep") as sleep,
-        ):
-            try:
-                save_flow_registry(data, registry_file=reg_file.name)
-            except Exception as exc:  # save_flow_registry raises bare Exception
-                raise AssertionError(f"the save did not land: {exc}") from exc
-
-        assert len(attempts) == 2
-        sleep.assert_called_once()
-        assert sleep.call_args.args[0] > 0
-        saved = json.loads(reg_file.read_text(encoding="utf-8"))
-        assert saved["plans"]["1"]["processed"] is True
-        assert not lock.exists()
-
-    def test_denial_that_never_clears_fails_at_the_budget_with_the_denial(self, tmp_path):
-        """A denial past the budget raises out of save_flow_registry with the
-        denial in the message after exactly the budget; the helper's own raise
-        is a PermissionError chained to the last denial.
-        """
-
-        reg_file = tmp_path / "fplan_registry.json"
-        before = {"next_number": 2, "plans": {"1": {"status": "closed"}}}
-        reg_file.write_text(json.dumps(before), encoding="utf-8")
-        lock = reg_file.with_suffix(".lock")
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-
-        with (
-            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            patch(f"{_PROC}._create_exclusive", side_effect=fake_open),
-            patch(f"{_PROC}._sleep") as sleep,
-            pytest.raises(Exception) as excinfo,
-        ):
-            proc.save_flow_registry({"next_number": 2, "plans": {}}, registry_file=reg_file.name)
-
-        budget = len(attempts)
-        assert budget > 1
-        assert str(lock) in str(excinfo.value)
-        assert f"{budget} attempts" in str(excinfo.value)
-        assert json.loads(reg_file.read_text(encoding="utf-8")) == before
-        # Waits are positive, doubling, and summed into the message.
-        delays = [c.args[0] for c in sleep.call_args_list]
-        assert len(delays) == len(attempts)
-        assert delays[0] > 0
-        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
-        assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
-
-        helper_exc = excinfo.value.__context__
-        assert isinstance(helper_exc, PermissionError)
-        assert helper_exc.__cause__ is raised[-1]
-
-    def test_lock_create_error_is_reported_as_itself(self, tmp_path, mock_logger, platform_create_answer):
-        """A lock create that fails with neither contention nor denial names its own cause.
-
-        The 257-byte .lock name fails on disk; which OSError is the platform's choice, so it is asked first.
-        """
-        name = "a" * 252 + ".js"
-        answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
-        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
-            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
-        )
-
-        with (
-            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
-            pytest.raises(Exception) as excinfo,
-        ):
-            proc.save_flow_registry({"next_number": 1, "plans": {}}, registry_file=name)
-
-        assert "Could not acquire lock" not in str(excinfo.value)
-        assert "retries" not in str(excinfo.value)
-        assert not (tmp_path / name).exists()
-        logged = [arg for c in mock_logger.warning.call_args_list for arg in c.args if isinstance(arg, OSError)]
-        assert len(logged) == 1
-        assert type(logged[0]) is type(answer)
-        assert logged[0].errno == answer.errno
-        assert excinfo.value.__context__ is logged[0]
-
-
 class TestGetClosedPlansAdditional:
     """Additional edge cases for get_closed_plans."""
 
@@ -456,7 +306,7 @@ class TestGetClosedPlansAdditional:
                 return_value={"orphans_found": 0, "successfully_healed": 0, "failed_to_heal": 0, "orphans": []},
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.load_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.load_registry",
                 side_effect=[Exception("corrupt"), {"plans": {}}],
             ),
         ):
@@ -488,7 +338,7 @@ class TestGetClosedPlansAdditional:
                 return_value={"orphans_found": 0, "successfully_healed": 0, "failed_to_heal": 0, "orphans": []},
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.load_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.load_registry",
                 return_value=registry,
             ),
         ):
@@ -496,21 +346,6 @@ class TestGetClosedPlansAdditional:
 
         assert len(result) == 1
         assert result[0]["registry_file"] == "special_registry.json"
-
-
-class TestCleanupTempFilesAdditional:
-    """Additional edge cases for cleanup_temp_files."""
-
-    def test_scan_error_returns_error_key(self, tmp_path):
-        """When scanning the directory raises, return scan_error key."""
-        unlistable = MagicMock(spec=Path)
-        unlistable.exists.return_value = True
-        unlistable.glob.side_effect = PermissionError("no access")
-        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", unlistable):
-            result = cleanup_temp_files()
-
-        assert "scan_error" in result
-        assert result["files_found"] == 0
 
 
 class TestVerifyAndHealOrphanedPlansAdditional:
@@ -539,7 +374,8 @@ class TestVerifyAndHealOrphanedPlansAdditional:
         reg_file.write_text(json.dumps(registry), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
             patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
             patch(
@@ -562,7 +398,7 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 return_value=["broken.json"],
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.load_flow_registry",
+                "aipass.flow.apps.handlers.mbank.process.load_registry",
                 side_effect=Exception("corrupt file"),
             ),
         ):
@@ -592,7 +428,8 @@ class TestVerifyAndHealOrphanedPlansAdditional:
         reg_file_b.write_text(json.dumps(reg_b), encoding="utf-8")
 
         with (
-            patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.load_registry.FLOW_JSON_DIR", tmp_path),
+            patch("aipass.flow.apps.handlers.registry.save_registry.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
             patch(
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
@@ -634,10 +471,6 @@ class TestProcessClosedPlansAdditional:
                 side_effect=RuntimeError("boom"),
             ),
             patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
-            ),
-            patch(
                 "aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE",
                 tmp_path / "fplan_registry.json",
             ),
@@ -674,12 +507,8 @@ class TestProcessClosedPlansAdditional:
         with (
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", return_value=False),
-            patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry", mock_save),
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
-            ),
+            patch("aipass.flow.apps.handlers.mbank.process.load_registry", return_value=registry),
+            patch("aipass.flow.apps.handlers.mbank.process.save_registry", mock_save),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
             process_closed_plans()
@@ -715,27 +544,16 @@ class TestProcessClosedPlansAdditional:
         with (
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", return_value=True),
-            patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry") as mock_save,
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
-            ),
+            patch("aipass.flow.apps.handlers.mbank.process.load_registry", return_value=registry),
+            patch("aipass.flow.apps.handlers.mbank.process.save_registry") as mock_save,
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
             process_closed_plans()
 
         mock_save.assert_called_once_with(registry, registry_file="fplan_registry.json")
         assert registry["plans"]["80"]["processed"] is True
-        mock_json_handler.assert_called_once_with(
-            "closed_plans_processed",
-            {
-                "processed": 1,
-                "errors": 0,
-                "cleanup_deleted": 0,
-                "success": True,
-            },
-        )
+        processed = [c for c in mock_json_handler.call_args_list if c.args[0] == "closed_plans_processed"]
+        assert [c.args[1] for c in processed] == [{"processed": 1, "errors": 0, "success": True}]
 
     def test_multiple_plans_mixed_results(self, tmp_path):
         """Process two plans: one succeeds, one fails.
@@ -775,12 +593,8 @@ class TestProcessClosedPlansAdditional:
         with (
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", side_effect=archive_results),
-            patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry") as mock_save,
-            patch(
-                "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
-                return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
-            ),
+            patch("aipass.flow.apps.handlers.mbank.process.load_registry", return_value=registry),
+            patch("aipass.flow.apps.handlers.mbank.process.save_registry") as mock_save,
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
             result = process_closed_plans()

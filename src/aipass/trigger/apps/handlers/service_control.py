@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: service_control.py
 # Description: systemd unit lifecycle for the trigger log watcher
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The systemd user unit behind the log watcher, and nothing else.
@@ -28,7 +28,6 @@ SERVICE_NAME = "trigger-log-watcher.service"
 _SERVICE_UNIT_PATH = Path.home() / ".config" / "systemd" / "user" / SERVICE_NAME
 _TEMPLATE_PATH = TRIGGER_ROOT / "templates" / f"{SERVICE_NAME}.template"
 
-#: Said in one place so the log, the CLI and the tests all quote the same fact.
 NO_SYSTEMD_REASON = "this host has no systemctl — the log watcher service door needs systemd"
 
 
@@ -38,22 +37,9 @@ def systemd_available() -> bool:
 
 
 def get_aipass_home() -> Path:
-    """Resolve AIPASS_HOME from env var or git repo root."""
+    """Resolve AIPASS_HOME from env var, else the registry-marker walk (never the cwd's checkout)."""
     env = os.environ.get("AIPASS_HOME")
-    if env:
-        return Path(env)
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return Path(result.stdout.strip())
-    except Exception as exc:
-        logger.warning("[MEDIC] git repo root detection failed: %s", exc)
-    return find_repo_root(caller="medic")
+    return Path(env) if env else find_repo_root(caller="medic")
 
 
 def ensure_service_installed() -> bool:
@@ -121,3 +107,11 @@ def systemctl(action: str) -> Optional[bool]:
 def is_service_active() -> Optional[bool]:
     """Check if the log watcher systemd service is running."""
     return systemctl("is-active")
+
+
+def service_state() -> str:
+    """The log watcher unit in one word: running, stopped, unknown, or unavailable."""
+    if not systemd_available():
+        return "unavailable"
+    active = is_service_active()
+    return "running" if active else "unknown" if active is None else "stopped"

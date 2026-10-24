@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_ops.py
 # Description: Template copy and file operations
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Template copy and file rename operations."""
@@ -73,36 +73,6 @@ def copy_template(template_dir, target_dir, replacements):
         logger.info("json_handler.log_operation failed (non-fatal): %s", exc)
 
     return copied, skipped
-
-
-def rename_placeholder_paths(target_dir, branch_name):
-    """Rename any remaining {{BRANCH}}_json style directories and files."""
-    target_dir = Path(target_dir)
-    lower = branch_name.lower().replace("-", "_")
-    renamed = []
-
-    # Bottom-up, so renaming a parent does not invalidate a child's path.
-    dirs_to_rename = []
-    for d in sorted(target_dir.rglob("*"), reverse=True):
-        if d.is_dir() and "{{BRANCH}}" in d.name:
-            dirs_to_rename.append(d)
-
-    for d in dirs_to_rename:
-        new_name = d.name.replace("{{BRANCH}}", lower)
-        new_path = d.parent / new_name
-        if not new_path.exists():
-            d.rename(new_path)
-            renamed.append(f"{d.name} -> {new_name}")
-
-    for f in target_dir.rglob("*"):
-        if f.is_file() and "{{BRANCH}}" in f.name:
-            new_name = f.name.replace("{{BRANCH}}", lower)
-            new_path = f.parent / new_name
-            if not new_path.exists():
-                f.rename(new_path)
-                renamed.append(f"{f.name} -> {new_name}")
-
-    return renamed
 
 
 def _walk(directory):

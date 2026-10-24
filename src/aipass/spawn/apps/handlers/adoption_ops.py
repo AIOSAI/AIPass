@@ -1,15 +1,12 @@
 # =================== AIPass ====================
 # Name: adoption_ops.py
 # Description: The target-exists lane — adopt a passported directory, or birth one from its tracked seed
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
-"""The target-exists lane of ``spawn create`` (split out of modules/core.py).
-
-core.py re-exports these under their old private names; tests and callers patch there.
-"""
+"""The target-exists lane of ``spawn create``: adopt a passported directory, or birth it from its seed."""
 
 import uuid
 from pathlib import Path
@@ -41,7 +38,6 @@ def error_result(message):
         "files_copied": 0,
         "dirs_created": 0,
         "files_skipped": 0,
-        "renamed": [],
         "registry_updated": False,
         "registry_path": "",
         "citizen_number": 0,
@@ -56,6 +52,8 @@ def birth_from_seed(target, seed_file, purpose, profile, registry_path):
     """
     branch_lower = normalize_branch_name(get_branch_name(target), "lower")
     reg_path = Path(registry_path) if registry_path else find_registry(target.parent)
+    if reg_path is None:
+        return error_result(f"Cannot birth {target} from its seed: no *_REGISTRY.json found above it")
 
     # Minted once, before the write, so passport and registry entry carry the same ids.
     resolved_registry_id = resolve_project_credential(reg_path)
@@ -89,16 +87,17 @@ def birth_from_seed(target, seed_file, purpose, profile, registry_path):
         data={"branch": branch_lower, "seed_sha256": passport["citizenship"]["seed"]["sha256"]},
     )
 
-    result = adopt_existing(target, purpose, profile, reg_path, citizen_id=citizen_id)
+    result = adopt_existing(target, purpose, profile, reg_path, citizen_id=citizen_id, credential=resolved_registry_id)
     result["seeded"] = True
     result["seed_path"] = str(seed_file)
     return result
 
 
-def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
+def adopt_existing(target, purpose, profile, registry_path, citizen_id="", credential=""):
     """Register an existing directory that already has a passport.
 
     citizen_id: pass the id already stamped into the passport; empty lets the registry mint one.
+    credential: the registry_id already stamped into the passport, for a registry created by this add.
     """
     folder_name = get_branch_name(target)
     branch_upper = normalize_branch_name(folder_name, "upper")
@@ -112,10 +111,8 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
         logger.error("[adopt] %s", msg)
         return {"branch": get_branch_name(target), "success": False, "error": msg}
 
-    if not purpose:
-        passport_path = target / ".trinity" / "passport.json"
-        passport = json_handler.read_json(passport_path)
-        purpose = (passport or {}).get("identity", {}).get("purpose", "Adopted agent")
+    identity = (json_handler.read_json(target / ".trinity" / "passport.json") or {}).get("identity", {})
+    purpose = purpose or identity.get("purpose", "Adopted agent")
 
     fix_passport_registry_id(target, reg_path)
 
@@ -133,6 +130,7 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
         f"@{branch_lower}",
         purpose,
         citizen_id=citizen_id,
+        credential=credential,
     )
 
     ensure_project_has_owner(reg_path)
@@ -165,10 +163,10 @@ def adopt_existing(target, purpose, profile, registry_path, citizen_id=""):
         "files_copied": update_additions,
         "dirs_created": 0,
         "files_skipped": 0,
-        "renamed": [],
         "registry_updated": registry_updated,
         "registry_path": str(reg_path),
         "citizen_number": 0,
+        "citizen_class": identity.get("citizen_class", ""),
         "validation_issues": [],
         "adopted": True,
     }

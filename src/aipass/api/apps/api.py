@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
 # Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-08
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """api Branch - Main Orchestrator"""
@@ -215,14 +215,11 @@ def print_help():
 
 def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
     """
-    Route command to appropriate module
+    Route command to appropriate module; a module that raises propagates, so main reports it as that command failing.
     """
     for module in modules:
-        try:
-            if module.handle_command(command, args):
-                return True
-        except Exception as e:
-            logger.error(f"Module error: {e}")
+        if module.handle_command(command, args):
+            return True
 
     return False
 
@@ -273,7 +270,13 @@ def main():
 
         # True means "recognised", not "worked"; resolve_exit reads error()'s flag:
         # 1 unrecognised, 2 recognised-and-refused, 0 only when no error printed.
-        handled = route_command(command, remaining_args, modules)
+        try:
+            handled = route_command(command, remaining_args, modules)
+        except Exception as e:
+            # A module recognised the command and crashed in it: its failure (exit 2), not "Unknown command".
+            logger.error(f"Module error: {e}")
+            error(f"{command} failed: {e}")
+            handled = True
 
         if not handled:
             logger.warning(f"Unknown command: {command}")

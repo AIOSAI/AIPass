@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flag_never_passed_check.py
 # Description: Flag Never Passed Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Flag Never Passed Standards Checker Handler
@@ -11,6 +11,7 @@
 Reference: flag_never_passed.md
 """
 
+from functools import partial
 import ast
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Dict, List, Set, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "branch_level"
@@ -56,15 +58,6 @@ def _live_files(root: Path) -> List[Path]:
     return [path for path in sorted(root.rglob("*.py")) if ARCHIVE not in path.relative_to(root).parts]
 
 
-def _tail_name(node: ast.AST) -> str:
-    """The last name in a call target: ``a.b.c`` -> ``c``, ``f`` -> ``f``."""
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
-
-
 def _parse(path: Path) -> ast.Module | None:
     """A file's tree, or None when Python cannot read it.
 
@@ -72,7 +65,7 @@ def _parse(path: Path) -> ast.Module | None:
     """
     try:
         return ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, OSError) as exc:
+    except (SyntaxError, OSError, ValueError) as exc:
         logger.info("[flag_never_passed] Unparseable, nothing scanned: %s", exc)
         return None
 
@@ -148,8 +141,8 @@ def _parsed_here(functions: Dict[str, ast.AST], path: Path, found: Dict[str, Tup
                 continue
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and FLAG.match(node.value):
                 found.setdefault(node.value, (path, node.lineno))
-            elif isinstance(node, ast.Call) and _tail_name(node.func) in functions:
-                stack.append(functions[_tail_name(node.func)])
+            elif isinstance(node, ast.Call) and tail_name(node.func) in functions:
+                stack.append(functions[tail_name(node.func)])
 
 
 def _row_of(node: ast.List | ast.Tuple) -> Set[str]:
@@ -209,7 +202,7 @@ def _bindings(tree: ast.Module) -> Tuple[Dict[str, ast.AST], List[ast.AST]]:
 
 def _parametrized(decorator: ast.AST, binds: Dict[str, ast.AST]) -> None:
     """Bind each name a ``parametrize`` spells to the argvalues behind it."""
-    if not isinstance(decorator, ast.Call) or _tail_name(decorator.func) != "parametrize":
+    if not isinstance(decorator, ast.Call) or tail_name(decorator.func) != "parametrize":
         return
     if len(decorator.args) < 2 or not isinstance(decorator.args[0], ast.Constant):
         return
@@ -250,9 +243,7 @@ def scan(branch_root: Path) -> Tuple[List[Tuple[Path, int, str]], Set[str]]:
     return sorted(findings), {flag for flag in shadowed if flag in declared}
 
 
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

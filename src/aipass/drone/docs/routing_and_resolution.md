@@ -136,6 +136,11 @@ conflicts with the nearest passport's `citizenship.registry_id` → the AIPass h
 from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`;
 `AIPASS_REGISTRY_PATH` is read by no code.
 
+From the shell, `drone config set <path>` and `drone config reset` cannot persist anything: the
+override would live only in a process that exits at once. Each prints the line that does persist
+(`export AIPASS_REGISTRY=<path>` or `unset AIPASS_REGISTRY`) and exits 1. `drone config path`
+shows the registry in use.
+
 ### Error handling
 
 ```python

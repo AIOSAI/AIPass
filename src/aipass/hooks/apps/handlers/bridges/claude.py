@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: claude.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Claude Code bridge — mounts the promoted hook code, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-05-18
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -20,8 +20,12 @@ import importlib.util
 import json
 import os
 import sys
+import time
 
 GUARDED_EVENTS = frozenset({"PreToolUse"})
+
+#: Where a break is recorded: @trigger's branch watcher reads src/aipass/*/logs/*.log for ERROR lines.
+BREAK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "logs", "bridge.log")
 
 BROKEN = (
     "HOOKS BROKEN: the AIPass hook engine could not run ({error}).\n"
@@ -50,16 +54,21 @@ def _mount() -> str:
     return served
 
 
+def _record_break(event_type: str, line: str) -> None:
+    """One ERROR line in prax's format, written with the stdlib: the prax logger can be what broke."""
+    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.claude | ERROR | {line} on {event_type}\n"
+    try:
+        with open(BREAK_LOG, "a", encoding="utf-8") as handle:
+            handle.write(entry)
+    except OSError as exc:
+        sys.stderr.write(f"[HOOKS] bridge: the break was not recorded in {BREAK_LOG}: {exc}\n")
+
+
 def _broken(event_type: str, exc: BaseException) -> None:
     """Refuse a guarded event outright; let any other event pass with the reason on stderr."""
     reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
     sys.stderr.write(reason + "\n")
-    try:
-        from aipass.prax.apps.modules.logger import system_logger as logger
-
-        logger.error("[HOOKS] bridge: %s on %s", reason.splitlines()[0], event_type)
-    except Exception as log_exc:  # the logger can be what broke; stderr above already carries it
-        sys.stderr.write(f"[HOOKS] bridge: logger unavailable too: {log_exc}\n")
+    _record_break(event_type, reason.splitlines()[0])
     if event_type in GUARDED_EVENTS:
         sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
         sys.exit(2)

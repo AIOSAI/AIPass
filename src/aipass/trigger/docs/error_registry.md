@@ -11,13 +11,13 @@ live registry and breaker state. This page is the model behind them.
 
 SHA1 fingerprinting for error deduplication. Tracks: fingerprint, branch, error type, message, count, first/last seen, dispatch history, source fix status.
 
-**Circuit breaker:** Trips after 10 errors within 60 seconds. Rejects all dispatch while open. Auto-resets after 300s cooldown. State persists across restarts in `trigger_cb_state.json`.
+**Circuit breaker:** Trips after 10 errors within 60 seconds. Rejects all dispatch while open. Auto-resets after 300s cooldown. State lives in `trigger_cb_state.json`: every change reads, edits and writes it under its lock, so the daemon, a CLI `circuit-breaker reset` and a `ci poll` all see each other's writes, and it survives restarts. A reset closes the breaker and keeps per-fingerprint backoff.
 
 **Per-fingerprint tracking:** Each unique error has independent exponential backoff and dispatch count. State persists across restarts.
 
 
 The registry is **operational, not archival**: resolved entries are meant to be cleared
-regularly, and a purge verb exists for the stale ones. Nothing here is a long-term record —
+regularly, and a purge verb exists for the stale ones. Each log watcher start purges rows unseen for 30 days, keeping suppressed rows: a dropped one would dispatch again on its next recurrence. Nothing here is a long-term record —
 that is @memory's job.
 
 ---

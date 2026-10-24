@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch3.py
 # Description: Batch 3 tests for 8 seedgo checker handlers
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-29
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/log_structure_check.py and seven batch-3 sibling checkers."""
@@ -165,6 +165,18 @@ class TestLogVisibilityCheck:
 
         assert result["standard"] == "LOG_VISIBILITY"
         # Should detect missing prax import
+        assert result["score"] < 100
+
+    def test_a_test_named_production_module_is_not_exempt(self, tmp_path):
+        """apps/modules/test_map.py is product code: its name alone does not make it a test."""
+        content = "import logging\nmylog = logging.getLogger(__name__)\n"
+        filepath = tmp_path / "apps" / "modules" / "test_map.py"
+        filepath.parent.mkdir(parents=True)
+        filepath.write_text(content, encoding="utf-8")
+
+        result = self._import().check_module(str(filepath))
+
+        assert result["checks"][0]["message"] != "Test file (exempt)"
         assert result["score"] < 100
 
     def test_log_visibility_bypass_respected(self, tmp_path):

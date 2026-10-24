@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_verify.py
 # Description: Post-copy completeness check — did the mint deliver the template?
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-17
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Verify a freshly minted citizen against the template that minted it.
@@ -30,7 +30,7 @@ def _is_skipped(rel_path: str) -> bool:
 def _map_path(rel_path: str, replacements: dict, branch_lower: str) -> str:
     """Render a template-relative path the way the copy renders it.
 
-    Must mirror file_ops._replace_path_placeholders then rename_placeholder_paths."""
+    Must mirror file_ops._replace_path_placeholders."""
     parts = []
     for part in Path(rel_path).parts:
         part = replace_placeholders(part, replacements or {})

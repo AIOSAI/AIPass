@@ -3,27 +3,23 @@
 # Description: Tests for file system watcher handlers
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
-"""Tests for apps/handlers/watcher/monitor.py and apps/handlers/discovery/watcher.py."""
+"""Tests for apps/handlers/discovery/watcher.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(json_structure) — start_monitoring's watcher_monitor_event log_operation record
 # seedgo: no-test-needed(json_structure) — _report_watcher_death's log_operation record, covered by that row
-# seedgo: no-test-needed(error_handling) — on_created's ValueError skip of a path outside ECOSYSTEM_ROOT
 
 import subprocess
 import sys
-import threading
 import time as _time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.prax.apps.handlers.discovery import watcher as discovery_watcher
-from aipass.prax.apps.handlers.watcher import monitor as watcher_monitor
 
 
 def _discovery_watcher_doubled(monkeypatch, tmp_path):
@@ -44,188 +40,7 @@ def _discovery_watcher_doubled(monkeypatch, tmp_path):
 def _fresh_watcher_state(monkeypatch):
     """The discovery watcher's state as a fresh import leaves it, undone after the test."""
     monkeypatch.setattr(discovery_watcher, "_observer", None)
-    monkeypatch.setattr(discovery_watcher, "_start_thread", None)
     monkeypatch.setattr(discovery_watcher, "_LIVENESS", discovery_watcher.LivenessState())
-
-
-class TestBranchFileHandler:
-    """Tests for BranchFileHandler event callbacks and filtering."""
-
-    @pytest.fixture(autouse=True)
-    def _quiet_module(self, monkeypatch):
-        """The monitor's logger and json service, doubled where it binds them."""
-        monkeypatch.setattr(watcher_monitor, "logger", MagicMock())
-        monkeypatch.setattr(watcher_monitor, "json_handler", MagicMock())
-
-    def _make_handler(self):
-        """A real BranchFileHandler on the real watchdog base, with a mock callback."""
-        callback = MagicMock()
-        handler = watcher_monitor.BranchFileHandler("TEST", callback)
-        return handler, callback, watcher_monitor
-
-    def _make_event(self, src_path: str, is_directory: bool = False, dest_path: str | None = None):
-        event = MagicMock()
-        event.src_path = src_path
-        event.is_directory = is_directory
-        if dest_path is not None:
-            event.dest_path = dest_path
-        return event
-
-    def test_on_created_fires_callback(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
-        event = self._make_event(path)
-        handler.on_created(event)
-        callback.assert_called_once_with("TEST", "CREATED", path)
-
-    def test_on_modified_fires_callback(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
-        event = self._make_event(path)
-        handler.on_modified(event)
-        callback.assert_called_once_with("TEST", "MODIFIED", path)
-
-    def test_on_deleted_fires_callback(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
-        event = self._make_event(path)
-        handler.on_deleted(event)
-        callback.assert_called_once_with("TEST", "DELETED", path)
-
-    def test_on_moved_fires_callback_with_arrow(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        old_path = str(tmp_path / "old.py")
-        new_path = str(tmp_path / "new.py")
-        event = self._make_event(old_path, dest_path=new_path)
-        handler.on_moved(event)
-        callback.assert_called_once_with("TEST", "MOVED", f"{old_path} \u2192 {new_path}")
-
-    def test_ignores_directory_events(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        event = self._make_event(str(tmp_path / "src" / "aipass" / "flow" / "apps"), is_directory=True)
-        handler.on_created(event)
-        callback.assert_not_called()
-
-    def test_ignores_log_files(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        event = self._make_event(str(tmp_path / "logs" / "prax.log"))
-        handler.on_modified(event)
-        callback.assert_not_called()
-
-    def test_ignores_tmp_files(self):
-        handler, callback, _mod = self._make_handler()
-        for path in ("/repo/data.tmp", "/repo/.tmp.xyz"):
-            event = self._make_event(path)
-            handler.on_created(event)
-        callback.assert_not_called()
-
-    def test_ignores_backup_files(self):
-        handler, callback, _mod = self._make_handler()
-        for path in ("/repo/file.backup", "/repo/file.bak", "/repo/file~"):
-            event = self._make_event(path)
-            handler.on_modified(event)
-        callback.assert_not_called()
-
-    def test_ignores_vim_swap_files(self):
-        handler, callback, _mod = self._make_handler()
-        for path in ("/repo/.file.swp", "/repo/.file.swo"):
-            event = self._make_event(path)
-            handler.on_created(event)
-        callback.assert_not_called()
-
-    def test_ignores_system_directories(self):
-        handler, callback, _mod = self._make_handler()
-        ignore_paths = [
-            "/repo/.claude/settings.json",
-            "/repo/.git/objects/abc",
-            "/repo/__pycache__/mod.pyc",
-            "/repo/.pytest_cache/v/cache.json",
-            "/repo/node_modules/pkg/index.js",
-            "/repo/.venv/lib/site.py",
-            "/repo/venv/lib/site.py",
-            "/repo/.local/share/data",
-            "/repo/.cache/fontconfig",
-            "/repo/.config/user.json",
-            "/repo/.vscode/settings.json",
-            "/repo/system_logs/prax.log",
-        ]
-        for path in ignore_paths:
-            event = self._make_event(path)
-            handler.on_modified(event)
-        callback.assert_not_called()
-
-    def test_does_not_ignore_normal_python_file(self, tmp_path):
-        handler, callback, _mod = self._make_handler()
-        changed = str(tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "status.py")
-        event = self._make_event(changed)
-        handler.on_modified(event)
-        callback.assert_called_once_with(handler.branch_name, "MODIFIED", changed)
-
-
-class TestStartStopMonitoring:
-    """Tests for start_monitoring and stop_monitoring functions."""
-
-    @pytest.fixture(autouse=True)
-    def _observer_double(self, monkeypatch):
-        """Observer replaced where the monitor binds it; watchdog counts as present."""
-        observer_cls = MagicMock()
-        monkeypatch.setattr(watcher_monitor, "WATCHDOG_AVAILABLE", True)
-        monkeypatch.setattr(watcher_monitor, "Observer", observer_cls)
-        monkeypatch.setattr(watcher_monitor, "logger", MagicMock())
-        monkeypatch.setattr(watcher_monitor, "json_handler", MagicMock())
-        self._observer_cls = observer_cls
-
-    def _import_watcher_monitor(self):
-        return watcher_monitor, self._observer_cls.return_value, self._observer_cls
-
-    def test_start_monitoring_schedules_paths(self, tmp_path):
-        mod, observer_inst, _cls = self._import_watcher_monitor()
-        branch_dir = tmp_path / "flow"
-        branch_dir.mkdir()
-        callback = MagicMock()
-
-        result = mod.start_monitoring([("FLOW", branch_dir)], callback)
-
-        assert result is observer_inst
-        observer_inst.schedule.assert_called_once()
-        observer_inst.start.assert_called_once()
-
-    def test_start_monitoring_skips_nonexistent_paths(self, tmp_path):
-        mod, observer_inst, _cls = self._import_watcher_monitor()
-        callback = MagicMock()
-
-        result = mod.start_monitoring([("GHOST", tmp_path / "nonexistent")], callback)
-
-        assert result is observer_inst
-        observer_inst.schedule.assert_not_called()
-        observer_inst.start.assert_called_once()
-
-    def test_start_monitoring_returns_none_when_watchdog_unavailable(self, monkeypatch):
-        mod, _inst, _cls = self._import_watcher_monitor()
-        monkeypatch.setattr(mod, "WATCHDOG_AVAILABLE", False)
-        result = mod.start_monitoring([], MagicMock())
-        assert result is None
-
-    def test_stop_monitoring_stops_and_joins(self):
-        mod, observer_inst, _cls = self._import_watcher_monitor()
-        mod.stop_monitoring(observer_inst)
-        observer_inst.stop.assert_called_once_with()
-        observer_inst.join.assert_called_once_with()
-
-    def test_stop_monitoring_handles_none(self):
-        """No observer means no teardown: nothing is stopped, nothing is joined."""
-        mod, _inst, _cls = self._import_watcher_monitor()
-
-        assert mod.stop_monitoring(None) is None
-
-        # A falsy observer takes the same path; only its untouched mocks show it.
-        absent = MagicMock()
-        absent.__bool__.return_value = False
-
-        mod.stop_monitoring(absent)
-
-        absent.stop.assert_not_called()
-        absent.join.assert_not_called()
 
 
 class TestDiscoveryWatcher:
@@ -1030,87 +845,3 @@ class TestOptionalTriggerIntegration:
             "prax's public logger could not be built while trigger was unavailable.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
-
-
-class TestTheBackgroundStartDoesNotMakeTheCallerWait:
-    """Scheduling the watch is slow (one inotify watch per directory), so the caller must not wait on it."""
-
-    @pytest.fixture(autouse=True)
-    def _keep_monkeypatch(self, monkeypatch):
-        self._monkeypatch = monkeypatch
-
-    def _module_and_a_gated_observer(self, tmp_path):
-        """The discovery watcher with a schedule() that blocks until released."""
-        mod, observer_inst, _cls = _discovery_watcher_doubled(self._monkeypatch, tmp_path)
-
-        gate = threading.Event()
-        observer_inst.schedule.side_effect = lambda *args, **kwargs: gate.wait(30)
-        return mod, observer_inst, gate
-
-    def test_the_caller_returns_while_the_walk_is_still_running(self, tmp_path):
-        """The whole point: the walk outlives the call that asked for it."""
-        mod, observer_inst, gate = self._module_and_a_gated_observer(tmp_path)
-
-        try:
-            mod.start_file_watcher_in_background()
-
-            assert getattr(mod, "_start_thread").is_alive()
-            assert getattr(mod, "_observer") is None
-
-            gate.set()
-            getattr(mod, "_start_thread").join(timeout=10)
-
-            observer_inst.schedule.assert_called_once()
-            observer_inst.start.assert_called_once()
-            assert getattr(mod, "_observer") is observer_inst
-        finally:
-            gate.set()
-
-    def test_a_second_call_during_the_walk_starts_no_second_observer(self, tmp_path):
-        """A second call during the walk starts no second observer, or every event arrives twice."""
-        mod, observer_inst, gate = self._module_and_a_gated_observer(tmp_path)
-
-        try:
-            mod.start_file_watcher_in_background()
-            mod.start_file_watcher_in_background()
-            mod.start_file_watcher_in_background()
-
-            gate.set()
-            getattr(mod, "_start_thread").join(timeout=10)
-
-            assert observer_inst.schedule.call_count == 1
-            _handler, root = observer_inst.schedule.call_args.args
-            assert (root, observer_inst.schedule.call_args.kwargs) == (str(mod.ECOSYSTEM_ROOT), {"recursive": True})
-            observer_inst.start.assert_called_once_with()
-        finally:
-            gate.set()
-
-    def test_a_synchronous_start_during_the_walk_waits_and_installs_nothing(self, tmp_path):
-        """The other half of the same rule: the two doors share one lock."""
-        mod, observer_inst, gate = self._module_and_a_gated_observer(tmp_path)
-
-        try:
-            mod.start_file_watcher_in_background()
-            gate.set()
-            getattr(mod, "_start_thread").join(timeout=10)
-
-            mod.start_file_watcher()
-
-            assert observer_inst.schedule.call_count == 1
-            assert observer_inst.schedule.call_args.args[1] == str(mod.ECOSYSTEM_ROOT)
-            observer_inst.start.assert_called_once_with()
-        finally:
-            gate.set()
-
-    def test_an_inotify_limit_is_logged_not_raised(self, tmp_path, monkeypatch):
-        """No caller is left to hand the OSError to: on an unjoined thread it is logged, not raised."""
-        mod, observer_inst, _cls = _discovery_watcher_doubled(monkeypatch, tmp_path)
-        observer_inst.schedule.side_effect = OSError("inotify watch limit reached")
-
-        with patch.object(mod, "logger") as mock_logger:
-            mod.start_file_watcher_in_background()
-            getattr(mod, "_start_thread").join(timeout=10)
-
-            assert getattr(mod, "_observer") is None
-            warnings = " ".join(str(call) for call in mock_logger.warning.call_args_list)
-            assert "inotify limit reached" in warnings

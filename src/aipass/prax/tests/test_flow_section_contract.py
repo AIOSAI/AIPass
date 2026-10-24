@@ -3,7 +3,7 @@
 # Description: sections.flow has two writers — both must build the same shape
 # Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/dashboard/refresh.py."""
@@ -13,9 +13,8 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
-# seedgo: no-test-needed(through_the_command) — _calculate_quick_status, covered by tests/test_dashboard_merge.py
+# seedgo: no-test-needed(through_the_command) — calculate_quick_status, covered by tests/test_dashboard_merge.py
 # seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
-# seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save
 # seedgo: no-test-needed(json_structure) — refresh_all_dashboards' log_operation record, covered by that row
 
 import json

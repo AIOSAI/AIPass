@@ -4,7 +4,7 @@
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
@@ -103,6 +103,15 @@ class TestReadLatestUsage:
 
         usage = read_latest_usage(str(transcript), tail_bytes=200)
         assert usage == {"input_tokens": 99}
+
+    def test_a_usage_older_than_the_tail_is_still_found(self, tmp_path):
+        """A long tool result after the last assistant turn fills the whole tail."""
+        transcript = tmp_path / "t.jsonl"
+        target = json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 7}}}) + "\n"
+        tool_result = json.dumps({"type": "user", "message": {"content": "x" * 5000}}) + "\n"
+        transcript.write_text(target + tool_result * 3, encoding="utf-8")
+
+        assert read_latest_usage(str(transcript), tail_bytes=200) == {"input_tokens": 7}
 
     def test_ignores_non_assistant_entries_without_usage(self, tmp_path):
         transcript = tmp_path / "t.jsonl"

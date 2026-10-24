@@ -3,7 +3,7 @@
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
 # Version: 1.0.2
 # Created: 2026-04-20
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
@@ -18,23 +18,25 @@ from aipass.ai_mail.apps.handlers.dispatch.wake import WAKE_BLOCKLIST, is_wake_b
 from aipass.ai_mail.apps.modules import dispatch as dispatch_mod
 
 _H = "aipass.ai_mail.apps.handlers"
+# The dispatch send half runs through email_send._send_direct, which binds these names at import.
+_ES = "aipass.ai_mail.apps.modules.email_send"
 
 
 def _send_defaults() -> dict:
     """The send patch set test_dispatch_module uses: nothing is mailed, written, woken or fired."""
     return {
         f"{_H}.email.send.resolve_sender_info": MagicMock(return_value={"email_address": "@ai_mail"}),
-        f"{_H}.email.header.prepend_dispatch_header": MagicMock(return_value="[DISPATCH] Body"),
-        f"{_H}.email.send.send_to_single": MagicMock(return_value=(True, None)),
-        f"{_H}.email.error_dispatch.on_email_delivered": MagicMock(),
+        f"{_ES}.prepend_dispatch_header": MagicMock(return_value="[DISPATCH] Body"),
+        f"{_ES}.send_to_single": MagicMock(return_value=(True, None)),
+        f"{_ES}.on_email_delivered": MagicMock(),
         f"{_H}.users.user.get_current_user": MagicMock(return_value={"name": "test"}),
         f"{_H}.registry.read.get_branch_by_email": MagicMock(return_value={"email": "@target"}),
-        f"{_H}.central_writer.update_central": MagicMock(),
-        f"{_H}.email.create.create_email_file": MagicMock(),
-        f"{_H}.email.create.load_email_file": MagicMock(),
-        f"{_H}.email.delivery.deliver_email_to_branch": MagicMock(),
-        f"{_H}.email.error_dispatch.dispatch_send_error": MagicMock(),
-        "aipass.trigger.apps.modules.core.trigger": MagicMock(),
+        f"{_ES}.update_central": MagicMock(),
+        f"{_ES}.create_email_file": MagicMock(),
+        f"{_ES}.load_email_file": MagicMock(),
+        f"{_ES}.deliver_email_to_branch": MagicMock(),
+        f"{_ES}.dispatch_send_error": MagicMock(),
+        f"{_ES}.trigger": MagicMock(),
     }
 
 

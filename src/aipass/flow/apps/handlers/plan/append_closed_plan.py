@@ -1,84 +1,27 @@
 # =================== AIPass ====================
 # Name: append_closed_plan.py
 # Description: Closed Plans Local Registry Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-03-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Closed Plans Append Handler"""
 
 import json
-import os
 import re
-import time
 from pathlib import Path
 
 from aipass.flow.apps.handlers.repo_root import module_file
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock
 
 _PKG_ROOT = module_file(__file__).parents[4]
 
 MODULE_NAME = "append_closed_plan"
 CLOSED_PLANS_FILE = "CLOSED_PLANS.local.json"
-
-_LOCK_RETRIES = 10
-_LOCK_BACKOFF_BASE = 0.05
-
-
-def _sleep(seconds: float) -> None:
-    """time.sleep(seconds), the lock backoff's wait.
-    A seam for tests: patching it skips the wait without replacing time.sleep process-wide.
-    """
-    time.sleep(seconds)
-
-
-def _create_exclusive(lock_path: Path) -> int:
-    """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
-    A seam for tests: Windows answers a delete-pending lock with PermissionError, which Linux cannot produce.
-    """
-    return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-
-def _acquire_append_lock(lock_path: Path) -> bool:
-    """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
-    A Windows delete-pending PermissionError is a held lock and is retried. Returns False when contention
-    outlasts the budget; raises PermissionError (chained) when the last attempt was denied.
-    """
-    denial: PermissionError | None = None
-    waited = 0.0
-    for attempt in range(_LOCK_RETRIES):
-        try:
-            fd = _create_exclusive(lock_path)
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            return True
-        except FileExistsError:
-            denial = None
-            logger.info("[%s] Lock contention on %s, retry %d", MODULE_NAME, lock_path, attempt + 1)
-        except PermissionError as exc:
-            denial = exc
-            logger.info(
-                "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
-            )
-        delay = _LOCK_BACKOFF_BASE * (2**attempt)
-        _sleep(delay)
-        waited += delay
-    if denial is not None:
-        raise PermissionError(
-            f"Lock {lock_path} still denied after {_LOCK_RETRIES} attempts ({waited:.2f}s waited)"
-        ) from denial
-    return False
-
-
-def _release_append_lock(lock_path: Path) -> None:
-    """Remove lockfile, tolerating already-removed."""
-    try:
-        lock_path.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("[%s] Could not release lock %s: %s", MODULE_NAME, lock_path, exc)
 
 
 def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) -> bool:
@@ -104,17 +47,9 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
             "location": plan_info.get("relative_path", ""),
         }
 
-        # Locked read-modify-write: concurrent closes would otherwise lose entries.
         closed_plans_path = plan_location / CLOSED_PLANS_FILE
-        lock_path = closed_plans_path.with_suffix(".lock")
-
-        if not _acquire_append_lock(lock_path):
-            logger.error(
-                f"[{MODULE_NAME}] Could not acquire lock for {closed_plans_path} after {_LOCK_RETRIES} retries"
-            )
-            return False
-
-        try:
+        # Locked read-modify-write: concurrent closes would otherwise lose entries.
+        with registry_lock():
             if closed_plans_path.exists():
                 with open(closed_plans_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -131,8 +66,6 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
             with open(closed_plans_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
                 f.write("\n")
-        finally:
-            _release_append_lock(lock_path)
 
         logger.info(f"[{MODULE_NAME}] Appended {plan_id} to {closed_plans_path}")
         json_handler.log_operation(
@@ -140,6 +73,9 @@ def append_to_closed_plans(plan_key: str, plan_info: dict, plan_location: Path) 
         )
         return True
 
+    except TimeoutError as e:
+        logger.error(f"[{MODULE_NAME}] Could not take the write lock for {CLOSED_PLANS_FILE}: {e}")
+        return False
     except Exception as e:
         logger.warning(f"[{MODULE_NAME}] Failed to append closed plan: {e}")
         raise

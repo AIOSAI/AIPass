@@ -3,11 +3,12 @@
 # Description: FileSystem Event Handler
 # Version: 0.3.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX Filesystem Event Handler"""
 
+import contextlib
 import json as _json
 from pathlib import Path
 from typing import Optional, Dict
@@ -18,6 +19,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.monitoring.event_queue import MonitoringEvent, MonitoringQueue
 from aipass.prax.apps.handlers.monitoring.branch_detector import detect_branch_from_path
 from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor, get_priority
+from aipass.prax.apps.handlers.monitoring.log_watcher import read_new_lines
 from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
@@ -283,19 +285,9 @@ class MonitoringFileHandler(FileSystemEventHandler):
         return "💬 Agent response"
 
     def _read_new_jsonl_lines(self, file_path, path_key: str) -> Optional[list]:
-        """Read new lines from a JSONL file since last position. Returns None if no new data."""
-        current_size = file_path.stat().st_size
-        last_pos = self._jsonl_positions.get(path_key, 0)
-        if current_size < last_pos:
-            last_pos = 0
-        if current_size <= last_pos:
-            return None
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            f.seek(last_pos)
-            new_data = f.read()
-            self._jsonl_positions[path_key] = f.tell()
-        lines = [line for line in new_data.strip().split("\n") if line.strip()]
-        return lines if lines else None
+        """Read new complete lines from a JSONL file since last position. Returns None if no new data."""
+        lines, self._jsonl_positions[path_key] = read_new_lines(file_path, self._jsonl_positions.get(path_key, 0))
+        return lines or None
 
     def _safe_parse_json(self, line: str, label: str) -> Optional[dict]:
         """Parse a JSON line, logging errors. Returns None on failure."""
@@ -364,21 +356,8 @@ class MonitoringFileHandler(FileSystemEventHandler):
         Emits only the last few distinct actions, so a large batch after a poll gap does not flood."""
         try:
             path_key = str(file_path)
-            current_size = file_path.stat().st_size
-            last_pos = self._jsonl_positions.get(path_key, 0)
-
-            if current_size < last_pos:
-                last_pos = 0
-            if current_size <= last_pos:
-                return True
-
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(last_pos)
-                new_data = f.read()
-                self._jsonl_positions[path_key] = f.tell()
-
-            lines = [line for line in new_data.strip().split("\n") if line.strip()]
-            if not lines:
+            lines = self._read_new_jsonl_lines(file_path, path_key)
+            if lines is None:
                 return True
 
             pending_actions = []
@@ -458,6 +437,11 @@ class MonitoringFileHandler(FileSystemEventHandler):
 
             # Markers use forward slashes; match on a local copy so Windows paths match too
             norm = path_str.replace("\\", "/")
+
+            if file_path.suffix == ".jsonl" and action != "created" and str(file_path) not in self._jsonl_positions:
+                # A transcript first seen mid-life starts at its end: its history is not live activity.
+                with contextlib.suppress(OSError):
+                    self._jsonl_positions[str(file_path)] = file_path.stat().st_size
 
             if file_path.suffix == ".jsonl" and ".claude/projects/" in norm:
                 if "/subagents/" in norm:

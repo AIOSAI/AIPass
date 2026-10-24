@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: handler.py - Branch Health skill handler
 # Date: 2026-03-29
-# Version: 1.0.0
+# Version: 1.1.0
+# Modified: 2026-10-24
 # Category: skills/lib/branch_health
 # =============================================
 
@@ -59,10 +60,6 @@ def _find_branches():
                     or (branch_dir / ".trinity").is_dir()
                 ):
                     yield (branch_dir.name, branch_dir)
-
-    skills_dir = src / "skills"
-    if skills_dir.is_dir():
-        yield ("skills", skills_dir)
 
 
 def _count_py_files(directory):
@@ -172,20 +169,12 @@ def _tests_only():
 
 def _single_branch(branch_name):
     """Stats for a single branch."""
-    src = _src_root()
+    # A branch is one directory name; "../.." would walk every file above src/aipass.
+    if not branch_name or Path(branch_name).name != branch_name or branch_name in (".", ".."):
+        return {"success": False, "output": "", "error": f"Not a branch name: {branch_name!r}"}
 
-    candidates = [
-        src / "aipass" / branch_name,
-        src / branch_name,
-    ]
-
-    branch_path = None
-    for candidate in candidates:
-        if candidate.is_dir():
-            branch_path = candidate
-            break
-
-    if branch_path is None:
+    branch_path = _src_root() / "aipass" / branch_name
+    if not branch_path.is_dir():
         return {
             "success": True,
             "output": f"Branch Health -- {branch_name}\n  Branch '{branch_name}' not found.",

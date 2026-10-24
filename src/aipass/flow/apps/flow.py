@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @flow — plan lifecycle management
 # Version: 1.2.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -136,8 +136,7 @@ def _main_impl():
         return resolve_exit(True)
 
     if remaining_args and remaining_args[0] in ["--help", "-h"]:
-        print_module_help(command, modules)
-        return 0
+        return 0 if print_module_help(command, modules) else 1
     else:
         console.print()
         error(f"Unknown command: {command}")
@@ -270,8 +269,8 @@ def print_help(modules: List[Any]):
     console.print()
 
 
-def print_module_help(command: str, modules: List[Any]):
-    """Display module-specific help with Rich formatting"""
+def print_module_help(command: str, modules: List[Any]) -> bool:
+    """Display module-specific help with Rich formatting; False when no module matches"""
     target_module = None
     for module in modules:
         module_name = module.__name__.split(".")[-1]
@@ -285,7 +284,7 @@ def print_module_help(command: str, modules: List[Any]):
         console.print()
         console.print("Run [dim]drone @flow --help[/dim] for available commands")
         console.print()
-        return
+        return False
 
     console.print()
     module_name = target_module.__name__.split(".")[-1]
@@ -299,6 +298,7 @@ def print_module_help(command: str, modules: List[Any]):
         console.print("[dim]No documentation available[/dim]")
 
     console.print()
+    return True
 
 
 if __name__ == "__main__":

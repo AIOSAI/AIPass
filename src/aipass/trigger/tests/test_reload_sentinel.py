@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_reload_sentinel.py
 # Description: Tests the handler-mtime reload sentinel that keeps the watcher on shipped code
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/reload_sentinel.py, the handler-mtime reload sentinel."""
@@ -39,6 +39,7 @@ def sentinel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """
     monkeypatch.setattr(reload_sentinel, "logger", trail_logger(tmp_path / "reload_sentinel.jsonl"))
     monkeypatch.setattr(reload_sentinel, "json_handler", MagicMock())
+    monkeypatch.setattr(reload_sentinel, "WATCHED_FILES", ())
     return reload_sentinel
 
 
@@ -111,6 +112,12 @@ class TestSnapshot:
         monkeypatch.setattr(sentinel, "WATCHED_ROOTS", (root,))
 
         assert set(sentinel.snapshot()) == {root / "escalation.py"}
+
+    def test_the_live_snapshot_holds_the_two_apps_files_the_service_loads(self) -> None:
+        """config.py and the service script sit outside both roots, yet the service runs them."""
+        apps = reload_sentinel.TRIGGER_ROOT / "apps"
+
+        assert {apps / "config.py", apps / "log_watcher_service.py"} <= set(reload_sentinel.snapshot())
 
 
 class TestChangeDetection:

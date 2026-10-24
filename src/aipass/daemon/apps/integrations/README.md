@@ -22,7 +22,7 @@ Wrappers should call into `@api`'s generic contracts (e.g. `api.memory_backend.q
 
 - **Driver code** — that belongs in `@api/apps/integrations/{project}/driver.py` (the connection layer).
 - **Public business logic** — use `apps/modules/` or `apps/handlers/` for that.
-- **Drone plugins** — use `apps/plugins/` for those.
+- **Scheduled work** — declare it in `.daemon/schedule.json`.
 - **Secrets** — they live in `~/.secrets/aipass/`, never in the repo.
 
 ## Architecture

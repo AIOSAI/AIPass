@@ -115,8 +115,8 @@ administration, not routing logic.
 | Plugin | Verb | Purpose |
 |--------|------|---------|
 | `merge_plugin` | `merge` | Straight-merge a PR and sync local main; an external repo takes `external_pr_handler` |
-| `sync_plugin` | `smart-sync` | Fetch, detect divergence, rebase |
-| `fix_plugin` | `fix` | Repair a stuck rebase or a detached HEAD |
+| `sync_plugin` | `smart-sync` | Fetch, detect divergence, rebase; acts on `main` only and refuses any other HEAD |
+| `fix_plugin` | `fix` | Repair a stuck rebase or a detached HEAD; the divergence repair runs on `main` only and is skipped on any other branch |
 
 `auth.py` is the gate they share. A second plugin directory, `hook_sounds/`, is disabled in place:
 its files carry a `.disabled` suffix, and hook sounds live in the hooks branch.

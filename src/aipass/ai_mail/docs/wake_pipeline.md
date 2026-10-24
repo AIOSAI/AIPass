@@ -2,7 +2,7 @@
 
 # The wake pipeline
 
-**Branch** ai_mail · **Code** `apps/modules/dispatch.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/daemon.py`
+**Branch** ai_mail · **Code** `apps/modules/dispatch.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/dispatch_monitor.py`
 
 ---
 
@@ -152,11 +152,10 @@ returns a `ModelDecision(model, refusal)`:
 - **Addresses normalised** exactly as `is_wake_blocked` normalises them (one leading
   `@`, lowercased), on both sides — a policy keyed on an address is worthless if
   typing it differently promotes *or* demotes a seat.
-- **One resolver.** Three sites in `apps/` name a model:
+- **One resolver.** Two sites in `apps/` name a model:
   `wake._spawn_manager_interactive` (interactive tmux) and the headless `base_args` in
-  `wake.wake_branch` both take the value `wake_branch` already resolved, and
-  `daemon.spawn_agent` hardcodes `DEFAULT_MODEL` in a module its own comment documents
-  as dormant. No second path can reach Fable.
+  `wake.wake_branch`, and both take the value `wake_branch` already resolved. No second
+  path can reach Fable.
 
 ## The recipient's dashboard is refreshed before the spawn
 
@@ -184,7 +183,7 @@ in the inbox.
 
 ## Related
 
-- [wake_lanes.md](wake_lanes.md) — the admin, cross-project, `@all` and daemon lanes
+- [wake_lanes.md](wake_lanes.md) — the admin, cross-project and `@all` lanes, and the reply return path
 - [dispatch_register_and_feed.md](dispatch_register_and_feed.md) — the register row a wake opens and the feed it writes
 - [identity_and_boundaries.md](identity_and_boundaries.md) — who may claim to be the sender a wake trusts
 - [sending_and_delivery.md](sending_and_delivery.md) — the delivery pipeline a dispatch rides in on

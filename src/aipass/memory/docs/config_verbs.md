@@ -57,7 +57,7 @@ immediate-kick verb in v1. The `*_meta` tab strings follow the write: a `config`
 re-renders the meta lines of every registry branch whose enforced count moved
 (`tab_renderer.refresh_moved_limits`, both configs resolved through `config_loader.resolve_limits`,
 so a branch holding its own count keeps its file untouched); a line left stale is printed as a
-warning. `rollover report-lines` does not re-render them — it writes nothing.
+warning.
 
 ---
 

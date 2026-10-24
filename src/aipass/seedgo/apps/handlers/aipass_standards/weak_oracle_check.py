@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: weak_oracle_check.py
 # Description: Weak Oracle Standards Checker Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-22
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Weak Oracle Standards Checker Handler
 Reference: weak_oracle.md
 """
 
+from functools import partial
 import ast
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +21,7 @@ from typing import Dict, List, Set, Tuple, Union
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse, read_text, result, tail_name
 
 APPLIES_TO = "tests"
 AUDIT_SCOPE = "all_files"
@@ -57,15 +59,6 @@ _SOFT = "soft"
 _STRONG = "strong"
 
 
-def _tail_name(func: ast.expr) -> str:
-    """The name a call is made under -- ``f`` for ``a.b.f(...)`` and ``f(...)``."""
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
-
-
 def _module_file(dotted: str) -> Path | None:
     """The source file for an ``aipass.a.b`` module, as a module or a package."""
     here = Path(__file__).resolve()
@@ -91,7 +84,7 @@ def none_returning_functions(dotted: str) -> frozenset[str]:
         return frozenset()
     try:
         tree = ast.parse(source.read_text(encoding="utf-8", errors="ignore"))
-    except (SyntaxError, OSError) as exc:
+    except (SyntaxError, OSError, ValueError) as exc:
         logger.info("[weak_oracle] Cannot read %s for a -> None annotation: %s", dotted, exc)
         return frozenset()
     return frozenset(
@@ -142,7 +135,7 @@ def _compare_verdict(test: ast.Compare, bare: Set[str], modules: Dict[str, str])
         if isinstance(left, ast.Call) and _is_tautological(left.func, bare, modules):
             return _SCORED, D6
         return _SOFT, SOFT_NONE
-    if isinstance(left, ast.Call) and _tail_name(left.func) in ("len", "count"):
+    if isinstance(left, ast.Call) and tail_name(left.func) in ("len", "count"):
         return _SOFT, SOFT_LEN
     if isinstance(operator, (ast.GtE, ast.LtE, ast.Gt, ast.Lt)):
         return _SOFT, SOFT_BOUND
@@ -189,7 +182,7 @@ def _binding(node: ast.AST) -> Tuple[ast.AST | None, ast.AST | None]:
 def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[str] | None = None) -> Tuple[str, str]:
     """(strength, form) for one oracle: an assert statement or a mock assertion."""
     if isinstance(node, ast.Call):
-        blind = _tail_name(node.func) in _BLIND_CALLS and not node.args and not node.keywords
+        blind = tail_name(node.func) in _BLIND_CALLS and not node.args and not node.keywords
         return (_SCORED, D5) if blind else (_STRONG, "")
 
     test = node.test if isinstance(node, ast.Assert) else node
@@ -202,7 +195,7 @@ def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str], built: Set[
         return _SCORED, D2
     if isinstance(test, ast.Call):
         # A call's truthiness is the claim; isinstance alone answers only the type.
-        return (_SCORED, D4) if _tail_name(test.func) == "isinstance" else (_STRONG, "")
+        return (_SCORED, D4) if tail_name(test.func) == "isinstance" else (_STRONG, "")
     if isinstance(test, ast.Compare) and len(test.ops) == 1:
         return _compare_verdict(test, bare, modules)
     return _STRONG, ""
@@ -240,7 +233,7 @@ def _oracles(function_nodes: List[ast.AST]) -> Tuple[List[Union[ast.Assert, ast.
             continue
         if not isinstance(node, ast.Call):
             continue
-        name = _tail_name(node.func)
+        name = tail_name(node.func)
         if name.startswith("assert_"):
             found.append(node)
         raises = raises or name == "raises"
@@ -248,13 +241,7 @@ def _oracles(function_nodes: List[ast.AST]) -> Tuple[List[Union[ast.Assert, ast.
     return sorted(found, key=lambda node: (node.lineno, node.col_offset)), raises
 
 
-def _parse(source: str) -> ast.Module | None:
-    """The file's tree, or None when Python cannot read it (ruff convicts the syntax error)."""
-    try:
-        return ast.parse(source)
-    except SyntaxError as exc:
-        logger.info("[weak_oracle] Unparseable, nothing scanned: %s", exc)
-        return None
+_parse = partial(parse, tag="weak_oracle")
 
 
 def scan(source: str) -> Tuple[List[Tuple[int, str, str]], List[str]]:
@@ -282,18 +269,8 @@ def scan(source: str) -> Tuple[List[Tuple[int, str, str]], List[str]]:
     return sorted(scored), counted
 
 
-def _read(path: Path) -> str | None:
-    """A file's text, or None if it cannot be read."""
-    try:
-        return path.read_text(encoding="utf-8", errors="ignore")
-    except OSError as exc:
-        logger.info("[weak_oracle] Cannot read %s: %s", path, exc)
-        return None
-
-
-def _result(passed: bool, checks: List[Dict], score: int) -> Dict:
-    """The result shape every checker in this pack returns."""
-    return {"passed": passed, "checks": checks, "score": score, "standard": STANDARD}
+_read = partial(read_text, tag="weak_oracle", errors="ignore")
+_result = partial(result, standard=STANDARD)
 
 
 def _one_check(passed: bool, message: str) -> List[Dict]:

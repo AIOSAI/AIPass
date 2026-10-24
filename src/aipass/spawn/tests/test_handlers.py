@@ -1,26 +1,26 @@
 # =================== META ====================
 # Name: test_handlers.py
 # Description: Tests for spawn update handler modules
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-07
-# Modified: 2026-10-03
+# Modified: 2026-10-24
 # =============================================
 
-"""Tests for apps/handlers/meta_ops.py and apps/handlers/json_ops.py."""
+"""Tests for apps/handlers/meta_ops.py and the shared json_ops update relies on."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that apps/handlers/meta_ops.py and apps/handlers/json_ops.py parse and import
+# seedgo: no-test-needed(ruff) — that apps/handlers/meta_ops.py parses and imports
 # seedgo: no-test-needed(documentation) — docstrings on the handler functions this file exercises
 
 import pytest
 from pathlib import Path
 
+from aipass.aipass.shared.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers import meta_ops
-from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
+from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.meta_ops import (
     compute_file_hash,
     generate_branch_meta,
-    get_template_dir,
     load_branch_meta,
     save_branch_meta,
 )

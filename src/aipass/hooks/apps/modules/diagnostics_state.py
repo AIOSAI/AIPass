@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: diagnostics_state.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Post-edit diagnostics state per seat — location, meaning, and live re-validation
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-13
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Owns what the diagnostics state means: one file per seat since leg 4 (see load_seat).
@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -250,7 +251,7 @@ def print_introspection() -> None:
 
 def handle_command(command: str, args: list) -> bool:
     """Route diagnostics_state commands from drone @hooks."""
-    if command in ("--help", "-h", "help"):
+    if command in ("--help", "-h", "help") or (command == "diagnostics_state" and wants_help(args)):
         CONSOLE.print("[bold cyan]diagnostics_state[/bold cyan] — what the edit gate remembers")
         CONSOLE.print()
         CONSOLE.print("  drone @hooks diagnostics_state    Show recorded errors and re-check them live")

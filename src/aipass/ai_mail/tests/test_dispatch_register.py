@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_register.py
 # Description: Tests for the dispatch register append-only log
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
@@ -587,3 +587,14 @@ class TestTheSuiteCannotTouchProduction:
 
         assert live.name == report.REPORTS_DIRNAME, "anchor check: the live path must be real"
         assert report.reports_dir() != live
+
+
+def test_a_reply_closes_the_oldest_open_row_first(repo):
+    """Two open rows on one thread: the reply closes the first dispatch, so a re-sent one never leaves it open forever."""
+    first = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+    second = register.open_dispatch("@devpulse", "@api", "Your brief", 7200, repo_root=repo)
+
+    closed = register.close_on_reply("@api", "@devpulse", "RE: Your brief", repo_root=repo)
+
+    assert closed == first
+    assert [row["dispatch_id"] for row in register.outstanding(repo_root=repo)] == [second]

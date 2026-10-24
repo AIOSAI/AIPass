@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: argv.py
 # Description: audit verb argument grammar, read once and answered as data
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -19,9 +19,7 @@ from aipass.seedgo.apps.handlers.cli.help_flags import DASHED_HELP_TOKENS
 from aipass.seedgo.apps.handlers.json import json_handler
 
 #: Every flag this verb accepts — the list a mistyped token is offered against.
-AUDIT_FLAGS: tuple = tuple(
-    "--show-bypasses --bypasses -b --no-bypass --full --artifact --no-artifact --help -h".split()
-)
+AUDIT_FLAGS: tuple = tuple("--no-bypass --full --artifact --no-artifact --help -h".split())
 
 #: Pack, then @branch. A third bare word fills no slot: refused, never dropped.
 MAX_POSITIONAL = 2
@@ -38,7 +36,6 @@ class AuditArgv:
     positional: List[str] = field(default_factory=list)
     #: Tokens no branch of the grammar claimed (Law ARGV). First one is refused.
     unrecognized: List[str] = field(default_factory=list)
-    show_bypasses: bool = False
     no_bypass: bool = False
     force_full: bool = False
     write_artifact: bool = True
@@ -58,9 +55,6 @@ def parse(args: Sequence[str]) -> AuditArgv:
         if expect_artifact_path:
             parsed.artifact_path = arg
             expect_artifact_path = False
-            continue
-        if arg in ("--show-bypasses", "--bypasses", "-b"):
-            parsed.show_bypasses = True
             continue
         if arg == "--no-bypass":
             parsed.no_bypass = True

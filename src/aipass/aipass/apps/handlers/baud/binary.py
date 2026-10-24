@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: binary.py
 # Description: Land a verified baud-cli beside the phone face: staging, rename, 0755, marker, previous kept
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -134,7 +134,12 @@ def install_binary(source: Path, root: Path, record: dict[str, Any]) -> Path:
         staging.unlink(missing_ok=True)
         raise
     if not json_handler.write_json(bin_marker_path(root), record):
-        raise UnpackError(f"baud-cli is in place at {target}, but {BIN_MARKER} could not be written.")
+        # A binary with no marker would refuse every later install, so the previous state comes back.
+        if had_target:
+            os.replace(prev, target)
+        else:
+            target.unlink(missing_ok=True)
+        raise UnpackError(f"{BIN_MARKER} could not be written at {root}, so baud-cli was not installed.")
     json_handler.log_operation(
         "baud_cli_installed",
         {"path": str(target), "tag": record.get("tag"), "kept_prev": had_target},

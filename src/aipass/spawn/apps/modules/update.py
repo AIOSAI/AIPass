@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: Update orchestrator — thin CLI layer for branch updates
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -20,6 +20,7 @@ from aipass.spawn.apps.handlers.update_ops import (
     update_all,
 )
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.registry import find_registry
 
 
 def print_introspection():
@@ -117,6 +118,12 @@ def handle_update(args: list[str]) -> int:
             classes = ", ".join(get_available_classes())
             error(
                 "--all requires a citizen class", suggestion=f"drone @spawn update <class> --all (available: {classes})"
+            )
+            return 1
+
+        if find_registry() is None:
+            error(
+                "No *_REGISTRY.json found above the current directory", suggestion="run from inside an AIPass project"
             )
             return 1
 

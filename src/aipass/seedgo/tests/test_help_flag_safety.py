@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for help_flag_safety_check.py
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/help_flag_safety_check.py."""
@@ -822,3 +822,33 @@ def test_module_with_own_scan_and_standalone_main_still_passes(tmp_path):
     result = _check(_branch(tmp_path, src, _ROUTER_NORMALISES))
     assert result["passed"] is True, result["checks"]
     assert result["score"] == 100
+
+
+def test_a_help_word_in_an_unrelated_constant_is_no_scan_of_the_args(tmp_path):
+    src = (
+        'SUBS = ["help", "run"]\n\n'
+        "def handle_command(command, args):\n"
+        '    if "help" in SUBS:\n'
+        "        pass\n"
+        '    if args and args[0] in ("--help", "-h"):\n'
+        "        print_help()\n"
+        "        return True\n"
+        "    do_work(args)\n"
+        "    return True\n"
+    )
+    assert _check(_branch(tmp_path, src))["passed"] is False
+
+
+def test_unpacking_the_args_puts_the_flag_in_a_value_slot(tmp_path):
+    src = (
+        "def handle_command(command, args):\n"
+        '    if args and args[0] == "--help":\n'
+        "        print_help()\n"
+        "        return True\n"
+        "    target, *rest = args\n"
+        "    deploy(target)\n"
+        "    return True\n"
+    )
+    result = _check(_branch(tmp_path, src))
+    assert result["passed"] is False
+    assert "'target' value slot" in result["checks"][0]["message"]

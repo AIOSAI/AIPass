@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: applicability.py
 # Description: Where each standard applies - production, tests, or everywhere
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-09
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Single source of truth for WHERE a standard applies.
@@ -57,6 +57,11 @@ def is_test_path(file_path: str) -> bool:
     if parts and parts[-1] in TEST_FILE_NAMES:
         return True
     return any(part in TEST_DIR_NAMES for part in parts)
+
+
+def entry_file_names(branch_name: str) -> tuple[str, str]:
+    """A branch's entry file under apps/, in preference order: the first that exists is the one judged."""
+    return (f"{branch_name.lower()}.py", "branch.py")
 
 
 @lru_cache(maxsize=4096)

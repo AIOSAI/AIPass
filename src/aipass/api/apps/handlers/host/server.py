@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: server.py
 # Description: Host API Server Handler — FastAPI app factory, auth dependency
-# Version: 1.1.7
+# Version: 1.1.8
 # Created: 2026-08-14
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalCall=false
 # pyright: reportArgumentType=false
@@ -17,6 +17,7 @@ Host API Server Handler
 Reference: docs/host_api.md. Routes that would push this file past its 1500-line cap live in *_route.py.
 Reserved, not built: POST /v1/notify; quick-send must reuse @ai_mail's injection path, never a raw send-keys."""
 
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -45,6 +46,9 @@ from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.handlers.host import uploads as host_uploads
 from aipass.api.apps.handlers.host import verbs as host_verbs
 from aipass.api.apps.handlers.host.denials import UnavailableHTTPException
+
+# Serializes the settings, memory-config and hooks-sound read-modify-writes now that they run in the threadpool.
+_WRITE_LOCK = threading.Lock()
 
 try:
     from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket
@@ -210,7 +214,7 @@ def require_scope(required: str = "read"):
             raise _deny(403, "forbidden", f"This token's scope cannot perform a '{required}' action")
 
         # Stamp only after verify and scope pass: else a prober writes the store it probes. Never raises.
-        host_tokens.touch_token(str(record.get("id", "")))
+        host_tokens.touch_token(str(record.get("id", "")), record.get("last_used"))
 
         return record
 
@@ -242,7 +246,7 @@ def socket_bearer(websocket: Any, required: str = "operate") -> dict:
     if not host_tokens.scope_allows(str(record.get("scope", "")), required):
         raise PermissionError(f"This token's scope cannot perform a '{required}' action")
 
-    host_tokens.touch_token(str(record.get("id", "")))
+    host_tokens.touch_token(str(record.get("id", "")), record.get("last_used"))
 
     return record
 
@@ -359,7 +363,7 @@ def create_app() -> Any:
         return JSONResponse(status_code=422, content=payload)
 
     # `def`, not `async def`, on every route whose body blocks: async runs on the single worker's loop.
-    # Routes that WRITE stay async on purpose: the loop is their only serialization. test_host_perf.py pins both.
+    # Writes too: a wake waits up to 120s. Read-modify-writes take _WRITE_LOCK instead. test_host_perf.py pins both.
 
     # response_class + the Response annotation keep FastAPI from inferring a body model; 204 must carry none.
     @app.get("/v1/ping", status_code=204, response_class=Response)
@@ -454,7 +458,7 @@ def create_app() -> Any:
     else:
 
         @app.post("/v1/files/upload")
-        async def files_upload_unavailable(
+        def files_upload_unavailable(
             record: dict = Depends(require_scope("operate")),
         ) -> dict:
             """
@@ -661,24 +665,25 @@ def create_app() -> Any:
             raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     @app.post("/v1/memory-config/set")
-    async def memory_config_set(
+    def memory_config_set(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
         """Override one branch's limit for one entry type."""
         try:
-            return host_memory_config.set_branch_limit(
-                branch=payload.get("branch", ""),
-                entry_type=payload.get("type", ""),
-                count=payload.get("count"),
-            )
+            with _WRITE_LOCK:
+                return host_memory_config.set_branch_limit(
+                    branch=payload.get("branch", ""),
+                    entry_type=payload.get("type", ""),
+                    count=payload.get("count"),
+                )
         except host_memory_config.MemoryConfigRefused as e:
             raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
             raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     @app.post("/v1/memory-config/set-default")
-    async def memory_config_set_default(
+    def memory_config_set_default(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -687,22 +692,24 @@ def create_app() -> Any:
         Answers pushed=false always: every branch keeps its old number until a push, by @memory's semantics.
         """
         try:
-            return host_memory_config.set_default_limit(
-                entry_type=payload.get("type", ""),
-                count=payload.get("count"),
-            )
+            with _WRITE_LOCK:
+                return host_memory_config.set_default_limit(
+                    entry_type=payload.get("type", ""),
+                    count=payload.get("count"),
+                )
         except host_memory_config.MemoryConfigRefused as e:
             raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
             raise _logged_denial(e, 503, "memory_config_unavailable") from e
 
     @app.post("/v1/memory-config/push")
-    async def memory_config_push(
+    def memory_config_push(
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
         """Reset EVERY branch to the defaults. Takes no body."""
         try:
-            return host_memory_config.push_defaults()
+            with _WRITE_LOCK:
+                return host_memory_config.push_defaults()
         except host_memory_config.MemoryConfigRefused as e:
             raise _logged_denial(e, 400, "memory_config_refused") from e
         except host_memory_config.MemoryConfigUnavailable as e:
@@ -711,7 +718,7 @@ def create_app() -> Any:
     # Verb bodies are plain fields, never a model; a client `confirmed` flag is never authorisation.
 
     @app.post("/v1/verbs/wake")
-    async def verb_wake(
+    def verb_wake(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -729,7 +736,7 @@ def create_app() -> Any:
             raise _logged_denial(e, 503, "verb_unavailable") from e
 
     @app.post("/v1/verbs/kill")
-    async def verb_kill(
+    def verb_kill(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -745,7 +752,7 @@ def create_app() -> Any:
             raise _logged_denial(e, 503, "verb_unavailable") from e
 
     @app.post("/v1/verbs/lock")
-    async def verb_lock(
+    def verb_lock(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -772,7 +779,7 @@ def create_app() -> Any:
             raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.post("/v1/agent-settings")
-    async def agent_settings_write(
+    def agent_settings_write(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -786,7 +793,9 @@ def create_app() -> Any:
         if not isinstance(patch, dict):
             raise _deny(400, "settings_refused", "the patch must be a JSON object")
         try:
-            return host_settings.write_agent_settings(host_reads.resolve_branch_root(branch, project), patch)
+            root = host_reads.resolve_branch_root(branch, project)
+            with _WRITE_LOCK:
+                return host_settings.write_agent_settings(root, patch)
         except (host_reads.ReadRefused, host_settings.SettingsRefused) as e:
             raise _logged_denial(e, 400, "settings_refused") from e
         except (host_reads.ReadUnavailable, host_settings.SettingsUnavailable) as e:
@@ -805,7 +814,7 @@ def create_app() -> Any:
             raise _logged_denial(e, 503, "settings_unavailable") from e
 
     @app.post("/v1/baud-settings")
-    async def baud_settings_write(
+    def baud_settings_write(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -814,7 +823,8 @@ def create_app() -> Any:
         if not isinstance(patch, dict):
             raise _deny(400, "settings_refused", "the patch must be a JSON object")
         try:
-            return host_settings.write_baud_settings(host_reads.repo_root(), patch)
+            with _WRITE_LOCK:
+                return host_settings.write_baud_settings(host_reads.repo_root(), patch)
         except host_settings.SettingsRefused as e:
             raise _logged_denial(e, 400, "settings_refused") from e
         except host_settings.SettingsUnavailable as e:
@@ -828,7 +838,7 @@ def create_app() -> Any:
         return {"active": host_settings.hooks_sound_get()}
 
     @app.post("/v1/hooks-sound")
-    async def hooks_sound_write(
+    def hooks_sound_write(
         payload: dict = Body(default={}),
         record: dict = Depends(require_scope("operate")),
     ) -> dict:
@@ -837,7 +847,8 @@ def create_app() -> Any:
         if not isinstance(active, bool):
             raise _deny(400, "settings_refused", "'active' must be true or false")
         try:
-            return {"active": host_settings.hooks_sound_set(active)}
+            with _WRITE_LOCK:
+                return {"active": host_settings.hooks_sound_set(active)}
         except host_settings.SettingsUnavailable as e:
             raise _logged_denial(e, 503, "settings_unavailable") from e
 

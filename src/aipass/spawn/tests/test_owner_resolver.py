@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_owner_resolver.py
 # Description: Tests for owner resolver and registry authority
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
-"""Tests for apps/handlers/registry.py's owner-resolution and backfill functions."""
+"""Tests for apps/handlers/registry.py's owner-resolution functions."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — docstrings on get_owner, is_owner, ensure_project_has_owner and is_protected
@@ -19,7 +19,6 @@ import pytest
 
 from aipass.spawn.apps.handlers.registry import (
     add_to_registry,
-    backfill_owner_and_registry_id,
     ensure_project_has_owner,
     get_owner,
     is_owner,
@@ -284,163 +283,6 @@ class TestEnsureProjectHasOwner:
 
         result = ensure_project_has_owner(reg)
         assert result is False
-
-
-class TestBackfillOwnerAndRegistryId:
-    """Tests for backfill_owner_and_registry_id() — mints unique per-citizen UUIDs."""
-
-    def test_mints_unique_uuids_for_entries_missing_registry_id(self, tmp_path):
-
-        reg = tmp_path / "TEST_REGISTRY.json"
-        reg.write_text(
-            json.dumps(
-                {
-                    "metadata": {"version": "1.0.0", "last_updated": "2026-07-10", "total_branches": 2},
-                    "branches": [
-                        {
-                            "name": "alpha",
-                            "path": "src/alpha",
-                            "email": "@alpha",
-                            "status": "active",
-                            "profile": "library",
-                            "description": "test",
-                            "created": "2026-01-01",
-                            "last_active": "2026-01-01",
-                        },
-                        {
-                            "name": "beta",
-                            "path": "src/beta",
-                            "email": "@beta",
-                            "status": "active",
-                            "profile": "library",
-                            "description": "test",
-                            "created": "2026-01-02",
-                            "last_active": "2026-01-02",
-                        },
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        result = backfill_owner_and_registry_id(reg)
-        assert result is True
-
-        data = json.loads(reg.read_text(encoding="utf-8"))
-        alpha_entry = next(b for b in data["branches"] if b["name"] == "alpha")
-        beta_entry = next(b for b in data["branches"] if b["name"] == "beta")
-
-        assert len(alpha_entry["registry_id"]) == 36
-        assert len(beta_entry["registry_id"]) == 36
-        assert alpha_entry["registry_id"] != beta_entry["registry_id"]
-
-    def test_remints_duplicate_registry_ids(self, tmp_path):
-
-        shared_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-        reg = tmp_path / "TEST_REGISTRY.json"
-        reg.write_text(
-            json.dumps(
-                {
-                    "metadata": {"version": "1.0.0", "last_updated": "2026-07-10", "total_branches": 2},
-                    "branches": [
-                        {
-                            "name": "alpha",
-                            "path": "src/alpha",
-                            "email": "@alpha",
-                            "status": "active",
-                            "profile": "library",
-                            "description": "test",
-                            "created": "2026-01-01",
-                            "last_active": "2026-01-01",
-                            "registry_id": shared_id,
-                        },
-                        {
-                            "name": "beta",
-                            "path": "src/beta",
-                            "email": "@beta",
-                            "status": "active",
-                            "profile": "library",
-                            "description": "test",
-                            "created": "2026-01-02",
-                            "last_active": "2026-01-02",
-                            "registry_id": shared_id,
-                        },
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        result = backfill_owner_and_registry_id(reg)
-        assert result is True
-
-        data = json.loads(reg.read_text(encoding="utf-8"))
-        ids = [b["registry_id"] for b in data["branches"]]
-        # Measured 2026-09-08: both entries are re-minted as uuid4, neither keeps the
-        # shared id. The old `or` passed on a half-cured registry this lane never emits.
-        assert ids[0] != ids[1]
-        assert shared_id not in ids, f"a duplicate registry_id survived the backfill: {ids}"
-        assert [len(i) for i in ids] == [36, 36], ids
-
-    def test_noop_when_already_unique(self, tmp_path):
-
-        reg = tmp_path / "TEST_REGISTRY.json"
-        reg.write_text(
-            json.dumps(
-                {
-                    "metadata": {"version": "1.0.0", "last_updated": "2026-07-10", "total_branches": 1},
-                    "branches": [
-                        {
-                            "name": "devpulse",
-                            "path": "src/devpulse",
-                            "email": "@devpulse",
-                            "status": "active",
-                            "profile": "library",
-                            "description": "test",
-                            "created": "2026-01-01",
-                            "last_active": "2026-01-01",
-                            "owner": True,
-                            "registry_id": "unique-uuid-dp",
-                        },
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        result = backfill_owner_and_registry_id(reg)
-        assert result is False
-
-    def test_seats_owner_when_missing(self, tmp_path):
-
-        reg = tmp_path / "TEST_REGISTRY.json"
-        reg.write_text(
-            json.dumps(
-                {
-                    "metadata": {"version": "1.0.0", "last_updated": "2026-07-10", "total_branches": 1},
-                    "branches": [
-                        {
-                            "name": "alpha",
-                            "path": "src/alpha",
-                            "email": "@alpha",
-                            "status": "active",
-                            "profile": "library",
-                            "description": "test",
-                            "created": "2026-01-01",
-                            "last_active": "2026-01-01",
-                            "registry_id": "unique-alpha-id",
-                        },
-                    ],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        result = backfill_owner_and_registry_id(reg)
-        assert result is True
-
-        data = json.loads(reg.read_text(encoding="utf-8"))
-        assert data["branches"][0].get("owner") is True
 
 
 class TestAddToRegistryMintsPerCitizenUid:

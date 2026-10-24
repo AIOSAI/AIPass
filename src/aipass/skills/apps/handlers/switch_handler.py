@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch_handler.py
 # Description: Per-skill off-switch — state, declaration, systemd actuation
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -174,14 +174,15 @@ def _discovered_skills() -> List[dict]:
     return build_registry(get_search_paths(), discover_skills_in_path)
 
 
-def declared_units(skill_name: str) -> List[str]:
+def declared_units(skill_name: str, registry: List[dict] | None = None) -> List[str]:
     """Return the systemd user units a skill declares as its own.
 
-    Read from frontmatter, not load_skill: the switch must never import or run a skill's code."""
+    Read from frontmatter, not load_skill: the switch must never import or run a skill's code.
+    Pass a registry already built to skip a discovery per call."""
     from aipass.skills.apps.handlers.discovery_handler import parse_frontmatter
-    from aipass.skills.apps.handlers.loader_handler import find_skill_in_registry
+    from aipass.skills.apps.handlers.registry import get_skill
 
-    entry = find_skill_in_registry(skill_name, _discovered_skills())
+    entry = get_skill(skill_name, registry if registry is not None else _discovered_skills())
     if entry is None:
         return []
 
@@ -321,14 +322,15 @@ def switch_rows() -> List[Dict[str, Any]]:
 
     State and machine are reported separately: an off skill with live units is the case to catch."""
     skills = read_state()
+    registry = _discovered_skills()
     rows = []
 
-    for skill in _discovered_skills():
+    for skill in registry:
         name = skill["name"]
         recorded = skills.get(name)
         entry = recorded if isinstance(recorded, dict) else {}
         enabled = bool(entry.get("enabled", True))
-        units = declared_units(name)
+        units = declared_units(name, registry)
 
         rows.append(
             {

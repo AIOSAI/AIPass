@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for module and command discovery
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-14
-# Modified: 2026-10-13
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/discovery.py and the discovery and module registry handlers it drives."""
@@ -26,6 +26,7 @@ from aipass.drone.apps.handlers.discovery_handler import (
     get_help as handler_get_help,
     get_entry_point,
     discover_modules as handler_discover_modules,
+    get_system_help as handler_get_system_help,
 )
 from aipass.drone.apps.handlers.exceptions import (
     BranchNotFoundError,
@@ -158,6 +159,19 @@ class TestParseHelpForCommands:
 
         assert "run" in result
         assert "test" in result
+
+    def test_a_line_merely_containing_commands_is_not_a_header(self):
+        """A command whose description says "commands" is kept; a usage line mentioning subcommands opens nothing."""
+        help_text = (
+            "Usage: python tool.py, run with subcommands below\n"
+            "  python      Not a command\n"
+            "\n"
+            "Commands:\n"
+            "  audit       Audit all commands\n"
+            "  list        List things\n"
+        )
+
+        assert parse_help_for_commands(help_text) == ["audit", "list"]
 
     def test_skips_options_flags(self):
         """Should not include lines starting with - as commands."""
@@ -491,6 +505,26 @@ class TestOrchestrationGetHelp:
 # =============================================================================
 # orchestration layer: discovery.get_system_help tests
 # =============================================================================
+
+
+class TestHandlerGetSystemHelp:
+    """Tests for discovery_handler.get_system_help()."""
+
+    def test_a_branch_outside_the_local_registry_is_included(self):
+        """Each branch is looked up the way routing does, so a home or declared-root branch is not skipped."""
+        found = HelpResult(branch="far_branch", command=None, text="help", commands_found=[])
+        with (
+            patch(
+                "aipass.drone.apps.handlers.registry_handler.get_branch_by_name",
+                side_effect=lambda name: {"path": "/far"} if name == "far_branch" else None,
+            ),
+            patch("aipass.drone.apps.handlers.registry_handler.load_registry", return_value={"branches": {}}),
+            patch("aipass.drone.apps.handlers.discovery_handler.get_help", return_value=found) as help_call,
+        ):
+            result = handler_get_system_help(["@far_branch"])
+
+        assert result == {"far_branch": found}
+        help_call.assert_called_once_with("/far", "far_branch")
 
 
 class TestOrchestrationGetSystemHelp:

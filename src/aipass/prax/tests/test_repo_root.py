@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -28,12 +28,10 @@
 # seedgo: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
-import json
 import os
 import subprocess
 import sys
 import textwrap
-from datetime import datetime
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from unittest.mock import MagicMock
 
@@ -41,7 +39,6 @@ import pytest
 
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
 from aipass.prax.apps.handlers.config import load as load_mod
-from aipass.prax.apps.handlers.dashboard import agent_status_writer
 from aipass.prax.apps.handlers.dashboard import refresh as refresh_mod
 from aipass.prax.apps.handlers.dashboard import status as status_mod
 from aipass.prax.apps.handlers.logging import introspection
@@ -971,159 +968,3 @@ class TestACallerNameIsNotAlwaysAModuleName:
             "realpath-denied": "DIED",
             "ntpath-shaped": "DIED",
         }, f"the Windows emulation does not read like the Windows runner did: {verdicts}"
-
-
-class TestRegistryRowsResolveAgainstTheRepoRoot:
-    """agent_status_writer: the same defect one door along.
-
-    Registry rows are repo-relative; unjoined, a row resolves against the process cwd, dropping the branch
-    or matching a look-alike. Read through the section builder: a reported lock is a path it resolved.
-    """
-
-    DEAD_PID = 999999999
-
-    @staticmethod
-    def _lock(branch_dir: Path) -> None:
-        """Lay a dispatch lock of a process that cannot be alive."""
-        mail = branch_dir / "ai_mail.local"
-        mail.mkdir(parents=True, exist_ok=True)
-        (mail / ".dispatch.lock").write_text(
-            json.dumps(
-                {
-                    "pid": TestRegistryRowsResolveAgainstTheRepoRoot.DEAD_PID,
-                    "timestamp": datetime.now().isoformat(),
-                    "branch": branch_dir.name,
-                }
-            ),
-            encoding="utf-8",
-        )
-
-    @staticmethod
-    def _registry(repo: Path, name: str, row: str) -> None:
-        repo.mkdir(parents=True, exist_ok=True)
-        (repo / "AIPASS_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": name, "path": row}]}), encoding="utf-8"
-        )
-
-    def _world(self, tmp_path, monkeypatch):
-        """A repo root holding one relative registry row, with the process standing elsewhere."""
-        repo = tmp_path / "checkout"
-        self._registry(repo, "somebranch", "src/aipass/somebranch")
-        (repo / "src" / "aipass" / "somebranch").mkdir(parents=True)
-
-        elsewhere = tmp_path / "elsewhere"
-        elsewhere.mkdir()
-        monkeypatch.chdir(elsewhere)
-        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
-
-        return repo, elsewhere
-
-    @staticmethod
-    def _empty_proc(tmp_path: Path) -> Path:
-        """A proc tree with no PIDs in it, so the lock's PID reads dead on every platform."""
-        proc = tmp_path / "proc"
-        proc.mkdir(exist_ok=True)
-        return proc
-
-    def test_a_relative_row_resolves_against_the_repo_root(self, tmp_path, monkeypatch):
-        repo, _ = self._world(tmp_path, monkeypatch)
-        self._lock(repo / "src" / "aipass" / "somebranch")
-
-        section = agent_status_writer.build_agent_status_section(proc_root=self._empty_proc(tmp_path))
-
-        assert [a["branch"] for a in section["stale_agents"]] == ["somebranch"]
-
-    def test_a_look_alike_subtree_under_the_cwd_is_not_the_branch(self, tmp_path, monkeypatch):
-        """The half a plain exists() check cannot see: a decoy under the cwd is read silently."""
-        _, elsewhere = self._world(tmp_path, monkeypatch)
-        self._lock(elsewhere / "src" / "aipass" / "somebranch")
-
-        section = agent_status_writer.build_agent_status_section(proc_root=self._empty_proc(tmp_path))
-
-        assert section["stale_agents"] == []
-        assert section["active_agents"] == []
-
-    def test_an_absolute_row_is_taken_as_written(self, tmp_path, monkeypatch):
-        """External projects register absolute rows — the join must not double them."""
-        outside = tmp_path / "other_project" / "branch"
-        outside.mkdir(parents=True)
-        self._lock(outside)
-        repo = tmp_path / "checkout"
-        self._registry(repo, "outsider", str(outside))
-        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
-
-        section = agent_status_writer.build_agent_status_section(proc_root=self._empty_proc(tmp_path))
-
-        assert [a["branch"] for a in section["stale_agents"]] == ["outsider"]
-
-
-class TestAPidNobodyCouldCheckIsNeverCalledDead:
-    """agent_status_writer filed a PID it could not check as dead_process.
-
-    A PID that cannot be checked reads unchecked; the proc tree comes in through proc_root.
-    """
-
-    PID = 4242
-
-    def _section(self, tmp_path, monkeypatch, proc_root, minutes_ago=1):
-        world = TestRegistryRowsResolveAgainstTheRepoRoot
-        repo = tmp_path / "checkout"
-        world._registry(repo, "somebranch", "src/aipass/somebranch")
-        mail = repo / "src" / "aipass" / "somebranch" / "ai_mail.local"
-        mail.mkdir(parents=True)
-        started = datetime.fromtimestamp(datetime.now().timestamp() - minutes_ago * 60)
-        (mail / ".dispatch.lock").write_text(
-            json.dumps({"pid": self.PID, "timestamp": started.isoformat(), "branch": "somebranch"}),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
-        return agent_status_writer.build_agent_status_section(proc_root=proc_root)
-
-    def _proc(self, tmp_path):
-        proc = tmp_path / "proc"
-        (proc / str(self.PID)).mkdir(parents=True)
-        return proc
-
-    def test_a_live_claude_pid_is_active_and_checked(self, tmp_path, monkeypatch):
-        proc = self._proc(tmp_path)
-        (proc / str(self.PID) / "cmdline").write_bytes(b"claude\x00--print\x00")
-        section = self._section(tmp_path, monkeypatch, proc)
-        assert section["stale_agents"] == []
-        assert [(a["branch"], a.get("status"), a["pid_checked"]) for a in section["active_agents"]] == [
-            ("somebranch", None, True)
-        ]
-
-    def test_a_missing_pid_is_dead(self, tmp_path, monkeypatch):
-        section = self._section(tmp_path, monkeypatch, tmp_path / "proc")
-        assert section["active_agents"] == []
-        assert [(a["status"], a["pid_checked"]) for a in section["stale_agents"]] == [("dead_process", True)]
-
-    def test_an_unreadable_pid_is_active_and_unchecked(self, tmp_path, monkeypatch):
-        """cmdline is a directory here, so the read raises whatever the platform raises."""
-        proc = self._proc(tmp_path)
-        (proc / str(self.PID) / "cmdline").mkdir()
-        section = self._section(tmp_path, monkeypatch, proc)
-        assert section["stale_agents"] == []
-        assert [(a.get("status"), a["pid_checked"]) for a in section["active_agents"]] == [("unchecked", False)]
-
-    def test_no_proc_filesystem_is_unchecked(self, tmp_path, monkeypatch):
-        section = self._section(tmp_path, monkeypatch, None)
-        assert section["stale_agents"] == []
-        assert [(a.get("status"), a["pid_checked"]) for a in section["active_agents"]] == [("unchecked", False)]
-
-    def test_an_unreadable_lock_is_shown_not_hidden(self, tmp_path, monkeypatch):
-        """An unreadable lock read as no lock, so the dispatch vanished from the card."""
-        self._section(tmp_path, monkeypatch, None)  # lays the world and a readable lock
-        lock = tmp_path / "checkout" / "src" / "aipass" / "somebranch" / "ai_mail.local" / ".dispatch.lock"
-        lock.write_text("<<<not json>>>", encoding="utf-8")
-
-        section = agent_status_writer.build_agent_status_section(proc_root=None)
-
-        assert section["active_agents"] == []
-        assert section["stale_agents"] == [{"branch": "somebranch", "status": "unreadable_lock", "pid_checked": False}]
-
-    def test_an_unchecked_pid_past_the_threshold_is_overtime_not_dead(self, tmp_path, monkeypatch):
-        minutes = agent_status_writer.STALE_THRESHOLD_MINUTES + 30
-        section = self._section(tmp_path, monkeypatch, None, minutes_ago=minutes)
-        assert section["active_agents"] == []
-        assert [(a["status"], a["pid_checked"]) for a in section["stale_agents"]] == [("overtime", False)]

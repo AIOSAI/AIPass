@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_drift_check.py
 # Description: v5 - does a patch's replacement match its target (whole module; function over a class)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Does this patch replace a function, or a whole module?
@@ -126,16 +126,30 @@ def _imported_module_names(tree: ast.Module, modules: Set[str]) -> Set[str]:
         if isinstance(node, ast.Import):
             names.update(_plain_import_names(node, modules))
         elif isinstance(node, ast.ImportFrom):
-            names.update(alias.asname or alias.name for alias in node.names if alias.name in modules)
+            prefix = f"{node.module}." if node.module else ""
+            names.update(
+                alias.asname or alias.name for alias in node.names if _names_a_module(prefix + alias.name, modules)
+            )
 
     return names
+
+
+def _names_a_module(dotted: str, modules: Set[str]) -> bool:
+    """Whether a dotted import names a file here: two trailing segments must match, never a bare stem.
+
+    `from aipass.prax import logger` is another package's logger, not this branch's logger.py.
+    """
+    parts = dotted.split(".")
+    if len(parts) == 1:
+        return dotted in modules
+    return any(".".join(parts[start:]) in modules for start in range(len(parts) - 1))
 
 
 def _plain_import_names(node: ast.Import, modules: Set[str]) -> Set[str]:
     """The local names a plain `import x.y` statement binds to a module."""
     names: Set[str] = set()
     for alias in node.names:
-        if alias.name in modules or alias.name.split(".")[-1] in modules:
+        if _names_a_module(alias.name, modules):
             names.add(alias.asname or alias.name.split(".")[0])
     return names
 

@@ -371,13 +371,15 @@ if sys.platform != "win32":
     pid, _ = os.waitpid(-1, os.WNOHANG)
 ```
 
-### Violation — os.kill without exception handling
+### Violation — os.kill(pid, 0) as a liveness probe
 ```python
-os.kill(pid, 0)  # Crashes on Windows with WinError 87
+os.kill(pid, 0)  # On Windows signal 0 terminates the target process
 ```
 
-### Fix — wrap in try/except
+### Fix — platform guard (try/except does not help: the process is already dead)
 ```python
+if sys.platform == "win32":
+    return _alive_via_openprocess(pid)
 try:
     os.kill(pid, 0)
 except OSError:

@@ -181,6 +181,14 @@ def _list_collections(db_path=None):
     return {"success": True, "collections": names, "count": len(names)}
 
 
+def _count_vectors(collection_name, db_path=None):
+    """How many vectors one collection holds; 0 for a collection that does not exist."""
+    client = _get_client(db_path)
+    if collection_name not in [col.name for col in client.list_collections()]:
+        return {"success": True, "count": 0, "exists": False}
+    return {"success": True, "count": client.get_collection(name=collection_name).count(), "exists": True}
+
+
 def _source_matches(source, pattern):
     """Whether pattern occurs in source at a non-alphanumeric boundary (DPLAN-0012 must not match TDPLAN-0012)."""
     if not source or not pattern:
@@ -397,6 +405,8 @@ def main(stdin: TextIO | None = None):
             )
         elif operation == "list_collections":
             result = _list_collections(db_path=input_data.get("db_path"))
+        elif operation == "count_vectors":
+            result = _count_vectors(input_data.get("collection_name"), db_path=input_data.get("db_path"))
         elif operation == "search_vectors":
             result = _search_vectors(
                 query_embedding=input_data.get("query_embedding"),

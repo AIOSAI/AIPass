@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
-from aipass.cli.apps.modules import console, success
+from aipass.cli.apps.modules import console, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -39,8 +39,8 @@ from aipass.aipass.apps.handlers.provider_wire import (
     settings_diff,
     settings_gaps,
 )
-from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL
-from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN
+from aipass.aipass.apps.handlers.settings_backup import DOOR_DOCTOR_FIX, DOOR_INSTALL, SettingsBackupError
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 
 
 # Re-exported: callers reach the stale-deny migration through this module.
@@ -177,8 +177,13 @@ def fix_provider_settings(
     """--fix's settings step: plan, show, ask once, write — or say why nothing was written.
 
     The install door never asks, ``--yes`` skips the question, no tty without ``--yes`` writes nothing.
+    An unreadable or since-changed settings file is a FAIL row and nothing is written.
     """
-    plans = plan_settings_fix(manifest_path)
+    try:
+        plans = plan_settings_fix(manifest_path)
+    except SettingsBackupError as exc:
+        logger.error("[doctor] settings plan refused: %s", exc)
+        return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_FAIL, str(exc), "Repair the settings JSON, then re-run")]
     if not plans:
         return []
     if door == DOOR_INSTALL:
@@ -195,14 +200,22 @@ def fix_provider_settings(
             _print_manual_wire_warning([], [], [], [], [])
             console.print(NOTHING_CHANGED)
             return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_WARN, NOT_APPLIED_DECLINED, YES_COMMAND)]
-    _apply_settings_plans(plans, door, consent)
+    try:
+        _apply_settings_plans(plans, door, consent)
+    except SettingsBackupError as exc:
+        logger.error("[doctor] settings write refused: %s", exc)
+        return [SettingsCheckResult(SETTINGS_FIX_LABEL, GLYPH_FAIL, str(exc), "Re-run aipass doctor --fix")]
     json_handler.log_operation("settings_fix", {"door": door, "consent": consent, "plans": len(plans)})
     return []
 
 
 def settings_fix_report(manifest_path: Optional[Path], yes: bool = False) -> dict:
     """The settings plan for ``doctor --fix --json``: written only with ``--yes`` (``applied``)."""
-    plans = plan_settings_fix(manifest_path)
+    try:
+        plans = plan_settings_fix(manifest_path)
+    except SettingsBackupError as exc:
+        logger.error("[doctor] settings plan refused: %s", exc)
+        return {"planned": [], "notes": [], "diff": [], "applied": False, "error": str(exc)}
     report = {
         "planned": [line for plan in plans for line in plan.planned],
         "notes": [note for plan in plans for note in plan.notes],
@@ -234,7 +247,12 @@ def _prompt_auto_wire(
         len(missing_deny) + len(missing_ask),
         len(missing_settings),
     )
-    plan = plan_wire_provider(manifest_path, settings_path)
+    try:
+        plan = plan_wire_provider(manifest_path, settings_path)
+    except SettingsBackupError as exc:
+        logger.error("[doctor] auto-wire refused: %s", exc)
+        warning(str(exc))
+        plan = None
     consent: Optional[str] = None
     if plan is not None and plan.planned:
         count = _render_settings_plan([plan])
@@ -245,9 +263,13 @@ def _prompt_auto_wire(
             consent = _ask_apply(count)
 
     if plan is not None and consent is not None:
-        for action in apply_settings_plan(plan, consent=consent):
-            success(action)
-        return True
+        try:
+            for action in apply_settings_plan(plan, consent=consent):
+                success(action)
+            return True
+        except SettingsBackupError as exc:
+            logger.error("[doctor] auto-wire write refused: %s", exc)
+            warning(str(exc))
 
     _print_manual_wire_warning(missing_hooks, missing_env, missing_deny, missing_ask, missing_settings)
     return False

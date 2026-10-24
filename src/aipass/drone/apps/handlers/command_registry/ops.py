@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ops.py
 # Description: Registry CRUD operations for custom command shortcuts
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Registry CRUD Operations for Custom Commands.
@@ -15,11 +15,18 @@ The registry maps shortcut names to full drone commands (``audit`` for
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from aipass.prax import logger
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # type: ignore[assignment]
+    logger.info("command registry: fcntl unavailable (Windows) — concurrent writers are not serialised")
 from aipass.drone.apps.handlers.exceptions import RegistryError
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.module_root import module_file
@@ -54,8 +61,24 @@ def _registry_path() -> Path:
     return REGISTRY_FILE
 
 
+@contextmanager
+def _registry_lock() -> Iterator[None]:
+    """Hold an exclusive lock on a sibling .lock file so load+modify+save is not interleaved."""
+    path = _registry_path()
+    if fcntl is None:
+        yield
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a", encoding="utf-8") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def load_registry() -> dict[str, Any]:
-    """Load the command registry from disk, auto-creating if missing.
+    """Load the command registry from disk; a missing file is an empty registry, and nothing is written.
 
     Raises RegistryError for an unreadable, non-JSON or non-object file, and
     writes nothing: recreating would bury damaged commands someone could repair.
@@ -63,10 +86,7 @@ def load_registry() -> dict[str, Any]:
     path = _registry_path()
 
     if not path.exists():
-        logger.info("[%s] Registry not found, creating at %s", MODULE_NAME, path)
-        registry = _empty_registry()
-        save_registry(registry)
-        return registry
+        return _empty_registry()
 
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -103,19 +123,16 @@ def save_registry(data: dict[str, Any]) -> bool:
     data["metadata"]["last_updated"] = _today()
     data["metadata"]["command_count"] = len(data["commands"])
 
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, ensure_ascii=False)
-        json_handler.log_operation(
-            "save_registry",
-            {"command_count": data["metadata"]["command_count"]},
-            module_name=MODULE_NAME,
-        )
-        return True
-    except OSError as exc:
-        logger.error("[%s] Failed to save registry: %s", MODULE_NAME, exc)
+    # Atomic replace: a concurrent reader never sees an empty or half-written file.
+    if not json_handler.write_json(path, data):
+        logger.error("[%s] Failed to save registry %s", MODULE_NAME, path)
         return False
+    json_handler.log_operation(
+        "save_registry",
+        {"command_count": data["metadata"]["command_count"]},
+        module_name=MODULE_NAME,
+    )
+    return True
 
 
 def add_command(
@@ -127,23 +144,24 @@ def add_command(
     source_branch: str = "",
 ) -> bool:
     """Add a new custom command to the registry; False if the name exists or the save fails."""
-    registry = load_registry()
+    with _registry_lock():
+        registry = load_registry()
 
-    if name in registry["commands"]:
-        logger.warning("[%s] Command '%s' already exists", MODULE_NAME, name)
-        return False
+        if name in registry["commands"]:
+            logger.warning("[%s] Command '%s' already exists", MODULE_NAME, name)
+            return False
 
-    registry["commands"][name] = {
-        "name": name,
-        "target": target,
-        "command": command,
-        "args": args if args is not None else [],
-        "description": description,
-        "created": _today(),
-        "source_branch": source_branch,
-    }
+        registry["commands"][name] = {
+            "name": name,
+            "target": target,
+            "command": command,
+            "args": args if args is not None else [],
+            "description": description,
+            "created": _today(),
+            "source_branch": source_branch,
+        }
 
-    result = save_registry(registry)
+        result = save_registry(registry)
     if result:
         json_handler.log_operation(
             "add_command",
@@ -155,15 +173,16 @@ def add_command(
 
 def remove_command(name: str) -> bool:
     """Remove a custom command from the registry; False if not found or the save fails."""
-    registry = load_registry()
+    with _registry_lock():
+        registry = load_registry()
 
-    if name not in registry["commands"]:
-        logger.warning("[%s] Command '%s' not found", MODULE_NAME, name)
-        return False
+        if name not in registry["commands"]:
+            logger.warning("[%s] Command '%s' not found", MODULE_NAME, name)
+            return False
 
-    del registry["commands"][name]
+        del registry["commands"][name]
 
-    result = save_registry(registry)
+        result = save_registry(registry)
     if result:
         json_handler.log_operation(
             "remove_command",
@@ -171,32 +190,3 @@ def remove_command(name: str) -> bool:
             module_name=MODULE_NAME,
         )
     return result
-
-
-def update_command(name: str, **kwargs: Any) -> bool:
-    """Update fields of an existing custom command; False if not found or the save fails."""
-    registry = load_registry()
-
-    if name not in registry["commands"]:
-        logger.warning("[%s] Command '%s' not found for update", MODULE_NAME, name)
-        return False
-
-    allowed_keys = {"target", "command", "args", "description", "source_branch"}
-    for key, value in kwargs.items():
-        if key in allowed_keys:
-            registry["commands"][name][key] = value
-
-    result = save_registry(registry)
-    if result:
-        json_handler.log_operation(
-            "update_command",
-            {"name": name, "updated_fields": list(kwargs.keys())},
-            module_name=MODULE_NAME,
-        )
-    return result
-
-
-def command_exists(name: str) -> bool:
-    """Check whether a custom command exists in the registry."""
-    registry = load_registry()
-    return name in registry["commands"]

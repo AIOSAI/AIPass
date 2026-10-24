@@ -73,7 +73,6 @@ KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku", "fable"})
 # The README names this default; change both together.
 DEFAULT_MODEL = "opus"
 
-# Decides the wake gate, not the model.
 MANAGER_CLASS = "manager"
 
 # Fable is granted by name, not class. Only the fallback: the live grant is read from CONFIG_FILE.
@@ -249,7 +248,13 @@ def _load_config() -> dict:
     return config
 
 
-def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
+def prepend_path(spawn_env: dict, directory: str) -> None:
+    """Put directory first on PATH once: background launchers (trigger, prax watchdog) run with a restricted one."""
+    if directory not in spawn_env.get("PATH", ""):
+        spawn_env["PATH"] = directory + os.pathsep + spawn_env.get("PATH", "")
+
+
+def spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, lock_file_path, custom_message, status):
     """Spawn monitor in its own systemd unit to survive cgroup cleanup.
 
     KillMode=control-group would SIGTERM the detached monitor when a oneshot service exits.
@@ -284,11 +289,14 @@ def _spawn_in_systemd_scope(monitor_cmd, branch_path, spawn_env, branch_email, l
 
     try:
         result = subprocess.run(systemd_cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode != 0:
-            logger.warning("[wake] systemd-run failed (rc=%d): %s", result.returncode, result.stderr.strip())
-            return False
     except (subprocess.SubprocessError, OSError) as e:
         logger.warning("[wake] systemd-run failed: %s", e)
+        return False
+    finally:
+        # EnvironmentFile is read at unit start; the environment copy must not outlive the launch.
+        env_file.unlink(missing_ok=True)
+    if result.returncode != 0:
+        logger.warning("[wake] systemd-run failed (rc=%d): %s", result.returncode, result.stderr.strip())
         return False
 
     try:
@@ -421,8 +429,7 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
         ]
         if candidates:
             if len(candidates) > 1:
-                # The gateway yields roots in declaration order, so [0] is the first-declared claimant.
-                # Still an error: two roots claiming one address is something someone should know.
+                # [0] is the first-declared root; still an error, two roots claiming one address must be seen.
                 logger.error(
                     "[wake] %s is claimed by %d declared roots — resolving to %s by DECLARATION ORDER "
                     "(first-declared root wins, per the fleet ruling). Other claimants: %s",
@@ -682,7 +689,6 @@ def wake_branch(
     else:
         prompt = f"{DEFAULT_PROMPT} "
     # Never tell the agent to delete its lock: the monitor owns cleanup, and two monitors would race.
-    # The spec-first line leads so it is read first.
     prompt += (
         "Before you build: read the seedgo standards rows for what you touch "
         "(src/aipass/seedgo/docs/aipass_standards.md; drone @seedgo checklist names the "
@@ -751,18 +757,12 @@ def wake_branch(
     spawn_env = os.environ.copy()
     spawn_env["AIPASS_SPAWNED"] = "1"
     spawn_env["AIPASS_SESSION_TYPE"] = "dispatched"
-    venv_bin = str(_REPO_ROOT / ".venv" / "bin")
-    if venv_bin not in spawn_env.get("PATH", ""):
-        spawn_env["PATH"] = venv_bin + ":" + spawn_env.get("PATH", "")
-    # Background launchers (trigger, prax watchdog) may run with a restricted PATH.
-    local_bin = str(Path.home() / ".local" / "bin")
-    if local_bin not in spawn_env.get("PATH", ""):
-        spawn_env["PATH"] = local_bin + ":" + spawn_env.get("PATH", "")
+    prepend_path(spawn_env, str(_REPO_ROOT / ".venv" / "bin"))
+    prepend_path(spawn_env, str(Path.home() / ".local" / "bin"))
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
 
-    # Lock BEFORE spawn (TOCTOU).
     acquired, lock_msg = acquire_lock(branch_path, os.getpid())
     if not acquired:
         status.fail("lock-acquire", f"Lock failed: {lock_msg}")
@@ -792,7 +792,7 @@ def wake_branch(
     spawned_via_scope = False
     monitor_pid = 0
     if os.environ.get("INVOCATION_ID") and shutil.which("systemd-run"):
-        spawned_via_scope = _spawn_in_systemd_scope(
+        spawned_via_scope = spawn_in_systemd_scope(
             monitor_cmd,
             branch_path,
             spawn_env,
@@ -888,73 +888,3 @@ def wake_branch(
         logger.info("[wake] Notification feed unavailable")
 
     return status, True
-
-
-if __name__ == "__main__":
-    args = sys.argv[1:]
-
-    if not args or args[0] in ("--help", "-h"):
-        print('Usage: wake.py [--fresh] [--auto] [--sender @branch] [--model sonnet|opus] @branch ["optional message"]')
-        print("  Manually spawn a Claude agent at a branch (daemon not required)")
-        print()
-        print("Flags:")
-        print("  --fresh          Start fresh session (claude -p) instead of resuming (claude -c -p)")
-        print("  --auto           Respect autonomous_pause (used by daemon). Manual wake ignores it.")
-        print("  --sender @branch Set return-to-sender for bounce emails (default: @devpulse).")
-        print("                   Privilege-bearing values must match the verified caller.")
-        print("  --model NAME     Model to use: opus (default), sonnet, haiku, or full model ID")
-        print()
-        print("Output: Step-by-step status of the dispatch pipeline:")
-        print("  ✅ resolve → @branch found at /path/to/branch")
-        print("  ✅ lock → No active lock — agent is sleeping")
-        print("  ✅ spawn → Monitor started (PID 12345)")
-        print("  ✅ alive → Agent responding (PID 12345 alive)")
-        print()
-        print("On failure, a bounce email is sent to --sender automatically.")
-        print()
-        print("Examples:")
-        print("  wake.py @flow                    # Default: check inbox (resume)")
-        print("  wake.py --fresh @flow            # Fresh session, check inbox")
-        print('  wake.py @vera "Review NOTEPAD"   # Custom prompt (resume)')
-        print("  wake.py --fresh --sender @vera @seedgo  # Fresh, bounce to @vera")
-        sys.exit(0)
-
-    use_fresh = "--fresh" in args
-    use_auto = "--auto" in args
-    use_sender = "@devpulse"
-    use_model = None
-
-    if "--sender" in args:
-        idx = args.index("--sender")
-        if idx + 1 < len(args):
-            use_sender = args[idx + 1]
-            args = args[:idx] + args[idx + 2 :]
-
-    if "--model" in args:
-        idx = args.index("--model")
-        if idx + 1 < len(args):
-            use_model = args[idx + 1]
-            args = args[:idx] + args[idx + 2 :]
-
-    args = [a for a in args if a not in ("--fresh", "--auto")]
-
-    if not args:
-        print("❌ Missing branch argument. Use --help for usage.")
-        sys.exit(1)
-
-    branch = args[0]
-    message = args[1] if len(args) > 1 else None
-
-    # --sender is privilege-bearing, so it goes through the verified-caller rail.
-    from aipass.ai_mail.apps.handlers.users.verified_caller import resolve_wake_sender, sender_claim_refusal
-
-    claim_refusal = sender_claim_refusal(use_sender)
-    if claim_refusal:
-        print(f"❌ Wake refused: {claim_refusal}", file=sys.stderr)
-        sys.exit(2)
-
-    dispatch_status, success = wake_branch(
-        branch, message, fresh=use_fresh, auto=use_auto, sender=resolve_wake_sender(use_sender), model=use_model
-    )
-    print(dispatch_status.format())
-    sys.exit(0 if success else 1)

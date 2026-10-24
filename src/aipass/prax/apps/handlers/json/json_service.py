@@ -3,7 +3,7 @@
 # Description: The fleet's one JSON handler service (prax-owned)
 # Version: 1.2.0
 # Created: 2026-09-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The fleet's one JSON handler implementation (DPLAN-0325).
@@ -35,6 +35,7 @@ _REPLACE_BACKOFF_SECONDS = 0.005
 _NEW_DOCUMENT_MODE = 0o666
 
 _STAGE_NAME_ATTEMPTS = 8
+_ORPHAN_AGE_SECONDS = 3600
 
 # pid + counter, never the clock: callers stub this module's `time` to skip the retry sleep.
 _stage_serial = itertools.count()
@@ -88,6 +89,7 @@ def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
     Beside the target: os.replace is atomic only within one filesystem. os.open, not
     NamedTemporaryFile: tempfile creates 0600 and os.replace carries that mode onto the target.
     """
+    _sweep_orphans(directory)
     fd = -1
     temp_path = ""
     for attempt in range(_STAGE_NAME_ATTEMPTS):
@@ -119,6 +121,21 @@ def _stage(directory: Path, content: str, mode: Optional[int] = None) -> str:
         raise
 
     return temp_path
+
+
+def _sweep_orphans(directory: Path) -> None:
+    """Best effort: remove staged files a killed writer left behind over an hour ago."""
+    # datetime, not time: callers stub this module's `time`.
+    cutoff = datetime.now().timestamp() - _ORPHAN_AGE_SECONDS
+    try:
+        for orphan in directory.glob(".[0-9]*_[0-9]*.tmp"):
+            try:
+                if orphan.stat().st_mtime < cutoff:
+                    orphan.unlink()
+            except OSError as exc:
+                logger.info("json_service: orphan sweep skipped '%s': %s", orphan, exc)
+    except OSError as exc:
+        logger.info("json_service: orphan sweep of '%s' failed: %s", directory, exc)
 
 
 def _discard(temp_path: str) -> None:
@@ -185,7 +202,7 @@ class JsonHandle:
 
     @property
     def json_dir(self) -> Path:
-        """The branch's json directory, computed per access so a later AIPASS_TEST_LOG_DIR redirects; empty is absence."""
+        """The branch's json directory, computed per access so AIPASS_TEST_LOG_DIR redirects; empty is absence."""
         name = self.branch_root.name
         test_dir = os.environ.get("AIPASS_TEST_LOG_DIR")
         if test_dir:

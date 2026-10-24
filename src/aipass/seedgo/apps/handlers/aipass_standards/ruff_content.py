@@ -1,23 +1,23 @@
 # =================== AIPass ====================
-# Name: ruff_check_content.py
+# Name: ruff_content.py
 # Description: Ruff Check Standards Content Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-09-25
+# Modified: 2026-10-24
 # =============================================
 
 """
 Ruff Check Standards Content Handler
 
-Provides formatted ruff_check standards content.
+Provides formatted ruff standards content.
 Module orchestrates, handler implements.
 """
 
 from aipass.seedgo.apps.handlers.json import json_handler
 
 
-def get_ruff_check_standards() -> str:
-    """Return formatted ruff_check standards content with Rich markup.
+def get_ruff_standards() -> str:
+    """Return formatted ruff standards content with Rich markup.
 
     Returns:
         str: Formatted standards text with Rich styling
@@ -34,7 +34,7 @@ def get_ruff_check_standards() -> str:
         "  undefined names, style, complexity, security, and more.",
         "",
         "  [green]Graceful degradation:[/green]",
-        "  - ruff not installed → SKIP (score 100, no penalty)",
+        "  - ruff not found (PATH or beside the interpreter) → FAIL with score 0",
         "  - subprocess timeout (60s) → FAIL with score 0",
         "  - JSON parse failure → FAIL with score 0",
         "",
@@ -55,7 +55,7 @@ def get_ruff_check_standards() -> str:
         "[bold cyan]GATING (since 2026-09-25, owner ruling 00:33):[/bold cyan]",
         "  Advisory from 2026-04-16 until CI ruff went green fleet-wide. Now the",
         "  row counts in Overall and fails on any lint OR format finding.",
-        "  Ruff not installed is a skip; a timeout is a 0.",
+        "  Ruff not found, a timeout, or unreadable output is a 0.",
         "",
         "[bold cyan]VIOLATIONS:[/bold cyan]",
         "  Violation message format:",
@@ -96,9 +96,9 @@ def get_ruff_check_standards() -> str:
         "",
         "[bold cyan]REFERENCE:[/bold cyan]",
         "  [dim]Checker: ruff_check.py[/dim]",
-        "  [dim]Standards pack: seedgo standards (ruff_check)[/dim]",
+        "  [dim]Standards pack: seedgo standards (ruff)[/dim]",
         "  [dim]Ruff docs: https://docs.astral.sh/ruff/[/dim]",
     ]
 
-    json_handler.log_operation("standard_content_queried", {"standard": "ruff_check"})
+    json_handler.log_operation("standard_content_queried", {"standard": "ruff"})
     return "\n".join(lines)

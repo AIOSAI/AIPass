@@ -19,6 +19,7 @@ from typing import Dict, Tuple, Optional, Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -57,7 +58,8 @@ def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
     subject = message.get("subject", "No Subject")
     safe_subject = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in subject)
     safe_subject = safe_subject[:50].strip()
-    filename = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{safe_subject}.json"
+    # The id keeps two same-subject messages closed in one second from overwriting each other.
+    filename = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{message.get('id') or 'noid'}_{safe_subject}.json"
 
     message["archived_at"] = timestamp.isoformat()
 
@@ -68,8 +70,11 @@ def _save_to_deleted_folder(mailbox_path: Path, message: Dict) -> Path:
     return email_file
 
 
-def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
-    """Migrate existing deleted.json to deleted/ directory on first access."""
+def _migrate_deleted_json_if_exists(mailbox_path: Path) -> Optional[int]:
+    """Migrate existing deleted.json to deleted/ directory on first access.
+
+    Returns the count moved, or None when the migration failed (the file is left in place).
+    """
     deleted_json = mailbox_path / "deleted.json"
 
     if not deleted_json.exists():
@@ -93,7 +98,7 @@ def _migrate_deleted_json_if_exists(mailbox_path: Path) -> int:
 
     except Exception as e:
         logger.warning("[cleanup] _migrate_deleted_json() failed: %s", e)
-        return 0
+        return None
 
 
 def _archive_deleted_json(mailbox_path: Path, deleted_json: Path) -> None:
@@ -220,12 +225,7 @@ def mark_as_opened(branch_path: Path, message_id: str) -> Tuple[bool, str, Optio
             sweep_closed(inbox_data, inbox_file.parent)
 
             inbox_data["total_messages"] = len(inbox_data["messages"])
-            new_count = sum(
-                1
-                for m in inbox_data["messages"]
-                if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
-            )
-            inbox_data["unread_count"] = new_count
+            inbox_data["unread_count"] = count_new(inbox_data["messages"])
 
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
@@ -275,17 +275,13 @@ def mark_as_closed_and_archive(branch_path: Path, message_id: str, skip_post_ops
             sweep_closed(inbox_data, mailbox_path)
 
             inbox_data["total_messages"] = len(inbox_data["messages"])
-            new_count = sum(
-                1
-                for m in inbox_data["messages"]
-                if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
-            )
-            inbox_data["unread_count"] = new_count
+            inbox_data["unread_count"] = count_new(inbox_data["messages"])
+
+            # Archive copy first: a failed copy after the inbox write would leave the message nowhere.
+            _save_to_deleted_folder(mailbox_path, message_to_archive)
 
             with open(inbox_file, "w", encoding="utf-8") as f:
                 json.dump(inbox_data, f, indent=2, ensure_ascii=False)
-
-            _save_to_deleted_folder(mailbox_path, message_to_archive)
 
         if not skip_post_ops:
             _update_central_stats()

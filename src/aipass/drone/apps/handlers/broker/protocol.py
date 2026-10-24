@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: protocol.py
 # Description: Typed protocol for broker IPC
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-09
-# Modified: 2026-06-09
+# Modified: 2026-10-24
 # =============================================
 
 """Typed protocol for broker IPC.
@@ -38,10 +38,10 @@ class BrokerRequest:
 
     @classmethod
     def from_bytes(cls, data: bytes) -> BrokerRequest:
-        """Deserialize from JSON bytes."""
+        """Deserialize from JSON bytes; ValueError/KeyError/TypeError/AttributeError on a malformed line."""
         d = json.loads(data)
         json_handler.log_operation("broker_request_parse", {"op": d.get("op", "")})
-        return cls(
+        req = cls(
             op=d["op"],
             path=d.get("path", ""),
             request_id=d.get("request_id", ""),
@@ -49,6 +49,10 @@ class BrokerRequest:
             branch=d.get("branch", ""),
             hmac=d.get("hmac", ""),
         )
+        for name in ("op", "path", "request_id", "branch", "hmac"):
+            if not isinstance(getattr(req, name), str):
+                raise TypeError(f"{name} must be a string")
+        return req
 
 
 @dataclass

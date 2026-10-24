@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — safe path helper, both worlds, the fence with its cwd removed
-# Version: 2.0.3
+# Version: 2.0.4
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the fence in apps/handlers/__init__.py under a dead cwd."""
@@ -44,7 +44,6 @@ PROBE_MODULES = [
     "aipass.backup.apps",
     "aipass.backup.apps.backup",
     "aipass.backup.apps.handlers",
-    "aipass.backup.apps.handlers.state.backup_timestamps",
     "aipass.backup.apps.handlers.project.setup",
     "aipass.backup.apps.handlers.project.registry",
     "aipass.backup.apps.handlers.json.json_handler",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -24,7 +24,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.router_handler import (
     caller_cwd,
-    registries_in,
+    find_project_root,
     resolve_caller_identity_signal,
 )
 
@@ -51,26 +51,8 @@ LANE_BROKER = "broker"
 
 UNKNOWN_CALLER = "unknown"
 
-# The cwd field after a delete removed the process's own cwd; "/" or the deleted
-# path would read as a real location months later.
+# The cwd field once a delete removed the cwd; "/" or the deleted path would read as a real place.
 NO_CURRENT_DIRECTORY = "<none: deleted during this operation>"
-
-
-def _find_project_root() -> Path | None:
-    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
-
-    No cwd must still reach AIPASS_HOME, so a delete of its own cwd keeps its durable record.
-    """
-    cwd = caller_cwd()
-    for parent in [cwd, *cwd.parents] if cwd is not None else []:
-        if registries_in(parent):
-            return parent.resolve()
-    aipass_home = os.environ.get("AIPASS_HOME")
-    if aipass_home:
-        home = Path(aipass_home)
-        if home.is_dir() and registries_in(home):
-            return home.resolve()
-    return None
 
 
 def _resolve_citizen_caller(cwd: Path | None) -> str:
@@ -102,7 +84,7 @@ def deletion_log_path(project_root: Path | None = None) -> Path:
     if override:
         return Path(override)
 
-    root = project_root if project_root is not None else _find_project_root()
+    root = project_root if project_root is not None else find_project_root()
     if root is None:
         return _temp_dir() / _LOG_NAME
     return root / _LOG_DIR_NAME / _LOG_NAME

@@ -151,11 +151,6 @@
       "reason": "print_branch_diagnostics() is a public API consumed by tests (test_diagnostics_audit.py). Not called in production code path."
     },
     {
-      "file": "apps/handlers/bypass/ignore_handler.py",
-      "standard": "unused_function",
-      "reason": "get_deprecated_patterns() is a public API consumed by tests (test_bypass.py). Not called in production code path."
-    },
-    {
       "file": "apps/handlers/audit/audit_display.py",
       "standard": "naming",
       "reason": "Redundant prefix is a known naming issue \u2014 rename deferred to avoid breaking imports across codebase"
@@ -178,7 +173,7 @@
     {
       "file": "apps/handlers/bypass/bypass_handler.py",
       "standard": "logged_fallback",
-      "lines": [100],
+      "lines": [78],
       "reason": "Devpulse's ruling (c), fleet green leg 15: no raise here, the verdict path stays as it is. The failure is made loud instead: it is recorded in UNREADABLE_REGISTRIES, and the checklist and the audit each print one note naming the unreadable registry (registry_notes; pinned in test_checklist and test_standards_audit)."
     },
     {
@@ -258,7 +253,7 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "windows_compat",
-      "lines": [935, 937],
+      "lines": [948, 950],
       "reason": "Test input (fleet green leg 15; re-pinned +3 leg 16): the 'aplay' lines are a quoted specimen of hooks apps/sound.py written to tmp as host_portability's input; nothing here runs aplay."
     },
     {
@@ -312,7 +307,7 @@
     {
       "file": "tests/test_aipass_standards.py",
       "standard": "through_the_command",
-      "lines": [714],
+      "lines": [727],
       "reason": "No public route (fleet green leg 15; re-pinned +3 leg 16): json_handler_check._is_canonical_shim is the sha256 gate itself; check_branch reaches it only through a whole branch tree. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -324,13 +319,13 @@
     {
       "file": "tests/test_audit_tests_lane_adapter.py",
       "standard": "through_the_command",
-      "lines": [593],
+      "lines": [565],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split, re-pinned after the fire_canary tests): m10._fingerprint is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
       "file": "tests/test_audit_tests_lane_statement_deletion.py",
       "standard": "through_the_command",
-      "lines": [402],
+      "lines": [426],
       "reason": "No public route (fleet green leg 15; moved with its test by the 10-08 split): statement_deletion._mutant_text, the unparseable-mutant answer, is reached only inside a gated run. Named in the leg 15 reply to @devpulse as the checker asks."
     },
     {
@@ -498,7 +493,7 @@
     {
       "file": "tests/test_audit_tests_lane.py",
       "standard": "windows_compat",
-      "lines": [670],
+      "lines": [693],
       "reason": "An argv token, not a location (surfaced by the 10-08 split, hidden until then under the file-wide classify_sqlite row): '/tmp/some_project' is a documented `audit-tests <path>` invocation handed to the verb's parser, whose runner is a recorder; nothing opens it."
     },
     {
@@ -514,7 +509,7 @@
     {
       "file": "apps/handlers/audit/incremental_cache.py",
       "standard": "logged_fallback",
-      "lines": [229, 260, 271],
+      "lines": [238, 269, 280],
       "reason": "A cache, and the checker is wrong on these lines (fleet green leg 14). An unreadable legacy doc migrates 0 entries (388), and an unreadable or corrupt entry is a cache miss (419, 430). Every caller needs the same answer to both: run the full audit and write the entry fresh, which is the documented fail-open. The corrupt entry is renamed aside to .corrupt and each failure is logged, so nothing is lost and nothing is silent."
     },
     {
@@ -526,7 +521,7 @@
     {
       "file": "apps/handlers/bypass/ignore_handler.py",
       "standard": "logged_fallback",
-      "lines": [158],
+      "lines": [154],
       "reason": "The checker is wrong on this line (fleet green leg 14). relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not ignored: a branch's .seedgoignore governs its own tree only. False here is the answer, not a failure, and the case is logged."
     },
     {
@@ -544,13 +539,13 @@
     {
       "file": "apps/handlers/aipass_standards/json_structure_check.py",
       "standard": "logged_fallback",
-      "lines": [324, 342],
+      "lines": [328, 346],
       "reason": "The checker is wrong on these lines (fleet green leg 14; re-pinned +3 10-08, resolve_relative's docstring grew): each failure answer is the STRICT answer. An unparseable file is not eligible for the bootstrap exemption (441, logged). A path outside the source root has no branch root (459): that is the true answer, and its one caller, _seam_logging, then finds no seam and grants nothing."
     },
     {
       "file": "apps/handlers/aipass_standards/ruff_check.py",
       "standard": "logged_fallback",
-      "lines": [44, 96],
+      "lines": [60, 112],
       "reason": "The checker is wrong on these lines (fleet green leg 14): an unreadable ruff_bypass.json answers 'no ruff bypass', the STRICT answer. Every ruff finding is reported and none is waived on a file nothing could read, and the failure is logged as a warning naming the file."
     },
     {
@@ -562,37 +557,37 @@
     {
       "file": "apps/handlers/aipass_standards/architecture_check.py",
       "standard": "logged_fallback",
-      "lines": [316],
+      "lines": [322],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. The caller sees the passport still exists and fails Template baseline ('No citizen_class in ...passport.json'); only an absent passport skips, and that path never reaches this except."
     },
     {
       "file": "apps/handlers/aipass_standards/json_handler_check.py",
       "standard": "logged_fallback",
-      "lines": [54],
+      "lines": [50],
       "reason": "The checker is wrong on this line (fleet green leg 15): the failure answer is the strict one. check_branch reads None as 'Handler exists' failed, so an unreadable handler fails the row; the read error is logged as a warning."
     },
     {
       "file": "apps/handlers/audit/discovery.py",
       "standard": "logged_fallback",
-      "lines": [234],
+      "lines": [235],
       "reason": "No verdict reads this value (fleet green leg 15): measure_pack_corpus feeds the corpus banner only, its docstring says a raising measurer answers None so the caller keeps its own count rather than print a fabricated 0, and the failure is logged as a warning naming the measurer."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/envdiff.py",
       "standard": "logged_fallback",
-      "lines": [664, 683],
+      "lines": [657],
       "reason": "The checker is wrong on these lines (fleet green leg 15): the failure answer is the strict one. read_records' docstring names both: an unreadable log is an empty list and its emptiness produces the refusal; an undecodable line is dropped with a warning naming the file and line, and the missing session record it leaves is refused upstream."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/payload/audit_hygiene_plugin.py",
       "standard": "logged_fallback",
-      "lines": [235],
+      "lines": [248],
       "reason": "Named, not silent (fleet green leg 15): the hook must never raise inside the suite it measures, and _note_error carries the realpath failure to the artifact, where Law M10 reports it. Only reachable in symlink-sibling mode, off by default."
     },
     {
       "file": "apps/handlers/tests_pytest_standards/statement_deletion.py",
       "standard": "logged_fallback",
-      "lines": [614],
+      "lines": [602],
       "reason": "No verdict reads this value (fleet green leg 15): _outermost_callee only picks the callee NAME a conviction line prints, and its caller keeps the regex reading (`or fields['callee']`) for a line that will not parse, as the docstring says. The conviction itself is unchanged either way."
     },
     {
@@ -622,7 +617,7 @@
     {
       "file": "tests/test_checkers_batch3.py",
       "standard": "permission_flags",
-      "lines": [357, 373],
+      "lines": [369, 385],
       "reason": "Test input (2026-10-18): 'CMD = \"--dangerously-skip-permissions\"' sits in textwrap.dedent fixture strings written to tmp files as the permission_flags checker's own input; a triple-quoted literal is code since the prose-lines helper, so the old toggle no longer hides them. No command is built from them."
     },
     {
@@ -642,6 +637,45 @@
       "standard": "permission_flags",
       "lines": [35, 36, 37, 38, 45, 47, 56],
       "reason": "Documentation, not code (2026-10-18): a standard's page is one triple-quoted string, and these lines quote the prohibited flags as the anti-pattern the standard names. The old docstring toggle hid the page body; a string literal in code is code since the prose-lines helper."
+    },
+    {
+      "file": "tests/test_trinity_check_file_shape.py",
+      "standard": "through_the_command",
+      "lines": [633],
+      "reason": "No public route (2026-10-24): trinity_groups._top_level_items pads an unmeasurable file to the same nine items a measured one yields; all_groups reaches it only with a whole branch context of both trinity files, config and templates."
+    },
+    {
+      "file": "tests/test_audit_tests_lane_statement_deletion.py",
+      "standard": "through_the_command",
+      "lines": [314],
+      "reason": "No public route (2026-10-24): adapter._campaign_outcome turns a budget-cut campaign into a refused group; the lane reaches it only after a full gated suite run."
+    },
+    {
+      "file": "apps/handlers/tests_pytest_standards/gatelog.py",
+      "standard": "logged_fallback",
+      "lines": [74],
+      "reason": "The checker is wrong on this line (2026-10-24): decode_line answers None only for a line that holds no record (blank, not JSON, not an object), as its docstring says; the success path returns a dict, never None. The broken line is logged as a warning naming the file and line, and read_gate_log counts it as malformed."
+    },
+    {
+      "file": "apps/modules/checklist.py",
+      "standard": "logged_fallback",
+      "lines": [198],
+      "reason": "The checker is wrong on this line (2026-10-24): relative_to raises ValueError only when the file is not under the branch root, and such a file is truly not audit-ignored, since a branch's ignore rules govern its own tree only. None here is the answer, not a failure, and the case is logged (same ruling as ignore_handler.py)."
+    },
+    {
+      "file": "tests/test_audit_tests_lane_adapter.py",
+      "standard": "sleep_in_test",
+      "reason": "One sleep, line 441 (2026-10-24): the test proves a NON-event, that a killed grandchild never writes its marker 1.5s after launch; absence can only be observed by waiting past the moment it would have happened, so no deadline poll can end early. File-wide because sleep_in_test passes no line to is_bypassed."
+    },
+    {
+      "file": "tests/test_checkers_batch5.py",
+      "standard": "stdlib_patch",
+      "reason": "One patch, line 88 (2026-10-24): monkeypatch.setattr(sys, 'executable', ...) moves the interpreter's own table; ruff_check's binary lookup reads sys.executable's directory and a test that did not move it would find the host's real ruff. File-wide because stdlib_patch passes no line to is_bypassed."
+    },
+    {
+      "file": "tests/test_audit_tests_lane.py",
+      "standard": "stdlib_patch",
+      "reason": "One patch, line 347 (2026-10-24): tempfile.TemporaryDirectory is replaced by a context manager whose cleanup raises, to prove a cleanup failure after publish keeps the artifact; no portable way makes the real cleanup fail. File-wide because stdlib_patch passes no line to is_bypassed."
     }
   ],
   "notes": {

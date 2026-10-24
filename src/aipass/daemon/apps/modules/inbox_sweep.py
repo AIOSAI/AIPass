@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-11
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -248,7 +248,7 @@ def run_sweep(dry_run: bool = False, stale_hours: int = DEFAULT_STALE_HOURS, lim
 
 
 def _parse_int_flag(args: List[str], flag: str, default: int) -> int:
-    """Read an integer value following `flag`. Falls back to default."""
+    """Read a positive integer following `flag`. Falls back to default; below 1 a slice would bypass the cap."""
     if flag not in args:
         return default
     position = args.index(flag)
@@ -256,10 +256,14 @@ def _parse_int_flag(args: List[str], flag: str, default: int) -> int:
         logger.info("[inbox_sweep] %s given without a value, using %d", flag, default)
         return default
     try:
-        return int(args[position + 1])
+        value = int(args[position + 1])
     except ValueError:
         logger.info("[inbox_sweep] %s value %r is not an integer, using %d", flag, args[position + 1], default)
         return default
+    if value < 1:
+        logger.info("[inbox_sweep] %s value %d is below 1, using %d", flag, value, default)
+        return default
+    return value
 
 
 def handle_command(command: str, args: List[str]) -> bool:

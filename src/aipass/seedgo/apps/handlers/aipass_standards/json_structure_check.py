@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: json_structure_check.py
 # Description: JSON Structure Standards Checker Handler
-# Version: 3.4.0
+# Version: 3.4.2
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -20,12 +20,15 @@ from pathlib import Path
 from typing import Dict, List
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.check_support import parse
 from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _is_canonical_shim
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
+from aipass.seedgo.apps.handlers.json import json_handler
 
 # APPLIES_TO: a test does not log_operation and should not.
 APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
+READS_BRANCH = True
 
 ALLOWED_JSON_SUBDIRS: frozenset[str] = frozenset({"custom_config"})
 
@@ -156,6 +159,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         passed_count = sum(1 for c in checks if c["passed"])
         total = len(checks)
         score = int((passed_count / total * 100)) if total > 0 else 0
+        json_handler.log_operation("check_completed", {"file": path_str, "score": score, "standard": "json_structure"})
         return {"passed": passed_count == total, "checks": checks, "score": score, "standard": "JSON STRUCTURE"}
 
     return {
@@ -182,7 +186,7 @@ def _declares_no_callable_code(content: str) -> bool:
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("json_structure: could not parse for the declarations-only test: %s", exc)
         return False
     return not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree))
@@ -218,7 +222,7 @@ def _aipass_imports(content: str, package: str | None = None) -> list[str]:
     """
     try:
         tree = ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         logger.info("json_structure: could not parse for the bootstrap-chain walk: %s", exc)
         return []
     names: list[str] = []
@@ -318,7 +322,7 @@ def _is_prelogging_bootstrap(path: Path, content: str) -> bool:
     """
     try:
         ast.parse(content)
-    except SyntaxError as exc:
+    except (SyntaxError, ValueError) as exc:
         # An unreadable file is not a bootstrap module: [] from _aipass_imports() would buy the exemption.
         logger.info("json_structure: unparseable, so not eligible for the bootstrap exemption: %s", exc)
         return False
@@ -397,6 +401,27 @@ def _seam_logging(path: Path, content: str) -> str | None:
     return None
 
 
+def _json_handler_wiring(content: str) -> tuple[bool, bool]:
+    """(imports json_handler, calls json_handler.log_operation), read from code: a docstring naming either is prose."""
+    tree = parse(content, tag="json_structure")
+    if tree is None:
+        return False, False
+    imports = any(
+        isinstance(node, (ast.Import, ast.ImportFrom))
+        and any((alias.asname or alias.name).split(".")[-1] == "json_handler" for alias in node.names)
+        for node in ast.walk(tree)
+    )
+    calls = any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "log_operation"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "json_handler"
+        for node in ast.walk(tree)
+    )
+    return imports, calls
+
+
 def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     """Check that a module/handler file imports json_handler and calls log_operation(); two check dicts."""
     if _is_operation_log_seam(content):
@@ -418,11 +443,8 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     # A module that logs through a branch-owned seam imports the SEAM, not the shim: the two checks are one
     # requirement (this module's operations reach a log), so they answer together.
     seam = _seam_logging(_path, content)
-    has_import = seam is not None or bool(
-        re.search(r"from\s+\S*\.json\s+import\s+json_handler", content)
-        or re.search(r"from\s+\S*json\s+import\s+json_handler", content)
-        or re.search(r"import\s+json_handler", content)
-    )
+    imports_shim, calls_log = _json_handler_wiring(content)
+    has_import = seam is not None or imports_shim
     if seam is not None:
         import_message = f"Imports this branch's {seam} logging seam"
     elif has_import:
@@ -440,8 +462,8 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
     )
 
     # The requirement is that operations ARE logged, never that they are logged in one spelling.
-    has_log_operation = "json_handler.log_operation" in content or seam is not None
-    seam = None if "json_handler.log_operation" in content else seam
+    has_log_operation = calls_log or seam is not None
+    seam = None if calls_log else seam
     if seam is not None:
         log_message = f"Logs operations through this branch's {seam} seam (built on aipass.prax)"
     elif has_log_operation:
@@ -603,6 +625,9 @@ def _check_json_dir_structure(branch_path: str, bypass_rules: list | None = None
 
 def check_branch_post(branch_path: str, bypass_rules: list | None = None) -> tuple[list, list]:
     """Post-audit check: validate {branch}_json/ directory structure."""
+    # No json dir is nothing to score: a 100 here would lift the branch average for free.
+    if _find_json_dir(branch_path) is None:
+        return [], []
     violations = _check_json_dir_structure(branch_path, bypass_rules=bypass_rules)
     scores = [0] if violations else [100]
     return violations, scores

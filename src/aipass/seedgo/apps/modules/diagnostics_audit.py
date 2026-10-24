@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diagnostics_audit.py
 # Description: System-wide Type Error Diagnostics
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """System-wide Type Error Diagnostics
@@ -22,6 +22,8 @@ from aipass.cli import console
 from aipass.cli.apps.modules import error, warning
 
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused
 
 from aipass.seedgo.apps.handlers.cli.help_flags import wants_help
 
@@ -127,7 +129,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"[dim]Handler: {handlers_dir}[/dim]")
     console.print(f"[dim]Module:  {Path(__file__)}[/dim]")
     console.print()
-    return True
+    raise CommandRefused(refusal.EXIT_UNKNOWN_ARGUMENT, args[0])
 
 
 def print_introspection():
@@ -161,16 +163,11 @@ def print_help():
     console.print()
 
     console.print("[yellow]COMMANDS:[/yellow]")
-    console.print(
-        "  [green]drone @seedgo diagnostics_audit[/green]            [dim]Scan all branches for type errors[/dim]"
-    )
-    console.print("  [green]drone @seedgo diagnostics_audit @<branch>[/green]  [dim]Scan specific branch[/dim]")
+    console.print("  [green]drone @seedgo diagnostics_audit[/green]     [dim]Show this module and its handlers[/dim]")
+    console.print("  [green]drone @seedgo audit aipass[/green]          [dim]Scan all branches for type errors[/dim]")
+    console.print("  [green]drone @seedgo audit aipass @flow[/green]    [dim]Scan one branch[/dim]")
     console.print()
-
-    console.print("[yellow]EXAMPLES:[/yellow]")
-    console.print("  [green]drone @seedgo diagnostics_audit[/green]")
-    console.print("  [green]drone @seedgo diagnostics_audit @flow[/green]")
-    console.print("  [green]drone @seedgo diagnostics_audit @spawn[/green]")
+    console.print("[dim]This module takes no arguments: the scan runs through the audit pipeline.[/dim]")
     console.print()
 
     console.print("[yellow]WHAT IT CHECKS:[/yellow]")

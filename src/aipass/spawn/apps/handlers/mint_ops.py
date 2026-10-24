@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mint_ops.py
 # Description: The mint of a new citizen from the template, step by step
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The mint body: a validated target becomes a registered citizen."""
@@ -18,7 +18,6 @@ from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branc
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict, validate_no_placeholders
 from aipass.spawn.apps.handlers.file_ops import (
     copy_template,
-    rename_placeholder_paths,
     regenerate_template_registry,
     ensure_directory,
 )
@@ -29,8 +28,10 @@ from aipass.spawn.apps.handlers.registry import (
     resolve_project_credential,
     find_registry,
     add_to_registry,
+    branches_as_list,
     get_next_citizen_number,
     ensure_project_has_owner,
+    load_registry,
 )
 from aipass.spawn.apps.handlers.adoption_ops import adopt_existing, birth_from_seed, error_result
 from aipass.spawn.apps.handlers.class_registry import (
@@ -39,10 +40,14 @@ from aipass.spawn.apps.handlers.class_registry import (
     get_template_dir,
     refuse_retired_or_forbidden,
 )
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.seed_ops import find_seed
 
 _PROJECT_MARKERS = (".git", "pyproject.toml", "setup.py", "setup.cfg")
+
+# Left in a tree the mint refused, so a retry refuses instead of adopting the partial tree.
+INCOMPLETE_MARKER = "INCOMPLETE_MINT.txt"
 
 
 def spawn_at(
@@ -67,7 +72,17 @@ def spawn_at(
             json_handler.log_operation("mint_refused", data={"class": candidate, "reason": refusal})
             return error_result(refusal)
 
+    # Role and purpose are substituted raw into the JSON passport template.
+    for label, value in (("role", role), ("purpose", purpose)):
+        if any(ch in '"\\' or ch < " " for ch in value or ""):
+            return error_result(
+                f"--{label} cannot contain a double quote, backslash, newline or other control character "
+                f"(it is written into the JSON passport): {value!r}"
+            )
+
     target = Path(target_path).resolve()
+    # A relative registry would never contain the target, and the mint would fall back to a new registry.
+    registry_path = Path(registry_path).resolve() if registry_path else None
     if template_dir:
         template = Path(template_dir)
     else:
@@ -84,6 +99,11 @@ def spawn_at(
             break
 
     if target.exists():
+        if (target / INCOMPLETE_MARKER).exists():
+            return error_result(
+                f"REFUSED: {target} is the partial tree of a refused mint (see {INCOMPLETE_MARKER} in it). "
+                "Move it aside, fix the template, then create again."
+            )
         passport_path = target / ".trinity" / "passport.json"
         if passport_path.exists():
             return adopt_existing(target, purpose, profile, registry_path)
@@ -147,6 +167,8 @@ def mint_citizen(
     except ValueError:
         logger.info("[spawn] Target %s outside registry %s — resolving project-local registry", target, reg_path)
         reg_path = _find_project_registry(target)
+    if any(b.get("name") == branch_upper for b in branches_as_list(load_registry(reg_path).get("branches", []))):
+        return error_result(f"{branch_upper} is already registered in {reg_path}; nothing was written.")
     citizen_number = get_next_citizen_number(reg_path)
 
     # Resolved before the copy: the passport is written before the registry, so both must carry this id.
@@ -175,8 +197,6 @@ def mint_citizen(
 
     ensure_directory(target)
     copied, skipped = copy_template(template, target, replacements)
-
-    renamed = rename_placeholder_paths(target, folder_name)
 
     # The template has no {{TRAITS}} placeholder, so traits are written after render or silently dropped.
     traits_issues = []
@@ -208,12 +228,17 @@ def mint_citizen(
         shown = ", ".join(missing[:12])
         if len(missing) > 12:
             shown += f", +{len(missing) - 12} more"
-        return error_result(
+        refusal = error_result(
             f"INCOMPLETE MINT: {len(missing)} file(s) the template claims never landed in {target}: {shown}. "
             f"Template: {template}. The usual cause is an incomplete template on disk — a fresh clone whose "
             f"template files are gitignored ships fewer files than the template's own manifest declares. "
             f"Nothing was registered; the partial tree is left at {target} for inspection."
         )
+        try:
+            atomic_write_text(target / INCOMPLETE_MARKER, refusal["error"] + "\n")
+        except OSError as e:
+            logger.warning("[spawn] Could not mark the refused tree %s: %s", target, e)
+        return refusal
 
     # Receipts go before registration; a failed stamp is surfaced, never fatal (the gold files are another branch's).
     receipt_result = write_birth_receipt(target / ".trinity")
@@ -239,9 +264,15 @@ def mint_citizen(
         credential=resolved_registry_id,
     )
 
+    if not registry_updated:
+        return error_result(
+            f"Registry add failed for {branch_upper} in {reg_path}: the tree at {target} is minted but NOT registered."
+        )
+
     ensure_project_has_owner(reg_path)
 
-    issues = validate_no_placeholders(target) + receipt_issues + traits_issues
+    placeholder_issues = [f"Unreplaced {sorted(names)} in {path}" for path, names in validate_no_placeholders(target)]
+    issues = placeholder_issues + receipt_issues + traits_issues
 
     logger.info(
         "[spawn] BORN %s at %s (class %s, citizen %s, receipt %s)",
@@ -267,9 +298,9 @@ def mint_citizen(
         "files_copied": len([c for c in copied if "(dir)" not in c]),
         "dirs_created": len([c for c in copied if "(dir)" in c]),
         "files_skipped": len(skipped),
-        "renamed": renamed,
         "registry_updated": registry_updated,
         "registry_path": str(reg_path),
         "citizen_number": citizen_number,
+        "citizen_class": resolved_class,
         "validation_issues": issues,
     }

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: validator.py
 # Description: Check skill requirements
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Skill requirement checking: can this skill actually run here?"""
@@ -17,8 +17,18 @@ from aipass.skills.apps.handlers.json import json_handler
 
 
 def validate_skill(skill_metadata):
-    """Check if a skill's requirements are met."""
-    requires = skill_metadata.get("requires", {})
+    """Check if a skill's requires block is met; a malformed block is never read as met."""
+    # PyYAML loads `requires:` with nothing under it as None: no requirements.
+    requires = skill_metadata.get("requires") or {}
+    if not isinstance(requires, dict):
+        logger.warning(f"requires is a {type(requires).__name__}, not a pip/bins/config mapping")
+        return {
+            "valid": False,
+            "missing_pip": [],
+            "missing_bins": [],
+            "missing_config": [],
+            "malformed": f"requires must map pip/bins/config to lists, not a {type(requires).__name__}",
+        }
 
     pip_packages = requires.get("pip", []) or []
     bins = requires.get("bins", []) or []

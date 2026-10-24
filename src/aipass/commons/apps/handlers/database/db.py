@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: db.py
 # Description: The Commons SQLite connection manager
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """The Commons - SQLite Connection Manager"""
@@ -228,8 +228,9 @@ def _seed_secret_rooms(conn: sqlite3.Connection) -> None:
 
 def _register_branches(conn: sqlite3.Connection) -> None:
     """Auto-register missing branches from AIPASS_REGISTRY.json as agents."""
-    registry_path = _find_branch_registry()
-    if not registry_path:
+    from aipass.commons.apps.handlers.identity.identity_ops import BRANCH_REGISTRY_PATH as registry_path
+
+    if not registry_path.exists():
         return
 
     try:
@@ -254,39 +255,6 @@ def _register_branches(conn: sqlite3.Connection) -> None:
         )
 
     conn.commit()
-
-
-def _find_branch_registry() -> Optional[Path]:
-    """Locate AIPASS_REGISTRY.json by searching standard paths."""
-    search_paths = []
-
-    aipass_root = os.environ.get("AIPASS_ROOT", "")
-    if aipass_root:
-        search_paths.append(Path(aipass_root) / "AIPASS_REGISTRY.json")
-
-    # module_file(): with an unreadable cwd a bare resolve raises OSError.
-    current = module_file(__file__).parent
-    for _ in range(10):
-        candidate = current / "AIPASS_REGISTRY.json"
-        if candidate.exists():
-            return candidate
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-
-    search_paths.extend(
-        [
-            Path.home() / ".aipass" / "AIPASS_REGISTRY.json",
-            Path.home() / "AIPASS_REGISTRY.json",
-        ]
-    )
-
-    for path in search_paths:
-        if path.exists():
-            return path
-
-    return None
 
 
 if __name__ == "__main__":

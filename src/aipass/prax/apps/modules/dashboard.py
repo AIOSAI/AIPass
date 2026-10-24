@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-02-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Dashboard Section Utilities
@@ -13,11 +13,11 @@ Reference: docs/dashboard.md
 
 __all__ = [
     "write_section",
-    "update_section",
     "get_dashboard_path",
     "SUBJECT_CAP",
     "DASHBOARD_CHAR_BUDGET",
     "cap_subject",
+    "dashboard_lock",
     "calculate_quick_status",
     "get_branch_paths",
     "resolve_branch_path",
@@ -35,7 +35,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -48,13 +48,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 
 from aipass.prax.apps.handlers.dashboard.operations import (
-    update_section as handler_update_section,
-    write_section,  # re-exported: used by ai_mail.apps.handlers.email.dashboard_sync
+    write_section,  # re-exported: the write-through API other branches call
     get_dashboard_path,
     # Re-exported: handlers are internal, so writers outside prax read the caps here.
     SUBJECT_CAP,
     DASHBOARD_CHAR_BUDGET,
     cap_subject,
+    dashboard_lock,  # re-exported: other writers of a dashboard take the same lock
 )
 from aipass.prax.apps.handlers.dashboard.status import (
     calculate_quick_status,
@@ -75,7 +75,6 @@ DASHBOARD_TEMPLATE = {
     "branch": "",
     "last_updated": "",
     "sections": {
-        "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
         "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
         "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
     },
@@ -88,17 +87,6 @@ DASHBOARD_TEMPLATE = {
         "summary": "",
     },
 }
-
-
-def update_section(branch_path: Path, section_name: str, section_data: Dict) -> bool:
-    """Update a specific section in branch dashboard (legacy wrapper); prefer write_section()."""
-    try:
-        return handler_update_section(
-            branch_path, section_name, section_data, DASHBOARD_TEMPLATE, calculate_quick_status
-        )
-    except Exception as e:
-        logger.error(f"Failed to update section {section_name}: {e}")
-        return False
 
 
 def print_introspection():
@@ -142,7 +130,7 @@ def print_help():
     console.print()
     console.print("[yellow]PROGRAMMATIC (write-through API):[/yellow]")
     console.print("  from aipass.prax.apps.modules.dashboard import write_section")
-    console.print("  write_section(branch_path, 'ai_mail', {'new': 3, 'total': 5})")
+    console.print("  write_section(branch_path, 'git', {'branch': 'main'})")
     console.print()
 
 
@@ -198,6 +186,21 @@ def _resolve_branch_path(branch_ref: str) -> Path:
     return resolve_branch_path(branch_ref, _caller_dir())
 
 
+def _registered_branch_at(start: Path) -> "Path | None":
+    """The nearest directory at or above ``start`` that a registry declares as a branch."""
+    # A registry row, never a marker file: a stray DASHBOARD.local.json made ~ or /tmp a "branch".
+    for directory in (start, *start.parents):
+        if not directory.name:
+            continue
+        try:
+            if resolve_branch_path(directory.name, start).resolve() == directory.resolve():
+                return directory
+        except (FileNotFoundError, OSError, json.JSONDecodeError) as e:
+            logger.info("No registry row for %s, walking up: %s", directory, e)
+            continue
+    return None
+
+
 def _handle_refresh(args: List[str]) -> None:
     """Handle dashboard refresh: no args (caller's branch), @branch, or --all."""
     if args and args[0] == "--all":
@@ -235,13 +238,10 @@ def _handle_refresh(args: List[str]) -> None:
     if cwd is None:
         error("No caller directory, so no branch to refresh. Name it: drone @prax dashboard refresh @branch")
         return
-    branch_path = cwd
-    while branch_path != branch_path.parent:
-        if (branch_path / "DASHBOARD.local.json").exists() or (branch_path / ".aipass").exists():
-            break
-        branch_path = branch_path.parent
-    else:
-        branch_path = cwd
+    branch_path = _registered_branch_at(cwd)
+    if branch_path is None:
+        error(f"{cwd} is not inside a registered branch. Name it: drone @prax dashboard refresh @branch")
+        return
 
     console.print(f"[dim]Refreshing {branch_path.name.upper()} dashboard...[/dim]")
     result = refresh_single_dashboard(branch_path)

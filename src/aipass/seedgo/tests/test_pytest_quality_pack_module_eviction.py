@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_pytest_quality_pack_module_eviction.py
 # Description: pytest_quality pack, module_eviction checker pins (split from test_pytest_quality_pack.py)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/pytest_quality_standards/module_eviction_check.py."""
@@ -79,9 +79,9 @@ def _module_eviction_project(root: Path) -> Path:
 
         @pytest.fixture
         def fresh_rollover():
-            sys.modules.pop(ROLLOVER, None)
-            yield importlib.import_module(ROLLOVER)
-            importlib.invalidate_caches()
+            saved = sys.modules.pop(ROLLOVER, None)
+            yield saved
+            sys.modules[ROLLOVER] = saved
         """,
     )
     return root
@@ -512,8 +512,8 @@ class TestModuleEvictionAcquittals:
             "tests/test_dashboard.py::test_the_status_handler_is_reloaded",
         ]
 
-    def test_a_fixture_with_a_teardown_is_acquitted_and_one_without_is_not(self, tmp_path):
-        """host_state's convention: any statement after the last yield is the teardown."""
+    def test_only_a_teardown_that_puts_the_module_back_acquits_a_fixture(self, tmp_path):
+        """A statement after the yield is a teardown, but only a restore there undoes the eviction."""
         _write(
             tmp_path,
             "tests/test_fixtures.py",
@@ -526,6 +526,13 @@ class TestModuleEvictionAcquittals:
 
             @pytest.fixture
             def rollover_with_teardown():
+                saved = sys.modules.pop("pkg.modules.rollover", None)
+                yield saved
+                sys.modules["pkg.modules.rollover"] = saved
+
+
+            @pytest.fixture
+            def rollover_with_idle_teardown():
                 sys.modules.pop("pkg.modules.rollover", None)
                 yield importlib.import_module("pkg.modules.rollover")
                 importlib.invalidate_caches()
@@ -557,10 +564,30 @@ class TestModuleEvictionAcquittals:
         rows = _eviction_rows(tmp_path)
 
         assert [row["nodeid"] for row in rows] == [
+            "tests/test_fixtures.py::rollover_with_idle_teardown",
             "tests/test_fixtures.py::rollover_without_teardown",
             "tests/test_fixtures.py::_rollover_generator",
             "tests/test_fixtures.py::verbs",
         ]
+
+    def test_a_mock_put_into_the_evicted_slot_is_no_restore(self, tmp_path):
+        _write(
+            tmp_path,
+            "tests/test_mock.py",
+            """
+            import sys
+            from unittest.mock import MagicMock
+
+
+            def test_swaps_in_a_mock():
+                sys.modules.pop("pkg.modules.rollover")
+                try:
+                    assert True
+                finally:
+                    sys.modules["pkg.modules.rollover"] = MagicMock()
+            """,
+        )
+        assert [row["nodeid"] for row in _eviction_rows(tmp_path)] == ["tests/test_mock.py::test_swaps_in_a_mock"]
 
     def test_an_autouse_fixture_in_the_same_file_that_records_the_key_acquits_a_bare_helper(self, tmp_path):
         """MEASURED ON THE FLEET: memory's test_symbolic_extras, five rows, zero leaks."""

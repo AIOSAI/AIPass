@@ -3,7 +3,7 @@
 # Description: Tests for close_ops handler — plan closure business logic
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -12,7 +12,6 @@
 # seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
@@ -70,28 +69,6 @@ class TestABareNumberNeverClosesTheNamesakeOfAnUnreadableRegistry:
 
 
 _APPEND = "aipass.flow.apps.handlers.plan.append_closed_plan"
-
-
-def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """A stand-in for the append's _create_exclusive seam that answers the way
-    Windows does mid-release.
-
-    Windows delete-pending raises PermissionError, which Linux can never show. The first
-    ``denials`` creates of ``lock_path`` are denied (None = forever), then the real create runs.
-    """
-    attempts: list[int] = []
-    raised: list[PermissionError] = []
-
-    def fake_create(path):
-        if str(path) == str(lock_path):
-            attempts.append(len(attempts) + 1)
-            if denials is None or len(attempts) <= denials:
-                denial = PermissionError(13, "Access is denied")
-                raised.append(denial)
-                raise denial
-        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-    return fake_create, attempts, raised
 
 
 class TestExtractPrefix:
@@ -521,95 +498,6 @@ class TestClosePlanImplSuccess:
         warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
         assert any("Failed to update DASHBOARD.local.json" in w for w in warned) is failed
         assert any("Failed to push flow section to branch dashboard" in w for w in warned) is failed
-
-    @staticmethod
-    def _close_with_real_append(tmp_path, fake_open, sleep):
-        """Close FPLAN-0001 in tmp_path with the REAL CLOSED_PLANS append, a
-        stand-in for its exclusive create and ``sleep`` recording the backoff's waits; returns
-        close_plan_impl's result.
-        """
-        plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
-        plan_file.write_text("# FPLAN-0001: test\nSome actual plan notes.", encoding="utf-8")
-        registry = {
-            "plans": {
-                "1": {
-                    "status": "open",
-                    "subject": "Test plan",
-                    "location": str(tmp_path),
-                    "file_path": str(plan_file),
-                    "relative_path": plan_file.name,
-                }
-            }
-        }
-        deps = _make_deps()
-        deps["load_registry"].return_value = registry
-
-        with (
-            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
-            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
-            patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess"),
-            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch(f"{_APPEND}._create_exclusive", side_effect=fake_open),
-            patch(f"{_APPEND}._sleep", sleep),
-        ):
-            return close_plan_impl(plan_num="1", **deps)
-
-    def test_closed_plans_append_waits_out_a_delete_pending_lock(self, tmp_path):
-        """The CLOSED_PLANS append lock takes a Windows delete-pending denial as
-        a held lock and retries it; the entry lands in CLOSED_PLANS.local.json.
-        """
-        closed_plans = tmp_path / "CLOSED_PLANS.local.json"
-        lock = closed_plans.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
-        sleep = MagicMock()
-
-        result = self._close_with_real_append(tmp_path, fake_open, sleep)
-
-        assert result["success"] is True
-        assert not any("CLOSED_PLANS" in m.get("text", "") for m in result["messages"])
-        assert closed_plans.exists()
-        entries = json.loads(closed_plans.read_text(encoding="utf-8"))["closed_plans"]
-        assert [e["plan_id"] for e in entries] == ["FPLAN-1"]
-        assert len(attempts) == 2
-        sleep.assert_called_once()
-        assert sleep.call_args.args[0] > 0
-        assert not lock.exists()
-
-    def test_closed_plans_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
-        """A denial past the budget: exactly the budget of attempts, the close
-        still succeeds (the append is non-critical) but reports the failed
-        append with its reason.
-        """
-
-        closed_plans = tmp_path / "CLOSED_PLANS.local.json"
-        lock = closed_plans.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
-        sleep = MagicMock()
-
-        result = self._close_with_real_append(tmp_path, fake_open, sleep)
-
-        assert result["success"] is True
-        # Read off the attempts, not the private budget constant.
-        budget = len(attempts)
-        assert budget > 1
-        assert not closed_plans.exists()
-        # The denial reaches the user with its reason. Mutant `raise` -> `return False`.
-        reported = [m["text"] for m in result["messages"] if "CLOSED_PLANS" in m.get("text", "")]
-        assert len(reported) == 1
-        assert reported[0].startswith("  CLOSED_PLANS update failed: Lock ")
-        assert str(lock) in reported[0]
-        waited = sum(c.args[0] for c in sleep.call_args_list)
-        assert reported[0].endswith(f"after {budget} attempts ({waited:.2f}s waited)")
-        # Never str(call): its repr doubles backslashes, hiding a Windows path.
-        warned = " ".join(str(arg) for c in mock_logger.warning.call_args_list for arg in c.args)
-        assert str(lock) in warned
-        assert f"{budget} attempts" in warned
-        # Positive, doubling, summed into the message.
-        delays = [c.args[0] for c in sleep.call_args_list]
-        assert len(delays) == len(attempts)
-        assert delays[0] > 0
-        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
-        assert f"({sum(delays):.2f}s waited)" in warned
 
 
 class TestTemplateDetectionNeverDeletes:

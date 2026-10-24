@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: catchup_queries.py
 # Description: Catchup Database Queries Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Catchup Database Queries Handler"""
@@ -52,6 +52,12 @@ def update_last_active(conn: sqlite3.Connection, branch_name: str) -> str:
     conn.execute("UPDATE agents SET last_active = ? WHERE branch_name = ?", (now_iso, branch_name))
     conn.commit()
     return now_iso
+
+
+def mark_mentions_read(conn: sqlite3.Connection, branch_name: str) -> None:
+    """Mark every unread mention of the branch read, so the next catchup shows only new ones."""
+    conn.execute("UPDATE mentions SET read = 1 WHERE mentioned_agent = ? AND read = 0", (branch_name,))
+    conn.commit()
 
 
 def _count_new_posts(conn: sqlite3.Connection, since_time: str) -> int:

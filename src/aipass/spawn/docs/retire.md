@@ -24,10 +24,14 @@ once the tree is gone, so anything left behind at archive time is lost. The whol
 citizen's identity is the part worth keeping, and `tests/test_birth_receipt.py` pins that it
 arrives.
 
-The archive copy skips build and VCS noise — `ARCHIVE_EXCLUDE` is `.venv`, `.git`,
-`__pycache__`, `.chroma`, `node_modules`, `.pytest_cache`. The same set guards the
-relocation lane in [registry_and_repair.md](registry_and_repair.md), so neither carries a
-virtualenv into an archive.
+The archive copy skips rebuildable noise only — `ARCHIVE_EXCLUDE` is `.venv`,
+`__pycache__`, `node_modules`, `.pytest_cache`. `.git` history and `.chroma` vectors are
+archived, since the tree is removed after the copy. The same set guards the relocation lane
+in [registry_and_repair.md](registry_and_repair.md).
+
+The registry entry is removed under `registry_lock`, reloaded inside it, before the tree is
+touched. A failed save deletes the partial archive, leaves the branch registered and in
+place, and exits 1.
 
 ---
 
@@ -107,4 +111,4 @@ census entries that named the branch or project. Those live with the branches th
 
 ---
 
-**Last Updated:** 2026-10-22
+**Last Updated:** 2026-10-24

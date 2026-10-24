@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_pusher.py
 # Description: Dashboard Template Push Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -23,6 +23,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler
+from .operations import atomic_write_text, dashboard_lock
 from .status import calculate_quick_status, merge_quick_status
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
@@ -56,7 +57,6 @@ DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins"]
 
 # Must match templates/DASHBOARD.template.json.
 REQUIRED_SECTIONS = {
-    "ai_mail": {"managed_by": "ai_mail", "new": 0, "opened": 0, "total": 0, "last_updated": ""},
     "flow": {"managed_by": "flow", "active_plans": 0, "recently_closed": [], "last_updated": ""},
     "memory": {"managed_by": "memory", "vectors_stored": 0, "notes": {}, "last_updated": ""},
 }
@@ -79,17 +79,6 @@ def _replace_placeholders(template: dict, branch_name: str) -> dict:
     return result
 
 
-def _calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) -> Dict:
-    """Calculate quick_status from live section data."""
-    # Delegate only: a local copy drifted and pushed a block without todo_count fleet-wide.
-    return calculate_quick_status(sections, branch_path)
-
-
-def _create_from_template(template: dict, branch_name: str) -> dict:
-    """Create a new dashboard from template with placeholders replaced."""
-    return _replace_placeholders(template, branch_name)
-
-
 def _safe_write_dashboard(
     dashboard_path: Path, data: Any, branch_name: str, dry_run: bool, result: Dict[str, Any]
 ) -> bool:
@@ -98,7 +87,7 @@ def _safe_write_dashboard(
         return True
     try:
         content = data if isinstance(data, str) else json.dumps(data, indent=2) + "\n"
-        dashboard_path.write_text(content, encoding="utf-8")
+        atomic_write_text(dashboard_path, content)
         return True
     except OSError as e:
         logger.error("Failed to write dashboard for %s: %s", branch_name, e)
@@ -170,12 +159,56 @@ def _apply_structural_updates(
 
     # Merged: no writer deletes a quick_status key it did not write (shared with @flow).
     if "sections" in data:
-        new_qs = merge_quick_status(data.get("quick_status"), _calculate_quick_status(data["sections"], branch_path))
+        new_qs = merge_quick_status(data.get("quick_status"), calculate_quick_status(data["sections"], branch_path))
         if data.get("quick_status") != new_qs:
             data["quick_status"] = new_qs
             changed = True
 
     return changed, branch_actions
+
+
+def _push_one(
+    dashboard_path: Path,
+    branch_path: Path,
+    branch_name: str,
+    template: dict,
+    dry_run: bool,
+    result: Dict[str, Any],
+    updated_list: List[str],
+) -> None:
+    """Create or structurally update one branch's dashboard."""
+    branch_actions: List[str] = []
+
+    if not dashboard_path.exists():
+        new_dashboard = _replace_placeholders(template, branch_name)
+        if _safe_write_dashboard(dashboard_path, new_dashboard, branch_name, dry_run, result):
+            result["branches_created"] += 1
+            updated_list.append(branch_name)
+            result["changes"].append({"branch": branch_name, "actions": ["created from template"]})
+        return
+
+    # An empty file is unreadable, not missing: a template over it wipes other services' sections.
+    try:
+        data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Unreadable dashboard for %s: %s", branch_name, e)
+        result["branches_skipped"] += 1
+        result["errors"].append(f"{branch_name}: invalid JSON in dashboard, skipped")
+        return
+    if not isinstance(data, dict):
+        result["branches_skipped"] += 1
+        result["errors"].append(f"{branch_name}: dashboard is not a JSON object, skipped")
+        return
+
+    changed, branch_actions = _apply_structural_updates(data, template, branch_actions, branch_path)
+
+    if changed:
+        data["last_updated"] = datetime.now().isoformat()
+        if not _safe_write_dashboard(dashboard_path, data, branch_name, dry_run, result):
+            return
+        result["branches_updated"] += 1
+        updated_list.append(branch_name)
+        result["changes"].append({"branch": branch_name, "actions": branch_actions})
 
 
 def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
@@ -234,37 +267,8 @@ def push_dashboard_template(dry_run: bool = False) -> Dict[str, Any]:
             continue
 
         dashboard_path = branch_path / "DASHBOARD.local.json"
-        branch_actions: List[str] = []
-
-        if not dashboard_path.exists() or not dashboard_path.read_text().strip():
-            label = "created from template" if not dashboard_path.exists() else "created from template (was empty)"
-            new_dashboard = _create_from_template(template, branch_name)
-            if not _safe_write_dashboard(dashboard_path, new_dashboard, branch_name, dry_run, result):
-                continue
-            branch_actions.append(label)
-            result["branches_created"] += 1
-            branches_updated_list.append(branch_name)
-            result["changes"].append({"branch": branch_name, "actions": branch_actions})
-            continue
-
-        content = dashboard_path.read_text().strip()
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as e:
-            logger.warning("Invalid JSON in dashboard for %s: %s", branch_name, e)
-            result["branches_skipped"] += 1
-            result["errors"].append(f"{branch_name}: invalid JSON in dashboard, skipped")
-            continue
-
-        changed, branch_actions = _apply_structural_updates(data, template, branch_actions, branch_path)
-
-        if changed:
-            data["last_updated"] = datetime.now().isoformat()
-            if not _safe_write_dashboard(dashboard_path, data, branch_name, dry_run, result):
-                continue
-            result["branches_updated"] += 1
-            branches_updated_list.append(branch_name)
-            result["changes"].append({"branch": branch_name, "actions": branch_actions})
+        with dashboard_lock(branch_path):
+            _push_one(dashboard_path, branch_path, branch_name, template, dry_run, result, branches_updated_list)
 
     spawn_template_path = repo_root / "src" / "aipass" / "spawn" / "templates" / "builder" / "DASHBOARD.local.json"
     _update_spawn_template(spawn_template_path, template, dry_run, result, branches_updated_list)

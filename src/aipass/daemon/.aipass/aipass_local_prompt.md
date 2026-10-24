@@ -13,18 +13,16 @@ The live inventory is `drone @daemon`, generated from the code. This tree is the
 src/aipass/daemon/
 ├── apps/
 │   ├── daemon.py                  # Entry point — module discovery, routing, help
-│   ├── daemon_wakeup.py           # Wakeup / cron trigger
 │   ├── modules/                   # One module per verb
 │   │   ├── run.py                 # The scheduler tick
 │   │   ├── queue.py               # Unified job queue view (--json frozen schema)
 │   │   ├── rotation.py            # Nightly rounds — the night watch
 │   │   ├── inbox_sweep.py         # Unread-mail backstop (hand tool)
 │   │   ├── activity_report.py     # activity, activity-report, branch-health
-│   │   ├── update.py              # Status digest (partial — stale data paths)
+│   │   ├── update.py              # Inbox status digest
 │   │   ├── timer_install.py       # systemd user timer install/uninstall
 │   │   ├── schedule.py            # Retired — retirement notice only
-│   │   ├── actions.py             # Retired — retirement notice only
-│   │   └── wakeup_ops.py          # Orphaned facade, unrouted (see docs/known_issues.md)
+│   │   └── actions.py             # Retired — retirement notice only
 │   ├── handlers/
 │   │   ├── schedule/              # discovery, runstate, command_job, catch_up_lane,
 │   │   │                          # recovery, rotation, tick_lock, job_reference
@@ -34,8 +32,7 @@ src/aipass/daemon/
 │   │   ├── update/data_loader.py  # Data loading for the digest
 │   │   ├── json/json_handler.py   # The json shim every branch shares
 │   │   └── module_root.py         # Module paths that survive a dead cwd
-│   ├── extensions/                # Extension point (empty)
-│   └── plugins/                   # Retired — discover_plugins() has no live caller
+│   └── extensions/                # Extension point (empty)
 ├── .daemon/schedule.json          # My own jobs, same contract as every citizen's
 ├── daemon_json/                   # Tracking data, including daemon_runstate.json
 ├── daemon-tick.service            # systemd user unit — one oneshot tick

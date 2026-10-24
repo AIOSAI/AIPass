@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_plan.py
 # Description: PLAN closure module with registry cleanup
-# Version: 3.6.1
+# Version: 3.7.0
 # Created: 2025-11-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -47,7 +47,7 @@ from aipass.cli.apps.modules import console, error, warning
 from aipass.cli.apps.modules import error as error_display
 
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
-from aipass.flow.apps.handlers.registry.save_registry import save_registry
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
 
 from aipass.flow.apps.handlers.plan.get_open_plans import get_open_plans
 from aipass.flow.apps.handlers.plan.validator import normalize_plan_number, validate_plan_exists
@@ -88,7 +88,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
             error_text = msg.get("text", "general")
             plan_num = msg.get("plan_num", "")
             details = msg.get("details", None)
-            console.print(format_plan_error(error_text, plan_num, details=details))
+            console.print(format_plan_error(error_text, plan_num, details=details, prefix=msg.get("prefix", "FPLAN")))
 
         elif msg_type == "warning":
             warning(msg["text"])
@@ -241,33 +241,41 @@ def close_plan(
     spawn_background: bool = True,
     dry_run: bool = False,
     exclude_types: List[str] | None = None,
+    refresh_dashboards: bool = True,
 ) -> bool:
     """
     Orchestrate plan closure workflow (thin orchestrator)
 
     Auto-confirms by default: running 'close' IS the intent.
-    spawn_background=False from close_all_plans() avoids a post-processing race.
+    spawn_background and refresh_dashboards are False from close_all_plans(): it does both once.
     """
-    result = close_plan_impl(
-        plan_num=plan_num,
-        confirm=confirm,
-        all_plans=all_plans,
-        spawn_background=spawn_background,
-        dry_run=dry_run,
-        exclude_types=exclude_types,
-        normalize_plan_number=normalize_plan_number,
-        load_registry=load_registry,
-        save_registry=save_registry,
-        validate_plan_exists=validate_plan_exists,
-        confirm_plan_deletion=confirm_plan_deletion,
-        is_template_content=is_template_content,
-        update_dashboard_local=update_dashboard_local,
-        push_to_plans_central=push_to_plans_central,
-        push_flow_to_branch_dashboard=push_flow_to_branch_dashboard,
-        close_all_plans_fn=close_all_plans,
-        archive_plan_fn=archive_plan,
-        trigger_fire_fn=_trigger_fire,
-    )
+    # One lock over the whole close: it resolves, writes, archives and writes again.
+    try:
+        with registry_lock():
+            result = close_plan_impl(
+                plan_num=plan_num,
+                confirm=confirm,
+                all_plans=all_plans,
+                spawn_background=spawn_background,
+                dry_run=dry_run,
+                exclude_types=exclude_types,
+                refresh_dashboards=refresh_dashboards,
+                normalize_plan_number=normalize_plan_number,
+                load_registry=load_registry,
+                save_registry=save_registry,
+                validate_plan_exists=validate_plan_exists,
+                confirm_plan_deletion=confirm_plan_deletion,
+                is_template_content=is_template_content,
+                update_dashboard_local=update_dashboard_local,
+                push_to_plans_central=push_to_plans_central,
+                push_flow_to_branch_dashboard=push_flow_to_branch_dashboard,
+                close_all_plans_fn=close_all_plans,
+                archive_plan_fn=archive_plan,
+                trigger_fire_fn=_trigger_fire,
+            )
+    except TimeoutError as exc:
+        error_display(str(exc))
+        return False
 
     if isinstance(result, dict):
         _display_messages(result.get("messages", []))
@@ -288,6 +296,9 @@ def close_all_plans(confirm: bool = False, dry_run: bool = False, exclude_types:
         exclude_types=exclude_types,
         get_open_plans=get_open_plans,
         close_plan_fn=close_plan,
+        update_dashboard_local=update_dashboard_local,
+        push_to_plans_central=push_to_plans_central,
+        push_flow_to_branch_dashboard=push_flow_to_branch_dashboard,
     )
 
     if isinstance(result, dict):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_inbox_cleanup.py
 # Description: Tests for inbox cleanup handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/email/inbox_cleanup.py."""
@@ -507,3 +507,30 @@ def test_proper_close_does_not_double_archive(tmp_path: Path):
 
     deleted_files = list((branch_path / ".ai_mail.local" / "deleted").glob("*.json"))
     assert len(deleted_files) == 1
+
+
+def test_same_subject_same_second_archives_both(tmp_path: Path, monkeypatch):
+    """Two messages sharing a subject, closed in one second, land in two files; the second never overwrites the first."""
+    from datetime import datetime as _dt
+
+    class _FrozenClock(_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return _dt(2026, 1, 1, 12, 0, 0)
+
+    monkeypatch.setattr(mod, "datetime", _FrozenClock)
+    branch = tmp_path / "branch"
+    _make_inbox(
+        branch,
+        [
+            {"id": "aaaa0001", "subject": "RE: Audit", "message": "one", "status": "new"},
+            {"id": "aaaa0002", "subject": "RE: Audit", "message": "two", "status": "new"},
+        ],
+    )
+
+    ok, _msg, count = mod.mark_all_read_and_archive(branch)
+
+    assert ok and count == 2
+    files = sorted((branch / ".ai_mail.local" / "deleted").glob("*.json"))
+    assert len(files) == 2, [f.name for f in files]
+    assert {json.loads(f.read_text(encoding="utf-8"))["message"] for f in files} == {"one", "two"}

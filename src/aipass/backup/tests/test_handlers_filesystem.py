@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
-# Version: 1.2.5
+# Version: 1.2.6
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-10-24
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
@@ -11,7 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/, audit/ parse without errors
 # seedgo: no-test-needed(documentation) — handler functions carry docstrings
-# seedgo: no-test-needed(constant) — project/config.py DEFAULTS' max_file_size_mb, auto_ignore_git and drive_sync values
+# seedgo: no-test-needed(constant) — project/config.py DEFAULTS' max_file_size_mb and drive_sync values
 # seedgo: no-test-needed(stdlib) — os.walk, os.path.islink and os.path.getsize in scan/walk.py and scan/filter.py
 
 import json
@@ -25,7 +25,8 @@ from aipass.backup.apps.handlers.path.builder import backup_root, build_snapshot
 from aipass.backup.apps.handlers.project.config import load_project_config, save_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.report.formatter import format_result
-from aipass.backup.apps.handlers.report.result import BackupResult, new_result
+from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.state.metadata import ERRORS_KEPT, build_metadata
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.handlers.ignore.patterns import is_ignored, load_spec
@@ -148,13 +149,13 @@ class TestProjectSetup:
     def test_second_setup_keeps_the_existing_config(self, tmp_path: Path) -> None:
         """A second setup returns the same .backup and keeps an edited config."""
         create_backup_dir(str(tmp_path))
-        edited = {**load_project_config(str(tmp_path)), "max_versions": 3}
+        edited = {**load_project_config(str(tmp_path)), "max_backup_files": 3}
         assert save_project_config(str(tmp_path), edited) is True
 
         second = create_backup_dir(str(tmp_path))
 
         assert second == tmp_path / ".backup"
-        assert load_project_config(str(tmp_path))["max_versions"] == 3
+        assert load_project_config(str(tmp_path))["max_backup_files"] == 3
 
 
 class TestProjectConfig:
@@ -165,8 +166,6 @@ class TestProjectConfig:
         result = load_project_config(str(tmp_path))
 
         assert isinstance(result, dict)
-        assert result["backup_mode"] == "snapshot"
-        assert result["max_versions"] == 10
         assert result["max_backup_files"] == 25000
         assert result["max_backup_size_gb"] == 10
         assert result["whitelist"] == []
@@ -204,13 +203,14 @@ class TestPathBuilder:
 class TestBackupResult:
     """Test BackupResult dataclass -- module coverage for 'report' package."""
 
-    def test_new_result_carries_the_mode_and_root_it_was_handed(self, tmp_path: Path) -> None:
-        """new_result builds a run's result under the mode and root it was handed."""
-        result = new_result("snapshot", str(tmp_path))
+    def test_a_changelog_entry_keeps_the_first_errors_and_the_full_count(self) -> None:
+        """Mutant: every error lands in the changelog, which every later run reads and rewrites whole."""
+        result = BackupResult(mode="snapshot", errors=[f"f{n}: denied" for n in range(12)])
 
-        assert result.mode == "snapshot"
-        assert result.project_root == str(tmp_path)
-        assert result.files_copied == 0
+        entry = build_metadata(result)
+
+        assert entry["errors"] == [f"f{n}: denied" for n in range(ERRORS_KEPT)]
+        assert entry["error_count"] == 12
 
     def test_format_result_renders_the_counts_the_result_carries(self, tmp_path: Path) -> None:
         """The counts a result carries are the counts the report renders."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Host API Feed Handler — cursor-first notification feed reads
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Host API Feed Handler
@@ -50,7 +50,8 @@ def read_feed(since: Optional[str] = None, limit: int = DEFAULT_LIMIT) -> Dict[s
     oldest_ts = str(events[0]["ts"])
     newest_ts = str(events[-1]["ts"])
 
-    if since is None:
+    # An empty ?since= is no cursor, not one older than every event.
+    if not since:
         window = events[-limit:]
         return _envelope(window, newest_ts, gap=False, more=len(events) > limit)
 

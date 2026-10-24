@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envdiff.py
 # Description: two-environment verdict diff - the width_coupling execution group
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-19
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Run the suite twice under two named environments and diff the per-test verdicts.
@@ -16,7 +16,6 @@ so an injected plugin writes JSONL, and its header records the width the child
 actually resolved. Either variant failing refuses the axis, never a zero.
 """
 
-import json
 import os
 import shutil
 import subprocess
@@ -28,6 +27,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.tests_pytest_standards.gatelog import decode_line, first_record
+from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_runner import run_in_group
 
 GROUP = "width_coupling"
 
@@ -553,15 +554,7 @@ def _launch(
 ) -> "Optional[subprocess.CompletedProcess[str]]":
     """Run pytest, or mark the variant refused with the reason it never ran."""
     try:
-        return subprocess.run(
-            command,
-            cwd=str(target.cwd),
-            env=environment,
-            capture_output=True,
-            text=True,
-            timeout=budget_seconds,
-            check=False,
-        )
+        return run_in_group(command, cwd=str(target.cwd), env=environment, timeout=budget_seconds)
     except subprocess.TimeoutExpired:
         logger.warning(f"[AUDIT-TESTS] variant '{run.variant}' exceeded its {budget_seconds}s budget")
         run.refused = True
@@ -599,14 +592,14 @@ def _absorb_log(run: VariantRun, log_path: Path) -> None:
         )
         return
 
-    header = _first(records, RECORD_HEADER)
+    header = first_record(records, RECORD_HEADER)
     run.reported_columns = _as_optional_int(header.get("reported_columns"))
     run.rootdir = str(header.get("rootdir", ""))
     run.verdicts = collapse_verdicts(records)
     run.collect_errors = [
         str(record.get("nodeid", "")) for record in records if record.get("rec") == RECORD_COLLECT_ERROR
     ]
-    run.session_finished = bool(_first(records, RECORD_SESSION))
+    run.session_finished = bool(first_record(records, RECORD_SESSION))
 
 
 def _rule_on_run(run: VariantRun, variant: Variant) -> None:
@@ -665,26 +658,10 @@ def read_records(log_path: Path) -> List[dict]:
 
     records: List[dict] = []
     for number, line in enumerate(raw.splitlines(), start=1):
-        record = _decode(line, path, number)
+        record = decode_line(line, path, number)
         if record is not None:
             records.append(record)
     return records
-
-
-def _decode(line: str, path: Path, number: int) -> Optional[dict]:
-    """One JSONL line as a dict, or None with a warning naming where it broke."""
-    text = line.strip()
-    if not text:
-        return None
-    try:
-        decoded = json.loads(text)
-    except json.JSONDecodeError as exc:
-        logger.warning(f"[AUDIT-TESTS] verdict log {path.name} line {number} is not JSON: {exc}")
-        return None
-    if not isinstance(decoded, dict):
-        logger.warning(f"[AUDIT-TESTS] verdict log {path.name} line {number} is not an object")
-        return None
-    return decoded
 
 
 def collapse_verdicts(records: Iterable[dict]) -> Dict[str, str]:
@@ -858,14 +835,6 @@ def not_applicable_document(reason: str) -> dict:
         "collection_delta": [],
         "limits": list(WIDTH_AXIS_LIMITS),
     }
-
-
-def _first(records: List[dict], kind: str) -> dict:
-    """The first record of a kind, or an empty dict when the run never wrote one."""
-    for record in records:
-        if record.get("rec") == kind:
-            return record
-    return {}
 
 
 def _as_optional_int(value: object) -> Optional[int]:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.5.0
+# Version: 1.5.2
 # Created: 2025-12-04
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -226,7 +226,7 @@ def _scan_single_log_file(
 ) -> Optional[str]:
     """Scan a single log file for ERROR entries; returns None when fully read, else the limit's reason."""
     # Function-local: medic imports this module, and log_watcher pulls watchdog and prax in at import.
-    from aipass.trigger.apps.handlers.watchers.log_watcher import detect_branch_from_log, generate_error_hash
+    from aipass.trigger.apps.handlers.log_watcher import detect_branch_from_path, generate_error_hash
 
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
@@ -262,7 +262,7 @@ def _scan_single_log_file(
                 _count_repeat(by_hash.get(error_hash), line_iso)
                 continue
 
-            branch = detect_branch_from_log(str(log_file))
+            branch = detect_branch_from_path(str(log_file))
             identity = _registry_identity(parsed["level"], message, branch, str(log_file), line_iso)
             if identity is None:
                 # Not added to processed_hashes: a newer line of the same error must still fire.
@@ -358,7 +358,8 @@ def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> No
             except Exception as exc:
                 logger.warning(f"parse last_scan_timestamp '{last_scan}': {exc}")
 
-        processed_hashes = set(catchup.get("processed_hashes", []))
+        previous_hashes = list(catchup.get("processed_hashes", []))
+        processed_hashes = set(previous_hashes)
 
         outcome = _scan_system_logs_for_errors(since_ts, processed_hashes)
 
@@ -366,7 +367,8 @@ def _run_error_catchup(fire_event: Optional[Callable[..., object]] = None) -> No
             for error in outcome.errors:
                 fire_event("error_detected", **error)
 
-        hash_list = list(processed_hashes)
+        # Oldest first, so the trim below drops the oldest; a set has no order to trim by.
+        hash_list = previous_hashes + sorted(processed_hashes.difference(previous_hashes))
         max_h = catchup.get("max_hashes", MAX_HASHES)
         if len(hash_list) > max_h:
             hash_list = hash_list[-max_h:]

@@ -4,7 +4,7 @@
 # Description: Tests for rm_gate security handler, the DPLAN-0356 lockdown since 2.0.0
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-10-10
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -16,6 +16,7 @@
 
 import json
 import logging
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -554,6 +555,13 @@ class TestEveryDeleteVerb:
         "perl -e 'unlink \"notes.txt\"'",
         "ruby -e \"FileUtils.rm_rf('build')\"",
         "php -r \"unlink('notes.txt');\"",
+        "su -lc 'rmdir build'",
+        "script -qc 'rmdir build'",
+        "su root -c 'rmdir build'",
+        "runuser alice --command='rmdir build'",
+        "flock lock.f -c 'rmdir build'",
+        "parallel ::: 'rmdir build'",
+        "parallel -j2 ::: 'rmdir build'",
     )
     RAW_RM = (r"find . -name x -exec rm {} \;", "ls | xargs rm")
     ALLOWED = (
@@ -563,6 +571,8 @@ class TestEveryDeleteVerb:
         "echo rmdir",
         "find . -name '*.pyc'",
         "bash -c 'echo rmdir'",
+        "parallel echo ::: rmdir",
+        "su -sc root",
         'python3 -c "xs = [1]; xs.remove(1)"',
         "python3 -c \"print('rm is refused')\"",
     )
@@ -606,11 +616,40 @@ class TestEveryDeleteVerb:
         (seat / "clean.sh").write_text("#!/bin/sh\nrmdir build\n", encoding="utf-8")
         (seat / "build.sh").write_text("#!/bin/sh\necho rmdir\n", encoding="utf-8")
 
-        for command in ("python3 cleanup.py", "bash clean.sh", "sh ./clean.sh", "./clean.sh", "source clean.sh"):
+        for command in (
+            "python3 cleanup.py",
+            "bash clean.sh",
+            "sh ./clean.sh",
+            "./clean.sh",
+            "source clean.sh",
+            ". clean.sh",
+        ):
             result = self._run(command, str(seat), grant=False)
             assert result["exit_code"] == 2, command
             assert "is a delete" in json.loads(result["stdout"])["reason"], command
         assert (self._run("bash build.sh rmdir", str(seat), grant=False)["exit_code"]) == 0
+
+    @pytest.mark.parametrize(
+        "command", ["bash <(echo 'rm notes.txt')", "source <(echo hi)", ". <(echo hi)", "bash < <(echo hi)"]
+    )
+    def test_a_process_substitution_program_is_unread(self, tmp_path, command):
+        """`<(...)` is no script on disk: its program is another command's output, never 'not written yet'."""
+        result = self._run(command, _seat(tmp_path, "canary"), grant=False)
+        assert result["exit_code"] == 2, command
+        assert "process substitution" in json.loads(result["stdout"])["reason"], command
+
+    def test_sed_runs_what_its_e_command_names(self, tmp_path):
+        """e COMMAND runs a shell command; s///e runs the pattern space, which no reader sees."""
+        seat = _seat(tmp_path, "canary")
+        assert self._run("sed '1e rmdir build' notes.txt", seat, grant=False)["exit_code"] == 2
+        assert self._run("sed -e p -e '2 e rmdir build' notes.txt", seat, grant=False)["exit_code"] == 2
+        result = self._run("sed -n 's/x/y/e' notes.txt", seat, grant=False)
+        assert "pattern space" in json.loads(result["stdout"])["reason"]
+        for command in ("sed -n '/rmdir/p' notes.txt", "sed 's/rmdir/e/' notes.txt", "sed '1a rmdir e' notes.txt"):
+            assert self._run(command, seat, grant=False)["exit_code"] == 0, command
+
+    def test_a_process_substitution_a_reader_reads_is_no_program(self, tmp_path):
+        assert self._run("diff <(ls a) <(ls b)", _seat(tmp_path, "canary"), grant=False)["exit_code"] == 0
 
     def test_a_script_that_cannot_be_read_is_refused_off_the_admin_seat(self, tmp_path):
         seat = Path(_seat(tmp_path, "canary"))
@@ -704,6 +743,16 @@ class TestTheShellSpellingIsReadTheWayTheShellRunsIt:
             )
 
         assert (result["exit_code"], result["stdout"]) == (0, "")
+
+    def test_many_arithmetic_commands_read_in_linear_time(self, tmp_path):
+        """Each (( once searched every token after it for its )): 8000 of them took 11s."""
+        command = "(( 1 )); " * 8000 + "rm notes.txt"
+        started = time.monotonic()
+        with patch(_RAIL, return_value=False):
+            result = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": _seat(tmp_path, "canary")})
+
+        assert time.monotonic() - started < 3
+        assert "Raw rm is refused" in json.loads(result["stdout"])["reason"]
 
 
 class TestAnUnknownWrapperIsReadForWhatItRuns:

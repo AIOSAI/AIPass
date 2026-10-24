@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations_display.py
 # Description: Unit tests for the dashboard display and command handlers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the display and command handlers of apps/modules/dashboard.py."""
@@ -238,6 +238,19 @@ class TestDashboardHandleCommand:
         assert refusal.value.token == "bogus"
 
 
+def _registry_of(monkeypatch, mod, *branches):
+    """Stand in for the registries: each of ``branches`` is declared under its own directory name."""
+    declared = {b.name.upper(): b for b in branches}
+
+    def _resolve(ref, caller=None):
+        try:
+            return declared[ref.lstrip("@").upper()]
+        except KeyError:
+            raise FileNotFoundError(f"Branch '{ref}' not found in registry") from None
+
+    monkeypatch.setattr(mod, "resolve_branch_path", _resolve)
+
+
 class TestHandleRefresh:
     """Tests for _handle_refresh -- refresh command handler."""
 
@@ -359,9 +372,8 @@ class TestHandleRefresh:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        # _handle_refresh walks UP from cwd for a marker; planting one here stops the walk
-        # at tmp_path instead of an ancestor's .aipass the test never built.
-        (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        # The registry declares tmp_path a branch, so the walk up from the cwd stops there.
+        _registry_of(monkeypatch, mod, tmp_path)
         # The caller's directory outranks the process cwd; under drone it is set.
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         monkeypatch.setattr(
@@ -382,9 +394,7 @@ class TestHandleRefresh:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        # See test_refresh_cwd_success: the marker keeps the ancestor walk
-        # inside the sandbox this test built, and the caller's directory is unset.
-        (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        _registry_of(monkeypatch, mod, tmp_path)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
         monkeypatch.setattr(
             mod,
@@ -405,7 +415,7 @@ class TestHandleRefresh:
         prax, flow = tmp_path / "prax", tmp_path / "flow"
         for branch in (prax, flow):
             (branch / "apps").mkdir(parents=True)
-            (branch / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        _registry_of(monkeypatch, mod, prax, flow)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(flow / "apps"))
         refreshed: list = []
         monkeypatch.setattr(
@@ -419,6 +429,22 @@ class TestHandleRefresh:
 
         assert refreshed == [flow]
         assert "Refreshed FLOW" in self._screen.read().printed
+
+    def test_bare_refresh_outside_any_registered_branch_refuses(self, tmp_path, monkeypatch):
+        """A stray DASHBOARD.local.json does not make ~, the repo root or /tmp a branch to write into."""
+        mod = _load_dashboard_module()
+        (tmp_path / "DASHBOARD.local.json").write_text("{}", encoding="utf-8")
+        _registry_of(monkeypatch, mod)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+        refreshed: list = []
+        monkeypatch.setattr(mod, "refresh_single_dashboard", lambda bp: refreshed.append(bp))
+
+        mod.handle_command("dashboard", ["refresh"])
+
+        assert refreshed == []
+        self._screen.assert_one_error(
+            f"{tmp_path} is not inside a registered branch. Name it: drone @prax dashboard refresh @branch"
+        )
 
     def test_bare_refresh_with_no_caller_directory_refuses_by_name(self, monkeypatch):
         """No caller variable and a deleted cwd: say how to name the branch, refresh nothing."""

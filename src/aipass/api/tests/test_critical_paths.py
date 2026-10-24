@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_critical_paths.py
 # Description: Critical path tests for API branch core functions
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-03-31
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(external) — the real OpenRouter request; make_api_request is mocked, no network in tests
 # seedgo: no-test-needed(ruff) — that api_key.py and openrouter_client.py parse and import
 
+import threading
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -104,12 +105,10 @@ class TestGetResponse:
     @patch(f"{MODULE}.make_api_request")
     @patch(f"{MODULE}.get_cached_client")
     @patch(f"{MODULE}.get_api_key")
-    @patch(f"{MODULE}.ensure_caller_config")
     @patch(f"{MODULE}.get_caller_info")
     def test_successful_call(
         self,
         mock_caller_info,
-        mock_ensure,
         mock_get_key,
         mock_get_client,
         mock_make_req,
@@ -117,6 +116,8 @@ class TestGetResponse:
         mock_track,
     ):
         """Full successful pipeline: detect caller, get key, make request, extract, track."""
+        tracked = threading.Event()
+        mock_track.side_effect = lambda *a: tracked.set()
         mock_caller_info.return_value = {"caller_name": "test-branch"}
         mock_get_key.return_value = "FAKE-sk-or-v1-testkey"
         mock_get_client.return_value = MagicMock()
@@ -132,12 +133,39 @@ class TestGetResponse:
         assert result is not None
         assert result["content"] == "Hello, world!"
         assert result["id"] == "gen-abc123"
+        assert tracked.wait(5)
         mock_track.assert_called_once()
 
+    @patch(f"{MODULE}.track_usage")
+    @patch(f"{MODULE}.extract_response")
+    @patch(f"{MODULE}.make_api_request")
+    @patch(f"{MODULE}.get_cached_client")
     @patch(f"{MODULE}.get_api_key")
-    @patch(f"{MODULE}.ensure_caller_config")
+    def test_the_response_returns_without_waiting_on_tracking(
+        self, mock_get_key, mock_get_client, mock_make_req, mock_extract, mock_track
+    ):
+        """track_usage sleeps and calls OpenRouter; get_response hands it off instead of waiting on it."""
+        release, tracked = threading.Event(), threading.Event()
+        mock_track.side_effect = lambda *a: (release.wait(5), tracked.set())
+        mock_get_key.return_value = "FAKE-sk-or-v1-testkey"
+        mock_extract.return_value = {"content": "hi", "id": "gen-bg", "model": "m"}
+        answers = []
+        caller = threading.Thread(target=lambda: answers.append(openrouter_client.get_response("p", "c", "m")))
+
+        caller.start()
+        caller.join(timeout=2)
+        returned_first = not caller.is_alive()
+        release.set()
+        caller.join()
+
+        assert returned_first, "get_response waited on track_usage"
+        assert answers[0]["id"] == "gen-bg"
+        assert tracked.wait(5)
+        mock_track.assert_called_once_with("gen-bg", "c", "m", "FAKE-sk-or-v1-testkey")
+
+    @patch(f"{MODULE}.get_api_key")
     @patch(f"{MODULE}.get_caller_info")
-    def test_no_model_returns_none(self, mock_caller_info, mock_ensure, mock_get_key):
+    def test_no_model_returns_none(self, mock_caller_info, mock_get_key):
         """Missing model parameter returns None without making API call."""
         mock_caller_info.return_value = {"caller_name": "test"}
 
@@ -147,9 +175,8 @@ class TestGetResponse:
         mock_get_key.assert_not_called()
 
     @patch(f"{MODULE}.get_api_key")
-    @patch(f"{MODULE}.ensure_caller_config")
     @patch(f"{MODULE}.get_caller_info")
-    def test_no_api_key_returns_none(self, mock_caller_info, mock_ensure, mock_get_key):
+    def test_no_api_key_returns_none(self, mock_caller_info, mock_get_key):
         """No API key available returns None."""
         mock_caller_info.return_value = {"caller_name": "test"}
         mock_get_key.return_value = None

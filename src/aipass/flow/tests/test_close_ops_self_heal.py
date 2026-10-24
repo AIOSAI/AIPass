@@ -3,7 +3,7 @@
 # Description: Tests for close's self-heal of an unregistered plan, split from test_close_ops.py (oversize, leg 12)
 # Version: 1.1.0
 # Created: 2026-10-06
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for close_plan_impl's self-heal in apps/handlers/plan/close_ops.py and close_helpers.py."""
@@ -261,9 +261,10 @@ class TestClosePlanImplSelfHeal:
         deps["load_registry"].return_value = {"plans": {}}
         deps["validate_plan_exists"].return_value = (False, "Plan 9990 not found")
 
-        result = close_plan_impl(plan_num="FPLAN-9990", **deps)
+        result = close_plan_impl(plan_num="DPLAN-9990", **deps)
         assert result["success"] is False
         assert result["messages"][0]["text"] == "not_found"
+        assert result["messages"][0]["prefix"] == "DPLAN"
 
 
 class TestSelfHealVerifyBlock:

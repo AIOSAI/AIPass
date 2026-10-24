@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
-# Version: 1.3.6
+# Version: 1.3.7
 # Created: 2026-06-12
-# Modified: 2026-09-28
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
@@ -11,8 +11,10 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that all ignore and scan files parse and import
 # seedgo: no-test-needed(documentation) — handler docstrings and function docs
-# seedgo: no-test-needed(constant) — project/setup.py's DEFAULT_CONFIG: create_backup_dir writes it, no assert reads it
+# seedgo: no-test-needed(constant) — project/config.py's DEFAULTS: create_backup_dir writes them, no assert reads it
 
+import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -30,6 +32,7 @@ from aipass.backup.apps.handlers.project import setup
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.report.result import BackupResult
 from aipass.backup.apps.handlers.scan.filter import filter_paths
+from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.modules import display
 from aipass.backup.apps.modules.all import handle_command
 from aipass.backup.apps.modules.snapshot import run_snapshot
@@ -459,6 +462,46 @@ class TestBuiltinTmpFloor:
 
 
 # --- mirror cleanup uses source-existence, no exceptions ---
+
+
+class TestWalkSkipsIgnoredDirectories:
+    """With the spec, the walk never enters a directory the spec ignores, unless something inside could be kept."""
+
+    @staticmethod
+    def _walked(root: Path, whitelist: list[str]) -> list[str]:
+        """The relative paths the walk yields under the project's own spec."""
+        return sorted(rel.replace("\\", "/") for _abs, rel in walk_project(str(root), load_spec(str(root)), whitelist))
+
+    @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs a POSIX directory a user cannot list")
+    def test_an_ignored_directory_is_never_opened(self, tmp_path: Path) -> None:
+        """Mutant: the walk enters node_modules/, and the walk refuses a directory it cannot list."""
+        (tmp_path / ".backupignore").write_text("node_modules/\n", encoding="utf-8")
+        sealed = tmp_path / "node_modules"
+        sealed.mkdir()
+        (tmp_path / "app.py").write_text("x", encoding="utf-8")
+        sealed.chmod(0)
+        try:
+            walked = self._walked(tmp_path, [])
+        finally:
+            sealed.chmod(0o755)
+
+        assert walked == [".backupignore", "app.py"]
+
+    def test_a_negation_keeps_the_walk_inside_so_the_re_included_file_is_still_found(self, tmp_path: Path) -> None:
+        """Mutant: pruning ignores "!" patterns and drops build/keep.txt the filter would keep."""
+        (tmp_path / ".backupignore").write_text("build/\n!build/keep.txt\n", encoding="utf-8")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "keep.txt").write_text("k", encoding="utf-8")
+
+        assert "build/keep.txt" in self._walked(tmp_path, [])
+
+    def test_a_whitelist_keeps_the_walk_inside(self, tmp_path: Path) -> None:
+        """Mutant: pruning ignores the whitelist, which rescues files inside ignored directories."""
+        (tmp_path / ".backupignore").write_text("build/\n", encoding="utf-8")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "keep.txt").write_text("k", encoding="utf-8")
+
+        assert "build/keep.txt" in self._walked(tmp_path, ["build/keep.txt"])
 
 
 class TestMirrorCleanupNoExceptions:

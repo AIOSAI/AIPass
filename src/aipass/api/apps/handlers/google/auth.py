@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Google OAuth2 authentication and credential management
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-14
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 # pyright: reportMissingImports=false, reportInvalidTypeForm=false, reportOptionalMemberAccess=false, reportOptionalCall=false
 
@@ -139,7 +139,8 @@ def run_oauth_flow(
 def authenticate(scopes: Optional[list] = None) -> Optional["Credentials"]:
     """Full authentication lifecycle: load → refresh → OAuth flow.
 
-    GoogleAuthUnavailable propagates so a headless caller (@backup) learns why instead of a consent flow starting.
+    Interactive: it can open a browser and wait. Headless callers go through service_factory.build_service,
+    which never reaches the flow.
     """
     if not GOOGLE_AUTH_AVAILABLE:
         return None

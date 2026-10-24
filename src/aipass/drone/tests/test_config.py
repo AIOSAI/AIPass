@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: The registry-path configuration commands
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/config.py: the registry-path configuration commands."""
@@ -135,23 +135,18 @@ class TestPathCommand:
 
 
 class TestSetCommand:
-    """'set' command overrides the registry path."""
+    """'set' cannot persist past this process, so it prints the export to use and fails."""
 
-    def test_set_with_arg_returns_true(self, mocks, capsys):
-        """Mutant killed: set confirming without naming the new path."""
+    def test_set_prints_the_export_and_fails(self, mocks, capsys):
+        """Mutant killed: set changing the in-process path and reporting success."""
         result = handle_command(command="set", args=["/new/path.json"])
-        assert result is True
-        assert "Registry path set to: /new/path.json" in capsys.readouterr().out
+        assert result is False
+        assert "export AIPASS_REGISTRY=/new/path.json" in capsys.readouterr().out
+        mocks["set_registry_path"].assert_not_called()
 
-    def test_set_calls_set_registry_path_with_correct_arg(self, mocks):
-
-        handle_command(command="set", args=["/custom/registry.json"])
-        mocks["set_registry_path"].assert_called_once_with("/custom/registry.json")
-
-    def test_set_prints_new_path(self, mocks, capsys):
-
-        handle_command(command="set", args=["/new/path.json"])
-        assert "/new/path.json" in capsys.readouterr().out
+    def test_set_quotes_a_path_with_spaces(self, mocks, capsys):
+        handle_command(command="set", args=["/my dir/registry.json"])
+        assert "export AIPASS_REGISTRY='/my dir/registry.json'" in capsys.readouterr().out
 
     def test_set_without_args_returns_false(self, mocks):
 
@@ -163,31 +158,16 @@ class TestSetCommand:
         handle_command(command="set")
         mocks["logger"].warning.assert_called_once_with("config set requires a path argument")
 
-    def test_set_without_args_does_not_call_set_registry_path(self, mocks):
-
-        handle_command(command="set")
-        mocks["set_registry_path"].assert_not_called()
-
 
 class TestResetCommand:
-    """'reset' command restores the default registry path."""
+    """'reset' cannot persist either: it prints the unset to use and fails."""
 
-    def test_reset_returns_true(self, mocks, capsys):
-        """Mutant killed: reset returning True without confirming."""
+    def test_reset_prints_the_unset_and_fails(self, mocks, capsys):
+        """Mutant killed: reset resetting the in-process path and reporting success."""
         result = handle_command(command="reset")
-        assert result is True
-        assert "Registry path reset to default" in capsys.readouterr().out
-
-    def test_reset_calls_reset_registry_path(self, mocks):
-        """Mutant killed: reset confirming without resetting."""
-        handle_command(command="reset")
-        assert mocks["reset_registry_path"].call_args_list == [call()]
-
-    def test_reset_prints_confirmation(self, mocks, capsys):
-
-        handle_command(command="reset")
-        printed = capsys.readouterr().out.strip()
-        assert printed == "Registry path reset to default"
+        assert result is False
+        assert "unset AIPASS_REGISTRY" in capsys.readouterr().out
+        mocks["reset_registry_path"].assert_not_called()
 
 
 class TestUnknownCommand:

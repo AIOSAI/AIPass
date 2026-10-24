@@ -16,7 +16,8 @@ vendors the bundle, so the two licences stay apart.
   to. No token and a 404 says the repo may be private and names `--from`.
 - **Verify.** The tarball's line in `SHA256SUMS.txt` (sha256sum format). No line
   means refused. A mismatch means refused, and a download is deleted; a `--from`
-  file stays, because it is yours.
+  file stays, because it is yours. `SHA256SUMS.txt` comes from the same release as
+  the files, so this catches a corrupt download, not a tampered release.
 - **Unpack.** Every member is judged before anything is written: no absolute
   names, `..`, links, devices or fifos, no directory but `assets/`, and
   `phone.html` plus `assets/` required. Files are copied by this code, never

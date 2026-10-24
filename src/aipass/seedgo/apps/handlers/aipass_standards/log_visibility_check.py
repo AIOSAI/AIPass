@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
-# Modified: 2026-10-18
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.applicability import is_test_path
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.aipass_standards.prose_lines import UnparseableSource, classify, hash_lines
 
@@ -75,7 +76,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             "standard": "LOG_VISIBILITY",
         }
 
-    if path.name.startswith("test_") or path.name.endswith("_test.py") or "/tests/" in module_path:
+    if is_test_path(module_path):
         return {
             "passed": True,
             "checks": [{"name": "Log visibility", "passed": True, "message": "Test file (exempt)"}],

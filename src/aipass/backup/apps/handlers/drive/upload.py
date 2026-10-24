@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.5.0
+# Version: 1.5.2
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Google Drive upload engine."""
@@ -124,20 +124,16 @@ def upload_single_file(
         result = client._api_call(request)
         if result:
             drive_file_id = result.get("id", existing_drive_id or "")
-            tracker_mod.update_entry(
-                client.file_tracker,
-                local_file,
-                backup_root,
-                drive_file_id,
-            )
-            trail.log_operation(
-                "upload_file",
-                {
-                    "file": str(local_file),
-                    "drive_id": drive_file_id,
-                    "action": action,
-                },
-            )
+            with client.tracker_lock:
+                tracker_mod.update_entry(
+                    client.file_tracker,
+                    local_file,
+                    backup_root,
+                    drive_file_id,
+                )
+            # One line per file goes to the prax log, not the audit trail: a Drive sync writes
+            # thousands and rotated the trail past the nightly's record in under an hour.
+            logger.info(f"[backup] upload_file {action} {local_file} -> {drive_file_id}")
             return True
     except Exception as exc:
         logger.warning(f"Failed to upload {local_file}: {exc}")
@@ -239,10 +235,12 @@ def upload_batch(
     def _maybe_batch_save(count: int) -> None:
         """Save tracker periodically during batch upload."""
         if project_root and count % batch_save_interval == 0:
+            with client.tracker_lock:
+                saved = dict(tracker)
             try:
-                tracker_mod.save_tracker(project_root, tracker)
+                tracker_mod.save_tracker(project_root, saved)
             except Exception as exc:
-                logger.info(f"Batch tracker save failed: {exc}")
+                logger.warning(f"Batch tracker save failed: {exc}")
 
     cancelled = False
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

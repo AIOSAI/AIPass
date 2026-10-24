@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_dashboard_plugin.py
 # Description: Tests for devpulse dashboard plugin
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-05-16
-# Modified: 2026-10-05
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/plugins/devpulse_dashboard/git_section.py, dispatch_section.py and refresh.py."""
@@ -16,11 +16,15 @@
 # seedgo: no-test-needed(log_level) — the lines each builder logs on a failure, covered by that row
 
 import json
+import os
+import subprocess
+import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from aipass.prax.apps.handlers.dashboard import operations
+from aipass.prax.apps.plugins.devpulse_dashboard import dispatch_section
 from aipass.prax.apps.plugins.devpulse_dashboard import git_section as dashboard_git_section
 from aipass.prax.apps.plugins.devpulse_dashboard.dispatch_section import build_dispatch_section
 from aipass.prax.apps.plugins.devpulse_dashboard.git_section import build_git_section
@@ -248,59 +252,61 @@ class TestGitSection:
 
 
 class TestDispatchSection:
-    """Tests for dispatch_section.py."""
+    """Tests for dispatch_section.py: branches come from the registry, locks in ai_mail's shape."""
+
+    @pytest.fixture(autouse=True)
+    def _registry(self, branch_path, monkeypatch):
+        """Registered branches under this test's own tmp_path, named the way the registry lists them."""
+        # Never branch_path.parent: that is pytest's shared base, so one test's lock reached the next.
+        parent = branch_path / "registered"
+        self.branches = {name: parent / name for name in ("ai_mail", "prax", "seedgo", "daemon")}
+        for path in self.branches.values():
+            (path / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(dispatch_section, "get_branch_paths", lambda: list(self.branches.values()))
+
+    def _lock(self, name, data):
+        text = data if isinstance(data, str) else json.dumps(data)
+        (self.branches[name] / ".ai_mail.local" / ".dispatch.lock").write_text(text, encoding="utf-8")
+
+    def _section(self, branch_path):
+        assert build_dispatch_section(branch_path) is True
+        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
+        return dash["sections"]["dispatch"]
 
     def test_build_dispatch_section_no_locks(self, branch_path):
-        """Test dispatch section when no agents are active."""
-
-        # Create sibling branch dirs (dispatch scans parent for all branches)
-        parent = branch_path.parent
-        for name in ["ai_mail", "prax", "seedgo"]:
-            (parent / name / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
-
-        result = build_dispatch_section(branch_path)
-        assert result is True
-
-        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        dispatch = dash["sections"]["dispatch"]
+        """No lock anywhere: nothing active."""
+        dispatch = self._section(branch_path)
         assert dispatch["managed_by"] == "devpulse"
         assert dispatch["agents_active"] == []
         assert dispatch["agents_active_count"] == 0
 
-    def test_build_dispatch_section_with_locks(self, branch_path):
-        """Test dispatch section detects active dispatch locks."""
+    def test_a_live_lock_reports_pid_and_timestamp(self, branch_path):
+        """ai_mail writes {pid, timestamp, branch}; a branch outside the old hard-coded list is seen."""
+        self._lock("daemon", {"pid": os.getpid(), "timestamp": "2026-05-16T14:00:00", "branch": "/x/daemon"})
 
-        parent = branch_path.parent
-        # Create lock for "prax"
-        prax_mail = parent / "prax" / ".ai_mail.local"
-        prax_mail.mkdir(parents=True, exist_ok=True)
-        lock_data = {"pid": 12345, "subject": "Build dashboard view", "started": "2026-05-16T14:00:00"}
-        (prax_mail / ".dispatch.lock").write_text(json.dumps(lock_data), encoding="utf-8")
+        dispatch = self._section(branch_path)
 
-        result = build_dispatch_section(branch_path)
-        assert result is True
+        assert dispatch["agents_active"] == ["daemon"]
+        assert dispatch["details"]["daemon"] == {"pid": os.getpid(), "timestamp": "2026-05-16T14:00:00"}
 
-        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        dispatch = dash["sections"]["dispatch"]
-        assert "prax" in dispatch["agents_active"]
-        assert dispatch["agents_active_count"] == 1
-        assert dispatch["details"]["prax"]["subject"] == "Build dashboard view"
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill terminates on Windows, so a pid is never probed there")
+    def test_a_dead_pid_lock_is_not_active(self, branch_path):
+        """A lock left by a process that is gone is not an active dispatch."""
+        gone = subprocess.run(
+            [sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, encoding="utf-8"
+        )
+        self._lock("prax", {"pid": int(gone.stdout), "timestamp": "2026-05-16T14:00:00", "branch": "/x/prax"})
+
+        assert self._section(branch_path)["agents_active"] == []
 
     def test_build_dispatch_section_corrupt_lock(self, branch_path):
-        """Test dispatch section handles corrupt lock files."""
+        """An unparseable lock is held as mid-write, so it still counts as active."""
+        self._lock("seedgo", "broken json{{{")
 
-        parent = branch_path.parent
-        seedgo_mail = parent / "seedgo" / ".ai_mail.local"
-        seedgo_mail.mkdir(parents=True, exist_ok=True)
-        (seedgo_mail / ".dispatch.lock").write_text("broken json{{{", encoding="utf-8")
+        dispatch = self._section(branch_path)
 
-        result = build_dispatch_section(branch_path)
-        assert result is True
-
-        dash = json.loads((branch_path / "DASHBOARD.local.json").read_text(encoding="utf-8"))
-        dispatch = dash["sections"]["dispatch"]
         assert "seedgo" in dispatch["agents_active"]
-        assert dispatch["details"]["seedgo"]["subject"] == "unknown"
+        assert dispatch["details"]["seedgo"] == {"pid": None, "timestamp": ""}
 
 
 class TestRefresh:

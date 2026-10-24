@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitor_module.py
 # Description: Tests for the unified monitoring module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/monitor.py."""
@@ -40,18 +40,13 @@ _DOUBLED_COLLABORATORS = (
     "print_command_separator",
     "print_hook_event",
     "MonitoringQueue",
-    "ModuleTracker",
     "MonitoringEvent",
-    "init_relay",
-    "relay_event",
-    "stop_relay",
-    "is_relay_enabled_by_env",
+    "instance_lock",
     "_get_pid_for_branch",
 )
 
 _RUN_STATE_NONE = (
     "_event_queue",
-    "_module_tracker",
     "_display_thread",
     "_file_watcher_thread",
     "_log_watcher_thread",
@@ -162,14 +157,13 @@ class TestDispatchRun:
     def test_bare_commons_routes_to_feed(self):
         """A standalone 'commons' target opens the feed, not the branch monitor."""
         mod = _import_monitor()
-        _doubled("is_relay_enabled_by_env").return_value = False
         with (
             patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
             patch.object(mod, "_run_monitor") as mock_branch,
         ):
             result = mod.handle_command("monitor", ["run", "commons"])
             assert result is True
-            mock_feed.assert_called_once_with([], relay_config=None)
+            mock_feed.assert_called_once_with([])
             mock_branch.assert_not_called()
 
     def test_commons_logs_escape_routes_to_branch_tail(self):
@@ -196,29 +190,19 @@ class TestDispatchRun:
             mock_branch.assert_called_once_with(["seedgo,commons"])
             mock_feed.assert_not_called()
 
-    def test_commons_feed_loads_relay_config_when_relay_flag_set(self):
-        """--relay on the feed path loads config via monitor.py's own _load_relay_config."""
+    @pytest.mark.parametrize("run_args", [["--relay"], ["commons", "--relay"], ["seedgo", "-x"]])
+    def test_unknown_flag_is_refused_before_anything_starts(self, run_args):
+        """A flag `run` does not define (the retired --relay included) exits 1, never starts a monitor."""
         mod = _import_monitor()
-        _doubled("is_relay_enabled_by_env").return_value = False
         with (
-            patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
-            patch.object(mod, "_load_relay_config", return_value={"bot_token": "x", "chat_id": 1}) as mock_load,
+            patch(_COMMONS_FEED_TARGET) as mock_feed,
+            patch.object(mod, "_run_monitor") as mock_branch,
+            pytest.raises(mod.UnknownArgument) as exc,
         ):
-            mod.handle_command("monitor", ["run", "commons", "--relay"])
-            mock_load.assert_called_once()
-            mock_feed.assert_called_once_with(["--relay"], relay_config={"bot_token": "x", "chat_id": 1})
-
-    def test_commons_feed_no_relay_config_when_relay_disabled(self):
-        """Without --relay (and no env flag), relay_config stays None."""
-        mod = _import_monitor()
-        _doubled("is_relay_enabled_by_env").return_value = False
-        with (
-            patch(_COMMONS_FEED_TARGET, return_value=True) as mock_feed,
-            patch.object(mod, "_load_relay_config") as mock_load,
-        ):
-            mod.handle_command("monitor", ["run", "commons"])
-            mock_load.assert_not_called()
-            mock_feed.assert_called_once_with([], relay_config=None)
+            mod.handle_command("monitor", ["run", *run_args])
+        assert exc.value.token == run_args[-1]
+        mock_feed.assert_not_called()
+        mock_branch.assert_not_called()
 
 
 class TestGetWatchDirectories:
@@ -351,7 +335,7 @@ class TestRenderEvent:
         event.action = action
 
         with patch.object(mod, "_get_pid_for_branch", return_value=None):
-            mod._render_event(event)
+            mod._print_event_to_console(event)
 
         _doubled("print_command_separator").assert_called_once_with("FLOW", "seedgo audit", "prax", expected_target)
 
@@ -365,10 +349,8 @@ class TestRenderEvent:
         event.level = "info"
 
         with patch.object(mod, "_get_pid_for_branch", return_value=42):
-            mod._render_event(event)
-        _doubled("print_event").assert_called_once_with(
-            "file_change", "FLOW", "STATUS.local.md modified", "info", pid=42
-        )
+            mod._print_event_to_console(event)
+        _doubled("print_event").assert_called_once_with("FLOW", "STATUS.local.md modified", "info", pid=42)
 
     def test_render_command_event_action_with_empty_target(self):
         """Command event with action 'audit:' (empty after colon) passes target=None."""
@@ -381,7 +363,7 @@ class TestRenderEvent:
         event.action = "audit:"
 
         with patch.object(mod, "_get_pid_for_branch", return_value=None):
-            mod._render_event(event)
+            mod._print_event_to_console(event)
         call_args = _doubled("print_command_separator").call_args
         assert call_args[0][3] is None
 
@@ -389,14 +371,16 @@ class TestRenderEvent:
 class TestThreadManagement:
     """Test thread start and stop functions."""
 
-    def test_start_threads_creates_four_threads(self):
-        """_start_threads creates and starts display, file watcher, log watcher, and rate tracker threads."""
+    @pytest.mark.parametrize(("holds_lock", "threads"), [(True, 4), (False, 3)])
+    def test_rate_tracker_starts_only_in_the_lock_holder(self, holds_lock, threads):
+        """Display, file and log watchers always start; the rate tracker only where the instance lock is held."""
         mod = _import_monitor()
+        _doubled("instance_lock").try_acquire.return_value = holds_lock
         mock_thread = MagicMock()
         with patch("threading.Thread", return_value=mock_thread) as mock_cls:
             mod._start_threads()
-        assert mock_cls.call_count == 4
-        assert mock_thread.start.call_count == 4
+        assert mock_cls.call_count == threads
+        assert mock_thread.start.call_count == threads
 
     def test_stop_threads_sets_stop_event(self, monkeypatch):
         """_stop_threads sets the stop event and stops the queue."""
@@ -471,7 +455,7 @@ class TestDisplayWorker:
         monkeypatch.setattr(mod, "_event_queue", mock_queue)
         mod._stop_event.clear()
 
-        with patch.object(mod, "_render_event") as mock_render:
+        with patch.object(mod, "_print_event_to_console") as mock_render:
             mod._display_worker()
         mock_render.assert_called_once_with(mock_event)
 
@@ -1181,12 +1165,6 @@ class TestBranchScopeWiring:
     def test_all_keyword_installs_no_scope(self):
         mod = _import_monitor()
         queue = _run_scoped(mod, ["all"])
-        assert _installed_scope_is_unscoped(queue)
-
-    def test_relay_flag_is_not_a_branch(self):
-        """--relay is stripped before scope parsing."""
-        mod = _import_monitor()
-        queue = _run_scoped(mod, ["--relay"])
         assert _installed_scope_is_unscoped(queue)
 
 

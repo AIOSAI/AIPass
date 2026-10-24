@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_errors.py
 # Description: Unit tests for the errors module (error registry management CLI)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
@@ -418,6 +418,29 @@ class TestHandleCommandResolve:
 
         out = capsys.readouterr().out
         assert _has_line(out, "✅", "Resolved", "e001"), "Expected 'Resolved' confirmation with error ID from success()"
+
+    def test_resolve_finds_a_short_id_past_the_first_thousand_rows(self) -> None:
+        mocks = _mocks()
+        rows = [{"id": f"r{n:05d}", "fingerprint": f"{n:040x}"} for n in range(1500)]
+        mocks["query"].side_effect = lambda limit=50, **_: rows[:limit]
+
+        errors.handle_command("errors", ["resolve", "r01400"])
+
+        mocks["update_status"].assert_called_once_with(f"{1400:040x}", "resolved")
+
+    def test_resolve_on_an_ambiguous_prefix_says_so_and_changes_nothing(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        mocks = _mocks()
+        mocks["query"].return_value = [
+            {"id": "e1", "fingerprint": "ab1" + "0" * 37},
+            {"id": "e2", "fingerprint": "ab2" + "0" * 37},
+        ]
+
+        errors.handle_command("errors", ["resolve", "ab"])
+
+        mocks["update_status"].assert_not_called()
+        assert "ambiguous: ab matches 2 errors" in capsys.readouterr().err.lower()
 
     def test_resolve_no_id_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
         """resolve with no ID prints a usage hint."""

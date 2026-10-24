@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Status module — show backup status for a project, as a page or one JSON object
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-23
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Status Module — display backup info and recent history for a project.
@@ -198,8 +198,6 @@ def handle_command(command: str, args: list) -> bool:
 
     console.print(f"[bold]Backup Status:[/bold] {config.get('project_name', Path(project_root).name)}")
     console.print(f"  Path:         {project_root}")
-    console.print(f"  Mode:         {config.get('backup_mode', 'snapshot')}")
-    console.print(f"  Max versions: {config.get('max_versions', 10)}")
     console.print(f"  Drive sync:   {config.get('drive_sync', False)}")
     console.print(f"  Total runs:   {len(changelog)}")
     for entry in read_running(project_root):

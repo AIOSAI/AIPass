@@ -4,7 +4,7 @@
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-08
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -78,6 +78,19 @@ class TestHandle:
 
         data = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))
         assert data["sessions"][0]["number"] == 11
+
+    def test_a_write_that_does_not_land_leaves_local_json_whole(self, tmp_path):
+        """Staged and renamed: a failed write leaves the old file, never a torn one rollover then reads."""
+        branch_dir = _make_branch(tmp_path, sessions=[{"number": 3, "date": "2026-01-01", "summary": "old"}])
+        local = branch_dir / ".trinity" / "local.json"
+        before = local.read_text(encoding="utf-8")
+        with (
+            patch(f"{MODULE}._find_repo_root", return_value=None),
+            patch("aipass.hooks.apps.handlers.json.files._replace_with_retry", side_effect=OSError("disk full")),
+        ):
+            handle({"cwd": str(branch_dir)})
+        assert local.read_text(encoding="utf-8") == before
+        assert [p.name for p in local.parent.iterdir()] == ["local.json"]
 
     def test_no_branch_dir_resolved_is_a_noop(self, tmp_path):
 
