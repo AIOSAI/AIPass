@@ -1,14 +1,15 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-09-01
 # Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
 
-# Every project here is built in tmp_path: no fleet count, Python version or platform, the species the tool exists to find.
+# Every project here is built in tmp_path: no fleet count, Python version or platform,
+# the species the tool exists to find.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — ast.parse's parsing; shape only walks the tree it returns
@@ -228,6 +229,7 @@ class TestExclusions:
         assert statuses["tests/legacy/deep/test_old.py"] == exclusions.STATUS_CONFTEST_IGNORE
         assert statuses["tests/test_live.py"] == exclusions.STATUS_COLLECTED
 
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="no tomllib below 3.11: read_rules reads no pyproject there")
     def test_a_string_testpaths_is_split_on_whitespace_not_into_letters(self, tmp_path):
         _write(tmp_path, "pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "tests checks"')
 
@@ -509,15 +511,17 @@ class TestTheTwinsSwitch:
 
     def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self, tmp_path: Path, monkeypatch) -> None:
         """`inventory._branch_container` descends from the repo root to the branches."""
-        fleet = roots.resolve(roots.FLEET_ARGUMENT)
+        repo_root = Path(_src_root()).parent
         [container] = _run_twins_verb(tmp_path, monkeypatch, roots.FLEET_ARGUMENT)
 
-        assert container != fleet.path
+        assert container != repo_root
         assert (container / "seedgo" / "tests").is_dir()
 
     def test_the_container_is_the_same_on_a_host_with_no_registry(self, tmp_path: Path, monkeypatch) -> None:
         """The fleet container never depends on AIPASS_REGISTRY.json existing."""
-        fleet = roots.resolve(roots.FLEET_ARGUMENT)
+        repo_root = Path(_src_root()).parent
+        registry = _write(tmp_path, f"registry/{registry_scan.DEFAULT_REGISTRY_NAME}", "{}")
+        monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
         [with_registry] = _run_twins_verb(tmp_path / "with", monkeypatch, roots.FLEET_ARGUMENT)
 
         monkeypatch.setattr(inventory, "_branch_paths", lambda: {})
@@ -525,7 +529,7 @@ class TestTheTwinsSwitch:
         [without_registry] = _run_twins_verb(tmp_path / "without", monkeypatch, roots.FLEET_ARGUMENT)
 
         assert without_registry == with_registry
-        assert without_registry != fleet.path
+        assert without_registry != repo_root
         assert (without_registry / "seedgo" / "tests").is_dir()
 
     def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path, monkeypatch) -> None:
