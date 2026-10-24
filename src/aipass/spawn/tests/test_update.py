@@ -1037,6 +1037,7 @@ class TestHandleUpdate:
         with (
             patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
             patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+            patch("aipass.spawn.apps.modules.update.find_registry", return_value=mock_registry),
         ):
             result = handle_update(["specialist", "--all"])
 
