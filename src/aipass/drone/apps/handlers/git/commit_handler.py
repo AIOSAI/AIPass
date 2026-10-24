@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-05-12
 # Modified: 2026-10-24
 # =============================================
@@ -35,8 +35,9 @@ SUBJECT_REFUSAL = (
     "so an essay there is read at every glance; in the body it is read once,\n"
     "by whoever needs it, and the record still keeps every word.\n"
     "\n"
-    "Nothing was committed."
+    "{outcome}"
 )
+COMMIT_OUTCOME = "Nothing was committed."
 
 
 def commit_subject(message: str) -> str:
@@ -50,12 +51,12 @@ def commit_subject(message: str) -> str:
     return stripped.splitlines()[0].strip()
 
 
-def subject_refusal(message: str) -> str | None:
-    """Refusal text when *message*'s subject is over the cap, else ``None``."""
+def subject_refusal(message: str, outcome: str = COMMIT_OUTCOME) -> str | None:
+    """Refusal text, ending in *outcome*, when *message*'s subject is over the cap, else ``None``."""
     subject = commit_subject(message)
     if len(subject) <= SUBJECT_CAP:
         return None
-    return SUBJECT_REFUSAL.format(length=len(subject), cap=SUBJECT_CAP)
+    return SUBJECT_REFUSAL.format(length=len(subject), cap=SUBJECT_CAP, outcome=outcome)
 
 
 def _find_branch_for_path(filepath: str, repo_root: Path) -> tuple[str, Path] | None:

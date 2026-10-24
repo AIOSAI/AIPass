@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -24,6 +25,7 @@ import pytest
 from aipass.drone.apps.handlers.git import external_pr_handler
 from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches, prune_temp_branches
 from aipass.drone.apps.handlers.git.commit_handler import subject_refusal
+from aipass.drone.apps.handlers.git.dev_pr_handler import DEV_PR_OUTCOME
 from aipass.drone.apps.modules.git_module import handle_command
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.trigger.apps.modules import core as trigger_core
@@ -409,10 +411,10 @@ class _GitHub:
         self.calls: list[list[str]] = []
         self.origin_on_github = True
         self.pr = {"headRefName": "dev", "title": "feat: tier prompt"}
-        self.create = (0, f"{_PR_URL}\n", "")
-        self.merge = (0, "", "")
+        self.create: tuple[int, str, str] = (0, f"{_PR_URL}\n", "")
+        self.merge: tuple[int, str, str] = (0, "", "")
 
-    def __call__(self, argv: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+    def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         if argv[:4] == ["git", "remote", "get-url", "origin"] and self.origin_on_github:
             return subprocess.CompletedProcess(argv, 0, f"{_GITHUB_URL}\n", "")
         if argv[0] != "gh":
@@ -551,7 +553,8 @@ class TestDevPrTitleIsCappedAtHome:
 
         result = handle_command("dev-pr", ["x" * 257])
 
-        assert result == {"stdout": "", "stderr": subject_refusal("x" * 257), "exit_code": 1}
+        assert result == {"stdout": "", "stderr": subject_refusal("x" * 257, DEV_PR_OUTCOME), "exit_code": 1}
+        assert result["stderr"].endswith("\n\nThe PR title was refused. Nothing was pushed.")
         assert (github.calls, _origin_dev(work)) == ([], "")
 
     def test_a_100_char_description_opens_the_pr(
