@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_flow.py
 # Description: Tests for flow.py CLI entry point
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -552,7 +552,7 @@ class TestPrintHelp:
 class TestPrintModuleHelp:
     """Tests for print_module_help()."""
 
-    def test_exact_match(self, capsys: pytest.CaptureFixture[str], header_bus) -> None:
+    def test_exact_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Finds module by exact name match, and the header names the module found.
 
         Mutant: header(f"Flow - {module_name} Command") -> header("Flow - Command") reddens this.
@@ -563,7 +563,7 @@ class TestPrintModuleHelp:
         out, err = capsys.readouterr()
         assert "Create plans" in out
         assert "Unknown command" not in out + err
-        assert header_bus.calls == [("cli_header_displayed", {"title": "Flow - create_plan Command"})]
+        assert "Flow - create_plan Command" in out
 
     def test_no_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows error for unknown command.

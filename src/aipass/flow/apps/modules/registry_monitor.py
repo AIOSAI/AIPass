@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_monitor.py
 # Description: Registry auto-healing module
-# Version: 3.4.0
+# Version: 3.5.0
 # Created: 2025-11-21
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -58,6 +58,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, error, success, warning
 
 from aipass.flow.apps.handlers.registry.load_registry import RegistryUnreadableError, load_registry
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock
 
 from aipass.flow.apps.handlers.registry.monitor_ops import (
     scan_plan_files_impl,
@@ -86,12 +87,13 @@ ECOSYSTEM_ROOT = REPO_ROOT  # Scan from repo root
 
 def scan_plan_files() -> Dict[str, Any]:
     """Scan ecosystem for PLAN files and heal the registry (thin orchestrator)"""
-    result = scan_plan_files_impl(
-        ecosystem_root=ECOSYSTEM_ROOT,
-        load_registry=load_registry,
-    )
+    with registry_lock():
+        result = scan_plan_files_impl(
+            ecosystem_root=ECOSYSTEM_ROOT,
+            load_registry=load_registry,
+        )
 
-    heal_result = heal_registry_doctrine_impl(ecosystem_root=ECOSYSTEM_ROOT)
+        heal_result = heal_registry_doctrine_impl(ecosystem_root=ECOSYSTEM_ROOT)
     result["doctrine_healed"] = heal_result["healed_count"]
     result["doctrine_heals"] = heal_result["healed"]
 
@@ -128,7 +130,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         console.print("[bold]Scanning for PLAN files...[/bold]")
         try:
             result = scan_plan_files()
-        except RegistryUnreadableError as exc:
+        except (RegistryUnreadableError, TimeoutError) as exc:
             error(f"Registry scan refused: {exc}")
             return True
 

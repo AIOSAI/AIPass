@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_central.py
 # Description: Push to Plans Central Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-21
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Push to Plans Central Handler"""
@@ -23,7 +23,8 @@ _PKG_ROOT = module_file(__file__).parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
 
 # The sibling handler, never the module: a handler must not import a module.
-from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
+from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl, save_central
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock
 
 
 MODULE_NAME = "push_central"
@@ -177,26 +178,27 @@ def _calculate_global_statistics(central_data: Dict[str, Any]) -> Dict[str, int]
 def push_to_plans_central() -> bool:
     """Push plan data for ALL branches to .ai_central/PLANS.central.json"""
     try:
-        AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)
+        with registry_lock():
+            AI_CENTRAL_DIR.mkdir(parents=True, exist_ok=True)
 
-        registry = _load_registry()
-        branch_sections = _extract_plans_by_branch(registry)
+            registry = _load_registry()
+            branch_sections = _extract_plans_by_branch(registry)
 
-        now = datetime.now(timezone.utc).isoformat()
-        for section in branch_sections.values():
-            section["last_updated"] = now
+            now = datetime.now(timezone.utc).isoformat()
+            for section in branch_sections.values():
+                section["last_updated"] = now
 
-        central_data = _load_central()
-        central_data["branches"] = branch_sections
-        central_data["global_statistics"] = _calculate_global_statistics(central_data)
-        central_data["generated_at"] = now
+            central_data = _load_central()
+            central_data["branches"] = branch_sections
+            central_data["global_statistics"] = _calculate_global_statistics(central_data)
+            central_data["generated_at"] = now
 
-        with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
-            json.dump(central_data, f, indent=2, ensure_ascii=False)
+            if not save_central(CENTRAL_FILE, AI_CENTRAL_DIR, central_data):
+                raise OSError(f"could not save {CENTRAL_FILE}")
 
-        # Branch sections without the top-level aggregation are not a finished push.
-        if not aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR):
-            raise OSError("the branch sections landed, but the aggregation did not")
+            # Branch sections without the top-level aggregation are not a finished push.
+            if not aggregate_central_impl(heal=True, central_file=CENTRAL_FILE, central_dir=AI_CENTRAL_DIR):
+                raise OSError("the branch sections landed, but the aggregation did not")
 
         total_active = sum(len(s.get("active_plans", [])) for s in branch_sections.values())
         json_handler.log_operation(

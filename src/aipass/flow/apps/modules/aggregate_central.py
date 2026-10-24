@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregate_central.py
 # Description: Aggregate Central Plans Module
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-30
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -56,6 +56,7 @@ from aipass.flow.apps.handlers.json import json_handler
 
 from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_all_branch_dashboards
 from aipass.flow.apps.handlers.plan.aggregate_ops import aggregate_central_impl
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock
 
 MODULE_NAME = "aggregate_central"
 
@@ -75,11 +76,16 @@ CENTRAL_FILE = AI_CENTRAL_DIR / "PLANS.central.json"
 
 def aggregate_central(heal: bool = True) -> bool:
     """Aggregate and validate central plans (thin orchestrator)"""
-    return aggregate_central_impl(
-        heal=heal,
-        central_file=CENTRAL_FILE,
-        central_dir=AI_CENTRAL_DIR,
-    )
+    try:
+        with registry_lock():
+            return aggregate_central_impl(
+                heal=heal,
+                central_file=CENTRAL_FILE,
+                central_dir=AI_CENTRAL_DIR,
+            )
+    except TimeoutError as exc:
+        logger.error("[aggregate_central] %s", exc)
+        return False
 
 
 def print_introspection():

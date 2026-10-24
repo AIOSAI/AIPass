@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_ops.py
 # Description: Template registry CRUD operations
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-18
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Template Registry CRUD Operations.
@@ -15,6 +15,7 @@ so plan types are discovered from disk instead of a hardcoded PREFIX_MAP.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -124,24 +125,16 @@ def load_registry() -> Dict[str, Any]:
 
 
 def _prune_orphaned_types(data: Dict[str, Any]) -> bool:
-    """Remove registry entries whose template directory no longer exists."""
+    """Remove registry entries whose template directory no longer exists.
+
+    The type's plan registry stays on disk: a directory missing for a moment must not cost its plan rows.
+    """
     templates_dir = FLOW_ROOT / "templates"
     orphaned = [d for d in data["types"] if d not in _PROTECTED_TYPES and not (templates_dir / d).is_dir()]
-    if not orphaned:
-        return False
-
-    plan_registry_dir = FLOW_ROOT / "flow_json"
     for dir_name in orphaned:
-        entry = data["types"][dir_name]
-        shorthand = entry.get("shorthand", entry.get("prefix", "").lower())
         logger.info("[%s] Auto-pruning orphaned type '%s' (directory missing)", MODULE_NAME, dir_name)
         del data["types"][dir_name]
-        if shorthand:
-            plan_reg = plan_registry_dir / f"{shorthand}_registry.json"
-            if plan_reg.exists():
-                plan_reg.unlink()
-                logger.info("[%s] Removed orphaned plan registry: %s", MODULE_NAME, plan_reg.name)
-    return True
+    return bool(orphaned)
 
 
 def _auto_register_new_types(data: Dict[str, Any]) -> bool:
@@ -224,8 +217,11 @@ def save_registry(data: Dict[str, Any]) -> bool:
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
+        # tmp + replace: a reader of a half-written file would reseed the defaults over it.
+        tmp_path = path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, path)
         json_handler.log_operation(
             "save_template_registry",
             {"type_count": data["metadata"]["type_count"]},

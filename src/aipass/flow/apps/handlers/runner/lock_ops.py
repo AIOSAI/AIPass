@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_ops.py
 # Description: Process lock file operations handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-22
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -13,11 +13,24 @@ Lock File Operations Handler
 import os
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO, Iterator
 
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+
+try:
+    import fcntl
+except ImportError as exc:
+    logger.debug("fcntl unavailable, using msvcrt: %s", exc)
+    fcntl = None  # type: ignore[assignment]
+try:
+    import msvcrt
+except ImportError as exc:
+    logger.debug("msvcrt unavailable, using fcntl: %s", exc)
+    msvcrt = None  # type: ignore[assignment]
 
 # Delete-pending clears in milliseconds; a real permissions problem should surface fast.
 _CREATE_RETRIES = 5
@@ -177,6 +190,51 @@ def acquire_lock(lock_file: Path) -> bool:
 
     json_handler.log_operation("lock_acquired", {"lock_file": str(lock_file), "stale_recovery": True})
     return True
+
+
+def _try_os_lock(fh: BinaryIO) -> bool:
+    """Take an exclusive OS lock on fh without blocking; True when taken."""
+    if msvcrt is not None:
+        try:
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]  # Windows-only
+            return True
+        except OSError:
+            return False
+    assert fcntl is not None
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+
+
+def _os_unlock(fh: BinaryIO) -> None:
+    """Drop the OS lock _try_os_lock took."""
+    if msvcrt is not None:
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]  # Windows-only
+        return
+    assert fcntl is not None
+    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def os_file_lock(lock_file: Path, timeout: float = 30.0, poll: float = 0.05) -> Iterator[None]:
+    """Hold an exclusive OS lock on lock_file, polling until timeout; raises TimeoutError past it.
+
+    The OS drops the lock when its holder dies, so it is never stale and the file is never deleted.
+    """
+    with open(lock_file, "a+b") as fh:
+        deadline = time.monotonic() + timeout
+        while not _try_os_lock(fh):
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"{lock_file} is held by another process past {timeout:.0f}s")
+            _sleep(poll)
+        try:
+            yield
+        finally:
+            _os_unlock(fh)
 
 
 def release_lock(lock_file: Path) -> None:

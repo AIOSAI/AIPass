@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_central.py
 # Description: Tests for push_central handler -- push to Plans Central
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_central.py."""
@@ -669,7 +669,7 @@ class TestPushToPlansCentral:
             result = mod.push_to_plans_central()
 
         assert result is False
-        mock_json_handler.assert_not_called()
+        assert not [c for c in mock_json_handler.call_args_list if c.args[0] == "plans_central_pushed"]
         assert [c.args for c in log.error.call_args_list] == [
             (
                 "Failed to push plans to central '%s': %s",
@@ -712,11 +712,10 @@ class TestPushToPlansCentral:
 
         assert result is True
         mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
-        mock_json_handler.assert_called_once()
-        call_args = mock_json_handler.call_args
-        assert call_args[0][0] == "plans_central_pushed"
-        assert call_args[0][1]["success"] is True
-        assert call_args[0][1]["active_plans"] == 1
+        pushed = [c for c in mock_json_handler.call_args_list if c.args[0] == "plans_central_pushed"]
+        assert len(pushed) == 1
+        assert pushed[0].args[1]["success"] is True
+        assert pushed[0].args[1]["active_plans"] == 1
 
     def test_writes_central_file(self, tmp_path):
         """Writes PLANS.central.json with correct structure."""

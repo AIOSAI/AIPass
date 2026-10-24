@@ -1,22 +1,22 @@
 # =================== AIPass ====================
 # Name: save_registry.py
 # Description: Save Registry Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-11-07
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Save Registry Handler"""
 
 import json
 import os
-import time
-from pathlib import Path
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Iterator
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.runner.lock_ops import os_file_lock
 
 from aipass.flow.apps.handlers.repo_root import module_file
 
@@ -26,87 +26,44 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 MODULE_NAME = "save_registry"
 FLOW_JSON_DIR = FLOW_ROOT / "flow_json"
 REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
+LOCK_NAME = ".flow_writes.lock"
 
-_LOCK_RETRIES = 10
-_LOCK_BACKOFF_BASE = 0.05
+# Depth of registry_lock() in this process: nested holders must not wait on themselves.
+_LOCK_STATE = {"depth": 0}
 
 
-def _sleep(seconds: float) -> None:
-    """time.sleep(seconds), the lock backoff's wait.
+@contextmanager
+def registry_lock() -> Iterator[None]:
+    """Hold flow's one write lock: plan registries, CLOSED_PLANS and PLANS.central. Re-entrant per process.
 
-    Tests patch this name so the backoff skips waiting without patching time.sleep globally.
+    One lock for all: a close resolves across several registries and writes all three before it is done.
+    Raises TimeoutError when another process keeps it past the timeout.
     """
-    time.sleep(seconds)
-
-
-def _create_exclusive(lock_path: Path) -> int:
-    """os.open(lock_path, O_CREAT | O_EXCL | O_WRONLY): the lock's one create.
-
-    Tests inject Windows' delete-pending PermissionError here instead of patching os.open.
-    """
-    return os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-
-def _acquire_lock(lock_path: Path) -> bool:
-    """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
-
-    Returns: True once acquired; False only when the budget runs out on contention.
-    Raises: PermissionError (chained) if the last attempt was denied; any other OSError at once.
-    """
-    denial: PermissionError | None = None
-    waited = 0.0
-    for attempt in range(_LOCK_RETRIES):
+    if _LOCK_STATE["depth"]:
+        _LOCK_STATE["depth"] += 1
         try:
-            fd = _create_exclusive(lock_path)
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            return True
-        except FileExistsError:
-            denial = None
-            logger.info("[%s] Lock contention on %s, retry %d", MODULE_NAME, lock_path, attempt + 1)
-        except PermissionError as exc:
-            denial = exc
-            logger.info(
-                "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
-            )
-        except OSError as exc:
-            # False would read as a spent retry budget, so other OSErrors propagate.
-            logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
-            raise
-        delay = _LOCK_BACKOFF_BASE * (2**attempt)
-        _sleep(delay)
-        waited += delay
-    if denial is not None:
-        raise PermissionError(
-            f"Lock {lock_path} still denied after {_LOCK_RETRIES} attempts ({waited:.2f}s waited)"
-        ) from denial
-    return False
-
-
-def _release_lock(lock_path: Path) -> None:
-    """Remove lockfile, tolerating already-removed."""
-    try:
-        lock_path.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("[%s] Could not release lock %s: %s", MODULE_NAME, lock_path, exc)
+            yield
+        finally:
+            _LOCK_STATE["depth"] -= 1
+        return
+    FLOW_JSON_DIR.mkdir(parents=True, exist_ok=True)
+    with os_file_lock(FLOW_JSON_DIR / LOCK_NAME):
+        _LOCK_STATE["depth"] = 1
+        try:
+            yield
+        finally:
+            _LOCK_STATE["depth"] = 0
 
 
 def save_registry(registry: Dict[str, Any], registry_file: str | None = None) -> bool:
     """Save PLAN registry
 
-    Returns True if saved, False on error (logged). Lockfile serializes writers; tmp+replace prevents torn reads.
+    Returns True if saved, False on error (logged). tmp+replace prevents torn reads.
     """
     target = FLOW_JSON_DIR / registry_file if registry_file else REGISTRY_FILE
-    lock_path = target.with_suffix(".lock")
 
     try:
-        FLOW_JSON_DIR.mkdir(parents=True, exist_ok=True)
-
-        if not _acquire_lock(lock_path):
-            logger.error("[%s] Could not acquire lock for %s after %d retries", MODULE_NAME, target, _LOCK_RETRIES)
-            return False
-
-        try:
+        with registry_lock():
             registry["_notice"] = "DO NOT MANUALLY EDIT — managed by flow close pipeline"
             registry["last_updated"] = datetime.now(timezone.utc).isoformat()
 
@@ -114,8 +71,6 @@ def save_registry(registry: Dict[str, Any], registry_file: str | None = None) ->
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(registry, f, indent=2, ensure_ascii=False)
             os.replace(str(tmp_path), str(target))
-        finally:
-            _release_lock(lock_path)
 
         json_handler.log_operation(
             "registry_saved",

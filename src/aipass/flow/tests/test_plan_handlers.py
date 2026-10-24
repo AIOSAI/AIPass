@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plan_handlers.py
 # Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-05
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
@@ -624,10 +624,10 @@ class TestCreatePlanImpl:
         bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="")
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
-    def test_registry_save_failure_warns_but_returns_success(self, mock_jh, bus):
-        """Plan is created even if registry save fails (file already on disk).
+    def test_registry_save_failure_is_a_failed_create(self, mock_jh, bus):
+        """A plan file with no saved row is no create: the next create would reissue its number.
 
-        Mutant: trigger.fire("plan_created" -> trigger.fire("plan_saved" reddens this.
+        Mutant: dropping the `return False` after a failed save_registry reddens this.
         """
         save_mock = MagicMock(side_effect=[True, False])  # First for auto-close, second for plan
         deps = self._make_deps(
@@ -637,9 +637,8 @@ class TestCreatePlanImpl:
             save_registry=save_mock,
         )
 
-        success, _, _, _, _, msgs = create_plan_impl(subject="test", **deps)
+        success, _, _, _, error, _ = create_plan_impl(subject="test", **deps)
 
-        assert success is True
-        warning_msgs = [m for m in msgs if m.get("type") == "warning"]
-        assert len(warning_msgs) >= 1
-        bus.fire.assert_called_once_with("plan_created", plan_number=1, location="plans", subject="test")
+        assert success is False
+        assert "registry scan" in error
+        bus.fire.assert_not_called()

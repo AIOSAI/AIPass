@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_branch_dashboard.py
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-04-26
-# Modified: 2026-09-28
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_branch_dashboard.py and aipass.prax's dashboard module."""
@@ -12,12 +12,16 @@
 # seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
+import sys
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from aipass.flow.apps.handlers.dashboard import push_branch_dashboard
-from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP
+from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, SUBJECT_CAP, dashboard_lock
 
 _MOD = "aipass.flow.apps.handlers.dashboard.push_branch_dashboard"
 
@@ -30,18 +34,12 @@ _MOD = "aipass.flow.apps.handlers.dashboard.push_branch_dashboard"
 class TestWriteDashboardSection:
     """Tests for _write_dashboard_section."""
 
-    def test_creates_dashboard_when_not_exists(self, tmp_path):
-        """Creates DASHBOARD.local.json when it does not exist."""
+    def test_refuses_when_no_dashboard_exists(self, tmp_path):
+        """No DASHBOARD.local.json: refused, nothing created."""
         mod = push_branch_dashboard
-        section_data = {"managed_by": "flow", "active_plans": 0}
-        with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", tmp_path / "nonexistent_template.json"):
-            result = mod._write_dashboard_section(tmp_path, "flow", section_data)
-        assert result is True
-        dashboard_path = tmp_path / "DASHBOARD.local.json"
-        assert dashboard_path.exists()
-        dashboard = json.loads(dashboard_path.read_text(encoding="utf-8"))
-        assert "flow" in dashboard["sections"]
-        assert dashboard["sections"]["flow"]["managed_by"] == "flow"
+        result = mod._write_dashboard_section(tmp_path, "flow", {"managed_by": "flow", "active_plans": 0})
+        assert result is False
+        assert not (tmp_path / "DASHBOARD.local.json").exists()
 
     def test_updates_existing_dashboard(self, tmp_path):
         """Updates an existing DASHBOARD.local.json with new section data."""
@@ -65,34 +63,18 @@ class TestWriteDashboardSection:
         assert "flow" in updated["sections"]
         assert "ai_mail" in updated["sections"]
 
-    def test_corrupt_json_creates_fresh(self, tmp_path):
-        """Corrupt JSON in dashboard file triggers creation of fresh dashboard."""
+    def test_unreadable_dashboard_is_refused_and_left_alone(self, tmp_path):
+        """A torn or empty file is most often another writer mid-write: refuse, never reseed over it.
+
+        Mutant: reseeding a fresh dashboard on JSONDecodeError reddens this.
+        """
         mod = push_branch_dashboard
         dashboard_path = tmp_path / "DASHBOARD.local.json"
-        dashboard_path.write_text("{not valid json!!!", encoding="utf-8")
-
-        section_data = {"managed_by": "flow", "active_plans": 0}
-        with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", tmp_path / "nonexistent_template.json"):
-            result = mod._write_dashboard_section(tmp_path, "flow", section_data)
-
-        assert result is True
-        updated = json.loads(dashboard_path.read_text(encoding="utf-8"))
-        assert "sections" in updated
-        assert "flow" in updated["sections"]
-
-    def test_empty_file_creates_fresh(self, tmp_path):
-        """Empty dashboard file triggers creation of fresh dashboard."""
-        mod = push_branch_dashboard
-        dashboard_path = tmp_path / "DASHBOARD.local.json"
-        dashboard_path.write_text("", encoding="utf-8")
-
-        section_data = {"managed_by": "flow", "active_plans": 0}
-        with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", tmp_path / "nonexistent_template.json"):
-            result = mod._write_dashboard_section(tmp_path, "flow", section_data)
-
-        assert result is True
-        updated = json.loads(dashboard_path.read_text(encoding="utf-8"))
-        assert "sections" in updated
+        for content in ('{"sections": {"ai_mail": {"new": 3', ""):
+            dashboard_path.write_text(content, encoding="utf-8")
+            result = mod._write_dashboard_section(tmp_path, "flow", {"managed_by": "flow", "active_plans": 0})
+            assert result is False
+            assert dashboard_path.read_text(encoding="utf-8") == content
 
     def test_recalculates_quick_status(self, tmp_path):
         """Dashboard quick_status is recalculated after section write."""
@@ -153,8 +135,8 @@ class TestWriteDashboardSection:
         """Returns False when an exception occurs during write."""
         mod = push_branch_dashboard
         section_data = {"managed_by": "flow"}
-        # Patch Path to simulate write failure
-        with patch.object(mod, "_create_fresh_dashboard", side_effect=RuntimeError("boom")):
+        (tmp_path / "DASHBOARD.local.json").write_text(json.dumps({"sections": {}}), encoding="utf-8")
+        with patch.object(mod.os, "replace", side_effect=OSError("boom")):
             result = mod._write_dashboard_section(tmp_path, "flow", section_data)
         assert result is False
 
@@ -170,67 +152,6 @@ class TestWriteDashboardSection:
         updated = json.loads(dashboard_path.read_text(encoding="utf-8"))
         assert "last_updated" in updated["sections"]["flow"]
         assert "last_updated" in updated
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. _create_fresh_dashboard
-# ═══════════════════════════════════════════════════════════
-
-
-class TestCreateFreshDashboard:
-    """Tests for _create_fresh_dashboard."""
-
-    def test_uses_template_when_exists(self, tmp_path):
-        """Loads from DASHBOARD_TEMPLATE_FILE when it exists."""
-        mod = push_branch_dashboard
-        template = {
-            "branch": "{{BRANCHNAME}}",
-            "sections": {},
-            "last_updated": "",
-        }
-        template_file = tmp_path / "DASHBOARD.template.json"
-        template_file.write_text(json.dumps(template), encoding="utf-8")
-
-        branch_path = tmp_path / "my_branch"
-        branch_path.mkdir()
-
-        with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", template_file):
-            result = mod._create_fresh_dashboard(branch_path)
-
-        assert result["branch"] == "MY_BRANCH"
-        assert "last_updated" in result
-
-    def test_fallback_when_no_template(self, tmp_path):
-        """Falls back to hardcoded defaults when template file does not exist."""
-        mod = push_branch_dashboard
-        branch_path = tmp_path / "test_branch"
-        branch_path.mkdir()
-
-        with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", tmp_path / "nonexistent.json"):
-            result = mod._create_fresh_dashboard(branch_path)
-
-        assert result["branch"] == "TEST_BRANCH"
-        assert result["_warning"] == "AUTO-GENERATED FILE - DO NOT MANUALLY EDIT."
-        assert "ai_mail" in result["sections"]
-        assert "flow" in result["sections"]
-        assert "memory" in result["sections"]
-        assert "devpulse" in result["sections"]
-        assert "commons_activity" in result["sections"]
-
-    def test_fallback_on_corrupt_template(self, tmp_path):
-        """Falls back to defaults when template file contains invalid JSON."""
-        mod = push_branch_dashboard
-        template_file = tmp_path / "DASHBOARD.template.json"
-        template_file.write_text("not json at all", encoding="utf-8")
-
-        branch_path = tmp_path / "fallback_branch"
-        branch_path.mkdir()
-
-        with patch.object(mod, "DASHBOARD_TEMPLATE_FILE", template_file):
-            result = mod._create_fresh_dashboard(branch_path)
-
-        assert result["branch"] == "FALLBACK_BRANCH"
-        assert "sections" in result
 
 
 # ═══════════════════════════════════════════════════════════
@@ -972,6 +893,26 @@ class TestPushFlowToBranchDashboard:
         call_args = mock_json_handler.call_args
         assert call_args[0][0] == "branch_dashboard_pushed"
         assert call_args[0][1]["success"] is True
+
+    # dashboard_lock is a no-op on Windows (no flock), so there is no contention to observe there.
+    @pytest.mark.skipif(sys.platform == "win32", reason="dashboard_lock does not lock on Windows")
+    def test_the_push_waits_for_a_held_dashboard_lock_and_writes_after_release(self, tmp_path, mock_json_handler):
+        mod = push_branch_dashboard
+        dashboard_path = tmp_path / "DASHBOARD.local.json"
+        dashboard_path.write_text(json.dumps({"sections": {}}), encoding="utf-8")
+        results = []
+
+        with patch.object(mod, "_load_registry", return_value={"plans": {}, "next_number": 1}):
+            with dashboard_lock(tmp_path):
+                pusher = threading.Thread(target=lambda: results.append(mod.push_flow_to_branch_dashboard(tmp_path)))
+                pusher.start()
+                pusher.join(timeout=0.5)
+                assert pusher.is_alive()
+                assert json.loads(dashboard_path.read_text(encoding="utf-8")) == {"sections": {}}
+            pusher.join(timeout=5)
+
+        assert results == [True]
+        assert "flow" in json.loads(dashboard_path.read_text(encoding="utf-8"))["sections"]
 
     def test_orchestrates_full_pipeline(self, tmp_path, mock_json_handler):
         """Main handler calls load, filter, build, write in sequence."""

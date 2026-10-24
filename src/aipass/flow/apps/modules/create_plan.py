@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: create_plan.py
 # Description: PLAN creation module with location awareness
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -54,7 +54,7 @@ from aipass.flow.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import console, error as cli_error, warning
 
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
-from aipass.flow.apps.handlers.registry.save_registry import save_registry
+from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
 
 from aipass.flow.apps.handlers.template.get_template import get_template
 from aipass.flow.apps.handlers.template.plan_type_loader import get_plan_type
@@ -185,25 +185,29 @@ def create_plan(
 
     template_type = plan_type_config.get("default_template", "default")
 
-    result = create_plan_impl(
-        location=location,
-        subject=subject,
-        template_type=template_type,
-        plan_type_config=plan_type_config,
-        ecosystem_root=ECOSYSTEM_ROOT,
-        load_registry=load_registry,
-        save_registry=save_registry,
-        auto_close_orphaned_plans=auto_close_orphaned_plans,
-        resolve_plan_location=resolve_plan_location,
-        calculate_relative_location=calculate_relative_location,
-        get_template=get_template,
-        create_plan_file=create_plan_file,
-        build_plan_registry_entry=build_plan_registry_entry,
-        display_plan_created=display_plan_created,
-        update_dashboard_local=update_dashboard_local,
-        push_to_plans_central=push_to_plans_central,
-        push_flow_to_branch_dashboard=push_flow_to_branch_dashboard,
-    )
+    try:
+        with registry_lock():
+            result = create_plan_impl(
+                location=location,
+                subject=subject,
+                template_type=template_type,
+                plan_type_config=plan_type_config,
+                ecosystem_root=ECOSYSTEM_ROOT,
+                load_registry=load_registry,
+                save_registry=save_registry,
+                auto_close_orphaned_plans=auto_close_orphaned_plans,
+                resolve_plan_location=resolve_plan_location,
+                calculate_relative_location=calculate_relative_location,
+                get_template=get_template,
+                create_plan_file=create_plan_file,
+                build_plan_registry_entry=build_plan_registry_entry,
+                display_plan_created=display_plan_created,
+                update_dashboard_local=update_dashboard_local,
+                push_to_plans_central=push_to_plans_central,
+                push_flow_to_branch_dashboard=push_flow_to_branch_dashboard,
+            )
+    except TimeoutError as exc:
+        return False, 0, "", "", str(exc)
 
     if len(result) == 6:
         ok, num, loc, tmpl, error, messages = result

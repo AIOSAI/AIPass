@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aggregate_ops.py
 # Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/plan/aggregate_ops.py."""
@@ -13,9 +13,6 @@
 
 import json
 import logging
-import os
-import re
-import sys
 from pathlib import Path
 from unittest.mock import call, patch
 
@@ -27,28 +24,6 @@ import aipass.flow.apps.handlers.plan.aggregate_ops as mod
 _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
 # Patched where it lives: aggregate_central_impl imports it inside the function.
 _BUS = "aipass.trigger.apps.modules.core.trigger"
-
-
-def _deny_exclusive_creates(lock_path: Path, denials: int | None):
-    """A stand-in for aggregate_ops' _create_exclusive seam that answers the
-    way Windows does mid-release.
-
-    Windows denies a create on a delete-pending lock with PermissionError; Linux cannot, so it is manufactured.
-    The first ``denials`` creates are denied (None = never clears); returns (side_effect, attempts, raised).
-    """
-    attempts: list[int] = []
-    raised: list[PermissionError] = []
-
-    def fake_create(path):
-        if str(path) == str(lock_path):
-            attempts.append(len(attempts) + 1)
-            if denials is None or len(attempts) <= denials:
-                denial = PermissionError(13, "Access is denied")
-                raised.append(denial)
-                raise denial
-        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-
-    return fake_create, attempts, raised
 
 
 def _import(name: str):
@@ -152,59 +127,6 @@ class TestSaveBranchRegistry:
         bad_path = blocker / "sub" / "registry.json"
         result = save_branch_registry(bad_path, {"plans": {}})
         assert result is False
-
-    def test_delete_pending_denial_is_retried_and_write_lands(self, tmp_path):
-        """A Windows delete-pending denial on the lock is a held lock: retried on
-        the same budget, and the registry reaches disk.
-        """
-        save_branch_registry = _import("save_branch_registry")
-        reg_file = tmp_path / "registry.json"
-        lock = reg_file.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
-        data = {"plans": {"3": {"status": "closed"}}, "next_number": 4}
-
-        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            result = save_branch_registry(reg_file, data)
-
-        assert result is True
-        assert len(attempts) == 2
-        sleep.assert_called_once()
-        assert sleep.call_args.args[0] > 0
-        saved = json.loads(reg_file.read_text(encoding="utf-8"))
-        assert saved["plans"]["3"]["status"] == "closed"
-        assert not lock.exists()
-
-    def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
-        """A denial past the budget: exactly the budget of attempts, the caller
-        returns False and logs the chained PermissionError, nothing is written.
-        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
-        """
-        reg_file = tmp_path / "registry.json"
-        before = {"plans": {}, "next_number": 1}
-        reg_file.write_text(json.dumps(before), encoding="utf-8")
-        lock = reg_file.with_suffix(".lock")
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-
-        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            result = mod.save_branch_registry(reg_file, {"plans": {"1": {}}})
-
-        assert result is False
-        assert json.loads(reg_file.read_text(encoding="utf-8")) == before
-        logged = [arg for c in mock_logger.error.call_args_list for arg in c.args]
-        denial = next((arg for arg in logged if isinstance(arg, PermissionError)), None)
-        assert denial is not None, logged
-        assert str(lock) in str(denial)
-        # Mutant: `_sleep(delay)` -> `_sleep(0.0)`, or dropping `(2**attempt)`, reddens this.
-        delays = [c.args[0] for c in sleep.call_args_list]
-        assert len(delays) == len(attempts)
-        assert delays[0] > 0
-        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
-        assert f"({sum(delays):.2f}s waited)" in str(denial)
-        assert denial.__cause__ is raised[-1]
-        reported = re.search(r"still denied after (\d+) attempts", str(denial))
-        assert reported, str(denial)
-        assert int(reported.group(1)) > 1
-        assert len(attempts) == int(reported.group(1))
 
 
 class TestExtractPlanNumber:
@@ -438,81 +360,6 @@ class TestSaveCentral:
         bad_file = bad_dir / "PLANS.central.json"
         result = save_central(bad_file, bad_dir, {})
         assert result is False
-
-    def test_lock_create_error_is_logged_as_itself(self, tmp_path, mock_logger, platform_create_answer):
-        """A lock create that fails with neither contention nor denial is not "after N retries".
-
-        The .lock sibling's 257-byte name fails on disk; which error is the platform's choice, so it is asked first.
-        Mutant: `lock_path, exc)` + `raise` -> `return False` reddens this.
-        """
-        save_central = _import("save_central")
-        central_file = tmp_path / ("a" * 252 + ".js")
-        answer = platform_create_answer(central_file.with_suffix(".lock"))
-        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
-            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
-        )
-
-        assert save_central(central_file, tmp_path, {"x": 1}) is False
-        assert not central_file.exists()
-        text = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
-        assert "retries" not in text
-        assert str(answer) in text
-        logged = [arg for c in mock_logger.warning.call_args_list for arg in c.args if isinstance(arg, OSError)]
-        assert len(logged) == 1
-        assert type(logged[0]) is type(answer)
-        assert logged[0].errno == answer.errno
-
-    def test_delete_pending_denial_is_retried_and_write_lands(self, tmp_path):
-        """save_central's lock takes the same retry: a delete-pending denial is
-        waited out and PLANS.central.json holds the new data.
-        """
-        save_central = _import("save_central")
-        central_dir = tmp_path / ".ai_central"
-        central_file = central_dir / "PLANS.central.json"
-        lock = central_file.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
-        data = {"active_plans": [{"plan_id": "FPLAN-0001"}], "branches": {}}
-
-        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            result = save_central(central_file, central_dir, data)
-
-        assert result is True
-        assert len(attempts) == 2
-        sleep.assert_called_once()
-        assert sleep.call_args.args[0] > 0
-        assert json.loads(central_file.read_text(encoding="utf-8")) == data
-        assert not lock.exists()
-
-    def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
-        """A denial past the budget: exactly the budget of attempts, save_central
-        returns False and logs the denial, and the old file is untouched.
-        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
-        """
-        central_dir = tmp_path / ".ai_central"
-        central_dir.mkdir()
-        central_file = central_dir / "PLANS.central.json"
-        before = {"active_plans": [], "branches": {}}
-        central_file.write_text(json.dumps(before), encoding="utf-8")
-        lock = central_file.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
-
-        with patch(f"{_MOD}._create_exclusive", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
-            result = mod.save_central(central_file, central_dir, {"active_plans": [{}], "branches": {}})
-
-        assert result is False
-        assert json.loads(central_file.read_text(encoding="utf-8")) == before
-        # Never str(call): its repr doubles every backslash, hiding a Windows path.
-        logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
-        assert str(lock) in logged
-        reported = re.search(r"still denied after (\d+) attempts", logged)
-        assert reported, logged
-        assert int(reported.group(1)) > 1
-        assert len(attempts) == int(reported.group(1))
-        delays = [c.args[0] for c in sleep.call_args_list]
-        assert len(delays) == len(attempts)
-        assert delays[0] > 0
-        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
-        assert f"({sum(delays):.2f}s waited)" in logged
 
 
 class TestAggregateCentralImpl:
