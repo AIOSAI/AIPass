@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: queue.py
 # Description: Unified job queue view (drone @daemon queue)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-25
 # Modified: 2026-10-24
 # =============================================
@@ -64,10 +64,9 @@ def _schedule_human(job: dict) -> str:
     sched_type = sched.get("type", "")
     if sched_type == "once":
         return sched.get("due_date", "?")
-    if sched_type == "daily":
+    # A rotation fires once a day; TYPE already names it, and `rotation` says "daily @" too.
+    if sched_type in ("daily", "rotation"):
         return f"daily @ {sched.get('time', '??:??')}"
-    if sched_type == "rotation":
-        return f"rotation @ {sched.get('time', '??:??')}"
     if sched_type == "hourly":
         m = sched.get("time", "0")
         return f"hourly @ :{int(m):02d}"
@@ -85,8 +84,8 @@ def _schedule_human(job: dict) -> str:
 
 
 def _compute_next_run(job: dict, state: dict) -> Optional[str]:
-    """Determine next_run from runstate or schedule."""
-    if state.get("completed"):
+    """Determine next_run from runstate or schedule; a disabled job never fires, so it has none."""
+    if state.get("completed") or not job.get("enabled", True):
         return None
     next_run = state.get("next_run")
     if next_run:
