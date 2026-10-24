@@ -3,7 +3,7 @@
 # Description: File System Watching
 # Version: 1.6.0
 # Created: 2025-11-26
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX File Watcher (Handler)
@@ -47,12 +47,7 @@ def _get_trigger() -> Any:
 
 _observer: Any = None
 
-# One scheduling thread at a time: a second would walk the tree for a watch the first installs.
-_start_thread: Any = None
-
-# _START_LOCK serialises the walk; _SPAWN_LOCK, the spawn decision only, is never held across it.
 _START_LOCK = threading.Lock()
-_SPAWN_LOCK = threading.Lock()
 
 # A dispatcher death is silent, so we look; death_reported makes it fire once per death, not per check.
 _LIVENESS_CHECK_INTERVAL_SEC = 60.0
@@ -169,34 +164,6 @@ def start_file_watcher():
 
     # No "started" record: this runs on an unjoined daemon thread, so the write orphaned
     # staging temps at process exit, and nothing reads it. Do not restore it.
-
-
-def start_file_watcher_in_background() -> None:
-    """Start the watcher without making the caller wait for the inotify walk.
-
-    The walk is one inotify syscall per directory and starves for the GIL under contention.
-    Never raises: an unjoined thread has no caller to tell, so failures are logged."""
-    global _start_thread
-
-    def _schedule() -> None:
-        try:
-            start_file_watcher()
-        except OSError as e:
-            logger.warning("inotify limit reached, continuing without file watcher: %s", e)
-        except Exception as e:  # a start failure must not kill an unjoined thread silently
-            logger.error(f"[watcher] could not start the discovery watcher ({type(e).__name__}: {e})")
-
-    with _SPAWN_LOCK:
-        if _observer is not None and _observer.is_alive():
-            return
-        if _start_thread is not None and _start_thread.is_alive():
-            return  # A walk is already under way; a second one installs nothing.
-
-        _start_thread = threading.Thread(target=_schedule, name="prax-watcher-start", daemon=True)
-        started = _start_thread
-
-    # Outside both locks: the thread's first act is to take _START_LOCK.
-    started.start()
 
 
 def stop_file_watcher():

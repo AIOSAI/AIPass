@@ -3,7 +3,7 @@
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
 # Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-10-02
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/monitoring/event_queue.py and the branch_scope.py filter it drives."""
@@ -29,14 +29,13 @@ from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
 
 @pytest.fixture
 def event_queue_module(monkeypatch, tmp_path):
-    """event_queue with its logger and json_handler replaced where it binds them.
+    """event_queue with its logger replaced where it binds it.
 
-    Recorders keep every line off the live logs and prax_json; AIPASS_TEST_LOG_DIR
+    The recorder keeps every line off the live logs; AIPASS_TEST_LOG_DIR
     points at tmp_path for anything that still writes.
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.setattr(event_queue, "logger", MagicMock())
-    monkeypatch.setattr(event_queue, "json_handler", MagicMock())
     return event_queue
 
 
@@ -110,13 +109,20 @@ class TestMonitoringEvent:
         info_event = monitoring_event_cls(priority=3, event_type="file")
         assert error_event < info_event
 
-    def test_ordering_equal_priority(self, monitoring_event_cls):
-        """Events with equal priority compare as equal."""
+    def test_ordering_equal_priority_keeps_arrival_order(self, monitoring_event_cls):
+        """Equal priority: the earlier-created event sorts first."""
         a = monitoring_event_cls(priority=2, message="a")
         b = monitoring_event_cls(priority=2, message="b")
-        assert not (a < b)
-        assert not (b < a)
-        assert a == b  # Comparison only uses priority
+        assert a < b
+        assert a != b
+
+    def test_queue_drains_equal_priority_in_arrival_order(self, monitoring_queue_cls, monitoring_event_cls):
+        """Fifty same-priority log lines come out in the order they went in, not heap order."""
+        q = monitoring_queue_cls()
+        for i in range(50):
+            q.enqueue(monitoring_event_cls(priority=3, event_type="log", branch="X", message=f"line {i}"))
+        out = [q.dequeue(timeout=0.05).message for _ in range(50)]
+        assert out == [f"line {i}" for i in range(50)]
 
     def test_sorting_multiple_events(self, monitoring_event_cls):
         """A list of events sorts by ascending priority number."""
@@ -417,19 +423,6 @@ class TestMonitoringQueue:
 
         assert len(errors) == 0
         assert q.size() == 200
-
-    def test_json_handler_called_on_enqueue(self, monitoring_queue_cls, monitoring_event_cls, event_queue_module):
-        """json_handler.log_operation is called when an event is enqueued."""
-        q = monitoring_queue_cls()
-        event = monitoring_event_cls(
-            priority=1, event_type="module", branch="SEEDGO", action="loaded", message="jh_test"
-        )
-        q.enqueue(event)
-        event_queue_module.json_handler.log_operation.assert_called_once()
-        call_args = event_queue_module.json_handler.log_operation.call_args
-        assert call_args[0][0] == "event_queued"
-        assert call_args[0][1]["event_type"] == "module"
-        assert call_args[0][1]["branch"] == "SEEDGO"
 
     def test_dequeue_from_stopped_queue(self, monitoring_queue_cls, monitoring_event_cls):
         """Dequeue on a stopped (and flushed) queue returns None."""

@@ -3,7 +3,7 @@
 # Description: System Log Size Watchdog
 # Version: 0.2.0
 # Created: 2026-02-26
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """System Log Size Watchdog
@@ -15,13 +15,15 @@ plain FileHandler bots), whose unbounded growth can take the system down.
 """
 
 import logging
+import os
 import sys
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from aipass.prax.apps.handlers.config.load import system_logs_home
+from aipass.prax.apps.handlers.config.load import get_system_logs_dir
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 
@@ -37,15 +39,9 @@ def _find_repo_root() -> Path:
     return find_repo_root(Path(__file__))
 
 
-_system_logs_dir_cache: Path | None = None
-
-
 def _get_system_logs_dir() -> Path:
-    """Lazily resolve system_logs directory, the same home the loggers write to."""
-    global _system_logs_dir_cache
-    if _system_logs_dir_cache is None:
-        _system_logs_dir_cache = system_logs_home(_find_repo_root())
-    return _system_logs_dir_cache
+    """The system_logs directory, the same home the loggers write to."""
+    return get_system_logs_dir()
 
 
 WARN_THRESHOLD_LINES = 5000  # Fire warning at this line count
@@ -120,25 +116,29 @@ def get_oversized_files(threshold: int = WARN_THRESHOLD_LINES) -> List[Dict[str,
 
 def truncate_log_file(filepath: Path, keep_lines: int = DEFAULT_MAX_LINES) -> Tuple[int, int]:
     """Truncate a log file to keep only the last N lines."""
+    filepath = Path(filepath)
     try:
+        original_count = 0
+        kept_lines: deque = deque(maxlen=keep_lines)
         with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            all_lines = f.readlines()
-
-        original_count = len(all_lines)
+            for line in f:
+                original_count += 1
+                kept_lines.append(line)
 
         if original_count <= keep_lines:
             return original_count, original_count
-
-        kept_lines = all_lines[-keep_lines:]
 
         marker = (
             f"--- LOG TRUNCATED by PRAX watchdog at {datetime.now().isoformat()} "
             f"| was {original_count} lines, kept last {keep_lines} ---\n"
         )
 
-        with open(filepath, "w", encoding="utf-8") as f:
+        # Sibling temp + replace: a crash mid-write never leaves the log empty; a leftover is overwritten next run.
+        tmp_path = filepath.with_name(f".{filepath.name}.trunc")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             f.write(marker)
             f.writelines(kept_lines)
+        os.replace(tmp_path, filepath)
 
         return original_count, keep_lines + 1  # +1 for marker line
 
@@ -166,9 +166,10 @@ def enforce_log_limits(
     return actions
 
 
-def log_health_summary() -> Dict[str, Any]:
-    """Generate a health summary of system logs."""
-    files = scan_log_files()
+def log_health_summary(files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Generate a health summary of system logs (from an existing scan when given)."""
+    if files is None:
+        files = scan_log_files()
 
     if not files:
         return {
@@ -282,9 +283,10 @@ def enforce_branch_log_limits(
     return actions
 
 
-def branch_log_health_summary() -> Dict[str, Any]:
-    """Generate a health summary of branch logs."""
-    files = scan_branch_log_files()
+def branch_log_health_summary(files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Generate a health summary of branch logs (from an existing scan when given)."""
+    if files is None:
+        files = scan_branch_log_files()
 
     if not files:
         return {
@@ -354,10 +356,10 @@ def sweep_stale_logs(max_age_days: int = SWEEP_MAX_AGE_DAYS) -> Dict[str, Any]:
     """Delete log files older than max_age_days across system_logs/ and branch logs/."""
     all_removed: List[Dict[str, Any]] = []
 
-    system_patterns = ["*.log", "*.log.1"]
+    system_patterns = ["*.log", "*.log.[0-9]"]
     all_removed.extend(_sweep_directory(_get_system_logs_dir(), system_patterns, max_age_days))
 
-    branch_patterns = ["*.log", "*.log.1", "*.jsonl", "*.jsonl.1"]
+    branch_patterns = ["*.log", "*.log.[0-9]", "*.jsonl", "*.jsonl.[0-9]"]
     eco_root = _get_ecosystem_root()
     if eco_root.exists():
         for branch_dir in sorted(eco_root.iterdir()):

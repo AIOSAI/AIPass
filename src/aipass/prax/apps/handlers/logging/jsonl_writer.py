@@ -3,7 +3,7 @@
 # Description: JSONL append with size-based rotation
 # Version: 1.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX JSONL Writer
@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Union
 
-from aipass.prax.apps.handlers.json import json_handler
+from aipass.prax.apps.handlers.logging.setup import rotation_lock
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,6 @@ def append_jsonl(
     with open(filepath, "a", encoding="utf-8") as f:
         f.write(line)
 
-    json_handler.log_operation("jsonl_append", {"file": str(filepath)})
-
 
 def _rotate_with_backup(filepath: Path) -> None:
     """Rename file to .1 backup; fall back to unlink on failure."""
@@ -65,21 +63,27 @@ def _unlink_safe(filepath: Path) -> None:
         logger.warning("Failed to unlink oversized JSONL %s: %s", filepath, exc)
 
 
-def _maybe_rotate(filepath: Path, max_bytes: int, backup_count: int) -> None:
-    """Rotate the file if it exceeds max_bytes."""
-    if not filepath.exists():
-        return
-
+def _over_limit(filepath: Path, max_bytes: int) -> bool:
+    """True when the file exists and has reached max_bytes."""
     try:
-        size = filepath.stat().st_size
+        return filepath.stat().st_size >= max_bytes
+    except FileNotFoundError:
+        return False
     except OSError as exc:
         logger.warning("Cannot stat %s for rotation check: %s", filepath, exc)
+        return False
+
+
+def _maybe_rotate(filepath: Path, max_bytes: int, backup_count: int) -> None:
+    """Rotate the file if it exceeds max_bytes, once across processes."""
+    if not _over_limit(filepath, max_bytes):
         return
 
-    if size < max_bytes:
-        return
-
-    if backup_count >= 1:
-        _rotate_with_backup(filepath)
-    else:
-        _unlink_safe(filepath)
+    with rotation_lock(filepath):
+        # Checked again under the lock: another writer may have just rotated it.
+        if not _over_limit(filepath, max_bytes):
+            return
+        if backup_count >= 1:
+            _rotate_with_backup(filepath)
+        else:
+            _unlink_safe(filepath)

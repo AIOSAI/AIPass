@@ -27,10 +27,9 @@ One row per file, no counts: the count belongs to the run, the coverage belongs 
 | test_json_handler.py | The fleet json service: branch resolution, the per-call seam, document modes, the NaN refusal, the exception table, bounded retry, the log cap, the data-leg bump and heal (incl. rate_tracker sharing the document), the shim binds-never-wraps |
 | test_log_watcher.py | Log file tailing, agent activity parsing |
 | test_monitor_module.py | Monitor commands, thread lifecycle (4-thread), branch scoping |
-| test_telegram_relay.py | Telegram relay, buffering, pause control |
 | test_config.py | Config loading, path resolution, log levels |
 | test_repo_root.py | Repo-root resolution with a dead working directory, per-platform expectation tables |
-| test_logger_module.py | Logger init, routing, lifecycle, NullLogger fallback, lazy-init import footprint (subprocess) |
+| test_logger_module.py | Logger routing, status, NullLogger fallback, lazy-init import footprint (subprocess) |
 | test_event_queue.py | Thread-safe event buffering, scope suppression |
 | test_logging_handlers.py | Setup, rotation, introspection, direct logger |
 | test_logging.py | Core logging system, debug level gating |
@@ -40,7 +39,7 @@ One row per file, no counts: the count belongs to the run, the coverage belongs 
 | test_dashboard_merge.py | quick_status merge, foreign-key preservation, plan-count shapes, push-template writer, action_required/summary agreement |
 | test_help_flag_safety.py | Help flags in any position never execute; ownership before help; free-text safety; the unknown-argument gate (top-level flag, sub-argument, exit code, did-you-mean) |
 | test_rate_tracker.py | Rate tracking, thresholds, persistence (incl. rate history), suppression |
-| test_instance_lock.py | Single-instance locking, stale reclaim |
+| test_instance_lock.py | Rate-tracker lock: held for the process life, freed on exit |
 | test_commons_feed.py | Commons live feed, cursors, room filtering, full-body rendering |
 | test_discovery.py | Module scanning |
 | test_display_resilience.py | Markup escaping, display-worker survival, standalone args |

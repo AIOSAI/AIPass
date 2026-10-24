@@ -16,9 +16,9 @@ something breaks. Work in progress, research and dated one-offs belong in
 ## Index
 
 - [logging_api.md](logging_api.md) — both import patterns, log levels, the
-  mocking contract other branches' tests rely on, the lifecycle events.
+  mocking contract other branches' tests rely on.
 - [monitor.md](monitor.md) — Mission Control: threads, multi-CLI session
-  reading, the commons feed, the Telegram relay.
+  reading, the commons feed.
 - [dashboard.md](dashboard.md) — refresh, template push and diff, and the
   write-through API services call.
 - [dashboard_caps.md](dashboard_caps.md) — the subject cap and whole-file budget

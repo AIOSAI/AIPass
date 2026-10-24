@@ -3,7 +3,7 @@
 # Description: PRAX Status Command
 # Version: 1.4.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX Status Module"""
@@ -86,7 +86,6 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print(f"  Module Logs Dir: {status['module_logs_dir']}")
     console.print(f"  Registry File:   {status['registry_file']}")
     console.print(f"  Last Scan:       {_format_last_scan(status['last_scan'])}")
-    console.print(f"  Logger Override: {'Active' if status['logger_override_active'] else 'Inactive'}")
     console.print("=" * 60)
     console.print()
     return True
@@ -136,7 +135,7 @@ def print_introspection():
     console.print()
     console.print("Connected Handlers:")
     console.print("  modules/")
-    console.print("    - logger.py (get_system_status — returns module count, watcher, override status)")
+    console.print("    - logger.py (get_system_status — returns module count, log dirs, registry, last scan)")
     console.print("    - logger.py (system_logger — auto-routing logger for module log files)")
     console.print()
 

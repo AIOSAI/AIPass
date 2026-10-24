@@ -3,7 +3,7 @@
 # Description: Unit tests for monitoring handler modules
 # Version: 1.4.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
@@ -54,7 +54,6 @@ class TestGetDetector:
         assert isinstance(detector, mod.BranchDetector)
         assert detector.branch_map == {}
         assert detector.log_map == {}
-        assert detector.module_map == {}
         assert detector.known_branches == set()
         assert mod._detector_instance is detector, "the singleton slot must hold what was handed back"
 
@@ -76,43 +75,6 @@ class TestGetDetector:
             setattr(mod, "_detector_instance", None)
             d2 = mod.get_detector()
             assert d1 is not d2
-
-
-class TestReloadRegistry:
-    """Tests for BranchDetector.reload_registry()."""
-
-    def test_clears_caches_and_reloads(self):
-        """reload_registry() should clear all caches and reload from registry."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector.log_map["some_log"] = "PRAX"
-        detector.module_map["some.module"] = "FLOW"
-
-        with patch.object(detector, "_load_registry") as mock_load:
-            detector.reload_registry()
-
-        assert len(detector.branch_map) == 0
-        assert len(detector.log_map) == 0
-        assert len(detector.module_map) == 0
-        assert len(detector.known_branches) == 0
-        # _load_registry takes no arguments: the claim is one reload, nothing handed on.
-        mock_load.assert_called_once_with()
-
-    def test_reload_restores_branches(self):
-        """reload_registry() should restore branches after clearing."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        def fake_load():
-            """Simulate _load_registry by populating branch state."""
-            detector.known_branches.add("PRAX")
-            detector.branch_map["/prax"] = "PRAX"
-
-        with patch.object(detector, "_load_registry", side_effect=fake_load):
-            detector.reload_registry()
-
-        assert "PRAX" in detector.known_branches
-        assert detector.branch_map["/prax"] == "PRAX"
 
 
 class TestDetectFromPath:
@@ -285,92 +247,6 @@ class TestDetectFromLog:
 
         mock_dfp.assert_called_once_with(fake_log_path)
         assert result == "CLI"
-
-
-class TestDetectFromModule:
-    """Tests for BranchDetector.detect_from_module()."""
-
-    def test_known_module_prefix(self):
-        """Should detect branch from first dotted segment."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector.known_branches.add("AIPASS")
-        result = detector.detect_from_module("aipass.prax.apps")
-        assert result == "AIPASS"
-
-    def test_single_segment_known(self):
-        """Should detect branch from single-segment module name."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        result = detector.detect_from_module("seedgo")
-        assert result == "SEEDGO"
-
-    def test_unknown_module(self):
-        """Should return UNKNOWN for unrecognized module."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        result = detector.detect_from_module("pandas.core.frame")
-        assert result == "UNKNOWN"
-
-    def test_caches_result(self):
-        """detect_from_module should cache in module_map."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector.detect_from_module("flow.planners.daily")
-        assert "flow.planners.daily" in detector.module_map
-
-    def test_empty_string_returns_unknown(self):
-        """Empty module name should return UNKNOWN."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        result = detector.detect_from_module("")
-        assert result == "UNKNOWN"
-
-    def test_exception_returns_unknown(self):
-        """Should return UNKNOWN on exception."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-
-        result = detector.detect_from_module(None)  # type: ignore[arg-type]
-        assert result == "UNKNOWN"
-
-
-class TestGetStats:
-    """Tests for BranchDetector.get_stats()."""
-
-    def test_returns_correct_keys(self):
-        """get_stats() should return dict with expected keys."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        stats = detector.get_stats()
-        assert "branch_paths" in stats
-        assert "cached_lookups" in stats
-        assert "cached_modules" in stats
-        assert "known_branches" in stats
-
-    def test_counts_match_state(self):
-        """get_stats() counts should match internal state."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod)
-        detector.log_map["a"] = "X"
-        detector.log_map["b"] = "Y"
-        detector.module_map["m.x"] = "Z"
-
-        stats = detector.get_stats()
-        assert stats["branch_paths"] == len(detector.branch_map)
-        assert stats["cached_lookups"] == 2
-        assert stats["cached_modules"] == 1
-        assert stats["known_branches"] == len(detector.known_branches)
-
-    def test_empty_detector_stats(self):
-        """get_stats() on fresh detector should have zero caches."""
-        mod = _import_branch_detector()
-        detector = _make_detector_with_branches(mod, branches={})
-        stats = detector.get_stats()
-        assert stats["branch_paths"] == 0
-        assert stats["cached_lookups"] == 0
-        assert stats["cached_modules"] == 0
-        assert stats["known_branches"] == 0
 
 
 class TestExactCaseRegistries:

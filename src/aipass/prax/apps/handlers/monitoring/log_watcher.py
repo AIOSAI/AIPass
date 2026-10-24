@@ -3,7 +3,7 @@
 # Description: Log File Monitor
 # Version: 1.2.0
 # Created: 2025-11-23
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX Log Watcher - Event Queue Integration"""
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 import re
 
 if sys.platform == "win32":
@@ -43,6 +43,25 @@ logger = get_direct_logger()
 _log_observer: Any = None
 
 
+def read_new_lines(path, last_pos: int) -> Tuple[List[str], int]:
+    """Non-blank complete lines appended after last_pos, and the offset just past the last newline.
+
+    A trailing line still being written is left unread, so the next call gets it whole."""
+    size = Path(path).stat().st_size
+    if size < last_pos:  # truncated or rotated: start over
+        last_pos = 0
+    if size <= last_pos:
+        return [], last_pos
+    with open(path, "rb") as f:
+        f.seek(last_pos)
+        data = f.read(size - last_pos)
+    end = data.rfind(b"\n")
+    if end < 0:
+        return [], last_pos
+    text = data[: end + 1].decode("utf-8", errors="ignore")
+    return [line for line in text.splitlines() if line.strip()], last_pos + end + 1
+
+
 class LogFileWatcher(FileSystemEventHandler):
     """Watch log files and push events to monitoring queue."""
 
@@ -51,7 +70,6 @@ class LogFileWatcher(FileSystemEventHandler):
         super().__init__()
         self.event_queue = event_queue
         self.log_positions: Dict[str, int] = {}
-        self.last_command: Optional[str] = None
         self.last_command_per_branch: Dict[str, str] = {}
 
     def _process_log_line(self, branch: str, line: str) -> None:
@@ -66,27 +84,12 @@ class LogFileWatcher(FileSystemEventHandler):
         if command_info:
             self._emit_command_separator(branch, command_info)
             return
-        if self._should_display_log(line):
-            level = self._detect_log_level(line)
-            self._emit_log_event(branch, line, level)
+        self._emit_log_event(branch, line, self._detect_log_level(line))
 
-    def _read_new_content(self, file_path: str) -> Optional[str]:
-        """Read new content from a log file since last position, or None if nothing new."""
-        current_size = Path(file_path).stat().st_size
-        last_pos = self.log_positions.get(file_path, 0)
-
-        if current_size < last_pos:
-            last_pos = 0
-
-        if current_size <= last_pos:
-            return None
-
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            f.seek(last_pos)
-            new_lines = f.read()
-            self.log_positions[file_path] = f.tell()
-
-        return new_lines if new_lines.strip() else None
+    def _read_new_content(self, file_path: str) -> List[str]:
+        """Complete new lines of a log file since its last position."""
+        lines, self.log_positions[file_path] = read_new_lines(file_path, self.log_positions.get(file_path, 0))
+        return lines
 
     def on_modified(self, event):
         """Watch for log file modifications and push events to queue."""
@@ -102,12 +105,12 @@ class LogFileWatcher(FileSystemEventHandler):
             return
 
         try:
-            new_content = self._read_new_content(file_path)
-            if not new_content:
+            lines = self._read_new_content(file_path)
+            if not lines:
                 return
 
             branch = detect_branch_from_log(file_path)
-            for line in new_content.strip().split("\n"):
+            for line in lines:
                 self._process_log_line(branch, line)
 
         except Exception as e:
@@ -164,10 +167,6 @@ class LogFileWatcher(FileSystemEventHandler):
             timestamp=datetime.now(),
         )
         self.event_queue.enqueue(hook_event)
-
-    def _should_display_log(self, _log_line: str) -> bool:
-        """Check if log line should be displayed. No filtering — show everything."""
-        return True
 
     def _detect_log_level(self, log_line: str) -> str:
         """Detect log level from log line. Returns 'error', 'warning', 'info', or 'debug'."""

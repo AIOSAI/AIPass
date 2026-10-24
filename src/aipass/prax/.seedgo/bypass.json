@@ -3,15 +3,9 @@
     "version": "2.0.0",
     "created": "2026-03-07T22:43:24.315842",
     "description": "Standards bypass configuration for prax branch",
-    "last_updated": "2026-09-03T02:45:00.000000"
+    "last_updated": "2026-10-23T23:00:00"
   },
   "bypass": [
-    {
-      "file": "apps/modules/monitor.py",
-      "standard": "gateway_boundary",
-      "pattern": "from aipass.api.apps.modules.secrets import get_secret",
-      "reason": "The Telegram relay's token loader. The owner retired Telegram 2026-10-22 (nothing runs, the relay is opt-in and off); the lane is archived on his word, not rewritten. Until then the import stays and this anchor keeps prax's audit honest about the one known reach into @api's secrets store."
-    },
     {
       "file": "apps/handlers/monitoring/unified_stream.py",
       "standard": "cli",
@@ -204,43 +198,61 @@
     {
       "file": "apps/modules/status.py",
       "standard": "logged_fallback",
-      "lines": [105],
+      "lines": [
+        105
+      ],
       "reason": "prax, leg 7: True is the handler contract's 'this module owned the command', not an answer. The failure reaches the caller through error() on the line above, which is what marks the run failed for the exit seam in prax.py main(). The checker's error() exemption reads a success-path return, not the handler's own."
     },
     {
       "file": "apps/prax.py",
       "standard": "logged_fallback",
-      "lines": [145],
+      "lines": [
+        145
+      ],
       "reason": "prax, leg 7: same contract as status.py:132. The router's True means a module owned the command, as its docstring says, and the failure is reported through error() on the line above, which sets the exit code."
     },
     {
       "file": "apps/handlers/monitoring/commons_feed.py",
       "standard": "logged_fallback",
-      "lines": [463],
+      "lines": [
+        463
+      ],
       "reason": "prax, leg 7: True is the command's 'handled'. The failure was already shown to the operator through error() two lines above (then the relay is stopped), the same as the db-missing guard's return True; error() is what marks the run failed."
     },
     {
       "file": "apps/handlers/json/json_service.py",
       "standard": "logged_fallback",
-      "lines": [158],
+      "lines": [
+        158
+      ],
       "reason": "prax, leg 7 (moved 263 -> 269 by the replace_with_retry docstring, DPLAN-0404): 'unknown' means one thing on both paths, as the docstring says: there is no module behind frame 2. sys._getframe raises ValueError exactly when the stack is too shallow to have that frame; it is the same answer, not a failure dressed as one."
     },
     {
       "file": "apps/handlers/logging/introspection.py",
       "standard": "logged_fallback",
-      "lines": [114],
+      "lines": [
+        114
+      ],
       "reason": "prax, leg 7: the docstring names None as the answer 'the caller cannot be located \u2014 an answer, not a failure'. A path that will not resolve is a caller that cannot be located; branch detection is a routing hint and must never raise into the caller's import."
     },
     {
       "file": "apps/handlers/monitoring/branch_detector.py",
       "standard": "logged_fallback",
-      "lines": [298, 322, 470, 509, 536],
+      "lines": [
+        298,
+        322,
+        470,
+        509,
+        536
+      ],
       "reason": "prax, leg 7: these are display labels and detector hints, and the value means the same on both paths. None at 392/423 is 'this detector has no answer, try the next' (an unreadable passport falls back to path matching, a file outside ~/Projects is not an external project); 'UNKNOWN' at 604/662/701 is the label for 'branch not determined', which is true when detection failed. The event is still displayed either way; no caller acts on the difference."
     },
     {
       "file": "apps/handlers/monitoring/filesystem_handler.py",
       "standard": "logged_fallback",
-      "lines": [197],
+      "lines": [
+        197
+      ],
       "reason": "prax, leg 7: None means 'this session file names no working directory', which is what an unreadable session file tells the caller as well; the caller then labels the event by the next means. The read is a display hint and the failure is logged at the line above."
     },
     {
@@ -256,68 +268,100 @@
     {
       "file": "tests/test_dashboard_merge.py",
       "standard": "through_the_command",
-      "lines": [201, 202, 203],
+      "lines": [
+        201,
+        202,
+        203
+      ],
       "reason": "prax, leg 14. These calls were always here; the _load helper hid them from the checker until this leg bound the modules by import. The file's subject is four copies of one quick_status calculator, and the defect it pins is the drift between them, so each copy is called by name in the parametrize table; a public door mixes in the merge and the other writers and could not tell which copy drifted. The other private calls the helper hid (the pusher's structural step, the differ's per-branch diff) now go through push_dashboard_template and diff_dashboard_template on a tmp world."
     },
     {
       "file": "tests/test_repo_root.py",
       "standard": "through_the_command",
-      "lines": [206, 620],
+      "lines": [
+        206,
+        620
+      ],
       "reason": "prax, leg 14. 320: the walk on the OTHER platform's dialect (a drive-qualified Windows path, from a Linux run). source_root makes a host Path of its start, so only the pure walk can take that dialect; the host's own dialect goes through source_root in the three tests above it. 856 (842 until the installed-package test landed above it, 2026-10-13): load's lane of the repo root; its one public reader, get_system_logs_dir outside a pytest session, ends in a mkdir of the live system_logs, so the lane is asked by name (prax, leg 5, HELD; re-read this leg, unchanged)."
     },
     {
       "file": "apps/handlers/monitoring/instance_lock.py",
       "standard": "logged_fallback",
-      "lines": [70, 79],
+      "lines": [
+        70,
+        79
+      ],
       "reason": "prax, leg 15. True is the fail-safe answer: a PID the check could not read (70) or may not signal (79, the process exists) is held alive, so try_acquire never steals a lock it could not check and agent_status_writer never marks an unchecked agent dead. The failure is logged beside 70."
     },
     {
       "file": "apps/handlers/discovery/watcher.py",
       "standard": "logged_fallback",
-      "lines": [280],
+      "lines": [
+        280
+      ],
       "reason": "prax, leg 15. Fail-safe True: the liveness check exists to report a death, its one caller (logger.py get_status) ignores the answer, and nothing restarts or is taken on True. The failure is logged as a warning beside it."
     },
     {
       "file": "apps/handlers/monitoring/file_watcher_integration.py",
       "standard": "logged_fallback",
-      "lines": [62, 109, 116],
+      "lines": [
+        62,
+        109,
+        116
+      ],
       "reason": "prax, leg 15. Each empty list is said beside it by a WARNING or ERROR naming the cause, and start() treats empty paths as failure (logger.error, returns False). Nothing writes or shows the empty list as the truth."
     },
     {
       "file": "apps/handlers/monitoring/event_queue.py",
       "standard": "logged_fallback",
-      "lines": [100],
+      "lines": [
+        100
+      ],
       "reason": "prax, leg 15. False means the event did not enter the queue, the same answer a duplicate gets, which is the truth; the drop is counted and reported by the rate-limited _report_drops."
     },
     {
       "file": "apps/handlers/dashboard/refresh.py",
       "standard": "logged_fallback",
-      "lines": [246],
+      "lines": [
+        246
+      ],
       "reason": "prax, leg 15. The dashboard is rebuilt from its sources; {} only loses the carried-forward section, which is logged as a WARNING naming the file. A raise would leave a corrupt dashboard that no refresh could heal."
     },
     {
       "file": "apps/handlers/dashboard/agent_status_writer.py",
       "standard": "logged_fallback",
-      "lines": [66, 82, 214, 242],
+      "lines": [
+        66,
+        82,
+        214,
+        242
+      ],
       "reason": "prax, leg 15 (97, moved from 95 by the leg 16 imports). The same [] is both the branches to scan and the branches to write to, so an unreadable registry writes the empty agent list to no dashboard; the failure is logged as a warning beside it. prax, leg 16: 126 is _is_pid_alive's None, named in its docstring, the same answer as no proc filesystem, both meaning unchecked, and the scan files it as unchecked, never dead. 325: _write_section_to_all_branches answers 0 dashboards updated when the write raised, which is the truth, logged at error. 365: push_agent_status_dashboard answers False, its docstring's total failure, logged at error."
     },
     {
       "file": "apps/handlers/dashboard/agent_status_writer.py",
       "standard": "host_portability",
-      "lines": [43],
+      "lines": [
+        43
+      ],
       "reason": "prax, leg 17, prax's decision under devpulse's ruling. PROC_ROOT is Path(\"/proc\") only where sys.platform == \"linux\", else None, and the guard is on the same line; every reader off Linux gets None and _is_pid_alive answers unchecked (leg 16). The checker acquits a guard on the line above, not an inline conditional; devpulse has taken that gap to seedgo, and when it closes this entry is dead and is retired.",
       "anchor": "Path(\"/proc\") if sys.platform == \"linux\" else None"
     },
     {
       "file": "apps/handlers/dashboard/status.py",
       "standard": "logged_fallback",
-      "lines": [202],
+      "lines": [
+        202
+      ],
       "reason": "prax, leg 16. _declared_path's None means this registry resolves nothing, the same answer as a registry that does not declare the name, and the caller then asks the next registry in either case; the unreadable file is logged as a warning saying it resolves nothing."
     },
     {
       "file": "tests/test_telegram_relay.py",
       "standard": "through_the_command",
-      "lines": [78, 359],
+      "lines": [
+        78,
+        359
+      ],
       "reason": "prax, leg 10. 109: the autouse fixture resets the relay's backoff to its starting value, which the module keeps only in _BACKOFF_INITIAL; copying the number would let the reset drift from the product. 425: _render_event is the one point where an event fans out to the relay and the console; the only public route to it is 'monitor run', a live loop on real watchers and the real relay, so the test calls the fan-out with both sinks doubled. Mutants: order swapped and relay argument changed both die at the assert."
     },
     {
@@ -328,7 +372,9 @@
     {
       "file": "tests/test_monitoring_handlers_display.py",
       "standard": "mock_console",
-      "lines": [154],
+      "lines": [
+        154
+      ],
       "reason": "prax, leg 11, under devpulse's console ruling (b): the colour is the claim (error level red, SEEDGO green, an unknown branch white), and it exists nowhere but inside print_event's console call (a dict lookup into the markup string). capsys strips it. A real Console on a buffer with colour forced, set by monkeypatch for the three colour tests alone; every other test in the file reads the real console with capsys."
     },
     {
@@ -365,6 +411,41 @@
       "file": "tests/test_pid_cache.py",
       "standard": "stdlib_patch",
       "reason": "prax, leg 10 (file-wide: this checker passes no line; the patches are at 64-65 and 115-116). The subject is the POSIX /proc liveness branch, chosen by sys.platform at call time. The tests pin that branch on every CI platform; Path.exists is wrapped to answer for the one /proc pid and fall through to the real call otherwise. A platform seam in pid_cache would be a door for the tests alone. Each patch is a with-block, undone at its end."
+    },
+    {
+      "file": "apps/handlers/logging/jsonl_writer.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
+    },
+    {
+      "file": "apps/handlers/config/load.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
+    },
+    {
+      "file": "apps/handlers/monitoring/unified_stream.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
+    },
+    {
+      "file": "apps/handlers/monitoring/monitoring_filters.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
+    },
+    {
+      "file": "apps/handlers/monitoring/event_queue.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
+    },
+    {
+      "file": "apps/handlers/discovery/filtering.py",
+      "standard": "json_structure",
+      "reason": "Hot path: runs per log line, per file event or per discovered path. log_operation measured ~11 ms per call (about 9 reads and 2 fsynced writes) and loses entries under concurrent writers, so it was removed here; the operation log stays on the command doors."
+    },
+    {
+      "file": "apps/handlers/logging/setup.py",
+      "standard": "json_structure",
+      "reason": "Builds the logger every branch's first log line goes through; log_operation measured ~11 ms per call and loses entries under concurrent writers, so the logger build path does not write the operation log."
     }
   ],
   "notes": {

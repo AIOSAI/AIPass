@@ -3,7 +3,7 @@
 # Description: Save Module Registry Handler
 # Version: 1.1.0
 # Created: 2025-11-07
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Save Module Registry Handler"""
@@ -16,14 +16,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from aipass.prax.apps.handlers.config.load import PRAX_ROOT, ECOSYSTEM_ROOT
+from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT
+from aipass.prax.apps.handlers.registry.load import PRAX_JSON_DIR, REGISTRY_FILE
 from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
 
 MODULE_NAME = "save"
-PRAX_JSON_DIR = PRAX_ROOT / "prax_json"
-REGISTRY_FILE = PRAX_JSON_DIR / "prax_registry.json"
 
 
 def _existing_last_scan() -> Optional[Dict[str, Any]]:

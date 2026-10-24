@@ -3,7 +3,7 @@
 # Description: Tests for PRAX JSONL writer with rotation
 # Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/logging/jsonl_writer.py, exported via apps/modules/logger.py."""
@@ -12,10 +12,11 @@
 # seedgo: no-test-needed(error_handling) — _rotate_with_backup unlinking when the rename fails, covered by that row
 # seedgo: no-test-needed(error_handling) — _unlink_safe's warning when the unlink fails, covered by that row
 # seedgo: no-test-needed(error_handling) — _maybe_rotate skipping rotation when the stat fails, covered by that row
-# seedgo: no-test-needed(json_structure) — append_jsonl's log_operation("jsonl_append") record, covered by that row
 # seedgo: no-test-needed(constant) — rotation above the JSONL_MAX_BYTES default; only the size under it is tested
 
+import contextlib
 import json
+import os
 
 from aipass.prax.apps.handlers.logging import jsonl_writer
 from aipass.prax.apps.handlers.logging.jsonl_writer import append_jsonl
@@ -85,6 +86,26 @@ class TestRotation:
 
         content = target.read_text(encoding="utf-8").strip()
         assert json.loads(content)["after"] == "rotation"
+
+    def test_a_rotation_another_writer_won_is_not_repeated(self, monkeypatch, tmp_path):
+        """Two writers saw the file over the limit; the one that waited on the lock must not rotate again."""
+        target = tmp_path / "shared.jsonl"
+        target.write_text("x" * 500 + "\n", encoding="utf-8")
+
+        @contextlib.contextmanager
+        def lock_won_by_another(path):
+            os.replace(path, tmp_path / "shared.jsonl.1")
+            path.write_text('{"theirs": 1}\n', encoding="utf-8")
+            yield
+
+        monkeypatch.setattr(jsonl_writer, "rotation_lock", lock_won_by_another)
+        append_jsonl(target, {"mine": 1}, max_bytes=400)
+
+        assert "x" * 500 in (tmp_path / "shared.jsonl.1").read_text(encoding="utf-8")
+        assert [json.loads(line) for line in target.read_text(encoding="utf-8").splitlines()] == [
+            {"theirs": 1},
+            {"mine": 1},
+        ]
 
     def test_no_rotation_under_limit(self, tmp_path):
         """Verify no rotation occurs when file is under max_bytes."""

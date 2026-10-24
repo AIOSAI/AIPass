@@ -3,7 +3,7 @@
 # Description: The display consumer must survive an unrenderable event
 # Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
@@ -19,7 +19,7 @@
 # seedgo: no-test-needed(through_the_command) — monitor.py's print_help(), covered by tests/test_help_markup.py
 # seedgo: no-test-needed(through_the_command) — print_status's formatting, covered by tests/test_monitoring_handlers.py
 # seedgo: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
-# seedgo: no-test-needed(constant) — COLORS, SYMBOLS and LEVEL_COLORS, the style tables print_event reads
+# seedgo: no-test-needed(constant) — LEVEL_COLORS and BRANCH_COLORS, the style tables print_event reads
 
 import io
 import threading
@@ -37,7 +37,6 @@ from aipass.prax.apps.modules import monitor
 @pytest.fixture
 def render(monkeypatch, capsys):
     """Run ``call(unified_stream)`` through the product's own console, return what it printed."""
-    monkeypatch.setattr(unified_stream, "json_handler", MagicMock())
     monkeypatch.setattr(unified_stream, "logger", MagicMock())
 
     def _render(call) -> str:
@@ -121,9 +120,8 @@ class TestEventTextIsUntrustedMarkup:
 
 @pytest.fixture(autouse=True)
 def _monitor_fresh(monkeypatch):
-    """monitor.py, bound at the top, with its run state fresh and its logger and relay doubled."""
+    """monitor.py, bound at the top, with its run state fresh and its logger doubled."""
     monkeypatch.setattr(monitor, "logger", MagicMock())
-    monkeypatch.setattr(monitor, "relay_event", MagicMock())
     monkeypatch.setattr(monitor, "_event_queue", None)
     monkeypatch.setattr(monitor, "_stop_event", threading.Event())
     monkeypatch.setattr(monitor, "_render_failures", 0)
@@ -166,7 +164,7 @@ class TestDisplayWorkerSurvivesBadEvent:
         setattr(mod, "_event_queue", _queue_of(events, mod))
         mod._stop_event.clear()
         mod._reset_render_failure_state()
-        with patch.object(mod, "_render_event", side_effect=render_side_effect) as render:
+        with patch.object(mod, "_print_event_to_console", side_effect=render_side_effect) as render:
             mod._display_worker()
         return render
 
@@ -247,9 +245,9 @@ class TestStandaloneRunArgs:
         assert mod._standalone_run_args(["seedgo"], []) == ["run", "seedgo"]
 
     def test_flags_pass_through(self):
-        """`run --relay` reaches _dispatch_run instead of being rejected."""
+        """`run --logs` reaches _dispatch_run, which owns flag validation."""
         mod = _import_monitor()
-        assert mod._standalone_run_args(["run"], ["--relay"]) == ["run", "--relay"]
+        assert mod._standalone_run_args(["run"], ["--logs"]) == ["run", "--logs"]
 
     def test_no_tokens_means_introspection(self):
         mod = _import_monitor()
@@ -268,26 +266,14 @@ class TestStandaloneRunArgs:
         assert list(legacy_scope.names) == ["RUN"]
 
 
-class TestRelaySurvivesConsoleFailure:
-    """Console and Telegram are separate sinks; one must not take out the other."""
-
-    def test_relay_runs_even_when_console_render_raises(self):
-        """The owner's Telegram feed does not depend on Rich rendering a line."""
-        mod = _import_monitor()
-        event = _event()
-        with patch.object(mod, "_print_event_to_console", side_effect=ValueError("markup")):
-            with patch.object(mod, "relay_event") as relay:
-                with pytest.raises(ValueError):
-                    mod._render_event(event)
-        relay.assert_called_once_with(event)
+class TestConsoleFailureIsSwallowed:
+    """A line the console cannot draw is reported, and the worker keeps going."""
 
     def test_worker_swallows_that_failure(self):
-        """End to end: bad line relayed, error reported, worker still alive."""
         mod = _import_monitor()
         setattr(mod, "_event_queue", _queue_of([_event(), _event("FLOW")], mod))
         mod._stop_event.clear()
         mod._reset_render_failure_state()
-        with patch.object(mod, "_print_event_to_console", side_effect=ValueError("markup")):
-            with patch.object(mod, "relay_event") as relay:
-                mod._display_worker()
-        assert relay.call_count == 2
+        with patch.object(mod, "_print_event_to_console", side_effect=ValueError("markup")) as render:
+            mod._display_worker()
+        assert render.call_count == 2

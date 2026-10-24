@@ -3,7 +3,7 @@
 # Description: Load Logging Configuration Handler
 # Version: 1.3.0
 # Created: 2025-11-07
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -18,7 +18,6 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
 
@@ -241,16 +240,9 @@ def level_to_int(level: Any) -> int:
     return numeric if isinstance(numeric, int) else logging.INFO
 
 
-def get_debug_prints_enabled() -> bool:
-    """Check if debug prints are enabled in config"""
-    try:
-        if PRAX_LOGGER_CONFIG_FILE.exists():
-            with open(PRAX_LOGGER_CONFIG_FILE, "r", encoding="utf-8") as f:
-                config = json.load(f)
-                return config.get("config", {}).get("debug_prints_enabled", False)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.info(f"Config load error (using defaults): {e}")
-    return False
+def _as_dict(value: Any) -> Dict[str, Any]:
+    """A config section, or {} when it is missing or not an object."""
+    return value if isinstance(value, dict) else {}
 
 
 def load_log_config() -> Dict[str, Any]:
@@ -263,7 +255,7 @@ def load_log_config() -> Dict[str, Any]:
 
                 # Missing sections mean the file's settings never reach a handler: warn,
                 # once per process (prax's own log sits in the directory prax watches).
-                section = config.get("config", {})
+                section = _as_dict(config.get("config")) if isinstance(config, dict) else {}
                 missing = [k for k in ("system_logs", "local_logs") if k not in section]
                 if missing and not _config_schema_warned:
                     _config_schema_warned = True
@@ -276,8 +268,8 @@ def load_log_config() -> Dict[str, Any]:
                         DEFAULT_LOCAL_LOGS,
                     )
 
-                system_logs = section.get("system_logs", DEFAULT_SYSTEM_LOGS)
-                local_logs = section.get("local_logs", DEFAULT_LOCAL_LOGS)
+                system_logs = {**DEFAULT_SYSTEM_LOGS, **_as_dict(section.get("system_logs"))}
+                local_logs = {**DEFAULT_LOCAL_LOGS, **_as_dict(section.get("local_logs"))}
 
                 result = {
                     "system_logs": system_logs,
@@ -285,7 +277,6 @@ def load_log_config() -> Dict[str, Any]:
                     "log_format": section.get("log_format", LOG_FORMAT),
                     "date_format": section.get("date_format", DATE_FORMAT),
                 }
-                json_handler.log_operation("config_loaded", {"source": str(PRAX_LOGGER_CONFIG_FILE)})
                 return result
     except (json.JSONDecodeError, OSError) as e:
         logger.info(f"Log config load error (using defaults): {e}")

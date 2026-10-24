@@ -3,7 +3,7 @@
 # Description: Unit tests for discovery handlers
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/discovery/filtering.py, scanner.py, scan.py and apps/modules/discover.py."""
@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.prax.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.prax.apps.handlers.config.ignore_patterns import DEFAULT_IGNORE_FOLDERS
 from aipass.prax.apps.handlers.discovery import filtering, scan, scanner
 from aipass.prax.apps.modules import discover
 
@@ -38,8 +40,7 @@ def mock_config_load(monkeypatch, tmp_path):
 
 @pytest.fixture()
 def filtering_module(monkeypatch, mock_ignore_patterns):
-    """filtering, with its loader and its json service doubled."""
-    monkeypatch.setattr(filtering, "json_handler", MagicMock())
+    """filtering, with its loader doubled."""
     return filtering
 
 
@@ -102,13 +103,16 @@ class TestShouldIgnorePath:
         """Directories with names similar to ignored patterns should pass."""
         assert filtering_module.should_ignore_path(tmp_path / "project" / "git_utils" / "helper.py") is False
 
-    def test_logs_filtered_path(self, filtering_module, tmp_path):
-        """When a path is ignored, json_handler.log_operation should be called."""
-        ignored = tmp_path / "repo" / ".git" / "config"
-        filtering_module.should_ignore_path(ignored)
-        filtering_module.json_handler.log_operation.assert_called_once_with(
-            "discovery_filtered", {"ignored_path": str(ignored)}
-        )
+    def test_parts_above_root_do_not_count(self, filtering_module, tmp_path):
+        """A checkout under an ignored folder name still sees its own tree; below root still filters."""
+        root = tmp_path / "node_modules" / "src" / "aipass"
+        assert filtering_module.should_ignore_path(root / "backup" / "mod.py", root) is False
+        assert filtering_module.should_ignore_path(root / ".venv" / "mod.py", root) is True
+
+    def test_backup_branch_is_not_a_default_ignore(self):
+        """src/aipass/backup is a branch; the backup folder is .backup."""
+        assert "backup" not in DEFAULT_IGNORE_FOLDERS
+        assert ".backup" in DEFAULT_IGNORE_FOLDERS
 
 
 class TestScanDirectorySafely:
@@ -224,6 +228,33 @@ class TestScanDirectorySafely:
             restricted.chmod(0o755)
 
         assert modules == {}
+
+
+    def test_patterns_load_once_per_walk(self, scanner_module, mock_ignore_patterns, tmp_path):
+        """One config read per scan, not one per entry."""
+        _tree(tmp_path, "a/one.py", "a/b/two.py", "c/three.py")
+
+        scanner_module.scan_directory_safely(tmp_path, {})
+        assert mock_ignore_patterns.call_count == 1
+
+    def test_one_vanished_file_does_not_drop_its_siblings(self, scanner_module, tmp_path, monkeypatch):
+        """A file gone between listing and stat is skipped; the rest of the directory is still recorded."""
+        _tree(tmp_path, "gone.py", "kept.py", "sub/deep.py")
+        real_stat = Path.stat
+
+        def flaky_stat(self, *args, **kwargs):
+            if self.name == "gone.py" and not kwargs and not args:
+                raise FileNotFoundError(self)
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "is_file", lambda self: self.suffix == ".py")
+        real_iterdir = Path.iterdir
+        monkeypatch.setattr(Path, "iterdir", lambda self: iter(sorted(real_iterdir(self))))
+        monkeypatch.setattr(Path, "stat", flaky_stat)
+        modules: dict = {}
+        scanner_module.scan_directory_safely(tmp_path, modules)
+        assert {"kept", "deep"} <= set(modules)
+        assert "gone" not in modules
 
 
 class TestDiscoverPythonModules:
@@ -369,6 +400,13 @@ class TestRunScan:
         assert stats["total"] == 1
         assert stats["timestamp"]
 
+    def test_an_empty_walk_never_overwrites_a_full_registry(self, scan_module, saved_registry, monkeypatch):
+        """Zero modules found means a broken root or filter: the registry on record is kept."""
+        _walk(scan_module, monkeypatch, before={"kept": {}}, found={})
+
+        assert scan_module.run_scan()["saved"] is False
+        assert saved_registry == {}
+
     def test_a_failed_write_is_reported_not_swallowed(self, scan_module, monkeypatch):
         """The counts describe the walk; `saved` is the only word on the file."""
         _walk(scan_module, monkeypatch, before={}, found={"a": {}})
@@ -448,6 +486,16 @@ class TestDiscoverCommandGate:
         assert discover_module.handle_command("discover", ["run"]) is True
         captured = capsys.readouterr()
         assert "The previous registry could not be read; it was rebuilt from disk." in captured.out + captured.err
+
+    def test_a_trailing_argument_after_run_is_refused_not_scanned(self, discover_module, monkeypatch):
+        """`discover run --dry-run` must not rewrite the registry."""
+        scanned = MagicMock()
+        monkeypatch.setattr(discover_module, "run_scan", scanned)
+
+        with pytest.raises(UnknownArgument) as refusal:
+            discover_module.handle_command("discover", ["run", "--dry-run"])
+        assert refusal.value.token == "--dry-run"
+        scanned.assert_not_called()
 
     def test_an_unknown_subcommand_is_refused(self, discover_module, monkeypatch):
         """`discover scna` must not be indistinguishable from `discover`."""

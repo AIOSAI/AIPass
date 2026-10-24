@@ -3,7 +3,7 @@
 # Description: Directory Scanning
 # Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -15,49 +15,55 @@ import logging
 from pathlib import Path
 
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Set
 
 from aipass.prax.apps.handlers.config.load import ECOSYSTEM_ROOT, get_system_logs_dir, get_module_logs_dir
 
-from aipass.prax.apps.handlers.discovery.filtering import in_sandbox, should_ignore_path
+from aipass.prax.apps.handlers.discovery import filtering
 from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
 
 
-def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10):
+def scan_directory_safely(directory: Path, modules: Dict, max_depth: int = 10, patterns: Optional[Set[str]] = None):
     """Safely scan directory with depth limit"""
     # Sandboxes are never entered: an archived copy would take a live module's stem-keyed entry.
     if max_depth <= 0:
         return
+    if patterns is None:
+        patterns = filtering.load_ignore_patterns_from_config()
 
     try:
-        for item in directory.iterdir():
-            if should_ignore_path(item) or in_sandbox(item, directory):
+        items = list(directory.iterdir())
+    except OSError as e:
+        logger.warning(f"[scanner] Error scanning directory {directory}: {e}")
+        return
+
+    # Per item: one file vanishing mid-walk must not drop the rest of the directory from the registry.
+    for item in items:
+        try:
+            if filtering.should_ignore_path(item, ECOSYSTEM_ROOT, patterns) or filtering.in_sandbox(item, directory):
                 continue
 
             if item.is_file() and item.suffix == ".py":
                 module_name = item.stem
-                relative_path = item.relative_to(ECOSYSTEM_ROOT)
-
+                stat = item.stat()
                 modules[module_name] = {
                     "file_path": str(item),
-                    "relative_path": str(relative_path),
+                    "relative_path": str(item.relative_to(ECOSYSTEM_ROOT)),
                     "system_log_file": str(get_system_logs_dir() / f"prax_{module_name}.log"),
                     "log_file": str(get_module_logs_dir("prax") / f"{module_name}.log"),
                     "discovered_time": datetime.now(timezone.utc).isoformat(),
-                    "size": item.stat().st_size,
-                    "modified_time": datetime.fromtimestamp(item.stat().st_mtime).isoformat(),
+                    "size": stat.st_size,
+                    "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                     "enabled": True,
                 }
 
             elif item.is_dir():
-                scan_directory_safely(item, modules, max_depth - 1)
+                scan_directory_safely(item, modules, max_depth - 1, patterns)
 
-    except PermissionError as e:
-        logger.warning(f"[scanner] Permission denied scanning directory {directory}: {e}")
-    except Exception as e:
-        logger.warning(f"[scanner] Error scanning directory {directory}: {e}")
+        except (OSError, ValueError) as e:
+            logger.warning(f"[scanner] Error scanning {item}: {e}")
 
 
 def discover_python_modules() -> Dict[str, Dict[str, Any]]:

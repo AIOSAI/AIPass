@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX log_audit module
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/log_audit.py."""
@@ -375,3 +375,38 @@ def test_display_branch_audit_critical(audit_world, monkeypatch, capsys):
     assert rows[0].startswith("  CRITICAL hooks")
     assert rows[0].endswith("engine.jsonl: 63.0 MB, 200,000 lines, unrotated")
     audit_world.error.assert_called_once_with("Status: 1 unbounded, 1 critical")
+
+
+@pytest.mark.parametrize("verb", ["enforce", "sweep", "audit"])
+def test_a_trailing_flag_is_refused_and_runs_nothing(audit_world, monkeypatch, verb):
+    """`enforce --dry-run` must not truncate for real: an extra token is refused by name."""
+    watchdog = _ensure_watchdog_mock(monkeypatch)
+    swept = MagicMock()
+    monkeypatch.setattr(log_watchdog, "sweep_stale_logs", swept)
+
+    with pytest.raises(UnknownArgument) as refusal:
+        log_audit.handle_command("log-audit", [verb, "--dry-run"])
+
+    assert refusal.value.token == "--dry-run"
+    watchdog.enforce_log_limits.assert_not_called()
+    watchdog.scan_log_files.assert_not_called()
+    swept.assert_not_called()
+
+
+def test_enforce_help_still_shows_help(audit_world, monkeypatch, capsys):
+    """Help after a verb is help, not a refusal."""
+    watchdog = _ensure_watchdog_mock(monkeypatch)
+
+    assert log_audit.handle_command("log-audit", ["enforce", "--help"]) is True
+    assert "log-audit enforce" in capsys.readouterr().out
+    watchdog.enforce_log_limits.assert_not_called()
+
+
+def test_audit_summarises_the_scan_it_already_made(audit_world, monkeypatch):
+    """Each tree is scanned once: the summary is built from the same list."""
+    watchdog = _ensure_watchdog_mock(monkeypatch)
+
+    log_audit.handle_command("log-audit", ["audit"])
+
+    watchdog.log_health_summary.assert_called_once_with(watchdog.scan_log_files.return_value)
+    watchdog.branch_log_health_summary.assert_called_once_with(watchdog.scan_branch_log_files.return_value)

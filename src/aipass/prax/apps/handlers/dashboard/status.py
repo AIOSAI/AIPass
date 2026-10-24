@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: Dashboard Status Calculation Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-02-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -46,8 +46,8 @@ def _read_todo_count(branch_path: Path) -> Optional[int]:
         return None
 
 
-def _read_mail_counts(branch_path: Path) -> tuple:
-    """Read new/opened mail counts from .ai_mail.local/inbox.json."""
+def _read_mail_counts(branch_path: Path) -> "Tuple[int, int] | None":
+    """Read new/opened mail counts from .ai_mail.local/inbox.json; None when it is unreadable."""
     inbox_path = branch_path / ".ai_mail.local" / "inbox.json"
     if not inbox_path.exists():
         return (0, 0)
@@ -62,9 +62,9 @@ def _read_mail_counts(branch_path: Path) -> tuple:
             elif status == "opened":
                 opened_mail += 1
         return (new_mail, opened_mail)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, OSError, AttributeError) as exc:
         logger.warning("Failed to read inbox from %s: %s", inbox_path, exc)
-        return (0, 0)
+        return None
 
 
 def count_active_plans(flow_section: Dict) -> int:
@@ -92,41 +92,20 @@ def merge_quick_status(existing: "Dict | None", computed: Dict) -> Dict:
     return merged
 
 
-def read_existing_quick_status(branch_path: "Path | None") -> "Dict | None":
-    """Read the quick_status block already on disk, for merging into a fresh build."""
-    # {} is no block; None is an unreadable file, which refresh records as previous_unreadable.
-    if not branch_path:
-        return {}
-    dashboard_path = Path(branch_path) / "DASHBOARD.local.json"
-    if not dashboard_path.exists():
-        return {}
-    try:
-        data = json.loads(dashboard_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(
-            "Could not read the existing dashboard at %s (%s), so keys written by other services "
-            "cannot be preserved on this refresh. prax's own counters are still correct and the "
-            "file is rewritten with previous_unreadable in its quick_status, not deleted.",
-            dashboard_path,
-            type(exc).__name__,
-        )
-        return None
-    block = data.get("quick_status", {})
-    return block if isinstance(block, dict) else {}
-
-
 def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) -> Dict:
     """Calculate quick status from branch data sources."""
-    # The single implementation: refresh.py, operations.py and template_pusher.py delegate here.
+    # The single implementation: refresh.py, operations.py and template_pusher.py all call it.
     flow = sections.get("flow", {})
 
     if branch_path:
-        new_mail, opened_mail = _read_mail_counts(branch_path)
+        mail_counts = _read_mail_counts(branch_path)
         todo_count = _read_todo_count(branch_path)
     else:
-        new_mail, opened_mail, todo_count = 0, 0, 0
+        mail_counts, todo_count = (0, 0), 0
     active_plans = count_active_plans(flow)
-    # Unreadable local.json: todo_count is left out so the merge keeps the last count written.
+    # Unreadable local.json or inbox: its keys are left out so the merge keeps the last counts written.
+    mail_unknown = mail_counts is None
+    new_mail, opened_mail = mail_counts or (0, 0)
     todos_unknown = todo_count is None
     todo_count = todo_count or 0
 
@@ -142,6 +121,8 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
         summary_parts.append(f"{active_plans} active plans")
     if todo_count > 0:
         summary_parts.append(f"{todo_count} todos")
+    if mail_unknown:
+        summary_parts.append("mail unreadable")
     if todos_unknown:
         summary_parts.append("todos unreadable")
 
@@ -153,6 +134,8 @@ def calculate_quick_status(sections: Dict, branch_path: "Path | None" = None) ->
         "action_required": action_required,
         "summary": ", ".join(summary_parts) if summary_parts else "All clear",
     }
+    if mail_unknown:
+        del result["new_mail"], result["opened_mail"]
     if todos_unknown:
         del result["todo_count"]
 

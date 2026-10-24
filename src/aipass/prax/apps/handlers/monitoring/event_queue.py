@@ -3,7 +3,7 @@
 # Description: Thread-Safe Event Queue
 # Version: 0.2.0
 # Created: 2025-11-23
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Thread-safe event coordination for monitoring system"""
@@ -12,13 +12,15 @@ from queue import Empty, Full, PriorityQueue
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+import itertools
 import threading
 import time
 
 from aipass.prax.apps.modules.logger import get_direct_logger
-from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
+
+_arrival = itertools.count()
 
 
 @dataclass(order=True)
@@ -26,6 +28,8 @@ class MonitoringEvent:
     """Unified event structure for all monitoring sources"""
 
     priority: int = field(compare=True)
+    # Second sort key: equal priorities leave the queue in arrival order.
+    seq: int = field(compare=True, init=False, repr=False, default_factory=lambda: next(_arrival))
     timestamp: datetime = field(compare=False, default_factory=datetime.now)
     event_type: str = field(compare=False, default="")  # 'file', 'log', 'module', 'command'
     branch: str = field(compare=False, default="")
@@ -99,8 +103,6 @@ class MonitoringQueue:
                     self._last_drop_warning = now
                 return False
 
-        # Only for queued events: per-attempt logging writes into a watched log.
-        json_handler.log_operation("event_queued", {"event_type": event.event_type, "branch": event.branch})
         return True
 
     def _report_drops(self, exc: Exception, latest: MonitoringEvent) -> None:
@@ -163,6 +165,3 @@ class MonitoringQueue:
     def size(self) -> int:
         """Get current queue size"""
         return self.queue.qsize()
-
-
-global_queue = MonitoringQueue()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.7.0
+# Version: 0.8.0
 # Created: 2026-02-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Dashboard Refresh Handler
@@ -18,8 +18,8 @@ from typing import Dict, List
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 
-from .operations import cap_subject, create_fresh_dashboard, save_dashboard
-from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status
+from .operations import cap_subject, create_fresh_dashboard, dashboard_lock, get_dashboard_path, save_dashboard
+from .status import calculate_quick_status, merge_quick_status
 
 from ..central.reader import read_all_centrals
 
@@ -29,7 +29,7 @@ from aipass.prax.apps.handlers.repo_root import find_repo_root
 
 logger = get_direct_logger()
 
-REFRESH_MANAGED_SECTIONS = {"ai_mail", "flow", "memory"}
+REFRESH_MANAGED_SECTIONS = {"flow", "memory"}
 
 
 def _find_repo_root() -> Path:
@@ -179,23 +179,6 @@ def _extract_flow_section(centrals: Dict, branch_name: str, existing: "Dict | No
     }
 
 
-def _extract_ai_mail_section(centrals: Dict, branch_name: str) -> Dict:
-    """Extract ai_mail section from AI_MAIL.central.json"""
-    mail_data = centrals.get("ai_mail")
-    if not mail_data:
-        return {"managed_by": "ai_mail", "unread": 0, "total": 0}
-
-    branch_stats = mail_data.get("branch_stats", {})
-    stats = branch_stats.get(branch_name, {"unread": 0, "total": 0})
-
-    return {
-        "managed_by": "ai_mail",
-        "unread": stats.get("unread", 0),
-        "total": stats.get("total", 0),
-        "last_updated": mail_data.get("last_updated", datetime.now().isoformat()),
-    }
-
-
 def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
     """Extract memory section - LOCAL vectors for this branch, not the global count."""
     local_vectors = 0
@@ -221,33 +204,6 @@ def _extract_memory_section(centrals: Dict, branch_path: Path) -> Dict:
     return {"managed_by": "memory", "vectors_stored": local_vectors, "notes": {}, "last_updated": mb_last_updated}
 
 
-def _calculate_quick_status(sections: Dict, branch_path: Path) -> Dict:
-    """Calculate quick_status from branch data sources; thin delegate to status.py."""
-    return calculate_quick_status(sections, branch_path)
-
-
-def _read_existing_section(branch_path: Path, name: str) -> Dict:
-    """Read one section off the dashboard already on disk.
-
-    The refresh rebuilds from the template, so a foreign section's keys survive only through here."""
-    dashboard_path = Path(branch_path) / "DASHBOARD.local.json"
-    if not dashboard_path.exists():
-        return {}
-    try:
-        data = json.loads(dashboard_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning(
-            "Could not read the existing dashboard at %s (%s), so the '%s' section's "
-            "foreign keys cannot be carried forward on this refresh.",
-            dashboard_path,
-            type(exc).__name__,
-            name,
-        )
-        return {}
-    section = data.get("sections", {}).get(name, {})
-    return section if isinstance(section, dict) else {}
-
-
 def _prune_deprecated_sections(dashboard: Dict) -> None:
     """Remove deprecated sections from dashboard before save."""
     sections = dashboard.get("sections", {})
@@ -255,12 +211,37 @@ def _prune_deprecated_sections(dashboard: Dict) -> None:
         sections.pop(key, None)
 
 
-def _merge_over_disk(branch_path: Path, computed: Dict) -> Dict:
+def _read_existing_dashboard(branch_path: Path) -> "Dict | None":
+    """The dashboard already on disk, parsed once per refresh: {} when absent, None when unreadable."""
+    dashboard_path = get_dashboard_path(branch_path)
+    if not dashboard_path.exists():
+        return {}
+    try:
+        data = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning(
+            "Could not read the existing dashboard at %s (%s), so keys written by other services "
+            "cannot be preserved on this refresh. prax's own counters are still correct and the "
+            "file is rewritten with previous_unreadable in its quick_status, not deleted.",
+            dashboard_path,
+            type(exc).__name__,
+        )
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _existing_sections(existing: "Dict | None") -> Dict:
+    """The sections block of the parsed dashboard, or {}."""
+    sections = (existing or {}).get("sections", {})
+    return sections if isinstance(sections, dict) else {}
+
+
+def _merge_over_disk(existing: "Dict | None", computed: Dict) -> Dict:
     """The computed quick_status merged over the block already on disk.
 
     An unreadable dashboard sets previous_unreadable so the loss of other services' keys shows in the file."""
-    existing = read_existing_quick_status(branch_path)
-    merged = merge_quick_status(existing, computed)
+    block = (existing or {}).get("quick_status", {})
+    merged = merge_quick_status(block if isinstance(block, dict) else {}, computed)
     if existing is None:
         merged["previous_unreadable"] = True
     else:
@@ -268,18 +249,35 @@ def _merge_over_disk(branch_path: Path, computed: Dict) -> Dict:
     return merged
 
 
-def _preserve_write_through_sections(dashboard: Dict, branch_path: Path, branch_name: str) -> None:
-    """Preserve write-through sections not managed by refresh."""
-    existing_path = branch_path / "DASHBOARD.local.json"
-    if not existing_path.exists():
-        return
-    try:
-        existing = json.loads(existing_path.read_text())
-        for key, value in existing.get("sections", {}).items():
+def _refresh_branch(branch_path: Path, centrals: Dict) -> None:
+    """Rebuild one branch's dashboard: one read and one write under the dashboard lock."""
+    branch_name = branch_path.name.upper()
+    with dashboard_lock(branch_path):
+        existing = _read_existing_dashboard(branch_path)
+        old_sections = _existing_sections(existing)
+        # Read before the template rebuild drops it: it holds keys prax cannot source.
+        old_flow = old_sections.get("flow", {})
+
+        dashboard = create_fresh_dashboard(branch_path)
+        dashboard["sections"]["flow"] = _extract_flow_section(
+            centrals, branch_name, old_flow if isinstance(old_flow, dict) else {}
+        )
+        dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
+
+        for key, value in old_sections.items():
             if key not in REFRESH_MANAGED_SECTIONS and key not in dashboard["sections"]:
                 dashboard["sections"][key] = value
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning("Failed to preserve write-through sections for %s: %s", branch_name, e)
+        _prune_deprecated_sections(dashboard)
+
+        # Mail counts come from the branch's own inbox (status.py::_read_mail_counts).
+        dashboard["quick_status"] = _merge_over_disk(
+            existing, calculate_quick_status(dashboard["sections"], branch_path)
+        )
+        save_dashboard(branch_path, dashboard)
+
+    # Outside the lock: the plugin's write_section takes it again.
+    if branch_name == "DEVPULSE":
+        _run_devpulse_plugin(branch_path)
 
 
 def _run_devpulse_plugin(branch_path: Path) -> None:
@@ -310,29 +308,7 @@ def refresh_all_dashboards() -> Dict:
         branch_name = branch_path.name.upper()
 
         try:
-            # Read before the template rebuild drops it: it holds keys prax cannot source.
-            existing_flow = _read_existing_section(branch_path, "flow")
-
-            dashboard = create_fresh_dashboard(branch_path)
-
-            dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
-            dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name, existing_flow)
-            dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
-
-            _preserve_write_through_sections(dashboard, branch_path, branch_name)
-            _prune_deprecated_sections(dashboard)
-
-            # Mail counts come from the branch's own inbox (status.py::_read_mail_counts),
-            # never from the ai_mail section, which is read by nothing and popped before save.
-            dashboard["quick_status"] = _merge_over_disk(
-                branch_path, _calculate_quick_status(dashboard["sections"], branch_path)
-            )
-            dashboard["sections"].pop("ai_mail", None)
-
-            save_dashboard(branch_path, dashboard)
-
-            if branch_name == "DEVPULSE":
-                _run_devpulse_plugin(branch_path)
+            _refresh_branch(branch_path, centrals)
 
             branches_updated += 1
 
@@ -371,26 +347,7 @@ def refresh_single_dashboard(branch_path: Path) -> Dict:
     branch_name = branch_path.name.upper()
 
     try:
-        existing_flow = _read_existing_section(branch_path, "flow")
-
-        dashboard = create_fresh_dashboard(branch_path)
-
-        dashboard["sections"]["ai_mail"] = _extract_ai_mail_section(centrals, branch_name)
-        dashboard["sections"]["flow"] = _extract_flow_section(centrals, branch_name, existing_flow)
-        dashboard["sections"]["memory"] = _extract_memory_section(centrals, branch_path)
-
-        _preserve_write_through_sections(dashboard, branch_path, branch_name)
-        _prune_deprecated_sections(dashboard)
-
-        dashboard["quick_status"] = _merge_over_disk(
-            branch_path, _calculate_quick_status(dashboard["sections"], branch_path)
-        )
-        dashboard["sections"].pop("ai_mail", None)
-
-        save_dashboard(branch_path, dashboard)
-
-        if branch_name == "DEVPULSE":
-            _run_devpulse_plugin(branch_path)
+        _refresh_branch(branch_path, centrals)
 
         return {"status": "success", "branch": branch_name}
 

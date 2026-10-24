@@ -1,23 +1,20 @@
 # =================== AIPass ====================
 # Name: unified_stream.py
 # Description: Unified Display Handler
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2025-11-23
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
-"""
-Unified Stream Display Handler
-"""
+"""Unified Stream Display Handler"""
 
 from datetime import datetime
-from typing import Optional, Dict, List
+from typing import Optional
 from threading import Lock
 
 from rich.markup import escape
 
 from aipass.prax.apps.modules.logger import get_direct_logger
-from aipass.prax.apps.handlers.json import json_handler
 
 logger = get_direct_logger()
 
@@ -39,36 +36,6 @@ def _plain(text: str) -> str:
     """
     return escape(str(text))
 
-
-COLORS = {
-    "file_created": "green",
-    "file_modified": "yellow",
-    # file_deleted is watchdog's real removal; profile_write_failed is trigger's
-    # bus event: both stay. Nothing reads COLORS today (print_event does not).
-    "file_deleted": "red",
-    "profile_write_failed": "red",
-    "file_moved": "blue",
-    "log_info": "white",
-    "log_warning": "yellow",
-    "log_error": "red",
-    "log_critical": "bold red",
-    "module_loaded": "cyan",
-    "module_error": "red",
-    "system_info": "blue",
-    "system_warning": "yellow",
-    "system_error": "bold red",
-}
-
-SYMBOLS = {
-    "file": "📁",
-    "log": "📝",
-    "module": "⚡",
-    "system": "🔧",
-    "error": "❌",
-    "warning": "⚠️",
-    "success": "✅",
-    "info": "ℹ️",
-}
 
 # Wide enough for three-tier labels like AIPASS/DEVPULSE/OPUS
 BRANCH_WIDTH = 24
@@ -105,11 +72,7 @@ BRANCH_COLORS = {
 
 
 def print_event(event_type: str, branch: str, message: str, level: str = "info", pid: Optional[int] = None):
-    """
-    Format and print event with branch attribution
-    """
-    json_handler.log_operation("stream_output", {"event_type": event_type, "branch": branch, "level": level})
-
+    """Format and print event with branch attribution."""
     with _print_lock:
         timestamp = datetime.now().strftime("%H:%M:%S")
 
@@ -175,37 +138,3 @@ def print_hook_event(branch: str, message: str, action: str = "unknown"):
         console.print(
             f"[dim]{timestamp}[/dim] [{style}]{symbol} HOOK[/{style}] {branch_label} [{style}]{_plain(message)}[/{style}]"
         )
-
-
-def print_status(watched_branches: List[str], verbosity: int, filters: Optional[Dict] = None):
-    """
-    Display current monitoring status
-    """
-    with _print_lock:
-        console.print("\n[bold]Current Status:[/bold]")
-        console.print(f"  Watching: [cyan]{', '.join(watched_branches) if watched_branches else 'All branches'}[/cyan]")
-        console.print(f"  Verbosity: [yellow]{verbosity}[/yellow]")
-
-        if filters:
-            console.print("  Filters:")
-            if filters.get("file_types"):
-                console.print(f"    File types: {', '.join(filters['file_types'])}")
-            if filters.get("log_levels"):
-                console.print(f"    Log levels: {', '.join(filters['log_levels'])}")
-            if filters.get("exclude_patterns"):
-                console.print(f"    Excluded: {', '.join(filters['exclude_patterns'])}")
-        console.print()
-
-
-def print_help():
-    """Display help information"""
-    with _print_lock:
-        console.print("\n[bold]Available Commands:[/bold]")
-        console.print("  [cyan]help[/cyan]              - Show this help")
-        console.print("  [cyan]status[/cyan]            - Show monitoring status")
-        console.print("  [cyan]clear[/cyan]             - Clear screen")
-        console.print("  [cyan]filter <type>[/cyan]    - Add filter")
-        console.print("  [cyan]verbosity <0-2>[/cyan]  - Set verbosity level")
-        console.print("  [cyan]watch <branch>[/cyan]   - Watch specific branch")
-        console.print("  [cyan]unwatch <branch>[/cyan] - Stop watching branch")
-        console.print("  [cyan]quit/exit[/cyan]        - Exit monitoring\n")

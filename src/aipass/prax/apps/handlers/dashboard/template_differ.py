@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_differ.py
 # Description: Dashboard Template Diff Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-02-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -21,7 +21,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
-from aipass.prax.apps.handlers.dashboard.template_pusher import DEPRECATED_QUICK_STATUS_KEYS
+from aipass.prax.apps.handlers.dashboard.template_pusher import DEPRECATED_QUICK_STATUS_KEYS, DEPRECATED_SECTIONS
 
 logger = get_direct_logger()
 
@@ -37,19 +37,9 @@ TEMPLATE_DIR = _PRAX_ROOT / "templates"
 TEMPLATE_FILE = TEMPLATE_DIR / "DASHBOARD.template.json"
 AIPASS_REGISTRY = _find_repo_root() / "AIPASS_REGISTRY.json"
 
-DEPRECATED_SECTIONS = [
-    "bulletin_board",
-    "devpulse",
-    "commons_activity",
-    "agent_status",
-    "memory_bank",
-    "session",
-    "todo",
-]
-
-# DEPRECATED_QUICK_STATUS_KEYS is imported from the pusher: a local copy drifts and
+# The deprecated lists are imported from the pusher: a local copy drifts and
 # recommends deleting live keys. These two are only the fallback when the template says nothing.
-REQUIRED_SECTIONS = ["ai_mail", "flow", "memory"]
+REQUIRED_SECTIONS = ["flow", "memory"]
 REQUIRED_QUICK_STATUS_KEYS = ["new_mail", "opened_mail", "active_plans", "action_required", "summary"]
 
 

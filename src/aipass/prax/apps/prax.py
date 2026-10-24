@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
 # Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX Branch - Main Orchestrator"""
@@ -164,22 +164,7 @@ def _run() -> int:
     """Parse the command line and route it. Refusals are raised, never returned."""
     parser = argparse.ArgumentParser(
         description="PRAX - System-Wide Logging Infrastructure",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,  # We route --help to modules when a command is given
-        epilog="""
-Available Commands:
-  monitor     Mission Control - unified real-time monitoring
-  status      Show PRAX system status
-  log-audit   Audit log file sizes and health
-  log-health  Log growth rates (scan / snapshot)
-  dashboard   System dashboard
-
-Examples:
-  drone @prax monitor run
-  drone @prax status
-  drone @prax log-health scan
-  drone @prax dashboard
-        """,
     )
 
     parser.add_argument("command", nargs="?", help="Command to execute")

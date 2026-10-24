@@ -3,7 +3,7 @@
 # Description: Tests for the log-health command module
 # Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/log_health.py."""
@@ -116,3 +116,26 @@ class TestRouting:
 
         assert refusal.value.verb == "log-health"
         assert refusal.value.token == "bogus"
+
+
+def test_a_trailing_argument_after_scan_is_refused():
+    """`scan --dry-run` is refused by name, not run as a scan."""
+    with pytest.raises(UnknownArgument) as refusal:
+        log_health.handle_command("log-health", ["scan", "--dry-run"])
+    assert refusal.value.token == "--dry-run"
+
+
+def test_a_trigger_that_raises_oserror_on_import_is_no_callback(monkeypatch):
+    """trigger's cwd guard raises OSError at import; log-health still runs without a callback."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def guarded(name, *args, **kwargs):
+        if name.startswith("aipass.trigger"):
+            raise OSError("no readable cwd")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(log_health, "logger", MagicMock())
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    assert log_health._get_event_callback() is None

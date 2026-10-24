@@ -3,21 +3,27 @@
 # Description: Logger Setup & Management
 # Version: 1.4.0
 # Created: 2025-11-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX Logger Setup"""
 
 import logging
+import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Iterator, Optional
 from logging.handlers import RotatingFileHandler
+
+try:
+    import fcntl
+except ImportError:  # Windows: rotation runs unlocked
+    fcntl = None  # type: ignore[assignment]
 
 from aipass.prax.apps.handlers.config.load import (
     get_system_logs_dir,
     get_module_logs_dir,
-    DEFAULT_LOG_LEVEL,
     load_log_config,
     lines_to_bytes,
     level_to_int,
@@ -30,39 +36,63 @@ from aipass.prax.apps.handlers.logging.introspection import (
     detect_external_project,
 )
 
-from aipass.prax.apps.handlers.json import json_handler
 
 logger = logging.getLogger(__name__)
-_system_logger: Optional[logging.Logger] = None
 _captured_loggers: Dict[str, logging.Logger] = {}
 _captured_loggers_lock = threading.Lock()
-# Held across a whole logger build, not just the cache read: every build of a module
-# configures the same shared logging.getLogger object, so two racing builds stack
-# duplicate handlers and every later line is written twice. Re-entrant because a build
-# can log through prax on its own thread.
+# Held across a whole logger build, not just the cache read: two racing builds would each
+# open handlers on the same files. Re-entrant because a build can log through prax on its own thread.
 _logger_build_lock = threading.RLock()
-_terminal_output_enabled = False
-
-_terminal_module_available = False
-try:
-    from aipass.prax.apps.handlers.logging.terminal.formatting import create_terminal_handler
-    from aipass.prax.apps.handlers.logging.terminal.filtering import should_display_terminal
-
-    _terminal_module_available = True
-except ImportError as e:
-    logger.info(f"[setup] Terminal handler modules not available: {e}")
-    create_terminal_handler = None  # type: ignore[assignment]
-    should_display_terminal = None  # type: ignore[assignment]
 
 
-class _WindowsSafeRotatingHandler(RotatingFileHandler):
-    """RotatingFileHandler that catches PermissionError/OSError during rotation on Windows."""
+@contextmanager
+def rotation_lock(path: Path) -> Iterator[None]:
+    """Exclusive cross-process lock on '<path>.lock' while a file rotates; no-op without fcntl."""
+    if fcntl is None:
+        yield
+        return
+    with open(f"{path}.lock", "a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        yield
+
+
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """Size rotation shared by every process writing one file.
+
+    Each process rotates on the on-disk size and follows a rename another process made,
+    so a rotation is never repeated or written past. Rotation errors (Windows file locks) are skipped."""
+
+    def _follow_rotation(self) -> bool:
+        """Reopen the stream if the file on disk is no longer the one it writes to; True if reopened."""
+        if self.stream is None:
+            return False
+        try:
+            moved = os.stat(self.baseFilename).st_ino != os.fstat(self.stream.fileno()).st_ino
+        except FileNotFoundError:
+            moved = True
+        if moved:
+            self.stream.close()
+            self.stream = self._open()
+        return moved
+
+    def shouldRollover(self, record: logging.LogRecord) -> bool:
+        """Roll when the on-disk file plus this record reaches maxBytes."""
+        self._follow_rotation()
+        if self.maxBytes <= 0:
+            return False
+        try:
+            size = os.stat(self.baseFilename).st_size
+        except OSError:
+            return False
+        return size + len(f"{self.format(record)}\n") >= self.maxBytes
 
     def doRollover(self) -> None:
-        """Rotate log file; skip on Windows file-lock errors rather than crash."""
+        """Rotate under the cross-process lock, unless another process already did."""
         try:
-            super().doRollover()
-        except (PermissionError, OSError) as exc:
+            with rotation_lock(Path(self.baseFilename)):
+                if not self._follow_rotation():
+                    super().doRollover()
+        except OSError as exc:
             # Windows locks open files, so the rename fails; keep writing to the current file.
             logger.warning("Log rotation skipped (file locked): %s", exc)
 
@@ -73,9 +103,7 @@ def _safe_rotating_handler(log_file: Path, max_bytes: int, backup_count: int) ->
         parent = log_file.parent
         if not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
-            if _system_logger:
-                _system_logger.warning(f"Self-healed missing log directory: {parent}")
-        return _WindowsSafeRotatingHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
+        return SafeRotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8")
     except OSError as e:
         logger.error("Log handler failed for %s: %s", log_file, e)
         return logging.NullHandler()
@@ -107,41 +135,6 @@ def setup_individual_logger(
     caller_branch: Optional[str] = None,
 ) -> logging.Logger:
     """Setup individual logger for a specific module with dual logging support"""
-    with _captured_loggers_lock:
-        if module_name in _captured_loggers:
-            return _captured_loggers[module_name]
-
-    with _logger_build_lock:
-        # Checked again: the thread that held the build lock may have just built this logger.
-        with _captured_loggers_lock:
-            if module_name in _captured_loggers:
-                return _captured_loggers[module_name]
-        return _build_individual_logger(module_name, caller_path, caller_branch)
-
-
-def _build_individual_logger(
-    module_name: str,
-    caller_path: Optional[str],
-    caller_branch: Optional[str],
-) -> logging.Logger:
-    """Build and cache one module's logger. Called only under _logger_build_lock."""
-    if _system_logger:
-        _system_logger.info(f"Creating logger for module: {module_name}")
-
-    logger = logging.getLogger(f"captured_{module_name}")
-    logger.setLevel(DEFAULT_LOG_LEVEL)
-    logger.handlers.clear()
-
-    log_config = load_log_config()
-
-    # The logger's own gate runs before any handler's, so it sits at the more permissive
-    # tier level or that tier's records are dropped before its handler sees them.
-    system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
-    local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
-    logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
-
-    import os
-
     branch_name: Optional[str] = caller_branch
     resolved_module_path: Optional[str] = caller_path
     if not branch_name:
@@ -152,6 +145,41 @@ def _build_individual_logger(
     # Set by drone for dispatched commands.
     if not branch_name:
         branch_name = os.environ.get("AIPASS_BRANCH_NAME")
+
+    # Same-named modules of two branches in one process must not share a logger or its files.
+    key = f"{branch_name or ''}_{module_name}"
+    with _captured_loggers_lock:
+        if key in _captured_loggers:
+            return _captured_loggers[key]
+
+    with _logger_build_lock:
+        # Checked again: the thread that held the build lock may have just built this logger.
+        with _captured_loggers_lock:
+            if key in _captured_loggers:
+                return _captured_loggers[key]
+        logger = _build_individual_logger(module_name, resolved_module_path, branch_name)
+        with _captured_loggers_lock:
+            _captured_loggers[key] = logger
+        return logger
+
+
+def _build_individual_logger(
+    module_name: str,
+    resolved_module_path: Optional[str],
+    branch_name: Optional[str],
+) -> logging.Logger:
+    """Build one module's logger. Called only under _logger_build_lock."""
+    # Outside the getLogger registry, which is keyed by name alone; the line keeps its "captured_<module>" tag.
+    logger = logging.Logger(f"captured_{module_name}")
+    logger.parent = logging.root
+
+    log_config = load_log_config()
+
+    # The logger's own gate runs before any handler's, so it sits at the more permissive
+    # tier level or that tier's records are dropped before its handler sees them.
+    system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
+    local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
+    logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
 
     external_project = None
     if not branch_name:
@@ -190,12 +218,6 @@ def _build_individual_logger(
         local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
 
-        if _system_logger:
-            _system_logger.info(
-                f"Logger created for {module_name} → external project '{project_name}': "
-                f"{getattr(system_handler, 'baseFilename', system_log_file)}, "
-                f"{getattr(local_handler, 'baseFilename', module_log_file)}"
-            )
     else:
         system_log_file = f"{branch_name}_{module_name}.log"
         system_limits = log_config["system_logs"]
@@ -217,91 +239,10 @@ def _build_individual_logger(
         local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
 
-        if _system_logger:
-            _system_logger.info(
-                f"Logger created for {module_name} → system: "
-                f"{getattr(system_handler, 'baseFilename', system_log_file)} "
-                f"({system_limits['max_lines']} lines), local: "
-                f"{getattr(local_handler, 'baseFilename', module_log_file)} "
-                f"({local_limits['max_lines']} lines)"
-            )
-
-    if _terminal_output_enabled and _terminal_module_available:
-        if should_display_terminal(module_name):  # type: ignore[misc]
-            terminal_handler = create_terminal_handler()  # type: ignore[misc]
-            logger.addHandler(terminal_handler)
-
-    with _captured_loggers_lock:
-        _captured_loggers[module_name] = logger
 
     return logger
-
-
-def setup_system_logger() -> logging.Logger:
-    """Setup prax_logger's own logging"""
-    global _system_logger
-
-    if _system_logger:
-        return _system_logger
-
-    log_config = load_log_config()
-
-    _system_logger = logging.getLogger("prax_system_logger")
-    _system_logger.handlers.clear()
-
-    # Most permissive tier level, as in _build_individual_logger.
-    system_level = resolve_log_level(log_config["system_logs"].get("log_level"))
-    local_level = resolve_log_level(log_config["local_logs"].get("log_level"))
-    _system_logger.setLevel(min(level_to_int(system_level), level_to_int(local_level)))
-
-    log_config_fmt = logging.Formatter(log_config["log_format"], log_config["date_format"])
-
-    system_limits = log_config["system_logs"]
-    system_max_bytes = lines_to_bytes(system_limits["max_lines"])
-    system_handler = _tier_handler(
-        get_system_logs_dir, "prax_logger.log", system_max_bytes, system_limits["backup_count"]
-    )
-    system_handler.setFormatter(log_config_fmt)
-    system_handler.setLevel(system_level)
-    _system_logger.addHandler(system_handler)
-
-    local_limits = log_config["local_logs"]
-    local_max_bytes = lines_to_bytes(local_limits["max_lines"])
-    local_handler = _tier_handler(
-        lambda: get_module_logs_dir("prax"), "prax_logger.log", local_max_bytes, local_limits["backup_count"]
-    )
-    local_handler.setFormatter(log_config_fmt)
-    local_handler.setLevel(local_level)
-    _system_logger.addHandler(local_handler)
-
-    # A muted tier has no file: None in the record, never a path that was not opened.
-    system_log_file = getattr(system_handler, "baseFilename", None)
-    local_log_file = getattr(local_handler, "baseFilename", None)
-
-    _system_logger.info("Prax system logger initialized successfully")
-    _system_logger.info(f"System logger writing to: {system_log_file} + {local_log_file}")
-
-    json_handler.log_operation("logger_setup_complete", {"system_log": system_log_file, "local_log": local_log_file})
-
-    return _system_logger
 
 
 def get_captured_loggers_count() -> int:
     """Get count of captured loggers"""
     return len(_captured_loggers)
-
-
-def enable_terminal_output():
-    """Enable terminal output for all future loggers"""
-    global _terminal_output_enabled
-    _terminal_output_enabled = True
-    if _system_logger:
-        _system_logger.info("Terminal output enabled")
-
-
-def disable_terminal_output():
-    """Disable terminal output"""
-    global _terminal_output_enabled
-    _terminal_output_enabled = False
-    if _system_logger:
-        _system_logger.info("Terminal output disabled")

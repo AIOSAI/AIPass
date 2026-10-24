@@ -10,13 +10,6 @@
     "summary": ""
   },
   "sections": {
-    "ai_mail": {
-      "managed_by": "ai_mail",
-      "new": 0,
-      "opened": 0,
-      "total": 0,
-      "last_updated": ""
-    },
     "flow": {
       "managed_by": "flow",
       "active_plans": 0,

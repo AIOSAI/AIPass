@@ -1,22 +1,26 @@
 # =================== AIPass ====================
 # Name: instance_lock.py
 # Description: Single-instance lock for the prax monitor
-# Version: 1.1.1
+# Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
-"""Relay-scoped lock for the prax monitor Telegram relay.
+"""Single-instance lock for the prax monitor's fleet-wide duties (the log rate tracker).
 
-Only the relay takes it, so viewers always start. The pidfile lives outside
+An flock held on an open fd for the process lifetime: the kernel drops it when the
+process dies, so there is no stale pidfile to judge. The file lives outside
 system_logs/: inside, the tailed directory would feed back on itself.
 """
 
-import json as _json
 import os
-import sys
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
+
+try:
+    import fcntl
+except ImportError:  # Windows: no lock, every monitor takes the duties
+    fcntl = None  # type: ignore[assignment]
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
@@ -24,134 +28,44 @@ from aipass.prax.apps.handlers.json import json_handler
 logger = get_direct_logger()
 
 _lock_path_override: Optional[Path] = None
-_held_lock: Optional[Path] = None
-
-
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def _is_pid_alive(pid: int) -> bool:
-    """Check if a process with the given PID is alive. Cross-platform."""
-    if sys.platform == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[instance_lock] PID %d Windows check failed (assuming alive): %s", pid, exc)
-            return True
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        logger.info("[instance_lock] PID %d not found", pid)
-        return False
-    except PermissionError:
-        logger.info("[instance_lock] PID %d alive (permission denied on signal)", pid)
-        return True
-    except OSError as exc:
-        logger.info("[instance_lock] os.kill(%d, 0) raised %s", pid, exc)
-        return False
-
-
-def _current_boot_id() -> Optional[str]:
-    """Return a stable identifier for the current boot, or None if unavailable."""
-    try:
-        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip() or None
-    except OSError as exc:
-        logger.info("[instance_lock] boot_id unavailable, using pid liveness only: %s", exc)
-        return None
+_held_file: Optional[IO[str]] = None
 
 
 def get_lock_path() -> Path:
-    """Return the path for the relay lock file."""
+    """Return the path for the monitor lock file (prax/prax_json/monitor.lock)."""
     if _lock_path_override is not None:
         return _lock_path_override
-    return Path(__file__).resolve().parent.parent.parent / "prax_json" / "relay.pid"
+    return Path(__file__).resolve().parents[3] / "prax_json" / "monitor.lock"
 
 
 def try_acquire() -> bool:
-    """Try to acquire the relay lock. Returns True if acquired, False if held by a live process."""
-    global _held_lock
-    lock_path = get_lock_path()
+    """Take the lock without blocking. True if this process now holds it."""
+    global _held_file
     json_handler.log_operation("instance_lock_acquire", {"pid": os.getpid()})
-
-    current_boot = _current_boot_id()
-
-    if lock_path.exists():
-        try:
-            data = _json.loads(lock_path.read_text(encoding="utf-8"))
-            existing_pid = data.get("pid", 0)
-            existing_boot = data.get("boot_id")
-
-            if existing_boot and current_boot and existing_boot != current_boot:
-                # A past boot's PID may be reused by an early-boot process, so
-                # liveness would lie: a lock from a past boot is always stale.
-                logger.info(
-                    "[instance_lock] Reclaiming lock from previous boot (PID %d, boot %s != %s)",
-                    existing_pid,
-                    existing_boot[:8],
-                    current_boot[:8],
-                )
-            elif existing_pid and _is_pid_alive(existing_pid):
-                logger.info(
-                    "[instance_lock] Another monitor (PID %d) already owns the Telegram relay — "
-                    "this one shows events on screen only and sends nothing to the chat.",
-                    existing_pid,
-                )
-                return False
-            else:
-                logger.info("[instance_lock] Reclaiming stale lock (PID %d is dead)", existing_pid)
-        except (ValueError, OSError) as exc:
-            logger.info("[instance_lock] Removing corrupt lock file: %s", exc)
-
+    if fcntl is None:
+        return True
+    lock_path = get_lock_path()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, object] = {"pid": os.getpid()}
-    if current_boot:
-        payload["boot_id"] = current_boot
-    lock_path.write_text(_json.dumps(payload), encoding="utf-8")
-    _held_lock = lock_path
-    logger.info("[instance_lock] Acquired relay lock (PID %d)", os.getpid())
+    lock_file = open(lock_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_file.close()
+        logger.info("[instance_lock] Another monitor holds %s", lock_path)
+        return False
+    lock_file.truncate(0)
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    _held_file = lock_file
+    logger.info("[instance_lock] Acquired (PID %d)", os.getpid())
     return True
 
 
 def release() -> None:
-    """Release the single-instance lock file."""
-    global _held_lock
-    if _held_lock and _held_lock.exists():
-        try:
-            _held_lock.unlink()
-            logger.info("[instance_lock] Released")
-        except OSError as exc:
-            logger.warning(
-                "[instance_lock] The Telegram relay could not delete its single-instance lock file "
-                "on shutdown (%s) — the next monitor start reclaims a stale lock automatically, so "
-                "no action is needed. Lock file: %s",
-                type(exc).__name__,
-                _held_lock,
-            )
-    _held_lock = None
+    """Drop the lock if held. The file stays: unlinking it would race a waiting opener."""
+    global _held_file
+    if _held_file is not None:
+        _held_file.close()
+        _held_file = None
+        logger.info("[instance_lock] Released")
     json_handler.log_operation("instance_lock_release", {"pid": os.getpid()})

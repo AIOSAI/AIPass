@@ -3,7 +3,7 @@
 # Description: Tests for log file monitoring handler
 # Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-10-03
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -514,7 +514,7 @@ class TestReadNewContent:
             f.write("new line\n")
 
         result = watcher._read_new_content(str(log_file))
-        assert result == "new line\n"
+        assert result == ["new line"]
 
     def test_returns_none_when_no_new_content(self, tmp_path):
         """Should return None when file hasn't grown."""
@@ -526,7 +526,7 @@ class TestReadNewContent:
         watcher.log_positions[str(log_file)] = log_file.stat().st_size
 
         result = watcher._read_new_content(str(log_file))
-        assert result is None
+        assert result == []
 
     def test_resets_position_on_truncation(self, tmp_path):
         """Should reset position to 0 when file is smaller than last pos."""
@@ -538,7 +538,7 @@ class TestReadNewContent:
         watcher.log_positions[str(log_file)] = 99999  # Way past end
 
         result = watcher._read_new_content(str(log_file))
-        assert result == "short\n"
+        assert result == ["short"]
 
     def test_returns_none_for_whitespace_only_content(self, tmp_path):
         """Should return None when new content is only whitespace."""
@@ -555,7 +555,18 @@ class TestReadNewContent:
             f.write("   \n  \n")
 
         result = watcher._read_new_content(str(log_file))
-        assert result is None
+        assert result == []
+
+    def test_a_line_still_being_written_is_read_whole_next_time(self, tmp_path):
+        """A write caught mid-line yields nothing for that line now, and the whole line later."""
+        mod = _import_log_watcher()
+        watcher, _ = _make_watcher(mod)
+        log_file = tmp_path / "test.log"
+        log_file.write_bytes(b"first\nsec")
+        assert watcher._read_new_content(str(log_file)) == ["first"]
+        with log_file.open("ab") as f:
+            f.write(b"ond half\n")
+        assert watcher._read_new_content(str(log_file)) == ["second half"]
 
 
 class TestOnModified:
@@ -601,17 +612,6 @@ class TestOnModified:
             watcher.on_modified(event)
 
         mock_queue.enqueue.assert_not_called()
-
-
-class TestShouldDisplayLog:
-    """Test _should_display_log filter."""
-
-    def test_always_returns_true(self):
-        """Current implementation shows all log lines."""
-        mod = _import_log_watcher()
-        watcher, _ = _make_watcher(mod)
-        assert watcher._should_display_log("any line") is True
-        assert watcher._should_display_log("") is True
 
 
 class TestMatchFlowCommand:

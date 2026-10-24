@@ -3,14 +3,14 @@
 # Description: Unit tests for the monitor's command parsing and stream display
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/monitoring/interactive_filter.py and unified_stream.py, the command and display."""
 
 # Covers:
 # - interactive_filter: parse_command, get_help_text
-# - unified_stream: print_event, print_command_separator, print_status
+# - unified_stream: print_event, print_command_separator
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
@@ -136,12 +136,11 @@ class TestGetHelpText:
 @pytest.fixture
 def stream_log(monkeypatch) -> MagicMock:
     """unified_stream is imported once at the top and prints through the real
-    console, read with capsys (prax, leg 11). Its logger and json service are
-    doubled where it binds them, so no test writes live state."""
-    log_ops = MagicMock()
-    monkeypatch.setattr(unified_stream, "json_handler", log_ops)
-    monkeypatch.setattr(unified_stream, "logger", MagicMock())
-    return log_ops
+    console, read with capsys (prax, leg 11). Its logger is doubled where it
+    binds it, so no test writes live state."""
+    log = MagicMock()
+    monkeypatch.setattr(unified_stream, "logger", log)
+    return log
 
 
 def _colour_console(monkeypatch) -> io.StringIO:
@@ -182,14 +181,6 @@ class TestPrintEvent:
         buffer = _colour_console(monkeypatch)
         unified_stream.print_event("log", "FLOW", "something broke", level="error")
         assert "\x1b[31msomething broke\x1b[0m" in buffer.getvalue()
-
-    def test_logs_operation(self, stream_log):
-        """print_event should log via json_handler."""
-        unified_stream.print_event("file", "PRAX", "test message")
-        stream_log.log_operation.assert_called_with(
-            "stream_output",
-            {"event_type": "file", "branch": "PRAX", "level": "info"},
-        )
 
     def test_branch_color_lookup(self, monkeypatch):
         """Should use branch-specific color from BRANCH_COLORS."""
@@ -232,46 +223,3 @@ class TestPrintCommandSeparator:
         """Should work without caller or target (no context line crash)."""
         unified_stream.print_command_separator("PRAX", "status")
         assert len(capsys.readouterr().out.splitlines()) == 4
-
-
-@pytest.mark.usefixtures("stream_log")
-class TestPrintStatus:
-    """Tests for print_status()."""
-
-    def test_prints_status(self, capsys):
-        """print_status prints its heading."""
-        unified_stream.print_status(["PRAX", "CLI"], verbosity=1)
-        assert "Current Status:" in capsys.readouterr().out.splitlines()
-
-    def test_includes_branch_names(self, capsys):
-        """Status output should list watched branches."""
-        unified_stream.print_status(["SEEDGO", "FLOW"], verbosity=0)
-        assert "  Watching: SEEDGO, FLOW" in capsys.readouterr().out.splitlines()
-
-    def test_empty_branches_shows_all(self, capsys):
-        """Empty branch list should show 'All branches'."""
-        unified_stream.print_status([], verbosity=0)
-        assert "  Watching: All branches" in capsys.readouterr().out.splitlines()
-
-    def test_includes_verbosity(self, capsys):
-        """Status output should include verbosity level."""
-        unified_stream.print_status(["PRAX"], verbosity=2)
-        assert "  Verbosity: 2" in capsys.readouterr().out.splitlines()
-
-    def test_with_filters(self, capsys):
-        """Status output should show filter details when provided."""
-        filters = {
-            "file_types": [".py", ".json"],
-            "log_levels": ["error", "warning"],
-            "exclude_patterns": ["__pycache__"],
-        }
-        unified_stream.print_status(["PRAX"], verbosity=1, filters=filters)
-        lines = capsys.readouterr().out.splitlines()
-        assert "    File types: .py, .json" in lines
-        assert "    Log levels: error, warning" in lines
-        assert "    Excluded: __pycache__" in lines
-
-    def test_without_filters(self, capsys):
-        """Should work without filters (no crash)."""
-        unified_stream.print_status(["PRAX"], verbosity=0, filters=None)
-        assert "  Filters:" not in capsys.readouterr().out.splitlines()

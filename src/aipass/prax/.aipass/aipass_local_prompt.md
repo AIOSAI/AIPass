@@ -26,12 +26,11 @@ prax/
 │   │   ├── dashboard/          # Refresh, operations, limits, status, template push/diff
 │   │   ├── discovery/          # Module scan, filters, the watcher
 │   │   ├── json/               # The fleet json service + prax's own shim
-│   │   ├── logging/            # Setup, rotation, introspection, override, direct logger, jsonl
+│   │   ├── logging/            # Setup, rotation, introspection, direct logger, jsonl
 │   │   ├── monitoring/         # Event queue, branch detect/scope, log watcher, rate tracker,
-│   │   │                       #   filters, commons feed, telegram relay, instance lock, pid cache
+│   │   │                       #   filters, commons feed, instance lock, pid cache
 │   │   ├── registry/           # Module registry load/save
-│   │   ├── status/             # STATUS.md sync handler
-│   │   └── watcher/            # Background system watchers
+│   │   └── status/             # STATUS.md sync handler
 │   ├── plugins/                # devpulse_dashboard: git, session and dispatch sections
 │   └── integrations/           # Per-integration prompt and config
 ├── templates/                  # DASHBOARD.template.json — the dashboard schema
@@ -64,11 +63,11 @@ prax/
 
  - A refresh rebuilds each dashboard from the template and carries only `sections` forward. A top-level key another branch added is dropped on the next refresh.
  - `sections.flow` has two writers, prax's refresh and flow's push, and both assign it wholesale. A change on one side alone is undone by the other side's next write.
- - `monitor run` is not single-instance. The instance lock guards the Telegram relay only, so several Mission Controls can run at once, each adding its own watches.
+ - `monitor run` is not single-instance. The instance lock (a flock held for the process life) only decides which monitor runs the rate tracker; several Mission Controls can run at once, each adding its own watches.
  - Mission Control's interactive prompt answers `help` and `status` only. Branch selection is launch-time. The commons feed mode is the exception: it takes `filter <room>` and `filter clear` live.
  - Discovery is a scheduled scan, not a per-process watcher: a log line starts nothing. The registry never prunes, so entries can name files that no longer exist.
  - The `AIPASS_TEST_LOG_DIR` seam redirects what the json service writes by module name. It does not reach module-level path constants in the config and registry handlers, so a registry save under a suite writes the live file.
- - Trigger is optional and every import site is guarded. The logging path fires no events at all; the lifecycle doors and the discovery watcher do.
+ - Trigger is optional and every import site is guarded. The logging path fires no events at all; the discovery watcher does.
  - An unknown verb or flag exits 1 with the token named on stderr. Asking for help never performs the action.
  - inotify runs out quietly; the watchers fall back to polling and keep working, slower.
 

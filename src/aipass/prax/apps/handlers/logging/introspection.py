@@ -3,11 +3,12 @@
 # Description: Stack Introspection
 # Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX Logging Introspection"""
 
+import functools
 import logging
 from pathlib import Path
 from typing import Optional
@@ -52,14 +53,6 @@ def _find_external_caller_path() -> Optional[str]:
         return None
     finally:
         del frame
-
-
-def get_calling_module() -> str:
-    """Detect calling module from stack trace, or 'unknown_module'"""
-    caller_path = _find_external_caller_path()
-    if caller_path:
-        return Path(caller_path).stem
-    return "unknown_module"
 
 
 def get_calling_module_path() -> Optional[str]:
@@ -114,6 +107,8 @@ def _resolve_caller_path(module_path: str) -> Optional[Path]:
         return None
 
 
+# Runs on every log line; resolve() is the cost and a module file does not move mid-process.
+@functools.lru_cache(maxsize=1024)
 def detect_branch_from_path(module_path: str) -> Optional[str]:
     """Detect branch name from module file path: src/aipass/{branch}/... or src/{branch}/..."""
     path = _resolve_caller_path(module_path)

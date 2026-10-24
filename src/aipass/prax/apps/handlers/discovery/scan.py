@@ -3,7 +3,7 @@
 # Description: One-shot module discovery scan
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """One-shot discovery scan — the registry's only writer that tells the truth.
@@ -52,16 +52,20 @@ def run_scan() -> Dict[str, Any]:
         "previous_unreadable": previous_unreadable,
     }
 
-    result["saved"] = save_module_registry(
-        found,
-        scan_stats={
-            "timestamp": result["timestamp"],
-            "added": len(added),
-            "removed": len(removed),
-            "unchanged": result["unchanged"],
-            "total": result["total"],
-        },
-    )
+    if not found and before:
+        logger.warning("scan: found no modules, a broken root or filter; the %d on record were kept", len(before))
+        result["saved"] = False
+    else:
+        result["saved"] = save_module_registry(
+            found,
+            scan_stats={
+                "timestamp": result["timestamp"],
+                "added": len(added),
+                "removed": len(removed),
+                "unchanged": result["unchanged"],
+                "total": result["total"],
+            },
+        )
     if not result["saved"]:
         logger.error("scan: the registry could not be written; the counts above describe the walk, not the file")
 

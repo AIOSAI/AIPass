@@ -3,7 +3,7 @@
 # Description: Direct Logger (Event Pipeline Bypass)
 # Version: 1.2.0
 # Created: 2026-02-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """PRAX Direct Logger
@@ -14,7 +14,7 @@ recurse through it (log_watcher, error_registry, log_streamer, base_bot). Refere
 
 import inspect
 import logging
-from logging.handlers import RotatingFileHandler as _BaseRotatingFileHandler
+import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
@@ -27,26 +27,14 @@ from aipass.prax.apps.handlers.config.load import (
     resolve_log_level,
 )
 from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
+from aipass.prax.apps.handlers.logging.setup import SafeRotatingFileHandler
 from aipass.prax.apps.handlers.json import json_handler
-
-# The stdlib getLogger, not prax's override: the prax logger would recurse into this bypass.
-from aipass.prax.apps.handlers.logging.override import _original_getLogger as _stdlib_getLogger
 
 logger = logging.getLogger(__name__)
 
-
-class RotatingFileHandler(_BaseRotatingFileHandler):
-    """Windows-safe RotatingFileHandler — skips rotation on file locking errors."""
-
-    def doRollover(self) -> None:
-        """Rotate log file; skip on Windows file-lock errors rather than crash."""
-        try:
-            super().doRollover()
-        except (PermissionError, OSError) as exc:
-            logger.warning("Log rotation skipped (file locked): %s", exc)
-
-
 _direct_loggers: Dict[str, logging.Logger] = {}
+# Two threads building one key would each add handlers to the same named logger.
+_direct_loggers_lock = threading.Lock()
 
 
 def _get_direct_caller_info() -> Tuple[str, Optional[str]]:
@@ -80,7 +68,7 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, limits: Dict[s
 
     The first line a direct logger writes opens these files; a raise would land in the caller."""
     try:
-        return RotatingFileHandler(
+        return SafeRotatingFileHandler(
             resolve_dir() / filename,
             maxBytes=lines_to_bytes(limits["max_lines"]),
             backupCount=limits["backup_count"],
@@ -94,7 +82,7 @@ def _tier_handler(resolve_dir: Callable[[], Path], filename: str, limits: Dict[s
 def _create_direct_logger(module_name: str, branch_name: str, branch_path: Optional[str]) -> logging.Logger:
     """Create a standalone logger with dual RotatingFileHandlers and no root propagation."""
     logger_key = f"direct_{branch_name}_{module_name}"
-    logger = _stdlib_getLogger(logger_key)
+    logger = logging.getLogger(logger_key)
     logger.handlers.clear()
     logger.propagate = False  # Critical: no root logger propagation
 
@@ -125,10 +113,12 @@ def _get_or_create_logger(module_name: str, branch_path: Optional[str]) -> loggi
     """Get cached logger or create a new one."""
     branch_name = Path(branch_path).name if branch_path else "unknown"
     key = f"{branch_name}_{module_name}"
-    if key not in _direct_loggers:
+    with _direct_loggers_lock:
+        if key in _direct_loggers:
+            return _direct_loggers[key]
         _direct_loggers[key] = _create_direct_logger(module_name, branch_name, branch_path)
-        # Recorded when the file opens, never in get_direct_logger(), which runs at import.
-        json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
+    # Recorded when the file opens, never in get_direct_logger(), which runs at import.
+    json_handler.log_operation("direct_log_created", {"module": module_name, "branch_path": branch_path})
     return _direct_loggers[key]
 
 

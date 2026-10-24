@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler's JSONL reading and agent activity
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py, its JSONL reading and agent activity."""
@@ -53,14 +53,13 @@ class TestReadNewJsonlLines:
         path.write_bytes(path.read_bytes() + b'{"n": 2}\n')
         assert handler._read_new_jsonl_lines(path, "pk") == ['{"n": 2}']
 
-    def test_no_new_data(self):
+    def test_no_new_data(self, tmp_path):
         """Should return None when no new data."""
         mod, _, _, _, _ = _import_filesystem_handler()
         handler = _make_handler(mod)
-        handler._jsonl_positions["pk"] = 100
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 100
-        result = handler._read_new_jsonl_lines(mock_path, "pk")
+        path = _on_disk(tmp_path, '{"type": "old"}\n')
+        handler._jsonl_positions["pk"] = path.stat().st_size
+        result = handler._read_new_jsonl_lines(path, "pk")
         assert result is None
 
     def test_file_truncated_resets_position(self, tmp_path):
@@ -166,16 +165,15 @@ class TestParseAgentActivity:
         assert result is True
         queue.enqueue.assert_called()
 
-    def test_no_new_data(self):
+    def test_no_new_data(self, tmp_path):
         """Should return True when no new data."""
         mod, _, _, _, queue = _import_filesystem_handler()
         handler = _make_handler(mod, queue=queue)
-        mock_path = MagicMock()
-        mock_path.stat.return_value.st_size = 50
-        mock_path.__str__ = MagicMock(return_value="/fake/claude.jsonl")
-        handler._jsonl_positions["/fake/claude.jsonl"] = 50
-        result = handler._parse_agent_activity(mock_path, "PRAX")
+        path = _on_disk(tmp_path, '{"type": "old"}\n', "claude.jsonl")
+        handler._jsonl_positions[str(path)] = path.stat().st_size
+        result = handler._parse_agent_activity(path, "PRAX")
         assert result is True
+        queue.enqueue.assert_not_called()
 
     def test_file_truncated(self, tmp_path):
         """Should reset position when file shrinks, and read the file from its start."""
@@ -380,3 +378,38 @@ class TestCheckCommandIndicator:
         file_path = MagicMock()
         file_path.name = "status.json"
         handler._check_command_indicator("modified", file_path, "PRAX")
+
+
+class TestFirstSeenTranscript:
+    """A transcript first seen on 'modified' starts at its end; one seen on 'created' from its start."""
+
+    @staticmethod
+    def _transcript(tmp_path):
+        entry = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "OldTool", "input": {}}]}}
+        path = tmp_path / ".claude" / "projects" / "abc" / "session.jsonl"
+        path.parent.mkdir(parents=True)
+        path.write_bytes((json.dumps(entry) + "\n").encode("utf-8"))
+        return path
+
+    def test_modified_first_shows_no_history(self, tmp_path):
+        mod, mock_eq, _, _, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        path = self._transcript(tmp_path)
+        handler._handle_event("modified", str(path))
+        assert handler._jsonl_positions[str(path)] == path.stat().st_size
+        assert not any("OldTool" in str(c) for c in mock_eq.MonitoringEvent.call_args_list)
+
+    def test_created_reads_from_the_start(self, tmp_path):
+        mod, mock_eq, _, _, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        path = self._transcript(tmp_path)
+        handler._handle_event("created", str(path))
+        assert any("OldTool" in str(c) for c in mock_eq.MonitoringEvent.call_args_list)
+
+    def test_partial_last_line_waits_for_its_newline(self, tmp_path):
+        mod, _, _, _, _ = _import_filesystem_handler()
+        handler = _make_handler(mod)
+        path = _on_disk(tmp_path, '{"n": 1}\n{"n": ')
+        assert handler._read_new_jsonl_lines(path, "pk") == ['{"n": 1}']
+        path.write_bytes(path.read_bytes() + b'2}\n')
+        assert handler._read_new_jsonl_lines(path, "pk") == ['{"n": 2}']

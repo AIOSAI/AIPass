@@ -3,16 +3,14 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
-# seedgo: no-test-needed(through_the_command) — setup_system_logger, covered by tests/test_logging_handlers.py
 # seedgo: no-test-needed(through_the_command) — _resolve_caller_path on <stdin>, covered by tests/test_repo_root.py
-# seedgo: no-test-needed(stdlib) — get_calling_module, a Path.stem over the stack walk get_caller_info shares
 # seedgo: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
@@ -22,7 +20,7 @@ import threading
 import types
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -269,7 +267,6 @@ class TestSetupExternalRouting:
         (project_dir / "system_logs").write_text("not a directory", encoding="utf-8")
         monkeypatch.setattr(setup_handler, "detect_external_project", lambda path: ("compass", project_dir))
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
-        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "")
 
         with caplog.at_level(logging.ERROR, logger=setup_handler.logger.name):
@@ -299,8 +296,6 @@ class TestConcurrentFirstCallsBuildOneLogger:
     def _sandbox(self, monkeypatch, tmp_path):
         monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
         monkeypatch.setattr(setup_handler, "get_module_logs_dir", lambda branch: tmp_path / branch / "logs")
-        monkeypatch.setattr(setup_handler, "_system_logger", None)
-        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
 
     def test_a_later_line_is_written_once_after_a_racing_first_call(self, monkeypatch, tmp_path):
@@ -337,9 +332,10 @@ class TestConcurrentFirstCallsBuildOneLogger:
 
     def test_racing_first_calls_build_the_logger_once(self, monkeypatch, tmp_path):
         self._sandbox(monkeypatch, tmp_path)
-        built_reports = []
+        builds = []
+        real_build = setup_handler._build_individual_logger
         monkeypatch.setattr(
-            setup_handler, "_system_logger", MagicMock(info=lambda message: built_reports.append(message))
+            setup_handler, "_build_individual_logger", lambda name, *rest: builds.append(name) or real_build(name, *rest)
         )
         barrier = threading.Barrier(self.THREADS)
         results = []
@@ -357,9 +353,34 @@ class TestConcurrentFirstCallsBuildOneLogger:
             handler.close()
             results[0].removeHandler(handler)
 
-        assert [m for m in built_reports if m.startswith("Creating logger")] == [
-            "Creating logger for module: build_probe"
-        ]
+        assert builds == ["build_probe"]
+
+
+class TestSameModuleNameInTwoBranches:
+    """config.py of api and of drone in one process each write their own branch's files."""
+
+    def test_each_branch_gets_its_own_logger_and_files(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+        monkeypatch.setattr(setup_handler, "get_module_logs_dir", lambda branch: tmp_path / branch / "logs")
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+        api = setup_handler.setup_individual_logger("config", caller_branch="api")
+        drone = setup_handler.setup_individual_logger("config", caller_branch="drone")
+        try:
+            api.info("from api")
+            drone.info("from drone")
+            api_local = (tmp_path / "api" / "logs" / "config.log").read_text(encoding="utf-8")
+            drone_central = (tmp_path / "system_logs" / "drone_config.log").read_text(encoding="utf-8")
+        finally:
+            for built in (api, drone):
+                for handler in list(built.handlers):
+                    handler.close()
+                    built.removeHandler(handler)
+
+        assert api is not drone
+        assert "from api" in api_local and "from drone" not in api_local
+        assert "from drone" in drone_central and "from api" not in drone_central
+        # The line's module tag is unchanged by the branch key.
+        assert "captured_config" in api_local
 
 
 class TestAnUnwritableLogHome:
@@ -376,8 +397,6 @@ class TestAnUnwritableLogHome:
         locked = tmp_path / "locked"
         locked.mkdir()
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(locked))
-        monkeypatch.setattr(setup_handler, "_system_logger", None)
-        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
         monkeypatch.setattr(setup_handler, "_captured_loggers", {})
         locked.chmod(0o500)
         try:
