@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: upload.py
 # Description: Google Drive upload engine — single + batch with threading
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
 """Google Drive upload engine."""
@@ -130,14 +130,9 @@ def upload_single_file(
                 backup_root,
                 drive_file_id,
             )
-            trail.log_operation(
-                "upload_file",
-                {
-                    "file": str(local_file),
-                    "drive_id": drive_file_id,
-                    "action": action,
-                },
-            )
+            # One line per file goes to the prax log, not the audit trail: a Drive sync writes
+            # thousands and rotated the trail past the nightly's record in under an hour.
+            logger.info(f"[backup] upload_file {action} {local_file} -> {drive_file_id}")
             return True
     except Exception as exc:
         logger.warning(f"Failed to upload {local_file}: {exc}")

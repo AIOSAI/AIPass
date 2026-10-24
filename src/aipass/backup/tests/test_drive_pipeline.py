@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.1.0
+# Version: 3.1.1
 # Created: 2026-06-12
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -637,7 +637,10 @@ class TestDriveUpload:
         self,
         tmp_path: Path,
         drive_api: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        upload_logger = MagicMock(name="logger")
+        monkeypatch.setattr(drive_upload, "logger", upload_logger)
         client = drive_client.DriveClient()
         service = MagicMock(name="drive_service")
         client._drive_service = service
@@ -651,8 +654,12 @@ class TestDriveUpload:
         service.files.return_value.create.assert_not_called()
         assert service.files.return_value.update.call_args.kwargs["fileId"] == "drive_has_it"
         assert client.file_tracker["hello.py"]["drive_id"] == "drive_has_it"
-        rows = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines() if line]
-        assert [row["action"] for row in rows if row.get("operation") == "upload_file"] == ["adopt"]
+        # The per-file line is a prax log line, never an audit row: a sync's thousands rotated the trail.
+        assert any("upload_file adopt" in call.args[0] for call in upload_logger.info.call_args_list)
+        audit = trail.log_path()
+        lines = audit.read_text(encoding="utf-8").splitlines() if audit.exists() else []
+        rows = [json.loads(line) for line in lines if line]
+        assert [row for row in rows if row.get("operation") == "upload_file"] == []
 
     def test_upload_single_file_refuses_a_missing_file_before_any_request(
         self,
