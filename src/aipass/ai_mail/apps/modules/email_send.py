@@ -200,7 +200,9 @@ def _send_direct(
     """
     try:
         if user_info is None:
-            user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
+            user_info = resolve_sender_info(
+                from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user
+            )
         if auto_execute:
             message = prepend_dispatch_header(message, no_memory_save=no_memory_save)
 

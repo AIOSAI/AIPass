@@ -239,7 +239,6 @@ def _build_individual_logger(
         local_handler.setLevel(local_level)
         logger.addHandler(local_handler)
 
-
     return logger
 
 

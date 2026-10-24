@@ -411,5 +411,5 @@ class TestFirstSeenTranscript:
         handler = _make_handler(mod)
         path = _on_disk(tmp_path, '{"n": 1}\n{"n": ')
         assert handler._read_new_jsonl_lines(path, "pk") == ['{"n": 1}']
-        path.write_bytes(path.read_bytes() + b'2}\n')
+        path.write_bytes(path.read_bytes() + b"2}\n")
         assert handler._read_new_jsonl_lines(path, "pk") == ['{"n": 2}']

@@ -52,9 +52,7 @@ def print_introspection():
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  handlers/update/")
     console.print(
-        "  [cyan]*[/cyan] data_loader.py"
-        " [dim](load_inbox, categorize_messages,"
-        " get_escalations — inbox data)[/dim]"
+        "  [cyan]*[/cyan] data_loader.py [dim](load_inbox, categorize_messages, get_escalations — inbox data)[/dim]"
     )
     console.print()
 

@@ -229,7 +229,6 @@ class TestScanDirectorySafely:
 
         assert modules == {}
 
-
     def test_patterns_load_once_per_walk(self, scanner_module, mock_ignore_patterns, tmp_path):
         """One config read per scan, not one per entry."""
         _tree(tmp_path, "a/one.py", "a/b/two.py", "c/three.py")

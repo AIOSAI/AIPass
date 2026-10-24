@@ -317,7 +317,9 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     try:
         ai_mail_dir = Path(__file__).resolve().parents[2]
-        user_info = resolve_sender_info(from_branch, find_repo_root(), ai_mail_dir, get_branch_by_email, get_current_user)
+        user_info = resolve_sender_info(
+            from_branch, find_repo_root(), ai_mail_dir, get_branch_by_email, get_current_user
+        )
     except Exception as e:
         logger.error(f"[dispatch] Send phase failed: {e}")
         error(f"Dispatch to {target} not sent: {e}")
@@ -381,15 +383,16 @@ def print_introspection():
     console.print()
     console.print("[bold cyan]dispatch Module[/bold cyan]")
     console.print(
-        "[dim]Orchestrates dispatch commands: combined send+wake,"
-        " the dispatch register, and manual wake.[/dim]"
+        "[dim]Orchestrates dispatch commands: combined send+wake, the dispatch register, and manual wake.[/dim]"
     )
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/dispatch/[/cyan]")
     console.print("    - [cyan]wake.py[/cyan] [dim](wake_branch — manually wake a branch by spawning an agent)[/dim]")
     console.print("  [cyan]handlers/email/[/cyan] [dim](used by combined dispatch)[/dim]")
-    console.print("    - [cyan]send.py[/cyan] [dim](resolve_sender_info — the sender the mail and the wake share)[/dim]")
+    console.print(
+        "    - [cyan]send.py[/cyan] [dim](resolve_sender_info — the sender the mail and the wake share)[/dim]"
+    )
     console.print("  [cyan]modules/email_send.py[/cyan] [dim](_send_direct — the send half of combined dispatch)[/dim]")
     console.print()
 

@@ -507,6 +507,7 @@ class BranchDetector:
             logger.info(f"Error detecting branch from log {log_file}: {e}")
             return "UNKNOWN"
 
+
 _detector_instance: Optional[BranchDetector] = None
 
 

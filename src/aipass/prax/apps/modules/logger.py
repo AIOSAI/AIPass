@@ -108,6 +108,7 @@ class SystemLogger:
 
 system_logger = SystemLogger()
 
+
 def get_system_status() -> Dict[str, Any]:
     """Get current logging system status"""
     from aipass.prax.apps.handlers.discovery.watcher import is_file_watcher_active

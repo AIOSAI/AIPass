@@ -274,7 +274,9 @@ def test_a_file_that_failed_to_load_is_never_deleted(tmp_path, monkeypatch):
     kept_mtime = oldest.stat().st_mtime
     oldest.write_text("{not json", encoding="utf-8")
     os.utime(oldest, (kept_mtime, kept_mtime))
-    monkeypatch.setattr(purge_mod, "_vectorize_emails", lambda emails, folder_type: {"success": True, "count": len(emails)})
+    monkeypatch.setattr(
+        purge_mod, "_vectorize_emails", lambda emails, folder_type: {"success": True, "count": len(emails)}
+    )
 
     result = purge_sent_folder(tmp_path)
 

@@ -20,7 +20,6 @@ import pytest
 from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
-import aipass.ai_mail.apps.handlers.email.send as send_mod
 from aipass.ai_mail.apps.handlers.email.send import (
     send_to_single,
     send_to_broadcast,

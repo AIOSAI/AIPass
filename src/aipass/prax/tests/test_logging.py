@@ -335,7 +335,9 @@ class TestConcurrentFirstCallsBuildOneLogger:
         builds = []
         real_build = setup_handler._build_individual_logger
         monkeypatch.setattr(
-            setup_handler, "_build_individual_logger", lambda name, *rest: builds.append(name) or real_build(name, *rest)
+            setup_handler,
+            "_build_individual_logger",
+            lambda name, *rest: builds.append(name) or real_build(name, *rest),
         )
         barrier = threading.Barrier(self.THREADS)
         results = []

@@ -968,5 +968,3 @@ class TestACallerNameIsNotAlwaysAModuleName:
             "realpath-denied": "DIED",
             "ntpath-shaped": "DIED",
         }, f"the Windows emulation does not read like the Windows runner did: {verdicts}"
-
-

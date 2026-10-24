@@ -161,6 +161,7 @@ HIGHLIGHT_PATTERNS = {
     ],
 }
 
+
 def should_monitor(path: Path, root: Optional[Path] = None) -> bool:
     """Check if path should be monitored
 
@@ -192,8 +193,20 @@ def should_monitor(path: Path, root: Optional[Path] = None) -> bool:
 
 # Whole path segments only: as substrings "lib" would hide "/robin/" and "env" hide "/seven/".
 _PARTS_ONLY_IGNORE = {
-    "backups", ".cache", ".git", "node_modules", ".local", ".config", ".var", ".backup",
-    "lib", "bin", "env", "build", "dist", "install",
+    "backups",
+    ".cache",
+    ".git",
+    "node_modules",
+    ".local",
+    ".config",
+    ".var",
+    ".backup",
+    "lib",
+    "bin",
+    "env",
+    "build",
+    "dist",
+    "install",
 }
 
 

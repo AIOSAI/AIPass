@@ -34,6 +34,7 @@ def load_inbox() -> Dict[str, Any]:
         logger.error("[data_loader] Failed to load inbox.json: %s", e)
         raise
 
+
 def categorize_messages(messages: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """Categorize inbox messages into new, opened, actionable and informational."""
     categories: Dict[str, List[Dict[str, Any]]] = {"new": [], "opened": [], "actionable": [], "informational": []}
@@ -53,6 +54,7 @@ def categorize_messages(messages: List[Dict[str, Any]]) -> Dict[str, List[Dict[s
             categories["informational"].append(msg)
 
     return categories
+
 
 def get_escalations(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Find messages that need escalation."""
