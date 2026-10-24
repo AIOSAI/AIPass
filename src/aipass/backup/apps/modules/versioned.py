@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: versioned.py
 # Description: Versioned module — per-file baseline + diff backup
-# Version: 3.1.1
+# Version: 3.1.2
 # Created: 2026-04-17
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
 """Versioned Module — per-file baseline + diff backup of a project directory."""
@@ -26,6 +26,7 @@ from aipass.backup.apps.handlers.copy.versioned import copy_versioned
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.path.builder import build_versioned_store
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
@@ -93,7 +94,7 @@ def _versioned_run(
 ) -> BackupResult:
     """The versioned run proper, inside the stop handler and the running file."""
     if show_panels:
-        show_last_backups()
+        show_last_backups(project_root)
 
     # Loaded on BOTH paths: the ceiling is a guard, and a guard that only
     # runs when this module did its own scan is not guarding the 'all' path.
@@ -105,7 +106,7 @@ def _versioned_run(
         spec = load_spec(project_root)
         whitelist_entries = load_whitelist(project_root)
         max_size = config.get("max_file_size_mb", 100)
-        all_files = list(walk_project(project_root))
+        all_files = list(walk_project(project_root, spec, whitelist_entries))
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
     breach = check_ceiling(filtered, config)
@@ -177,7 +178,7 @@ def _versioned_run(
     if show_panels:
         show_result_summary(result)
         if not result.errors:
-            show_backups_now("versioned", project_root)
+            show_backups_now(project_root)
 
     return result
 
@@ -197,7 +198,7 @@ def handle_command(command: str, args: list) -> bool:
         print_introspection()
         return True
 
-    project_root = args[0]
+    project_root = str(resolve_caller_path(args[0]))
     run_versioned(project_root)
     return True
 

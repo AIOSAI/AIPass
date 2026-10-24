@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: all.py
 # Description: All module — full cycle: snapshot + versioned + drive (shared scan)
-# Version: 4.2.0
+# Version: 4.2.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """All Module — runs snapshot then versioned backup with shared scan, then drive sync when the project has it on.
@@ -29,6 +29,7 @@ from aipass.cli.apps.modules import console, error
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.registry import list_projects
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
@@ -108,7 +109,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
         spec = load_spec(project_root)
         whitelist_entries = load_whitelist(project_root)
         max_size = config.get("max_file_size_mb", 100)
-        all_files = list(walk_project(project_root))
+        all_files = list(walk_project(project_root, spec, whitelist_entries))
         filtered = filter_paths(all_files, spec, whitelist_entries, max_size)
 
     # Refuse the whole cycle here: a refusal inside run_snapshot alone falls through to run_versioned.
@@ -123,7 +124,7 @@ def _all_run(project_root: str, show_panels: bool) -> dict:
         report_stopped("snapshot", PRIMARY_COMMAND, project_root, done=0, total=len(filtered), failed=0, bytes_done=0)
         return _stopped_summary(summary, start)
 
-    snap_result = run_snapshot(project_root, verb=PRIMARY_COMMAND)
+    snap_result = run_snapshot(project_root, verb=PRIMARY_COMMAND, pre_scanned=filtered)
     summary["snapshot_files"] = snap_result.files_copied
     if run_was_stopped():
         return _stopped_summary(summary, start)
@@ -266,7 +267,7 @@ def handle_command(command: str, args: list) -> bool:
         run_registered(show_panels=show_panels)
         return True
 
-    run_all(args[0], show_panels=show_panels)
+    run_all(str(resolve_caller_path(args[0])), show_panels=show_panels)
     return True
 
 

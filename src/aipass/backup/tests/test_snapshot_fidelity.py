@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_snapshot_fidelity.py
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-06-12
-# Modified: 2026-10-16
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""
@@ -14,6 +14,7 @@
 # seedgo: no-test-needed(stdlib) — shutil, pathlib, os standard library usage
 
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
 from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.modules.snapshot import run_snapshot
 
 
 # Why trail.log_operation is NOT patched out anywhere in this file:
@@ -232,6 +234,32 @@ class TestCopySnapshotUpgrade:
         result = copy_snapshot(files, str(dest), str(source))
         assert not (dest / "stale.txt").exists()
         assert result["files_deleted"] == 1
+
+
+class TestAFailedCopyIsRetried:
+    """A run with a failed copy must not let the next run's quick-check call the snapshot current."""
+
+    @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs a POSIX file a user cannot read")
+    def test_a_file_that_failed_to_copy_lands_on_the_next_run_with_nothing_else_changed(self, tmp_path: Path) -> None:
+        """Mutant: the timestamp map is saved after a failed copy, so the next run returns "no changes"."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "ok.txt").write_text("ok", encoding="utf-8")
+        locked = project / "locked.txt"
+        locked.write_text("locked", encoding="utf-8")
+        mtime = locked.stat().st_mtime_ns
+
+        locked.chmod(0)
+        try:
+            first = run_snapshot(str(project), show_panels=False)
+        finally:
+            locked.chmod(0o644)
+        os.utime(locked, ns=(mtime, mtime))
+        run_snapshot(str(project), show_panels=False)
+
+        assert first.errors
+        stored = path_builder.build_snapshot_path(str(project)) / "locked.txt"
+        assert stored.read_text(encoding="utf-8") == "locked"
 
 
 class TestTheLongPathGuardIsWindowsOnly:

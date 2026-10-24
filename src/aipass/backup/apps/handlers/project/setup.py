@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Project setup handler — scaffold .backup/ directory in target
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Project setup handler."""
@@ -15,6 +15,7 @@ from ..path.module_paths import branch_root
 from ..audit import trail
 from ..json import json_handler
 from ..path import builder
+from .config import DEFAULTS
 
 _TEMPLATE_PATH = branch_root(__file__, 3) / "templates" / "backupignore.template"
 
@@ -26,19 +27,6 @@ def _build_backupignore() -> str:
     return _TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
-DEFAULT_CONFIG = {
-    "version": "1.0.0",
-    "backup_mode": "snapshot",
-    "max_versions": 10,
-    "max_file_size_mb": 100,
-    "max_backup_files": 25000,
-    "max_backup_size_gb": 10,
-    "auto_ignore_git": True,
-    "drive_sync": False,
-    "whitelist": [],
-}
-
-
 def create_backup_dir(project_path: str) -> Path | None:
     """Create the ``.backup/`` scaffold inside a project path; None on failure, config write included."""
     root = Path(project_path)
@@ -47,18 +35,12 @@ def create_backup_dir(project_path: str) -> Path | None:
         return None
 
     backup_dir = builder.backup_root(project_path)
-    subdirs = [
-        backup_dir / "snapshots",
-        backup_dir / "logs",
-    ]
-
-    for d in subdirs:
-        d.mkdir(parents=True, exist_ok=True)
+    (backup_dir / "snapshots").mkdir(parents=True, exist_ok=True)
 
     config_path = builder.build_config_path(project_path)
     if not config_path.exists():
         config = {
-            **DEFAULT_CONFIG,
+            **DEFAULTS,
             "project_name": root.name,
             "project_path": str(root),
             "created": datetime.now(timezone.utc).isoformat(),

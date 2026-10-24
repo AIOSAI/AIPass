@@ -33,8 +33,9 @@ A whitelisted path is one the next run copies straight back, so it is never list
 - `snapshots/` — one candidate per **file**, `snapshots/<rel_path>`.
 - `versioned/` — one candidate per **file-folder**: the folder `build_versioned_file_path()`
   makes for one source file, holding the current copy, its baseline and its
-  `<name>_diffs/`. A file-folder under `root/` is read as a root-level file; the
-  layout gives a project file `root/<name>` the same folder and cannot tell the two apart.
+  `<name>_diffs/`. The project path is the store path with one leading
+  `root/` removed (`versioned_rel_path()` in `handlers/path/builder.py`), so a root-level
+  file and a project file under `root/` stay apart.
 
 The listing prints, per store, one row per top-level directory (count and bytes;
 root-level files under `(root files)`), then the grand total. Without `--apply`
@@ -49,11 +50,9 @@ removed from Drive; that remains the owner's by hand.
 
 ### What is not implemented
 
-**`max_versions` does nothing.** `.backup/config.json` carries a `max_versions`
-key (default `10`), `register` writes it, and `status` prints it as "Max
-versions" — but no code reads it. Nothing prunes old versions of a file that is
-still backed up; `prune` removes whole file-folders of ignored paths only. Treat
-`max_versions` as advertised-but-unimplemented.
+**No version limit.** Nothing prunes old versions of a file that is still
+backed up; `prune` removes whole file-folders of ignored paths only. A
+`max_versions` key left in an older `.backup/config.json` is read by nothing.
 
 The versioned store is otherwise append-only and holds two copies of every new
 file (current + baseline), so it grows to roughly 2× the source.

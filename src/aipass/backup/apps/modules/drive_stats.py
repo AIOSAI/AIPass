@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_stats.py
 # Description: Drive stats module — shows file tracker statistics and the Drive account quota
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Drive Stats Module — displays tracker statistics for a project and the Drive account quota."""
@@ -22,6 +22,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error, warning
 
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.report.formatter import _human_bytes
 
 
@@ -126,7 +127,7 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = args[0]
+    project_root = str(resolve_caller_path(args[0]))
     run_drive_stats(project_root)
     return True
 

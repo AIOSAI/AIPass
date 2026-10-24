@@ -23,7 +23,7 @@ A refusal names the directories that caused it, at a depth you can paste straigh
   If the project really is this large, raise 'max_backup_files' in .backup/config.json (0 disables).
 ```
 
-The guard sits in `snapshot`, `versioned` **and** `all`. It is in `all` as well as the sub-modules because `run_snapshot` does its own full walk — letting a breach fall through means walking a runaway tree twice before refusing it.
+The guard sits in `snapshot`, `versioned` **and** `all`. `all` walks the tree once and hands the filtered set to both lanes (`pre_scanned`); each lane measures that set again, so a lane run on its own and a lane run from `all` are guarded alike.
 
 **Known gap:** the ceiling stops a runaway *before* it happens. It does not clean up a store that a previous run already filled — see [store cleanup](store_cleanup.md).
 

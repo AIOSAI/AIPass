@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.8
+# Version: 2.0.9
 # Created: 2026-06-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -276,7 +276,9 @@ STANDALONE_ENTRY_MODULES = [
         all_module,
         "run_snapshot",
         lambda p: [str(p)],
-        lambda p: call(str(p), verb=all_module.PRIMARY_COMMAND),
+        lambda p: call(
+            str(p), verb=all_module.PRIMARY_COMMAND, pre_scanned=[(str(p / ".backupignore"), ".backupignore")]
+        ),
         id="all",
     ),
     # drive_check is account-wide: "run" is its only executing route, with no project.
@@ -423,7 +425,10 @@ class TestNoWriteEscapesToRealSecrets:
             }
             all_module.handle_command(all_module.PRIMARY_COMMAND, [project])
 
-        assert snap.call_args_list == [call(project, verb=all_module.PRIMARY_COMMAND)]
+        scanned = doubles["run_versioned"].call_args.kwargs["pre_scanned"]
+        # Single-scan rule: snapshot gets the very list versioned does, so the tree is walked once.
+        assert snap.call_args_list == [call(project, verb=all_module.PRIMARY_COMMAND, pre_scanned=scanned)]
+        assert snap.call_args.kwargs["pre_scanned"] is scanned
         assert sorted(doubles) == ["run_drive_sync", "run_versioned"]
 
         # show_panels comes from the absence of --quiet: True is the claim, not a placeholder.

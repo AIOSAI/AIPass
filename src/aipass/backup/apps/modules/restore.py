@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore.py
 # Description: Restore module — version discovery and file restoration
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Restore Module — list versions and restore files from versioned store."""
@@ -24,6 +24,7 @@ from aipass.cli.apps.modules import console, error
 
 from aipass.backup.apps.handlers.diff.restore import list_versions, restore_file
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 from aipass.backup.apps.handlers.path.builder import build_versioned_file_path, build_versioned_store
 
 MODULE_NAME = "restore"
@@ -142,7 +143,7 @@ def handle_command(command: str, args: list) -> bool:
         )
         return True
 
-    project_root = args[0]
+    project_root = str(resolve_caller_path(args[0]))
     subcommand = args[1]
 
     if subcommand == "list" and len(args) >= 3:
@@ -150,7 +151,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if subcommand == "file" and len(args) >= 4:
-        run_restore_file(project_root, args[2], args[3])
+        run_restore_file(project_root, args[2], str(resolve_caller_path(args[3])))
         return True
 
     if subcommand == "file":

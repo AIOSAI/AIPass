@@ -41,6 +41,8 @@ template. It is not shipped by `init` and it is never overwritten once present.
 
 **A miss in the seed is expensive.** The template covers `build/`, `dist/`, `target/`, `node_modules/`, `.venv/` and friends precisely because an uncovered build-artifact tree is indistinguishable from real source to the walker. An uncovered Rust `src-tauri/target` tree is tens of thousands of files and many gigabytes, walked and copied as if it were source. Patterns are unanchored on purpose: a build tree such as `app/src-tauri/target` sits below the root, and an anchored `/target/` would miss it.
 
+**The walk never enters an ignored directory** (`handlers/scan/walk.py`), unless the spec holds a `!` pattern or the project has a `whitelist`: either one can keep a file inside an ignored directory, so then every directory is walked and the filter decides file by file.
+
 
 ---
 

@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: builder.py
 # Description: Destination path builders for snapshot, versioned, and drive modes
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Path builder handler."""
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -56,15 +57,22 @@ def build_changelog_path(project_root: str) -> Path:
     return backup_root(project_root) / "changelog.json"
 
 
-def build_log_dir(project_root: str) -> Path:
-    """Log directory: <project>/.backup/logs/"""
-    return backup_root(project_root) / "logs"
-
-
 def build_versioned_store(project_root: str) -> Path:
     """Persistent versioned store: <project>/.backup/versioned/"""
     trail.log_operation("build_versioned_store", {"project_root": project_root})
     return backup_root(project_root) / "versioned"
+
+
+#: Top-level files live under this folder; a project's own top-level ``root/`` is nested under it too.
+VERSIONED_ROOT = "root"
+_LONG_NAME = 50
+
+
+def versioned_folder_name(name: str) -> str:
+    """The file-folder name the versioned store gives a file called ``name``."""
+    if len(name) > _LONG_NAME:
+        return name[:30] + "_" + hashlib.md5(name.encode()).hexdigest()[:8]
+    return name
 
 
 def build_versioned_file_path(
@@ -72,28 +80,15 @@ def build_versioned_file_path(
     rel_path: str,
 ) -> Path:
     """Build the file-folder target path for a versioned file."""
-    import hashlib
-
     store = build_versioned_store(project_root)
     p = Path(rel_path)
-    name = p.name
-    parent = str(p.parent)
-
-    if len(name) > 50:
-        name_hash = hashlib.md5(name.encode()).hexdigest()[:8]
-        folder_name = name[:30] + f"_{name_hash}"
-    else:
-        folder_name = name
-
-    if parent == ".":
-        return store / "root" / folder_name / name
-    return store / parent / folder_name / name
+    parent = p.parent
+    # Prefixing a real root/ as well keeps "x.py" and "root/x.py" in different folders.
+    if parent == Path(".") or p.parts[0] == VERSIONED_ROOT:
+        parent = VERSIONED_ROOT / parent
+    return store / parent / versioned_folder_name(p.name) / p.name
 
 
-def build_drive_path(project_root: str, file: str) -> Path:
-    """Drive destination for one snapshot-store-relative file, as a single path."""
-    # REMOTE: mirrors the folders drive/client.py and drive/upload.py create; no name shortening on Drive.
-    from ..drive.client import BACKUP_FOLDER_NAME
-    from ..drive.tracker import DRIVE_LANE
-
-    return Path(BACKUP_FOLDER_NAME) / Path(project_root).name / DRIVE_LANE / file
+def versioned_rel_path(store_parent: str, name: str) -> str:
+    """The project-relative path of the file stored under ``store_parent``; the inverse of the builder."""
+    return f"{store_parent}/{name}".removeprefix(f"{VERSIONED_ROOT}/")

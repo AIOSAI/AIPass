@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Rich CLI rendering for backup results (full 9-stage output)
-# Version: 3.1.0
+# Version: 3.1.1
 # Created: 2026-06-12
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
 """Rich CLI rendering for backup — full output pipeline faithfully ported from gold source."""
@@ -24,15 +24,10 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, header, success, warning
 
 from aipass.backup.apps.handlers.audit import trail
-from aipass.backup.apps.handlers.report.formatter import _human_bytes
+from aipass.backup.apps.handlers.report.formatter import _human_bytes, format_age
 from aipass.backup.apps.handlers.report.result import BackupResult
 from aipass.backup.apps.handlers.scan.ceiling import CeilingBreach
 from aipass.backup.apps.handlers.state.changelog import load_changelog
-from aipass.backup.apps.handlers.state.backup_timestamps import (
-    format_age,
-    get_timestamps,
-    update_timestamp,
-)
 
 MODULE_NAME = "display"
 
@@ -101,14 +96,19 @@ def print_help():
     print_introspection()
 
 
-def show_last_backups() -> None:
-    """Stage 1: Show 'Last backups:' panel with dim ages."""
-    ts = get_timestamps()
+def _show_lane_ages(title: str, project_root: str) -> None:
+    """Each lane's age from this project's own changelog, as status --json reads it."""
+    ts = {entry.get("mode"): entry.get("timestamp") for entry in load_changelog(project_root)}
     console.print()
-    console.print("[dim]Last backups:[/dim]")
+    console.print(f"[dim]{title}:[/dim]")
     console.print(f"  [dim]Snapshot:   {format_age(ts.get('snapshot'))}[/dim]")
     console.print(f"  [dim]Versioned:  {format_age(ts.get('versioned'))}[/dim]")
     console.print(f"  [dim]Drive sync: {format_age(ts.get('drive_sync'))}[/dim]")
+
+
+def show_last_backups(project_root: str) -> None:
+    """Stage 1: the 'Last backups:' panel, this project's lanes before the run."""
+    _show_lane_ages("Last backups", project_root)
 
 
 def show_run_header(result: BackupResult) -> None:
@@ -169,15 +169,9 @@ def show_result_summary(result: BackupResult) -> None:
     logger.info(f"[backup] Rendered {result.mode} result: {result.files_copied} files")
 
 
-def show_backups_now(mode: str, project_root: str) -> None:
-    """Stage 8: the 'Backups now:' panel, each age from this project's own changelog, as status --json reads it."""
-    update_timestamp(mode)
-    ts = {entry.get("mode"): entry.get("timestamp") for entry in load_changelog(project_root)}
-    console.print()
-    console.print("[dim]Backups now:[/dim]")
-    console.print(f"  [dim]Snapshot:   {format_age(ts.get('snapshot'))}[/dim]")
-    console.print(f"  [dim]Versioned:  {format_age(ts.get('versioned'))}[/dim]")
-    console.print(f"  [dim]Drive sync: {format_age(ts.get('drive_sync'))}[/dim]")
+def show_backups_now(project_root: str) -> None:
+    """Stage 8: the 'Backups now:' panel, this project's lanes after the run."""
+    _show_lane_ages("Backups now", project_root)
 
 
 def show_drive_result(result: dict, project_root: str) -> None:
@@ -219,7 +213,7 @@ def show_drive_result(result: dict, project_root: str) -> None:
     console.print(f"  [dim]Duration: {duration:.1f}s | Location: {location}[/dim]")
 
     if not failed:
-        show_backups_now("drive_sync", project_root)
+        show_backups_now(project_root)
 
     trail.log_operation("render_drive_result", {"uploaded": uploaded})
     logger.info(f"[backup] Rendered drive_sync result: {uploaded} uploaded")

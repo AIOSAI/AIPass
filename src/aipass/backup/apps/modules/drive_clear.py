@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drive_clear.py
 # Description: Drive clear module — clears Drive file tracker (requires --force)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-17
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Drive Clear Module — clears the Drive file tracker for a project."""
@@ -22,6 +22,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error as cli_error
 
 from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.path.caller import resolve_caller_path
 
 
 MODULE_NAME = "drive_clear"
@@ -81,7 +82,7 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    project_root = args[0]
+    project_root = str(resolve_caller_path(args[0]))
     force = "--force" in args
     run_drive_clear(project_root, force=force)
     return True

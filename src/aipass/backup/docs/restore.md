@@ -19,9 +19,13 @@ The versioned store wraps each file in a folder of its own name
 (`handlers/path/builder.py`):
 
 ```
-<store>/root/<name>/<name>        # a file at the project root
-<store>/<parent>/<name>/<name>    # a nested file
+<store>/root/<name>/<name>             # a file at the project root
+<store>/<parent>/<name>/<name>         # a nested file
+<store>/root/root/<parent>/<name>/<name> # a file under the project's own root/ folder
 ```
+
+A project folder named `root/` is nested one level under the store's `root/`, so
+`x.py` and `root/x.py` never share a folder.
 
 so the folder and the file inside it share a name, and a lookup has to match the
 folder by the path and the file by its basename. A name longer than 50
