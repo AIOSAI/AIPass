@@ -207,7 +207,7 @@ def close_plan_impl(
                 logger.warning(f"[{MODULE_NAME}] {error_msg}")
                 return {
                     "success": False,
-                    "messages": [{"type": "error", "text": "not_found", "plan_num": plan_key}],
+                    "messages": [{"type": "error", "text": "not_found", "plan_num": plan_key, "prefix": prefix}],
                     "plan_key": plan_key,
                     "cancelled": False,
                 }

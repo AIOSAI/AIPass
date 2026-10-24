@@ -88,7 +88,7 @@ def _display_messages(messages: List[Dict[str, Any]]):
             error_text = msg.get("text", "general")
             plan_num = msg.get("plan_num", "")
             details = msg.get("details", None)
-            console.print(format_plan_error(error_text, plan_num, details=details))
+            console.print(format_plan_error(error_text, plan_num, details=details, prefix=msg.get("prefix", "FPLAN")))
 
         elif msg_type == "warning":
             warning(msg["text"])

@@ -3,7 +3,7 @@
 # Description: Plan Display Handler
 # Version: 0.2.0
 # Created: 2025-11-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -183,7 +183,7 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
             logger.warning(f"[display] Failed to parse created date '{created}': {e}")
 
     display_num = plan_info.get("_plan_num", plan_key)
-    return f"  {display_prefix}-{display_num}  [{status:>6}]  {location:<30}  {subject:<40}  {created}"
+    return f"  {display_prefix}-{display_num}  \\[{status:>6}]  {location:<30}  {subject:<40}  {created}"
 
 
 def format_plans_list(
@@ -207,7 +207,7 @@ def format_plans_list(
     if show_header:
         lines.append("")
         status_text = f" ({filter_status})" if filter_status else ""
-        lines.append(f"[bold cyan]╭─ PLAN Registry{status_text} ─╮[/bold cyan]")
+        lines.append(f"[bold cyan]╭─ PLAN Registry, fleet{status_text} ─╮[/bold cyan]")
         lines.append("")
         lines.append(f"  [dim]{'Number':<8}  {'Status':<8}  {'Location':<30}  {'Subject':<40}  Created[/dim]")
         lines.append("[dim]─" * 120 + "[/dim]")

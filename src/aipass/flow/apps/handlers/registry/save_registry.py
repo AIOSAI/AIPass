@@ -29,6 +29,7 @@ REGISTRY_FILE = FLOW_JSON_DIR / "fplan_registry.json"
 LOCK_NAME = ".flow_writes.lock"
 
 # Depth of registry_lock() in this process: nested holders must not wait on themselves.
+# Process-global, not per-thread: correct only while flow runs no threads.
 _LOCK_STATE = {"depth": 0}
 
 

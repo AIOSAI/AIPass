@@ -3,7 +3,7 @@
 # Description: Tests for flow's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-09-04
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/flow.py, the CLI entry point."""
@@ -186,14 +186,14 @@ def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
     assert stub_module.calls == [("probe", ["--help"])]
 
 
-def test_subcommand_help_on_unknown_command_shows_module_help(monkeypatch, stub_module, capsys):
-    """`flow ghost --help` falls through to module help and exits 0.
+def test_subcommand_help_on_unknown_command_refuses(monkeypatch, stub_module, capsys):
+    """`flow ghost --help` refuses with exit 1: there is no module help to answer with.
 
-    A help request answered with help is not a refusal. Both streams are read: a silent main() returning 0 must fail.
+    Both streams are read: a silent main() returning 1 must fail.
     """
     result = _run(monkeypatch, ["nonexistent", "--help"])
 
-    assert result == 0
+    assert result == 1
     captured = capsys.readouterr()
     assert "Unknown command: nonexistent" in captured.err
     assert "Run drone @flow --help for available commands" in captured.out

@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/plan/display.py -- plan display formatting
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/plan/display.py."""
@@ -333,7 +333,9 @@ class TestFormatPlansList:
             "0002": {"status": "closed", "subject": "Beta", "relative_path": "flow", "created": "unknown"},
         }
         result = fn(plans, show_header=True)
-        assert "PLAN Registry" in result
+        assert "PLAN Registry, fleet" in result
+        # Unescaped, Rich reads [closed] as a markup tag and prints nothing.
+        assert "\\[closed]" in result
         assert "Alpha" in result
         assert "Beta" in result
 

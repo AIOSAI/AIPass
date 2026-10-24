@@ -58,6 +58,16 @@ resolves to `tdplan_registry.json` and never collides with `DPLAN-0012`. A row
 whose `file_path` carries no prefix offers no type evidence at all; the bulk and
 restore paths refuse such a row rather than guess.
 
+**One write lock.** `create`, `close`, `restore`, `registry scan` and
+`aggregate` each hold `flow_json/.flow_writes.lock` (`registry_lock()` in
+`apps/handlers/registry/save_registry.py`) for their whole write: the per-type
+registries, `CLOSED_PLANS` and `PLANS.central`. It is an OS lock, re-entrant
+within one process; a second process waits up to 30 seconds, then the command
+fails with a `TimeoutError` message.
+
+**A failed registry save fails create.** The plan file is already on disk, so
+the error names it and points at `drone @flow registry scan` to register it.
+
 ---
 
 
