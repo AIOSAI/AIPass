@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.5.0
+# Version: 4.6.0
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -31,6 +31,19 @@ _CHAT_LIMIT = 5
 # How long 'r' waits for the dispatch monitor to surrender its lock; resuming before races its cleanup.
 _RECLAIM_WAIT_S = 10.0
 _RECLAIM_POLL_S = 0.5
+
+
+def _execvp(file: str, args: list[str]) -> None:
+    """Process-replacement seam; late-bound so a patched os.execvp still reaches it."""
+    os.execvp(file, args)
+
+
+def _kill(pid: int, sig: int) -> None:
+    """Signal seam, late-bound like _execvp. OSError (WinError 87, dead PID) goes to the caller's handler."""
+    try:
+        os.kill(pid, sig)
+    except OSError:
+        raise
 
 
 def _resolve_claude_binary() -> str:
@@ -224,7 +237,7 @@ def _stop_session(session: dict, claude_bin: str) -> str:
 
     if pid:
         try:
-            os.kill(pid, signal.SIGTERM)
+            _kill(pid, signal.SIGTERM)
             logger.info("[SESSION_BOOT] Sent SIGTERM to PID %d", pid)
             return f"PID {pid}: sent SIGTERM"
         except ProcessLookupError:
@@ -250,7 +263,7 @@ def _resume_session(
     tmux_session = _find_tmux_session_for_pid(pid) if pid else None
     if tmux_session:
         logger.info("[SESSION_BOOT] Attaching to tmux session '%s'", tmux_session)
-        os.execvp("tmux", ["tmux", "attach-session", "-t", tmux_session])
+        _execvp("tmux", ["tmux", "attach-session", "-t", tmux_session])
         return {"exit_code": 0, "action": "attached", "tmux_session": tmux_session}
 
     logger.info("[SESSION_BOOT] Continuing dead-window session via --continue")
@@ -280,7 +293,7 @@ def _exec_in_tmux(branch: str, session_id: str, claude_cmd: list[str]) -> dict:
     if _tmux_session_exists(session_name):
         _tmux_kill_session(session_name)
     logger.info("[SESSION_BOOT] Launching in tmux '%s': %s", session_name, " ".join(claude_cmd))
-    os.execvp("tmux", ["tmux", "new-session", "-s", session_name, "--"] + claude_cmd)
+    _execvp("tmux", ["tmux", "new-session", "-s", session_name, "--"] + claude_cmd)
     return {"exit_code": 0, "action": "started", "tmux_session": session_name}
 
 
@@ -361,7 +374,7 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
         logger.info("[SESSION_BOOT] Headless mode (-p) — running claude directly, no tmux")
         claude_cmd = [claude_bin] + defaults
         claude_cmd.extend(extra_args)
-        os.execvp(claude_bin, claude_cmd)
+        _execvp(claude_bin, claude_cmd)
         return {"exit_code": 0, "action": "direct", "reason": "headless -p mode"}
 
     if os.environ.get("TMUX"):
@@ -369,7 +382,7 @@ def boot(cwd: str | None = None, extra_args: list[str] | None = None) -> dict:
         claude_cmd = [claude_bin] + defaults + _name_flag(branch, extra_args=extra_args)
         if extra_args:
             claude_cmd.extend(extra_args)
-        os.execvp(claude_bin, claude_cmd)
+        _execvp(claude_bin, claude_cmd)
         return {"exit_code": 0, "action": "direct", "reason": "already in tmux"}
 
     tmux = _find_tmux()
@@ -896,7 +909,7 @@ def _menu_dispatched(
     if choice in ("", "q", "quit", "exit"):
         return {"exit_code": 0, "action": "left_working"}
     if choice == "w":
-        os.execvp("drone", ["drone", "@prax", "monitor", "run", branch])
+        _execvp("drone", ["drone", "@prax", "monitor", "run", branch])
         return {"exit_code": 0, "action": "spectate"}
     if choice == "n":
         return _start_fresh(branch, claude_bin, defaults, extra_args, cwd=branch_cwd)
@@ -954,7 +967,7 @@ def _start_fresh(
         claude_cmd.extend(extra_args)
 
     logger.info("[SESSION_BOOT] Starting fresh in tmux session '%s': %s", session_name, " ".join(claude_cmd))
-    os.execvp("tmux", ["tmux", "new-session", "-s", session_name, "--"] + claude_cmd)
+    _execvp("tmux", ["tmux", "new-session", "-s", session_name, "--"] + claude_cmd)
     return {"exit_code": 0, "action": "started", "tmux_session": session_name}
 
 

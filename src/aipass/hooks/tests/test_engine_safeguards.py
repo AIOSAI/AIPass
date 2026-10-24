@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-10-08
 # Modified: 2026-10-24
 # =============================================
@@ -26,11 +26,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.hooks.apps.modules import engine, injection_ledger, promote
-from aipass.hooks.apps.modules.engine import (
-    dispatch,
-    _run_handler,
-    _log,
-)
+from aipass.hooks.apps.modules.engine import dispatch
 from aipass.hooks.apps.handlers.config.diagnostics import LOG_FILE
 from aipass.hooks.apps.handlers.config.output_merge import CONTEXT_LIMIT
 from aipass.hooks.apps.handlers.config.gates import FAIL_CLOSED
@@ -39,6 +35,29 @@ from aipass.hooks.apps.handlers.config.trust_registry import enroll
 from aipass.hooks.tests.support_engine import _GATE, _one
 
 pytestmark = pytest.mark.usefixtures("_no_real_trust_banners")
+
+_FAKE = "aipass.hooks.apps.handlers.fake.handle"
+
+
+def _dispatch_handler(handle, handler: str = _FAKE, timeout: int | None = None):
+    """Dispatch one handler hook whose module is `handle`; answer (result, logged entries, importer)."""
+    hook = {"enabled": True, "handler": handler, "matcher": ""}
+    if timeout is not None:
+        hook["timeout"] = timeout
+    module = MagicMock()
+    module.handle = handle
+    with (
+        patch("aipass.hooks.apps.modules.engine._log") as log,
+        patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module) as importer,
+        patch("aipass.hooks.apps.sound.speak"),
+    ):
+        result = dispatch("UserPromptSubmit", "{}", {"hooks_enabled": True, "UserPromptSubmit": {"h": hook}})
+    return result, [c.args[0] for c in log.call_args_list], importer
+
+
+def _hook_entry(entries: list) -> dict:
+    (entry,) = [e for e in entries if e.get("hook") == "h"]
+    return entry
 
 
 class TestLayerATrustEnforcement:
@@ -93,18 +112,22 @@ class TestLayerATrustEnforcement:
         mock_run.assert_not_called()
         assert "hooks_disabled_gates_run" in [c[0][0].get("action") for c in mock_log.call_args_list]
 
-    def test_handler_namespace_enforced(self, mock_logger):
-        result = _run_handler("evil.payload.handle", {})
-        assert result["exit_code"] == -1
-        assert "namespace refused" in result["stderr"]
+    def test_handler_namespace_enforced_before_any_import(self, mock_logger):
+        handle = MagicMock(return_value={"stdout": "PWNED"})
+        result, entries, importer = _dispatch_handler(handle, handler="evil.payload.handle")
+        assert result == ("", 0)
+        importer.assert_not_called()
+        entry = _hook_entry(entries)
+        assert entry["exit_code"] == -1
+        assert "namespace refused" in entry["stderr_preview"]
 
     def test_handler_aipass_namespace_allowed(self, mock_logger):
-        mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
-        mock_module = MagicMock()
-        mock_module.handle = mock_handler
-        with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.notification.stop_sound.handle", {})
-        assert result["exit_code"] == 0
+        handle = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
+        result, entries, _ = _dispatch_handler(
+            handle, handler="aipass.hooks.apps.handlers.notification.stop_sound.handle"
+        )
+        assert result == ("ok", 0)
+        assert _hook_entry(entries)["exit_code"] == 0
 
     def test_command_type_allowed_from_default_config(self, mock_logger):
         config = {
@@ -220,13 +243,10 @@ class TestRunHandlerTimeout:
     daemon thread and joins with a timeout instead of calling it inline."""
 
     def test_handler_completes_within_timeout(self, mock_logger):
-        mock_handler = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
-        mock_module = MagicMock()
-        mock_module.handle = mock_handler
-        with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.notification.stop_sound.handle", {}, timeout_s=1)
-        assert result["exit_code"] == 0
-        assert result["stdout"] == "ok"
+        handle = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
+        result, entries, _ = _dispatch_handler(handle, timeout=1)
+        assert result == ("ok", 0)
+        assert not [e for e in entries if e.get("action") == "timeout"]
 
     def test_handler_exceeding_timeout_returns_timeout_marker(self, mock_logger):
         import threading
@@ -237,13 +257,10 @@ class TestRunHandlerTimeout:
             released.wait(10)  # held until the test has its answer: past any timeout, without a sleep
             return {"exit_code": 0, "stdout": "too late"}
 
-        mock_module = MagicMock()
-        mock_module.handle = _slow_handler
-        with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
+        result, entries, _ = _dispatch_handler(_slow_handler, timeout=1)
         released.set()
-        assert result["exit_code"] == -1
-        assert result["stderr"] == "TIMEOUT"
+        assert result == ("", 0)
+        assert [e["hook"] for e in entries if e.get("action") == "timeout"] == ["h"]
 
     def test_handler_timeout_does_not_block_caller(self, mock_logger):
         """Regression: the caller must return promptly even if the handler thread never finishes."""
@@ -256,33 +273,24 @@ class TestRunHandlerTimeout:
             released.wait(30)  # never finishes while the caller is measured
             return {"exit_code": 0, "stdout": "should never see this"}
 
-        mock_module = MagicMock()
-        mock_module.handle = _hangs_much_longer_than_timeout
-        with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=mock_module):
-            start = time_module.monotonic()
-            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
-            elapsed = time_module.monotonic() - start
+        start = time_module.monotonic()
+        result, entries, _ = _dispatch_handler(_hangs_much_longer_than_timeout, timeout=1)
+        elapsed = time_module.monotonic() - start
         released.set()
         assert elapsed < 2.0
-        assert result["stderr"] == "TIMEOUT"
-
-    def test_default_handler_timeout_is_30(self):
-        import inspect
-
-        sig = inspect.signature(_run_handler)
-        assert sig.parameters["timeout_s"].default == 30
+        assert result == ("", 0)
+        assert [e["hook"] for e in entries if e.get("action") == "timeout"] == ["h"]
 
     def test_handler_exception_still_surfaces_as_error_not_timeout(self, mock_logger):
         def _boom(_data):
             raise RuntimeError("handler blew up")
 
-        mock_module = MagicMock()
-        mock_module.handle = _boom
-        with patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=mock_module):
-            result = _run_handler("aipass.hooks.apps.handlers.fake.handle", {}, timeout_s=1)
-        assert result["exit_code"] == -1
-        assert "handler blew up" in result["stderr"]
-        assert result["stderr"] != "TIMEOUT"
+        result, entries, _ = _dispatch_handler(_boom, timeout=1)
+        assert result == ("", 0)
+        entry = _hook_entry(entries)
+        assert entry["exit_code"] == -1
+        assert "handler blew up" in entry["stderr_preview"]
+        assert not [e for e in entries if e.get("action") == "timeout"]
 
 
 class TestDispatchHandlerTimeout:
@@ -436,11 +444,11 @@ class TestJsonHandlerNotApplicable:
         log_file = temp_test_dir / "factory.jsonl"
         assert not log_file.exists()
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "factory_test"})
+            dispatch("factory_test", "{}", {})
         assert log_file.exists()
 
     def test_log_validate_json_output(self, temp_test_dir, mock_logger):
-        """Two _log calls append two JSON lines, in call order, both readable.
+        """Two dispatches append two JSON lines, in call order, both readable.
 
         Was a loop of isinstance over however many lines happened to be there:
         an appender that dropped the second entry, or wrote nothing at all, left
@@ -449,8 +457,8 @@ class TestJsonHandlerNotApplicable:
         """
         log_file = temp_test_dir / "validate.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "A", "ts": 1.0})
-            _log({"event": "B", "ts": 2.0})
+            dispatch("A", "{}", {})
+            dispatch("B", "{}", {})
         lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
         assert [json.loads(line)["event"] for line in lines] == ["A", "B"]
@@ -462,16 +470,17 @@ class TestJsonHandlerNotApplicable:
     def test_log_ensure_exists(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "new_dir" / "ensure.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"ensure": True})
+            dispatch("Stop", "{}", {})
         assert log_file.parent.exists()
 
     def test_log_save_entry(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "save.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"saved": True, "value": 42})
+            dispatch("Stop", "{}", {})
         entry = json.loads(log_file.read_text(encoding="utf-8").strip())
-        assert entry["saved"] is True
-        assert entry["value"] == 42
+        assert entry["event"] == "Stop"
+        assert entry["action"] == "no_hooks_configured"
+        assert isinstance(entry["ts"], float)
 
     def test_log_load_entry(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "load.jsonl"
@@ -483,13 +492,24 @@ class TestJsonHandlerNotApplicable:
     def test_log_operation_recorded(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "ops.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
-            _log({"event": "PreToolUse", "hook": "test", "exit_code": 0})
+            dispatch("PreToolUse", "{}", {})
         entry = json.loads(log_file.read_text(encoding="utf-8").strip())
         assert entry["event"] == "PreToolUse"
 
-    def test_log_ensure_module(self):
-        assert hasattr(engine, "_log")
-        assert callable(engine._log)
+    def test_a_hook_that_ran_is_logged_with_its_exit_and_then_the_completion(self, temp_test_dir, mock_logger):
+        log_file = temp_test_dir / "ran.jsonl"
+        module = MagicMock()
+        module.handle = MagicMock(return_value={"exit_code": 0, "stdout": "ok"})
+        with (
+            patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file),
+            patch("aipass.hooks.apps.modules.engine._import_handler_module", return_value=module),
+        ):
+            dispatch("PreToolUse", "{}", _one(_FAKE))
+        entries = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+        assert [(e.get("hook"), e.get("exit_code"), e.get("action")) for e in entries] == [
+            ("the_hook", 0, None),
+            (None, None, "complete"),
+        ]
 
 
 # =============================================================================

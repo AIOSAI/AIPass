@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.7.0
+# Version: 1.7.1
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
@@ -182,12 +182,11 @@ class TestAdminIdentityIsVerifiedNotClaimed:
 
         The grant is given, so only the dark rail can refuse; a None sys.modules entry did not isolate it.
         """
-        real = edit_gate._import_module
 
         def _no_rail(name: str):
             if name.endswith("admin_seat") or name.startswith("aipass.ai_mail"):
                 raise ImportError("no ai_mail")
-            return real(name)
+            return importlib.import_module(name)
 
         with patch.object(edit_gate, "_import_module", side_effect=_no_rail):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")

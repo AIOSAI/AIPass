@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
@@ -430,19 +430,30 @@ class TestAutoFixSubprocessChecks:
         """One definition. The next marker change cannot silently disagree."""
         assert _checklist_marker() == FINDING_MARKER
 
-    def test_an_unreadable_seedgo_falls_back_loudly(self):
-        with patch.object(auto_fix, "_load_checklist_module", side_effect=ImportError("no seedgo")):
-            with patch.object(auto_fix.logger, "warning") as warned:
-                marker = auto_fix._checklist_marker()
-        assert marker == auto_fix._CHECKLIST_MARKER_FALLBACK
-        warned.assert_called_once()
+    @staticmethod
+    def _edit_with_fallback_marker(tmp_path, **loader) -> tuple[str, MagicMock]:
+        """A .py edit through handle(), the checklist printing '[FAIL]' and the marker's source as given."""
+        with (
+            patch.object(auto_fix, "_run_python_checks", return_value=[]),
+            patch.object(auto_fix, "_run_pyright_check", return_value=[]),
+            patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
+            patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}),
+            patch("subprocess.run", return_value=MagicMock(returncode=0, stdout="  [FAIL] — meta: Missing META\n")),
+            patch.object(auto_fix, "_load_checklist_module", **loader),
+            patch.object(auto_fix.logger, "warning") as warned,
+        ):
+            result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "x.py")}})
+        return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"], warned
 
-    def test_a_seedgo_publishing_no_marker_falls_back_loudly(self):
-        with patch.object(auto_fix, "_load_checklist_module", return_value=object()):
-            with patch.object(auto_fix.logger, "warning") as warned:
-                marker = auto_fix._checklist_marker()
-        assert marker == auto_fix._CHECKLIST_MARKER_FALLBACK
-        warned.assert_called_once()
+    def test_an_unreadable_seedgo_falls_back_loudly(self, tmp_path):
+        context, warned = self._edit_with_fallback_marker(tmp_path, side_effect=ImportError("no seedgo"))
+        assert "SEEDGO: meta: Missing META" in context
+        assert [c.args[-1] for c in warned.call_args_list] == ["[FAIL]"]
+
+    def test_a_seedgo_publishing_no_marker_falls_back_loudly(self, tmp_path):
+        context, warned = self._edit_with_fallback_marker(tmp_path, return_value=object())
+        assert "SEEDGO: meta: Missing META" in context
+        assert [c.args[-1] for c in warned.call_args_list] == ["[FAIL]"]
 
     @pytest.mark.parametrize("spell", _HOOK_SPELLINGS)
     @patch("subprocess.run")

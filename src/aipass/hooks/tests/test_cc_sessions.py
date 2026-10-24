@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.0.4
+# Version: 1.0.5
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
@@ -11,7 +11,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — HELP_COMMANDS' help rows
-# seedgo: no-test-needed(stdlib) — os.getpid and os.kill, patched at the edge wherever a live pid is needed
+# seedgo: no-test-needed(stdlib) — os.getpid and os.kill, stood in at the module seam wherever a live pid is needed
 
 import json
 import os
@@ -105,8 +105,13 @@ class TestGetPpidPortable:
     def test_windows_answers_none_by_contract(self, tmp_path):
         assert self._resolved_with_parent_file(tmp_path) is None
 
-    def test_dead_pid_returns_none(self):
-        assert cc_sessions._get_ppid_portable(999999999) is None
+    def test_a_failed_ps_ends_the_walk_with_none_not_a_raise(self, tmp_path):
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
+            patch("subprocess.run", side_effect=OSError("no ps")) as ps,
+        ):
+            assert cc_sessions.resolve_session_pid() is None
+        assert ps.call_count == 1
 
 
 class TestIsPidAlive:
@@ -134,11 +139,17 @@ class TestIsPidAlive:
         assert self._status(tmp_path, capsys, 1) == "stale"
 
     def test_permission_error_treated_as_alive(self, tmp_path, capsys):
-        with patch("sys.platform", "linux"), patch("os.kill", side_effect=PermissionError("denied")):
+        with (
+            patch.object(cc_sessions, "_PLATFORM", "linux"),
+            patch.object(cc_sessions, "_kill", side_effect=PermissionError("denied")),
+        ):
             assert self._status(tmp_path, capsys, 42) == "live"
 
     def test_oserror_treated_as_dead(self, tmp_path, capsys):
-        with patch("os.kill", side_effect=OSError("unknown")):
+        with (
+            patch.object(cc_sessions, "_PLATFORM", "linux"),
+            patch.object(cc_sessions, "_kill", side_effect=OSError("unknown")),
+        ):
             assert self._status(tmp_path, capsys, 42) == "stale"
 
 
@@ -166,20 +177,29 @@ class TestProcStartTicks:
 
     def test_non_linux_returns_none(self, tmp_path):
         # No start read means liveness only: the mismatched procStart no longer drops it.
-        with patch("sys.platform", "win32"):
+        with (
+            patch.object(cc_sessions, "_PLATFORM", "win32"),
+            patch.object(cc_sessions, "_pid_alive_windows", return_value=True),
+        ):
             assert self._kept(tmp_path, "not-a-tick") is True
 
-    def test_missing_pid_returns_none(self):
-        with patch("sys.platform", "linux"):
-            assert cc_sessions._proc_start_ticks(999999999) is None
+    def test_an_unreadable_proc_stat_keeps_the_session_on_liveness(self, tmp_path):
+        s = {"pid": 999999999, "sessionId": "gone", "cwd": str(tmp_path / "hooks"), "procStart": "not-a-tick"}
+        (tmp_path / "999999999.json").write_text(json.dumps(s), encoding="utf-8")
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
+            patch.object(cc_sessions, "_PLATFORM", "linux"),
+            patch.object(cc_sessions, "_kill", return_value=None),
+        ):
+            assert [r["sessionId"] for r in cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))] == ["gone"]
 
 
-class TestSessionPidMatches:
-    """Four units moved 2026-09-28: their answers are read through find_live_for_cwd
-    (TestFindLiveForCwd). The non-int guard stays: no public route reaches it."""
-
-    def test_non_int_pid_passes(self):
-        assert cc_sessions._session_pid_matches({"pid": "not-an-int", "procStart": "123"}) is True
+class TestNonIntPid:
+    def test_a_non_int_pid_is_dropped_as_not_live_not_a_crash(self, tmp_path):
+        s = {"pid": "not-an-int", "procStart": "123", "sessionId": "odd", "cwd": str(tmp_path / "hooks")}
+        (tmp_path / "4242.json").write_text(json.dumps(s), encoding="utf-8")
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
+            assert cc_sessions.find_live_for_cwd(str(tmp_path / "hooks")) == []
 
 
 class TestReadAllSessions:

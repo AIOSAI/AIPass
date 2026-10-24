@@ -1079,12 +1079,6 @@
       "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_hook, ruling (c): dispatch() runs a command hook as a shell subprocess (a spawn); contract: exit code, stdout, stderr and elapsed_ms answered, TIMEOUT and OSError answered as exit -1, never raised. _log, ruling (b): the JSONL diagnostics writer, one JSON object appended per line, a failed write never raises."
     },
     {
-      "file": "tests/test_engine_safeguards.py",
-      "standard": "through_the_command",
-      "lines": [28, 463],
-      "reason": "Moved from tests/test_engine.py (split leg, 2026-10-08); the ruling of that file's through_the_command row, fleet green leg 9. _run_handler, ruling (c): on a timeout dispatch()'s far side speaks the timeout through the sound player (a spawn); contract: a handler outside aipass.* is refused before import, a hung handler answers TIMEOUT at its timeout, a raising one answers exit -1. _log, ruling (b): the JSONL diagnostics writer; line 463's hasattr pin (line 1614 before the split) is the json-handler shape the module keeps."
-    },
-    {
       "file": "tests/support_cadence.py",
       "standard": "state_leak",
       "reason": "_reset_module_globals writes cadence's caches on the tests' behalf; the restore is conftest's _restore_cadence_globals, requested by every test of test_cadence.py and test_cadence_regroup.py through pytestmark. state_leak reads one file and cannot see a conftest fixture (its own Known limits). Split leg, 2026-10-08."
@@ -1409,7 +1403,7 @@
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
-      "lines": [137, 165, 171, 174, 177, 200, 275],
+      "lines": [141, 169, 175, 178, 181, 204, 279],
       "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
     },
     {
@@ -1463,7 +1457,7 @@
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "logged_fallback",
-      "lines": [104, 173, 313, 852],
+      "lines": [117, 186, 326, 865],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
     {
@@ -1538,22 +1532,10 @@
       "reason": "Fleet green leg 8, ruling (c), hooks' decision: the public door is main(), whose far side mounts the promoted .live copy over aipass.hooks.apps in sys.modules (mount.py) and runs the real engine over the live .aipass/hooks.json, writing engine.jsonl and cadence state. _normalize_stdin (Codex input -> tool_input) and _wrap_output (the hookSpecificOutput envelope, block -> deny) are pure, and reaching them by name is the safe door."
     },
     {
-      "file": "tests/test_edit_gate_bash.py",
-      "standard": "through_the_command",
-      "lines": [184],
-      "reason": "Fleet green leg 8, ruling (b), hooks' decision: the contract is that a missing admin rail refuses (the lane goes dark, never open). Isolating that arm needs only the rail's import refused while every other call-time import of the gate runs, which is what edit_gate._import_module (its own import seam, leg 4) is for. A None entry in sys.modules was tried and did not isolate the arm: its 'return True' mutant survived twice. Through this seam, with the grant given, the mutant dies at _blocked."
-    },
-    {
       "file": "tests/test_cc_transcripts.py",
       "standard": "through_the_command",
       "lines": [83, 106, 138],
       "reason": "Fleet green leg 9, ruling (b), hooks' decision: the contract is the Claude Code CLI's own path-to-dirname rule and 31-hash, pinned against vectors measured with the CLI's own code on RAW strings (a Windows path, the empty string, a non-BMP character). project_dir_for resolves its argument first, so on POSIX a raw Windows path or '' never reaches the rule as written, and the resolved long path's hash suffix depends on the host's spelling (a drive letter on Windows), so no fixed CLI vector can name it. Everything a short path shows goes through project_dir_for."
-    },
-    {
-      "file": "tests/test_cc_sessions.py",
-      "standard": "through_the_command",
-      "lines": [108, 173, 181],
-      "reason": "Fleet green leg 9, ruling (b), hooks' decision: three guards no public door reaches. resolve_session_pid walks from os.getpid() and its parents, so a dead PID never reaches the ppid lookup (contract: a failed ps answers None); find_live_for_cwd checks liveness first, so a dead PID never reaches the /proc start read (contract: unreadable answers None, liveness only) nor a non-int pid the identity check (contract: cannot check, keep). The live halves of the same helpers are read through resolve_session_pid, find_live_for_cwd and the sessions listing."
     },
     {
       "file": "tests/test_telegram_response_delivery.py",
@@ -1586,22 +1568,10 @@
       "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): real SIGTERM / real exec of tmux; no seam on exec or kill; on 10-05 leg 7 a def-time seam let the string-form patches miss and one run exec'd real tmux. Re-pointed from test_session_boot.py by the 2026-10-08 split; 199 and 213 (patch(f\"{_MOD}.os.execvp\"), judged again once the checker followed the support import) added in the re-pin leg."
     },
     {
-      "file": "tests/test_session_boot.py",
-      "standard": "stdlib_patch",
-      "lines": [38, 51, 76, 91, 123, 150, 164, 181, 195, 296, 310, 320, 331, 342, 355, 366, 378, 394, 437, 501, 521, 537, 597, 635, 727, 740, 753, 768, 786, 808, 831, 903, 921, 933, 947, 961, 974],
-      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1516 and 1529): patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux (new-session / attach-session), claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time. Lines re-pinned after the 2026-10-08 split."
-    },
-    {
       "file": "tests/test_session_boot_doors.py",
       "standard": "stdlib_patch",
       "lines": [117, 201, 291],
       "reason": "Moved from test_session_boot.py by the 2026-10-08 split; that file's execvp row's ruling: fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8: patch(f\"{_MOD}.os.execvp\"). The far side is a real exec: os.execvp replaces the test process with tmux, claude or drone, so no run may reach it. Every public door of session_boot (boot(), main()) ends in that exec, so no door is safe; and no seam may stand on an exec, because on 10-05 (leg 7) a def-time seam let string-form patches miss and one run exec'd real tmux. The patch is the only guard, held at call time."
-    },
-    {
-      "file": "tests/test_session_boot.py",
-      "standard": "stdlib_patch",
-      "lines": [215, 234, 244],
-      "reason": "Fleet green leg 11, ruling (c) without trial, hooks' decision of leg 8 (landed leg 10 for 1505): patch(f\"{_MOD}.os.kill\"). The far side is a real signal: _stop_session sends SIGTERM to the session's pid, a live claude process of this machine, so no run may reach it. Its only public door is boot()'s menu, which also ends in an exec, so no door is safe; and no seam may stand on a kill, by the same 10-05 incident. The patch is the only guard, held at call time. Lines re-pinned after the 2026-10-08 split."
     },
     {
       "file": "tests/test_session_boot_lookups.py",
@@ -1610,28 +1580,16 @@
       "reason": "Fleet green row 0 (leg 8, landed leg 10): Path.home patched to raise (unresolvable home), not an exec; no portable in-process way to make the real Path.home raise. Re-pointed from test_session_boot.py by the 2026-10-08 split."
     },
     {
-      "file": "tests/test_cc_sessions.py",
-      "standard": "stdlib_patch",
-      "lines": [136, 140],
-      "reason": "Fleet green row 0 (leg 8, landed leg 10), ruling (c): os.kill, a real signal."
-    },
-    {
-      "file": "tests/test_cc_sessions.py",
-      "standard": "stdlib_patch",
-      "lines": [136, 168, 172],
-      "reason": "Fleet green row 0 (leg 8, landed leg 10): sys.platform emulation; Windows pinned for real by CI's Windows lane."
-    },
-    {
       "file": "tests/test_edit_gate_bash.py",
       "standard": "stdlib_patch",
-      "lines": [857],
+      "lines": [891],
       "reason": "Fleet green row 0 (leg 8, landed leg 10): bash_writes.Path flavour oracle; threading flavour through every path builder is the cost; closes the leg 5 write_targets flavour HELD."
     },
     {
       "file": "tests/test_session_boot.py",
       "standard": "through_the_command",
-      "lines": [205, 210, 216, 225, 236, 246, 523, 539, 550, 561, 624, 637, 652, 658, 663, 674, 685, 694, 705, 714, 729, 742, 755, 923, 976, 1075, 1096, 1099, 1102, 1105, 1118, 1130, 1138, 1147, 1156, 1163, 1168, 1173, 1176, 1182],
-      "reason": "Fleet green leg 9, ruling (c) without trial, devpulse's ruling for this file (the 10-05 incident): the module's only public doors are boot() and main(), and every path through them ends in os.execvp (claude, tmux new-session/attach-session, drone @prax monitor) or os.kill (SIGTERM on a stopped session), after spawning tmux, ps, the claude CLI and drone @daemon stop. No seam may bind on an exec, kill or spawn. The 24 names (_takeover_bg, _stop_session, _warn_on_version_drift, _name_flag, _is_descendant, _find_tmux_session_for_pid, _daemon_stop, _tmux_session_exists, _session_label, _resume_session, _is_session_file_present, _get_ppid, _tmux_kill_session, _make_session_name, _exec_in_tmux, _chat_age, _running_cli_version, _pinned_cli_version, _find_tmux, _start_fresh, _resolve_claude_binary, _find_manifest, _chat_line, _CHAT_LIMIT) are pinned at their own contracts with the exec and kill stood in. Lines re-pointed by the 2026-10-08 split; the lookups half is the row for test_session_boot_lookups.py."
+      "lines": [226, 231, 237],
+      "reason": "_stop_session's bg early return (a bg session is never SIGTERMed): every boot() caller (_menu_single_new, _menu_single_close, _close_all, _new_over_all) filters bg sessions out first, so no boot()/main() route reaches it and no single mutant can turn a boot()-level test red. Kept as a second layer; whether it is deliberate or dead is open with devpulse (2026-10-24)."
     },
     {
       "file": "tests/test_session_boot_lookups.py",
