@@ -10,6 +10,8 @@
 Memory System - Central Memory Archive & Rollover System
 """
 
+__version__ = "1.3.1"
+
 import os
 import sys
 
@@ -94,7 +96,6 @@ def print_help():
     table.add_row("rollover run", "Execute memory rollover")
     table.add_row("rollover status", "Show rollover statistics")
     table.add_row("rollover check", "Dry run — check what needs rollover")
-    table.add_row("rollover report-lines", "Report line counts (read-only)")
     table.add_row("rollover push [--json]", "⚠ Reset ALL per_branch limits to defaults (system-wide)")
     table.add_row("config get [@branch] [--json]", "Show effective rollover limits (defaults + deviations)")
     table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
@@ -173,7 +174,7 @@ def print_help():
     console.print()
 
     console.print(
-        "Commands: search, push, rollover \\[run|status|check|report-lines|push],"
+        "Commands: search, push, rollover \\[run|status|check|push],"
         " config \\[get|set|set-default], lint \\[fields], health, roots, fleet, governance,"
         " pool \\[process|status], templates, todo \\[backlog|restore], verify, watch"
     )
@@ -234,7 +235,7 @@ def main() -> int:
         return 0
 
     if args[0] in ["--version", "-V"]:
-        console.print("memory v1.0.0")
+        console.print(f"memory v{__version__}")
         return 0
 
     if args[0] in ["--help", "-h", "help"]:

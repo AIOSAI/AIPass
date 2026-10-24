@@ -10,70 +10,17 @@
 Memory Extraction Handler
 """
 
-import shutil
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 from datetime import datetime
 
 # Handler imports (relative within package)
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
-from aipass.memory.apps.handlers.monitor.detector import undrainable_in
-from aipass.memory.apps.handlers.write_fence import fence_write
+from aipass.memory.apps.handlers.monitor.detector import _count_file_lines, file_limits, undrainable_in
 from aipass.prax.apps.modules.logger import get_system_logger
 
 logger = get_system_logger()
-
-
-def create_rollover_backup(file_path: Path) -> Dict[str, Any]:
-    """Create the single rollover backup in the branch's .backup/ (overwrites the previous one)."""
-    try:
-        if file_path.parent.name == ".trinity":
-            backup_dir = file_path.parent.parent / ".backup"
-        else:
-            backup_dir = file_path.parent / ".backup"
-        backup_name = f"rollover_backup_{file_path.name}"
-        backup_path = backup_dir / backup_name
-        # A refused backup stops the rollover: the caller already reads a failed backup as "do not proceed"
-        refusal = fence_write(backup_path, lane="rollover_backup")
-        if refusal is not None:
-            return {"success": False, "error": f"Backup failed: {refusal}"}
-        backup_dir.mkdir(exist_ok=True)
-
-        shutil.copy2(file_path, backup_path)
-
-        return {"success": True, "backup_path": str(backup_path), "message": f"Backup created: {backup_path.name}"}
-
-    except Exception as e:
-        logger.error(f"[extractor] Backup failed for {file_path}: {e}")
-        return {"success": False, "error": f"Backup failed: {e}"}
-
-
-def restore_from_backup(file_path: Path) -> Dict[str, Any]:
-    """Restore file from rollover backup (called when a rollover fails)."""
-    try:
-        # Must match create_rollover_backup's location.
-        if file_path.parent.name == ".trinity":
-            backup_dir = file_path.parent.parent / ".backup"
-        else:
-            backup_dir = file_path.parent / ".backup"
-        backup_name = f"rollover_backup_{file_path.name}"
-        backup_path = backup_dir / backup_name
-
-        if not backup_path.exists():
-            return {"success": False, "error": "No backup found to restore from"}
-
-        refusal = fence_write(file_path, lane="rollover_restore")
-        if refusal is not None:
-            return {"success": False, "error": f"Restore failed: {refusal}"}
-
-        shutil.copy2(backup_path, file_path)
-
-        return {"success": True, "message": f"Restored from backup: {backup_path.name}"}
-
-    except Exception as e:
-        logger.error(f"[extractor] Restore from backup failed for {file_path}: {e}")
-        return {"success": False, "error": f"Restore failed: {e}"}
 
 
 def _read_memory_file(file_path: Path) -> Dict[str, Any] | None:
@@ -85,7 +32,7 @@ def _write_memory_file(file_path: Path, data: Dict[str, Any]) -> None:
     """Write memory JSON file, RAISING when the write is refused.
 
     `write_memory_file_simple` returns False instead of raising; swallowing it lets the
-    archive store entries the file never gave up. The OSError routes to restore-from-backup.
+    archive store entries the file never gave up. The OSError makes ``commit_trimmed`` a refusal.
     """
     if not write_memory_file_simple(file_path, data):
         raise OSError(
@@ -93,12 +40,6 @@ def _write_memory_file(file_path: Path, data: Dict[str, Any]) -> None:
             f"Rollover authors no text, so a cap refusal here would be a bug in the "
             f"gate, not drift in the file; see prax for the writer's own reason"
         )
-
-
-def _count_file_lines(file_path: Path) -> int:
-    """Count physical lines in file"""
-    with open(file_path, "r", encoding="utf-8") as f:
-        return len(f.readlines())
 
 
 def _derive_branch_and_type(file_path: Path) -> tuple[str, str]:
@@ -214,19 +155,7 @@ def _extract_tail_excess(
 def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract items from v2 format file (entry-count based)."""
     old_lines = _count_file_lines(file_path)
-
-    if file_path.parent.name == ".trinity":
-        branch_key = file_path.parents[1].name.lower()
-        file_type = file_path.stem  # "local" or "observations"
-    else:
-        branch_key = file_path.parent.name.lower()
-        file_type = file_path.stem.split(".")[-1]
-
-    cfg = config_loader.section("rollover")
-    file_limits = cfg.get("per_branch", {}).get(branch_key, {}).get(file_type, {})
-    if not file_limits:
-        # Must match extract_items' gate, or a defaults-only branch passes it and archives nothing.
-        file_limits = cfg.get("defaults", {}).get(file_type, {})
+    branch_key, _file_type, limits = file_limits(config_loader.section("rollover"), file_path)
 
     all_extracted = []
 
@@ -239,7 +168,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         if repaired:
             data["sessions"] = sessions
             order_repaired = True
-        session_limits = file_limits.get("sessions", {})
+        session_limits = limits.get("sessions", {})
         # Each lane takes its head from its own entries: a shared head lets a snapshot judge regulars.
 
         auto_compact_cap = session_limits.get("auto_compact_cap")
@@ -286,7 +215,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         if repaired:
             data["key_learnings"] = key_learnings
             order_repaired = True
-    max_key_learnings = file_limits.get("key_learnings", {}).get("count")
+    max_key_learnings = limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None and isinstance(key_learnings, list) and key_learnings:
         kl_head = key_learnings[0] if isinstance(key_learnings[0], dict) else {}
         archived_kl = _extract_tail_excess(
@@ -308,7 +237,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         if repaired:
             data["observations"] = observations
             order_repaired = True
-    max_observations = file_limits.get("observations", {}).get("count")
+    max_observations = limits.get("observations", {}).get("count")
     if max_observations is not None and isinstance(observations, list) and observations:
         obs_head = observations[0] if isinstance(observations[0], dict) else {}
         archived_obs = _extract_tail_excess(
@@ -334,7 +263,7 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
                 logger.error(f"[extractor] Failed to persist order repair: {e}")
                 return {"success": False, "error": f"Failed to write file: {e}"}
         # A dict-held container can be over limit yet undrainable; say so rather than "nothing exceeds".
-        undrainable = undrainable_in(data, file_limits)
+        undrainable = undrainable_in(data, limits)
         if undrainable:
             return {
                 "success": True,
@@ -343,14 +272,8 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             }
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
 
-    # No metadata stamping: rollover moves entries and does not own the metadata.
-    try:
-        _write_memory_file(file_path, data)
-        new_lines = _count_file_lines(file_path)
-    except Exception as e:
-        logger.error(f"[extractor] Failed to write file after v2 extraction: {e}")
-        return {"success": False, "error": f"Failed to write file: {e}"}
-
+    # Not written here: the file keeps every entry until the orchestrator has them in the
+    # store and calls commit_trimmed. A crash between extraction and storage loses nothing.
     branch_name, memory_type = _derive_branch_and_type(file_path)
 
     return {
@@ -363,12 +286,24 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         "extracted_count": len(all_extracted),
         "remaining_count": 0,
         "old_lines": old_lines,
-        "new_lines": new_lines,
+        "trimmed": data,
     }
 
 
+def commit_trimmed(file_path: Path, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Write the trimmed file once its entries are stored; ``new_lines`` on success."""
+    if not isinstance(data, dict):
+        return {"success": False, "error": "No trimmed data to write"}
+    try:
+        _write_memory_file(file_path, data)
+    except Exception as e:
+        logger.error(f"[extractor] Failed to write file after v2 extraction: {e}")
+        return {"success": False, "error": f"Failed to write file: {e}"}
+    return {"success": True, "new_lines": _count_file_lines(file_path)}
+
+
 def extract_items(file_path: Path) -> Dict[str, Any]:
-    """Extract items from memory file (WITH BACKUP SAFETY)"""
+    """Extract items from a memory file; the trimmed data is returned, written only by ``commit_trimmed``."""
     if not file_path.exists():
         return {"success": False, "error": f"File not found: {file_path}"}
 
@@ -380,16 +315,7 @@ def extract_items(file_path: Path) -> Dict[str, Any]:
         logger.warning(f"[extractor] Failed to read file {file_path}: {e}")
         return {"success": False, "error": f"Failed to read file: {e}"}
 
-    if file_path.parent.name == ".trinity":
-        _ext_branch = file_path.parents[1].name.lower()
-        _ext_ftype = file_path.stem
-    else:
-        _ext_branch = file_path.parent.name.lower()
-        _ext_ftype = file_path.stem.split(".")[-1]
-    _ext_cfg = config_loader.section("rollover")
-    _ext_file_limits = _ext_cfg.get("per_branch", {}).get(_ext_branch, {}).get(_ext_ftype, {})
-    if not _ext_file_limits:
-        _ext_file_limits = _ext_cfg.get("defaults", {}).get(_ext_ftype, {})
+    _ext_branch, _ext_ftype, _ext_file_limits = file_limits(config_loader.section("rollover"), file_path)
 
     if _ext_file_limits:
         return _extract_items_v2(file_path, data)
@@ -469,5 +395,5 @@ def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
         "entries": enriched,
         "count": len(enriched),
         "old_lines": result.get("old_lines"),
-        "new_lines": result.get("new_lines"),
+        "trimmed": result.get("trimmed"),
     }

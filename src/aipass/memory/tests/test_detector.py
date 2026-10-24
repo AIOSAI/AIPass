@@ -3,7 +3,7 @@
 # Description: Tests for rollover trigger detection handler
 # Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/monitor/detector.py."""
@@ -599,147 +599,21 @@ class TestReadRegistry:
         assert result == []
 
 
-def _heal(tmp_path: Path, monkeypatch, branch_dir: Path, name: str) -> dict:
-    """check_all_branches over a tmp fleet of one branch: the walk that reseeds a missing .trinity file."""
-    registry = {"branches": [{"name": name, "path": str(branch_dir), "status": "active"}]}
-    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
-    monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
-    monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
-    return detector.check_all_branches()
+class TestAMissingTrinityFileIsSkipped:
+    """The fleet walk reads; a missing .trinity file is spawn's to scaffold, never the detector's to write."""
 
-
-class TestRecreateTrinityFile:
-    """P4 self-healing: the fleet walk reseeds a missing .trinity file from its template."""
-
-    def test_recreates_missing_local_file(self, tmp_path: Path, monkeypatch):
-        """Missing local.json should be recreated from template with _usage and no limits."""
-
-        templates_dir = tmp_path / "templates"
-        templates_dir.mkdir()
-        template = {
-            "document_metadata": {
-                "document_type": "session_history",
-                "document_name": "{{BRANCH}}.LOCAL",
-                "_usage": "Automated file.",
-                "status": {"health": "healthy"},
-            },
-            "sessions": [],
-            "key_learnings": [],
-        }
-        (templates_dir / "LOCAL.template.json").write_text(json.dumps(template), encoding="utf-8")
-        monkeypatch.setattr(detector, "_TEMPLATES_DIR", templates_dir)
-        monkeypatch.setattr(
-            detector,
-            "_TEMPLATE_MAP",
-            {"local": templates_dir / "LOCAL.template.json"},
-        )
-
-        branch_dir = tmp_path / "testbranch"
-        branch_dir.mkdir()
-
-        _heal(tmp_path, monkeypatch, branch_dir, "testbranch")
-
-        result = branch_dir / ".trinity" / "local.json"
-        assert result.exists()
-        data = json.loads(result.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "testbranch.LOCAL"
-        assert "_usage" in data["document_metadata"]
-        assert "limits" not in data["document_metadata"]
-
-    def test_recreates_missing_observations_file(self, tmp_path: Path, monkeypatch):
-        """Missing observations.json should be recreated from template."""
-
-        templates_dir = tmp_path / "templates"
-        templates_dir.mkdir()
-        template = {
-            "document_metadata": {
-                "document_type": "collaboration_patterns",
-                "document_name": "{{BRANCH}}.OBSERVATIONS",
-                "_usage": "Automated file.",
-            },
-            "observations": [],
-        }
-        (templates_dir / "OBSERVATIONS.template.json").write_text(json.dumps(template), encoding="utf-8")
-        monkeypatch.setattr(detector, "_TEMPLATES_DIR", templates_dir)
-        monkeypatch.setattr(
-            detector,
-            "_TEMPLATE_MAP",
-            {"observations": templates_dir / "OBSERVATIONS.template.json"},
-        )
-
-        branch_dir = tmp_path / "api"
-        branch_dir.mkdir()
-
-        _heal(tmp_path, monkeypatch, branch_dir, "api")
-
-        result = branch_dir / ".trinity" / "observations.json"
-        data = json.loads(result.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "api.OBSERVATIONS"
-        assert "limits" not in data["document_metadata"]
-
-    def test_a_branch_outside_the_aipass_root_is_never_reseeded(self, tmp_path: Path, monkeypatch):
-        """The seed is refused outside the AIPass root, before ``.trinity/`` is made (that is a write)."""
-
-        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
-        branch_dir = tmp_path / "other_root" / "src" / "x"
-        branch_dir.mkdir(parents=True)
-
-        result = _heal(tmp_path, monkeypatch, branch_dir, "x")
-
-        assert result["triggers"] == []
-        assert not (branch_dir / ".trinity").exists()
-
-    def test_check_all_branches_recreates_missing(self, tmp_path: Path, monkeypatch):
-        """check_all_branches should auto-recreate missing .trinity files."""
-
+    def test_check_all_branches_writes_nothing_for_a_missing_file(self, tmp_path: Path, monkeypatch):
         branch_dir = tmp_path / "mybranch"
-        trinity_dir = branch_dir / ".trinity"
-        trinity_dir.mkdir(parents=True)
-        obs_data = {
-            "document_metadata": {"schema_version": "1.0.0", "limits": {"max_lines": 600}},
-            "observations": [],
-        }
-        (trinity_dir / "observations.json").write_text(json.dumps(obs_data, indent=2), encoding="utf-8")
-
-        templates_dir = tmp_path / "templates"
-        templates_dir.mkdir()
-        local_template = {
-            "document_metadata": {
-                "document_type": "session_history",
-                "document_name": "{{BRANCH}}.LOCAL",
-                "_usage": "Automated file.",
-                "status": {"health": "healthy"},
-            },
-            "sessions": [],
-        }
-        (templates_dir / "LOCAL.template.json").write_text(json.dumps(local_template), encoding="utf-8")
-        monkeypatch.setattr(detector, "_TEMPLATES_DIR", templates_dir)
-        monkeypatch.setattr(
-            detector,
-            "_TEMPLATE_MAP",
-            {
-                "local": templates_dir / "LOCAL.template.json",
-                "observations": templates_dir / "OBSERVATIONS.template.json",
-            },
-        )
-
-        registry_file = tmp_path / "AIPASS_REGISTRY.json"
-        registry_data = {
-            "branches": [
-                {"name": "mybranch", "path": str(branch_dir), "status": "active"},
-            ]
-        }
-        registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
+        branch_dir.mkdir()
+        registry = {"branches": [{"name": "mybranch", "path": str(branch_dir), "status": "active"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
-        detector.check_all_branches()
+        result = detector.check_all_branches()
 
-        recreated = trinity_dir / "local.json"
-        assert recreated.exists()
-        data = json.loads(recreated.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "mybranch.LOCAL"
-        assert "limits" not in data["document_metadata"]
+        assert result["triggers"] == []
+        assert not (branch_dir / ".trinity").exists()
 
 
 _ROLLOVER_WITH_TODOS = {

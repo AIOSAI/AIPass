@@ -13,10 +13,11 @@ Template = the whole truth: any key it does not declare is stripped, at every le
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, Any
 
-from aipass.memory.apps.handlers import repo_root, write_fence
+from aipass.memory.apps.handlers import write_fence
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -112,14 +113,6 @@ def _sort_container_newest_first(container: list, container_name: str, changes: 
     return ordered
 
 
-def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
-
-    Kept as a local name because callers and tests patch it here; never the working directory.
-    """
-    return repo_root.find_repo_root(caller="normalize")
-
-
 def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, Any]:
     """Normalize a memory file against its canonical template."""
     if not file_path.exists():
@@ -194,9 +187,9 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
         if refusal is not None:
             return {"success": False, "error": refusal}
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
+            tmp = file_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(tmp, file_path)
         except Exception as e:
             logger.error(f"[normalize] Failed to write {file_path}: {e}")
             return {"success": False, "error": f"Failed to write: {e}"}
@@ -213,91 +206,3 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
         "warnings": warnings,
         "dry_run": dry_run,
     }
-
-
-def normalize_all_memory_files(dry_run: bool = False) -> Dict[str, Any]:
-    """Normalize schema for all memory files in AIPASS_REGISTRY."""
-    registry_path = _find_repo_root() / "AIPASS_REGISTRY.json"
-
-    # exists_exactly, not exists(): a case-folding filesystem would answer for aipass_registry.json,
-    # and this lane REWRITES every file the answer names.
-    if not repo_root.exists_exactly(registry_path):
-        return {"success": False, "error": "AIPASS_REGISTRY.json not found"}
-
-    try:
-        with open(registry_path, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-            branches = registry.get("branches", [])
-    except Exception as e:
-        logger.warning(f"[normalize] Failed to read registry: {e}")
-        return {"success": False, "error": f"Failed to read registry: {e}"}
-
-    results = {
-        "success": True,
-        "files_checked": 0,
-        "files_modified": 0,
-        "files_with_warnings": 0,
-        "dry_run": dry_run,
-        "details": [],
-    }
-
-    for branch in branches:
-        branch_path = Path(branch.get("path", ""))
-        branch_name = branch.get("name", "").upper()
-
-        if not branch_path.exists():
-            continue
-
-        for memory_type in ["local", "observations"]:
-            file_name = f"{branch_name}.{memory_type}.json"
-            file_path = branch_path / file_name
-
-            if not file_path.exists():
-                continue
-
-            results["files_checked"] += 1
-            result = normalize_memory_file(file_path, dry_run=dry_run)
-
-            if not result["success"]:
-                continue
-
-            if result.get("changes"):
-                results["files_modified"] += 1
-            if result.get("warnings"):
-                results["files_with_warnings"] += 1
-            if result.get("changes") or result.get("warnings"):
-                results["details"].append(
-                    {
-                        "file": file_name,
-                        "changes": result["changes"],
-                        "warnings": result["warnings"],
-                    }
-                )
-
-    return results
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Normalize memory file schema")
-    parser.add_argument("--dry-run", action="store_true", help="Report changes without writing")
-    parser.add_argument("--file", type=str, help="Normalize single file")
-    args = parser.parse_args()
-
-    if args.file:
-        result = normalize_memory_file(Path(args.file), dry_run=args.dry_run)
-        print(json.dumps(result, indent=2))
-    else:
-        result = normalize_all_memory_files(dry_run=args.dry_run)
-        print(f"Files checked: {result['files_checked']}")
-        print(f"Files modified: {result['files_modified']}")
-        print(f"Files with warnings: {result['files_with_warnings']}")
-        if result["details"]:
-            print("\nChanges:")
-            for detail in result["details"]:
-                print(f"  {detail['file']}:")
-                for change in detail["changes"]:
-                    print(f"    - {change}")
-                for warning in detail["warnings"]:
-                    print(f"    ! WARNING: {warning}")

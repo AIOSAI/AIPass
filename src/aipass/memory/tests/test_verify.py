@@ -3,7 +3,7 @@
 # Description: Tests for verify module (plan vectorization check)
 # Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/verify.py."""
@@ -18,6 +18,7 @@ import subprocess
 import sys
 from unittest.mock import MagicMock
 
+from aipass.memory.apps.handlers.storage import lane
 from aipass.memory.apps.modules import verify
 
 
@@ -48,7 +49,7 @@ def _introspected_handlers(capsys):
 
 
 class TestGetMemoryPython:
-    """Tests for _get_memory_python() resolution logic."""
+    """Tests for the lane's memory_python() resolution, read off the interpreter the plan check launches."""
 
     def test_env_override_takes_precedence(self, monkeypatch, tmp_path):
         """AIPASS_MEMORY_PYTHON env var overrides all other paths."""
@@ -66,7 +67,7 @@ class TestGetMemoryPython:
         fake_python.parent.mkdir(parents=True)
         fake_python.touch()
 
-        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", fake_python)
+        monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", fake_python)
         result = _python_used(monkeypatch)
         assert result == str(fake_python)
 
@@ -74,7 +75,7 @@ class TestGetMemoryPython:
         """When no env var and no venv, fall back to sys.executable."""
 
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
-        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
+        monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = _python_used(monkeypatch)
         assert result == sys.executable
 
@@ -82,7 +83,7 @@ class TestGetMemoryPython:
         """An empty AIPASS_MEMORY_PYTHON env var should be treated as unset."""
 
         monkeypatch.setenv("AIPASS_MEMORY_PYTHON", "")
-        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
+        monkeypatch.setattr(lane, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = _python_used(monkeypatch)
         assert result == sys.executable
 
@@ -98,7 +99,7 @@ class TestCheckPlanSubprocess:
         fake_result.returncode = 0
         fake_result.stdout = json.dumps(expected)
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake_result)
 
         result = verify.is_plan_vectorized("FPLAN-0126")
@@ -114,7 +115,7 @@ class TestCheckPlanSubprocess:
         fake_result.returncode = 1
         fake_result.stderr = "collection not found"
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake_result)
 
         result = verify.is_plan_vectorized("FPLAN-9999")
@@ -128,12 +129,12 @@ class TestCheckPlanSubprocess:
         fake_result.returncode = 1
         fake_result.stderr = ""
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake_result)
 
         result = verify.is_plan_vectorized("FPLAN-0001")
         assert result["success"] is False
-        assert result["error"] == "Subprocess failed"
+        assert result["error"].startswith("Check operation failed (exit 1)")
 
     def test_timeout_returns_error(self, monkeypatch):
         """Subprocess timeout produces a clear error message."""
@@ -141,7 +142,7 @@ class TestCheckPlanSubprocess:
         def raise_timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired(cmd="python", timeout=60)
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", raise_timeout)
 
         result = verify.is_plan_vectorized("FPLAN-0126")
@@ -155,7 +156,7 @@ class TestCheckPlanSubprocess:
         fake_result.returncode = 0
         fake_result.stdout = "not valid json {{"
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake_result)
 
         result = verify.is_plan_vectorized("FPLAN-0126")
@@ -168,7 +169,7 @@ class TestCheckPlanSubprocess:
         def raise_oserror(*args, **kwargs):
             raise OSError("No such file or directory")
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", raise_oserror)
 
         result = verify.is_plan_vectorized("FPLAN-0126")
@@ -187,7 +188,7 @@ class TestCheckPlanSubprocess:
             result.stdout = json.dumps({"success": True, "found": False, "count": 0})
             return result
 
-        monkeypatch.setattr(verify, "_get_memory_python", lambda: "/usr/bin/python3")
+        monkeypatch.setattr(lane, "memory_python", lambda: "/usr/bin/python3")
         monkeypatch.setattr(subprocess, "run", capture_run)
 
         verify.is_plan_vectorized("HPLAN-0042")

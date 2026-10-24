@@ -3,7 +3,7 @@
 # Description: Pins against sys.modules poisoning of the handlers.json package
 # Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for tests/conftest.py's handlers/json stand-in and the suite's sys.modules evictions."""
@@ -149,7 +149,6 @@ class TestNobodyEvictsThePackageOneWay:
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.monitor",
         "test_rollover_pipeline.py::aipass.memory.apps.handlers.rollover",
         "test_rollover_pipeline_extraction.py::aipass.memory.apps.handlers.monitor",
-        "test_rollover_pipeline_extraction.py::aipass.memory.apps.handlers.tracking",
         "support_symbolic_extras.py::aipass.memory.apps.handlers.vector",
     }
 

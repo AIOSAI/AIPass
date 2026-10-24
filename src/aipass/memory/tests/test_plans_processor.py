@@ -3,7 +3,7 @@
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -15,7 +15,6 @@
 import hashlib
 import json
 import subprocess
-import sys
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.intake import plans_processor
@@ -354,40 +353,6 @@ class TestFindRepoRoot:
         monkeypatch.chdir(tmp_path)
 
         assert mod._find_repo_root() != tmp_path
-
-
-class TestGetMemoryPython:
-    """Test _get_memory_python function."""
-
-    def test_env_override(self, monkeypatch, tmp_path):
-        mod = plans_processor
-        custom_python = str(tmp_path / "custom" / "python")
-        monkeypatch.setenv("AIPASS_MEMORY_PYTHON", custom_python)
-
-        result = mod._get_memory_python()
-
-        assert result == custom_python
-
-    def test_venv_python_exists(self, monkeypatch, tmp_path):
-        mod = plans_processor
-        monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
-        venv_python = tmp_path / ".venv" / "bin" / "python"
-        venv_python.parent.mkdir(parents=True)
-        venv_python.write_text("#!/usr/bin/env python", encoding="utf-8")
-        monkeypatch.setattr(mod, "_MEMORY_VENV_PYTHON", venv_python)
-
-        result = mod._get_memory_python()
-
-        assert result == str(venv_python)
-
-    def test_falls_back_to_sys_executable(self, monkeypatch, tmp_path):
-        mod = plans_processor
-        monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
-        monkeypatch.setattr(mod, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / "python")
-
-        result = mod._get_memory_python()
-
-        assert result == sys.executable
 
 
 class TestTheManifestKeysOnContentNotOnlyOnAName:

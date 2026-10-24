@@ -1,19 +1,19 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline.py
-# Description: Rollover pipeline — the rollover module's run, status and triggers, normalize, line counter
+# Description: Rollover pipeline — the rollover module's run, status and triggers, normalize
 # Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
 """Tests for apps/modules/rollover.py and the rollover pipeline handlers it drives."""
 
-# The run lane: run_rollover, show_status, check_triggers, normalize, the line counter, the valve's
-# logging and the carried-debt lane. Siblings: test_rollover_pipeline_{extraction,valve,todo}.py.
+# The run lane: run_rollover, show_status, check_triggers, normalize, the valve's logging and the
+# carried-debt lane. Siblings: test_rollover_pipeline_{extraction,valve,todo}.py.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — rollover.report_line_counts(); tests/test_marker7_memory_lane.py
+# seedgo: no-test-needed(covered_elsewhere) — orchestrator.execute_rollover(); tests/test_orchestrator_exec.py
 
 import json
 import tempfile
@@ -55,7 +55,6 @@ def _import_rollover_module(monkeypatch):
 
     mock_orchestrator = MagicMock()
     mock_orchestrator.execute_rollover = MagicMock(return_value={"success": True, "triggers_count": 0})
-    mock_orchestrator.sync_line_counts = MagicMock(return_value={"success": True, "updated": 0, "failed": 0})
 
     monitor_pkg = MagicMock()
     monitor_pkg.detector = mock_detector
@@ -155,35 +154,6 @@ def _import_normalize(monkeypatch):
 
     return normalize, {
         "json_handler": mock_json_handler,
-    }
-
-
-def _import_line_counter(monkeypatch):
-    """Import line_counter with mocked infrastructure dependencies."""
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    mock_memory_files = MagicMock()
-    mock_memory_files.update_metadata = MagicMock(return_value={"success": True})
-
-    json_pkg = MagicMock()
-    # A package stand-in must answer __path__ (test_import_isolation.py).
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
-
-    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.tracking.line_counter", raising=False)
-    parent = sys.modules.get("aipass.memory.apps.handlers.tracking")
-    if parent is not None:
-        monkeypatch.delattr(parent, "line_counter", raising=False)
-
-    from aipass.memory.apps.handlers.tracking import line_counter
-
-    return line_counter, {
-        "json_handler": mock_json_handler,
-        "memory_files": mock_memory_files,
     }
 
 
@@ -368,160 +338,6 @@ class TestCheckTriggers:
         assert "ready for rollover" not in (printed + warned).lower()
 
 
-class TestNormalizeAllMemoryFiles:
-    """Test normalize_all_memory_files iterates registry branches."""
-
-    def test_returns_error_when_registry_not_found(self, monkeypatch, tmp_path):
-        norm, _ = _import_normalize(monkeypatch)
-        with patch.object(norm, "_find_repo_root", return_value=tmp_path / "nonexistent"):
-            result = norm.normalize_all_memory_files()
-        assert result["success"] is False
-        assert "not found" in result["error"]
-
-    def test_normalizes_files_for_existing_branches(self, monkeypatch, tmp_path):
-        norm, _ = _import_normalize(monkeypatch)
-
-        branch_dir = tmp_path / "src" / "aipass" / "test_branch"
-        branch_dir.mkdir(parents=True)
-
-        memory_data = {
-            "limits": {"max_lines": 600},
-            "document_metadata": {"status": {}},
-            "sessions": [],
-        }
-        file_path = branch_dir / "TEST_BRANCH.local.json"
-        file_path.write_text(json.dumps(memory_data, indent=2), encoding="utf-8")
-
-        registry = {
-            "branches": [
-                {"name": "TEST_BRANCH", "path": str(branch_dir)},
-            ]
-        }
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(json.dumps(registry), encoding="utf-8")
-
-        with patch.object(norm, "_find_repo_root", return_value=tmp_path):
-            result = norm.normalize_all_memory_files()
-
-        assert result["success"] is True
-        assert result["files_checked"] >= 1
-
-    def test_skips_branches_with_missing_paths(self, monkeypatch, tmp_path):
-        norm, _ = _import_normalize(monkeypatch)
-
-        registry = {
-            "branches": [
-                {"name": "MISSING", "path": str(tmp_path / "nonexistent")},
-            ]
-        }
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(json.dumps(registry), encoding="utf-8")
-
-        with patch.object(norm, "_find_repo_root", return_value=tmp_path):
-            result = norm.normalize_all_memory_files()
-
-        assert result["success"] is True
-        assert result["files_checked"] == 0
-
-    def test_dry_run_does_not_modify_files(self, monkeypatch, tmp_path):
-        norm, _ = _import_normalize(monkeypatch)
-
-        branch_dir = tmp_path / "branch"
-        branch_dir.mkdir()
-
-        memory_data = {
-            "limits": {"max_lines": 600},
-            "document_metadata": {"status": {}},
-            "sessions": [],
-        }
-        file_path = branch_dir / "BRANCH.local.json"
-        original_content = json.dumps(memory_data, indent=2)
-        file_path.write_text(original_content, encoding="utf-8")
-
-        registry = {"branches": [{"name": "BRANCH", "path": str(branch_dir)}]}
-        registry_path = tmp_path / "AIPASS_REGISTRY.json"
-        registry_path.write_text(json.dumps(registry), encoding="utf-8")
-
-        with patch.object(norm, "_find_repo_root", return_value=tmp_path):
-            result = norm.normalize_all_memory_files(dry_run=True)
-
-        assert result["dry_run"] is True
-        assert file_path.read_text(encoding="utf-8") == original_content
-
-
-class TestUpdateAllMemoryFiles:
-    """Test update_all_memory_files iterates registry branches."""
-
-    def test_returns_empty_when_no_branches(self, monkeypatch):
-        lc, _ = _import_line_counter(monkeypatch)
-
-        mock_read_registry = MagicMock(return_value=[])
-        mock_get_path = MagicMock(return_value=None)
-
-        with (
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._read_registry",
-                mock_read_registry,
-            ),
-            patch(
-                "aipass.memory.apps.handlers.monitor.detector._get_memory_file_path",
-                mock_get_path,
-            ),
-        ):
-            result = lc.update_all_memory_files()
-
-        assert result["success"] is True
-        assert result["updated"] == 0
-
-    def test_updates_existing_files(self, monkeypatch, tmp_path):
-        lc, mocks = _import_line_counter(monkeypatch)
-
-        file_path = tmp_path / "local.json"
-        file_path.write_text('{\n  "test": true\n}\n', encoding="utf-8")
-
-        branch = {"name": "TEST", "path": str(tmp_path)}
-
-        def mock_get_path(b, mem_type):
-            if mem_type == "local":
-                return file_path
-            return None
-
-        import importlib
-
-        detector = importlib.import_module("aipass.memory.apps.handlers.monitor.detector")
-        monkeypatch.setattr(detector, "_read_registry", lambda: [branch])
-        monkeypatch.setattr(detector, "_get_memory_file_path", mock_get_path)
-
-        result = lc.update_all_memory_files()
-
-        assert result["success"] is True
-        assert result["updated"] >= 1
-
-    def test_tracks_failures(self, monkeypatch, tmp_path):
-        lc, _mocks = _import_line_counter(monkeypatch)
-
-        # A missing file is the one failure update_line_count has left.
-        file_path = tmp_path / "local.json"
-
-        branch = {"name": "TEST", "path": str(tmp_path)}
-
-        def mock_get_path(b, mem_type):
-            if mem_type == "local":
-                return file_path
-            return None
-
-        import importlib
-
-        detector = importlib.import_module("aipass.memory.apps.handlers.monitor.detector")
-        monkeypatch.setattr(detector, "_read_registry", lambda: [branch])
-        monkeypatch.setattr(detector, "_get_memory_file_path", mock_get_path)
-
-        result = lc.update_all_memory_files()
-
-        assert result["success"] is True
-        assert result["failed"] >= 1
-
-
 class TestValveLoggingIsBounded:
     """The safety valve logs ONE summary warning per array per run; per-entry detail goes to DEBUG."""
 
@@ -626,11 +442,6 @@ class TestASkippedTriggerIsNotSilentlyDropped:
                 orchestrator.detector,
                 "check_all_branches",
                 return_value={"success": True, "triggers": [self._trigger()]},
-            ),
-            patch.object(
-                orchestrator.extractor,
-                "create_rollover_backup",
-                return_value={"success": True, "message": "backed up"},
             ),
             patch.object(
                 orchestrator.extractor,
@@ -815,6 +626,7 @@ class TestRolloverSurvivesCarriedDebt:
         result = ext.extract_items(file_path)
 
         assert result["success"] is True, result.get("error")
+        assert ext.commit_trimmed(file_path, result["trimmed"])["success"] is True
         after = json.loads(file_path.read_text(encoding="utf-8"))["sessions"]
         assert len(after) < before_count, "the lane reported success and the file never shrank"
         assert result["extracted_count"] == before_count - len(after), (
@@ -829,6 +641,7 @@ class TestRolloverSurvivesCarriedDebt:
         # The run must have archived something, or "still there" passes on a dead lane.
         assert result["success"] is True, result.get("error")
         assert result["extracted_count"] > 0, "nothing was archived — this pin would pass vacuously"
+        ext.commit_trimmed(file_path, result["trimmed"])
 
         head = json.loads(file_path.read_text(encoding="utf-8"))["sessions"][0]
         assert head["summary"] == "X" * 343, "rollover edited an entry it only moves past"
@@ -837,6 +650,7 @@ class TestRolloverSurvivesCarriedDebt:
         """A file that shrank leaves the second run strictly less to do (no duplicate-work loop)."""
         file_path = self._seedgo_shaped_file(tmp_path)
         first = ext.extract_items(file_path)
+        ext.commit_trimmed(file_path, first["trimmed"])
         second = ext.extract_items(file_path)
 
         assert first["extracted_count"] > 0

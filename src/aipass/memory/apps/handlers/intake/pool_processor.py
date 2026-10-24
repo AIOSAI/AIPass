@@ -1,18 +1,20 @@
 # =================== AIPass ====================
 # Name: pool_processor.py
 # Description: Memory Pool Processor
-# Version: 0.1.0
+# Version: 0.2.0
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
 Memory Pool Intake Handler
+
+Embedding and storage go through the subprocess lane; this module never imports chromadb or fastembed.
 """
 
-import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
@@ -21,10 +23,11 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, run_json
+from aipass.memory.apps.handlers.templates.push_store import vectorize_and_store_subprocess
 
 _MEMORY_ROOT = module_file(__file__).parent.parent.parent.parent  # handlers/intake/ → handlers/ → apps/ → memory/
 MEMORY_POOL_PATH = _MEMORY_ROOT / "memory_pool"
-CHROMA_PATH = _MEMORY_ROOT / ".chroma"
 
 
 AI_MAIL_PATH = _MEMORY_ROOT.parent / "ai_mail" / "apps" / "ai_mail.py"
@@ -33,21 +36,21 @@ AI_MAIL_PATH = _MEMORY_ROOT.parent / "ai_mail" / "apps" / "ai_mail.py"
 def _notify_failure(subject: str, message: str) -> None:
     """Send failure notification to @devpulse via ai_mail."""
     try:
-        subprocess.run(
-            ["python3", str(AI_MAIL_PATH), "send", "@devpulse", subject, message],
+        sent = subprocess.run(
+            [sys.executable, str(AI_MAIL_PATH), "send", "@devpulse", subject, message],
             capture_output=True,
             text=True,
             timeout=30,
             cwd=str(_MEMORY_ROOT),
         )
+        if sent.returncode != 0:
+            logger.warning(f"[pool_processor] Failure notification exited {sent.returncode}: {sent.stderr.strip()}")
     except Exception as e:
         logger.warning(f"[pool_processor] Failed to send failure notification: {e}")
 
 
 def _update_central_and_dashboard() -> None:
     """Update memory central stats in a subprocess (handler independence); failures only log."""
-    import sys
-
     try:
         subprocess.run(
             [
@@ -69,7 +72,7 @@ def find_source_file(filename: str) -> Path | None:
     if active.exists():
         return active
 
-    archived = MEMORY_POOL_PATH / ".archive" / filename
+    archived = _MEMORY_ROOT / load_config().get("archive_path", "memory_pool_archive") / filename
     if archived.exists():
         return archived
 
@@ -153,57 +156,40 @@ def chunk_content(content: str, chunk_size: int = 1000, overlap: int = 100) -> L
 def process_file_to_vectors(
     file_path: Path, collection_name: str, chunk_size: int = 1000, chunk_overlap: int = 100
 ) -> dict:
-    """Process a single file: read, chunk, and store vectors."""
+    """Process a single file: read, chunk, and store vectors in ``collection_name``."""
     read_result = read_file_content(file_path)
     if not read_result["success"]:
         return read_result
 
-    content = read_result["content"]
     metadata = read_result["metadata"]
+    chunks = chunk_content(read_result["content"], chunk_size, chunk_overlap)
+    processed_at = datetime.now().isoformat()
 
-    chunks = chunk_content(content, chunk_size, chunk_overlap)
-
-    # Late import: chromadb/fastembed are not importable from every venv.
-    try:
-        import chromadb
-        from fastembed import TextEmbedding
-
-        client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        collection = client.get_or_create_collection(name=collection_name)
-        model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
-
-        documents = []
-        ids = []
-        metadatas = []
-
-        for chunk in chunks:
-            doc_id = f"{file_path.stem}_{chunk['chunk_index']}"
-            documents.append(chunk["text"])
-            ids.append(doc_id)
-            metadatas.append(
-                {
-                    "source": metadata["filename"],
-                    "chunk_index": chunk["chunk_index"],
-                    "total_chunks": len(chunks),
-                    "processed_at": datetime.now().isoformat(),
-                    "type": "memory_pool",
-                }
-            )
-
-        embeddings = [e.tolist() for e in model.embed(documents)]
-
-        collection.upsert(documents=documents, embeddings=embeddings, ids=ids, metadatas=metadatas)
-
-        return {
-            "success": True,
-            "file": metadata["filename"],
-            "chunks_stored": len(chunks),
-            "collection": collection_name,
+    # source_file salts the store's content-hash ids, so the same paragraph in two files keeps both.
+    metadatas = [
+        {
+            "source": metadata["filename"],
+            "source_file": metadata["filename"],
+            "chunk_index": chunk["chunk_index"],
+            "total_chunks": len(chunks),
+            "processed_at": processed_at,
+            "type": "memory_pool",
         }
+        for chunk in chunks
+    ]
+    # The store names a collection <branch>_<memory_type>; split at the last underscore to keep the name.
+    branch, _, memory_type = collection_name.rpartition("_")
+    stored = vectorize_and_store_subprocess(branch, memory_type, [chunk["text"] for chunk in chunks], metadatas)
+    if not stored.get("success"):
+        logger.warning(f"[pool_processor] Failed to process {file_path.name} to vectors: {stored.get('error')}")
+        return {"success": False, "error": str(stored.get("error", "vectorize_and_store refused"))}
 
-    except Exception as e:
-        logger.warning(f"[pool_processor] Failed to process file to vectors: {e}")
-        return {"success": False, "error": str(e)}
+    return {
+        "success": True,
+        "file": metadata["filename"],
+        "chunks_stored": len(chunks),
+        "collection": collection_name,
+    }
 
 
 def archive_old_files(keep_recent: int, archive_path: str = "memory_pool_archive") -> dict:
@@ -334,37 +320,24 @@ def get_pool_status() -> dict:
     config = load_config()
     extensions = config.get("supported_extensions", [".md", ".txt"])
     files = get_pool_files(extensions)
+    collection_name = config.get("collection_name", "memory_pool_docs")
 
-    collection_count = 0
-    try:
-        import chromadb
-
-        client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-        collection_name = config.get("collection_name", "memory_pool_docs")
-        if collection_name in [c.name for c in client.list_collections()]:
-            collection = client.get_collection(name=collection_name)
-            collection_count = collection.count()
-    except Exception as e:
-        logger.warning(f"[pool_processor] Failed to get collection count: {e}")
+    counted = run_json(
+        CHROMA_SUBPROCESS_SCRIPT,
+        {"operation": "count_vectors", "collection_name": collection_name},
+        timeout=60,
+        label="count_vectors",
+    )
+    if not counted.get("success"):
+        logger.warning(f"[pool_processor] Failed to get collection count: {counted.get('error')}")
+    collection_count = int(counted.get("count", 0) or 0)
 
     return {
         "enabled": config.get("enabled", False),
         "files_in_pool": len(files),
         "keep_recent": config.get("keep_recent", 10),
         "vectors_stored": collection_count,
-        "collection_name": config.get("collection_name", "memory_pool_docs"),
+        "collection_name": collection_name,
         "newest_file": files[0].name if files else None,
         "oldest_file": files[-1].name if files else None,
     }
-
-
-if __name__ == "__main__":
-    import sys
-
-    if len(sys.argv) > 1 and sys.argv[1] == "status":
-        status = get_pool_status()
-        print(json.dumps(status, indent=2))
-    else:
-        print("Processing memory_pool...")
-        result = process_memory_pool()
-        print(json.dumps(result, indent=2))

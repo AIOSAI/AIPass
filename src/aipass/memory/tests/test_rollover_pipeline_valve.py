@@ -3,7 +3,7 @@
 # Description: Rollover pipeline - the extractor's safety valve, snapshot budget and newest-first guard
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -376,8 +376,8 @@ class TestARefusedWriteMustNotReadAsASuccessfulRollover:
         assert ext._write_memory_file(target, {"sessions": []}) is None
         writer.assert_called_once_with(target, {"sessions": []})
 
-    def test_the_refusal_reaches_the_caller_as_a_failed_extraction(self, monkeypatch, tmp_path):
-        """A refused write must NOT be reported as archived, or the orchestrator vectorizes what the file holds."""
+    def test_the_refusal_reaches_the_caller_as_a_failed_commit(self, monkeypatch, tmp_path):
+        """Extraction writes nothing; a refused commit must NOT read as a trimmed file."""
         ext, mocks = _import_extractor(monkeypatch)
         branch_key = tmp_path.name.lower()
         data = {
@@ -400,11 +400,15 @@ class TestARefusedWriteMustNotReadAsASuccessfulRollover:
         monkeypatch.setattr(ext, "write_memory_file_simple", writer)
 
         result = ext.extract_items(file_path)
+        assert result["success"] is True, result.get("error")
+        writer.assert_not_called()
+
+        committed = ext.commit_trimmed(file_path, result["trimmed"])
 
         assert writer.call_args.args[0] == file_path, "the refusal must come from the rolled file's own write"
-        assert result["success"] is False
-        # No `extracted` key at all, so no caller can read partial work out of a dead run.
-        assert sorted(result) == ["error", "success"], sorted(result)
+        assert committed["success"] is False
+        # No `new_lines` key at all, so no caller can read a trimmed file out of a refused write.
+        assert sorted(committed) == ["error", "success"], sorted(committed)
 
 
 class TestTodayIsNotEvidenceAgainstANumberedEntry:

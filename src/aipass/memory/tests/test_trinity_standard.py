@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
 # Version: 1.2.3
 # Created: 2026-08-25
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
@@ -336,10 +336,6 @@ class TestNoHealthStamping:
     def _stamps_health(source: str) -> bool:
         """True when the source WRITES the field (a quoted key or keyword argument), not merely names it."""
         return '"last_health_check"' in source or "'last_health_check'" in source or "last_health_check=" in source
-
-    def test_line_counter_stamps_no_health_date(self):
-        source = (_MEMORY_ROOT / "apps" / "handlers" / "tracking" / "line_counter.py").read_text(encoding="utf-8")
-        assert not self._stamps_health(source)
 
     def test_the_normalizer_adds_no_status_block(self):
         source = (_MEMORY_ROOT / "apps" / "handlers" / "schema" / "normalize.py").read_text(encoding="utf-8")

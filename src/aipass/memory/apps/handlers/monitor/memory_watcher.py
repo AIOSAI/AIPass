@@ -9,7 +9,7 @@
 """
 Memory File System Watcher
 
-Uses watchdog when present; delegates to line_counter, detector and the rollover orchestrator.
+Uses watchdog when present; delegates to the detector and the rollover orchestrator.
 """
 
 import logging
@@ -33,7 +33,6 @@ except ImportError:
     FileSystemEventHandler = object  # type: ignore[assignment,misc]
     logger.info("Optional dependency 'watchdog' not available")
 
-from aipass.memory.apps.handlers.tracking.line_counter import update_line_count
 from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.repo_root import exists_exactly
@@ -41,6 +40,7 @@ from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.storage.lane import memory_python
 
 logger = get_system_logger()
 
@@ -55,15 +55,10 @@ _startup_check_done = False
 def _check_vector_deps() -> bool:
     """Check whether the memory venv has chromadb and numpy available."""
     import subprocess
-    import sys
-
-    venv_python = _MEMORY_ROOT / ".venv" / "bin" / "python3"
-    if not venv_python.exists():
-        venv_python = Path(sys.executable)
 
     try:
         result = subprocess.run(
-            [str(venv_python), "-c", "import chromadb; import numpy"],
+            [memory_python(), "-c", "import chromadb; import numpy"],
             capture_output=True,
             timeout=10,
         )
@@ -139,7 +134,10 @@ def check_and_rollover() -> Dict[str, Any]:
 
     results["lines_synced"] = 0
 
-    if results["files_over_limit"]:
+    if results["files_over_limit"] and not vector_deps_ok:
+        logger.warning("[memory_watcher] Rollover skipped: vector storage degraded, the files keep their entries")
+        results["rollover_skipped"] = "vector storage degraded"
+    elif results["files_over_limit"]:
         results["rollover_triggered"] = True
 
         try:
@@ -156,8 +154,6 @@ def check_and_rollover() -> Dict[str, Any]:
     results["memory_pool"] = _check_memory_pool()
 
     results["plans"] = _check_plans()
-
-    results["code_archive"] = _check_code_archive()
 
     json_handler.log_operation(
         "check_and_rollover",
@@ -248,17 +244,6 @@ def _check_plans() -> Dict[str, Any]:
     return {"success": True, "pending_files": pending_count, "action": "count_only"}
 
 
-def _check_code_archive() -> Dict[str, Any]:
-    """Check code_archive for new files and index them."""
-    try:
-        from aipass.memory.apps.handlers.archive.indexer import check_for_new_files
-
-        return check_for_new_files()
-    except Exception as e:
-        logger.warning(f"[memory_watcher] Code archive check failed: {e}")
-        return {"success": False, "error": str(e)}
-
-
 def _find_repo_root() -> Path:
     """Repo root for this lane, by ``handlers/repo_root.py``; a local name because tests patch it here."""
     return repo_root.find_repo_root(caller="memory_watcher")
@@ -323,14 +308,6 @@ class MemoryFileWatcher(FileSystemEventHandler):  # type: ignore[misc]
         norm_result = normalize_memory_file(file_path)
         if norm_result.get("changes"):
             self._recent_modifications.add(file_key)
-
-        update_result = update_line_count(file_path)
-
-        if not update_result["success"]:
-            logger.error(
-                f"[memory_watcher] Failed to update metadata for {file_path.name}: {update_result.get('error')}"
-            )
-            return
 
         check_result = check_single_file(file_path)
 
@@ -427,49 +404,3 @@ def get_watcher_status() -> Dict[str, Any]:
         return {"active": True, "error": str(e)}
 
     return {"active": True, "watched_directories": len(branch_paths), "paths": [str(p) for p in branch_paths]}
-
-
-if __name__ == "__main__":
-    import argparse
-    import time
-
-    parser = argparse.ArgumentParser(description="Memory File Watcher - Monitor memory files for rollover")
-    parser.add_argument("command", choices=["start", "stop", "status"], help="Command to execute")
-
-    args = parser.parse_args()
-
-    if args.command == "start":
-        result = start_memory_watcher()
-
-        if result["success"]:
-            print(f"Started watching {result['count']} directories")
-            print("Press Ctrl+C to stop...")
-
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("[memory_watcher] Watcher stopped by user (KeyboardInterrupt)")
-                print("\nStopping...")
-                stop_memory_watcher()
-        else:
-            print(f"Failed to start: {result.get('error')}")
-
-    elif args.command == "stop":
-        result = stop_memory_watcher()
-
-        if result["success"]:
-            print(result["message"])
-        else:
-            print(f"Failed to stop: {result.get('error')}")
-
-    elif args.command == "status":
-        status = get_watcher_status()
-
-        if status["active"]:
-            print("Watcher is ACTIVE")
-            print(f"Watching {status['watched_directories']} directories:")
-            for path in status["paths"]:
-                print(f"  - {path}")
-        else:
-            print("Watcher is INACTIVE")

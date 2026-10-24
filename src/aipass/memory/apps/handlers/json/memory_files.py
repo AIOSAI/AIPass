@@ -20,14 +20,9 @@ from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries
-from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.write_fence import fence_write
 
 logger = get_system_logger()
-
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_CONFIG_DIR = _MEMORY_ROOT / "config"
-_TEMPLATES_DIR = _MEMORY_ROOT / "apps" / "json_templates"
 
 _TRACKED_TRINITY_FILES = {"local.json", "observations.json"}
 
@@ -167,20 +162,14 @@ def _check_entry_counts(file_path: Path, data: Dict[str, Any]) -> None:
     if file_path.name not in _TRACKED_TRINITY_FILES:
         return
 
-    branch = file_path.parent.parent.name.lower()
-    file_type = file_path.stem
+    # In the function: the detector imports this gate at its top.
+    from aipass.memory.apps.handlers.monitor.detector import file_limits
 
-    cfg = config_loader.section("rollover")
-    per_branch = cfg.get("per_branch", {})
-    defaults = cfg.get("defaults", {})
-
-    file_limits = per_branch.get(branch, {}).get(file_type, {})
-    if not file_limits:
-        file_limits = defaults.get(file_type, {})
-    if not file_limits:
+    branch, _file_type, limits = file_limits(config_loader.section("rollover"), file_path)
+    if not limits:
         return
 
-    for section_name, section_cfg in file_limits.items():
+    for section_name, section_cfg in limits.items():
         if section_name.startswith("_"):
             continue
         if not isinstance(section_cfg, dict):
@@ -307,39 +296,3 @@ def validate_memory_file_structure(data: Dict[str, Any]) -> tuple[bool, str]:
         return False, f"Missing metadata fields: {', '.join(missing)}"
 
     return True, ""
-
-
-if __name__ == "__main__":
-    import sys as _sys
-
-    print("\n=== MEMORY FILE I/O HANDLER - Safe Operations Test ===\n")
-
-    if len(_sys.argv) > 1:
-        test_file = Path(_sys.argv[1])
-    else:
-        print("Usage: drone @memory (via handler memory_files.py)")
-        print("No file specified, exiting.")
-        _sys.exit(0)
-
-    if test_file.exists():
-        print(f"[TEST] Reading {test_file.name}...")
-        result = read_memory_file(test_file)
-
-        if result["success"]:
-            file_data = result["data"]
-            print("+ Read successful")
-            print(f"   Document type: {file_data.get('document_metadata', {}).get('document_type')}")
-            entry_counts = {k: len(v) for k, v in file_data.items() if isinstance(v, list)}
-            print(f"   Entries: {entry_counts}")
-
-            valid, error = validate_memory_file_structure(file_data)
-            if valid:
-                print("+ Structure validation passed")
-            else:
-                print(f"- Structure validation failed: {error}")
-        else:
-            print(f"- Read failed: {result['error']}")
-    else:
-        print(f"\n[TEST] Test file not found: {test_file}")
-
-    print()

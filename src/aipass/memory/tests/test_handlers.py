@@ -1,26 +1,23 @@
 # =================== AIPass ====================
 # Name: test_handlers.py
-# Description: Handler-layer tests — rollover extractor, line counter, normalize and the todos operational schema
+# Description: Handler-layer tests — rollover extractor, normalize and the todos operational schema
 # Version: 1.1.1
 # Created: 2026-04-01
-# Modified: 2026-09-28
+# Modified: 2026-10-23
 # =============================================
 
-"""Tests for apps/handlers/rollover/extractor.py, tracking/line_counter.py and schema/normalize.py."""
+"""Tests for apps/handlers/rollover/extractor.py and schema/normalize.py."""
 
 # Targeted handler-layer tests for critical untested handlers.
 #
 # Covers:
 #   - rollover/extractor.py  (_extract_items_v2, helpers)
-#   - tracking/line_counter.py (_count_physical_lines, update_line_count)
 #   - schema/normalize.py (normalize_memory_file)
 #   - todos[] operational schema (rollover ignores them)
 #
 # All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — update_all_memory_files() fleet walk, tests/test_orchestrator_exec.py
-# seedgo: no-test-needed(covered_elsewhere) — normalize_all_memory_files() fleet walk, tests/test_unified_schema.py
 # seedgo: no-test-needed(covered_elsewhere) — extract_with_metadata() wrapper, tests/test_unified_schema.py
 # seedgo: no-test-needed(covered_elsewhere) — the todos count cap, check_todos() in tests/test_detector.py
 
@@ -29,10 +26,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers import write_fence
-from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import extractor
 from aipass.memory.apps.handlers.schema import normalize
-from aipass.memory.apps.handlers.tracking import line_counter
 
 
 # ---------------------------------------------------------------------------
@@ -60,21 +55,6 @@ def _import_extractor(monkeypatch):
         "json_handler": mock_json_handler,
         "memory_files": mock_memory_files,
         "config_loader": mock_config_loader,
-    }
-
-
-def _import_line_counter(monkeypatch):
-    """The real line_counter, its json_handler seam patched at the edge."""
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    mock_memory_files = MagicMock()
-    mock_memory_files.update_metadata = MagicMock(return_value={"success": True})
-
-    monkeypatch.setattr(line_counter, "json_handler", mock_json_handler)
-
-    return line_counter, {
-        "json_handler": mock_json_handler,
-        "memory_files": mock_memory_files,
     }
 
 
@@ -275,160 +255,6 @@ class TestExtractItemsV2:
 # status.health field it stamped; rollover moves entries and no longer edits
 # metadata it does not own. Its pins live on as the sweep in
 # tests/test_trinity_standard.py::TestNoHealthStamping.
-
-
-class TestCreateRolloverBackup:
-    """Test backup and restore file operations."""
-
-    def test_creates_backup_file(self, monkeypatch, tmp_path):
-        ext, _ = _import_extractor(monkeypatch)
-        mem_file = tmp_path / "local.json"
-        mem_file.write_text('{"test": true}', encoding="utf-8")
-
-        result = ext.create_rollover_backup(mem_file)
-        assert result["success"] is True
-
-        backup_path = Path(result["backup_path"])
-        assert backup_path.exists()
-        assert json.loads(backup_path.read_text(encoding="utf-8")) == {"test": True}
-
-    def test_restore_from_backup(self, monkeypatch, tmp_path):
-        ext, _ = _import_extractor(monkeypatch)
-        mem_file = tmp_path / "local.json"
-        mem_file.write_text('{"original": true}', encoding="utf-8")
-
-        ext.create_rollover_backup(mem_file)
-        mem_file.write_text('{"modified": true}', encoding="utf-8")
-
-        result = ext.restore_from_backup(mem_file)
-        assert result["success"] is True
-        assert json.loads(mem_file.read_text(encoding="utf-8")) == {"original": True}
-
-    def test_restore_fails_without_backup(self, monkeypatch, tmp_path):
-        ext, _ = _import_extractor(monkeypatch)
-        mem_file = tmp_path / "local.json"
-        mem_file.write_text("{}", encoding="utf-8")
-
-        result = ext.restore_from_backup(mem_file)
-        assert result["success"] is False
-
-    @staticmethod
-    def _foreign_memory_file(tmp_path, monkeypatch) -> Path:
-        """A branch file in a project beside a fake AIPass root the fence stands on."""
-        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
-        mem_file = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"
-        mem_file.parent.mkdir(parents=True)
-        mem_file.write_text('{"original": true}', encoding="utf-8")
-        return mem_file
-
-    def test_a_backup_outside_the_aipass_root_is_refused_and_creates_nothing(self, monkeypatch, tmp_path):
-        """The 2026-09-17 species: rollover made `.backup/` dirs inside Vera Studio's branches.
-
-        A refused backup must also stop the rollover — the orchestrator already
-        treats a failed backup as "do not proceed", so the refusal reuses that
-        contract rather than inventing one.
-        """
-        ext, _ = _import_extractor(monkeypatch)
-        mem_file = self._foreign_memory_file(tmp_path, monkeypatch)
-
-        result = ext.create_rollover_backup(mem_file)
-
-        assert result["success"] is False
-        assert not (mem_file.parent.parent / ".backup").exists()
-
-    def test_a_restore_outside_the_aipass_root_is_refused_and_the_file_untouched(self, monkeypatch, tmp_path):
-        ext, _ = _import_extractor(monkeypatch)
-        mem_file = self._foreign_memory_file(tmp_path, monkeypatch)
-        backup_dir = mem_file.parent.parent / ".backup"
-        backup_dir.mkdir()
-        (backup_dir / "rollover_backup_local.json").write_text('{"restored": true}', encoding="utf-8")
-        before = mem_file.read_bytes()
-
-        result = ext.restore_from_backup(mem_file)
-
-        assert result["success"] is False
-        assert mem_file.read_bytes() == before
-
-
-# ===========================================================================
-# Tests: tracking/line_counter.py
-# ===========================================================================
-
-
-class TestCountPhysicalLines:
-    """Test _count_physical_lines helper."""
-
-    def test_counts_lines_correctly(self, monkeypatch, tmp_path):
-        lc, _ = _import_line_counter(monkeypatch)
-        f = tmp_path / "test.local.json"
-        f.write_text("line1\nline2\nline3\n", encoding="utf-8")
-        assert lc._count_physical_lines(f) == 3
-
-    def test_returns_zero_for_missing_file(self, monkeypatch, tmp_path):
-        lc, _ = _import_line_counter(monkeypatch)
-        f = tmp_path / "missing.json"
-        assert lc._count_physical_lines(f) == 0
-
-    def test_counts_single_line_no_newline(self, monkeypatch, tmp_path):
-        lc, _ = _import_line_counter(monkeypatch)
-        f = tmp_path / "one.json"
-        f.write_text("single line", encoding="utf-8")
-        assert lc._count_physical_lines(f) == 1
-
-
-class TestUpdateLineCount:
-    """Test update_line_count function."""
-
-    def test_returns_error_for_missing_file(self, monkeypatch, tmp_path):
-        lc, _ = _import_line_counter(monkeypatch)
-        result = lc.update_line_count(tmp_path / "gone.json")
-        assert result["success"] is False
-
-    def test_the_fleet_walk_answers_an_unreadable_registry_never_raises(self, monkeypatch, tmp_path):
-        """report-lines reaches this through orchestrator.sync_line_counts (DPLAN-0354 leg 3b)."""
-        lc, _ = _import_line_counter(monkeypatch)
-        registry = tmp_path / "AIPASS_REGISTRY.json"
-
-        def _raise():
-            raise detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
-
-        monkeypatch.setattr(detector, "_read_registry", _raise)
-
-        result = lc.update_all_memory_files()
-
-        assert result["success"] is False
-        assert str(registry) in result["error"]
-
-    def test_updates_line_count_successfully(self, monkeypatch, tmp_path):
-        lc, _mocks = _import_line_counter(monkeypatch)
-        f = tmp_path / "test.local.json"
-        f.write_text('{\n  "a": 1\n}\n', encoding="utf-8")
-
-        result = lc.update_line_count(f)
-        assert result["success"] is True
-        assert result["lines"] == 3
-
-    def test_counting_lines_writes_nothing(self, monkeypatch, tmp_path):
-        """The health stamp was this function's only write (removed 2026-08-25).
-
-        The file must come back byte-identical: a counter that edits the thing
-        it is counting is how `sync-lines` came to be the fleet's most frequent
-        writer of a field nobody read.
-        """
-        lc, _mocks = _import_line_counter(monkeypatch)
-        f = tmp_path / "test.local.json"
-        original = '{\n  "a": 1\n}\n'
-        f.write_text(original, encoding="utf-8")
-
-        assert lc.update_line_count(f)["success"] is True
-        assert f.read_text(encoding="utf-8") == original
-
-    def test_reports_failure_for_a_missing_file(self, monkeypatch, tmp_path):
-        lc, _mocks = _import_line_counter(monkeypatch)
-
-        result = lc.update_line_count(tmp_path / "absent.local.json")
-        assert result["success"] is False
-        assert "not found" in result["error"].lower()
 
 
 # ===========================================================================

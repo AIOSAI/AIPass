@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-10-03
+# Modified: 2026-10-23
 # Category: memory/tests
 # =============================================
 
@@ -62,11 +62,9 @@ def _import_orchestrator(monkeypatch):
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
 
     mock_extractor = MagicMock()
-    mock_line_counter = MagicMock()
 
     monkeypatch.setattr(orchestrator, "detector", mock_detector)
     monkeypatch.setattr(orchestrator, "extractor", mock_extractor)
-    monkeypatch.setattr(orchestrator, "line_counter", mock_line_counter)
     # The conftest stands mocks in for these two in sys.modules; a module
     # imported at the top of the file bound the real ones, so patch them here.
     monkeypatch.setattr(orchestrator, "logger", MagicMock())
@@ -79,7 +77,6 @@ def _import_orchestrator(monkeypatch):
     return orchestrator, {
         "detector": mock_detector,
         "extractor": mock_extractor,
-        "line_counter": mock_line_counter,
     }
 
 
@@ -124,53 +121,26 @@ class TestExecuteRolloverCheckBranches:
         assert result["triggers_count"] == 0
 
 
-class TestExecuteRolloverBackup:
-    """Tests for the backup phase."""
-
-    def test_backup_fails(self, monkeypatch, tmp_path):
-        """Backup failure skips trigger and adds to failed list."""
-        orch, mocks = _import_orchestrator(monkeypatch)
-        trigger = _make_trigger(tmp_path)
-        mocks["detector"].check_all_branches.return_value = {
-            "success": True,
-            "triggers": [trigger],
-        }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": False,
-            "error": "disk full",
-        }
-
-        result = orch.execute_rollover()
-        assert result["success"] is False
-        assert len(result["failed"]) == 1
-        assert result["failed"][0]["stage"] == "backup"
-
-
 class TestExecuteRolloverExtraction:
     """Tests for the extraction phase."""
 
-    def test_extract_fails_and_restores(self, monkeypatch, tmp_path):
-        """Extraction failure triggers restore_from_backup."""
+    def test_extract_fails(self, monkeypatch, tmp_path):
+        """Extraction failure fails the trigger; nothing is trimmed."""
         orch, mocks = _import_orchestrator(monkeypatch)
         trigger = _make_trigger(tmp_path)
         mocks["detector"].check_all_branches.return_value = {
             "success": True,
             "triggers": [trigger],
-        }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "backup created",
         }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": False,
             "error": "parse error",
         }
-        mocks["extractor"].restore_from_backup.return_value = {"success": True}
 
         result = orch.execute_rollover()
         assert len(result["failed"]) == 1
         assert result["failed"][0]["stage"] == "extraction"
-        mocks["extractor"].restore_from_backup.assert_called_once()
+        mocks["extractor"].commit_trimmed.assert_not_called()
 
     def test_no_branch_in_result(self, monkeypatch, tmp_path):
         """Extraction succeeds but returns no branch field and trigger has empty branch."""
@@ -182,17 +152,13 @@ class TestExecuteRolloverExtraction:
             "success": True,
             "triggers": [trigger],
         }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
-        }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
             "entries": [{"text": "data"}],
             "branch": "",
             "type": "sessions",
             "old_lines": 100,
-            "new_lines": 50,
+            "trimmed": {"sessions": []},
         }
 
         result = orch.execute_rollover()
@@ -210,10 +176,6 @@ class TestExecuteRolloverExtractionSkipped:
         mocks["detector"].check_all_branches.return_value = {
             "success": True,
             "triggers": [trigger],
-        }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
         }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
@@ -234,10 +196,6 @@ class TestExecuteRolloverExtractionSkipped:
         mocks["detector"].check_all_branches.return_value = {
             "success": True,
             "triggers": [trigger],
-        }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
         }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
@@ -272,23 +230,18 @@ class TestExecuteRolloverEmbedding:
             "success": True,
             "triggers": [trigger],
         }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
-        }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
             "entries": [{"text": "memory item"}],
             "branch": trigger.branch or "TEST",
             "type": trigger.memory_type or "sessions",
             "old_lines": 100,
-            "new_lines": 50,
+            "trimmed": {"sessions": []},
         }
-        mocks["extractor"].restore_from_backup.return_value = {"success": True}
         return trigger
 
-    def test_embed_fails_and_restores(self, monkeypatch, tmp_path):
-        """Embedding failure triggers restore."""
+    def test_embed_fails(self, monkeypatch, tmp_path):
+        """Embedding failure fails the trigger; nothing is trimmed."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_to_embedding(monkeypatch, tmp_path, mocks)
 
@@ -301,10 +254,10 @@ class TestExecuteRolloverEmbedding:
         result = orch.execute_rollover()
         assert len(result["failed"]) == 1
         assert result["failed"][0]["stage"] == "embedding"
-        mocks["extractor"].restore_from_backup.assert_called_once()
+        mocks["extractor"].commit_trimmed.assert_not_called()
 
-    def test_no_embeddings_returned_restores_backup(self, monkeypatch, tmp_path):
-        """Embed succeeds but returns empty embeddings — must restore from backup."""
+    def test_no_embeddings_returned_fails(self, monkeypatch, tmp_path):
+        """Embed succeeds but returns empty embeddings — the trigger fails, nothing is trimmed."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_to_embedding(monkeypatch, tmp_path, mocks)
 
@@ -318,27 +271,7 @@ class TestExecuteRolloverEmbedding:
         assert len(result["failed"]) == 1
         assert result["failed"][0]["stage"] == "embedding"
         assert "No embeddings" in result["failed"][0]["error"]
-        mocks["extractor"].restore_from_backup.assert_called_once()
-
-    def test_no_embeddings_restore_fails(self, monkeypatch, tmp_path):
-        """Empty embeddings + restore failure — CRITICAL data loss path."""
-        orch, mocks = _import_orchestrator(monkeypatch)
-        self._setup_to_embedding(monkeypatch, tmp_path, mocks)
-        mocks["extractor"].restore_from_backup.return_value = {
-            "success": False,
-            "error": "backup file missing",
-        }
-
-        monkeypatch.setattr(
-            orch,
-            "encode_batch_subprocess",
-            lambda texts: {"success": True, "embeddings": []},
-        )
-
-        result = orch.execute_rollover()
-        assert len(result["failed"]) == 1
-        assert result["failed"][0]["stage"] == "embedding"
-        mocks["extractor"].restore_from_backup.assert_called_once()
+        mocks["extractor"].commit_trimmed.assert_not_called()
 
 
 class TestExecuteRolloverStorage:
@@ -352,19 +285,14 @@ class TestExecuteRolloverStorage:
             "success": True,
             "triggers": [trigger],
         }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
-        }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
             "entries": [{"text": "item", "_metadata": {"source": "test"}, "timestamp": "2026-01-01"}],
             "branch": trigger.branch or "TEST",
             "type": trigger.memory_type or "sessions",
             "old_lines": 100,
-            "new_lines": 50,
+            "trimmed": {"sessions": []},
         }
-        mocks["extractor"].restore_from_backup.return_value = {"success": True}
 
         monkeypatch.setattr(
             orch,
@@ -395,14 +323,14 @@ class TestExecuteRolloverStorage:
             return {"success": True, "collection": "col", "total_vectors": 1}
 
         monkeypatch.setattr(orch, "store_vectors_subprocess", fake_store)
-        mocks["line_counter"].update_line_count.return_value = {"success": True}
+        mocks["extractor"].commit_trimmed.return_value = {"success": True, "new_lines": 50}
 
         result = orch.execute_rollover()
         assert result["success_count"] == 1
         assert call_count["n"] == 2  # both local and global called
 
-    def test_global_storage_fails_and_restores(self, monkeypatch, tmp_path):
-        """Global storage failure triggers restore -- CRITICAL path."""
+    def test_global_storage_fails(self, monkeypatch, tmp_path):
+        """Global storage failure fails the trigger; the file is never trimmed -- CRITICAL path."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_to_storage(monkeypatch, tmp_path, orch, mocks)
 
@@ -415,26 +343,7 @@ class TestExecuteRolloverStorage:
         result = orch.execute_rollover()
         assert len(result["failed"]) == 1
         assert result["failed"][0]["stage"] == "global_storage"
-        mocks["extractor"].restore_from_backup.assert_called_once()
-
-    def test_global_storage_fails_restore_fails(self, monkeypatch, tmp_path):
-        """Global storage fails AND restore fails -- CRITICAL logging path."""
-        orch, mocks = _import_orchestrator(monkeypatch)
-        self._setup_to_storage(monkeypatch, tmp_path, orch, mocks)
-
-        monkeypatch.setattr(
-            orch,
-            "store_vectors_subprocess",
-            lambda **kw: {"success": False, "error": "chroma crash"},
-        )
-        mocks["extractor"].restore_from_backup.return_value = {
-            "success": False,
-            "error": "backup file missing",
-        }
-
-        result = orch.execute_rollover()
-        assert len(result["failed"]) == 1
-        assert result["failed"][0]["stage"] == "global_storage"
+        mocks["extractor"].commit_trimmed.assert_not_called()
 
 
 class TestExecuteRolloverFullPipeline:
@@ -448,17 +357,13 @@ class TestExecuteRolloverFullPipeline:
             "success": True,
             "triggers": [trigger],
         }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
-        }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
             "entries": [{"text": "mem", "_metadata": {"src": "t"}, "timestamp": "2026-01-01"}],
             "branch": trigger.branch or "TEST",
             "type": trigger.memory_type or "sessions",
             "old_lines": 100,
-            "new_lines": 50,
+            "trimmed": {"sessions": []},
         }
 
         monkeypatch.setattr(
@@ -472,11 +377,11 @@ class TestExecuteRolloverFullPipeline:
             "store_vectors_subprocess",
             lambda **kw: {"success": True, "collection": "mem_TEST", "total_vectors": 5},
         )
-        mocks["line_counter"].update_line_count.return_value = {"success": True}
+        mocks["extractor"].commit_trimmed.return_value = {"success": True, "new_lines": 50}
         return trigger
 
     def test_full_success_pipeline(self, monkeypatch, tmp_path):
-        """Complete success: backup, extract, embed, store global, line update."""
+        """Complete success: extract, embed, store global, trim."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
@@ -496,6 +401,7 @@ class TestExecuteRolloverFullPipeline:
         assert result["triggers_count"] == 1
         assert len(result["results"]) == 1
         assert result["results"][0]["memories_count"] == 1
+        mocks["extractor"].commit_trimmed.assert_called_once()
 
     def test_a_registry_that_turns_unreadable_after_the_check_never_strands_the_entries(self, monkeypatch, tmp_path):
         """The file is already trimmed when the local store's path is looked up; the global store still takes it.
@@ -620,7 +526,7 @@ class TestExecuteRolloverMultiple:
     """Tests with multiple triggers."""
 
     def test_multiple_triggers_mixed_results(self, monkeypatch, tmp_path):
-        """Two triggers: one succeeds, one fails at backup."""
+        """Two triggers: one succeeds, one fails at extraction."""
         orch, mocks = _import_orchestrator(monkeypatch)
 
         trigger_ok = _make_trigger(tmp_path, branch="GOOD")
@@ -631,21 +537,20 @@ class TestExecuteRolloverMultiple:
             "triggers": [trigger_ok, trigger_bad],
         }
 
-        def fake_backup(fp):
+        def fake_extract(fp):
             """Fail for BAD branch, succeed for others."""
             if "BAD" in str(fp):
-                return {"success": False, "error": "disk full"}
-            return {"success": True, "message": "ok"}
+                return {"success": False, "error": "parse error"}
+            return {
+                "success": True,
+                "entries": [{"text": "m", "_metadata": {}, "timestamp": "2026-01-01"}],
+                "branch": "GOOD",
+                "type": "sessions",
+                "old_lines": 80,
+                "trimmed": {"sessions": []},
+            }
 
-        mocks["extractor"].create_rollover_backup.side_effect = fake_backup
-        mocks["extractor"].extract_with_metadata.return_value = {
-            "success": True,
-            "entries": [{"text": "m", "_metadata": {}, "timestamp": "2026-01-01"}],
-            "branch": "GOOD",
-            "type": "sessions",
-            "old_lines": 80,
-            "new_lines": 40,
-        }
+        mocks["extractor"].extract_with_metadata.side_effect = fake_extract
 
         monkeypatch.setattr(
             orch,
@@ -658,7 +563,7 @@ class TestExecuteRolloverMultiple:
             "store_vectors_subprocess",
             lambda **kw: {"success": True, "collection": "c", "total_vectors": 1},
         )
-        mocks["line_counter"].update_line_count.return_value = {"success": True}
+        mocks["extractor"].commit_trimmed.return_value = {"success": True, "new_lines": 50}
 
         # Mock post-rollover chain (success_count > 0 triggers it)
         mock_trigger_mod = MagicMock()
@@ -676,17 +581,13 @@ class TestExecuteRolloverMultiple:
         assert result["triggers_count"] == 2
         assert len(result["failed"]) == 1
 
-    def test_line_count_update_fails(self, monkeypatch, tmp_path):
-        """Line count update failure after successful storage is non-fatal."""
+    def test_a_refused_trim_after_storage_fails_the_trigger(self, monkeypatch, tmp_path):
+        """Vectors stored, file whole: the trigger fails at the commit stage and the next run retries it."""
         orch, mocks = _import_orchestrator(monkeypatch)
         trigger = _make_trigger(tmp_path)
         mocks["detector"].check_all_branches.return_value = {
             "success": True,
             "triggers": [trigger],
-        }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
         }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
@@ -694,7 +595,7 @@ class TestExecuteRolloverMultiple:
             "branch": "TEST",
             "type": "sessions",
             "old_lines": 100,
-            "new_lines": 50,
+            "trimmed": {"sessions": []},
         }
         monkeypatch.setattr(
             orch,
@@ -707,10 +608,7 @@ class TestExecuteRolloverMultiple:
             "store_vectors_subprocess",
             lambda **kw: {"success": True, "collection": "c", "total_vectors": 1},
         )
-        mocks["line_counter"].update_line_count.return_value = {
-            "success": False,
-            "error": "permission denied",
-        }
+        mocks["extractor"].commit_trimmed.return_value = {"success": False, "error": "permission denied"}
 
         # Mock post-rollover chain
         mock_trigger_mod = MagicMock()
@@ -723,9 +621,9 @@ class TestExecuteRolloverMultiple:
         monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
-        # Still succeeds -- line count is non-fatal
-        assert result["success"] is True
-        assert result["success_count"] == 1
+        assert result["success"] is False
+        assert result["success_count"] == 0
+        assert result["failed"][0]["stage"] == "commit"
 
     def test_local_storage_with_path(self, monkeypatch, tmp_path):
         """Local chroma path exists and local storage succeeds."""
@@ -735,17 +633,13 @@ class TestExecuteRolloverMultiple:
             "success": True,
             "triggers": [trigger],
         }
-        mocks["extractor"].create_rollover_backup.return_value = {
-            "success": True,
-            "message": "ok",
-        }
         mocks["extractor"].extract_with_metadata.return_value = {
             "success": True,
             "entries": [{"text": "m", "_metadata": {}, "timestamp": "2026-01-01"}],
             "branch": "TEST",
             "type": "sessions",
             "old_lines": 100,
-            "new_lines": 50,
+            "trimmed": {"sessions": []},
         }
         monkeypatch.setattr(
             orch,
@@ -760,7 +654,7 @@ class TestExecuteRolloverMultiple:
             "store_vectors_subprocess",
             lambda **kw: {"success": True, "collection": "c", "total_vectors": 1},
         )
-        mocks["line_counter"].update_line_count.return_value = {"success": True}
+        mocks["extractor"].commit_trimmed.return_value = {"success": True, "new_lines": 50}
 
         # Mock post-rollover chain
         mock_trigger_mod = MagicMock()
@@ -775,38 +669,6 @@ class TestExecuteRolloverMultiple:
         result = orch.execute_rollover()
         assert result["success"] is True
         assert result["results"][0]["local_stored"] is True
-
-
-# ===========================================================================
-# sync_line_counts
-# ===========================================================================
-
-
-class TestSyncLineCounts:
-    """Tests for sync_line_counts."""
-
-    def test_sync_success(self, monkeypatch):
-        """line_counter returns success."""
-        orch, mocks = _import_orchestrator(monkeypatch)
-        mocks["line_counter"].update_all_memory_files.return_value = {
-            "success": True,
-            "updated": 5,
-            "failed": 0,
-        }
-        result = orch.sync_line_counts()
-        assert result["success"] is True
-        assert result["updated"] == 5
-
-    def test_sync_failure(self, monkeypatch):
-        """line_counter returns failure."""
-        orch, mocks = _import_orchestrator(monkeypatch)
-        mocks["line_counter"].update_all_memory_files.return_value = {
-            "success": False,
-            "updated": 0,
-            "failed": 3,
-        }
-        result = orch.sync_line_counts()
-        assert result["success"] is False
 
 
 class TestTheEmbedRefusalNamesItsCause:

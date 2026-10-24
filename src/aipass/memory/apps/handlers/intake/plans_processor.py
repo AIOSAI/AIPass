@@ -14,10 +14,8 @@ ML runs in a subprocess on the memory venv's python (venv isolation).
 
 import hashlib
 import json
-import re
 import os
-import subprocess
-import sys
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -27,14 +25,7 @@ from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.repo_root import module_file
-from aipass.memory.apps.handlers.storage.chroma_subprocess import embedder_reason
-
-_HANDLERS_DIR = module_file(__file__).parent.parent
-EMBED_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "vector" / "embed_subprocess.py"
-CHROMA_SUBPROCESS_SCRIPT = _HANDLERS_DIR / "storage" / "chroma_subprocess.py"
-
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_MEMORY_VENV_PYTHON = _MEMORY_ROOT / ".venv" / "bin" / "python"
+from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
 
 def _find_repo_root() -> Path:
@@ -45,17 +36,7 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="plans_processor")
 
 
-def _get_memory_python() -> str:
-    env_override = os.environ.get("AIPASS_MEMORY_PYTHON")
-    if env_override:
-        return env_override
-    if _MEMORY_VENV_PYTHON.exists():
-        return str(_MEMORY_VENV_PYTHON)
-    return sys.executable
-
-
-MEMORY_PYTHON = _get_memory_python()
-
+_MEMORY_ROOT = module_file(__file__).parents[3]
 _PROCESSED_MANIFEST = _MEMORY_ROOT / "memory_json" / ".plans_processed.json"
 
 MAX_CHUNK_CHARS = 1500  # ~375 tokens, fits well with all-MiniLM-L6-v2
@@ -156,7 +137,9 @@ def _load_manifest() -> Dict[str, Any]:
 def _save_manifest(manifest: Dict[str, Any]) -> None:
     """Save processed files manifest."""
     _PROCESSED_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-    _PROCESSED_MANIFEST.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    tmp = _PROCESSED_MANIFEST.with_suffix(".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    os.replace(tmp, _PROCESSED_MANIFEST)
 
 
 def _content_hash(text: str) -> str:
@@ -203,24 +186,7 @@ def _is_stale(plan_file: Path, entry: Any, text: str) -> bool:
 
 def _embed_texts(texts: List[str], timeout: int = 120) -> dict:
     """Encode texts via subprocess."""
-    input_data = json.dumps({"texts": texts})
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(EMBED_SUBPROCESS_SCRIPT)],
-            input=input_data,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if result.returncode != 0:
-            return {
-                "success": False,
-                "error": f"Embedding failed (exit {result.returncode}): {embedder_reason(result)}",
-            }
-        return json.loads(result.stdout)
-    except Exception as e:
-        logger.warning(f"[plans_processor] Embedding subprocess failed: {e}")
-        return {"success": False, "error": str(e)}
+    return run_json(EMBED_SUBPROCESS_SCRIPT, {"texts": texts}, timeout=timeout, label="Embedding")
 
 
 def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans") -> dict:
@@ -234,20 +200,7 @@ def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans
         "metadatas": metadatas,
         "db_path": None,  # global
     }
-    try:
-        result = subprocess.run(
-            [str(MEMORY_PYTHON), str(CHROMA_SUBPROCESS_SCRIPT)],
-            input=json.dumps(input_data),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
-            return {"success": False, "error": result.stderr or "Storage failed"}
-        return json.loads(result.stdout)
-    except Exception as e:
-        logger.warning(f"[plans_processor] Vector storage subprocess failed: {e}")
-        return {"success": False, "error": str(e)}
+    return run_json(CHROMA_SUBPROCESS_SCRIPT, input_data, timeout=60, label="Storage")
 
 
 def process_plans() -> Dict[str, Any]:

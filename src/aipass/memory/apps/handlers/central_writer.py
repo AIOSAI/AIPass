@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: Central File Writer Handler
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2025-11-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Central File Writer Handler
 MEMORY.central.json is memory's API output; dashboards read it.
 """
 
+import os
 from json import load as json_load, dump as json_dump
 from pathlib import Path
 from datetime import datetime
@@ -28,16 +29,12 @@ _MEMORY_ROOT = module_file(__file__).parents[2]
 
 
 def _find_repo_root() -> Path:
-    """Repo root for this lane — resolved by ``handlers/repo_root.py``.
-
-    Kept as a local name because callers and tests patch it here.
-    """
+    """Repo root via ``handlers/repo_root.py``; a local name because callers and tests patch it here."""
     return repo_root.find_repo_root(caller="central_writer")
 
 
 CENTRAL_FILE = _find_repo_root() / ".ai_central" / "MEMORY.central.json"
 CHROMA_DB_PATH = _MEMORY_ROOT / ".chroma"
-ARCHIVE_DIR = _MEMORY_ROOT / ".archive"
 
 
 def count_chroma_vectors() -> int:
@@ -64,58 +61,16 @@ def count_chroma_vectors() -> int:
         conn.close()
 
 
-def count_archive_files() -> int:
-    """Count total archive files in .archive directory"""
-    try:
-        if not ARCHIVE_DIR.exists():
-            return 0
-
-        archive_files = list(ARCHIVE_DIR.glob("*.md"))
-        return len(archive_files)
-
-    except Exception as e:
-        logger.error(f"[central_writer] Failed to count archive files: {e}")
-        raise Exception(f"Failed to count archive files: {e}")
-
-
-def get_last_rollover_timestamp() -> str:
-    """Get timestamp of last rollover operation"""
-    try:
-        if not ARCHIVE_DIR.exists():
-            return ""
-
-        archive_files = list(ARCHIVE_DIR.glob("*.md"))
-        if not archive_files:
-            return ""
-
-        latest = max(archive_files, key=lambda f: f.stat().st_mtime)
-        mtime = datetime.fromtimestamp(latest.stat().st_mtime)
-
-        return mtime.isoformat()
-
-    except Exception as e:
-        logger.error(f"[central_writer] Failed to get rollover timestamp: {e}")
-        raise Exception(f"Failed to get rollover timestamp: {e}")
-
-
 def collect_stats() -> Dict[str, Any]:
     """Collect all memory statistics"""
-    return {
-        "total_vectors": count_chroma_vectors(),
-        "total_archives": count_archive_files(),
-        "last_rollover": get_last_rollover_timestamp(),
-    }
+    return {"total_vectors": count_chroma_vectors()}
 
 
 def read_central_file() -> Dict[str, Any]:
     """Read current central file contents"""
     try:
         if not CENTRAL_FILE.exists():
-            return {
-                "service": "memory",
-                "last_updated": "",
-                "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
-            }
+            return {"service": "memory", "last_updated": "", "stats": {"total_vectors": 0}}
 
         with open(CENTRAL_FILE, "r", encoding="utf-8") as f:
             return json_load(f)
@@ -126,12 +81,14 @@ def read_central_file() -> Dict[str, Any]:
 
 
 def write_central_file(data: Dict[str, Any]) -> None:
-    """Write data to central file"""
+    """Write data to central file; a reader never sees a half-written one."""
     try:
         CENTRAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CENTRAL_FILE.with_suffix(".tmp")
 
-        with open(CENTRAL_FILE, "w", encoding="utf-8") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             json_dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, CENTRAL_FILE)
 
     except Exception as e:
         logger.error(f"[central_writer] Failed to write central file: {e}")
@@ -166,43 +123,3 @@ def update_central(verbose: bool = False) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"[central_writer] Failed to update central: {e}")
         return {"success": False, "error": str(e)}
-
-
-def get_current_stats() -> Dict[str, Any]:
-    """Get current memory statistics without writing to file"""
-    try:
-        stats = collect_stats()
-        return {"success": True, **stats}
-
-    except Exception as e:
-        logger.warning(f"[central_writer] Failed to get current stats: {e}")
-        return {"success": False, "error": str(e)}
-
-
-if __name__ == "__main__":
-    print("\n=== Memory Central Writer ===\n")
-
-    print("Collecting statistics...")
-    stats_result = get_current_stats()
-
-    if stats_result["success"]:
-        print(f"  Total Vectors: {stats_result.get('total_vectors', 0)}")
-        print(f"  Total Archives: {stats_result.get('total_archives', 0)}")
-        print(f"  Last Rollover: {stats_result.get('last_rollover', 'Never')}")
-    else:
-        print(f"Error collecting stats: {stats_result.get('error')}")
-
-    print()
-
-    print("Updating central file...")
-    result = update_central(verbose=True)
-
-    if result["success"]:
-        print(f"Updated: {result['updated']}")
-        if "stats" in result:
-            print(f"  Vectors: {result['stats']['total_vectors']}")
-            print(f"  Archives: {result['stats']['total_archives']}")
-    else:
-        print(f"Update failed: {result.get('error')}")
-
-    print()

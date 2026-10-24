@@ -3,7 +3,7 @@
 # Description: Tests for the central writer handler
 # Version: 1.0.2
 # Created: 2026-04-05
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -35,7 +35,6 @@ def _import_central_writer(monkeypatch, tmp_path):
     monkeypatch.setattr(central_writer, "_MEMORY_ROOT", tmp_path)
     monkeypatch.setattr(central_writer, "CENTRAL_FILE", tmp_path / "central" / "MEMORY.central.json")
     monkeypatch.setattr(central_writer, "CHROMA_DB_PATH", tmp_path / ".chroma")
-    monkeypatch.setattr(central_writer, "ARCHIVE_DIR", tmp_path / ".archive")
 
     return central_writer
 
@@ -100,114 +99,21 @@ class TestCountChromaVectors:
         assert not cw.CENTRAL_FILE.exists()
 
 
-class TestCountArchiveFiles:
-    """Test count_archive_files .md counting."""
-
-    def test_dir_does_not_exist(self, monkeypatch, tmp_path):
-        """Should return 0 when .archive directory is missing."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        assert cw.count_archive_files() == 0
-
-    def test_with_md_files(self, monkeypatch, tmp_path):
-        """Should count only .md files."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
-
-        (archive / "session1.md").write_text("# Session 1", encoding="utf-8")
-        (archive / "session2.md").write_text("# Session 2", encoding="utf-8")
-        (archive / "notes.txt").write_text("not counted", encoding="utf-8")
-
-        assert cw.count_archive_files() == 2
-
-    def test_empty_archive_dir(self, monkeypatch, tmp_path):
-        """Should return 0 when .archive exists but has no .md files."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
-
-        assert cw.count_archive_files() == 0
-
-    def test_access_failure_raises(self, monkeypatch, tmp_path):
-        """Should raise Exception when directory access fails."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        class _DeniedArchive:
-            """An archive that exists but refuses listing — handed to the product, pathlib untouched."""
-
-            def exists(self):
-                return True
-
-            def glob(self, pattern):
-                raise PermissionError(f"access denied listing {pattern}")
-
-        monkeypatch.setattr(cw, "ARCHIVE_DIR", _DeniedArchive())
-
-        with pytest.raises(Exception, match=r"Failed to count archive files: access denied listing \*\.md"):
-            cw.count_archive_files()
-
-
-class TestGetLastRolloverTimestamp:
-    """Test get_last_rollover_timestamp file stat reading."""
-
-    def test_no_archive_dir(self, monkeypatch, tmp_path):
-        """Should return empty string when .archive does not exist."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        assert cw.get_last_rollover_timestamp() == ""
-
-    def test_no_md_files(self, monkeypatch, tmp_path):
-        """Should return empty string when .archive has no .md files."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
-
-        assert cw.get_last_rollover_timestamp() == ""
-
-    def test_with_archive_files(self, monkeypatch, tmp_path):
-        """Should return ISO timestamp of most recently modified .md file."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
-
-        (archive / "old.md").write_text("old", encoding="utf-8")
-        (archive / "new.md").write_text("new", encoding="utf-8")
-
-        result = cw.get_last_rollover_timestamp()
-
-        assert result != ""
-        assert "T" in result
-
-
 class TestCollectStats:
     """Test collect_stats aggregation."""
 
-    def test_returns_all_fields(self, monkeypatch, tmp_path):
-        """Should return dict with total_vectors, total_archives, last_rollover."""
+    def test_returns_the_vector_count_only(self, monkeypatch, tmp_path):
+        """The stats are the one number memory can measure."""
+        cw = _import_central_writer(monkeypatch, tmp_path)
+        _create_chroma_db(tmp_path / ".chroma" / "chroma.sqlite3", num_rows=4)
+
+        assert cw.collect_stats() == {"total_vectors": 4}
+
+    def test_zero_when_empty(self, monkeypatch, tmp_path):
+        """Should return zero when no data exists."""
         cw = _import_central_writer(monkeypatch, tmp_path)
 
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
-        (archive / "session.md").write_text("# test", encoding="utf-8")
-
-        stats = cw.collect_stats()
-
-        assert "total_vectors" in stats
-        assert "total_archives" in stats
-        assert "last_rollover" in stats
-        assert stats["total_archives"] == 1
-        assert stats["total_vectors"] == 0
-
-    def test_all_zeros_when_empty(self, monkeypatch, tmp_path):
-        """Should return zeros/empty when no data exists."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        stats = cw.collect_stats()
-
-        assert stats["total_vectors"] == 0
-        assert stats["total_archives"] == 0
-        assert stats["last_rollover"] == ""
+        assert cw.collect_stats() == {"total_vectors": 0}
 
 
 class TestReadCentralFile:
@@ -221,8 +127,7 @@ class TestReadCentralFile:
 
         assert result["service"] == "memory"
         assert result["last_updated"] == ""
-        assert result["stats"]["total_vectors"] == 0
-        assert result["stats"]["total_archives"] == 0
+        assert result["stats"] == {"total_vectors": 0}
 
     def test_file_exists(self, monkeypatch, tmp_path):
         """Should read and return existing JSON contents."""
@@ -233,7 +138,7 @@ class TestReadCentralFile:
         data = {
             "service": "memory",
             "last_updated": "2026-03-01T12:00:00",
-            "stats": {"total_vectors": 42, "total_archives": 5, "last_rollover": "2026-02-28"},
+            "stats": {"total_vectors": 42},
             "extra_field": "preserved",
         }
         (central_dir / "MEMORY.central.json").write_text(json.dumps(data), encoding="utf-8")
@@ -271,6 +176,7 @@ class TestWriteCentralFile:
 
         written = json.loads(central_file.read_text(encoding="utf-8"))
         assert written["stats"]["total_vectors"] == 10
+        assert not central_file.with_suffix(".tmp").exists(), "the atomic write left its temp file"
 
     def test_overwrites_existing_file(self, monkeypatch, tmp_path):
         """Should overwrite existing file content."""
@@ -336,7 +242,7 @@ class TestUpdateCentral:
             "service": "memory",
             "last_updated": "",
             "_note": "placeholder - not yet populated",
-            "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
+            "stats": {"total_vectors": 0},
         }
         (central_dir / "MEMORY.central.json").write_text(json.dumps(old_data), encoding="utf-8")
 
@@ -357,7 +263,7 @@ class TestUpdateCentral:
             "service": "memory",
             "last_updated": "2026-01-01",
             "custom_field": "keep_me",
-            "stats": {"total_vectors": 0, "total_archives": 0, "last_rollover": ""},
+            "stats": {"total_vectors": 0},
         }
         (central_dir / "MEMORY.central.json").write_text(json.dumps(old_data), encoding="utf-8")
 
@@ -440,58 +346,3 @@ class TestTheBareWorldTheOldPinCouldNotSurvive:
         assert result["success"] is True
         ours = [call for call in mock_handler.log_operation.call_args_list if call[0][0] == "update_central"]
         assert len(ours) == 1
-
-
-class TestGetCurrentStats:
-    """Test get_current_stats read-only stats collection."""
-
-    def test_success(self, monkeypatch, tmp_path):
-        """Should return success=True with stats fields."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        result = cw.get_current_stats()
-
-        assert result["success"] is True
-        assert "total_vectors" in result
-        assert "total_archives" in result
-        assert "last_rollover" in result
-
-    def test_does_not_write_file(self, monkeypatch, tmp_path):
-        """Should NOT create or modify the central file."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        cw.get_current_stats()
-
-        central_file = tmp_path / "central" / "MEMORY.central.json"
-        assert not central_file.exists()
-
-    def test_failure_returns_error(self, monkeypatch, tmp_path):
-        """Should return success=False with error when stats collection fails."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        monkeypatch.setattr(cw, "collect_stats", MagicMock(side_effect=RuntimeError("db error")))
-
-        result = cw.get_current_stats()
-
-        assert result["success"] is False
-        assert "error" in result
-        assert "db error" in result["error"]
-
-    def test_with_real_data(self, monkeypatch, tmp_path):
-        """Should return actual counts from real test data."""
-        cw = _import_central_writer(monkeypatch, tmp_path)
-
-        db_file = tmp_path / ".chroma" / "chroma.sqlite3"
-        _create_chroma_db(db_file, num_rows=3)
-
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
-        (archive / "s1.md").write_text("session 1", encoding="utf-8")
-        (archive / "s2.md").write_text("session 2", encoding="utf-8")
-
-        result = cw.get_current_stats()
-
-        assert result["success"] is True
-        assert result["total_vectors"] == 3
-        assert result["total_archives"] == 2
-        assert result["last_rollover"] != ""

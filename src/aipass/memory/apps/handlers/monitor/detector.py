@@ -13,7 +13,6 @@ Todos are counted (check_todos, one branch) but never fed to the fleet walk: it 
 """
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any
 from dataclasses import dataclass
@@ -22,7 +21,6 @@ from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
-from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 
@@ -218,68 +216,11 @@ def _count_file_lines(file_path: Path) -> int:
         return 0
 
 
-_TEMPLATES_DIR = module_file(__file__).parents[3] / "templates"
-_TEMPLATE_MAP = {
-    "local": _TEMPLATES_DIR / "LOCAL.template.json",
-    "observations": _TEMPLATES_DIR / "OBSERVATIONS.template.json",
-}
-
-
-def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str) -> Path | None:
-    """Recreate a missing .trinity file from canonical template (never outside the AIPass root)."""
-    trinity_dir = branch_path / ".trinity"
-    file_path = trinity_dir / f"{memory_type}.json"
-    # Refused before the mkdir, which is already a write.
-    if write_fence.fence_write(file_path, lane="recreate_trinity_file") is not None:
-        return None
-
-    template_path = _TEMPLATE_MAP.get(memory_type)
-    if not template_path or not template_path.exists():
-        logger.warning(f"[detector] No template for {memory_type}")
-        return None
-
-    try:
-        template = json.loads(template_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as e:
-        logger.warning(f"[detector] Failed to read template {template_path}: {e}")
-        return None
-
-    today = datetime.now().strftime("%Y-%m-%d")
-    lower_name = branch_name.lower()
-
-    def _walk(val):
-        if isinstance(val, str):
-            return val.replace("{{BRANCH}}", lower_name).replace("{{DATE}}", today)
-        if isinstance(val, list):
-            return [_walk(item) for item in val]
-        if isinstance(val, dict):
-            return {k: _walk(v) for k, v in val.items()}
-        return val
-
-    data = _walk(template)
-
-    trinity_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        file_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-        logger.info(f"[detector] Recreated {file_path}")
-        json_handler.log_operation(
-            "recreate_trinity_file",
-            {"branch": branch_name, "type": memory_type, "path": str(file_path)},
-        )
-        return file_path
-    except OSError as e:
-        logger.warning(f"[detector] Failed to write {file_path}: {e}")
-        return None
-
-
-def _limits_for(file_path: Path) -> tuple[str, str, Dict[str, Any]]:
-    """The v2 limits for one memory file -> ``(branch_name, file_type, file_limits)``.
+def file_limits(cfg: Dict[str, Any], file_path: Path) -> tuple[str, str, Dict[str, Any]]:
+    """The v2 limits one rollover section gives a memory file -> ``(branch_name, file_type, file_limits)``.
 
     per_branch[branch][file_type], falling back to defaults[file_type]; ``{}`` when neither has any.
+    The one rule for the detector, the extractor and the write gate, so they cannot disagree.
     """
     if file_path.parent.name == ".trinity":
         branch_name = file_path.parents[1].name.lower()
@@ -288,11 +229,15 @@ def _limits_for(file_path: Path) -> tuple[str, str, Dict[str, Any]]:
         branch_name = file_path.stem.split(".")[0].lower()
         file_type = file_path.stem.split(".")[-1]
 
-    cfg = config_loader.section("rollover")
-    file_limits = cfg.get("per_branch", {}).get(branch_name, {}).get(file_type, {})
-    if not file_limits:
-        file_limits = cfg.get("defaults", {}).get(file_type, {})
-    return branch_name, file_type, file_limits
+    limits = cfg.get("per_branch", {}).get(branch_name, {}).get(file_type, {})
+    if not limits:
+        limits = cfg.get("defaults", {}).get(file_type, {})
+    return branch_name, file_type, limits
+
+
+def _limits_for(file_path: Path) -> tuple[str, str, Dict[str, Any]]:
+    """``file_limits`` read from the live config."""
+    return file_limits(config_loader.section("rollover"), file_path)
 
 
 # The capped containers, in the order a reason line names them.
@@ -319,33 +264,42 @@ def undrainable_in(data: Any, file_limits: Dict[str, Any]) -> List[str]:
     return reasons
 
 
-def undrainable_containers(file_path: Path) -> List[str]:
-    """``undrainable_in`` for one file on disk; ``[]`` when it cannot be read or has no limits.
-
-    ``_should_rollover`` already reports both in the same walk.
-    """
+def _read_memory(file_path: Path) -> tuple[int, Any]:
+    """One read of a memory file: its physical line count and its parsed JSON, None when it does not parse."""
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        text = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
+        return 0, None
+    lines = len(text.splitlines())
+    try:
+        return lines, json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
+        return lines, None
+
+
+def undrainable_containers(file_path: Path, loaded: tuple[int, Any] | None = None) -> List[str]:
+    """``undrainable_in`` for one file; ``[]`` when it cannot be read or has no limits.
+
+    ``loaded`` is ``_read_memory``'s answer when the caller already holds it.
+    """
+    _lines, data = loaded if loaded is not None else _read_memory(file_path)
+    if data is None:
         return []
     _branch, _type, file_limits = _limits_for(file_path)
     return undrainable_in(data, file_limits)
 
 
-def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
+def _should_rollover(file_path: Path, loaded: tuple[int, Any] | None = None) -> tuple[bool, int, str, str]:
     """
     Check if file should rollover -> (should_rollover, current_lines, schema_version, v2_reason).
 
     Fires only ABOVE the limit: the extractor drains `len - limit`, so `>=` here would spin forever.
+    ``loaded`` is ``_read_memory``'s answer when the caller already holds it.
     """
-    current_lines = _count_file_lines(file_path)
-
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
+    current_lines, data = loaded if loaded is not None else _read_memory(file_path)
+    if data is None:
         return (False, current_lines, "3.0.0", "parse failure — skipped")
 
     branch_name, file_type, file_limits = _limits_for(file_path)
@@ -415,13 +369,10 @@ def check_all_branches() -> Dict[str, Any]:
             file_path = _get_memory_file_path(branch, memory_type)
 
             if file_path is None:
-                branch_path = Path(branch.get("path", ""))
-                if branch_path.exists():
-                    file_path = _recreate_trinity_file(branch_path, branch_name, memory_type)
-                if file_path is None:
-                    continue
+                continue
 
-            should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path)
+            loaded = _read_memory(file_path)
+            should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path, loaded)
 
             if should_trigger:
                 trigger = RolloverTrigger(
@@ -559,7 +510,8 @@ def get_rollover_stats() -> Dict[str, Any]:
                 continue
 
             stats["files_checked"] += 1
-            should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path)
+            loaded = _read_memory(file_path)
+            should_trigger, current_lines, schema_ver, v2_reason = _should_rollover(file_path, loaded)
 
             stat_entry: Dict[str, Any] = {
                 "current": current_lines,
@@ -568,7 +520,7 @@ def get_rollover_stats() -> Dict[str, Any]:
             }
             if v2_reason:
                 stat_entry["v2_reason"] = v2_reason
-            undrainable = undrainable_containers(file_path)
+            undrainable = undrainable_containers(file_path, loaded)
             if undrainable:
                 stat_entry["undrainable"] = undrainable
                 stats["files_undrainable"] += 1
