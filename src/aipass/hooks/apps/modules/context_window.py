@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Shared transcript reader (usage + model) and model-aware compact-window resolver (DPLAN-0253)
 # Branch: hooks
 # Layer: apps/modules
@@ -8,8 +8,9 @@
 # Modified: 2026-10-24
 # =============================================
 
-"""Reads live context fill and the model from a session transcript, and resolves the
-window Claude Code really runs — shared by pre_compact_prep.py and context_gauge.py.
+"""Live context fill and the model from a session transcript, and the window Claude Code runs.
+
+Shared by pre_compact_prep.py and context_gauge.py.
 
 Live context size ≈ input_tokens + cache_read_input_tokens + cache_creation_input_tokens
 of the most recent assistant turn (proven readable S326).
@@ -25,6 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
+from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -237,7 +239,7 @@ def print_introspection() -> None:
 
 def handle_command(command: str, args: list) -> bool:
     """Route context_window commands from drone @hooks."""
-    if command in ("--help", "-h", "help"):
+    if command in ("--help", "-h", "help") or (command == "context_window" and wants_help(args)):
         CONSOLE.print("[bold cyan]context_window[/bold cyan] — Transcript usage + compact-window resolver")
         CONSOLE.print()
         CONSOLE.print(

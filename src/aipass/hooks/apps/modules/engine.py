@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.1.1
+# Version: 2.2.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
@@ -572,7 +572,7 @@ def handle_command(command: str, args: list) -> bool:
             print_introspection()
             return True
 
-    if command in ("--help", "-h", "help"):
+    if command in ("--help", "-h", "help") or (command == "engine" and wants_help(args)):
         CONSOLE.print("[bold cyan]engine[/bold cyan] — Hook dispatch engine")
         CONSOLE.print()
         CONSOLE.print("  drone @hooks log       Tail recent hook activity")

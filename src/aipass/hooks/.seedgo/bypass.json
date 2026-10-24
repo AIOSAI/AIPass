@@ -1391,13 +1391,13 @@
     {
       "file": "apps/modules/engine_closure.py",
       "standard": "logged_fallback",
-      "lines": [167],
+      "lines": [169],
       "reason": "Fleet green leg 5, item 2: None is 'ruff could not run' and the success path never returns it (a list, [] when clean); the docstring names it. The edit is allowed and logged because two layers stand behind this one (the promoted copy, the fail-closed engine), and refusing every edit to 119 closure files on a missing linter would lock out the repair too."
     },
     {
       "file": "apps/modules/diagnostics_state.py",
       "standard": "logged_fallback",
-      "lines": [205, 208, 211, 214],
+      "lines": [206, 209, 212, 215],
       "reason": "Fleet green leg 5: revalidate's None is 'unknown' (pyright missing, timed out, unparseable, failed) and its docstring says it must never be read as clean; the success path returns a list. edit_gate keeps the recorded errors on None, so the fence stays as it was: fail-closed."
     },
     {
@@ -1409,13 +1409,13 @@
     {
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
-      "lines": [287, 439, 444, 531, 713, 798, 855, 939],
+      "lines": [288, 440, 445, 532, 714, 799, 856, 940],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value (turn 0, 'never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
     {
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
-      "lines": [58],
+      "lines": [60],
       "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write."
     },
     {

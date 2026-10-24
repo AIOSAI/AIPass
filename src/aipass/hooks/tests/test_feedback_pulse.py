@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_feedback_pulse.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Tests for feedback pulse handler and toggle module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-10-05
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
@@ -23,7 +23,10 @@ import pytest
 
 from aipass.hooks.apps.handlers.prompt import feedback_pulse
 from aipass.hooks.apps.handlers.prompt.feedback_pulse import handle
+from aipass.hooks.apps.modules import feedback
 from aipass.hooks.apps.modules.feedback import handle_command
+
+_PULSE_ON = {"UserPromptSubmit": {"feedback_pulse": {"enabled": True}}}
 
 
 class TestFeedbackPulseHandler:
@@ -259,7 +262,8 @@ class TestFeedbackPulseToggle:
 class TestFeedbackToggleModule:
     """Tests for the feedback toggle CLI module (drone @hooks feedback)."""
 
-    def test_handle_command_feedback_shows_status(self, capsys, tmp_path):
+    def test_handle_command_feedback_shows_status(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.setattr(feedback, "find_project_config", lambda: _PULSE_ON)
         with patch(
             "aipass.hooks.apps.modules.feedback._sentinel",
             return_value=tmp_path / "nonexistent" / "sentinel",
@@ -268,6 +272,27 @@ class TestFeedbackToggleModule:
 
         captured = capsys.readouterr()
         assert "ENABLED" in captured.err
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"UserPromptSubmit": {"feedback_pulse": {"enabled": False}}},
+            {**_PULSE_ON, "hooks_enabled": False},
+            None,
+        ],
+    )
+    def test_status_reads_disabled_when_hooks_config_turns_the_pulse_off(self, config, capsys, tmp_path, monkeypatch):
+        """Status once read only the sentinel and said ENABLED where `status` showed the hook off."""
+        monkeypatch.setattr(feedback, "find_project_config", lambda: config)
+        with patch(
+            "aipass.hooks.apps.modules.feedback._sentinel",
+            return_value=tmp_path / "feedback_off",
+        ):
+            assert handle_command("feedback", []) is True
+
+        err = capsys.readouterr().err
+        assert "DISABLED" in err
+        assert "ENABLED" not in err
 
     def test_handle_command_feedback_disabled(self, capsys, tmp_path):
         sentinel = tmp_path / "feedback_off"

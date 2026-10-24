@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: feedback.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Feedback pulse toggle — on/off control for periodic feedback ask
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-18
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Feedback pulse toggle — on/off control for the periodic feedback ask via drone @hooks feedback."""
@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config.loader import find_project_config
 from aipass.hooks.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
 
@@ -47,6 +48,15 @@ def _sentinel() -> Path | None:
     return aipass_dir / "feedback_off"
 
 
+def _configured_on() -> bool:
+    """Whether hooks.json fires the pulse here: the sentinel alone cannot turn it on (status reads the same)."""
+    config = find_project_config()
+    if not config or not config.get("hooks_enabled", True):
+        return False
+    hook = config.get("UserPromptSubmit", {}).get("feedback_pulse", {})
+    return isinstance(hook, dict) and bool(hook.get("enabled", False))
+
+
 def print_introspection() -> None:
     """Print module structure for drone routing."""
     sentinel = _sentinel()
@@ -54,6 +64,8 @@ def print_introspection() -> None:
         status = "NO PROJECT"
     else:
         status = "DISABLED" if sentinel.exists() else "ENABLED"
+        if not _configured_on():
+            status = "DISABLED in hooks.json"
     CONSOLE.print(f"[bold cyan]feedback[/bold cyan] — Feedback pulse ({status})")
 
 
