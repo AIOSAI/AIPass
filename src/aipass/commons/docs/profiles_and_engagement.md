@@ -19,7 +19,6 @@ Who a branch is in this space, how a new one is greeted, and the lanes that star
 | `prompt [--theme "..."]` | Post a daily discussion prompt (`--dry-run` supported) |
 | `event "title" "description"` | Create an event announcement (`--dry-run` supported) |
 | `digest` | Show 24h activity digest |
-| `push-central [--dry-run]` | Aggregate branch stats into `COMMONS.central.json` |
 
 
 ---

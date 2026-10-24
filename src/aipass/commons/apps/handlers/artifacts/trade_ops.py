@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade_ops.py
 # Description: Trading & Ephemeral Item Operations Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -11,57 +11,14 @@ Trading & Ephemeral Item Operations Handler
 """
 
 import json
-import os
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
-
-
-def _find_registry_path() -> str:
-    """Walk up from __file__ to find AIPASS_REGISTRY.json in the project root."""
-    current = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(10):
-        candidate = os.path.join(current, "AIPASS_REGISTRY.json")
-        if os.path.exists(candidate):
-            return candidate
-        current = os.path.dirname(current)
-    return os.path.join(os.path.expanduser("~"), "AIPASS_REGISTRY.json")
-
-
-BRANCH_REGISTRY_PATH = _find_registry_path()
-
-RARITY_COLORS = {
-    "common": "white",
-    "uncommon": "green",
-    "rare": "blue",
-    "legendary": "yellow",
-    "unique": "magenta",
-}
-
-
-def _resolve_branch_name(mention: str) -> Optional[str]:
-    """Resolve a @mention to a branch name (lowercase-normalized).
-
-    None means not registered; an unreadable registry raises, so "not found" never means "could not look"."""
-    name = mention.lstrip("@").lower()
-
-    if not os.path.exists(BRANCH_REGISTRY_PATH):
-        return None
-
-    try:
-        with open(BRANCH_REGISTRY_PATH, encoding="utf-8") as f:
-            registry = json.load(f)
-        for branch in registry.get("branches", []):
-            if branch.get("name", "").lower() == name:
-                return name
-        return None
-    except Exception:
-        logger.error("[trade_ops] Failed to resolve branch name from registry")
-        raise
+from aipass.commons.apps.handlers.identity.identity_ops import resolve_registered_name
 
 
 def _now_utc() -> str:
@@ -117,7 +74,7 @@ def gift_artifact(args: List[str]) -> dict:
         return {"success": False, "error": "Artifact ID must be a number"}
 
     try:
-        recipient = _resolve_branch_name(args[1])
+        recipient = resolve_registered_name(args[1])
     except Exception as exc:
         logger.warning(f"[trade_ops] gift stopped: branch registry unreadable: {exc}")
         return {"success": False, "error": f"Branch registry unreadable: {exc}"}
@@ -152,7 +109,14 @@ def gift_artifact(args: List[str]) -> dict:
             close_db(conn)
             return {"success": False, "error": f"You don't own artifact {artifact_id}. Only the owner can gift it."}
 
-        conn.execute("UPDATE artifacts SET owner = ? WHERE id = ?", (recipient, artifact_id))
+        # Owner in the WHERE: a concurrent gift or trade of the same artifact moves 0 rows here.
+        moved = conn.execute(
+            "UPDATE artifacts SET owner = ? WHERE id = ? AND owner = ?", (recipient, artifact_id, sender)
+        ).rowcount
+        if not moved:
+            conn.rollback()
+            close_db(conn)
+            return {"success": False, "error": f"Artifact {artifact_id} changed owner while gifting; nothing moved"}
         conn.execute(
             "INSERT INTO artifact_history (artifact_id, action, from_agent, to_agent, details) "
             "VALUES (?, 'gifted', ?, ?, ?)",
@@ -192,7 +156,7 @@ def trade_artifact(args: List[str]) -> dict:
         return {"success": False, "error": "Artifact IDs must be numbers"}
 
     try:
-        partner = _resolve_branch_name(args[2])
+        partner = resolve_registered_name(args[2])
     except Exception as exc:
         logger.warning(f"[trade_ops] trade stopped: branch registry unreadable: {exc}")
         return {"success": False, "error": f"Branch registry unreadable: {exc}"}
@@ -236,8 +200,17 @@ def trade_artifact(args: List[str]) -> dict:
             close_db(conn)
             return {"success": False, "error": f"{partner} doesn't own artifact {their_id}"}
 
-        conn.execute("UPDATE artifacts SET owner = ? WHERE id = ?", (partner, your_id))
-        conn.execute("UPDATE artifacts SET owner = ? WHERE id = ?", (sender, their_id))
+        # Owners in the WHERE: if either side changed hands meanwhile, the whole trade rolls back.
+        moved = conn.execute(
+            "UPDATE artifacts SET owner = ? WHERE id = ? AND owner = ?", (partner, your_id, sender)
+        ).rowcount
+        moved += conn.execute(
+            "UPDATE artifacts SET owner = ? WHERE id = ? AND owner = ?", (sender, their_id, partner)
+        ).rowcount
+        if moved != 2:
+            conn.rollback()
+            close_db(conn)
+            return {"success": False, "error": "An artifact changed owner while trading; nothing moved"}
 
         conn.execute(
             "INSERT INTO artifact_history (artifact_id, action, from_agent, to_agent, details) "
@@ -399,22 +372,21 @@ def find_item(args: List[str]) -> dict:
             now = datetime.now(timezone.utc)
             expires_dt = datetime.strptime(artifact["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
             if now > expires_dt:
-                conn.execute(
-                    "INSERT INTO artifact_history (artifact_id, action, from_agent, to_agent, details) "
-                    "VALUES (?, 'expired', ?, NULL, ?)",
-                    (artifact_id, artifact["owner"], f"Ephemeral item '{artifact['name']}' expired"),
-                )
-                conn.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
-                conn.commit()
+                # Left for sweep_expired, which removes the history rows first as the foreign key requires.
                 close_db(conn)
                 return {"success": False, "error": f"Artifact {artifact_id} has expired and is no longer available"}
 
         old_owner = artifact["owner"]
 
-        conn.execute(
-            "UPDATE artifacts SET owner = ?, expires_at = NULL WHERE id = ?",
-            (finder, artifact_id),
-        )
+        # Old owner in the WHERE: of two finders at once, only the first moves the row.
+        moved = conn.execute(
+            "UPDATE artifacts SET owner = ?, expires_at = NULL WHERE id = ? AND owner = ? AND expires_at IS NOT NULL",
+            (finder, artifact_id, old_owner),
+        ).rowcount
+        if not moved:
+            conn.rollback()
+            close_db(conn)
+            return {"success": False, "error": f"Artifact {artifact_id} was already found"}
         conn.execute(
             "INSERT INTO artifact_history (artifact_id, action, from_agent, to_agent, details) "
             "VALUES (?, 'found', ?, ?, ?)",
@@ -453,7 +425,7 @@ def mint_event_artifact(args: List[str]) -> dict:
     warnings = []
     for mention in mentions:
         try:
-            branch = _resolve_branch_name(mention)
+            branch = resolve_registered_name(mention)
         except Exception as exc:
             logger.warning(f"[trade_ops] mint stopped: branch registry unreadable: {exc}")
             return {"success": False, "error": f"Branch registry unreadable: {exc}"}

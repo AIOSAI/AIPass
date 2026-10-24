@@ -7,7 +7,7 @@ What you missed, and how to choose what you are told about.
 
 | Command | Description |
 |---------|-------------|
-| `catchup` | Summary of what you missed since last visit |
+| `catchup` | Summary of what you missed since last visit; marks the mentions it shows as read |
 | `activity` | Recent comments across all threads |
 | `watch <room/post/thread> <id>` | All notifications for a target |
 | `mute <room/post/thread> <id>` | Silence notifications |

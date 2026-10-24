@@ -81,11 +81,6 @@
       "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
     },
     {
-      "file": "apps/modules/central.py",
-      "standard": "introspection",
-      "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
-    },
-    {
       "file": "apps/modules/space.py",
       "standard": "introspection",
       "reason": "Entry point main() intercepts a help flag anywhere after the verb before routing (HELP_AWARE_COMMANDS). Module-level --help interception unnecessary."
@@ -321,11 +316,6 @@
       "reason": "format_time_ago() depth 5 — tight utility with try/except + if/elif for time delta calculation. Duplicate of feed_ops pattern."
     },
     {
-      "file": "apps/handlers/central/central_writer.py",
-      "standard": "naming",
-      "reason": "Redundant prefix — all handlers follow {domain}_{type}.py pattern for consistency across 19 handler domains"
-    },
-    {
       "file": "apps/handlers/curation/reaction_queries.py",
       "standard": "unused_function",
       "reason": "get_reaction_summary() — social utility called by other branches via drone @commons for displaying reaction summaries on posts/comments"
@@ -350,12 +340,6 @@
       "standard": "logged_fallback",
       "lines": [115],
       "reason": "True here means the command was claimed, not that it succeeded: the reader of stdout closed the pipe, so there is no caller left to tell (commons' decision, DPLAN-0354 leg 5)"
-    },
-    {
-      "file": "apps/modules/central.py",
-      "standard": "logged_fallback",
-      "lines": [65],
-      "reason": "Router after error(): error() marks the command failed and cli resolve_exit answers 2; True means claimed, the protocol of every handle_command (commons' decision, DPLAN-0354 leg 5)"
     },
     {
       "file": "apps/modules/commons_identity.py",

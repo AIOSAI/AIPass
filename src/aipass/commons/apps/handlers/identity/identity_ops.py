@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: identity_ops.py
 # Description: Identity operations handler
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -182,6 +182,12 @@ def _match_by_name(registry_path: Path, branch_name: str) -> Optional[Dict[str, 
             return branch
 
     return None
+
+
+def resolve_registered_name(mention: str) -> Optional[str]:
+    """Resolve a @mention against the AIPass registry only, lowercased; None if unregistered, raises if unreadable."""
+    name = mention.lstrip("@").lower()
+    return name if _match_by_name(BRANCH_REGISTRY_PATH, name) else None
 
 
 def _search_registries(matcher: Callable[[Path], Optional[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:

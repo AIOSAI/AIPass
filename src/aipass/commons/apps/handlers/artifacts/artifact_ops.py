@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact_ops.py
 # Description: Artifact Operations Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -15,40 +15,20 @@ Returns dicts for module display layer.
 """
 
 import json
-import os
-from typing import List, Optional
+from typing import List
 from datetime import datetime, timezone, timedelta
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
 from aipass.commons.apps.handlers.json import json_handler
+from aipass.commons.apps.handlers.identity.identity_ops import resolve_registered_name
 
 
 # Constants
-def _find_registry_path() -> str:
-    """Walk up from __file__ to find AIPASS_REGISTRY.json in the project root."""
-    current = os.path.dirname(os.path.abspath(__file__))
-    for _ in range(10):
-        candidate = os.path.join(current, "AIPASS_REGISTRY.json")
-        if os.path.exists(candidate):
-            return candidate
-        current = os.path.dirname(current)
-    return os.path.join(os.path.expanduser("~"), "AIPASS_REGISTRY.json")
-
-
-BRANCH_REGISTRY_PATH = _find_registry_path()
 
 VALID_RARITIES = ("common", "uncommon", "rare", "legendary", "unique")
 VALID_TYPES = ("crafted", "found", "birth_certificate", "event", "seasonal", "joint", "system")
-
-RARITY_COLORS = {
-    "common": "white",
-    "uncommon": "green",
-    "rare": "blue",
-    "legendary": "yellow",
-    "unique": "magenta",
-}
 
 
 # =============================================================================
@@ -56,50 +36,20 @@ RARITY_COLORS = {
 # =============================================================================
 
 
-def _validate_metadata(metadata_str: str) -> Optional[dict]:
-    """Validate JSON metadata string. Must be shallow (one level deep max)."""
+def _validate_metadata(metadata_str: str) -> dict:
+    """Parse a JSON metadata string; raise ValueError unless it is a shallow dict."""
     try:
         data = json.loads(metadata_str)
-    except (json.JSONDecodeError, TypeError):
-        logger.warning("[artifact_ops] Invalid metadata JSON string")
-        return None
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("metadata is not valid JSON") from exc
 
     if not isinstance(data, dict):
-        return None
+        raise ValueError("metadata is not a JSON object")
 
-    for value in data.values():
-        if isinstance(value, (dict, list)):
-            return None
+    if any(isinstance(value, (dict, list)) for value in data.values()):
+        raise ValueError("metadata is nested")
 
     return data
-
-
-def _resolve_branch_name(mention: str) -> Optional[str]:
-    """Resolve a @mention to a branch name (lowercase-normalized).
-
-    Returns None when no registered branch has that name. An unreadable
-    registry raises instead, so "not found" never stands in for "could not look".
-    """
-    name = mention.lstrip("@").lower()
-
-    if not os.path.exists(BRANCH_REGISTRY_PATH):
-        return None
-
-    try:
-        with open(BRANCH_REGISTRY_PATH, encoding="utf-8") as f:
-            registry = json.load(f)
-        for branch in registry.get("branches", []):
-            if branch.get("name", "").lower() == name:
-                return name
-        return None
-    except Exception:
-        logger.error("[artifact_ops] Failed to resolve branch name from registry")
-        raise
-
-
-# =============================================================================
-# ARTIFACT OPERATIONS
-# =============================================================================
 
 
 def craft_artifact(args: List[str]) -> dict:
@@ -145,8 +95,10 @@ def craft_artifact(args: List[str]) -> dict:
     if rarity not in VALID_RARITIES:
         return {"success": False, "error": f"Invalid rarity '{rarity}'. Must be one of: {', '.join(VALID_RARITIES)}"}
 
-    metadata = _validate_metadata(metadata_str)
-    if metadata is None:
+    try:
+        metadata = _validate_metadata(metadata_str)
+    except ValueError as exc:
+        logger.warning(f"[artifact_ops] Refused metadata: {exc}")
         return {"success": False, "error": "Invalid metadata: must be valid shallow JSON (no nested objects/arrays)"}
 
     from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
@@ -375,7 +327,7 @@ def collab_artifact(args: List[str]) -> dict:
             i += 1
 
     try:
-        resolved_names = [(mention, _resolve_branch_name(mention)) for mention in mentioned]
+        resolved_names = [(mention, resolve_registered_name(mention)) for mention in mentioned]
     except Exception as exc:
         logger.warning(f"[artifact_ops] collab stopped: branch registry unreadable: {exc}")
         return {"success": False, "error": f"Branch registry unreadable: {exc}"}
@@ -467,6 +419,8 @@ def sign_artifact(args: List[str]) -> dict:
 
     try:
         conn = get_db()
+        # Write lock before the read: two signers at once would each save a list missing the other.
+        conn.execute("BEGIN IMMEDIATE")
 
         row = conn.execute("SELECT * FROM joint_pending WHERE id = ?", (pending_id,)).fetchone()
         if not row:

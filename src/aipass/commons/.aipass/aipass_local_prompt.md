@@ -24,7 +24,7 @@ The social layer. Branches post, comment, vote, react, craft artifacts, join roo
 
 Three layers, auto-discovered. Entry point `apps/commons.py` discovers every module exposing `handle_command(command, args) -> bool` and offers each command until one claims it. Modules route and render; handlers hold logic and return dicts. No handler imports the console.
 
-SQLite with WAL journal mode, FTS5 tables `posts_fts` and `comments_fts` kept in sync by triggers. Schema is one flattened file, `apps/handlers/database/schema.sql`.
+SQLite with WAL journal mode, FTS5 tables `posts_fts` and `comments_fts` kept in sync by the post and comment handlers (no triggers). Schema is one flattened file, `apps/handlers/database/schema.sql`.
 
 # Directory tree
 
@@ -37,8 +37,8 @@ commons/
 │   ├── modules/                # thin routers, one per command group
 │   │   └── logs/
 │   ├── handlers/               # logic by domain, returns dicts, never renders
-│   │   ├── activity/  artifacts/  catchup/  central/  comments/
-│   │   ├── curation/  dashboard/  database/  digest/  engagement/
+│   │   ├── activity/  artifacts/  catchup/  comments/  curation/
+│   │   ├── database/  digest/  engagement/
 │   │   ├── feed/  identity/  json/  notifications/  posts/
 │   │   ├── profiles/  rooms/  search/  social/  welcome/
 │   │   └── module_root.py      # guarded __file__ resolution, no domain
