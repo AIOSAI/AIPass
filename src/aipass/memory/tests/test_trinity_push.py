@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-27
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -757,7 +757,7 @@ class TestDryRunWritesNothing:
 class TestThePushedFileIsCanonical:
     """The output is measured by the standard's own checker, not by opinion."""
 
-    def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path):
+    def test_a_pushed_branch_satisfies_the_trinity_checker(self, tmp_path, monkeypatch):
         pytest.importorskip("aipass.seedgo.apps.modules.door_trinity")
         local = {
             "document_metadata": {"created": "2026-01-01", "status": {"health": "healthy"}},
@@ -777,6 +777,14 @@ class TestThePushedFileIsCanonical:
         plan = tp.plan_branch("guinea", root, _config())
         tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
 
+        # The checker judges against the config the push was handed, never the host's operator file.
+        pushed_with = {
+            **_config(),
+            "entry_limits": {**_config()["entry_limits"], "draft_percent": entry_limits.draft_percent()},
+        }
+        monkeypatch.setattr(
+            sys.modules[check_branch.__module__], "load_memory_config", lambda: copy.deepcopy(pushed_with)
+        )
         result = check_branch(str(root))
         failing = [check["name"] for check in result["checks"] if check["score"] < 100]
         messages = [str(check.get("message")) for check in result["checks"] if check["score"] < 100]
