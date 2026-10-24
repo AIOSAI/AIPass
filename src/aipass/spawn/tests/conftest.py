@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared test fixtures for spawn test suite
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -17,7 +17,6 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 from pathlib import Path
-from typing import Any
 from unittest.mock import patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
@@ -134,29 +133,6 @@ def pinned_console_width() -> None:
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
-
-
-class _BusRecorder:
-    """Stands where display._TRIGGER stands: records each fire, answers like an idle bus."""
-
-    def __init__(self) -> None:
-        self.fired: list[tuple[str, dict[str, Any]]] = []
-
-    def fire(self, event: str, **data: Any) -> dict[str, Any]:
-        """Record one fire; nothing is dispatched."""
-        self.fired.append((event, data))
-        return {"event": event, "handlers": 0, "ran": 0, "failed": 0}
-
-
-@pytest.fixture(autouse=True)
-def cli_trigger_bus(monkeypatch) -> _BusRecorder:
-    """Every test's cli header fires into a recorder, never the real trigger bus.
-
-    _TRIGGER_LOADED=True stops display's lazy import of the real trigger."""
-    recorder = _BusRecorder()
-    monkeypatch.setattr(display, "_TRIGGER", recorder)
-    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
-    return recorder
 
 
 @pytest.fixture(autouse=True)

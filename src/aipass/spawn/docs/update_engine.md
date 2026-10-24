@@ -3,7 +3,7 @@
 # The update engine
 
 **Branch** spawn · **Code** `apps/handlers/update_ops.py`, `apps/handlers/update_ignore.py`,
-`apps/handlers/json_ops.py`, `apps/modules/update.py`
+`aipass.aipass.shared.json_ops`, `apps/modules/update.py`
 
 Update is **preview-only by default**; `--apply` is what executes. The verbs and flags live
 in `drone @spawn update --help`. Everything below is what the engine decides once it runs.
@@ -22,9 +22,12 @@ phase.
    `UpdateIgnoreUnreadable` before any write; `update <class> --all` reports it and goes on
    to the next branch.
 3. **Directories** — Walk the template's directories and create any the branch is missing.
+   Anything named in `file_ops.SKIP_NAMES` (tool caches, `.git`) is skipped, the same set
+   the mint skips.
 4. **Files** — Walk the template's files and decide per file: missing → add (placeholders
    replaced, atomically written) · existing `.py` → **skip by design** · existing `.json` →
-   deep merge (existing values win, plus the list policy below) · existing `.md` → compare
+   deep merge (existing values win, plus the list policy below), written and backed up only
+   when the parsed document changes, never for key order alone · existing `.md` → compare
    and report, never write · `passport.json` → heal against a narrow allowlist only
    · create-only paths → skip entirely · a file already present under a
    `dropbox/` or `.archive/` directory → never read, compared or merged, and no report row
@@ -65,7 +68,8 @@ both doors follow.
 The engine compares an existing `.md` against the **rendered** template and reports one
 line per file: `matches`, `differs`, `absent` (it was missing, so it was added), or
 `unreadable` when either side cannot be decoded as text. Unreadable is its own answer rather
-than a guessed `differs`.
+than a guessed `differs`. The template is rendered with the branch passport's own purpose and
+class; `{{DATE}}` renders as today, so a README stamped on an earlier day still reads `differs`.
 
 Nothing is written. A README or branch-prompt diet is the owner's judgment about what to
 keep and what to move into `docs/`, not something a template overwrite can perform: every
@@ -131,8 +135,8 @@ needs a dispatch to the branch that owns the file rather than a fleet update.
 `update <class> --all` walks the registry, skips spawn itself (the lane runs in spawn's own
 process, so it cannot rewrite the module it is executing), and reports per branch plus a
 totals line: additions, updates, py-skipped, owner-protected, and markdown drift reported
-but never written.
+but never written. With no `*_REGISTRY.json` above the cwd it exits 1.
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-24

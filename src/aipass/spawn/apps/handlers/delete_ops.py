@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete_ops.py
 # Description: Delete handler — branch deletion by name or path, and whole-project retirement
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Delete handler implementation for branch lifecycle management."""
@@ -25,6 +25,7 @@ from aipass.spawn.apps.handlers.registry import (
     find_registry,
     is_protected,
     load_registry,
+    registry_lock,
     save_registry,
     branches_as_list,
 )
@@ -97,8 +98,14 @@ def _unregister_archived_passport(archive_dir):
     return None
 
 
-def _remove_from_registry(registry, branch_name, registry_path):
+def _remove_from_registry(branch_name, registry_path):
     """Remove branch from registry and save; True if the save succeeded."""
+    with registry_lock(registry_path):
+        return _remove_and_save(load_registry(registry_path), branch_name, registry_path)
+
+
+def _remove_and_save(registry, branch_name, registry_path):
+    """Drop the branch's entry from a registry loaded under the lock, then save it."""
     branches = registry.get("branches", [])
     if isinstance(branches, dict):
         for key in list(branches.keys()):
@@ -220,11 +227,13 @@ def delete_branch(
             _cleanup_partial_archive(archive_dir)
             return _error_result(branch_name, unregister_error)
 
-    registry_updated = _remove_from_registry(registry, branch_name, registry_path)
-    if registry_updated:
-        logger.info(f"[delete] Removed {branch_name} from registry")
-    else:
-        logger.error(f"[delete] Failed to update registry after removing {branch_name}")
+    # A failed save leaves the entry pointing at the tree, so the tree stays and the archive goes.
+    if not _remove_from_registry(branch_name, registry_path):
+        msg = f"Failed to save {registry_path} - {branch_name} left registered and in place"
+        logger.error(f"[delete] {msg}")
+        _cleanup_partial_archive(archive_dir)
+        return _error_result(branch_name, msg)
+    logger.info(f"[delete] Removed {branch_name} from registry")
 
     try:
         shutil.rmtree(str(branch_dir))
@@ -233,7 +242,7 @@ def delete_branch(
         msg = f"Archive created but failed to remove directory: {exc}"
         logger.error(f"[delete] {msg}")
         write_receipts([receipt], "failed", repo_root())
-        return _error_result(branch_name, msg, str(archive_dir), registry_updated)
+        return _error_result(branch_name, msg, str(archive_dir), True)
 
     write_receipts([receipt], "retired" if retire else "deleted", repo_root())
 
@@ -262,7 +271,7 @@ def delete_branch(
         "branch": branch_name,
         "success": True,
         "archive_path": str(archive_dir),
-        "registry_updated": registry_updated,
+        "registry_updated": True,
         "retired": retire,
     }
 

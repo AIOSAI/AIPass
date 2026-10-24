@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-07-11
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
@@ -646,8 +646,10 @@ class TestFixDryRunFullyReadOnly:
         with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=None):
             result = handle_sync_registry(["--fix", "--dry-run"])
 
+        out, err = capsys.readouterr()
         assert result == 1
-        assert "no *_REGISTRY.json found" in capsys.readouterr().err
+        assert "no registry found" in err
+        assert "No stale entries" not in out, "a missing registry is not a clean sync report"
 
 
 class TestUnifiedOwnerHeuristic:
@@ -694,3 +696,121 @@ class TestUnifiedOwnerHeuristic:
 
         assert fix_owner["name"] == ensure_owner["name"] == "newer"
         assert fix_result["applied"] is True
+
+
+class TestSyncRegistryCommand:
+    """sync-registry through handle_sync_registry: which registry it touches, and when it refuses."""
+
+    def test_an_unreadable_registry_with_fix_exits_1_and_keeps_its_bytes(self, tmp_path, monkeypatch, capsys):
+        """Pins --fix saving {"branches": []} with a new id over a registry it could not read."""
+
+        reg = tmp_path / "AIPASS_REGISTRY.json"
+        reg.write_text('<<<<<<< HEAD\n{"metadata": {"id": "proj-id"}, "branches": []}\n', encoding="utf-8")
+        before = reg.read_bytes()
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_sync_registry([str(tmp_path), "--fix"]) == 1
+
+        assert "could not be read" in capsys.readouterr().err
+        assert reg.read_bytes() == before
+
+    def test_fix_and_check_refuse_an_unreadable_registry(self, tmp_path):
+
+        reg = tmp_path / "AIPASS_REGISTRY.json"
+        reg.write_text("{not json", encoding="utf-8")
+
+        fixed = fix_owner_identity(registry_path=reg)
+        checked = check_owner_identity(registry_path=reg)
+
+        assert "could not be read" in fixed["error"] and fixed["applied"] is False
+        assert reg.read_text(encoding="utf-8") == "{not json"
+        assert checked["clean"] is False
+        assert [i["flag"] for i in checked["issues"]] == ["unreadable_registry"]
+
+    def test_a_named_project_is_synced_not_the_cwd_project(self, tmp_path, monkeypatch):
+        """Pins `sync-registry /B --fix` from inside A rewriting A's entries."""
+
+        project_a, project_b = tmp_path / "a", tmp_path / "b"
+        project_a.mkdir()
+        project_b.mkdir()
+        reg_a = _write_registry(project_a, metadata={"version": "1.0.0", "id": "id-a"})
+        reg_b = _write_registry(project_b, metadata={"version": "1.0.0", "id": "id-b"})
+        _make_branch(project_a, "alpha", "alpha")
+        _make_branch(project_b, "beta", "beta")
+        before_a = reg_a.read_bytes()
+        monkeypatch.chdir(project_a)
+
+        assert handle_sync_registry([str(project_b), "--fix"]) == 0
+
+        assert reg_a.read_bytes() == before_a
+        assert [b["name"] for b in json.loads(reg_b.read_text(encoding="utf-8"))["branches"]] == ["BETA"]
+
+    def test_a_named_path_with_no_registry_exits_1_and_leaves_the_cwd_registry(self, tmp_path, monkeypatch, capsys):
+
+        project_a, elsewhere = tmp_path / "a", tmp_path / "elsewhere"
+        project_a.mkdir()
+        elsewhere.mkdir()
+        reg_a = _write_registry(project_a, metadata={"version": "1.0.0", "id": "id-a"})
+        _make_branch(project_a, "alpha", "alpha")
+        before_a = reg_a.read_bytes()
+        monkeypatch.chdir(project_a)
+
+        assert handle_sync_registry([str(elsewhere), "--fix"]) == 1
+
+        assert "No *_REGISTRY.json found" in capsys.readouterr().err
+        assert reg_a.read_bytes() == before_a
+
+    def test_a_branch_moved_by_hand_keeps_its_entry_and_sealed_flags(self, tmp_path, monkeypatch):
+        """Pins --fix deleting the moved entry as stale, owner and admin flags with it."""
+
+        _make_branch(tmp_path, "devpulse", "src/devpulse", passport_rid="proj-id")
+        entry = _entry("DEVPULSE", "devpulse", owner=True, registry_id="uid-dp")
+        entry["admin"] = True
+        reg = _write_registry(tmp_path, metadata={"version": "1.0.0", "id": "proj-id"}, branches=[entry])
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_sync_registry([str(tmp_path), "--fix"]) == 0
+
+        [kept] = json.loads(reg.read_text(encoding="utf-8"))["branches"]
+        assert kept["path"] == "src/devpulse"
+        assert (kept["owner"], kept["admin"], kept["registry_id"]) == (True, True, "uid-dp")
+
+    def test_a_hyphenated_branch_is_registered_once(self, tmp_path, monkeypatch):
+        """Pins `create my-agent` (MY_AGENT) gaining a second MY-AGENT entry from --fix."""
+
+        _make_branch(tmp_path, "my-agent", "my-agent", passport_rid="proj-id")
+        reg = _write_registry(
+            tmp_path,
+            metadata={"version": "1.0.0", "id": "proj-id"},
+            branches=[_entry("MY_AGENT", "my-agent", owner=True, registry_id="uid-ma")],
+        )
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_sync_registry([str(tmp_path), "--fix"]) == 0
+
+        assert [b["name"] for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]] == ["MY_AGENT"]
+
+    def test_owner_check_and_fix_never_follow_an_entry_out_of_the_project(self, tmp_path):
+        """Pins fix rewriting the passport of an entry whose path climbs out of the project."""
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        outside = _make_branch(tmp_path, "stray", "stray", passport_rid="someone-elses-id")
+        _make_branch(project, "alpha", "alpha", passport_rid="proj-id")
+        reg = _write_registry(
+            project,
+            metadata={"version": "1.0.0", "id": "proj-id"},
+            branches=[
+                _entry("alpha", "alpha", owner=True, registry_id="uid-a"),
+                _entry("stray", "../stray", created="2026-02-01", registry_id="uid-s"),
+            ],
+        )
+        passport = outside / ".trinity" / "passport.json"
+        before = passport.read_bytes()
+
+        checked = check_owner_identity(registry_path=reg)
+        fixed = fix_owner_identity(registry_path=reg)
+
+        assert not [i for i in checked["issues"] if i["flag"] == "passport_mismatch"]
+        assert not [a for a in fixed["actions"] if "stray" in a]
+        assert passport.read_bytes() == before

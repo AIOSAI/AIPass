@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, retire-project, sync-registry)
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -15,7 +15,7 @@
 import io
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -1229,6 +1229,40 @@ class TestDeleteByPath:
         assert executed[-1]["caller"] == "@devpulse"
         assert executed[-1]["registry"] == str(registry)
 
+    def test_a_failed_registry_save_keeps_the_branch_and_drops_the_archive(self, capsys, tmp_path, monkeypatch):
+        """Ran red while the tree was removed after a failed save and the delete exited 0."""
+        root, branch, registry = _foreign_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch)
+        before = _tree_bytes(branch)
+        failed_save = Mock(return_value=False)
+        monkeypatch.setattr("aipass.spawn.apps.handlers.delete_ops.save_registry", failed_save)
+
+        result = handle_delete([str(branch), "--retire", "--yes"])
+
+        assert result == 1
+        assert failed_save.call_count == 1
+        assert "registry" in _said(capsys).lower()
+        assert _tree_bytes(branch) == before
+        assert _registry_names(registry) == ["WORKER"]
+        assert list((root / ".archive" / "deleted_branches").iterdir()) == []
+        assert _deletion_rows(tmp_path) == []
+
+    def test_a_retire_delete_archives_the_branch_git_and_chroma(self, tmp_path, monkeypatch):
+        """Ran red while ARCHIVE_EXCLUDE held .git and .chroma: history and vectors went with the rmtree."""
+        root, branch, _ = _foreign_project(tmp_path)
+        for kept in (".git/HEAD", ".chroma/chroma.sqlite3"):
+            (branch / kept).parent.mkdir()
+            (branch / kept).write_text(kept, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        _seat(monkeypatch)
+
+        assert handle_delete([str(branch), "--retire", "--yes"]) == 0
+
+        (archive,) = (root / ".archive" / "deleted_branches").iterdir()
+        assert (archive / ".git" / "HEAD").read_text(encoding="utf-8") == ".git/HEAD"
+        assert (archive / ".chroma" / "chroma.sqlite3").read_text(encoding="utf-8") == ".chroma/chroma.sqlite3"
+
 
 def _retire_rig(tmp_path, monkeypatch, admin=True):
     """A tmp AIPass root, a sibling project the hooks trust registry knows, and the seat answering admin or not."""
@@ -1318,6 +1352,21 @@ class TestRetireProject:
         assert _passport(archive / "src" / "driveTest" / "Worker")["citizenship"]["registered"] is False
         assert (archive / "DRIVETEST_REGISTRY.json").is_file()
         assert set(json.loads(trust.read_text(encoding="utf-8"))["projects"]) == {other}
+
+    def test_retire_archives_the_project_git_and_a_citizen_chroma(self, tmp_path, monkeypatch):
+        """Ran red while ARCHIVE_EXCLUDE held .git and .chroma: a retired project lost its history."""
+        aipass, root, branch, *_ = _retire_rig(tmp_path, monkeypatch)
+        (root / ".git").mkdir()
+        (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (branch / ".chroma").mkdir()
+        (branch / ".chroma" / "chroma.sqlite3").write_text("vectors", encoding="utf-8")
+
+        assert handle_retire_project([str(root), "--yes"]) == 0
+
+        (archive,) = (aipass / ".archive" / "deleted_branches").iterdir()
+        assert (archive / ".git" / "HEAD").read_text(encoding="utf-8") == "ref: refs/heads/main\n"
+        chroma = archive / "src" / "driveTest" / "Worker" / ".chroma" / "chroma.sqlite3"
+        assert chroma.read_text(encoding="utf-8") == "vectors"
 
     def test_one_receipt_row_per_removed_thing_reads_back_with_its_fields(self, tmp_path, monkeypatch):
         aipass, root, branch, registry, trust, _ = _retire_rig(tmp_path, monkeypatch)

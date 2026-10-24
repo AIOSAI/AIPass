@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-27
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -17,9 +17,10 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.spawn.apps.handlers import update_ops
+from aipass.spawn.apps.handlers import mint_ops, update_ops
 from aipass.spawn.apps.handlers.seed_ops import canonical_text, seed_path_for
 from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
+from aipass.spawn.apps.modules.migrate_passports import handle_migrate_passports
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main, print_help, print_introspection
@@ -155,6 +156,47 @@ class TestCreateDryRun:
         assert result == 1
         captured = capsys.readouterr()
         assert "Target already exists" in captured.out + captured.err
+
+    def test_dry_run_previews_the_template_the_caller_named(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        template = tmp_path / "my_template"
+        template.mkdir()
+
+        assert handle_create([str(tmp_path / "drytest"), "--template", str(template), "--dry-run"]) == 0
+        assert str(template) in capsys.readouterr().out
+
+    def test_dry_run_on_a_passported_dir_previews_adoption_not_an_error(
+        self, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
+        target = tmp_path / "citizen"
+        (target / ".trinity").mkdir(parents=True)
+        (target / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+
+        assert handle_create([str(target), "--dry-run"]) == 0
+        assert "Would adopt" in capsys.readouterr().out
+
+
+class TestCreateSummary:
+    """The success summary reports what the mint decided and every issue it hit."""
+
+    def test_the_summary_names_the_class_decided_at_mint(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        assert handle_create([str(tmp_path / "first"), "--registry", str(registry)]) == 0
+        assert "Class: manager" in capsys.readouterr().out
+
+    def test_the_summary_prints_each_issue_text(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
+        monkeypatch.setattr(mint_ops, "write_birth_receipt", lambda _: {"success": False, "error": "gold unreadable"})
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        assert handle_create([str(tmp_path / "orphan"), "--registry", str(registry)]) == 0
+        assert "Birth receipt not stamped: gold unreadable" in capsys.readouterr().err
+
+    def test_a_json_breaking_purpose_exits_non_zero(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        assert handle_create([str(tmp_path / "quoted"), "--purpose", 'Say "hi"', "--registry", str(registry)]) == 1
+        assert "--purpose" in capsys.readouterr().err
+        assert not (tmp_path / "quoted").exists()
 
 
 class TestTemplateFlag:
@@ -355,6 +397,34 @@ class TestExportSeedsOnlyFlag:
 
         assert seed_path_for(tmp_path / "src" / "aipass" / "wanderer").is_file()
         assert not seed_path_for(tmp_path / "src" / "aipass" / "stranger").exists()
+
+
+class TestFleetCommandsNeverSayAllClearAfterAFailure:
+    """export-seeds and migrate-passports: no green line, and a non-zero exit, when nothing honest was done."""
+
+    def test_export_seeds_over_nothing_exits_one_without_the_all_clear(
+        self, tmp_path, capsys: pytest.CaptureFixture[str]
+    ):
+        assert handle_export_seeds(["--root", str(tmp_path)]) == 1
+        captured = capsys.readouterr()
+        assert "already current" not in captured.out
+        assert "nothing was scanned" in captured.err
+
+    def test_export_seeds_with_only_errors_prints_no_all_clear(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        trinity = tmp_path / "src" / "aipass" / "wanderer" / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "passport.json").write_text("{not json", encoding="utf-8")
+
+        assert handle_export_seeds(["--root", str(tmp_path)]) == 1
+        assert "already current" not in capsys.readouterr().out
+
+    def test_migrate_with_only_errors_prints_no_all_clear(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        trinity = tmp_path / "src" / "aipass" / "wanderer" / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "passport.json").write_text("{not json", encoding="utf-8")
+
+        assert handle_migrate_passports(["--root", str(tmp_path)]) == 1
+        assert "Nothing to migrate" not in capsys.readouterr().out
 
 
 def test_output_capture(capsys: pytest.CaptureFixture[str]):

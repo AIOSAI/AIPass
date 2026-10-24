@@ -26,6 +26,15 @@ repairs passport `registry_id` values; `--fix --dry-run` previews exactly that;
 `--check` (optionally `--json`) is the read-only owner and identity health check, which
 writes nothing and answers with an exit code.
 
+A named `[project-path]` is the registry every step reads and writes; a path with no registry
+above it, or no registry above the cwd, exits 1 and never falls back. A registry that exists
+but will not parse is refused by the sync, `--fix` and `--check` alike (`--check` flags
+`unreadable_registry`): rebuilding it would re-mint the project. Under `--fix`, a stale entry
+whose branch is found elsewhere in the project has its `path` rewritten, so `owner`, `admin`
+and `registry_id` stay; directory names are keyed through `normalize_branch_name`, so
+`my-agent` on disk matches `MY_AGENT`. Every registry writer holds `registry_lock` (POSIX
+`flock` on `.<stem>.lock`, a no-op on Windows) and loads inside it.
+
 ---
 
 ## Registry entry shape — mixed casing is not a rule
@@ -63,7 +72,8 @@ success — see [cli_contract.md](cli_contract.md) for why that distinction is l
 `export-seeds` regenerates each branch's tracked `.aipass/passport.seed.json` from its live
 passport, stripping machine-local values. Dry-run by default; `--only` restricts to one
 branch and `--root` targets another project. The seeds are what a fresh clone carries, so
-they are compared, never assumed — see [birth.md](birth.md).
+they are compared, never assumed — see [birth.md](birth.md). A run that scans nothing, or
+hits an error, exits 1 and never prints the all-current line.
 
 ---
 
@@ -86,9 +96,16 @@ without `--apply`:
   artifacts flag to carry its vector store along.
 - `--clean-pollution` archives and removes duplicate directories.
 
-The archive copy skips build and VCS noise — `ARCHIVE_EXCLUDE` in `repair_ops.py` is
-`.venv`, `.git`, `__pycache__`, `.chroma`, `node_modules`, `.pytest_cache`. The same set
-guards the relocation lane, so neither carries a virtualenv into `.archive/`.
+The archive copy skips rebuildable noise only — `ARCHIVE_EXCLUDE` in `repair_ops.py` is
+`.venv`, `__pycache__`, `node_modules`, `.pytest_cache`. `.git` history and `.chroma`
+vectors go into the archive, because the original is removed after the copy. The same set
+guards the relocation lane.
+
+`--relocate` resolves the new path before checking it sits inside the project, so
+`<root>/../outside` refuses. If the registry write fails after the move, the tree is moved
+back and the command exits 1. `--clean-pollution` never flags a nested directory holding
+`__init__.py`: that is a flat-layout package, not a duplicate. A grant ceremony whose
+registry write fails exits 1 and grants nothing.
 
 ---
 
@@ -106,4 +123,4 @@ from a template; only the owner's ceremony grants it.
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-24

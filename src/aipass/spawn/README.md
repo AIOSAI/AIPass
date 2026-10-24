@@ -91,7 +91,7 @@ concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verif
 `class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`, `deletion_receipts`,
 `sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`), and the primitives
-(`json_ops`, `atomic_write`, `metadata`, and the fleet json shim under `json/`).
+(`atomic_write`, `metadata`, and the fleet json shim under `json/`).
 
 `templates/citizen/` is the one template both classes mint from, and its
 `.spawn/.template_registry.json` manifest is what a mint is verified against — change a
@@ -144,7 +144,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-**Last Updated:** 2026-10-22
+**Last Updated:** 2026-10-24
 
 ---
 [← Back to AIPass](../../../README.md)

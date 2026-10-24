@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_fence.py
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/grant_admin.py, apps/handlers/registry.py and apps/handlers/class_registry.py: the seat-flag fences."""
@@ -165,6 +165,19 @@ class TestEnsureAdmin:
 
 class TestGrantAdminCli:
     """drone @spawn grant-admin — the owner's one-time ceremony command."""
+
+    def test_a_registry_write_that_fails_exits_1_not_granted(self, tmp_path, capsys):
+        """Pins the ceremony printing 'Admin granted' when the save returned False."""
+
+        registry = _write_registry(tmp_path, [_entry("DEVPULSE", owner=True)])
+
+        with patch("aipass.spawn.apps.handlers.registry.save_registry", return_value=False):
+            code = handle_grant_admin(["--registry", str(registry)])
+
+        out, err = capsys.readouterr()
+        assert code == 1
+        assert "could not be written" in err
+        assert "granted" not in out.lower()
 
     def test_grants_via_cli(self, tmp_path):
         """--registry points at the root registry; exit 0 and flag written."""

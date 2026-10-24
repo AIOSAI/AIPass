@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete.py
 # Description: Branch deletion — thin CLI layer for archive and deregister
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Delete orchestrator for branch lifecycle management."""
@@ -46,10 +46,14 @@ def handle_command(command: str, args: list) -> bool:
 
 def handle_delete(args: list[str]) -> int:
     """Parse args and execute delete; returns exit code (0=success, 1=failure)."""
-    if "--help" in args or "-h" in args:
-        console.print(
-            "[bold cyan]Usage:[/bold cyan] drone @spawn delete <@branch | path> [--retire] [--yes] [--dry-run]"
-        )
+    help_asked = "--help" in args or "-h" in args
+    if help_asked or not args:
+        usage = "drone @spawn delete <@branch | path> [--retire] [--yes] [--dry-run]"
+        # Asked-for help is output; a bare call is a usage error.
+        if help_asked:
+            console.print(f"[bold cyan]Usage:[/bold cyan] {usage}")
+        else:
+            warning(f"Usage: {usage}")
         console.print()
         console.print("  [green]@branch[/green]    Branch to archive and deregister, from the cwd's registry")
         console.print("  [green]path[/green]       Branch directory; its own project's registry is read")
@@ -58,19 +62,7 @@ def handle_delete(args: list[str]) -> int:
         )
         console.print("  [green]--yes[/green]      Skip confirmation prompt")
         console.print("  [green]--dry-run[/green]  Preview what would happen without changes")
-        return 0
-
-    if not args:
-        warning("Usage: drone @spawn delete <@branch | path> [--retire] [--yes] [--dry-run]")
-        console.print()
-        console.print("  [green]@branch[/green]    Branch to archive and deregister, from the cwd's registry")
-        console.print("  [green]path[/green]       Branch directory; its own project's registry is read")
-        console.print(
-            "  [green]--retire[/green]   Retire an active citizen: its archived passport reads registered false"
-        )
-        console.print("  [green]--yes[/green]      Skip confirmation prompt")
-        console.print("  [green]--dry-run[/green]  Preview what would happen without changes")
-        return 1
+        return 0 if help_asked else 1
 
     dry_run = "--dry-run" in args
     skip_confirm = "--yes" in args

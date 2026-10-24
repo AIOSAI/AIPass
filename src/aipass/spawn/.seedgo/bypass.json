@@ -6,11 +6,6 @@
   },
   "bypass": [
     {
-      "file": "apps/handlers/json_ops.py",
-      "standard": "json_structure",
-      "reason": "Pure utility \u2014 deep_merge and backup_json only. No operational side effects to log. Migrations archived."
-    },
-    {
       "file": "apps/handlers/class_registry.py",
       "standard": "json_structure",
       "reason": "Pure data registry \u2014 dict lookup only, no operations to log"
@@ -83,7 +78,7 @@
     {
       "file": "apps/handlers/atomic_write.py",
       "standard": "json_structure",
-      "reason": "Pure I/O primitive \u2014 stage/fsync/os.replace only, same species as json_ops.py above. Nothing to log: it is the write mechanism every other handler's log_operation call ultimately rides on, and logging each atomic write would emit an entry per passport/registry swap. Verified load-bearing in BOTH lanes 2026-08-16 (checklist [FAIL] json_structure; audit 97%/overall 99% with it lifted)."
+      "reason": "Pure I/O primitive \u2014 stage/fsync/os.replace only. Nothing to log: it is the write mechanism every other handler's log_operation call ultimately rides on, and logging each atomic write would emit an entry per passport/registry swap. Verified load-bearing in BOTH lanes 2026-08-16 (checklist [FAIL] json_structure; audit 97%/overall 99% with it lifted)."
     },
     {
       "file": "apps/handlers/mint_verify.py",
@@ -103,7 +98,9 @@
     {
       "file": "apps/handlers/meta_ops.py",
       "standard": "logged_fallback",
-      "lines": [54],
+      "lines": [
+        43
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): '' is never an answer here. The success path returns sha256 hexdigest()[:12], twelve hex characters; the only other '' (line 44) is the not-a-file refusal, itself a failure. The docstring names '' as the failure value and the except logs the OSError. The caller can tell failure from an answer: '' is failure on both lines."
     },
     {
@@ -114,43 +111,57 @@
     {
       "file": "tests/test_template_import_guard.py",
       "standard": "import_site",
-      "lines": [788],
+      "lines": [
+        788
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision; HELD in leg 7): importlib.import_module in test_the_denier_actually_denies is the negative control. Its subject is the import attempt under the denier; a top-level import would succeed before the denier exists and prove nothing. The sys.modules delitems only drop cached aipass.memory modules so the finder is consulted, and monkeypatch restores them."
     },
     {
       "file": "apps/handlers/meta_ops.py",
       "standard": "logged_fallback",
-      "lines": [74],
+      "lines": [
+        63
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): None is never a registry here. The other None (line 67) is the not-found refusal, logged by logger.warning; it is a failure. The docstring names None as missing/unreadable, and every caller (update_ops 256, mint_ops 199, sync_registry_ops 320, mint_verify 47, regenerate_registry_ops 62) reads None as no registry."
     },
     {
       "file": "apps/modules/delete.py",
       "standard": "logged_fallback",
-      "lines": [93],
+      "lines": [
+        93
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): handle_command answers an exit code, 0 success and 1 failure (docstring). The other return 1 the checker counts as success (line 69) is the no-argument refusal, reported by warning('Usage: ...') and the usage lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/grant_admin.py",
       "standard": "logged_fallback",
-      "lines": [109],
+      "lines": [
+        109
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): the function answers an exit code, 0 success and 1 failure. The other return 1 (line 118) follows error(reason) on a refused ceremony with a console.print() between; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/repair.py",
       "standard": "logged_fallback",
-      "lines": [101],
+      "lines": [
+        101
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_relocate answers an exit code, 0 success and 1 failure. The other return 1 (line 84) follows error('--relocate requires @branch and new_path') and the warning with its usage line; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/sync_registry.py",
       "standard": "logged_fallback",
-      "lines": [122],
+      "lines": [
+        131
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): _handle_check answers an exit code, 0 clean and 1 not clean. The other return 1 (line 140) is the not-clean verdict, reported by error('Owner/identity check: N issue(s)') and the issue lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     },
     {
       "file": "apps/modules/update.py",
       "standard": "logged_fallback",
-      "lines": [138],
+      "lines": [
+        145
+      ],
       "reason": "CHECKER DEFECT (fleet green leg 8, spawn's decision): handle_update answers an exit code, 0 success and 1 failure. The other return 1 the checker counts as success (line 87) is the no-argument refusal, reported by warning('Usage: ...') and the usage lines; it is a failure. Every 1 here is a failure, and spawn.py's exit seam reads it so."
     }
   ],

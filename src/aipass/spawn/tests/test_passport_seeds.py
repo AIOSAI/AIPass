@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -634,3 +634,25 @@ class TestMintFromSeedEndToEnd:
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert STAMP_KEY not in passport["citizenship"]
         assert passport["citizenship"]["registered"] is True
+
+    def test_a_seed_birth_with_no_registry_refuses_and_writes_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        target = _seeded_branch(tmp_path)
+
+        result = spawn_agent(str(target))
+
+        assert result["success"] is False
+        assert "no *_REGISTRY.json" in result["error"]
+        assert not (target / ".trinity" / "passport.json").exists()
+
+    def test_a_seed_birth_into_a_new_registry_gives_it_the_passports_credential(self, tmp_path):
+        target = _seeded_branch(tmp_path)
+        reg = tmp_path / "NEW_REGISTRY.json"
+
+        result = spawn_agent(str(target), registry_path=str(reg))
+
+        assert result["success"] is True
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        credential = json.loads(reg.read_text(encoding="utf-8"))["metadata"]["id"]
+        assert credential
+        assert passport["citizenship"]["registry_id"] == credential

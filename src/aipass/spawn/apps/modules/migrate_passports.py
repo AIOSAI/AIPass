@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: migrate_passports.py
 # Description: Passport 2.0 fleet migration — thin CLI layer over passport_migration
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """One-shot fleet passport migration to schema 2.0 (DPLAN-0319).
@@ -176,7 +176,7 @@ def _print_receipt(receipt: dict) -> None:
             "  [dim]Discovery matches this repository's layout "
             "(src/aipass/<branch>/ and projects/<project>/src/<pkg>/<branch>/).[/dim]"
         )
-    elif not receipt["changed"]:
+    elif not receipt["changed"] and not receipt["errors"]:
         console.print("  [green]Nothing to migrate — every scanned passport is already 2.0.[/green]")
     console.print()
 

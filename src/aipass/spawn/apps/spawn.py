@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-05
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -230,7 +230,7 @@ def handle_create(args):
         template_dir = None
 
     if dry_run:
-        return _dry_run_create(parsed.target_path, citizen_class, parsed)
+        return _dry_run_create(parsed.target_path, citizen_class, parsed, template_dir)
 
     result = spawn_agent(
         target_path=parsed.target_path,
@@ -245,12 +245,12 @@ def handle_create(args):
     if result["success"]:
         console.print()
         console.print(f"[green]Agent created: {result['branch_name']}[/green]")
-        console.print(f"  Class: {citizen_class}")
+        console.print(f"  Class: {result.get('citizen_class') or citizen_class}")
         console.print(f"  Path: {result['path']}")
         console.print(f"  Files: {result['files_copied']}")
         console.print(f"  Registry: {'updated' if result['registry_updated'] else 'not updated'}")
-        if result["validation_issues"]:
-            warning(f"{len(result['validation_issues'])} unreplaced placeholders")
+        for issue in result["validation_issues"]:
+            warning(issue)
         console.print()
         return 0
     else:
@@ -258,7 +258,7 @@ def handle_create(args):
         return 1
 
 
-def _dry_run_create(target_path, citizen_class, parsed):
+def _dry_run_create(target_path, citizen_class, parsed, template_dir=None):
     """Preview what create would do without making changes.
 
     No registry read, so a None class is shown as decided at mint, never guessed."""
@@ -268,10 +268,11 @@ def _dry_run_create(target_path, citizen_class, parsed):
         get_branch_name,
         get_default_class,
         normalize_branch_name,
+        INCOMPLETE_MARKER,
     )
 
     target = Path(target_path).resolve()
-    template = get_template_dir(citizen_class or get_default_class())
+    template = Path(template_dir) if template_dir else get_template_dir(citizen_class or get_default_class())
     class_display = citizen_class or "decided at mint (manager if first citizen in the project, else specialist)"
     branch_name = get_branch_name(target)
     branch_upper = normalize_branch_name(branch_name, "upper")
@@ -287,6 +288,13 @@ def _dry_run_create(target_path, citizen_class, parsed):
         console.print(f"  [bold]Role:[/bold]    {parsed.role}")
     if parsed.purpose:
         console.print(f"  [bold]Purpose:[/bold] {parsed.purpose}")
+
+    if (target / ".trinity" / "passport.json").is_file() and not (target / INCOMPLETE_MARKER).exists():
+        console.print()
+        console.print("  [bold cyan]Would adopt[/bold cyan] the existing citizen and register it.")
+        console.print("  [dim]No files were changed. Remove --dry-run to execute.[/dim]")
+        console.print()
+        return 0
 
     if target.exists():
         error(f"Target already exists: {target}")

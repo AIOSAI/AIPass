@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_file_ops.py
 # Description: Tests for file_ops handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-03
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/file_ops.py."""
@@ -23,7 +23,6 @@ from aipass.spawn.apps.handlers.file_ops import (
     copy_template,
     ensure_directory,
     regenerate_template_registry,
-    rename_placeholder_paths,
 )
 
 REPLACEMENTS = {
@@ -172,48 +171,6 @@ class TestCopyTemplate:
         result = (target / "image.bin").read_bytes()
         assert result == binary_data
         assert any("image.bin" in c and "binary" in c for c in copied)
-
-
-class TestRenamePlaceholderPaths:
-    """Tests for rename_placeholder_paths()."""
-
-    def test_rename_placeholder_paths_dirs(self, tmp_path: Path) -> None:
-        """Directories containing {{BRANCH}} in their name are renamed."""
-        target = tmp_path / "branch"
-        (target / "{{BRANCH}}_json").mkdir(parents=True)
-
-        renamed = rename_placeholder_paths(target, "MyAgent")
-
-        assert (target / "myagent_json").is_dir()
-        assert not (target / "{{BRANCH}}_json").exists()
-        assert len(renamed) == 1
-        assert "myagent_json" in renamed[0]
-
-    def test_rename_placeholder_paths_files(self, tmp_path: Path) -> None:
-        """Files containing {{BRANCH}} in their name are renamed."""
-        target = tmp_path / "branch"
-        target.mkdir(parents=True)
-        (target / "{{BRANCH}}_config.json").write_text("{}", encoding="utf-8")
-
-        renamed = rename_placeholder_paths(target, "MyAgent")
-
-        assert (target / "myagent_config.json").exists()
-        assert not (target / "{{BRANCH}}_config.json").exists()
-        assert len(renamed) == 1
-
-    def test_rename_placeholder_paths_no_overwrite(self, tmp_path: Path) -> None:
-        """If the renamed target already exists, the rename is skipped."""
-        target = tmp_path / "branch"
-        target.mkdir(parents=True)
-
-        (target / "myagent_data").mkdir()
-        (target / "{{BRANCH}}_data").mkdir()
-
-        renamed = rename_placeholder_paths(target, "MyAgent")
-
-        assert (target / "myagent_data").is_dir()
-        assert (target / "{{BRANCH}}_data").is_dir()
-        assert len(renamed) == 0
 
 
 class TestWalk:

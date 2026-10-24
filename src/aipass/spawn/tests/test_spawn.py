@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.0.4
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
@@ -18,6 +18,8 @@ import sys
 import pytest
 
 from aipass.spawn import spawn_agent
+from aipass.spawn.apps.handlers import mint_ops
+from aipass.spawn.apps.handlers.class_registry import get_template_dir
 from aipass.spawn.apps.handlers.metadata import get_branch_name, normalize_branch_name, detect_profile
 from aipass.spawn.apps.handlers.placeholders import (
     build_replacements_dict,
@@ -342,3 +344,75 @@ class TestAtomicWriteAndLocking:
         assert result is False
         data = json.loads(reg.read_text(encoding="utf-8")) if reg.exists() else {"branches": []}
         assert len(data.get("branches", [])) == 0
+
+
+class TestMintRefusals:
+    """spawn_agent refuses a mint it cannot finish honestly, and says so."""
+
+    @pytest.mark.parametrize(
+        ("flag", "value"),
+        [("purpose", 'Say "hi"'), ("role", "C:\\data"), ("purpose", "two\nlines")],
+    )
+    def test_a_json_breaking_role_or_purpose_refuses_before_anything_is_written(
+        self, tmp_agent, tmp_registry, flag, value
+    ):
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry), **{flag: value})
+
+        assert result["success"] is False
+        assert f"--{flag}" in result["error"]
+        assert not tmp_agent.exists()
+        assert not tmp_registry.exists()
+
+    def test_a_name_already_registered_refuses_before_any_copy(self, tmp_path, tmp_agent, tmp_registry):
+        add_to_registry(tmp_registry, "TEST_AGENT", str(tmp_path / "elsewhere"), "W", "@test_agent")
+
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+
+        assert result["success"] is False
+        assert "already registered" in result["error"]
+        assert not tmp_agent.exists()
+
+    def test_a_failed_registry_add_is_an_error_not_a_success(self, tmp_path, tmp_agent, tmp_registry, monkeypatch):
+        real_add = mint_ops.add_to_registry
+
+        def racing_add(registry, name, *args, **kwargs):
+            # A parallel mint registers the same name between the pre-copy check and this add.
+            real_add(registry, name, str(tmp_path / "raced"), "W", "@raced")
+            return real_add(registry, name, *args, **kwargs)
+
+        monkeypatch.setattr(mint_ops, "add_to_registry", racing_add)
+
+        result = spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
+
+        assert result["success"] is False
+        assert "NOT registered" in result["error"]
+
+    def test_a_relative_registry_is_the_one_used_not_a_new_one(self, tmp_path, monkeypatch):
+        registry = tmp_path / "TEST_REGISTRY.json"
+        registry.write_text(json.dumps({"metadata": {"id": "project-credential"}, "branches": []}), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = spawn_agent(str(tmp_path / "newbie"), registry_path="TEST_REGISTRY.json")
+
+        assert result["success"] is True
+        assert result["registry_path"] == str(registry)
+        passport = json.loads((tmp_path / "newbie" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+        assert passport["citizenship"]["registry_id"] == "project-credential"
+        assert [b["name"] for b in load_registry(registry)["branches"]] == ["NEWBIE"]
+
+    def test_a_retry_after_an_incomplete_mint_refuses_instead_of_adopting(self, tmp_path, tmp_registry):
+        template = tmp_path / "tmpl"
+        shutil.copytree(get_template_dir(), template)
+        manifest = template / ".spawn" / ".template_registry.json"
+        claims = json.loads(manifest.read_text(encoding="utf-8"))
+        claims["files"]["never_shipped"] = {"path": "never_shipped.md"}
+        manifest.write_text(json.dumps(claims), encoding="utf-8")
+        target = tmp_path / "partial"
+
+        first = spawn_agent(str(target), template_dir=str(template), registry_path=str(tmp_registry))
+        retry = spawn_agent(str(target), template_dir=str(template), registry_path=str(tmp_registry))
+
+        assert "INCOMPLETE MINT" in first["error"]
+        assert retry["success"] is False
+        assert "refused mint" in retry["error"]
+        assert load_registry(tmp_registry)["branches"] == []

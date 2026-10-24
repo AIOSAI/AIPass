@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: export_seeds.py
 # Description: Passport seed export — thin CLI layer over seed_ops
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Export every core citizen's passport seed (TDPLAN-0017).
@@ -96,7 +96,7 @@ def handle_export_seeds(args: list[str]) -> int:
     )
 
     _print_receipt(receipt)
-    return 1 if receipt["errors"] else 0
+    return 1 if receipt["errors"] or not receipt["scanned"] else 0
 
 
 def print_help():
@@ -163,7 +163,9 @@ def _print_receipt(receipt: dict) -> None:
     console.print()
     if not receipt["confirm"] and receipt["changed"]:
         console.print("  [dim]No files were written. Add --confirm to execute.[/dim]")
-    elif not receipt["changed"]:
+    elif not receipt["scanned"]:
+        error(f"No core passports found under {receipt['root']} — nothing was scanned.")
+    elif not receipt["changed"] and not receipt["errors"]:
         console.print("  [green]Every seed is already current — nothing to export.[/green]")
     console.print()
 

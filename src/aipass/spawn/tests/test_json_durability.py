@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_json_durability.py
 # Description: Torn-write durability tests for spawn's JSON/text write paths
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
@@ -27,7 +27,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from aipass.spawn.apps.handlers import file_ops, regenerate_registry_ops, update_ops
+from aipass.spawn.apps.handlers import (
+    delete_ops,
+    file_ops,
+    regenerate_registry_ops,
+    repair_ops,
+    sync_registry_ops,
+    update_ops,
+)
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
@@ -709,6 +716,30 @@ class TestAtomicWriteHelper:
 
         assert order == ["fsync", "replace"]
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_an_existing_files_mode_survives_the_swap(self, tmp_path):
+        """Pins passports turning 0600: the staged temp's mkstemp mode replaced the target's."""
+
+        target = tmp_path / "passport.json"
+        target.write_text("old\n", encoding="utf-8")
+        target.chmod(0o644)
+
+        atomic_write_text(target, "new\n")
+
+        assert target.stat().st_mode & 0o777 == 0o644
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_new_file_gets_the_umask_default_not_0600(self, tmp_path):
+
+        target = tmp_path / "fresh.json"
+        previous = os.umask(0o027)
+        try:
+            atomic_write_text(target, "new\n")
+        finally:
+            os.umask(previous)
+
+        assert target.stat().st_mode & 0o777 == 0o640
+
     def test_encoding_failure_raises_and_leaves_no_temp(self, tmp_path):
         """A surrogate payload must not silently land, and must not litter."""
 
@@ -874,6 +905,54 @@ class TestSaveRegistryStaysAtomic:
             return save_registry(reg, {"metadata": {"round": n}, "branches": list(branches)})
 
         _Racer(reg, write_once).run().assert_clean()
+
+
+_REGISTRY_WRITERS = {
+    "add_to_registry": lambda reg: registry_mod.add_to_registry(reg, "NEW", "new", "p", "@new"),
+    "update_registry_path": lambda reg: repair_ops.update_registry_path(reg, "ALPHA", "src/alpha"),
+    "sync_registry": lambda reg: sync_registry_ops.sync_registry(fix=True, registry_path=reg),
+    "fix_owner_identity": lambda reg: fix_owner_identity(registry_path=reg),
+    "ensure_project_has_owner": lambda reg: registry_mod.ensure_project_has_owner(reg),
+    "ensure_admin": lambda reg: registry_mod.ensure_admin(reg),
+    "delete_branch": lambda reg: delete_ops.delete_branch("ALPHA", confirm=False, retire=True, registry_path=reg),
+}
+
+
+class TestRegistryWritersWaitAndReload:
+    """Every registry read-modify-write runs under registry_lock and reloads inside it."""
+
+    @pytest.mark.skipif(registry_mod.fcntl is None, reason="no fcntl on Windows: the writers run unlocked there")
+    @pytest.mark.parametrize("writer", sorted(_REGISTRY_WRITERS))
+    def test_a_waiting_writer_keeps_the_entry_another_writer_landed(self, tmp_path, writer):
+        """Pins a stale copy saved over an entry another agent added while this one held its load."""
+
+        for rel in ("alpha", "devpulse", "gamma", "deep/x/y/late"):
+            _make_citizen(tmp_path, rel, passport_rid="cred")
+        branches = []
+        for name, rel in (("ALPHA", "alpha"), ("DEVPULSE", "devpulse")):
+            entry = _entry(name, rel)
+            entry.pop("owner")
+            entry["registry_id"] = f"rid-{rel}"
+            branches.append(entry)
+        reg = _make_registry(tmp_path, "cred", branches)
+        late = _entry("LATE", "deep/x/y/late")
+        late.pop("owner")
+        late["registry_id"] = "rid-late"
+        outcome = []
+        thread = threading.Thread(target=lambda: outcome.append(_REGISTRY_WRITERS[writer](reg)))
+
+        with registry_mod.registry_lock(reg):
+            thread.start()
+            thread.join(0.5)
+            assert thread.is_alive(), f"{writer} did not wait for the registry lock"
+            data = json.loads(reg.read_text(encoding="utf-8"))
+            data["branches"].append(late)
+            reg.write_text(json.dumps(data), encoding="utf-8")
+        thread.join(10)
+
+        assert outcome, f"{writer} raised instead of returning"
+        names = [b["name"] for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]]
+        assert "LATE" in names, f"{writer} saved a stale copy over LATE: {names}"
 
 
 # Parked code does not run, and nothing looks into a dropbox; flagging them would only weaken the guard.

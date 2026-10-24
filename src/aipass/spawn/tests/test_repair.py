@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair handler — move, registry path update, pollution cleanup
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-05-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py — move_branch, update_registry_path, pollution cleanup."""
@@ -220,6 +220,31 @@ class TestMoveBranch:
         assert result["success"] is False
         assert "outside project root" in result["error"]
 
+    def test_a_dotdot_target_that_resolves_outside_the_project_is_refused(self, tmp_path):
+        """Pins the lexical check: /proj/../outside passed relative_to and the branch left the project."""
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        result = move_branch("NAV", f"{project}/../outside", registry_path=reg)
+
+        assert result["success"] is False
+        assert "outside project root" in result["error"]
+        assert (project / "navigator").is_dir()
+        assert not (tmp_path / "outside").exists()
+
+    def test_a_failed_registry_write_exits_1_and_puts_the_branch_back(self, tmp_path, capsys):
+        """Pins relocate reporting success while the registry still named the old path."""
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+
+        with patch.object(repair_ops, "save_registry", return_value=False):
+            code = handle_repair(["--relocate", "@nav", "src/compass/navigator", str(reg), "--apply"])
+
+        assert code == 1
+        assert "Relocate FAILED" in capsys.readouterr().err
+        assert (project / "navigator" / ".trinity" / "passport.json").is_file()
+        assert not (project / "src" / "compass" / "navigator").exists()
+        assert json.loads(reg.read_text(encoding="utf-8"))["branches"][0]["path"] == "navigator"
+
     def test_an_unreadable_passport_is_reported_as_a_failure_not_a_skip(self, tmp_path):
         """A passport that exists but cannot be read is a failure, and says so.
 
@@ -309,6 +334,19 @@ class TestDetectPollution:
 
         issues = detect_pollution(project)
         assert len(issues) == 0
+
+    def test_a_flat_layout_package_is_not_pollution(self, tmp_path):
+        """Pins a real package at compass/compass/ being archived and removed as pollution."""
+
+        project = tmp_path / "compass"
+        package = project / "compass"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+        _empty_registry(project)
+
+        assert detect_pollution(project) == []
+        assert cleanup_pollution(project)["issues_found"] == 0
+        assert (package / "__init__.py").is_file()
 
 
 class TestCleanupPollution:
@@ -809,16 +847,16 @@ class TestArchiveExclude:
     """Tests for ARCHIVE_EXCLUDE constant shared between repair_ops and delete_ops."""
 
     def test_archive_exclude_defined_in_repair_ops(self, tmp_path):
-        """ARCHIVE_EXCLUDE is a set in repair_ops, and the pollution archive honours it.
+        """The pollution archive drops rebuildable noise and keeps history and vectors.
 
-        Mutant: cleanup_pollution copies without the ARCHIVE_EXCLUDE ignore -> red."""
-
-        assert isinstance(ARCHIVE_EXCLUDE, set)
-        assert ".venv" in ARCHIVE_EXCLUDE
-        assert ".git" in ARCHIVE_EXCLUDE
+        Mutant: cleanup_pollution copies without the ARCHIVE_EXCLUDE ignore -> red.
+        Pins .git and .chroma in the set: the archive lost them before the original was removed."""
 
         project = tmp_path / "compass"
         dup = project / "compass"
+        for kept in (".git", ".chroma"):
+            (dup / kept).mkdir(parents=True)
+            (dup / kept / "data").write_text(kept, encoding="utf-8")
         (dup / ".venv").mkdir(parents=True)
         (dup / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
         (dup / "junk.txt").write_text("pollution", encoding="utf-8")
@@ -827,7 +865,8 @@ class TestArchiveExclude:
         result = cleanup_pollution(project)
 
         archive = Path(result["cleaned"][0]["archive"])
-        assert sorted(p.name for p in archive.iterdir()) == ["junk.txt"]
+        assert sorted(p.name for p in archive.iterdir()) == [".chroma", ".git", "junk.txt"]
+        assert (archive / ".git" / "data").read_text(encoding="utf-8") == ".git"
 
     def test_delete_ops_imports_archive_exclude(self):
         """delete_ops imports ARCHIVE_EXCLUDE from repair_ops (same object)."""

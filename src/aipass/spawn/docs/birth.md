@@ -44,9 +44,13 @@ name instead of silently making a branch called WIZARD in `./wizard`.
 
 ## The create pipeline (`spawn_agent` in `core.py`, `mint_citizen` in `handlers/mint_ops.py`)
 
-1. **Resolve** — Extract the branch name from the target path and refuse a target that sits
-   inside another citizen's tree (any parent holding `.trinity/passport.json`). An existing
-   directory that already has a passport is **adopted** instead of refused (see Adoption).
+1. **Resolve** — Refuse a `--role` or `--purpose` holding a double quote, backslash, newline
+   or other control character: both are substituted raw into the JSON passport. Resolve
+   `--registry` to an absolute path. Extract the branch name from the target path and refuse a
+   target that sits inside another citizen's tree (any parent holding `.trinity/passport.json`).
+   An existing directory that already has a passport is **adopted** instead of refused (see
+   Adoption), unless it holds `INCOMPLETE_MINT.txt` (step 8). A name already in the registry
+   refuses before anything is copied.
 2. **Lookup** — Resolve the citizen class to a template directory via `class_registry`.
 3. **Credential** — Resolve the target project's registry credential (`metadata.id`)
    **before anything is written**, through `resolve_project_credential` in `registry.py`.
@@ -59,29 +63,30 @@ name instead of silently making a branch called WIZARD in `./wizard`.
    `add_to_registry`, which adopts it **only when it is creating the registry file** — keyed
    off `registry_path.exists()` captured before the load — and refuses to write a registry
    that exists but is not a readable document.
-4. **Copy** — Recursive copy of the class template to target (skips `__pycache__`).
-5. **Rename** — Replace `{{BRANCH}}` in directory and file names.
-6. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including
+4. **Copy** — Recursive copy of the class template to target, skipping `file_ops.SKIP_NAMES`;
+   `{{BRANCH}}` in directory and file names is rendered as it copies.
+5. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including
    `{{CITIZEN_CLASS}}` (sourced from the create call, not a baked literal).
-7. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the
+6. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the
    passport as `citizenship.citizen_id` (the citizen's unique id, rendered by faces as the
    passport number) and written as the `registry_id` of its `branches[]` registry entry.
    Minting it at registration time instead would be too late — the passport is written
    before the registry, so the two copies would be different UUIDs for one citizen. Distinct
    from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is
    shared by every citizen in a project.
-8. **Meta** — Generate `.spawn/.branch_meta.json`: the per-branch tracking file that maps
+7. **Meta** — Generate `.spawn/.branch_meta.json`: the per-branch tracking file that maps
    each delivered file back to its **template file id** with a current SHA-256, matched by
    path first and content hash second. This is what lets `update` reason about a renamed or
    drifted file rather than diffing blind. Meta tabs load from @memory when available,
    degrading gracefully to empty when it is not.
-9. **Verify** — Compare the minted tree against the template's own manifest
+8. **Verify** — Compare the minted tree against the template's own manifest
    (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims
    but the mint never produced REFUSES the create, names every missing path, never
    reaches the registry, and never prints "Agent created". Custom `--template`
    trees carry no manifest and are verified against their own contents only. The partial
-   tree is deliberately left on disk for inspection.
-10. **Receipt** — Stamp `.trinity/.template_version.json`: which trinity template version
+   tree is deliberately left on disk for inspection, marked with `INCOMPLETE_MINT.txt` so a
+   retry refuses instead of adopting it; move it aside before creating again.
+9. **Receipt** — Stamp `.trinity/.template_version.json`: which trinity template version
     this citizen carries, in @memory's four-key shape (`template_versions`, `stamped`,
     `stamped_by: "spawn birth"`, `config_rendered`). The versions are read from the fleet's
     GOLD source (@memory's `templates/*.template.json` → `document_metadata.schema_version`),
@@ -91,10 +96,12 @@ name instead of silently making a branch called WIZARD in `./wizard`.
     gold source that cannot be read stamps NOTHING and surfaces the miss in
     `validation_issues` — a receipt naming an unverifiable version is worse than an absent
     one, but a citizen unborn because another branch's files are unreadable is worse than both.
-11. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`. Placed after
-    step 10 deliberately: a registered citizen always carries a receipt.
-12. **Owner** — Ensure at least one citizen in that project carries `owner: true`.
-13. **Validate** — Scan for any remaining `{{...}}` patterns.
+10. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`. Placed after
+    step 9 deliberately: a registered citizen always carries a receipt. A failed add is an
+    error and a non-zero exit: the tree is minted but not registered.
+11. **Owner** — Ensure at least one citizen in that project carries `owner: true`.
+12. **Validate** — Scan for any remaining `{{...}}` patterns. The summary prints the class
+    the mint decided and each issue's own text.
 
 ---
 
@@ -176,4 +183,4 @@ it. `tests/test_template_hygiene.py` pins the file's ABSENCE from the template.
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-24
