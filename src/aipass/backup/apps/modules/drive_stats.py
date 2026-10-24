@@ -3,7 +3,7 @@
 # Description: Drive stats module — shows file tracker statistics and the Drive account quota
 # Version: 1.1.2
 # Created: 2026-04-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Drive Stats Module — displays tracker statistics for a project and the Drive account quota."""

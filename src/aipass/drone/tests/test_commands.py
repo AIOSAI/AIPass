@@ -3,7 +3,7 @@
 # Description: Tests for the custom command registry
 # Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""

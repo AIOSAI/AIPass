@@ -3,7 +3,7 @@
 # Description: Tests for PRAX JSONL writer with rotation
 # Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/logging/jsonl_writer.py, exported via apps/modules/logger.py."""

@@ -3,7 +3,7 @@
 # Description: The registry-path configuration commands
 # Version: 1.0.1
 # Created: 2026-04-05
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/config.py: the registry-path configuration commands."""

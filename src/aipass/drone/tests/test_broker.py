@@ -3,7 +3,7 @@
 # Description: Tests for the drone-broker daemon, identity, and allowlist
 # Version: 2.0.9
 # Created: 2026-06-09
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""

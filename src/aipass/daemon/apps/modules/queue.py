@@ -3,7 +3,7 @@
 # Description: Unified job queue view (drone @daemon queue)
 # Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

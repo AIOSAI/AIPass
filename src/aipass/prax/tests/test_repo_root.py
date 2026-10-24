@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):

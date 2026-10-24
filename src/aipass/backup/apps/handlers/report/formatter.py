@@ -3,7 +3,7 @@
 # Description: Format a BackupResult into a human-readable CLI string
 # Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Backup result formatter."""

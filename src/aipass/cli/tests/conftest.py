@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for CLI branch tests
 # Version: 4.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""

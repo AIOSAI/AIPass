@@ -3,7 +3,7 @@
 # Description: Delete branch handler — remove remote branches with safety guards
 # Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Delete branch handler — remove remote branches with safety guards."""

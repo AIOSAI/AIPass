@@ -3,7 +3,7 @@
 # Description: Tests for caller-CWD path resolution across user-facing commands
 # Version: 1.0.7
 # Created: 2026-08-08
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/path/caller.py and caller-CWD resolution."""

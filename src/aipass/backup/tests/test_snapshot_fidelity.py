@@ -3,7 +3,7 @@
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
 # Version: 2.2.1
 # Created: 2026-06-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""

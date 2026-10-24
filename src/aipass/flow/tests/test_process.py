@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""

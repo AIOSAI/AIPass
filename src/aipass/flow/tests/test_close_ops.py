@@ -3,7 +3,7 @@
 # Description: Tests for close_ops handler — plan closure business logic
 # Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""

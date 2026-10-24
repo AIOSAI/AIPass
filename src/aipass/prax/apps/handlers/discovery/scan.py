@@ -3,7 +3,7 @@
 # Description: One-shot module discovery scan
 # Version: 1.0.0
 # Created: 2026-09-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """One-shot discovery scan — the registry's only writer that tells the truth.

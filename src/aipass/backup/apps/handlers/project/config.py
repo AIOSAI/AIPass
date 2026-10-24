@@ -3,7 +3,7 @@
 # Description: Project config handler — load/save per-project backup config
 # Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Project configuration handler."""

@@ -3,7 +3,7 @@
 # Description: Prune handler — finds and removes stored copies whose project path the ignore spec now matches
 # Version: 1.0.1
 # Created: 2026-10-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Prune handler — stored copies of paths the ignore spec now matches.

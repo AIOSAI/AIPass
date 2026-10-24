@@ -3,7 +3,7 @@
 # Description: JSONL append with size-based rotation
 # Version: 1.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX JSONL Writer

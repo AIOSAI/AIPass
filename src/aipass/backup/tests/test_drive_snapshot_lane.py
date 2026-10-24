@@ -3,7 +3,7 @@
 # Description: Tests for the Drive lane's source store, tracker lane stamp, never-leaves floor and Drive headroom
 # Version: 1.2.2
 # Created: 2026-10-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/drive_sync.py: the snapshot store it uploads, the tracker lane, the floor and the headroom."""

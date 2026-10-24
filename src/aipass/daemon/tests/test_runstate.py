@@ -3,7 +3,7 @@
 # Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""

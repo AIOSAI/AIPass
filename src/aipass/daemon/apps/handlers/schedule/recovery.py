@@ -3,7 +3,7 @@
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

@@ -3,7 +3,7 @@
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
 # Version: 2.3.3
 # Created: 2026-03-08
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

@@ -3,7 +3,7 @@
 # Description: Branch resolution, @name to path, and the resolver commands
 # Version: 1.0.1
 # Created: 2026-03-14
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/resolver.py: @name to path resolution and its commands."""

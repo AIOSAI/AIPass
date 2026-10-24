@@ -3,7 +3,7 @@
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
 # Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""

@@ -3,7 +3,7 @@
 # Description: Fleet inbox sweep tests — stale unread mail detection, wake policy and waking
 # Version: 1.1.1
 # Created:2026-08-11
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/inbox_sweep.py and the handlers/monitoring/inbox_scanner.py it drives."""

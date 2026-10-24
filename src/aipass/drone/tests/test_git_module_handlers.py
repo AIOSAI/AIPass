@@ -3,7 +3,7 @@
 # Description: Tests for the handlers @git drives — lock, repo root, status, sync and PR
 # Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the lock, status, sync and PR handlers under apps/handlers/git/ that apps/modules/git_module.py drives."""

@@ -3,7 +3,7 @@
 # Description: File System Watching
 # Version: 1.6.0
 # Created: 2025-11-26
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX File Watcher (Handler)

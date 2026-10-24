@@ -3,7 +3,7 @@
 # Description: PLAN closure module with registry cleanup
 # Version: 3.7.0
 # Created: 2025-11-25
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

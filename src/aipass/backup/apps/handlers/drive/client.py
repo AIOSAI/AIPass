@@ -3,7 +3,7 @@
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
 # Version: 2.1.1
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Google Drive client.

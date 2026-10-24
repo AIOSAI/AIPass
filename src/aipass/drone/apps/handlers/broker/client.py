@@ -3,7 +3,7 @@
 # Description: Broker client — sends delete requests over inherited fd
 # Version: 2.0.2
 # Created: 2026-06-09
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Broker client — sends delete requests over an inherited socket fd.

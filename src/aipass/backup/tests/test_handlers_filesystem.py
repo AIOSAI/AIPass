@@ -3,7 +3,7 @@
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
 # Version: 1.2.6
 # Created: 2026-06-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""

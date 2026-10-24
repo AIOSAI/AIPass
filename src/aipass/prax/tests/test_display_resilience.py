@@ -3,7 +3,7 @@
 # Description: The display consumer must survive an unrenderable event
 # Version: 1.2.0
 # Created: 2026-08-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""

@@ -3,7 +3,7 @@
 # Description: CLI Display Module — public API for Rich terminal output formatting
 # Version: 0.5.4
 # Created: 2025-11-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

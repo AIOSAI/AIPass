@@ -3,7 +3,7 @@
 # Description: PLAN restore module (reopen closed plans)
 # Version: 1.6.0
 # Created: 2025-11-22
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

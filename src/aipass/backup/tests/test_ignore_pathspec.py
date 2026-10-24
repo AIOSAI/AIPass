@@ -3,7 +3,7 @@
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
 # Version: 1.3.7
 # Created: 2026-06-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""

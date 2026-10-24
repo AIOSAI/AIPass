@@ -3,7 +3,7 @@
 # Description: Unit tests for the branch detector's external project and path strategies
 # Version: 1.0.0
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, its external project detection and path strategies."""

@@ -3,7 +3,7 @@
 # Description: Contained safe-delete handler
 # Version: 1.4.5
 # Created: 2026-06-02
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Contained safe-delete handler.

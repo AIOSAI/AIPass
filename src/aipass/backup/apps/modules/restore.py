@@ -3,7 +3,7 @@
 # Description: Restore module — version discovery and file restoration
 # Version: 1.0.1
 # Created: 2026-06-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Restore Module — list versions and restore files from versioned store."""

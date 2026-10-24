@@ -3,7 +3,7 @@
 # Description: Project tree walker yielding file paths
 # Version: 1.0.2
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Project tree walker."""

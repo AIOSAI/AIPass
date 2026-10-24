@@ -3,7 +3,7 @@
 # Description: Unified diff generation with binary detection and pattern filtering
 # Version: 2.0.1
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Diff generator — unified diffs between file versions with binary detection."""

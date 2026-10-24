@@ -3,7 +3,7 @@
 # Description: Tests for sent/deleted auto-purge handler
 # Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/email/purge.py."""

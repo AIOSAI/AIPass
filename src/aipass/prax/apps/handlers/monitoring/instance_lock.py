@@ -3,7 +3,7 @@
 # Description: Single-instance lock for the prax monitor
 # Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Single-instance lock for the prax monitor's fleet-wide duties (the log rate tracker).

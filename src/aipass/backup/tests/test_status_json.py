@@ -3,7 +3,7 @@
 # Description: Tests for apps/modules/status.py's --json and --sizes, the backup door's status contract
 # Version: 1.1.1
 # Created: 2026-10-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/status.py's --json [--sizes], the backup door's status contract."""

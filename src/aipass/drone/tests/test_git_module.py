@@ -3,7 +3,7 @@
 # Description: Tests for the @git module — routing, help, auth, scope footer, merge gate, gh verbs, untrack, release, label, alerts
 # Version: 1.6.1
 # Created: 2026-04-21
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/git_module.py: command routing, help, the auth gate and the verbs it fronts."""

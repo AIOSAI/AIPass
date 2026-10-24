@@ -3,7 +3,7 @@
 # Description: Integration tests for CLI main() flow
 # Version: 2.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/cli.py main() — the routed flow end to end."""

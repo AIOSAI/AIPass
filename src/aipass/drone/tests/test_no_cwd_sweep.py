@@ -3,7 +3,7 @@
 # Description: Every location-inference site survives a deleted working directory
 # Version: 1.0.6
 # Created: 2026-08-31
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""

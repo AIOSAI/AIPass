@@ -3,7 +3,7 @@
 # Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
 # Version: 1.4.1
 # Created: 2026-03-09
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

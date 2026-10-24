@@ -3,7 +3,7 @@
 # Description: Data loader tests — inbox and local.json loading, message triage, the real mailbox path
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/update/data_loader.py."""

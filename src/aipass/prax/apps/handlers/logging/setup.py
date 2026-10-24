@@ -3,7 +3,7 @@
 # Description: Logger Setup & Management
 # Version: 1.4.0
 # Created: 2025-11-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """PRAX Logger Setup"""

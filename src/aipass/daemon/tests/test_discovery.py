@@ -3,7 +3,7 @@
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""

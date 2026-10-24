@@ -3,7 +3,7 @@
 # Description: Google Drive upload engine — single + batch with threading
 # Version: 1.5.2
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Google Drive upload engine."""

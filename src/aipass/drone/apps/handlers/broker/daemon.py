@@ -3,7 +3,7 @@
 # Description: Broker daemon — privileged deleter for sandboxed agents
 # Version: 2.1.5
 # Created: 2026-06-09
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.

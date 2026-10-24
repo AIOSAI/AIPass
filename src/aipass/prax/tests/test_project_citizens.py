@@ -3,7 +3,7 @@
 # Description: projects/* citizens resolve by registry and passport, not path shape
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py."""

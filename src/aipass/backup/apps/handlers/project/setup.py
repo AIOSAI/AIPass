@@ -3,7 +3,7 @@
 # Description: Project setup handler — scaffold .backup/ directory in target
 # Version: 1.1.2
 # Created: 2026-04-16
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Project setup handler."""

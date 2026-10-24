@@ -3,7 +3,7 @@
 # Description: Tests for module and command discovery
 # Version: 1.1.1
 # Created: 2026-03-14
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/discovery.py and the discovery and module registry handlers it drives."""

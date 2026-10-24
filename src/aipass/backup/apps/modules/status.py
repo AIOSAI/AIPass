@@ -3,7 +3,7 @@
 # Description: Status module — show backup status for a project, as a page or one JSON object
 # Version: 1.4.1
 # Created: 2026-04-23
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Status Module — display backup info and recent history for a project.

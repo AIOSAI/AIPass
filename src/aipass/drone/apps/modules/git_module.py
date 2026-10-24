@@ -3,7 +3,7 @@
 # Description: Git workflow module — PR, status, sync, lock management
 # Version: 1.13.1
 # Created: 2026-03-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

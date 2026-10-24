@@ -3,7 +3,7 @@
 # Description: Tests for the monitor single-instance lock
 # Version: 2.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/instance_lock.py."""

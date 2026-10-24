@@ -3,7 +3,7 @@
 # Description: Tests for prax logging handler modules
 # Version: 1.5.0
 # Created: 2026-04-25
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""

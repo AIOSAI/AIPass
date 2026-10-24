@@ -3,7 +3,7 @@
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
 # Version: 1.3.1
 # Created: 2026-08-11
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """

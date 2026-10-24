@@ -3,7 +3,7 @@
 # Description: Versioned module — per-file baseline + diff backup
 # Version: 3.1.2
 # Created: 2026-04-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Versioned Module — per-file baseline + diff backup of a project directory."""

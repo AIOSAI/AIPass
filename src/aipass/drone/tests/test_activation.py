@@ -3,7 +3,7 @@
 # Description: Tests for command activation, listing, removal, and custom execution
 # Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/drone.py: activate, list, remove, target, and running a custom command."""

@@ -3,7 +3,7 @@
 # Description: Drive sync module — uploads the snapshot store to Google Drive
 # Version: 2.6.2
 # Created: 2026-04-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Drive Sync Module — orchestrates file upload to Google Drive.

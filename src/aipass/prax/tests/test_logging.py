@@ -3,7 +3,7 @@
 # Description: Tests for prax logging subsystem
 # Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/logging/introspection.py and setup.py."""
@@ -275,7 +275,7 @@ class TestSetupExternalRouting:
             failed = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Log handler failed")]
             handler_types = [type(h) is logging.NullHandler for h in built.handlers]
             local_is_a_file = isinstance(built.handlers[1], RotatingFileHandler)
-            local_file = Path(built.handlers[1].baseFilename)
+            local_file = Path(getattr(built.handlers[1], "baseFilename"))
         finally:
             for handler in list(built.handlers):
                 handler.close()

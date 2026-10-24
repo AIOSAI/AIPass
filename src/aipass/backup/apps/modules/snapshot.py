@@ -3,7 +3,7 @@
 # Description: Snapshot module — full-copy backup of a project
 # Version: 2.2.2
 # Created: 2026-04-17
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""

@@ -3,7 +3,7 @@
 # Description: Tag handler — create, push, and list release tags
 # Version: 1.2.1
 # Created: 2026-07-02
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tag handler — create, push, and list release tags.

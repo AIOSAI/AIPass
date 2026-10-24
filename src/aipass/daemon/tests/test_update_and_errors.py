@@ -3,7 +3,7 @@
 # Description: Tests for update command and error message formatting
 # Version: 1.1.0
 # Created: 2026-03-30
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/update.py, the actions refusal and branch-health's bare summary."""

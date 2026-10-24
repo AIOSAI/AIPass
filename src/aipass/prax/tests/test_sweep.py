@@ -3,7 +3,7 @@
 # Description: Tests for stale log sweep in log_audit
 # Version: 1.4.0
 # Created: 2026-07-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""

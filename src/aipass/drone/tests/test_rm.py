@@ -3,7 +3,7 @@
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
 # Version: 1.0.5
 # Created: 2026-06-02
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""

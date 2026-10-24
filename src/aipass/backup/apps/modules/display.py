@@ -3,7 +3,7 @@
 # Description: Rich CLI rendering for backup results (full 9-stage output)
 # Version: 3.1.1
 # Created: 2026-06-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Rich CLI rendering for backup — full output pipeline faithfully ported from gold source."""

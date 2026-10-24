@@ -3,7 +3,7 @@
 # Description: Unit tests for PRAX logger module (public API)
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/logger.py."""

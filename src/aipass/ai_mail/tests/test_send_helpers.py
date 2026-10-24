@@ -3,7 +3,7 @@
 # Description: Tests for email send handler and send_args dispatch resolution
 # Version: 1.0.4
 # Created: 2026-04-25
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""

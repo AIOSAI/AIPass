@@ -3,7 +3,7 @@
 # Description: PID cache for branch-to-agent mapping
 # Version: 1.0.0
 # Created: 2026-07-10
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """PID cache — maps branch names to active agent PIDs from dispatch lock files.

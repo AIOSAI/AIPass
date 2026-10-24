@@ -3,7 +3,7 @@
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
 # Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/monitoring/event_queue.py and the branch_scope.py filter it drives."""

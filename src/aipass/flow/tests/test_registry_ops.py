@@ -3,7 +3,7 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""

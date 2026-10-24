@@ -3,7 +3,7 @@
 # Description: Typed protocol for broker IPC
 # Version: 1.0.1
 # Created: 2026-06-09
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Typed protocol for broker IPC.
