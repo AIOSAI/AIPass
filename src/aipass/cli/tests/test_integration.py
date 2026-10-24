@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/test_integration.py
 # Description: Integration tests for CLI main() flow
-# Version: 2.1.1
+# Version: 2.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
-"""Tests for apps/cli.py main() and the package's cli_entry — the routed flow end to end."""
+"""Tests for apps/cli.py main() — the routed flow end to end."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(help_flag_safety) — that each module's handle_command calls wants_help before acting
@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.cli import cli_entry
 from aipass.cli.apps import cli as cli_module
 from aipass.cli.apps.cli import main
 from aipass.cli.apps.modules import display
@@ -51,8 +50,6 @@ class TestMainFlow:
             patch.object(cli_module, "console", cons),
             patch.object(display, "CONSOLE", cons),
             patch.object(display, "err_console", err_cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
             patch("sys.argv", ["cli", "--help"]),
         ):
             result = main()
@@ -94,24 +91,10 @@ class TestMainFlow:
             patch.object(cli_module, "console", cons),
             patch.object(display, "CONSOLE", cons),
             patch.object(display, "err_console", err_cons),
-            patch.object(display, "_TRIGGER", None),
-            patch.object(display, "_TRIGGER_LOADED", True),
             patch("sys.argv", ["cli", "display", "demo"]),
         ):
             result = main()
         assert result == 0
-
-    def test_cli_entry_callable(self):
-        """cli_entry() is the console_scripts entry point — verify it's callable."""
-        cons, _get_output = _make_capture_console()
-        with (
-            patch.object(cli_module, "console", cons),
-            patch.object(display, "CONSOLE", cons),
-            patch("sys.argv", ["aipass", "--version"]),
-            pytest.raises(SystemExit) as exc_info,
-        ):
-            cli_entry()
-        assert exc_info.value.code == 0
 
 
 class TestBareDemo:

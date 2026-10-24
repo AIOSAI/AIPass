@@ -18,7 +18,7 @@ The face is `README.md`, kept short for strangers. Depth lives in `docs/`, one p
 
 ```
 cli/
-├── __init__.py                     lazy top-level exports (PEP 562) + cli_entry()
+├── __init__.py                     lazy top-level exports (PEP 562)
 ├── apps/
 │   ├── cli.py                      entry point: main, run_cli, discover_modules, route_command
 │   ├── modules/                    public — import from here

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.5.3
+# Version: 0.5.4
 # Created: 2025-11-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -49,7 +49,7 @@ CONSOLE = _LiveConsole()  # terminal=colour, pipe or capture=plain, decided per 
 console = CONSOLE  # Primary export (lowercase service instance pattern)
 err_console = _LiveConsole(stderr=True)  # same, against the live sys.stderr
 
-# Trigger loaded lazily to avoid circular import
+# shortcut: inert, read by nothing; kept because other branches' conftests monkeypatch them; drop once they stop.
 _TRIGGER = None
 _TRIGGER_LOADED = False
 
@@ -123,7 +123,6 @@ def print_help():
         "  [green]✓[/green] Six core display functions ([green]header, success, error, warning, fatal, section[/green])"
     )
     CONSOLE.print("  [green]✓[/green] Beautiful terminal output with colors, panels, and formatting")
-    CONSOLE.print("  [green]✓[/green] Integration with CLI error handler for advanced error display")
     CONSOLE.print()
 
     CONSOLE.print("[bold cyan]PUBLIC API FUNCTIONS (6 total):[/bold cyan]")
@@ -205,9 +204,7 @@ def print_help():
         _display_path = Path(__file__).resolve()
     except OSError:
         _display_path = Path(__file__)
-    _cli_root = _display_path.parents[2]  # display.py -> modules -> apps -> cli
     CONSOLE.print(f"  [yellow]Module:[/yellow]      [dim]{_display_path}[/dim]")
-    CONSOLE.print(f"  [yellow]Handlers:[/yellow]    [dim]{_cli_root / 'apps' / 'handlers' / 'display'}[/dim]")
     CONSOLE.print("  [yellow]Standards:[/yellow]   [dim]See docs/display_api.md[/dim]")
     CONSOLE.print()
     CONSOLE.print("─" * 70)
@@ -287,17 +284,6 @@ def header(title: str, details: Optional[Dict[str, Any]] = None) -> None:
         CONSOLE.print()
         for key, value in details.items():
             CONSOLE.print(f"  [dim]{key}:[/dim] {value}")
-    global _TRIGGER, _TRIGGER_LOADED
-    if not _TRIGGER_LOADED:
-        _TRIGGER_LOADED = True
-        try:
-            from aipass.trigger.apps.modules.core import trigger as t
-
-            _TRIGGER = t
-        except ImportError:
-            pass
-    if _TRIGGER:
-        _TRIGGER.fire("cli_header_displayed", title=title)
     CONSOLE.print()
 
 
@@ -333,13 +319,7 @@ def warning(message: str, details: str | None = None) -> None:
 
 def fatal(message: str, suggestion: str | None = None) -> None:
     """Display error message with Rich styling and exit with code 1"""
-    msg = Text("❌ ")
-    msg.append(message, style="red bold")
-    err_console.print(msg)
-    if suggestion:
-        hint = Text("   → Try: ")
-        hint.append(suggestion, style="yellow")
-        err_console.print(hint)
+    error(message, suggestion)
     sys.exit(1)
 
 
@@ -366,30 +346,3 @@ __all__ = [
     "reset_command_state",
     "resolve_exit",
 ]
-
-if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    try:
-        if len(sys.argv) == 1:
-            print_introspection()
-            sys.exit(0)
-
-        if sys.argv[1] in ["--help", "-h", "help"]:
-            print_help()
-            sys.exit(0)
-
-        command = sys.argv[1]
-        args = sys.argv[2:] if len(sys.argv) > 2 else []
-
-        if handle_command(command, args):
-            sys.exit(0)
-        else:
-            CONSOLE.print(f"[red]Unknown command: {command}[/red]")
-            CONSOLE.print("[dim]Run 'drone @cli display --help' for usage[/dim]")
-            sys.exit(1)
-    except Exception as e:
-        CONSOLE.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)

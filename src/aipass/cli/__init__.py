@@ -4,7 +4,6 @@ Names load on first access (PEP 562): an eager import here puts kin in every sta
 """
 
 import importlib
-import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -13,7 +12,7 @@ if TYPE_CHECKING:
 _DISPLAY = "aipass.cli.apps.modules.display"
 _LAZY = ("console", "header", "success", "error", "warning", "section", "escape")
 
-__all__ = [*_LAZY, "cli_entry"]
+__all__ = [*_LAZY]
 
 
 def __getattr__(name: str):
@@ -24,12 +23,3 @@ def __getattr__(name: str):
     globals()[name] = value
     return value
 
-
-def cli_entry():
-    """Console_scripts entry point for the `aipass` command."""
-    from aipass.cli.apps.cli import main
-
-    try:
-        sys.exit(main())
-    except KeyboardInterrupt:
-        sys.exit(0)

@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: CLI Templates Module — reusable operation output patterns
-# Version: 0.3.3
+# Version: 0.3.4
 # Created: 2025-11-12
-# Modified: 2026-10-21
+# Modified: 2026-10-23
 # =============================================
 
 """
 CLI Templates Module - PUBLIC API
 """
 
-import sys
 from typing import List
 
 from aipass.cli.apps.modules.display import console as CONSOLE, error
@@ -152,32 +151,9 @@ def operation_complete(**summary) -> None:
     CONSOLE.print("[bold]Summary:[/bold]")
 
     for key, value in summary.items():
-        CONSOLE.print(f"  {key}: {value}")
+        if key != "time":
+            CONSOLE.print(f"  {key}: {value}")
 
     if summary.get("time"):
         CONSOLE.print(f"  [dim]Completed in {summary['time']}[/dim]")
     CONSOLE.print()
-
-
-if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    if len(sys.argv) == 1:
-        print_introspection()
-        sys.exit(0)
-
-    if sys.argv[1] in ["--help", "-h", "help"]:
-        print_help()
-        sys.exit(0)
-
-    command = sys.argv[1]
-    args = sys.argv[2:] if len(sys.argv) > 2 else []
-
-    if handle_command(command, args):
-        sys.exit(0)
-    else:
-        CONSOLE.print(f"[red]Unknown command: {command}[/red]")
-        CONSOLE.print("[dim]Run 'drone @cli templates --help' for usage[/dim]")
-        sys.exit(1)
