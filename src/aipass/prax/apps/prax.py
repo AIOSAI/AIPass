@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: prax.py
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-05
 # Modified: 2026-10-24
 # =============================================
@@ -78,7 +78,7 @@ def print_introspection():
         for module_file in modules_dir.glob("*.py"):
             if module_file.name.startswith("_") or module_file.name == "logger.py":
                 continue
-            discovered_modules.append(module_file.stem)
+            discovered_modules.append(module_file.stem.replace("_", "-"))
 
     console.print(f"[yellow]Discovered Modules:[/yellow] {len(discovered_modules)}")
     console.print()

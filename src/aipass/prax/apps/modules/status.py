@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2025-11-15
 # Modified: 2026-10-24
 # =============================================
@@ -81,7 +81,7 @@ def handle_command(command: str, args: List[str]) -> bool:
     console.print("=" * 60)
     total = status["total_modules"]
     console.print(f"  Total Modules:   {'unreadable (see the prax log)' if total is None else total}")
-    console.print(f"  Active Loggers:  {status['individual_loggers']}")
+    console.print(f"  Loggers opened by this command: {status['individual_loggers']}")
     console.print(f"  System Logs Dir: {status['system_logs_dir']}")
     console.print(f"  Module Logs Dir: {status['module_logs_dir']}")
     console.print(f"  Registry File:   {status['registry_file']}")
