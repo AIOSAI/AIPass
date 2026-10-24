@@ -18,8 +18,8 @@ Error monitoring subsystem. Watches branch and system logs for errors, fingerpri
 3. **Count >= 2** — first occurrence suppressed, dispatch on recurrence
 4. **Recipient is not `@devpulse`** — the manager is protected from self-dispatch. The code gates on the literal recipient string `@devpulse` in `error_detected.py`
 5. **Branch in registry** — target must be a registered citizen
-6. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown
-7. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
+6. **Not suppressed + backoff elapsed** — `should_dispatch()` checks registry status first, then exponential backoff
+7. **Circuit breaker closed** — trips after 10 errors in 60s, 300s cooldown. It runs after the backoff check, so a half-open breaker's one probe goes to a fingerprint that would be sent. Every error past gate 3 still counts toward tripping, including one gate 6 refuses
 
 Gates 6 and 7 are the Medic v2 path and run only when the error registry is available
 *and* the event carried a fingerprint. When it is not, the handler takes the **legacy

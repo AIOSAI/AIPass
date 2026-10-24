@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_medic.py
 # Description: Unit tests for medic module handle_command
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -319,6 +319,17 @@ def test_handle_command_mute_for_sets_the_asked_duration_not_the_default():
 
     state = _get_medic_state()
     state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=7200.0)
+
+
+def test_handle_command_mute_with_an_unparsable_for_refuses_instead_of_muting_24h(capsys):
+    """--for 30m is not <n>h or <n>d: the command errors and nothing is muted."""
+    medic = _import_medic()
+    medic.handle_command("mute", ["@speakeasy", "--for", "30m"])
+
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
+    assert any("Invalid --for duration" in s for s in err_args), err_args
+    _get_medic_state().mute_branch.assert_not_called()
 
 
 def test_handle_command_mute_branch_without_at():

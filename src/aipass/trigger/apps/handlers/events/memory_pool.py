@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_pool.py
 # Description: Memory pool auto-process event handler — observability for pool processing
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -15,6 +15,7 @@ branch must be a registered citizen, never "__global__": error_detected's gate d
 from typing import Any
 
 from aipass.trigger.apps.config import TRIGGER_ROOT, trail_logger
+from aipass.trigger.apps.handlers.error_reporter import report_error
 from aipass.trigger.apps.handlers.json import json_handler
 
 # Not prax: watchers read *.log and would fire this line back here; the .jsonl sidecar is skipped.
@@ -59,12 +60,9 @@ def handle_memory_pool_auto_processed(
         },
     )
 
-    fire_event = kwargs.get("fire_event")
-    if fire_event is not None:
-        fire_event(
-            "error_detected",
-            branch=branch or "memory",
-            error_type="MemoryPoolAutoProcessError",
-            message=error_msg,
-            source_file="auto_process.py",
-        )
+    report_error(
+        error_type="MemoryPoolAutoProcessError",
+        message=error_msg,
+        component=(branch or "memory").upper(),
+        fire_event=kwargs.get("fire_event") is not None,
+    )

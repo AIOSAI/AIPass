@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Branch log watcher event producer for error detection
-# Version: 2.8.1
+# Version: 2.9.0
 # Created: 2026-02-02
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -21,6 +21,7 @@ from pathlib import Path, PurePath
 from typing import Any, Dict, Set, Optional, Callable
 from aipass.trigger.apps.config import TRIGGER_ROOT, AIPASS_PKG_ROOT, atomic_write_json, json_file_lock
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers.error_registry import report as registry_report
 
 from aipass.prax.apps.modules.logger import get_direct_logger
 
@@ -61,21 +62,6 @@ _SEMANTIC_EXCLUSION_PATTERNS: re.Pattern = re.compile(
 )
 
 try:
-    from aipass.trigger.apps.handlers.error_registry import report as registry_report
-
-    _REGISTRY_AVAILABLE = True
-except ImportError:
-    logger.info("error_registry not available, using MD5 fallback dedup")
-    _REGISTRY_AVAILABLE = False
-
-    def registry_report(
-        error_type: str, message: str, component: str, log_path: str = "", severity: str = "medium"
-    ) -> dict:
-        """Fallback no-op error registry report when error_registry is unavailable."""
-        return {"is_new": False, "count": 0}
-
-
-try:
     from watchdog.observers import Observer as WatchdogObserver
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
 
@@ -89,7 +75,6 @@ except ImportError:
 _branch_log_observer: Any = None
 _active_watcher: Any = None
 _seen_error_hashes: Set[str] = set()
-_fallback_error_counts: Dict[str, int] = {}
 MAX_SEEN_HASHES = 2000
 
 # Debounced: positions + hashes coalesce into one write per interval, not one per event.
@@ -381,6 +366,7 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
         super().__init__()
         self.log_positions: Dict[str, int] = {}
         self.log_inodes: Dict[str, int] = {}
+        self.watched_dirs: Set[Path] = set()
 
     def _record_position(self, file_path: str, position: int) -> None:
         """Record byte position and inode identity for a watched file."""
@@ -446,8 +432,9 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             return True
         if kind != "system":
             return False
-        # Prax dual-writes; drop the system copy, whose branch is only guessed from its filename.
-        return _system_log_branch_twin(file_path) is None
+        # Prax dual-writes; drop the system copy only while its twin is read, else it is the only copy.
+        twin = _system_log_branch_twin(file_path)
+        return twin is None or twin.parent not in self.watched_dirs
 
     def _read_new_lines(self, file_path: str) -> None:
         """Read new content from a log file and process lines."""
@@ -548,97 +535,38 @@ class BranchLogWatcher(WatchdogFileSystemEventHandler if WATCHDOG_AVAILABLE else
             module = parsed["module"]
             message = parsed["message"]
 
-            if _REGISTRY_AVAILABLE:
-                try:
-                    result = registry_report(
-                        error_type=parsed["level"],
-                        message=message,
-                        component=branch,
-                        log_path=log_path,
-                        severity="medium",
-                    )
+            result = registry_report(
+                error_type=parsed["level"],
+                message=message,
+                component=branch,
+                log_path=log_path,
+                severity="medium",
+            )
 
-                    # Fire on every occurrence; the handler owns breaker, backoff and threshold.
-                    error_count = result.get("count", 1)
-
-                    if _fire_event is not None:
-                        _fire_event(
-                            "error_detected",
-                            branch=branch,
-                            module=module,
-                            message=message,
-                            log_path=log_path,
-                            error_hash=result.get("id", ""),
-                            timestamp=parsed["timestamp"],
-                            fingerprint=result.get("fingerprint", ""),
-                            registry_id=result.get("id", ""),
-                            first_seen=result.get("first_seen", ""),
-                            last_seen=result.get("last_seen", ""),
-                            count=error_count,
-                        )
-                        json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
-                    else:
-                        logger.warning(
-                            "Cannot fire error_detected event: _fire_event callback not set (branch=%s, module=%s)",
-                            branch,
-                            module,
-                        )
-                    return
-
-                except Exception as e:
-                    logger.warning("Registry report failed for %s:%s — using MD5 fallback: %s", branch, module, e)
-
-            error_hash = generate_error_hash(module, message)
-
-            # The import may have failed at module load yet succeed now.
-            try:
-                from aipass.trigger.apps.handlers.error_registry import report as _lazy_report
-
-                result = _lazy_report(
-                    error_type=parsed["level"], message=message, component=branch, log_path=log_path, severity="medium"
-                )
-                error_count = result.get("count", 1)
-                if _fire_event is not None:
-                    _fire_event(
-                        "error_detected",
-                        branch=branch,
-                        module=module,
-                        message=message,
-                        log_path=log_path,
-                        error_hash=result.get("id", error_hash),
-                        timestamp=parsed["timestamp"],
-                        fingerprint=result.get("fingerprint", ""),
-                        registry_id=result.get("id", ""),
-                        first_seen=result.get("first_seen", ""),
-                        last_seen=result.get("last_seen", ""),
-                        count=error_count,
-                    )
-                    json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
-                return
-            except Exception as exc:
-                logger.warning("Lazy registry import failed in fallback path: %s", exc)
-
-            _fallback_error_counts[error_hash] = _fallback_error_counts.get(error_hash, 0) + 1
-            local_count = _fallback_error_counts[error_hash]
-
-            if _fire_event is not None:
-                _fire_event(
-                    "error_detected",
-                    branch=branch,
-                    module=module,
-                    message=message,
-                    log_path=log_path,
-                    error_hash=error_hash,
-                    timestamp=parsed["timestamp"],
-                    count=local_count,
-                )
-                json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
-            else:
+            if _fire_event is None:
                 logger.warning(
                     "Cannot fire error_detected event: _fire_event callback not set (branch=%s, module=%s)",
                     branch,
                     module,
                 )
+                return
+
+            # Fire on every occurrence; the handler owns breaker, backoff and threshold.
+            _fire_event(
+                "error_detected",
+                branch=branch,
+                module=module,
+                message=message,
+                log_path=log_path,
+                error_hash=result.get("id", ""),
+                timestamp=parsed["timestamp"],
+                fingerprint=result.get("fingerprint", ""),
+                registry_id=result.get("id", ""),
+                first_seen=result.get("first_seen", ""),
+                last_seen=result.get("last_seen", ""),
+                count=result.get("count", 1),
+            )
+            json_handler.log_operation("error_detected_in_log", {"branch": branch, "log_path": log_path})
 
         except Exception as exc:
             logger.warning("Failed to process log line from '%s': %s", log_path, exc)
@@ -716,6 +644,7 @@ def start_branch_log_watcher() -> Any:
         logs_dir = branch_dir / "logs"
         if logs_dir.exists():
             observer.schedule(watcher, str(logs_dir), recursive=False)
+            watcher.watched_dirs.add(logs_dir)
 
     if SYSTEM_LOGS_DIR.exists():
         observer.schedule(watcher, str(SYSTEM_LOGS_DIR), recursive=False)

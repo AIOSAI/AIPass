@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: triage.py
 # Description: CI red lane triage - run list parsing, newest per workflow, infra steps, owner mapping
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-22
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -83,8 +83,8 @@ def _owners(lines: List[str]) -> List[str]:
 def triage_log(log_text: str) -> Dict[str, Any]:
     """Failing step, failing lines and owners from a `run view --log-failed` dump."""
     parsed = [_log_text(line) for line in log_text.splitlines() if line.strip()]
-    lines = [text.rstrip() for _job, _step, text in parsed if _FAILING.search(text)][-MAX_FAILING_LINES:]
-    result = {"step": _failing_step(parsed), "lines": lines, "owners": _owners(lines)}
+    all_lines = [text.rstrip() for _job, _step, text in parsed if _FAILING.search(text)]
+    result = {"step": _failing_step(parsed), "lines": all_lines[-MAX_FAILING_LINES:], "owners": _owners(all_lines)}
     json_handler.log_operation("ci_log_triaged", {"step": result["step"], "owners": result["owners"]})
     return result
 

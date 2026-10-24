@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_startup_handler.py
 # Description: Tests for startup event handler
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.startup as startup
-import aipass.trigger.apps.handlers.watchers.log_watcher as system_log_reader
+import aipass.trigger.apps.handlers.log_watcher as lw
 
 
 @pytest.fixture(autouse=True)
@@ -40,6 +40,9 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
 
     monkeypatch.setattr(startup.json_handler, "log_operation", MagicMock(return_value=True))
     monkeypatch.setattr(startup, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+    # The tests write their logs at tmp_path; the branch is read the way the watcher reads system_logs.
+    monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path)
+    monkeypatch.setattr(lw, "_known_branch_names", lambda: ("ai_mail", "hooks", "flow"))
     for name in ("_run_error_catchup", "_scan_system_logs_for_errors"):
         monkeypatch.setattr(startup, name, getattr(startup, name))
 
@@ -209,7 +212,7 @@ class TestCatchupOccurrenceCounting:
         from datetime import datetime
 
         log = self._write_log(tmp_path, [self._line("2026-09-07 10:00:00")] * 5)
-        old_hash = system_log_reader.generate_error_hash("flow.runner", "connection timed out")
+        old_hash = lw.generate_error_hash("flow.runner", "connection timed out")
 
         errors: list = []
         mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), {old_hash}, errors, time.monotonic(), {})
@@ -302,6 +305,16 @@ class TestCatchupNamesTheRegistryRow:
         assert reported and reported[0]["component"] == "HOOKS"
         assert reported[0]["error_type"] == "ERROR", "the row's error_type is uppercase — match it, don't mint a twin"
         assert errors[0]["registry_id"] == "ab12cd34"
+
+    def test_an_ai_mail_log_is_owned_by_ai_mail_not_ai(self, tmp_path: Path) -> None:
+        """The longest registered prefix names the owner; cutting at the first "_" names @ai, which nobody is."""
+        mod = _import_startup()
+        log = tmp_path / "ai_mail_delivery.log"
+        log.write_text("2026-09-24 10:00:00 | ai_mail.delivery | ERROR | inbox write failed\n", encoding="utf-8")
+
+        errors = self._scan(mod, log)
+
+        assert [e["branch"] for e in errors] == ["AI_MAIL"]
 
     def test_the_lookup_uses_the_level_stored_rows_carry(self, tmp_path: Path) -> None:
         """Stored rows say error_type "ERROR"; a lower-cased lookup finds nothing and mints a twin."""
@@ -397,6 +410,21 @@ class TestRowTwelveTimestampGate:
         state = self._read(mod)
         assert state["last_scan_timestamp"] == self.HELD
         assert "deadbeef" in state["processed_hashes"]
+
+    def test_the_trim_drops_the_oldest_hashes_and_keeps_this_scans(self) -> None:
+        mod = _import_startup()
+        old = [f"old{i:03d}" for i in range(mod.MAX_HASHES)]
+        self._state(mod, self.HELD, old)
+
+        def _scan(since, processed_hashes):
+            processed_hashes.add("fresh")
+            return mod.ScanOutcome([], True, "")
+
+        mod._scan_system_logs_for_errors = _scan
+
+        mod._run_error_catchup(None)
+
+        assert self._read(mod)["processed_hashes"] == old[1:] + ["fresh"]
 
     def test_size_skipped_file_holds_the_timestamp(self, tmp_path: Path) -> None:
         """A file too large to read is a hole in the window, so the cursor waits.

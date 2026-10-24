@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.9.1
+# Version: 2.10.0
 # Created: 2026-02-10
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -15,16 +15,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from aipass.trigger.apps.config import (
-    TRIGGER_JSON_DIR,
-    TRIGGER_ROOT,
-    append_trail,
-    migrate_json_file,
-    trail_logger,
-)
+from aipass.trigger.apps.config import TRIGGER_ROOT, append_trail, trail_logger
 from aipass.trigger.apps.handlers.repo_root import find_repo_root
 from aipass.trigger.apps.handlers.json import json_handler
-from aipass.trigger.apps.handlers import escalation
+from aipass.trigger.apps.handlers import escalation, medic_state
 
 # Not prax: this runs on the watched event path, so a prax line would fire straight back at it.
 logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
@@ -33,10 +27,6 @@ logger = trail_logger(TRIGGER_ROOT / "logs" / "error_detected_handler.jsonl")
 _REPO_ROOT = find_repo_root(caller="error_detected")
 
 BRANCH_REGISTRY_FILE = _REPO_ROOT / "AIPASS_REGISTRY.json"
-
-# Live medic state — see medic_state.py for why it is not on the trio path.
-MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "medic_state.json"
-LEGACY_MEDIC_STATE_FILE = TRIGGER_JSON_DIR / "trigger_config.json"
 
 # Set by the module layer, so this handler never imports from modules.
 _send_email: Optional[Callable[..., bool]] = None
@@ -86,51 +76,19 @@ MAX_DISPATCHES_PER_WINDOW = 3
 RATE_LIMIT_WINDOW_SECONDS = 600  # 10 minutes
 
 
-def _read_medic_state() -> Dict[str, Any]:
-    """Read medic_state.json, migrating off the legacy path on first read."""
-    migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
-    if not MEDIC_STATE_FILE.exists():
-        return {}
-    return json.loads(MEDIC_STATE_FILE.read_text(encoding="utf-8"))
-
-
 def _is_medic_enabled() -> bool:
     """Check if medic (auto-healing dispatch) is enabled."""
     # Unreadable state raises, never answers enabled: it may hold a person's 'medic off'.
     try:
-        config = _read_medic_state().get("config", {})
-        enabled = bool(config.get("medic_enabled", True))
-        if enabled:
-            return True
-        disabled_until = config.get("medic_disabled_until")
-        if disabled_until and datetime.fromisoformat(disabled_until) <= datetime.now():
-            return True
-        return False
+        return medic_state.is_enabled()
     except Exception as exc:
-        raise RuntimeError(f"medic state unreadable ({MEDIC_STATE_FILE.name}): {exc}") from exc
-
-
-def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
-    """Check if a single mute entry matches the branch and is still active."""
-    if isinstance(entry, str):
-        return entry.lower() == branch_lower
-    if not isinstance(entry, dict):
-        return False
-    if entry.get("name", "").lower() != branch_lower:
-        return False
-    expires_at = entry.get("expires_at")
-    if expires_at is None:
-        return True
-    return datetime.fromisoformat(expires_at) > now
+        raise RuntimeError(f"medic state unreadable ({medic_state.MEDIC_STATE_FILE.name}): {exc}") from exc
 
 
 def _is_branch_muted(branch_name: str) -> bool:
     """Check if a specific branch is muted for medic dispatch."""
     try:
-        muted = _read_medic_state().get("config", {}).get("muted_branches", [])
-        branch_lower = branch_name.lower()
-        now = datetime.now()
-        return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
+        return branch_name.lstrip("@").lower() in medic_state.get_muted_branches()
     except Exception as exc:
         logger.warning(f"_is_branch_muted config read failed: {exc}")
         return False
@@ -361,10 +319,7 @@ def handle_error_detected(
             return
 
         if _REGISTRY_DISPATCH_AVAILABLE and fingerprint:
-            if not circuit_breaker_allows():
-                _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
-                return
-
+            # Backoff first: a half-open breaker's one probe must go to a fingerprint that would be sent.
             if not registry_should_dispatch(fingerprint):
                 # Keep a permanent suppression from reading as a timing wait on the trail.
                 if registry_is_suppressed(fingerprint):
@@ -375,6 +330,10 @@ def handle_error_detected(
                     _write_rate_log(
                         "Backoff active", f"fingerprint {fingerprint[:12]}: {recipient} - {module}, skipping"
                     )
+                return
+
+            if not circuit_breaker_allows():
+                _write_suppression_log("Circuit breaker OPEN - suppressed dispatch for", branch, module, message)
                 return
         else:
             recent_count = len(

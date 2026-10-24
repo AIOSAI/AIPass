@@ -40,7 +40,9 @@ lands in *two* files: `src/aipass/<branch>/logs/<module>.log` and
 escalation signatures that disagree about who wrote it, because the branch copy is
 attributed by the directory it sits in while the `system_logs` copy is attributed by
 its filename. `_should_process()` drops a `system_logs` file when
-`_system_log_branch_twin()` finds the branch copy that already covers it. Most
+`_system_log_branch_twin()` finds the branch copy that already covers it and that
+copy's `logs/` directory got a watch at start. A `logs/` directory created after start
+has no watch, so its `system_logs` copy is the one read until the next restart. Most
 `system_logs` files are twin-backed; the ones with no twin (external projects, bots,
 test-fixture logs) keep being watched — that is the only reason the directory is still
 read at all.

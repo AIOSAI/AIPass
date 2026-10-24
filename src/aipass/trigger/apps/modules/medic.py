@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-02-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -183,7 +183,7 @@ def print_help() -> None:
 
 
 def _parse_duration_args(args: list) -> tuple:
-    """Extract --for <dur> and --forever from args."""
+    """Extract --for <dur> and --forever from args; a --for value that does not parse raises ValueError."""
     remaining = []
     duration = None
     is_forever = False
@@ -193,9 +193,9 @@ def _parse_duration_args(args: list) -> tuple:
             is_forever = True
             i += 1
         elif args[i] == "--for" and i + 1 < len(args):
-            parsed = parse_duration(args[i + 1])
-            if parsed is not None:
-                duration = parsed
+            duration = parse_duration(args[i + 1])
+            if duration is None:
+                raise ValueError(f"Invalid --for duration: {args[i + 1]!r}")
             i += 2
         else:
             remaining.append(args[i])
@@ -233,7 +233,11 @@ def _handle_mute(console, args: list) -> None:
     """Handle 'medic mute @branch [--for <dur>] [--forever]'."""
     from aipass.cli.apps.modules import error
 
-    duration_secs, is_forever, rest = _parse_duration_args(args)
+    try:
+        duration_secs, is_forever, rest = _parse_duration_args(args)
+    except ValueError as exc:
+        error(str(exc), suggestion="Use <n>h or <n>d, e.g. --for 48h or --for 7d")
+        return
 
     if not rest:
         error("Missing branch name", suggestion="Usage: medic mute @branch [--for 48h] [--forever]")
@@ -275,7 +279,11 @@ def _handle_volume_mute(console, args: list) -> None:
     """Handle 'medic volume-mute @branch [--for <dur>] [--forever]'."""
     from aipass.cli.apps.modules import error
 
-    duration_secs, is_forever, rest = _parse_duration_args(args)
+    try:
+        duration_secs, is_forever, rest = _parse_duration_args(args)
+    except ValueError as exc:
+        error(str(exc), suggestion="Use <n>h or <n>d, e.g. --for 48h or --for 7d")
+        return
 
     usage = "Usage: medic volume-mute @branch [--for 48h] [--forever]"
     if not rest:

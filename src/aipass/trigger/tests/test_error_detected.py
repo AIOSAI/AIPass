@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-04-25
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -29,7 +29,7 @@ import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.error_detected as error_detected
 from aipass.ai_mail.apps.modules import door_wake as wake
 from aipass.trigger.apps.config import trail_logger
-from aipass.trigger.apps.handlers import escalation
+from aipass.trigger.apps.handlers import escalation, medic_state
 
 
 @pytest.fixture(autouse=True)
@@ -55,8 +55,9 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setattr(error_detected, "registry_is_suppressed", MagicMock(return_value=False))
     monkeypatch.setattr(error_detected, "_REGISTRY_DISPATCH_AVAILABLE", True)
     monkeypatch.setattr(error_detected.json_handler, "log_operation", MagicMock(return_value=True))
-    monkeypatch.setattr(error_detected, "MEDIC_STATE_FILE", json_dir / "medic_state.json")
-    monkeypatch.setattr(error_detected, "LEGACY_MEDIC_STATE_FILE", json_dir / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", json_dir / "medic_state.json")
+    monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", json_dir / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", tmp_path / "AIPASS_REGISTRY.json")
     monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
     monkeypatch.setattr(error_detected, "logger", trail_logger(tmp_path / "error_detected_handler.jsonl"))
@@ -520,7 +521,7 @@ class TestMedicEnabledTTL:
         send = _setup_happy_path(mod)
         mod._is_medic_enabled = real_is_medic_enabled  # type: ignore[attr-defined]
 
-        config_file = mod.MEDIC_STATE_FILE
+        config_file = medic_state.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         past = (datetime.now() - timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -554,7 +555,7 @@ class TestMedicEnabledTTL:
         send = _setup_happy_path(mod)
         mod._is_medic_enabled = real_is_medic_enabled  # type: ignore[attr-defined]
 
-        config_file = mod.MEDIC_STATE_FILE
+        config_file = medic_state.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         future = (datetime.now() + timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -592,7 +593,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.MEDIC_STATE_FILE
+        config_file = medic_state.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         future = (datetime.now() + timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -626,7 +627,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.MEDIC_STATE_FILE
+        config_file = medic_state.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         past = (datetime.now() - timedelta(hours=1)).isoformat()
         config_file.write_text(
@@ -661,7 +662,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.MEDIC_STATE_FILE
+        config_file = medic_state.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -694,7 +695,7 @@ class TestBranchMutedFormats:
         mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
         mod._get_registered_emails = MagicMock(return_value={"@api", "@flow"})  # type: ignore[attr-defined]
 
-        config_file = mod.MEDIC_STATE_FILE
+        config_file = medic_state.MEDIC_STATE_FILE
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(
             json.dumps(
@@ -1041,3 +1042,61 @@ class TestEscalationRecording:
 
         send.assert_called_once()
         assert lane.mod.get_signatures() == []
+
+
+class TestOneMuteRule:
+    """A mute reads the same in every gate, however it was stored."""
+
+    def test_a_mute_stored_with_an_at_suppresses_dispatch(self) -> None:
+        """medic status reads "@seedgo" as seedgo muted; the dispatch gate must agree.
+        Red first: the gate compared the raw entry and dispatched to a muted branch.
+        """
+        mod = _import_module()
+        real_is_branch_muted = mod._is_branch_muted
+        send = _setup_happy_path(mod)
+        mod._is_branch_muted = real_is_branch_muted  # type: ignore[attr-defined]
+        mod._get_registered_emails = MagicMock(return_value={"@seedgo"})  # type: ignore[attr-defined]
+        medic_state.MEDIC_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        medic_state.MEDIC_STATE_FILE.write_text(
+            json.dumps({"config": {"muted_branches": [{"name": "@seedgo", "expires_at": None}]}}), encoding="utf-8"
+        )
+
+        mod.handle_error_detected(
+            branch="SEEDGO", module="cfg", message="err", error_hash="h1", count=2, fingerprint="fp_at"
+        )
+
+        send.assert_not_called()
+
+
+class TestHalfOpenProbe:
+    """The breaker's one half-open probe goes to a fingerprint that would be sent."""
+
+    def test_a_backoff_fingerprint_leaves_the_probe_for_a_fresh_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Open breaker, cooldown over: a fingerprint in backoff arrives, then a fresh one is still sent.
+        Red first: the backoff fingerprint spent the probe and the fresh one reopened the breaker.
+        """
+        import time
+
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+        later = time.time() + 301
+        monkeypatch.setattr(mod, "circuit_breaker_allows", lambda: error_registry.circuit_breaker_allows(now=later))
+        monkeypatch.setattr(
+            mod, "circuit_breaker_record_error", lambda: error_registry.circuit_breaker_record_error(now=later)
+        )
+        monkeypatch.setattr(mod, "circuit_breaker_probe_succeeded", error_registry.circuit_breaker_probe_succeeded)
+        monkeypatch.setattr(mod, "registry_should_dispatch", lambda fingerprint: fingerprint != "fp_backoff")
+        error_registry.circuit_breaker_reset()
+        for _ in range(10):
+            error_registry.circuit_breaker_record_error()
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="noisy", error_hash="h1", count=5, fingerprint="fp_backoff"
+        )
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="fresh", error_hash="h2", count=2, fingerprint="fp_fresh"
+        )
+
+        send.assert_called_once()
+        assert "fresh" in send.call_args.kwargs["message"]
+        assert error_registry.get_circuit_breaker_status(now=later)["state"] == "closed"

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ci.py
 # Description: Tests for the CI red lane module - poll, reply, verdict, status - and the handlers it drives
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-23
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/ci.py and the handlers/ci/ handlers it drives."""
@@ -86,6 +86,12 @@ class TestTriage:
 
     def test_a_failing_test_path_names_its_branch(self):
         assert triage.triage_log(PYTEST_LOG)["owners"] == ["spawn"]
+
+    def test_an_owner_before_the_shown_lines_is_still_named(self):
+        noise = "test (3.12)\tRun tests\t2026-10-23T05:31:00.0Z Error: traceback line\n" * triage.MAX_FAILING_LINES
+        facts = triage.triage_log(AUDIT_LOG + noise)
+        assert facts["owners"] == ["hooks"]
+        assert len(facts["lines"]) == triage.MAX_FAILING_LINES
 
     def test_infra_is_a_cancel_or_a_setup_step_never_a_test_step(self):
         assert triage.is_infra("cancelled", "Run tests") is True
@@ -177,6 +183,35 @@ class TestPoll:
         ci.poll()
         assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "superseded"
         assert ci_lane.mails == [] and ci_lane.wakes == []
+
+    def test_a_poll_overlapping_another_reads_and_wakes_a_red_once(self, ci_lane):
+        class _Overlap(dict):
+            def get(self, key, default=None):
+                if not getattr(self, "ran", False):
+                    self.ran = True
+                    ci.poll()
+                return super().get(key, default)
+
+        ci_lane.logs = _Overlap({"900": AUDIT_LOG})
+        ci_lane.add_run("900", created="2026-10-23T05:00:00Z")
+        ci.poll()
+        assert [c for c in ci_lane.calls if c[1:3] == ["run", "view"]] == [
+            ["@git", "run", "view", "900", "--log-failed"]
+        ]
+        assert [m["to_branch"] for m in ci_lane.mails] == ["@hooks"]
+
+    def test_a_claim_left_by_a_dead_poll_is_taken_over(self, ci_lane):
+        stale = {"claimed": "2026-01-01T00:00:00Z", "workflow": "CI", "step": "audit", "lines": ["hooks: 99%"]}
+        runs = {"900": {"verdict": "triaging", "triaged": True, **stale}}
+        cures = {"800@hooks": {"run_id": "800", "owner": "hooks", "state": "dispatching", **stale}}
+        (ci_lane.root / "ci_ledger.json").write_text(json.dumps({"runs": runs, "cures": cures}), encoding="utf-8")
+        ci_lane.add_run("900", created="2026-10-23T05:00:00Z")
+        ci_lane.logs["900"] = AUDIT_LOG
+        ci.poll()
+        assert {c["run_id"]: c["state"] for c in ci_lane.ledger()["cures"].values()} == {
+            "800": "dispatched",
+            "900": "dispatched",
+        }
 
     def test_a_first_time_green_sends_nothing(self, ci_lane):
         ci_lane.add_run("901", conclusion="success")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher_service.py
 # Description: Tests for the log watcher service entry point
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/log_watcher_service.py — the persistent service entry point."""
@@ -36,6 +36,8 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # The real catch-up walks the live system_logs and fires error_detected; tests assert on this mock.
     monkeypatch.setattr(log_watcher_service, "run_error_catchup", MagicMock())
+    # The real purge rewrites the LIVE error registry.
+    monkeypatch.setattr(log_watcher_service, "purge_stale", MagicMock(return_value=0))
 
     # The shell may be systemd-supervised: main() starts reload_sentinel,
     # whose evaluate() only acts under INVOCATION_ID.
@@ -190,6 +192,18 @@ class TestMain:
             mod.main()
 
         assert exc_info.value.code == 1
+
+    def test_start_purges_stale_rows_but_keeps_suppressed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Each start bounds the registry; suppressed rows stay, or they would wake their owner again."""
+        mod = _import_module()
+
+        pre_set = threading.Event()
+        pre_set.set()
+        monkeypatch.setattr(mod, "threading", SimpleNamespace(Event=lambda: pre_set))
+
+        mod.main()
+
+        mod.purge_stale.assert_called_once_with(30, keep_suppressed=True)
 
     def test_calls_stop_on_shutdown(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """After stop_event is set, both stop functions are called (mutant: the two stops swapped)."""

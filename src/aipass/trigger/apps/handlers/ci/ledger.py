@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ledger.py
 # Description: CI red lane ledger - run verdicts and cure states in trigger_json/ci_ledger.json
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-22
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -24,11 +24,22 @@ LEDGER_FILE = TRIGGER_JSON_DIR / "ci_ledger.json"
 
 # Waiting for the two-awake cap: the next poll drains both.
 QUEUED = {"queued", "review_queued"}
+# Past this a claim belongs to a poll that died: the next poll takes the run or cure over.
+CLAIM_STALE_SECONDS = 3600
 
 
 def utc_now() -> str:
     """Now as GitHub stamps a run's creation, so the two compare as strings."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def claim_is_live(entry: Dict[str, Any]) -> bool:
+    """True while the entry's `claimed` stamp is younger than CLAIM_STALE_SECONDS; unreadable is stale."""
+    try:
+        claimed = datetime.strptime(entry.get("claimed", ""), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc) - claimed).total_seconds() < CLAIM_STALE_SECONDS
 
 
 def _empty() -> Dict[str, Any]:

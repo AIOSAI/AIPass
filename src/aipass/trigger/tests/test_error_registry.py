@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-03-24
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -35,9 +35,6 @@ def _registry_on_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     json_dir = tmp_path / "trigger_json"
     monkeypatch.setattr(er, "REGISTRY_FILE", json_dir / "error_registry.json")
     monkeypatch.setattr(er, "CB_STATE_FILE", json_dir / "trigger_cb_state.json")
-    monkeypatch.setattr(er, "_circuit_breaker", er.CircuitBreakerState())
-    monkeypatch.setattr(er, "_fingerprint_dispatch_times", {})
-    monkeypatch.setattr(er, "_fingerprint_dispatch_count", {})
     monkeypatch.setattr(er.json_handler, "log_operation", MagicMock(return_value=True))
     monkeypatch.setattr(er, "logger", MagicMock())
 
@@ -290,6 +287,12 @@ def test_circuit_breaker_closed_allows_dispatch(tmp_path: Path) -> None:
     assert er.circuit_breaker_allows() is True
 
 
+def _trip(registry) -> None:
+    """Open the breaker the way production does: a threshold of errors inside the trip window."""
+    for _ in range(10):
+        registry.circuit_breaker_record_error()
+
+
 def test_circuit_breaker_trips_after_threshold(tmp_path: Path) -> None:
     """Circuit breaker trips to open after recording threshold errors."""
     _seed_registry(tmp_path)
@@ -323,7 +326,7 @@ def test_circuit_breaker_open_blocks_dispatch(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
     er.circuit_breaker_reset()
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
 
     assert er.circuit_breaker_allows() is False
 
@@ -332,7 +335,7 @@ def test_circuit_breaker_reset_restores_closed(tmp_path: Path) -> None:
     """circuit_breaker_reset restores the breaker to closed state."""
     _seed_registry(tmp_path)
     er = _import_registry()
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     er.circuit_breaker_reset()
 
     status = er.get_circuit_breaker_status()
@@ -360,7 +363,7 @@ def test_circuit_breaker_half_open_allows_one_dispatch(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
 
     tripped = er.get_circuit_breaker_status()
     later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
@@ -379,7 +382,7 @@ def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path:
 
     base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
     er.circuit_breaker_allows(now=later)  # Transition to half_open
 
@@ -937,7 +940,7 @@ class TestEmptyJsonResilience:
         assert list(saved["errors"]) == [result["fingerprint"]]
 
     def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
-        """_load_circuit_breaker_state returns default when its state file is empty."""
+        """An empty breaker state file reads as a closed breaker with no backoff."""
         config_dir = tmp_path / "trigger_json"
         config_dir.mkdir(parents=True, exist_ok=True)
         # The breaker persists here; any other file would pass without reading anything.
@@ -945,9 +948,10 @@ class TestEmptyJsonResilience:
         config_file.write_text("", encoding="utf-8")
 
         er = _import_registry()
-        result = er._load_circuit_breaker_state()
-        assert result.state == "closed"
-        assert result.cooldown_seconds == 300
+        status = er.get_circuit_breaker_status()
+        assert status["state"] == "closed"
+        assert status["cooldown_seconds"] == 300
+        assert er.get_dispatch_count("any_fp") == 0
 
     def test_report_with_empty_registry(self, tmp_path: Path) -> None:
         """report() works when registry file is empty (creates fresh)."""
@@ -1066,7 +1070,7 @@ def test_evaluate_state_transitions_open_to_half_open_after_cooldown(tmp_path: P
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     tripped = er.get_circuit_breaker_status()
     later = tripped["opened_at"] + tripped["cooldown_seconds"] + 10
 
@@ -1080,7 +1084,7 @@ def test_evaluate_state_no_transition_before_cooldown(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     tripped = er.get_circuit_breaker_status()
     assert tripped["state"] == "open"
 
@@ -1106,7 +1110,7 @@ def test_probe_succeeded_closes_breaker(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
     base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
     er.circuit_breaker_allows(now=later)  # Transitions to half_open
     assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
@@ -1139,7 +1143,7 @@ def test_probe_succeeded_noop_when_open(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     assert er.get_circuit_breaker_status()["state"] == "open"
 
     er.circuit_breaker_probe_succeeded()
@@ -1153,7 +1157,7 @@ def test_status_returns_remaining_seconds(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     tripped = er.get_circuit_breaker_status()
 
     # 100 seconds after the trip, exactly cooldown - 100 remain: the clock is handed in
@@ -1177,7 +1181,7 @@ def test_breaker_half_open_on_read_then_allows_probe(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     tripped = er.get_circuit_breaker_status()
     later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
@@ -1195,7 +1199,7 @@ def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
 
     base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
-    er.circuit_breaker_trip(reason="test")
+    _trip(er)
     tripped = er.get_circuit_breaker_status()
     assert tripped["state"] == "open"
 
@@ -1268,7 +1272,7 @@ def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
 
     er.get_dispatch_count("read_only_fp")
 
-    assert "read_only_fp" not in er._fingerprint_dispatch_count
+    assert not er.CB_STATE_FILE.exists()
 
 
 def _refuse_once(mp, er):
@@ -1347,3 +1351,77 @@ class TestRegistryWritersHoldTheLock:
         errors = json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]
         assert landed(errors), f"{writer} did not apply its change"
         assert "c" * 40 in errors, f"{writer} wrote back a stale read and lost the concurrent entry"
+
+
+def _write_other_process_state(breaker_state: str, per_fingerprint: dict) -> None:
+    """Stand in for a second process (a CLI reset, a ci poll) writing the shared breaker file."""
+    er.CB_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    er.CB_STATE_FILE.write_text(
+        json.dumps({"circuit_breaker": {"state": breaker_state, "opened_at": 0.0}, "per_fingerprint": per_fingerprint}),
+        encoding="utf-8",
+    )
+
+
+class TestBreakerFileIsTheTruth:
+    """Breaker and backoff state live in the file, so every process sees the others' writes."""
+
+    def test_a_dispatch_saved_by_another_process_survives_this_ones_save(self) -> None:
+        er.record_dispatch("fp_daemon")
+        on_disk = json.loads(er.CB_STATE_FILE.read_text(encoding="utf-8"))["per_fingerprint"]
+        _write_other_process_state("closed", {**on_disk, "fp_ci_poll": {"last_dispatch": time.time(), "count": 1}})
+
+        er.record_dispatch("fp_daemon_again")
+
+        assert er.get_dispatch_count("fp_ci_poll") == 1
+        assert er.get_dispatch_count("fp_daemon") == 1
+        assert er.should_dispatch("fp_ci_poll") is False
+
+    def test_a_reset_by_another_process_reopens_dispatch_here(self) -> None:
+        _trip(er)
+        assert er.circuit_breaker_allows() is False
+
+        _write_other_process_state("closed", {})
+
+        assert er.circuit_breaker_allows() is True
+
+    def test_reset_closes_the_breaker_and_keeps_backoff(self) -> None:
+        er.record_dispatch("fp_backed_off")
+        _trip(er)
+
+        er.circuit_breaker_reset()
+
+        assert er.circuit_breaker_allows() is True
+        assert er.should_dispatch("fp_backed_off") is False
+
+    def test_a_threshold_trip_opens_at_the_handed_in_clock(self) -> None:
+        start = 1_000_000.0
+        for _ in range(10):
+            er.circuit_breaker_record_error(now=start)
+
+        assert er.get_circuit_breaker_status(now=start)["opened_at"] == start
+
+
+def test_a_prefix_matching_two_rows_finds_neither_but_a_full_fingerprint_still_does(tmp_path: Path) -> None:
+    first, second = "ab1" + "0" * 37, "ab2" + "0" * 37
+    _seed_registry(
+        tmp_path, {first: {"fingerprint": first, "status": "new"}, second: {"fingerprint": second, "status": "new"}}
+    )
+
+    assert er.get_entry("ab") is None
+    assert er.update_status("ab", "suppressed") is False
+    assert er.get_entry(second)["fingerprint"] == second
+    assert er.get_entry("ab1")["fingerprint"] == first
+
+
+def test_purge_keeping_suppressed_drops_stale_rows_but_not_suppressed_ones(tmp_path: Path) -> None:
+    stale = "2025-01-01T00:00:00"
+    _seed_registry(
+        tmp_path,
+        {
+            "s" * 40: {"fingerprint": "s" * 40, "status": "suppressed", "last_seen": stale},
+            "n" * 40: {"fingerprint": "n" * 40, "status": "new", "last_seen": stale},
+        },
+    )
+
+    assert er.purge_stale(30, keep_suppressed=True) == 1
+    assert list(json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]) == ["s" * 40]

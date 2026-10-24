@@ -19,6 +19,9 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    workflow** counts. An older red is marked `superseded` and never dispatched, and so is any
    of its cures still `queued` or `gated`: a run that a newer run (green or red) replaces
    closes its waiting cure with no dispatch. A cure whose owner is already awake keeps going.
+   A new red is claimed in the same locked write (`triaging`, with a `claimed` stamp), so a
+   second poll running at the same time skips it. A run whose log read fails is released for
+   the next poll; a claim older than an hour belongs to a poll that died and is taken over.
 2. **Triage.** For a new red, `drone @git run view <id> --log-failed` is read. The failing step
    is the one that carries `##[error]`. Owners come from the failing lines:
    - an audit line `<branch>: NN%` below 100 names that branch;
@@ -31,13 +34,15 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    component = owner, message = workflow and step). So suppression, backoff and the digest
    apply to it the same way they apply to a repeating log error. Then medic's gates run, in
    medic's order, by calling the same functions in `error_detected.py`: medic enabled, branch
-   not muted, registered citizen, circuit breaker, then suppression and backoff. A refusal goes
+   not muted, registered citizen, suppression and backoff, then circuit breaker. A refusal goes
    to `logs/medic_suppressed.jsonl` and the cure becomes `gated`, with the refusal as its
    reason. Every poll fires `ci_red` again for each `gated` and `queued` cure. The gates run
    again and the refusal is logged once per poll, until a gate opens (the mute expires or is
    lifted, the breaker closes, the backoff ends) and the owner is dispatched. Only the first
    fire counts the red in the escalation lane and feeds the circuit breaker; a retry is not a
-   new error. Gate four still holds: an owner that is @devpulse is mailed and never woken.
+   new error. The handler claims the cure as `dispatching` under the ledger lock before the
+   gates, so two fires at once wake the owner once; a `dispatching` claim older than an hour is
+   retried like a `queued` one. Gate four still holds: an owner that is @devpulse is mailed and never woken.
 4. **Owner.** The owner gets a dispatch: the mail, then a wake with @trigger as sender. The
    brief carries the run id, workflow, step, URL and failing lines. It says the owner has no
    git and asks for the owner reply shape below. When the owner exits, @trigger is woken back.
@@ -77,15 +82,15 @@ json service regenerates files with those names.
 ```json
 {"version": 1,
  "runs":  {"<run_id>": {"workflow", "event", "title", "created", "status", "conclusion",
-                        "verdict": "running|green|red|infra|unowned|superseded",
-                        "triaged", "step", "url"}},
+                        "verdict": "running|triaging|green|red|infra|unowned|superseded",
+                        "triaged", "claimed", "step", "url"}},
  "cures": {"<run_id>@<owner>": {"run_id", "owner", "workflow", "step", "lines", "url",
-                        "fingerprint", "state", "reason", "updated",
+                        "fingerprint", "state", "reason", "updated", "claimed",
                         "files", "changelog", "note", "diff", "verdict", "lesson",
                         "sha", "pushed_at", "proving_run"}}}
 ```
 
-A cure's states are `queued`, `gated`, `dispatched`, `emailed` (@devpulse as owner),
+A cure's states are `dispatching`, `queued`, `gated`, `dispatched`, `emailed` (@devpulse as owner),
 `replied`, `review_queued`, `reviewing`, `held`, `pushed`, `cured`, `unproven` and
 `superseded`. An unreadable ledger raises: `ci` exits with an error, and the event handler
 records a warning.

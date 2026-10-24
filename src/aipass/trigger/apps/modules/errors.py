@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: errors.py
 # Description: Error registry management module for Medic v2 commands
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-02-13
-# Modified: 2026-10-15
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -104,17 +104,23 @@ def _parse_args(args: list) -> dict:
 
 
 def _find_by_id_or_fp(identifier: str) -> Optional[dict]:
-    """Look up error by fingerprint (prefix ok) or short ID field."""
+    """Look up an error by exact short ID or fingerprint, then by a unique fingerprint prefix."""
     try:
-        entry = get_entry(identifier)
-        if entry:
-            return entry
-        for entry in query(limit=1000):
-            if entry.get("id") == identifier:
+        for entry in query(limit=sys.maxsize):
+            if identifier in (entry.get("id"), entry.get("fingerprint")):
                 return entry
+        return get_entry(identifier)
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         logger.warning("Failed to look up error '%s': %s", identifier, exc)
     return None
+
+
+def _not_found(identifier: str) -> str:
+    """The message for a lookup that found no single error: ambiguous prefix or no match."""
+    matches = sum(1 for entry in query(limit=sys.maxsize) if entry.get("fingerprint", "").startswith(identifier))
+    if matches > 1:
+        return f"Ambiguous: {identifier} matches {matches} errors - give more of the fingerprint or the short ID"
+    return f"Error not found: {identifier}"
 
 
 def _fmt_time(iso: str) -> str:
@@ -298,7 +304,7 @@ def _cmd_detail(console, args: list) -> bool:
         return True
 
     if not entry:
-        error(f"Error not found: {args[0]}", suggestion="Try a fingerprint prefix, full fingerprint, or short ID")
+        error(_not_found(args[0]), suggestion="Try a fingerprint prefix, full fingerprint, or short ID")
         return True
 
     from rich.markup import escape
@@ -352,7 +358,7 @@ def _cmd_suppress(console, args: list) -> bool:
 
     entry = _find_by_id_or_fp(args[0])
     if not entry:
-        error(f"Error not found: {args[0]}")
+        error(_not_found(args[0]))
         return True
 
     reason = " ".join(args[1:]) if len(args) > 1 else "No reason provided"
@@ -396,7 +402,7 @@ def _cmd_unsuppress(console, args: list) -> bool:
 
     entry = _find_by_id_or_fp(args[0])
     if not entry:
-        error(f"Error not found: {args[0]}")
+        error(_not_found(args[0]))
         return True
 
     if entry.get("status") != "suppressed":
@@ -426,7 +432,7 @@ def _cmd_resolve(console, args: list) -> bool:
 
     entry = _find_by_id_or_fp(args[0])
     if not entry:
-        error(f"Error not found: {args[0]}")
+        error(_not_found(args[0]))
         return True
 
     fp = entry.get("fingerprint", args[0])

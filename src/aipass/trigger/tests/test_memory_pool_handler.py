@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_memory_pool_handler.py
 # Description: Tests for memory_pool_auto_processed event handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/events/memory_pool.py."""
@@ -12,12 +12,16 @@
 # seedgo: no-test-needed(behaviour) — the event wiring in apps/handlers/events/registry.py; the bus tests cover delivery
 
 import pytest
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 from pathlib import Path
 
 from aipass.ai_mail.apps.modules import email_send
 from aipass.trigger.apps.config import trail_logger
-from aipass.trigger.apps.handlers.events import memory_pool, registry
+from aipass.trigger.apps.handlers import error_registry, error_reporter
+from aipass.trigger.apps.handlers.events import error_detected, memory_pool, registry
+from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.modules import core
 
 
@@ -31,6 +35,7 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     monkeypatch.setattr(memory_pool, "json_handler", mock_json_handler)
+    monkeypatch.setattr(memory_pool, "report_error", MagicMock(return_value={}))
 
 
 def _import_module():
@@ -118,23 +123,52 @@ class TestHandleMemoryPoolAutoProcessedFailure:
     """Tests for failed auto-process events."""
 
     def test_fires_error_detected_on_failure(self) -> None:
-        """Fires error_detected through the event bus on failure."""
+        """Reports the failure through the registry, which fires error_detected on the bus."""
         mod = _import_module()
-        fire_event = MagicMock()
 
         mod.handle_memory_pool_auto_processed(
             success=False,
             branch="memory",
             error="ChromaDB connection refused",
-            fire_event=fire_event,
+            fire_event=MagicMock(),
         )
 
-        fire_event.assert_called_once_with(
-            "error_detected",
-            branch="memory",
+        mod.report_error.assert_called_once_with(  # type: ignore[attr-defined]
             error_type="MemoryPoolAutoProcessError",
             message="ChromaDB connection refused",
-            source_file="auto_process.py",
+            component="MEMORY",
+            fire_event=True,
+        )
+
+    def test_the_fired_payload_gets_past_the_handler_first_guard(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The real report_error and handle_error_detected: the failure reaches the gates, never dropped at the guard.
+        Red first: a payload with no module or error_hash returned before any gate ran.
+        """
+        monkeypatch.setattr(memory_pool, "report_error", error_reporter.report_error)
+        monkeypatch.setattr(error_registry, "REGISTRY_FILE", tmp_path / "error_registry.json")
+        monkeypatch.setattr(error_registry, "CB_STATE_FILE", tmp_path / "trigger_cb_state.json")
+        monkeypatch.setattr(json_handler, "log_operation", MagicMock(return_value=True))
+        monkeypatch.setattr(error_detected, "_is_medic_enabled", MagicMock(return_value=False))
+        suppressed = MagicMock()
+        monkeypatch.setattr(error_detected, "_write_suppression_log", suppressed)
+
+        def _bus(event: str, **data: Any) -> None:
+            assert event == "error_detected"
+            error_detected.handle_error_detected(**data)
+
+        monkeypatch.setattr(core, "trigger", SimpleNamespace(fire=_bus))
+
+        memory_pool.handle_memory_pool_auto_processed(
+            success=False, branch="memory", error="pool down", fire_event=_bus
+        )
+
+        reason, branch, module, _ = suppressed.call_args.args
+        assert (reason, branch, module) == (
+            "Medic OFF - suppressed dispatch for",
+            "MEMORY",
+            "MemoryPoolAutoProcessError",
         )
 
     def test_logs_failure(self) -> None:
@@ -165,8 +199,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
             fire_event=fire_event,
         )
 
-        call_kwargs = fire_event.call_args[1]
-        assert "no detail" in call_kwargs["message"]
+        assert "no detail" in mod.report_error.call_args.kwargs["message"]  # type: ignore[attr-defined]
 
     def test_failure_default_branch(self) -> None:
         """Defaults branch to 'memory' when not provided."""
@@ -179,7 +212,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
             fire_event=fire_event,
         )
 
-        assert fire_event.call_args[1]["branch"] == "memory"
+        assert mod.report_error.call_args.kwargs["component"] == "MEMORY"  # type: ignore[attr-defined]
 
     def test_a_failure_with_no_fire_event_still_records_the_failure(self) -> None:
         """No callback means no dispatch — it must not also mean no record.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher_service.py
 # Description: Persistent log watcher process for Medic error detection
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -16,6 +16,7 @@ import threading
 
 import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.trigger.apps.modules.errors import purge_stale
 from aipass.trigger.apps.modules.core import trigger
 from aipass.trigger.apps.modules.medic import run_error_catchup
 from aipass.trigger.apps.modules.branch_log_events import (
@@ -106,6 +107,11 @@ def main(argv: list[str] | None = None) -> None:
     if system_ok:
         started.append("system")
     logger.info(f"[trigger-log-watcher] Running ({', '.join(started)} watchers active)")
+
+    # The daemon restarts on every reload, so a start-up purge keeps the registry bounded.
+    # Suppressed rows stay: a dropped one would dispatch again on its next recurrence.
+    if purge_stale(30, keep_suppressed=True) < 0:
+        logger.error("[trigger-log-watcher] Start-up registry purge failed")
 
     # Catch-up runs here, AFTER the watchers are up: overlap is safe (the registry
     # dedupes on fingerprint), a gap between scan and first watch is not.

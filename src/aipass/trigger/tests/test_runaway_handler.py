@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_runaway_handler.py
 # Description: Tests for the runaway_log_detected event handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-09
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -22,6 +22,7 @@ import pytest
 
 from aipass.ai_mail.apps.modules import door_wake as ai_mail_wake
 from aipass.trigger.apps import config as trigger_config
+from aipass.trigger.apps.handlers import medic_state
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
 
 # The handler only keys cooldowns and names alerts by this path; it never opens it.
@@ -38,8 +39,9 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     monkeypatch.setattr(mod, "_file_cooldowns", {})
     mod._send_email = None
 
-    monkeypatch.setattr(mod, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
-    monkeypatch.setattr(mod, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
+    monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "logger", MagicMock())
     monkeypatch.setattr(mod, "ALERTS_FILE", tmp_path / "alerts.json")
     _trail.reset_mock()
     monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
@@ -180,6 +182,16 @@ class TestBranchMuted:
             sustained_duration_sec=60,
         )
         send.assert_not_called()
+
+    def test_a_mute_stored_with_an_at_reads_as_muted(self, tmp_path: Path) -> None:
+        """A mute stored as "@flow" is the mute "flow", as medic status reads it.
+        Red first: the handler compared the raw entry and let "@flow" through.
+        """
+        _write_config(tmp_path, {"volume_muted_branches": [{"name": "@flow", "expires_at": None}]})
+
+        mod.handle_runaway_log_detected(file_path=RUNAWAY_LOG, branch="FLOW", rate_lines_per_min=500)
+
+        assert [e["outcome"] for e in _decision_entries("volume_muted")] == ["suppressed"]
 
     def test_expired_volume_mute_delivers(self, tmp_path: Path) -> None:
         """An expired volume mute entry does not suppress."""
@@ -985,7 +997,7 @@ class TestVolumeMuteMigration:
 
     def test_volume_mute_survives_migration(self, tmp_path: Path) -> None:
         """A volume mute written under the old filename still silences the alert."""
-        mod.LEGACY_MEDIC_STATE_FILE.write_text(
+        medic_state.LEGACY_MEDIC_STATE_FILE.write_text(
             json.dumps({"config": {"volume_muted_branches": [{"name": "hooks", "expires_at": None}]}}),
             encoding="utf-8",
         )
@@ -993,5 +1005,5 @@ class TestVolumeMuteMigration:
         mod.handle_runaway_log_detected(file_path=RUNAWAY_LOG, branch="hooks", severity="warning")
 
         assert [e["outcome"] for e in _decision_entries("volume_muted")] == ["suppressed"]
-        assert mod.MEDIC_STATE_FILE.exists()
-        assert not mod.LEGACY_MEDIC_STATE_FILE.exists()
+        assert medic_state.MEDIC_STATE_FILE.exists()
+        assert not medic_state.LEGACY_MEDIC_STATE_FILE.exists()
