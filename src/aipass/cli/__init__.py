@@ -22,4 +22,3 @@ def __getattr__(name: str):
     value = getattr(importlib.import_module(_DISPLAY), name)
     globals()[name] = value
     return value
-
