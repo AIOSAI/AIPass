@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: secrets.py
 # Description: Secrets Store Handler — values rest in the login keyring; files are only the import source
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-15
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Secrets Store Handler"""
@@ -18,6 +18,7 @@ from keyring.backends import chainer, fail, null
 from keyring.errors import KeyringError
 
 from aipass.prax import logger
+from aipass.api.apps.handlers.auth.env import PLACEHOLDERS
 from aipass.api.apps.handlers.json import json_handler
 
 SERVICE = "aipass"
@@ -240,10 +241,12 @@ def _env_entries(path: Path) -> Tuple[List[Tuple[str, str, Any, bool]], bool]:
         key, value = key.strip(), value.strip()
         if not key or key.startswith("#"):
             continue
-        if key.endswith(_ENV_KEY_SUFFIX) and value:
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key.endswith(_ENV_KEY_SUFFIX) and value and value not in PLACEHOLDERS:
             items.append((key[: -len(_ENV_KEY_SUFFIX)].lower(), "api_key", value, False))
         else:
-            # Another setting (BLUESKY_HANDLE, ...) is not a store shape: the file stays for the owner's hand.
+            # Another setting (BLUESKY_HANDLE, ...) or an init placeholder is not a store shape: the file stays.
             only_keys = False
     return items, only_keys
 

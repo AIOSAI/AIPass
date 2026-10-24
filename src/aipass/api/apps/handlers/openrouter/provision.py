@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: provision.py
 # Description: Caller Auto-Provisioning Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
 Caller Auto-Provisioning Handler
 
-Internal-only, not a CLI command: client.get_response() calls ensure_caller_config().
+Internal-only, not a CLI command. Nothing in the branch calls ensure_caller_config() any more.
 """
 
 import json
@@ -65,26 +65,6 @@ def get_default_caller_config() -> Dict[str, Any]:
     }
 
 
-def get_default_caller_data() -> Dict[str, Any]:
-    """Get default data template for tracking caller usage"""
-    return {
-        "module_name": "openrouter",
-        "timestamp": datetime.now().isoformat(),
-        "data": {
-            "total_requests": 0,
-            "successful_requests": 0,
-            "failed_requests": 0,
-            "models_used": {},
-            "last_request": None,
-        },
-    }
-
-
-def get_default_caller_log() -> Dict[str, Any]:
-    """Get default log template for caller operations"""
-    return {"module_name": "openrouter", "timestamp": datetime.now().isoformat(), "logs": []}
-
-
 def provision_json_folder(json_folder: Path) -> bool:
     """Create JSON folder structure if missing"""
     try:
@@ -114,20 +94,6 @@ def create_caller_config(caller: str, json_folder: Path) -> Dict[str, Any]:
 
         logger.info(f"Created API config for {caller}: {config_file}")
         logger.info(f"Created config: {config_file.name}")
-
-        data_file = json_folder / "openrouter_data.json"
-        data = get_default_caller_data()
-
-        if write_json(data_file, data):
-            logger.info(f"Created data file for {caller}: {data_file}")
-            logger.info(f"Created data: {data_file.name}")
-
-        log_file = json_folder / "openrouter_log.json"
-        log_data = get_default_caller_log()
-
-        if write_json(log_file, log_data):
-            logger.info(f"Created log file for {caller}: {log_file}")
-            logger.info(f"Created log: {log_file.name}")
 
         logger.info(f"Auto-provisioned OpenRouter config for '{caller}'")
         logger.warning("Reload config and retry request")

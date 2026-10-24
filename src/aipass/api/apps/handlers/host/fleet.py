@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fleet.py
 # Description: Host API Fleet Handler — reads @baud's headless fleet snapshot
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -14,13 +14,10 @@ Reference: docs/host_surfaces.md
 on failure); empty stdout means BAUD never ran (exit 2). stderr is never parsed.
 """
 
-import copy
 import json
 import os
 import shutil
 import subprocess
-import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -28,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host.read_cache import ReadCache
 from aipass.api.apps.handlers.host.reads import repo_root
 
 # Operational kill switch: False refuses with 503, never fakes a fleet.
@@ -61,9 +59,11 @@ END_ROOM_TIMEOUT_SECONDS = 20
 SNAPSHOT_TTL_SECONDS = 1.5
 
 # '' (the anchor) is a different key from the anchor's own name, deliberately.
-_snapshot_cache: Dict[str, tuple] = {}
-_snapshot_flights: Dict[str, threading.Lock] = {}
-_snapshot_guard = threading.Lock()
+_snapshots = ReadCache("fleet_snapshot", SNAPSHOT_TTL_SECONDS)
+
+# The file lane resolves a project root per request; the census changes far slower than one refresh.
+_census = ReadCache("project_census", SNAPSHOT_TTL_SECONDS)
+_CENSUS_KEY = "census"
 
 _NOT_READY = (
     "The fleet snapshot is switched off on this host (fleet.SNAPSHOT_READY is False). "
@@ -166,33 +166,9 @@ def snapshot_binary() -> str:
 
 
 def reset_snapshot_cache() -> None:
-    """Forget every cached snapshot."""
-    with _snapshot_guard:
-        _snapshot_cache.clear()
-
-
-def _flight_lock(key: str) -> threading.Lock:
-    """The lock that makes one key's refresh single-flight."""
-    with _snapshot_guard:
-        return _snapshot_flights.setdefault(key, threading.Lock())
-
-
-def _cached_snapshot(key: str) -> Optional[Dict[str, Any]]:
-    """
-    The cached envelope for one key, if it is still young enough.
-
-    A deep copy: handing out the cached object lets one caller's edit reach
-    every caller for the rest of the TTL.
-    """
-    with _snapshot_guard:
-        entry = _snapshot_cache.get(key)
-    if entry is None:
-        return None
-
-    stored_at, envelope = entry
-    if time.monotonic() - stored_at > SNAPSHOT_TTL_SECONDS:
-        return None
-    return copy.deepcopy(envelope)
+    """Forget every cached snapshot and census."""
+    _snapshots.clear()
+    _census.clear()
 
 
 def read_snapshot(project: str = "") -> Dict[str, Any]:
@@ -201,20 +177,7 @@ def read_snapshot(project: str = "") -> Dict[str, Any]:
 
     A failure is never cached, so a binary that comes back works on the next request.
     """
-    cached = _cached_snapshot(project)
-    if cached is not None:
-        return cached
-
-    with _flight_lock(project):
-        # Re-checked inside the lock: the flight we queued behind has just filled it.
-        cached = _cached_snapshot(project)
-        if cached is not None:
-            return cached
-
-        envelope = _read_snapshot_uncached(project)
-        with _snapshot_guard:
-            _snapshot_cache[project] = (time.monotonic(), copy.deepcopy(envelope))
-        return envelope
+    return _snapshots.get(project, lambda: _read_snapshot_uncached(project))
 
 
 def _read_snapshot_uncached(project: str = "") -> Dict[str, Any]:
@@ -281,7 +244,12 @@ def _read_snapshot_uncached(project: str = "") -> Dict[str, Any]:
 
 
 def list_projects() -> Dict[str, Any]:
-    """Read BAUD's project census — the rows a switcher menu shows."""
+    """Read BAUD's project census — the rows a switcher menu shows. Coalesced and briefly cached."""
+    return _census.get(_CENSUS_KEY, _list_projects_uncached)
+
+
+def _list_projects_uncached() -> Dict[str, Any]:
+    """Exec BAUD's census. A refusal is raised, never returned, so it is never cached."""
     if not SNAPSHOT_READY:
         logger.info("[host_api] project census requested while the exec is gated")
         raise FleetUnavailable(_NOT_READY)

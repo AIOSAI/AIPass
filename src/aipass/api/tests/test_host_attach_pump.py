@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_attach_pump.py
 # Description: Tests for the attach lane's room and pump — the tmux command, a real PTY, resize and hangup
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-08
-# Modified: 2026-10-19
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/host/attach.py's room and PTY, and apps/handlers/host/pump.py's control frames."""
@@ -687,3 +687,48 @@ class TestARoomThatEndsClosesItsSocketWith4000:
         websocket.close.assert_awaited_once_with(code=4000, reason="room ended")
         assert close_code is None, "the room ended first; the client sent no code"
         assert session.hangups == 1
+
+
+class TestAFailedPtyGivesTheSlotBack:
+    """A slot is reserved before the PTY exists, so a PTY that fails must hand it back."""
+
+    def _slots_after(self, monkeypatch: Any, openpty: Any, winsize: Any) -> tuple:
+        """Spawn with the given PTY seams; answer (free slots afterwards, descriptors closed)."""
+        slots = host_attach.threading.BoundedSemaphore(host_attach.PUMP_WORKERS)
+        closed: list = []
+        monkeypatch.setattr(host_attach, "_PUMP_SLOTS", slots)
+        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=openpty))
+        monkeypatch.setattr(host_attach, "set_winsize", winsize)
+        monkeypatch.setattr(host_attach, "logger", MagicMock())
+
+        with pytest.raises((host_attach.AttachUnavailable, OSError)):
+            host_attach._spawn_pty(["cat"], None, "baud-api", close_fd=closed.append)
+
+        free = 0
+        while slots.acquire(blocking=False):
+            free += 1
+        for _ in range(free):
+            slots.release()
+        return free, closed
+
+    def test_a_failed_openpty_releases_the_slot(self, monkeypatch: Any) -> None:
+        """Nothing was opened, so nothing is closed, but the slot comes back."""
+
+        def _no_pty() -> tuple:
+            raise OSError(errno.EMFILE, "out of descriptors")
+
+        free, closed = self._slots_after(monkeypatch, _no_pty, lambda *a: None)
+
+        assert free == host_attach.PUMP_WORKERS
+        assert closed == []
+
+    def test_a_failed_winsize_releases_the_slot_and_closes_both_ends_once(self, monkeypatch: Any) -> None:
+        """Both ends were open: each is closed exactly once, and the slot comes back."""
+
+        def _no_size(*args: Any) -> None:
+            raise OSError(errno.ENOTTY, "not a terminal")
+
+        free, closed = self._slots_after(monkeypatch, lambda: (-7, -8), _no_size)
+
+        assert free == host_attach.PUMP_WORKERS
+        assert sorted(closed) == [-8, -7]

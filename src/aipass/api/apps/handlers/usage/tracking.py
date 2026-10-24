@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tracking.py
 # Description: Usage Tracking Handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Usage Tracking Handler"""
@@ -12,6 +12,7 @@ import json
 import requests
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional
 
 from aipass.prax import logger
@@ -19,6 +20,7 @@ from aipass.prax import logger
 from aipass.api.apps.handlers.module_root import module_file
 
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.usage.cleanup import _write_json, store_lock
 
 MODULE_NAME = "tracking"
 DATA_FILE = "usage_tracker_data.json"  # Standard 3-file pattern
@@ -129,82 +131,91 @@ def store_usage_data(caller: str, model: str, generation_id: str, metrics: Dict[
         API_JSON_DIR.mkdir(parents=True, exist_ok=True)
         data_path = API_JSON_DIR / DATA_FILE
 
-        # Read-modify-write: the json service keeps its own keys (operations_total, last_operation) in
-        # this file; we own only 'data' and 'timestamp', and 'data' may not exist yet.
-        today = datetime.now().date().isoformat()
-        document: Dict[str, Any] = {}
-        if data_path.exists():
-            with open(data_path, "r", encoding="utf-8") as f:
-                document = json.load(f)
-        document.setdefault("module_name", "usage_tracker")
-        document.setdefault("created", today)
-        document["last_updated"] = today
-
-        current_data = document.setdefault("data", {})
-        current_data.setdefault(
-            "current_session",
-            {"start_time": datetime.now().isoformat(), "total_requests": 0, "total_cost": 0.0, "total_tokens": 0},
-        )
-        for section in ("usage_by_caller", "daily_totals", "monthly_totals", "generation_tracking"):
-            current_data.setdefault(section, {})
-
-        total_tokens = metrics["tokens_prompt"] + metrics["tokens_completion"]
-
-        current_data["current_session"]["total_requests"] += 1
-        current_data["current_session"]["total_cost"] += metrics["total_cost"]
-        current_data["current_session"]["total_tokens"] += total_tokens
-
-        if caller not in current_data["usage_by_caller"]:
-            current_data["usage_by_caller"][caller] = {
-                "requests": 0,
-                "total_cost": 0.0,
-                "total_tokens": 0,
-                "models_used": {},
-                "last_request": None,
-            }
-
-        caller_data = current_data["usage_by_caller"][caller]
-        caller_data["requests"] += 1
-        caller_data["total_cost"] += metrics["total_cost"]
-        caller_data["total_tokens"] += total_tokens
-        caller_data["last_request"] = datetime.now().isoformat()
-
-        if model not in caller_data["models_used"]:
-            caller_data["models_used"][model] = 0
-        caller_data["models_used"][model] += 1
-
-        if today not in current_data["daily_totals"]:
-            current_data["daily_totals"][today] = {"requests": 0, "cost": 0.0, "tokens": 0}
-
-        current_data["daily_totals"][today]["requests"] += 1
-        current_data["daily_totals"][today]["cost"] += metrics["total_cost"]
-        current_data["daily_totals"][today]["tokens"] += total_tokens
-
-        month = today[:7]  # YYYY-MM
-        if month not in current_data["monthly_totals"]:
-            current_data["monthly_totals"][month] = {"requests": 0, "cost": 0.0, "tokens": 0}
-        current_data["monthly_totals"][month]["requests"] += 1
-        current_data["monthly_totals"][month]["cost"] += metrics["total_cost"]
-        current_data["monthly_totals"][month]["tokens"] += total_tokens
-
-        new_entry = {"timestamp": datetime.now().isoformat(), "caller": caller, "model": model, "usage_data": metrics}
-
-        # Newest first: the trim below drops from the end.
-        current_tracking = current_data["generation_tracking"]
-        current_data["generation_tracking"] = {generation_id: new_entry, **current_tracking}
-
-        if len(current_data["generation_tracking"]) > MAX_GENERATION_TRACKING:
-            keys = list(current_data["generation_tracking"].keys())
-            for old_key in keys[MAX_GENERATION_TRACKING:]:
-                del current_data["generation_tracking"][old_key]
-
-        document["timestamp"] = datetime.now().isoformat()
-
-        with open(data_path, "w", encoding="utf-8") as f:
-            json.dump(document, f, indent=2, ensure_ascii=False)
-
-        return True
+        with store_lock(data_path):
+            return _store_locked(data_path, caller, model, generation_id, metrics)
 
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to store usage data: {e}")
         return False
+
+
+def _store_locked(data_path: Path, caller: str, model: str, generation_id: str, metrics: Dict[str, Any]) -> bool:
+    """The read-modify-write itself, run while the caller holds the store's lock."""
+    # Read-modify-write: the json service keeps its own keys (operations_total, last_operation) in
+    # this file; we own only 'data' and 'timestamp', and 'data' may not exist yet.
+    today = datetime.now().date().isoformat()
+    document: Dict[str, Any] = {}
+    if data_path.exists():
+        with open(data_path, "r", encoding="utf-8") as f:
+            document = json.load(f)
+    document.setdefault("module_name", "usage_tracker")
+    document.setdefault("created", today)
+    document["last_updated"] = today
+
+    current_data = document.setdefault("data", {})
+    current_data.setdefault(
+        "current_session",
+        {"start_time": datetime.now().isoformat(), "total_requests": 0, "total_cost": 0.0, "total_tokens": 0},
+    )
+    for section in ("usage_by_caller", "daily_totals", "monthly_totals", "generation_tracking"):
+        current_data.setdefault(section, {})
+
+    # Already counted: adding again would double every total.
+    if generation_id in current_data["generation_tracking"]:
+        return True
+
+    total_tokens = metrics["tokens_prompt"] + metrics["tokens_completion"]
+
+    current_data["current_session"]["total_requests"] += 1
+    current_data["current_session"]["total_cost"] += metrics["total_cost"]
+    current_data["current_session"]["total_tokens"] += total_tokens
+
+    if caller not in current_data["usage_by_caller"]:
+        current_data["usage_by_caller"][caller] = {
+            "requests": 0,
+            "total_cost": 0.0,
+            "total_tokens": 0,
+            "models_used": {},
+            "last_request": None,
+        }
+
+    caller_data = current_data["usage_by_caller"][caller]
+    caller_data["requests"] += 1
+    caller_data["total_cost"] += metrics["total_cost"]
+    caller_data["total_tokens"] += total_tokens
+    caller_data["last_request"] = datetime.now().isoformat()
+
+    if model not in caller_data["models_used"]:
+        caller_data["models_used"][model] = 0
+    caller_data["models_used"][model] += 1
+
+    if today not in current_data["daily_totals"]:
+        current_data["daily_totals"][today] = {"requests": 0, "cost": 0.0, "tokens": 0}
+
+    current_data["daily_totals"][today]["requests"] += 1
+    current_data["daily_totals"][today]["cost"] += metrics["total_cost"]
+    current_data["daily_totals"][today]["tokens"] += total_tokens
+
+    month = today[:7]  # YYYY-MM
+    if month not in current_data["monthly_totals"]:
+        current_data["monthly_totals"][month] = {"requests": 0, "cost": 0.0, "tokens": 0}
+    current_data["monthly_totals"][month]["requests"] += 1
+    current_data["monthly_totals"][month]["cost"] += metrics["total_cost"]
+    current_data["monthly_totals"][month]["tokens"] += total_tokens
+
+    new_entry = {"timestamp": datetime.now().isoformat(), "caller": caller, "model": model, "usage_data": metrics}
+
+    # Newest first: the trim below drops from the end.
+    current_tracking = current_data["generation_tracking"]
+    current_data["generation_tracking"] = {generation_id: new_entry, **current_tracking}
+
+    if len(current_data["generation_tracking"]) > MAX_GENERATION_TRACKING:
+        keys = list(current_data["generation_tracking"].keys())
+        for old_key in keys[MAX_GENERATION_TRACKING:]:
+            del current_data["generation_tracking"][old_key]
+
+    document["timestamp"] = datetime.now().isoformat()
+
+    _write_json(data_path, document)
+
+    return True

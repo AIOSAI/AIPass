@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_provision.py
 # Description: Tests for caller auto-provisioning handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-20
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/openrouter/provision.py, caller auto-provisioning."""
@@ -23,24 +23,20 @@ from aipass.api.apps.handlers.openrouter.provision import (
     create_caller_config,
     ensure_caller_config,
     get_default_caller_config,
-    get_default_caller_data,
-    get_default_caller_log,
     provision_json_folder,
     read_json,
     write_json,
 )
 
 
-def test_create_caller_config_creates_three_files(tmp_path: Path):
-    """create_caller_config() should create config, data, and log JSON files."""
+def test_create_caller_config_writes_only_the_config(tmp_path: Path):
+    """create_caller_config() writes the config alone: no data or log file, nothing reads them."""
     json_folder = tmp_path / "test_json"
 
     result = create_caller_config("test_caller", json_folder)
 
     assert result != {}
-    assert (json_folder / "openrouter_config.json").exists()
-    assert (json_folder / "openrouter_data.json").exists()
-    assert (json_folder / "openrouter_log.json").exists()
+    assert sorted(p.name for p in json_folder.iterdir()) == ["openrouter_config.json"]
 
 
 def test_create_caller_config_defaults(tmp_path: Path):
@@ -56,33 +52,6 @@ def test_create_caller_config_defaults(tmp_path: Path):
     assert config["config"]["enabled"] is True
     assert config["config"]["ai_model"] == ""
     assert config["module_name"] == "openrouter"
-
-
-def test_create_caller_config_data_defaults(tmp_path: Path):
-    """Data file should have zeroed counters."""
-    json_folder = tmp_path / "test_json"
-
-    create_caller_config("test_caller", json_folder)
-
-    data = read_json(json_folder / "openrouter_data.json")
-    assert data is not None
-    assert data["data"]["total_requests"] == 0
-    assert data["data"]["successful_requests"] == 0
-    assert data["data"]["failed_requests"] == 0
-    assert data["data"]["models_used"] == {}
-    assert data["data"]["last_request"] is None
-
-
-def test_create_caller_config_log_defaults(tmp_path: Path):
-    """Log file should have empty logs list."""
-    json_folder = tmp_path / "test_json"
-
-    create_caller_config("test_caller", json_folder)
-
-    log = read_json(json_folder / "openrouter_log.json")
-    assert log is not None
-    assert log["logs"] == []
-    assert log["module_name"] == "openrouter"
 
 
 def test_create_caller_config_creates_folder(tmp_path: Path):
@@ -125,9 +94,7 @@ def test_ensure_caller_config_provisions_new(mock_detect, tmp_path: Path):
     result = ensure_caller_config("test_caller")
 
     assert result != {}
-    assert (json_folder / "openrouter_config.json").exists()
-    assert (json_folder / "openrouter_data.json").exists()
-    assert (json_folder / "openrouter_log.json").exists()
+    assert sorted(p.name for p in json_folder.iterdir()) == ["openrouter_config.json"]
 
 
 @patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")
@@ -283,55 +250,3 @@ def test_write_json_returns_false_on_error(tmp_path: Path):
     result = write_json(target, {"key": "value"})
 
     assert result is False
-
-
-def test_get_default_caller_data_structure():
-    """get_default_caller_data returns dict with expected keys and zeroed counters."""
-    data = get_default_caller_data()
-
-    assert data["module_name"] == "openrouter"
-    assert "timestamp" in data
-    assert isinstance(data["data"], dict)
-
-    counters = data["data"]
-    assert counters["total_requests"] == 0
-    assert counters["successful_requests"] == 0
-    assert counters["failed_requests"] == 0
-    assert counters["models_used"] == {}
-    assert counters["last_request"] is None
-
-
-def test_get_default_caller_data_timestamp_is_iso():
-    """The stamp parses AND is the moment it was made."""
-    from datetime import datetime
-
-    before = datetime.now()
-    data = get_default_caller_data()
-    after = datetime.now()
-
-    stamped = datetime.fromisoformat(data["timestamp"])
-
-    assert before <= stamped <= after, f"the stamp is not the moment it was made: {stamped}"
-
-
-def test_get_default_caller_log_structure():
-    """get_default_caller_log returns dict with module_name, timestamp, and empty logs."""
-    log = get_default_caller_log()
-
-    assert log["module_name"] == "openrouter"
-    assert "timestamp" in log
-    assert log["logs"] == []
-    assert isinstance(log["logs"], list)
-
-
-def test_get_default_caller_log_timestamp_is_iso():
-    """The log's stamp parses AND is the moment it was made."""
-    from datetime import datetime
-
-    before = datetime.now()
-    log = get_default_caller_log()
-    after = datetime.now()
-
-    stamped = datetime.fromisoformat(log["timestamp"])
-
-    assert before <= stamped <= after, f"the stamp is not the moment it was made: {stamped}"

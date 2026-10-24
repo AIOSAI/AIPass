@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_integrations.py
 # Description: Tests for bridge, registry, and integrations handlers
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-15
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/bridge.py with the registry walker and integrations_manager's contract calls."""
@@ -11,6 +11,8 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered) — handle_command() and print_help() CLI, tests/test_integrations_manager.py
 # seedgo: no-test-needed(covered) — _import_driver()'s namespaced module key, tests/test_registry.py
+
+from unittest.mock import patch
 
 import pytest
 
@@ -197,9 +199,14 @@ class TestCallContract:
             return "done"
 
         bridge.register("cap", capturing_driver)
-        result = call_contract("cap", ["foo", "bar"])
+        with patch("aipass.api.apps.handlers.integrations.call.json_handler") as mock_jh:
+            result = call_contract("cap", ["foo", "bar"])
         assert result["success"] is True
         assert received == ["foo", "bar"]
+        # Args can carry a token or a message body: the operations log gets their count only.
+        mock_jh.log_operation.assert_called_once_with(
+            "integrations_call", {"contract": "cap", "arg_count": 2, "success": True}
+        )
 
     def test_call_driver_exception_returns_failure(self):
         """call_contract() returns failure dict when driver raises."""

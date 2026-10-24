@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_api_entry.py
 # Description: Tests for api.py entry point CLI
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/api.py, the entry point CLI for drone @api."""
@@ -14,6 +14,8 @@
 # seedgo: no-test-needed(through_the_command) — each module's own commands, covered by that module's test file
 
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from aipass.api.apps.api import discover_modules, main, print_help, print_introspection, route_command
 from aipass.cli.apps.modules import display
@@ -186,14 +188,14 @@ class TestRouteCommand:
 
     @patch(PATCH_LOGGER)
     def test_module_raises_exception(self, mock_logger):
-        """Returns False and logs error when module raises."""
-        module = MagicMock()
+        """A raising module propagates for main to report, never routed on to the next module."""
+        module, after = MagicMock(), MagicMock()
         module.handle_command.side_effect = RuntimeError("boom")
 
-        result = route_command("get-key", [], [module])
+        with pytest.raises(RuntimeError, match="boom"):
+            route_command("get-key", [], [module, after])
 
-        assert result is False
-        mock_logger.error.assert_called_once()
+        after.handle_command.assert_not_called()
 
 
 class TestMain:
@@ -439,6 +441,17 @@ class TestTheExitSeamCarriesARefusal:
             return False
 
         assert self._run(["definitelynotacommand"], decline) == 1
+
+    def test_a_module_that_raises_exits_2_with_its_reason_not_unknown_command(self, capsys):
+        """A crash in a recognised command is that command failing, not an unknown command."""
+
+        def crash(command, args):
+            raise RuntimeError("driver exploded")
+
+        assert self._run(["validate"], crash) == 2
+        err = capsys.readouterr().err
+        assert "driver exploded" in err
+        assert "Unknown command" not in err
 
     def test_a_stale_failure_flag_from_an_earlier_command_is_not_ours(self):
         """The flag is process-level, so main() clears it before anything can set it.

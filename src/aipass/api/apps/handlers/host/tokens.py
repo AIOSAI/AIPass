@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tokens.py
 # Description: Host API Token Handler — bearer token issue, verify, revoke
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -276,8 +276,11 @@ def verify_token(raw: str) -> Optional[Dict[str, Any]]:
     return record if status == STATUS_ACTIVE else None
 
 
-def touch_token(token_id: str) -> None:
+def touch_token(token_id: str, last_used: Any = None) -> None:
     """Record that a token was just used. Best-effort, and never fatal."""
+    # The caller's stamp, still inside the window, settles it without locking: every request touches.
+    if last_used is not None and not _is_due(last_used):
+        return
     try:
         with _store_lock():
             # Re-read INSIDE the lock: a list read before a revoke, written back, resurrects the token.

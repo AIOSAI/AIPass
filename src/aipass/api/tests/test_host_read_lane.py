@@ -1,20 +1,22 @@
 # =================== AIPass ====================
 # Name: test_host_read_lane.py
 # Description: Tests for the host API read lane — file reads, the whole diff, and the read lane's /v1 routes
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for the file and diff reads in apps/handlers/host/reads.py and git_reads.py, and their /v1 routes."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — drone's own diff output; read_diff's subprocess call is faked, drone tests it
+# seedgo: no-test-needed(external) — drone's own diff output; read_diff's drone child is faked, drone tests it
 # seedgo: no-test-needed(covered_elsewhere) — token minting and the token store; tests/test_host_token_store.py
 # seedgo: no-test-needed(ruff) — that every module in apps/handlers/host/ parses and imports
 
+import io
 import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -47,6 +49,16 @@ PATCH_TOKENS_LOGGER = "aipass.api.apps.handlers.host.tokens.logger"
 
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
+
+
+def _child(completed: Any) -> Any:
+    """A drone child process whose pipes carry what a finished run would have captured."""
+    child = MagicMock()
+    child.stdout = io.BytesIO((completed.stdout or "").encode("utf-8"))
+    child.stderr = io.BytesIO((completed.stderr or "").encode("utf-8"))
+    child.wait.return_value = completed.returncode
+    return child
+
 
 # The /v1/git-changes route cases reach read_git_changes and its cache.
 pytestmark = pytest.mark.usefixtures("_clean_git_changes_cache")
@@ -106,7 +118,7 @@ class TestReadDiff:
 
     def test_routes_through_drone_not_raw_git(self, fake_repo: dict) -> None:
         """The house rule holds here: never a raw git subprocess."""
-        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+        with patch.object(subprocess, "Popen", return_value=_child(self._completed())) as mock_run:
             host_git.read_diff("demo")
 
         command = mock_run.call_args[0][0]
@@ -114,33 +126,42 @@ class TestReadDiff:
 
     def test_staged_flag_passed_through(self, fake_repo: dict) -> None:
         """--staged reaches drone rather than being reinterpreted here."""
-        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+        with patch.object(subprocess, "Popen", return_value=_child(self._completed())) as mock_run:
             host_git.read_diff("demo", staged=True)
 
         assert "--staged" in mock_run.call_args[0][0]
 
     def test_runs_in_the_branch_directory(self, fake_repo: dict) -> None:
         """drone's git lane is CWD-scoped, so the cwd IS the branch selection."""
-        with patch.object(subprocess, "run", return_value=self._completed()) as mock_run:
+        with patch.object(subprocess, "Popen", return_value=_child(self._completed())) as mock_run:
             host_git.read_diff("demo")
 
         assert mock_run.call_args.kwargs["cwd"] == str(fake_repo["branch"].resolve())
 
     def test_missing_drone_raises_unavailable(self, fake_repo: dict) -> None:
         """No drone on PATH is an honest 503, not an empty diff."""
-        with patch.object(subprocess, "run", side_effect=FileNotFoundError("no drone")):
+        with patch.object(subprocess, "Popen", side_effect=FileNotFoundError("no drone")):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_diff("demo")
 
-    def test_timeout_raises_unavailable(self, fake_repo: dict) -> None:
-        """A hung diff must not hang the request forever."""
-        with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)):
+    def test_timeout_raises_unavailable(self, fake_repo: dict, monkeypatch: Any) -> None:
+        """A hung diff must not hang the request forever: the timer kills the door."""
+        child = _child(self._completed())
+        killed = threading.Event()
+        child.kill.side_effect = killed.set
+        child.stdout = MagicMock()
+        child.stdout.read.side_effect = lambda _size: killed.wait(5) and b""
+        monkeypatch.setattr(host_git, "DIFF_TIMEOUT_SECONDS", 0.05)
+
+        with patch.object(subprocess, "Popen", return_value=child):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_diff("demo")
+
+        assert killed.is_set()
 
     def test_non_zero_exit_raises_unavailable(self, fake_repo: dict) -> None:
         """A failed diff is reported, never returned as empty output."""
-        with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1)):
+        with patch.object(subprocess, "Popen", return_value=_child(self._completed(stdout="", returncode=1))):
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_diff("demo")
 
@@ -148,11 +169,25 @@ class TestReadDiff:
         """Generated output may be capped — but the cap is REPORTED."""
         huge = "x" * (host_git.MAX_DIFF_BYTES + 100)
 
-        with patch.object(subprocess, "run", return_value=self._completed(stdout=huge)):
+        with patch.object(subprocess, "Popen", return_value=_child(self._completed(stdout=huge))):
             result = host_git.read_diff("demo")
 
         assert result["truncated"] is True
         assert len(result["diff"]) <= host_git.MAX_DIFF_BYTES
+
+    def test_an_oversized_diff_is_read_only_to_the_cap_and_the_door_killed(self, fake_repo: dict) -> None:
+        """A commit adding a 200MB file must not be held in memory whole just to be cut."""
+        child = _child(self._completed())
+        pipe = io.BytesIO(b"x" * (host_git.MAX_DIFF_BYTES * 8))
+        child.stdout = MagicMock(wraps=pipe)
+
+        with patch.object(subprocess, "Popen", return_value=child):
+            result = host_git.read_diff("demo")
+
+        child.stdout.read.assert_called_once_with(host_git.MAX_DIFF_BYTES + 1)
+        child.kill.assert_called_once()
+        assert result["truncated"] is True
+        assert len(result["diff"]) == host_git.MAX_DIFF_BYTES
 
 
 fastapi_required = pytest.mark.skipif(
@@ -248,7 +283,7 @@ class TestReadLaneRoutes:
         completed.stderr = ""
         completed.returncode = 0
 
-        with patch.object(subprocess, "run", return_value=completed):
+        with patch.object(subprocess, "Popen", return_value=_child(completed)):
             response = api.get(
                 "/v1/diff",
                 params={"branch": "demo"},
@@ -394,7 +429,7 @@ class TestReadLaneRoutes:
         """Tap-a-file: the whole point of the round, through the real route."""
         api, raw = client
 
-        with patch.object(subprocess, "run", return_value=self._completed(TWO_FILE_DIFF)):
+        with patch.object(subprocess, "Popen", return_value=_child(self._completed(TWO_FILE_DIFF))):
             response = api.get(
                 "/v1/diff",
                 params={"branch": "demo", "path": "src/aipass/demo/hello.txt"},
@@ -410,7 +445,7 @@ class TestReadLaneRoutes:
         """A stale tap gets a refusal, not an empty patch that renders as calm."""
         api, raw = client
 
-        with patch.object(subprocess, "run", return_value=self._completed(TWO_FILE_DIFF)):
+        with patch.object(subprocess, "Popen", side_effect=lambda *_a, **_k: _child(self._completed(TWO_FILE_DIFF))):
             response = api.get(
                 "/v1/diff",
                 params={"branch": "demo", "path": "src/aipass/demo/absent.py"},
@@ -681,7 +716,7 @@ class TestReadsFollowTheFleetLane:
         completed.stdout = "diff --git a/x b/x"
         completed.stderr = ""
 
-        with patch.object(host_git.subprocess, "run", return_value=completed) as run:
+        with patch.object(host_git.subprocess, "Popen", return_value=_child(completed)) as run:
             result = host_git.read_diff("baud", project="BAUD")
 
         assert result["diff"] == "diff --git a/x b/x"

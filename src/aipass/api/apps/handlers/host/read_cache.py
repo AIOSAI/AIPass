@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: read_cache.py
 # Description: Host API Read Cache Handler — single-flight and TTL for expensive reads
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Host API Read Cache Handler"""
@@ -27,7 +27,8 @@ class ReadCache:
         # Counter, not clock: a tie or frozen clock must not hand a later arrival an earlier failure.
         self._failures: Dict[Hashable, tuple] = {}
         self._failure_count = 0
-        self._flights: Dict[Hashable, threading.Lock] = {}
+        # key -> [lock, callers inside get() for it]: an entry lives only while someone is waiting on it.
+        self._flights: Dict[Hashable, list] = {}
         self._guard = threading.Lock()
 
     def clear(self) -> None:
@@ -51,6 +52,13 @@ class ReadCache:
 
         with self._guard:
             arrived = self._failure_count
+        try:
+            return self._fly(key, producer, arrived)
+        finally:
+            self._leave(key)
+
+    def _fly(self, key: Hashable, producer: Callable[[], Any], arrived: int) -> Any:
+        """The single-flight read for one key, for a caller that arrived at failure count *arrived*."""
         with self._flight_lock(key):
             # Asked again inside the lock: re-running the read the flight ahead just ran is the stampede.
             cached = self._fresh(key)
@@ -82,7 +90,21 @@ class ReadCache:
         """The lock that makes one key's read single-flight.
         Per key, not global: a slow read of one key must not queue every other key."""
         with self._guard:
-            return self._flights.setdefault(key, threading.Lock())
+            flight = self._flights.setdefault(key, [threading.Lock(), 0])
+            flight[1] += 1
+            return flight[0]
+
+    def _leave(self, key: Hashable) -> None:
+        """Let go of one key's flight; the last caller out drops its lock and failure.
+        No caller left means none that arrived before the failure, so nobody can be owed it."""
+        with self._guard:
+            flight = self._flights.get(key)
+            if flight is None:
+                return
+            flight[1] -= 1
+            if flight[1] <= 0:
+                del self._flights[key]
+                self._failures.pop(key, None)
 
     def _fresh(self, key: Hashable) -> Optional[Any]:
         """The stored answer for one key, if it is still young enough.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: env.py
 # Description: .env file operations
-# Version: 0.2.0
+# Version: 0.2.1
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """.env File Handler"""
@@ -17,6 +17,11 @@ from aipass.prax import logger
 
 from aipass.api.apps.handlers.json import json_handler
 
+OPENROUTER_PLACEHOLDER = "sk-or-v1-your-key-here"
+OPENAI_PLACEHOLDER = "sk-your-openai-key-here"
+GENERIC_PLACEHOLDER = "your-key-here"
+PLACEHOLDERS = (OPENROUTER_PLACEHOLDER, OPENAI_PLACEHOLDER, GENERIC_PLACEHOLDER)
+
 
 def create_env_template(provider: str = "openrouter", target_path: Optional[Path] = None) -> bool:
     """Create .env template file with default placeholders."""
@@ -27,14 +32,14 @@ def create_env_template(provider: str = "openrouter", target_path: Optional[Path
         return True
 
     if provider.lower() == "openrouter":
-        env_template = """# AIPass API Keys
+        env_template = f"""# AIPass API Keys
 # Add your API keys here
 
 # OpenRouter API Key (recommended - access to 323+ models)
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
+OPENROUTER_API_KEY={OPENROUTER_PLACEHOLDER}
 
 # Backup OpenAI API Key (if needed)
-OPENAI_API_KEY=sk-your-openai-key-here
+OPENAI_API_KEY={OPENAI_PLACEHOLDER}
 
 # Other provider keys can be added as needed
 """
@@ -43,7 +48,7 @@ OPENAI_API_KEY=sk-your-openai-key-here
 # Add your API keys here
 
 # {provider.upper()} API Key
-{provider.upper()}_API_KEY=your-key-here
+{provider.upper()}_API_KEY={GENERIC_PLACEHOLDER}
 
 # Other provider keys can be added as needed
 """

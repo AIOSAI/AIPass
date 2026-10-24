@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_perf.py
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
@@ -30,8 +30,12 @@ import pytest
 from aipass.api.apps.handlers.host import attach as host_attach
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import pump as host_pump
+from aipass.api.apps.handlers.host import read_cache as host_read_cache
+from aipass.api.apps.handlers.host import reads as host_reads
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.handlers.host import settings as host_settings
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 
@@ -49,11 +53,6 @@ SERVER_SOURCE = Path(host_server.__file__)
 
 # GETs that may stay on the loop: both return values the server already holds (no file, exec or registry).
 LOOP_SAFE_GETS = {"/v1/ping", "/v1/whoami"}
-
-# POSTs off the loop, each with nothing the loop must serialize: upload writes a fresh uniquely named file;
-# pair writes under the token store's file lock and a threading lock; backup/run's job table holds its own lock;
-# backup/cancel and verbs/new-project write nothing of this server's and wait seconds that must not hold the loop.
-LOOP_FREE_POSTS = {"/v1/files/upload", "/v1/pair", "/v1/backup/run", "/v1/backup/cancel", "/v1/verbs/new-project"}
 
 fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),
@@ -172,19 +171,54 @@ class TestReadRoutesRunOffTheEventLoop:
         for name, dumped in bodies.items():
             assert "host_" not in dumped, f"{name} now calls a handler module — it can no longer stay on the loop"
 
-    def test_write_routes_are_async_on_purpose(self) -> None:
-        """A decision pin, not an accident."""
-        # Settings and memory config read-modify-write with no lock; the event loop is their only serialization.
+    def test_no_write_route_runs_on_the_loop(self) -> None:
+        """A wake can wait 120s: on the loop it would freeze ping, reads and every attach pump."""
         import inspect
 
         with patch(PATCH_SERVER_LOGGER):
-            loose = [
+            on_loop = [
                 path
                 for path, methods, endpoint in self._v1_routes()
-                if "POST" in methods and path not in LOOP_FREE_POSTS and not inspect.iscoroutinefunction(endpoint)
+                if "POST" in methods and inspect.iscoroutinefunction(endpoint)
             ]
 
-        assert loose == [], f"these write routes left the loop without a lock landing: {loose}"
+        assert on_loop == [], f"these write routes still run ON the event loop: {on_loop}"
+
+    @pytest.mark.parametrize(
+        "path, module, name, body",
+        [
+            ("/v1/memory-config/set", "memory_config", "set_branch_limit", {"branch": "api", "type": "x", "count": 1}),
+            ("/v1/memory-config/set-default", "memory_config", "set_default_limit", {"type": "x", "count": 1}),
+            ("/v1/memory-config/push", "memory_config", "push_defaults", None),
+            ("/v1/agent-settings", "settings", "write_agent_settings", {"branch": "api", "patch": {}}),
+            ("/v1/baud-settings", "settings", "write_baud_settings", {"patch": {}}),
+            ("/v1/hooks-sound", "settings", "hooks_sound_set", {"active": True}),
+        ],
+    )
+    def test_read_modify_write_routes_hold_the_write_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, module: str, name: str, body: object
+    ) -> None:
+        """Off the loop, the shared lock is these routes' only serialization."""
+        from fastapi.testclient import TestClient
+
+        held: list = []
+        target = {"memory_config": host_memory_config, "settings": host_settings}[module]
+        lock = getattr(host_server, "_WRITE_LOCK", None)
+        monkeypatch.setattr(target, name, lambda *a, **k: held.append(bool(lock and lock.locked())) or {})
+        monkeypatch.setattr(host_reads, "resolve_branch_root", lambda *a, **k: tmp_path)
+        monkeypatch.setattr(host_reads, "repo_root", lambda: tmp_path)
+
+        store = tmp_path / "secrets"
+        store.mkdir()
+        with patch(PATCH_SECRETS_BASE, store), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
+            with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
+                _, raw = host_tokens.issue_token("phone", "operate")
+                client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+                answer = client.post(path, json=body, headers={"Authorization": f"Bearer {raw}"})
+
+        assert answer.status_code == 200, answer.text
+        assert held == [True]
+        assert lock is not None and not lock.locked()
 
     def test_the_upload_route_is_the_named_exception(self) -> None:
         """It writes a file of its own, so it has no shared document to lose."""
@@ -337,9 +371,9 @@ class TestTheSnapshotIsCoalesced:
     ) -> None:
         """The TTL expires — against a clock this test drives, not one it hopes for."""
         # Windows' monotonic ticks in ~15.6ms steps, so a sleep can land on the same tick.
-        # fleet's OWN `time` name: a global time.monotonic patch would freeze pytest-timeout's clock too.
+        # read_cache's OWN `time` name: a global time.monotonic patch would freeze pytest-timeout's clock too.
         clock = [1000.0]
-        monkeypatch.setattr(host_fleet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
         host_fleet.read_snapshot()
         clock[0] += host_fleet.SNAPSHOT_TTL_SECONDS + 0.001
@@ -354,7 +388,7 @@ class TestTheSnapshotIsCoalesced:
     ) -> None:
         """The other side of the same boundary, on the same driven clock."""
         clock = [1000.0]
-        monkeypatch.setattr(host_fleet, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
         host_fleet.read_snapshot()
         clock[0] += host_fleet.SNAPSHOT_TTL_SECONDS - 0.001
@@ -466,6 +500,36 @@ class TestTheSnapshotIsCoalesced:
 
         snapshots = [call for call in calls if "--snapshot" in call]
         assert len(snapshots) == 2, "the snapshot survived a room kill"
+
+    def test_many_projects_leave_no_flight_locks_behind(self, counted_exec: list) -> None:
+        """One lock per project ever asked would grow for the life of the server."""
+        for n in range(50):
+            host_fleet.read_snapshot(f"P{n}")
+
+        assert host_fleet._snapshots._flights == {}
+
+    def test_two_quick_census_reads_run_baud_once(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        seated: None,
+        tmp_path: Path,
+    ) -> None:
+        """A project root resolved twice in one refresh pays one --list-projects, not two 30s-capped execs."""
+        calls: list = []
+        census = {"error": None, "projects": [{"name": "AIPASS", "root": str(tmp_path)}]}
+
+        def _run(command, **kwargs):
+            calls.append(list(command))
+            return _completed(0, json.dumps(census))
+
+        monkeypatch.setattr(host_fleet.subprocess, "run", _run)
+        journal = MagicMock()
+        monkeypatch.setattr(host_fleet, "json_handler", journal)
+
+        assert host_reads.resolve_root(host_reads.ROOT_PROJECT, "AIPASS") == tmp_path.resolve()
+        assert host_reads.resolve_root(host_reads.ROOT_PROJECT, "AIPASS") == tmp_path.resolve()
+        assert len(calls) == 1
+        journal.log_operation.assert_called_once_with("host_api_project_census", {"projects": 1})
 
     def test_the_cache_can_be_cleared_by_name(self, counted_exec: list) -> None:
         """A cache nobody can clear is a cache that outlives its own truth."""
