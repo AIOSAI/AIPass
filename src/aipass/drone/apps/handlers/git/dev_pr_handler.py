@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dev_pr_handler.py
 # Description: Dev branch PR handler — push dev and create PR to main
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Branch PR handlers — generic and dev-specific."""
@@ -16,6 +16,7 @@ import subprocess
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import external_pr_handler
+from aipass.drone.apps.handlers.git.commit_handler import subject_refusal
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 
@@ -129,6 +130,10 @@ def create_dev_pr(description: str) -> dict:
     Returns:
         Dict with success, message, and pr_url keys.
     """
+    # GitHub refuses a long title only after the push has landed; measure it at home first.
+    refusal = subject_refusal(description)
+    if refusal:
+        return {"success": False, "message": refusal, "pr_url": ""}
     repo_root = find_repo_root()
     if not is_aipass_repo(repo_root):
         return external_pr_handler.create_dev_pr(repo_root, description)

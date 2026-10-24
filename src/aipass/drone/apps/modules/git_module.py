@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.13.0
+# Version: 1.13.1
 # Created: 2026-03-17
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -675,7 +675,7 @@ def _handle_merge(args: list[str], caller: str) -> dict:
     """Handle the merge subcommand (owner-tier, auth pre-checked)."""
     confirmed = "--confirm" in args
     pr_args = [a for a in args if not a.startswith("--")]
-    if not pr_args:
+    if not pr_args or not pr_args[0].isdigit():
         return {"stdout": "", "stderr": "Usage: drone @git merge <PR#> [--confirm]", "exit_code": 1}
 
     refusal = _confirm_merge(pr_args[0], caller, confirmed)
@@ -1356,10 +1356,9 @@ def get_introspective() -> str:
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
         "  gh passthrough: issue, run, workflow\n"
         "Machine surface: --json on status, log, show, remote\n"
-        "Tiers: global (status,diff,log,show,blame,tracked,export,remote,lock,branches,tag --list,"
-        "issue,run,workflow,release)"
-        " | owner (pr,commit,untrack,checkout,dev-pr,delete-branch,prune-temp,close-pr,sync,merge-main,"
-        "unlock,merge,smart-sync,fix,tag) | ci-cure (ci-cure)\n"
+        f"Tiers: global ({','.join(_tier_commands('global'))})"
+        f" | owner ({','.join(_tier_commands('owner'))})"
+        f" | ci-cure ({','.join(_tier_commands('ci-cure'))})\n"
     )
 
 

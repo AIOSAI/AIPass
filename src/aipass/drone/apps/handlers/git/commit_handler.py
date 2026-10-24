@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -127,38 +127,6 @@ def _run_test_gate(repo_root: Path) -> dict | None:
     }
 
 
-def stage_branch_dir(branch_dir: Path, repo_root: Path | None = None) -> dict:
-    """Stage all changes under branch_dir; pr_handler shares it."""
-    if repo_root is None:
-        repo_root = find_repo_root()
-
-    try:
-        rel_dir = branch_dir.resolve().relative_to(repo_root.resolve())
-    except ValueError:
-        logger.warning(
-            "stage_branch_dir: branch_dir %s not relative to repo root %s",
-            branch_dir,
-            repo_root,
-        )
-        rel_dir = branch_dir
-
-    add_result = subprocess.run(
-        ["git", "add", str(rel_dir) + "/"],
-        capture_output=True,
-        text=True,
-        cwd=str(repo_root),
-    )
-
-    if add_result.returncode != 0:
-        return {
-            "success": False,
-            "rel_dir": rel_dir,
-            "message": f"Failed to stage files: {add_result.stderr.strip()}",
-        }
-
-    return {"success": True, "rel_dir": rel_dir, "message": f"Staged files under {rel_dir}"}
-
-
 def commit_changes(
     message: str,
     all_files: bool = False,
@@ -233,8 +201,10 @@ def commit_changes(
         if add_result.returncode != 0:
             return {"stdout": "", "stderr": f"Failed to stage: {add_result.stderr.strip()}", "exit_code": 1}
 
+    # Named files commit alone (--only): whatever another agent staged stays staged, out of this commit.
+    scope = ["--", *files] if files else []
     diff_check = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
+        ["git", "diff", "--cached", "--quiet", *scope],
         capture_output=True,
         text=True,
         cwd=str(repo_root),
@@ -247,7 +217,7 @@ def commit_changes(
         }
 
     try:
-        cmd = ["git", "commit", "-m", message]
+        cmd = ["git", "commit", "-m", message, *(["--only", *scope] if files else [])]
 
         result = subprocess.run(
             cmd,

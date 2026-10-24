@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-06-02
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -613,42 +613,34 @@ class TestContainedCitizens:
 
     @pytest.fixture()
     def only_my_own_tree(self, project_dir, monkeypatch):
-        """Stand in spawn, whose parent holds spawn and its skeleton and nobody
-        else — the one shape the contains-fence must let through."""
+        """Stand in spawn, whose parent holds spawn and its skeleton and nobody else."""
         spawn = project_dir / "src" / "aipass" / "spawn"
         (spawn / ".trinity").mkdir(parents=True)
         (spawn / "templates" / "aipass_framework" / ".trinity").mkdir(parents=True)
         monkeypatch.chdir(spawn)
         return spawn.parent
 
-    @pytest.mark.deletable_cwd
-    def test_a_folder_holding_only_the_callers_own_tree_is_allowed(self, only_my_own_tree):
-        """The caller's tree is pruned whole — its template skeleton included,
-        which is spawn's by outermost-wins and must not read as a stranger.
-
-        Marked: deleting the parent deletes the cwd, which Windows refuses (WinError 32, see
-        WINDOWS_CWD_REASON in conftest); the two cases below make the verdict on every OS.
-        """
-        ((_path, ok, message),) = safe_delete([".."])
-        assert ok is True, message
-        assert not only_my_own_tree.exists()
-
-    def test_the_fence_itself_allows_the_callers_own_tree_on_every_os(self, only_my_own_tree, project_dir):
-        """The same verdict, asked of the guard instead of proved by a delete,
-        so the claim above is not the skipped host's only cover."""
-        blocked, reason = check_carveouts(only_my_own_tree.resolve(), project_dir.resolve())
-        assert blocked is False, reason
+    @pytest.mark.parametrize("spelling", [".", "templates/..", ".."], ids=["dot", "dotted", "parent"])
+    def test_the_callers_own_branch_and_its_holders_are_refused(self, only_my_own_tree, spelling):
+        """Mutant killed: check_carveouts without the own-branch fence (spawn and its .trinity deleted)."""
+        ((_path, ok, message),) = safe_delete([spelling])
+        assert ok is False, message
+        assert "your own branch spawn/" in message
+        assert (only_my_own_tree / "spawn" / ".trinity").is_dir()
 
     def test_a_host_that_refuses_to_delete_a_live_cwd_is_not_a_refusal_of_ours(
-        self, only_my_own_tree, tmp_path, monkeypatch
+        self, project_dir, tmp_path, monkeypatch
     ):
-        """The Windows half of the case above, manufactured here rather than
-        asked of this host.
+        """Windows' refusal of a tree the process stands in, manufactured here
+        rather than asked of this host.
 
         The host's refusal, not a guard's: the message carries the way out and the ledger says failed.
         It models the refusal only; a real rmtree empties what it can reach before raising.
         Mutant killed: the `_standing_inside` suffix dropped from the failure message.
         """
+        scratch = project_dir / "scratch"
+        (scratch / "inner").mkdir(parents=True)
+        monkeypatch.chdir(scratch / "inner")
 
         def windows_remove_tree(path: Path) -> None:
             here = Path.cwd()
@@ -667,11 +659,11 @@ class TestContainedCitizens:
         assert ok is False
         assert "WinError 32" in message
         assert "Protected:" not in message, "no guard of ours refused this one"
-        assert f"run drone rm from outside {only_my_own_tree.resolve()}" in message
+        assert f"run drone rm from outside {scratch.resolve()}" in message
         (record,) = _ledger(tmp_path)
         assert record["outcome"] == "failed"
         assert "standing in" in record["reason"], "the durable half must carry the way out too"
-        assert only_my_own_tree.exists()
+        assert scratch.exists()
 
     def test_a_temp_dir_target_is_unchanged(self, at_drone, tmp_path_factory):
         """Outside the project a .trinity is scaffolding, not a citizen."""

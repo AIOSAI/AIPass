@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-14
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py, the safe_delete path that writes it, and apps/modules/door_deletion_log.py."""
@@ -382,7 +382,7 @@ class TestLogLocation:
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         monkeypatch.delenv("AIPASS_HOME", raising=False)
         monkeypatch.chdir(tmp_path)
-        with patch.object(deletion_log, "_find_project_root", return_value=None):
+        with patch.object(deletion_log, "find_project_root", return_value=None):
             assert deletion_log.deletion_log_path().name == "deletions.jsonl"
 
     def test_env_override_wins(self, project, monkeypatch, tmp_path):

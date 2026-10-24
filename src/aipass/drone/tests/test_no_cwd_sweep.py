@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-08-31
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -105,11 +105,11 @@ class TestDroneEntryPointSurvives:
 
 class TestTheDeleteLaneSurvives:
     def test_project_root_falls_through_to_aipass_home(self, no_cwd, home_root):
-        """Mutant killed: _find_project_root dropping its AIPASS_HOME fallback (no project root allowed)."""
+        """Mutant killed: find_project_root dropping its AIPASS_HOME fallback (no project root allowed)."""
         assert rm_handler.get_allowed_roots()[0] == home_root.resolve()
 
     def test_project_root_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
-        """Mutant killed: _find_project_root walking a cwd it does not have (a crash, not an answer)."""
+        """Mutant killed: find_project_root walking a cwd it does not have (a crash, not an answer)."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
         temp_roots = {Path(tempfile.gettempdir()).resolve()}
         if sys.platform != "win32":
@@ -235,11 +235,11 @@ class TestTheAuthGateFailsClosed:
 
 class TestTheBrokerSurvives:
     def test_broker_project_root_falls_through_to_aipass_home(self, no_cwd, home_root):
-        """Mutant killed: the daemon's _find_project_root dropping its AIPASS_HOME fallback."""
+        """Mutant killed: the daemon's find_project_root dropping its AIPASS_HOME fallback."""
         assert daemon.BrokerDaemon().socket_path.is_relative_to(home_root.resolve())
 
     def test_broker_project_root_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
-        """Mutant killed: the daemon's _find_project_root walking a cwd it does not have."""
+        """Mutant killed: the daemon's find_project_root walking a cwd it does not have."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
         assert daemon.BrokerDaemon().socket_path.parent == Path(tempfile.gettempdir())
 

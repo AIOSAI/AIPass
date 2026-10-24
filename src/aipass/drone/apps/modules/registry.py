@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Registry operations for branch management
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -22,6 +22,7 @@ from aipass.drone.apps.handlers.registry_handler import (
     get_branch_by_name,
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.modules.resolver import normalize_branch_name
 
 # Public contract: path and error types live here too, so callers never reach into the handler.
 __all__ = [
@@ -88,7 +89,7 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
         if not args:
             logger.warning("registry lookup requires a branch name")
             return False
-        branch = get_branch_by_name(args[0])
+        branch = get_branch_by_name(normalize_branch_name(args[0]))
         if branch:
             logger.info("Branch: %s", branch)
         else:

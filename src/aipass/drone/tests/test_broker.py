@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.8
+# Version: 2.0.9
 # Created: 2026-06-09
-# Modified: 2026-10-18
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -21,9 +21,15 @@ import json
 import socket
 import os
 import stat
+import threading
 from pathlib import Path
 
 import pytest
+
+if os.name == "posix":
+    import fcntl
+else:
+    fcntl = None
 
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
 from aipass.drone.apps.handlers.broker import daemon as broker_daemon
@@ -1122,7 +1128,7 @@ class TestBrokerFeedsDeletionRecord:
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         decoy = tmp_path / "standing_project"
         decoy.mkdir()
-        monkeypatch.setattr(deletion_log, "_find_project_root", lambda: decoy)
+        monkeypatch.setattr(deletion_log, "find_project_root", lambda: decoy)
 
         resp = _send_identified(
             running_broker,
@@ -1243,3 +1249,200 @@ class TestASandboxCopyIsNotTheBranch:
         assert resp.error_code == "NO_BASE"
         assert target.exists()
         assert empty_tmp_base.exists()
+
+
+class TestTheDeleteHoldsWhatItJudged:
+    def test_a_folder_holding_branches_is_refused_even_for_devpulse(
+        self, running_broker: BrokerDaemon, repo_root: Path
+    ) -> None:
+        """Mutant killed: _check_denylist without check_contained_citizens (src/aipass deleted)."""
+        aipass_dir = repo_root / "src" / "aipass"
+        resp = _send_identified(
+            running_broker, "devpulse", BrokerRequest(op="delete", path=str(aipass_dir), request_id="holds")
+        )
+        assert resp.ok is False
+        assert resp.error_code == "DENYLIST"
+        assert "contains citizen" in resp.message
+        assert (aipass_dir / "testbranch" / ".trinity").is_dir()
+
+    def test_a_parent_swapped_for_a_symlink_after_the_check_cannot_redirect_the_delete(
+        self, running_broker: BrokerDaemon, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant killed: the delete re-walking the resolved path string (the sibling's file goes)."""
+        branch = repo_root / "src" / "aipass" / "testbranch"
+        sibling_file = repo_root / "src" / "aipass" / "sibling" / "important.txt"
+        (branch / "subdir" / "important.txt").write_text("mine", encoding="utf-8")
+        judge = running_broker._check_denylist
+
+        def swap_then_judge(resolved: Path, own: Path | None) -> str | None:
+            os.rename(branch / "subdir", branch / "subdir_moved")
+            (branch / "subdir").symlink_to(sibling_file.parent, target_is_directory=True)
+            return judge(resolved, own)
+
+        monkeypatch.setattr(running_broker, "_check_denylist", swap_then_judge)
+        resp = _send_identified(
+            running_broker, "testbranch", BrokerRequest(op="delete", path="subdir/important.txt", request_id="swap")
+        )
+        assert resp.ok is True, resp.message
+        assert sibling_file.read_text(encoding="utf-8") == "don't delete"
+        assert not (branch / "subdir_moved" / "important.txt").exists()
+
+    @pytest.mark.parametrize("lane", ["openat2", "walk"])
+    def test_a_trailing_symlink_is_removed_and_its_target_kept(
+        self, running_broker: BrokerDaemon, repo_root: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+    ) -> None:
+        """Mutant killed: the leaf stat refusing a symlink (NO_BASE, the link stays)."""
+        if lane == "walk":
+            _no_openat2(monkeypatch)
+        branch = repo_root / "src" / "aipass" / "testbranch"
+        target = repo_root / "src" / "aipass" / "sibling" / "important.txt"
+        (branch / "link").symlink_to(target)
+        resp = _send_identified(
+            running_broker, "testbranch", BrokerRequest(op="delete", path="link", request_id="link")
+        )
+        assert resp.ok is True, resp.message
+        assert not os.path.lexists(branch / "link")
+        assert target.exists()
+
+    @pytest.mark.parametrize("lane", ["openat2", "walk"])
+    def test_a_directory_is_removed_relative_to_its_held_parent(
+        self, running_broker: BrokerDaemon, repo_root: Path, monkeypatch: pytest.MonkeyPatch, lane: str
+    ) -> None:
+        """The tree lane under each resolver's parent fd (an O_PATH fd on Linux)."""
+        if lane == "walk":
+            _no_openat2(monkeypatch)
+        subdir = repo_root / "src" / "aipass" / "testbranch" / "subdir"
+        resp = _send_identified(
+            running_broker, "testbranch", BrokerRequest(op="delete", path="subdir", request_id="tree")
+        )
+        assert resp.ok is True, resp.message
+        assert not subdir.exists()
+
+    def test_the_socket_is_owner_only(self, running_broker: BrokerDaemon) -> None:
+        """Mutant killed: no chmod after bind (the socket keeps the umask mode)."""
+        if os.name != "posix":
+            pytest.skip("POSIX permission check")
+        else:
+            assert stat.S_IMODE(os.stat(running_broker.socket_path).st_mode) == 0o600
+
+
+class TestABadLineKeepsTheConnection:
+    def test_each_bad_line_gets_an_error_and_the_next_request_is_served(
+        self, running_broker: BrokerDaemon, tmp_path: Path
+    ) -> None:
+        """Mutant killed: from_bytes uncaught in _handle_connection (the connection closes on line one)."""
+        target = tmp_path / "after_bad_lines.txt"
+        target.write_text("x", encoding="utf-8")
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(str(running_broker.socket_path))
+        try:
+            for bad in (b"not json\n", b"[1]\n", b"{}\n", b'{"op":"delete","path":5}\n'):
+                client.sendall(bad)
+                resp = _recv_response(client)
+                assert resp.error_code == "BAD_REQUEST", (bad, resp)
+            client.sendall(BrokerRequest(op="delete", path=str(target), request_id="good").to_bytes())
+            assert _recv_response(client).ok is True
+        finally:
+            client.close()
+        assert not target.exists()
+
+    def test_a_line_without_end_is_refused(self, running_broker: BrokerDaemon) -> None:
+        """Mutant killed: no buffer cap (the broker buffers forever and never answers)."""
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(5)
+        client.connect(str(running_broker.socket_path))
+        try:
+            client.sendall(b"x" * (80 * 1024))
+            assert _recv_response(client).error_code == "BAD_REQUEST"
+        finally:
+            client.close()
+
+
+class TestTheClientOwnsItsReply:
+    def test_a_reply_for_another_request_is_not_taken(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant killed: no request_id check (another process's reply read as this one's)."""
+        mine, broker_end = socket.socketpair()
+        try:
+            broker_end.sendall(BrokerResponse(ok=True, message="Deleted: theirs", request_id="theirs").to_bytes())
+            monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
+            ok, msg = broker_delete("anything")
+        finally:
+            mine.close()
+            broker_end.close()
+        assert ok is False
+        assert "theirs" in msg
+
+    def test_a_truncated_reply_is_a_failure_not_a_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mine, broker_end = socket.socketpair()
+        try:
+            broker_end.sendall(b'{"ok": tr')
+            broker_end.shutdown(socket.SHUT_WR)
+            monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
+            ok, msg = broker_delete("anything")
+        finally:
+            mine.close()
+            broker_end.close()
+        assert ok is False
+        assert "malformed" in msg
+
+    def test_another_process_holding_the_fd_lock_makes_the_call_wait(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant killed: no lockf around send+receive (the call does not wait its turn)."""
+        if os.name != "posix" or fcntl is None:
+            pytest.skip("POSIX: fork and fcntl locks")
+        else:
+            mine, broker_end = socket.socketpair()
+            monkeypatch.setenv(BROKER_FD_ENV, str(mine.fileno()))
+            # Warm the call once, so first-call setup is not mistaken for waiting on the lock.
+            broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
+            broker_delete("anything")
+            ready_r, ready_w = os.pipe()
+            release_r, release_w = os.pipe()
+            child = os.fork()
+            if child == 0:
+                fcntl.lockf(mine.fileno(), fcntl.LOCK_EX)
+                os.write(ready_w, b"L")
+                os.read(release_r, 1)
+                os._exit(0)
+            try:
+                assert os.read(ready_r, 1) == b"L"
+                broker_end.sendall(BrokerResponse(ok=True, message="x", request_id="x").to_bytes())
+                call = threading.Thread(target=broker_delete, args=("anything",))
+                call.start()
+                call.join(timeout=0.3)
+                waited_for_the_lock = call.is_alive()
+                os.write(release_w, b"R")
+                call.join(timeout=5)
+            finally:
+                os.waitpid(child, 0)
+                for fd in (ready_r, ready_w, release_r, release_w):
+                    os.close(fd)
+                mine.close()
+                broker_end.close()
+            assert waited_for_the_lock, "the call went ahead while another process held the fd lock"
+            assert not call.is_alive()
+
+    def test_a_malformed_identify_reply_closes_the_socket(self, tmp_path: Path) -> None:
+        """Mutant killed: create_identified_connection leaking its socket on an unparsable reply."""
+        secret = tmp_path / "secret"
+        secret.write_bytes(b"s" * 32)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(tmp_path / "fake.sock"))
+        listener.listen(1)
+
+        def answer_garbage() -> None:
+            conn, _ = listener.accept()
+            conn.recv(4096)
+            conn.sendall(b"garbage\n")
+            conn.close()
+
+        server = threading.Thread(target=answer_garbage)
+        server.start()
+        before = len(os.listdir("/proc/self/fd"))
+        # The traceback keeps the frame, and an unclosed socket in it, alive while the caller holds it.
+        with pytest.raises(ValueError) as raised:
+            create_identified_connection(tmp_path / "fake.sock", secret, "testbranch")
+        server.join(timeout=5)
+        after = len(os.listdir("/proc/self/fd"))
+        assert raised.value is not None
+        listener.close()
+        assert after == before

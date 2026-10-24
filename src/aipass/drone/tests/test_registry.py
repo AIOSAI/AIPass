@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Tests for the registry module orchestrator
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-26
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/registry.py: introspection, help, and the load, branches and lookup commands."""
@@ -154,6 +154,16 @@ class TestHandleCommandLookup:
             result = handle_command("lookup", ["drone"])
         assert result is True
         log.info.assert_called_once_with("Branch: %s", mock_branch)
+
+    def test_lookup_takes_an_at_name(self) -> None:
+        """``registry lookup @seedgo`` looks up seedgo, as every other @name in drone does."""
+
+        def by_name(name: str) -> dict | None:
+            return {"name": "seedgo"} if name == "seedgo" else None
+
+        with patch(f"{_REG}.get_branch_by_name", side_effect=by_name) as lookup:
+            assert handle_command("lookup", ["@seedgo"]) is True
+        lookup.assert_called_once_with("seedgo")
 
     def test_lookup_not_found(self) -> None:
         """lookup with missing branch returns False."""

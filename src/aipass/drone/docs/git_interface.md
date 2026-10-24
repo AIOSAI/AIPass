@@ -89,17 +89,8 @@ that has already spent three minutes of pytest teaches nothing. The external-rep
 unchanged: `--repo <path> commit` routes through the same function, and its ledger line records the
 refusal like any other outcome.
 
-`pr_handler.create_pr()` composes its own commit message and measures it **before** it acquires the
-PR lock — a PR commit lands in the same oneline log as any other, and a refusal holding the
-repo-wide lock would block every other citizen while it teaches.
-
-The lock is a non-blocking exclusive create of `.git_pr.lock`, and on Windows a create racing
-another process's release answers access denied rather than file exists, so that arm answers
-`Lock blocked` too — the holder if the file still reads, else the denial named with a retry.
-
 Pinned by `TestCommitSubjectCap` in `tests/test_git_access_handlers.py` (including the boundary: a
-subject exactly at the cap commits) and by two cases in `TestPRHandler` in
-`tests/test_git_module_handlers.py`.
+subject exactly at the cap commits).
 
 ---
 

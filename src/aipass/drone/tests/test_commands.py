@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_commands.py
 # Description: Tests for the custom command registry
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/modules/commands.py and the command registry handlers it drives."""
@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from aipass.drone.apps.handlers.command_registry import ops, lookup
+from aipass.prax import json_handler as prax_json
 from aipass.drone.apps.modules import RegistryError
 from aipass.drone.apps.modules.commands import handle_command, list_all
 
@@ -79,22 +80,21 @@ class TestUnreadableRegistry:
         assert "stand-in: this registry cannot be read" in str(raised.value)
         assert isolated_registry.read_text(encoding="utf-8") == before
 
-    def test_control_a_missing_registry_is_created(self, isolated_registry: Path, unreadable_reads: None) -> None:
-        """Control: under the same stand-in, a file that does not exist is recreated, never refused."""
+    def test_control_a_missing_registry_is_empty(self, isolated_registry: Path, unreadable_reads: None) -> None:
+        """Control: under the same stand-in, a file that does not exist is an empty registry, never refused."""
         registry = ops.load_registry()
 
         assert registry["commands"] == {}
-        assert json.loads(isolated_registry.read_bytes())["commands"] == {}
 
 
 class TestRegistryAutoCreation:
-    def test_load_creates_file_when_missing(self, isolated_registry: Path) -> None:
-        """load_registry() creates a new file when none exists."""
+    def test_load_of_a_missing_file_writes_nothing(self, isolated_registry: Path) -> None:
+        """A read never writes: a missing file is an empty registry and stays missing."""
         assert not isolated_registry.exists()
 
         registry = ops.load_registry()
 
-        assert isolated_registry.exists()
+        assert not isolated_registry.exists()
         assert isinstance(registry, dict)
         assert "commands" in registry
         assert "metadata" in registry
@@ -194,44 +194,38 @@ class TestCRUDOperations:
 
         assert result is False
 
-    def test_update_command(self, isolated_registry: Path) -> None:
-        """update_command modifies fields of an existing entry."""
-        ops.add_command("audit", "@seedgo", "audit", description="Old desc")
+    def test_a_failed_save_leaves_the_old_file_whole(
+        self, isolated_registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The save is staged and replaced: when the replace fails the old registry is byte-equal."""
+        _seed_registry(isolated_registry, {"audit": {"name": "audit", "target": "@seedgo"}})
+        before = isolated_registry.read_bytes()
 
-        result = ops.update_command("audit", description="New desc", target="@prax")
+        def refuse(source: str, destination: str) -> None:
+            raise OSError("stand-in: replace refused")
 
-        assert result is True
-        registry = ops.load_registry()
-        cmd = registry["commands"]["audit"]
-        assert cmd["description"] == "New desc"
-        assert cmd["target"] == "@prax"
+        monkeypatch.setattr(prax_json, "replace_with_retry", refuse)
 
-    def test_update_nonexistent_returns_false(self, isolated_registry: Path) -> None:
-        """Updating a nonexistent command returns False."""
-        result = ops.update_command("ghost", description="nope")
+        assert ops.add_command("list", "@t", "list") is False
+        assert isolated_registry.read_bytes() == before
 
-        assert result is False
+    @pytest.mark.skipif(ops.fcntl is None, reason="no flock on this platform")
+    def test_add_waits_for_the_registry_lock(self, isolated_registry: Path) -> None:
+        """A second writer blocks on the lock instead of interleaving load+save."""
+        import threading
 
-    def test_update_ignores_disallowed_keys(self, isolated_registry: Path) -> None:
-        """update_command ignores keys outside the allowed set."""
-        ops.add_command("audit", "@seedgo", "audit")
-
-        ops.update_command("audit", created="1970-01-01")
-
-        registry = ops.load_registry()
-        cmd = registry["commands"]["audit"]
-        # 'created' is not in the allowed set, so it should NOT be overwritten
-        assert cmd["created"] != "1970-01-01"
-
-    def test_command_exists_true(self, isolated_registry: Path) -> None:
-        """command_exists returns True for registered commands."""
-        ops.add_command("audit", "@seedgo", "audit")
-
-        assert ops.command_exists("audit") is True
-
-    def test_command_exists_false(self, isolated_registry: Path) -> None:
-        """command_exists returns False for unregistered commands."""
-        assert ops.command_exists("nonexistent") is False
+        fcntl = ops.fcntl
+        lock_file = isolated_registry.with_name(isolated_registry.name + ".lock")
+        with open(lock_file, "a", encoding="utf-8") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            writer = threading.Thread(target=ops.add_command, args=("audit", "@seedgo", "audit"))
+            writer.start()
+            writer.join(timeout=0.3)
+            assert writer.is_alive()
+            assert not isolated_registry.exists()
+            fcntl.flock(held, fcntl.LOCK_UN)
+        writer.join(timeout=5)
+        assert "audit" in ops.load_registry()["commands"]
 
     def test_metadata_command_count_updates(self, isolated_registry: Path) -> None:
         """metadata.command_count tracks the number of commands after each save."""
@@ -420,7 +414,7 @@ class TestModuleOrchestrator:
         result = handle_command("add", ["test_cmd", "@branch", "do_thing", "--desc=A test"])
 
         assert result is True
-        assert ops.command_exists("test_cmd") is True
+        assert "test_cmd" in ops.load_registry()["commands"]
 
         registry = ops.load_registry()
         assert registry["commands"]["test_cmd"]["description"] == "A test"
@@ -432,7 +426,7 @@ class TestModuleOrchestrator:
         result = handle_command("remove", ["doomed"])
 
         assert result is True
-        assert ops.command_exists("doomed") is False
+        assert "doomed" not in ops.load_registry()["commands"]
 
     def test_handle_command_list(self, isolated_registry: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """handle_command 'list' prints each command; mutant killed: the list loop printing nothing."""

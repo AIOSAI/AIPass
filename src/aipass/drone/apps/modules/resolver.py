@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: resolver.py
 # Description: Branch resolution logic for symbolic @branch names
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-09
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -179,15 +179,11 @@ def get_branch_info(symbolic_name: str) -> Dict[str, Any]:
     Raises:
         BranchNotFoundError: If branch not in registry
     """
-    registry = load_registry()
-
-    name = normalize_branch_name(symbolic_name).lower()
-    branch = registry.get("branches", {}).get(name)
-
-    if branch is None:
+    found = get_branch_with_registry(normalize_branch_name(symbolic_name).lower())
+    if found is None:
+        load_registry()  # a damaged local registry raises its own error, never "not found"
         raise BranchNotFoundError(f"Branch '{symbolic_name}' not found in registry")
-
-    return branch
+    return found[0]
 
 
 def list_branches(

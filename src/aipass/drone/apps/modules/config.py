@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Registry configuration management
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-09
-# Modified: 2026-10-13
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -12,6 +12,7 @@ Registry configuration management.
 Thin orchestrator that delegates to registry_handler for path resolution.
 """
 
+import shlex
 from typing import List, Optional
 
 from aipass.prax import logger
@@ -66,15 +67,7 @@ def print_introspection():
 
 
 def handle_command(command: Optional[str] = None, args: Optional[List[str]] = None) -> bool:
-    """Route config commands to handler functions.
-
-    Args:
-        command: The command string (e.g. "path", "set", "reset")
-        args: List of arguments for the command
-
-    Returns:
-        True if command succeeded, False otherwise
-    """
+    """Route config commands (path, set, reset); True if the command succeeded."""
     if not args:
         if command is None:
             print_introspection()
@@ -87,17 +80,18 @@ def handle_command(command: Optional[str] = None, args: Optional[List[str]] = No
     if command == "path":
         console.print(f"Registry path: {get_registry_path()}")
         return True
+    # set/reset would change only this process, which exits at once: name the env var that persists.
     if command == "set":
         if not args:
             logger.warning("config set requires a path argument")
             return False
-        set_registry_path(args[0])
-        console.print(f"Registry path set to: {args[0]}")
-        return True
+        console.print("config set does not persist across drone runs. To use this registry, run:")
+        console.print(f"  export AIPASS_REGISTRY={shlex.quote(args[0])}", markup=False)
+        return False
     if command == "reset":
-        reset_registry_path()
-        console.print("Registry path reset to default")
-        return True
+        console.print("config reset does not persist across drone runs. To restore the default, run:")
+        console.print("  unset AIPASS_REGISTRY")
+        return False
     logger.warning("config: unknown command '%s'", command)
     return False
 
@@ -110,5 +104,5 @@ def print_help() -> None:
     console.print()
     console.print("Commands:")
     console.print("  path                Show current registry path")
-    console.print("  set <path>          Set custom registry path")
-    console.print("  reset               Reset registry path to default")
+    console.print("  set <path>          Print the AIPASS_REGISTRY export that selects a registry")
+    console.print("  reset               Print the unset that restores the default registry")

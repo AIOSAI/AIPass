@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation; the caller stamp for routed children and in-process modules
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-09
-# Modified: 2026-10-22
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -121,6 +121,23 @@ def caller_cwd() -> Path | None:
     except OSError as exc:
         logger.info("No current directory — it was deleted out from under this process (%s)", exc)
         return None
+
+
+def find_project_root() -> Path | None:
+    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
+
+    With no cwd (the caller deleted it) the walk is skipped and AIPASS_HOME answers.
+    """
+    cwd = caller_cwd()
+    for parent in [cwd, *cwd.parents] if cwd is not None else []:
+        if registries_in(parent):
+            return parent.resolve()
+    aipass_home = os.environ.get("AIPASS_HOME")
+    if aipass_home:
+        home = Path(aipass_home)
+        if home.is_dir() and registries_in(home):
+            return home.resolve()
+    return None
 
 
 def detect_caller_signal(cwd: Path) -> CallerSignal:

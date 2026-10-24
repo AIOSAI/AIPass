@@ -12,3 +12,4 @@ build/
 *.log
 *.tmp
 *.swp
+drone_command_registry.json.lock

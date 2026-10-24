@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: merge_plugin.py
 # Description: Merge a PR and sync local main
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-30
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Merge a PR and sync local main.
@@ -20,6 +20,7 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git import external_pr_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
+from aipass.drone.apps.handlers.git.sync_handler import stash_changes
 
 
 PROTECTED_BRANCHES = ("dev", "main")
@@ -87,13 +88,11 @@ def merge_pr(pr_number: str, caller: str) -> dict:
                 return result
 
         # Stashed first: git pull --rebase aborts on a dirty working tree.
-        stash = subprocess.run(
-            ["git", "stash"],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_root),
-        )
-        stashed = "No local changes to save" not in stash.stdout
+        stashed, error = stash_changes(repo_root)
+        if error:
+            result["message"] = f"PR #{pr_number} merged, but local main was not pulled: {error}"
+            logger.error(result["message"])
+            return result
 
         pull = subprocess.run(
             ["git", "pull", "--rebase"],
@@ -121,10 +120,12 @@ def merge_pr(pr_number: str, caller: str) -> dict:
                 cwd=str(repo_root),
             )
             if pop.returncode != 0:
-                logger.warning(
-                    "merge_pr: stash pop after pull failed (manual restore may be needed): %s",
-                    pop.stderr.strip(),
+                result["message"] = (
+                    f"PR #{pr_number} merged and pulled, but stash pop failed — "
+                    f"your changes are kept in stash@{{0}}: {pop.stderr.strip()}"
                 )
+                logger.error(result["message"])
+                return result
 
         rev = subprocess.run(
             ["git", "rev-parse", "HEAD"],

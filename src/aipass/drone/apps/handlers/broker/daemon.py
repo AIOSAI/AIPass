@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Broker daemon — privileged deleter for sandboxed agents
-# Version: 2.1.4
+# Version: 2.1.5
 # Created: 2026-06-09
-# Modified: 2026-10-18
+# Modified: 2026-10-23
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
@@ -19,7 +19,10 @@ import hmac as hmac_mod
 import json
 import os
 import secrets
+import shutil
 import socket
+import stat
+import sys
 import tempfile
 import threading
 import time
@@ -28,42 +31,23 @@ from pathlib import Path
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
-from aipass.drone.apps.handlers.broker.path_resolver import resolve_beneath
-from aipass.drone.apps.handlers import deletion_log
-from aipass.drone.apps.handlers.router_handler import caller_cwd, registries_in
+from aipass.drone.apps.handlers.broker.path_resolver import open_parent_beneath
+from aipass.drone.apps.handlers import deletion_log, rm_handler
+from aipass.drone.apps.handlers.router_handler import find_project_root
 
 _DEFAULT_SOCKET_DIR = ".ai_central"
 _SOCKET_NAME = "drone_broker.sock"
 _AUDIT_LOG_NAME = "drone_broker_audit.jsonl"
 _SECRET_NAME = "broker_secret"
 
-_DENYLIST_DIRS = frozenset((".git", ".trinity", ".aipass", ".codex", ".agents"))
-
 _TMP_BASES = (Path(tempfile.gettempdir()),)
 
-
-def _find_project_root() -> Path | None:
-    """Walk up from CWD to find *_REGISTRY.json; return its parent as project root.
-
-    Twin of ``rm_handler._find_project_root``, kept separate (daemon vs one-shot lifetimes);
-    ``TestTheSweepIsComplete`` pins them together.
-    """
-    cwd = caller_cwd()
-    if cwd is not None:
-        for parent in [cwd, *cwd.parents]:
-            if registries_in(parent):
-                return parent.resolve()
-    aipass_home = os.environ.get("AIPASS_HOME")
-    if aipass_home:
-        home = Path(aipass_home)
-        if home.is_dir() and registries_in(home):
-            return home.resolve()
-    return None
+_MAX_LINE_BYTES = 64 * 1024
 
 
 def _default_socket_path() -> Path:
     """Return the default broker socket path under the repo root."""
-    root = _find_project_root()
+    root = find_project_root()
     if root is None:
         return Path(tempfile.gettempdir()) / _SOCKET_NAME
     return root / _DEFAULT_SOCKET_DIR / _SOCKET_NAME
@@ -71,7 +55,7 @@ def _default_socket_path() -> Path:
 
 def _default_audit_path() -> Path:
     """Return the default audit log path."""
-    root = _find_project_root()
+    root = find_project_root()
     if root is None:
         return Path(tempfile.gettempdir()) / _AUDIT_LOG_NAME
     return root / _DEFAULT_SOCKET_DIR / _AUDIT_LOG_NAME
@@ -79,7 +63,7 @@ def _default_audit_path() -> Path:
 
 def _default_secret_path() -> Path:
     """Return the default secret path."""
-    root = _find_project_root()
+    root = find_project_root()
     if root is None:
         return Path(tempfile.gettempdir()) / _SECRET_NAME
     return root / _DEFAULT_SOCKET_DIR / _SECRET_NAME
@@ -97,7 +81,7 @@ class BrokerDaemon:
         None (unidentified): /tmp, /var/tmp only.
         Builder branch: /tmp, /var/tmp, + own tree ($REPO/src/aipass/<branch>/).
         devpulse: /tmp, /var/tmp, + anywhere under $REPO.
-        Denylist backstop (.git, .trinity, .aipass, .codex, .agents) always applies.
+        rm's fences always apply: protected dirs, and no folder holding another citizen.
     """
 
     def __init__(
@@ -108,7 +92,7 @@ class BrokerDaemon:
         secret_path: Path | None = None,
     ) -> None:
         """Initialize the broker; *repo_root* is auto-discovered when not set."""
-        self._repo_root = repo_root.resolve() if repo_root else _find_project_root()
+        self._repo_root = repo_root.resolve() if repo_root else find_project_root()
         self.socket_path = socket_path or _default_socket_path()
         self.audit_path = audit_path or _default_audit_path()
         self._secret_path = secret_path or _default_secret_path()
@@ -116,7 +100,6 @@ class BrokerDaemon:
         self._server: socket.socket | None = None
         self._running = False
         self._listening = threading.Event()
-        self._lock = threading.Lock()
         json_handler.log_operation(
             "broker_init",
             {
@@ -148,12 +131,12 @@ class BrokerDaemon:
         with open(self.audit_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, separators=(",", ":")) + "\n")
 
-    def _check_denylist(self, resolved: Path) -> str | None:
-        """Return a reason string if the resolved path hits the denylist."""
-        for part in resolved.parts:
-            if part in _DENYLIST_DIRS:
-                return f"Protected directory: path is inside {part}/"
-        return None
+    def _check_denylist(self, resolved: Path, own: Path | None) -> str | None:
+        """Return a reason string if rm's fences refuse *resolved*; *own* is the caller's branch root."""
+        blocked, reason = rm_handler.check_protected_dirs(resolved)
+        if not blocked:
+            blocked, reason = rm_handler.check_contained_citizens(resolved, self._repo_root, own)
+        return reason if blocked else None
 
     def _get_allowed_bases(self, identity: str | None) -> list[Path]:
         """Return the allowed base directories for the given identity."""
@@ -230,8 +213,6 @@ class BrokerDaemon:
 
     def _handle_delete(self, req: BrokerRequest, identity: str | None) -> BrokerResponse:
         """Process a single delete request with full re-resolution and identity scoping."""
-        import shutil
-
         audit_entry: dict = {
             "op": req.op,
             "agent_path": req.path,
@@ -240,6 +221,11 @@ class BrokerDaemon:
         }
 
         allowed_bases = self._get_allowed_bases(identity)
+        try:
+            own = self._resolve_branch_dir(identity) if identity else None
+        except OSError as exc:
+            logger.warning("broker: own branch of %s unknown, so no tree counts as its own: %s", identity, exc)
+            own = None
 
         for base in allowed_bases:
             agent_path = req.path
@@ -251,129 +237,16 @@ class BrokerDaemon:
                 logger.info("broker: path normalization skipped for %s: %s", agent_path, exc)
 
             try:
-                resolved = resolve_beneath(base, agent_path)
+                parent_fd, name, resolved = open_parent_beneath(base, agent_path)
             except OSError as exc:
                 logger.info("broker: base %s skipped for %s: %s", base, agent_path, exc)
                 continue
-
-            # Prevent /tmp base from granting access to repo-scoped paths
-            if self._repo_root and base in _TMP_BASES and resolved.is_relative_to(self._repo_root):
-                logger.info("broker: %s is under repo root via /tmp — skipping", resolved)
-                continue
-
-            if not resolved.is_relative_to(base):
-                continue
-
-            deny_reason = self._check_denylist(resolved)
-            if deny_reason:
-                audit_entry.update(
-                    result="REFUSED",
-                    reason=deny_reason,
-                    resolved=str(resolved),
-                    base=str(base),
-                )
-                self._audit(audit_entry)
-                logger.warning("broker: denied delete %s: %s", resolved, deny_reason)
-                deletion_log.record_deletion(
-                    lane=deletion_log.LANE_BROKER,
-                    outcome=deletion_log.OUTCOME_REFUSED,
-                    requested=req.path,
-                    resolved=resolved,
-                    reason=deny_reason,
-                    caller=identity,
-                    project_root=self._repo_root,
-                )
-                return BrokerResponse(
-                    ok=False,
-                    message=deny_reason,
-                    request_id=req.request_id,
-                    error_code="DENYLIST",
-                )
-
-            if resolved == base:
-                reason = f"Refusing to delete root directory itself: {base}"
-                audit_entry.update(
-                    result="REFUSED",
-                    reason=reason,
-                    resolved=str(resolved),
-                    base=str(base),
-                )
-                self._audit(audit_entry)
-                deletion_log.record_deletion(
-                    lane=deletion_log.LANE_BROKER,
-                    outcome=deletion_log.OUTCOME_REFUSED,
-                    requested=req.path,
-                    resolved=resolved,
-                    reason=reason,
-                    caller=identity,
-                    project_root=self._repo_root,
-                )
-                return BrokerResponse(
-                    ok=False,
-                    message=reason,
-                    request_id=req.request_id,
-                    error_code="ROOT_DELETE",
-                )
-
-            # A tree cannot be sized once it is gone.
-            measurement = deletion_log.measure(resolved)
-
             try:
-                if resolved.is_symlink():
-                    resolved.unlink()
-                elif resolved.is_dir():
-                    shutil.rmtree(resolved)
-                else:
-                    resolved.unlink()
-
-                audit_entry.update(result="DELETED", resolved=str(resolved), base=str(base))
-                self._audit(audit_entry)
-                logger.info(
-                    "broker: deleted %s (base=%s, identity=%s)",
-                    resolved,
-                    base,
-                    identity,
-                )
-                deletion_log.record_deletion(
-                    lane=deletion_log.LANE_BROKER,
-                    outcome=deletion_log.OUTCOME_DELETED,
-                    requested=req.path,
-                    resolved=resolved,
-                    reason=f"Deleted: {resolved}",
-                    measurement=measurement,
-                    caller=identity,
-                    project_root=self._repo_root,
-                )
-                return BrokerResponse(
-                    ok=True,
-                    message=f"Deleted: {resolved}",
-                    request_id=req.request_id,
-                )
-            except OSError as exc:
-                audit_entry.update(
-                    result="ERROR",
-                    reason=str(exc),
-                    resolved=str(resolved),
-                    base=str(base),
-                )
-                self._audit(audit_entry)
-                logger.error("broker: delete failed %s: %s", resolved, exc)
-                deletion_log.record_deletion(
-                    lane=deletion_log.LANE_BROKER,
-                    outcome=deletion_log.OUTCOME_FAILED,
-                    requested=req.path,
-                    resolved=resolved,
-                    reason=f"Delete failed: {exc}",
-                    measurement=measurement,
-                    caller=identity,
-                    project_root=self._repo_root,
-                )
-                return BrokerResponse(
-                    ok=False,
-                    message=f"Delete failed: {exc}",
-                    request_id=req.request_id,
-                    error_code="OS_ERROR",
-                )
+                response = self._judge_and_delete(req, identity, base, resolved, parent_fd, name, own, audit_entry)
+            finally:
+                os.close(parent_fd)
+            if response is not None:
+                return response
 
         audit_entry.update(result="REFUSED", reason="Path not under any allowed base for this identity")
         self._audit(audit_entry)
@@ -394,6 +267,140 @@ class BrokerDaemon:
             error_code="NO_BASE",
         )
 
+    def _judge_and_delete(
+        self,
+        req: BrokerRequest,
+        identity: str | None,
+        base: Path,
+        resolved: Path,
+        parent_fd: int,
+        name: str,
+        own: Path | None,
+        audit_entry: dict,
+    ) -> BrokerResponse | None:
+        """Fence and delete one resolved leaf under *base*; None when this base does not serve it."""
+        # Prevent /tmp base from granting access to repo-scoped paths
+        if self._repo_root and base in _TMP_BASES and resolved.is_relative_to(self._repo_root):
+            logger.info("broker: %s is under repo root via /tmp — skipping", resolved)
+            return None
+
+        if not resolved.is_relative_to(base):
+            return None
+
+        deny_reason = self._check_denylist(resolved, own)
+        if deny_reason:
+            audit_entry.update(
+                result="REFUSED",
+                reason=deny_reason,
+                resolved=str(resolved),
+                base=str(base),
+            )
+            self._audit(audit_entry)
+            logger.warning("broker: denied delete %s: %s", resolved, deny_reason)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_BROKER,
+                outcome=deletion_log.OUTCOME_REFUSED,
+                requested=req.path,
+                resolved=resolved,
+                reason=deny_reason,
+                caller=identity,
+                project_root=self._repo_root,
+            )
+            return BrokerResponse(
+                ok=False,
+                message=deny_reason,
+                request_id=req.request_id,
+                error_code="DENYLIST",
+            )
+
+        if resolved == base:
+            reason = f"Refusing to delete root directory itself: {base}"
+            audit_entry.update(
+                result="REFUSED",
+                reason=reason,
+                resolved=str(resolved),
+                base=str(base),
+            )
+            self._audit(audit_entry)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_BROKER,
+                outcome=deletion_log.OUTCOME_REFUSED,
+                requested=req.path,
+                resolved=resolved,
+                reason=reason,
+                caller=identity,
+                project_root=self._repo_root,
+            )
+            return BrokerResponse(
+                ok=False,
+                message=reason,
+                request_id=req.request_id,
+                error_code="ROOT_DELETE",
+            )
+
+        # A tree cannot be sized once it is gone.
+        measurement = deletion_log.measure(resolved)
+
+        try:
+            # Relative to the held parent fd: a parent swapped since resolution cannot redirect it.
+            leaf = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(leaf.st_mode):
+                os.unlink(name, dir_fd=parent_fd)
+            elif sys.version_info >= (3, 11):
+                shutil.rmtree(name, dir_fd=parent_fd)
+            else:
+                # shortcut: rmtree takes no dir_fd before 3.11, so 3.10 deletes a tree by path; drop at 3.11+.
+                shutil.rmtree(resolved)
+
+            audit_entry.update(result="DELETED", resolved=str(resolved), base=str(base))
+            self._audit(audit_entry)
+            logger.info(
+                "broker: deleted %s (base=%s, identity=%s)",
+                resolved,
+                base,
+                identity,
+            )
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_BROKER,
+                outcome=deletion_log.OUTCOME_DELETED,
+                requested=req.path,
+                resolved=resolved,
+                reason=f"Deleted: {resolved}",
+                measurement=measurement,
+                caller=identity,
+                project_root=self._repo_root,
+            )
+            return BrokerResponse(
+                ok=True,
+                message=f"Deleted: {resolved}",
+                request_id=req.request_id,
+            )
+        except OSError as exc:
+            audit_entry.update(
+                result="ERROR",
+                reason=str(exc),
+                resolved=str(resolved),
+                base=str(base),
+            )
+            self._audit(audit_entry)
+            logger.error("broker: delete failed %s: %s", resolved, exc)
+            deletion_log.record_deletion(
+                lane=deletion_log.LANE_BROKER,
+                outcome=deletion_log.OUTCOME_FAILED,
+                requested=req.path,
+                resolved=resolved,
+                reason=f"Delete failed: {exc}",
+                measurement=measurement,
+                caller=identity,
+                project_root=self._repo_root,
+            )
+            return BrokerResponse(
+                ok=False,
+                message=f"Delete failed: {exc}",
+                request_id=req.request_id,
+                error_code="OS_ERROR",
+            )
+
     def _handle_connection(self, conn: socket.socket) -> None:
         """Read messages in a loop, tracking per-connection identity."""
         identity: str | None = None
@@ -402,6 +409,13 @@ class BrokerDaemon:
         try:
             while True:
                 while b"\n" not in buffer:
+                    if len(buffer) > _MAX_LINE_BYTES:
+                        conn.sendall(
+                            BrokerResponse(
+                                ok=False, message="Request line too long", error_code="BAD_REQUEST"
+                            ).to_bytes()
+                        )
+                        return
                     chunk = conn.recv(4096)
                     if not chunk:
                         return
@@ -411,7 +425,14 @@ class BrokerDaemon:
                 if not line.strip():
                     continue
 
-                req = BrokerRequest.from_bytes(line + b"\n")
+                try:
+                    req = BrokerRequest.from_bytes(line + b"\n")
+                except (ValueError, KeyError, TypeError, AttributeError) as exc:
+                    logger.warning("broker: bad request line: %s", exc)
+                    conn.sendall(
+                        BrokerResponse(ok=False, message=f"Bad request: {exc}", error_code="BAD_REQUEST").to_bytes()
+                    )
+                    continue
 
                 if req.op == "identify":
                     if first_message_done:
@@ -467,6 +488,7 @@ class BrokerDaemon:
 
         self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._server.bind(str(self.socket_path))
+        os.chmod(self.socket_path, 0o600)
         self._server.listen(5)
         self._server.settimeout(1.0)
         self._running = True
@@ -481,7 +503,7 @@ class BrokerDaemon:
                 t = threading.Thread(target=self._handle_connection, args=(conn,), daemon=True)
                 t.start()
             except socket.timeout:
-                logger.info("broker: accept poll tick")
+                logger.debug("broker: accept poll tick")
                 continue
             except OSError as exc:
                 if self._running:

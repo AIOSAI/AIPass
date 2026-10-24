@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_handler.py
 # Description: Safe main branch synchronization
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -22,6 +22,14 @@ import subprocess
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
+
+
+def stash_changes(repo_root) -> tuple[bool, str]:
+    """Run ``git stash``; returns (stashed, error). A failed stash stashed nothing, so no later pop may run."""
+    stash = subprocess.run(["git", "stash"], capture_output=True, text=True, cwd=str(repo_root))
+    if stash.returncode != 0:
+        return False, f"git stash failed: {stash.stderr.strip()}"
+    return "No local changes to save" not in stash.stdout, ""
 
 
 def sync_main(autostash: bool = False) -> dict:
@@ -54,13 +62,10 @@ def sync_main(autostash: bool = False) -> dict:
                 return {"success": False, "message": msg, "stdout": checkout.stdout}
 
         if autostash:
-            stash = subprocess.run(
-                ["git", "stash"],
-                capture_output=True,
-                text=True,
-                cwd=str(repo_root),
-            )
-            stashed = "No local changes to save" not in stash.stdout
+            stashed, error = stash_changes(repo_root)
+            if error:
+                logger.error(error)
+                return {"success": False, "message": error, "stdout": ""}
 
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
@@ -145,10 +150,9 @@ def sync_main(autostash: bool = False) -> dict:
                 cwd=str(repo_root),
             )
             if pop.returncode != 0:
-                logger.warning(
-                    "sync_main: autostash pop failed (manual restore may be needed): %s",
-                    pop.stderr.strip(),
-                )
+                msg = f"{msg}\nStash pop failed — your changes are kept in stash@{{0}}: {pop.stderr.strip()}"
+                logger.error(msg)
+                return {"success": False, "message": msg, "stdout": stdout}
 
         json_handler.log_operation(
             "sync_main",
@@ -171,13 +175,10 @@ def _sync_dev(repo_root, autostash: bool = False) -> dict:
     stashed = False
 
     if autostash:
-        stash = subprocess.run(
-            ["git", "stash"],
-            capture_output=True,
-            text=True,
-            cwd=str(repo_root),
-        )
-        stashed = "No local changes to save" not in stash.stdout
+        stashed, error = stash_changes(repo_root)
+        if error:
+            logger.error(error)
+            return {"success": False, "message": error, "stdout": ""}
 
     fetch = subprocess.run(
         ["git", "fetch", "origin", "--prune"],
@@ -198,7 +199,11 @@ def _sync_dev(repo_root, autostash: bool = False) -> dict:
     )
 
     if stashed:
-        subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(repo_root))
+        pop = subprocess.run(["git", "stash", "pop"], capture_output=True, text=True, cwd=str(repo_root))
+        if pop.returncode != 0:
+            msg = f"Stash pop failed — your changes are kept in stash@{{0}}: {pop.stderr.strip()}"
+            logger.error(msg)
+            return {"success": False, "message": msg, "stdout": result.stdout}
 
     if result.returncode != 0:
         raw = result.stderr.strip()

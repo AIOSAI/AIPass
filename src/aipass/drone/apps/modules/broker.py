@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: broker.py
 # Description: Module orchestrator for the drone-broker daemon
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-09
-# Modified: 2026-06-09
+# Modified: 2026-10-24
 # =============================================
 
 """Module orchestrator for the drone-broker daemon.
@@ -46,9 +46,9 @@ def handle_command(command: Optional[str] = None, args: Optional[list[str]] = No
 
 def _start_broker() -> bool:
     """Start the broker daemon in the foreground."""
-    from aipass.drone.apps.handlers.broker.daemon import _find_project_root
+    from aipass.drone.apps.handlers.router_handler import find_project_root
 
-    repo_root = _find_project_root()
+    repo_root = find_project_root()
     if not repo_root:
         logger.error("No project root found — cannot start broker")
         return False

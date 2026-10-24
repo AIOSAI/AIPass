@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: delete_branch_handler.py
 # Description: Delete branch handler — remove remote branches with safety guards
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-10-23
 # =============================================
 
 """Delete branch handler — remove remote branches with safety guards."""
@@ -27,12 +27,14 @@ def delete_remote_branch(branch_name: str) -> dict:
     """
     if branch_name in _PROTECTED_BRANCHES:
         return {"success": False, "message": f"Refusing to delete protected branch '{branch_name}'."}
+    if not branch_name or branch_name.startswith(("-", "refs/")) or ":" in branch_name:
+        return {"success": False, "message": f"Refusing to delete '{branch_name}': not a plain branch name."}
 
     repo_root = find_repo_root()
 
     try:
         result = subprocess.run(
-            ["git", "push", "origin", "--delete", branch_name],
+            ["git", "push", "--delete", "origin", branch_name],
             capture_output=True,
             text=True,
             cwd=str(repo_root),

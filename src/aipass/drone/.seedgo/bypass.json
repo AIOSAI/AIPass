@@ -40,11 +40,6 @@
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure. Plugins are an intentional extension point."
     },
     {
-      "file": "apps/handlers/git/pr_handler.py",
-      "standard": "handlers",
-      "reason": "Lazy CROSS-branch import of aipass.trigger's module for trigger.fire() - event notification after PR creation. Non-blocking, wrapped in try/except. Survives the same-branch relaxation (dc07cc01) precisely because the target is another branch's module, not drone's. FILE-WIDE BY NECESSITY: the handlers standard never passes a line to is_bypassed, so a lines key is inert post-FPLAN-0382-wave-2 (seedgo's inert-rule info channel flagged it; lines[298] dropped by devpulse 2026-08-09 per this rule's own documented intent, seedgo mail 932be941). Re-scope if handlers ever threads line=."
-    },
-    {
       "file": "apps/plugins/devpulse_ops/merge_plugin.py",
       "standard": "architecture",
       "reason": "Plugin lives in apps/plugins/ by design — separate from 3-layer structure."
@@ -120,23 +115,6 @@
       "reason": "Standalone acceptance demo runner — helper functions invoked from the demo main, not a production module (same pattern as the other demo bypasses)."
     },
     {
-      "file": "apps/handlers/command_registry/ops.py",
-      "standard": "unused_function",
-      "functions": [
-        "update_command",
-        "command_exists"
-      ],
-      "reason": "Public CRUD API surface (update_command, command_exists) — tested, available for programmatic use. No CLI subcommand wired yet."
-    },
-    {
-      "file": "apps/handlers/git/pr_handler.py",
-      "standard": "unused_function",
-      "functions": [
-        "create_pr"
-      ],
-      "reason": "create_pr() has no production caller — the `pr` command is owner-tier and live, but _handle_pr() in git_module.py dispatches to dev_pr_handler.create_branch_pr(), not here. Its only callers are 7 sites in tests/test_git_module.py. Kept pending a removal decision (APLAN-0003); this bypass documents orphaned code, it does not defend it."
-    },
-    {
       "file": "apps/modules/git_module.py",
       "standard": "unused_function",
       "functions": [
@@ -189,10 +167,10 @@
       "file": "apps/drone.py",
       "standard": "logged_fallback",
       "lines": [
-        585,
-        604,
-        608,
-        668
+        602,
+        621,
+        625,
+        689
       ],
       "reason": "main() is the process exit status: 1 is the failure answer to the OS on every path that returns it (routing refused, unknown command, registry unreadable at 653 and 675, an unhandled systems error at 679, a module that raised at 747), and success is 0. Each handler prints the error to stderr before it. A passport fault (leg 7) is printed after routing by the _reports_passport_fault wrapper and never changes the code. The checker counts the other `return 1`s as a success path because they are not error() calls; they are failures too. Callers: the console script entry only (sys.exit(main())). Fleet green leg 6, drone's decision.",
       "anchor": "return 1"
@@ -248,18 +226,18 @@
       "file": "apps/handlers/command_registry/ops.py",
       "standard": "logged_fallback",
       "lines": [
-        118
+        129
       ],
-      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, OSError here, logged ERROR) and the success path returns True only. Callers add_command/remove_command/update_command (201, 228, 259) report False as a failed save; load_registry's one self-heal save (102, a missing file only; an existing file that cannot be read, is not JSON or is not an object raises since legs 7 and 8) carries on with the in-memory registry, the save's own ERROR log standing. Fleet green leg 6, drone's decision.",
+      "reason": "save_registry: True = written, False = not written; every False is a failure (invalid structure, a failed write here, logged ERROR) and the success path returns True only. Callers add_command/remove_command report False as a failed save. load_registry never saves: a missing file reads as an empty registry. Fleet green leg 6, drone's decision.",
       "anchor": "return False"
     },
     {
       "file": "apps/handlers/broker/path_resolver.py",
       "standard": "host_portability",
       "lines": [
-        86
+        108
       ],
-      "reason": "_fd_path reads /proc/self/fd, and its one caller is _resolve_via_openat2, entered only from resolve_contained after _openat2_available() (line 55: sys.platform == 'linux' and x86_64) said yes. The fence is real, two hops up; the checker acquits a guard one hop away only (ledger rows 491, 510). A platform raise inside _fd_path would be a door for the checker alone: the walk lane never calls it (pinned in tests/test_broker.py with a failing reader). Fleet green leg 6, drone's decision.",
+      "reason": "_fd_path reads /proc/self/fd, and its one caller is _open_via_openat2, entered only from resolve_contained after _openat2_available() (line 55: sys.platform == 'linux' and x86_64) said yes. The fence is real, two hops up; the checker acquits a guard one hop away only (ledger rows 491, 510). A platform raise inside _fd_path would be a door for the checker alone: the walk lane never calls it (pinned in tests/test_broker.py with a failing reader). Fleet green leg 6, drone's decision.",
       "anchor": "/proc/self/fd/"
     }
   ],

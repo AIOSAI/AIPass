@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sync_plugin.py
 # Description: Smart sync — fetch, detect divergence, rebase if needed
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-30
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Smart sync — fetch, detect divergence, rebase if needed.
@@ -35,6 +35,16 @@ def smart_sync(caller: str) -> dict:
     }
 
     try:
+        # Divergence is measured for main, so the rebase/merge must act on main too.
+        head = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True, text=True, cwd=str(repo_root))
+        if head.stdout.strip() != "refs/heads/main":
+            result["message"] = (
+                f"smart-sync works on main only (HEAD is '{head.stdout.strip() or 'detached'}'). "
+                "On dev use 'drone @git sync'."
+            )
+            logger.error(result["message"])
+            return result
+
         fetch = subprocess.run(
             ["git", "fetch", "origin"],
             capture_output=True,

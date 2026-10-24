@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: path_resolver.py
 # Description: Kernel-safe path resolution via openat2 RESOLVE_BENEATH
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-06-09
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Kernel-safe path resolution via openat2 RESOLVE_BENEATH.
@@ -31,6 +31,7 @@ SYS_OPENAT2 = 437
 
 # openat2 takes raw Linux flag numbers; the walk takes host values from `os` (flag numbers differ on macOS).
 O_PATH = 0o010000000
+O_DIRECTORY = 0o200000
 
 _WALK_O_PATH = getattr(os, "O_PATH", 0)
 _WALK_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -63,6 +64,21 @@ def _openat2(dirfd: int, pathname: bytes, flags: int, resolve: int) -> int:
 
 def resolve_beneath(base: Path, relpath: str) -> Path:
     """Resolve *relpath* strictly beneath *base*, refusing escapes and symlinks (OSError)."""
+    parent_fd, name, resolved = open_parent_beneath(base, relpath)
+    try:
+        if name:
+            _stat_leaf(name, parent_fd)
+    finally:
+        os.close(parent_fd)
+    return resolved
+
+
+def open_parent_beneath(base: Path, relpath: str) -> tuple[int, str, Path]:
+    """Open *relpath*'s parent strictly beneath *base*, following no symlink; the leaf must exist.
+
+    Returns ``(parent fd, leaf name, leaf path)``; the caller closes the fd. The leaf is lstat'd,
+    never followed, so it may be a symlink. Leaf name ``""`` means *relpath* is the base itself.
+    """
     json_handler.log_operation("resolve_beneath", {"base": str(base), "relpath": relpath})
 
     cleaned = os.path.normpath(relpath)
@@ -73,9 +89,15 @@ def resolve_beneath(base: Path, relpath: str) -> Path:
     if ".." in parts:
         raise OSError(1, "Path contains .. component", relpath)
 
+    components = [c for c in parts if c not in ("", ".")]
+    parent, name = components[:-1], components[-1] if components else ""
     if _openat2_available():
-        return _resolve_via_openat2(base, cleaned)
-    return _resolve_via_walk(base, parts)
+        try:
+            return _open_via_openat2(base, parent, name)
+        except OSError as exc:
+            if exc.errno != errno.ENOSYS:
+                raise
+    return _open_via_walk(base, parent, name, parts)
 
 
 def _fd_path(fd: int) -> Path:
@@ -86,24 +108,27 @@ def _fd_path(fd: int) -> Path:
     return Path(os.readlink(f"/proc/self/fd/{fd}"))
 
 
-def _resolve_via_openat2(base: Path, cleaned: str) -> Path:
-    """Resolve using the openat2 syscall with kernel-enforced containment."""
+def _open_via_openat2(base: Path, parent: list[str], name: str) -> tuple[int, str, Path]:
+    """Open the parent with the openat2 syscall: kernel-enforced containment."""
     dirfd = os.open(str(base), os.O_RDONLY | os.O_DIRECTORY)
     try:
         fd = _openat2(
             dirfd,
-            cleaned.encode(),
-            O_PATH,
+            "/".join(parent).encode() or b".",
+            O_PATH | O_DIRECTORY,
             RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS,
         )
-        try:
-            resolved = _fd_path(fd)
-            logger.info("resolve_beneath: openat2 resolved %s -> %s", cleaned, resolved)
-            return resolved
-        finally:
-            os.close(fd)
     finally:
         os.close(dirfd)
+    try:
+        if name:
+            os.stat(name, dir_fd=fd, follow_symlinks=False)
+        resolved = _fd_path(fd) / name
+    except BaseException:
+        os.close(fd)
+        raise
+    logger.info("resolve_beneath: openat2 resolved %s -> %s", "/".join([*parent, name]), resolved)
+    return fd, name, resolved
 
 
 def _stat_leaf(component: str, dir_fd: int) -> os.stat_result:
@@ -147,8 +172,8 @@ def _real_base(base: Path) -> Path:
     return Path(os.path.realpath(base))
 
 
-def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
-    """Fallback: per-component walk using O_NOFOLLOW to block symlinks."""
+def _open_via_walk(base: Path, parent: list[str], name: str, parts: list[str]) -> tuple[int, str, Path]:
+    """Fallback: open the parent component by component with O_NOFOLLOW to block symlinks."""
     if not _WALK_SUPPORTED:
         raise OSError(
             errno.ENOTSUP,
@@ -157,14 +182,13 @@ def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
             "/".join(parts),
         )
 
-    components = [c for c in parts if c not in ("", ".")]
     current_fd = os.open(str(base), os.O_RDONLY | os.O_DIRECTORY)
     try:
         leaf = os.fstat(current_fd)
-        for i, component in enumerate(components):
+        for i, component in enumerate([*parent, name] if name else parent):
             try:
-                if i == len(components) - 1:
-                    leaf = _stat_leaf(component, current_fd)
+                if i == len(parent):
+                    leaf = os.stat(component, dir_fd=current_fd, follow_symlinks=False)
                     break
                 next_fd = os.open(
                     component,
@@ -181,9 +205,10 @@ def _resolve_via_walk(base: Path, parts: list[str]) -> Path:
             os.close(current_fd)
             current_fd = next_fd
 
-        resolved = _real_base(base).joinpath(*components)
+        resolved = _real_base(base).joinpath(*parent, name)
         _verify_leaf(resolved, leaf, parts)
         logger.info("resolve_beneath: walk resolved %s -> %s", "/".join(parts), resolved)
-        return resolved
-    finally:
+        return current_fd, name, resolved
+    except BaseException:
         os.close(current_fd)
+        raise
