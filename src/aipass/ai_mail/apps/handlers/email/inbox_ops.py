@@ -14,7 +14,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -56,62 +56,86 @@ def find_message(messages: List[Dict], message_id: str) -> Optional[Dict]:
     return None
 
 
+def count_new(messages: List[Dict]) -> int:
+    """Unread messages: v2 ``status == "new"``, or a legacy row with no status and ``read`` false."""
+    return sum(
+        1
+        for msg in messages
+        if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
+    )
+
+
+def migrate_inbox_format(raw: Any) -> Tuple[Dict[str, Any], bool]:
+    """Bring parsed inbox data to the v2 schema in memory. Returns (data, changed).
+
+    The one schema fixer: delivery and load_inbox both run it, so the shape cannot drift between them.
+    A JSON value that is neither a list nor an object reads as an empty mailbox, unchanged on disk.
+    """
+    migrated = False
+    data: Dict[str, Any]
+
+    if isinstance(raw, list):
+        data = {"messages": [m for m in raw if isinstance(m, dict)]}
+        migrated = True
+    elif isinstance(raw, dict):
+        data = raw
+    else:
+        return {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}, False
+
+    if "inbox" in data and "messages" not in data:
+        old_messages = data.pop("inbox", [])
+        data["messages"] = old_messages if isinstance(old_messages, list) else []
+        migrated = True
+
+    if "messages" not in data:
+        data["messages"] = []
+        migrated = True
+
+    if "mailbox" not in data:
+        data["mailbox"] = "inbox"
+        migrated = True
+
+    if "total_messages" not in data:
+        data["total_messages"] = len(data["messages"])
+        migrated = True
+
+    if "unread_count" not in data:
+        data["unread_count"] = count_new(data["messages"])
+        migrated = True
+
+    return data, migrated
+
+
 def load_inbox(inbox_file: Path) -> Dict:
-    """Load inbox data from inbox.json file."""
+    """Load inbox data from inbox.json file.
+
+    Read, migrate and persist under one lock: a delivery landing between an unlocked read and the write would be erased.
+    """
     json_handler.log_operation("load_inbox", {"inbox_file": str(inbox_file)})
     if not inbox_file.exists():
         return {"messages": []}
 
     try:
-        with open(inbox_file, "r", encoding="utf-8") as f:
-            inbox_data = json.load(f)
+        with _get_inbox_lock()(inbox_file):
+            with open(inbox_file, "r", encoding="utf-8") as f:
+                inbox_data = json.load(f)
 
-        if not isinstance(inbox_data, dict):
-            return {"mailbox": "inbox", "total_messages": 0, "unread_count": 0, "messages": []}
+            inbox_data, migrated = migrate_inbox_format(inbox_data)
 
-        # Old format {"inbox": []} migrates to the v2 schema.
-        migrated = False
-
-        if "inbox" in inbox_data and "messages" not in inbox_data:
-            inbox_data["messages"] = inbox_data.pop("inbox", [])
-            migrated = True
-
-        if "messages" not in inbox_data:
-            inbox_data["messages"] = []
-            migrated = True
-
-        if "mailbox" not in inbox_data:
-            inbox_data["mailbox"] = "inbox"
-            migrated = True
-
-        if "total_messages" not in inbox_data:
-            inbox_data["total_messages"] = len(inbox_data["messages"])
-            migrated = True
-
-        if "unread_count" not in inbox_data:
-            inbox_data["unread_count"] = sum(
-                1
-                for msg in inbox_data["messages"]
-                if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
-            )
-            migrated = True
-
-        try:
-            from aipass.ai_mail.apps.handlers.email.inbox_cleanup import sweep_closed
-
-            swept = sweep_closed(inbox_data, inbox_file.parent)
-            if swept > 0:
-                migrated = True
-        except Exception as e:
-            logger.warning("[inbox] sweep_closed in load_inbox failed: %s", e)
-
-        if migrated:
             try:
-                with _get_inbox_lock()(inbox_file):
+                from aipass.ai_mail.apps.handlers.email.inbox_cleanup import sweep_closed
+
+                if sweep_closed(inbox_data, inbox_file.parent) > 0:
+                    migrated = True
+            except Exception as e:
+                logger.warning("[inbox] sweep_closed in load_inbox failed: %s", e)
+
+            if migrated:
+                try:
                     with open(inbox_file, "w", encoding="utf-8") as f:
                         json.dump(inbox_data, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                logger.warning("[inbox] Migration persist failed for %s: %s", inbox_file, e)
+                except Exception as e:
+                    logger.warning("[inbox] Migration persist failed for %s: %s", inbox_file, e)
 
         return inbox_data
 

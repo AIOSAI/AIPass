@@ -23,6 +23,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import REGISTRY_SUFFIX, find_repo_root, find_project_root, registries_in
 from aipass.ai_mail.apps.handlers.registry.read import get_all_branches
+from aipass.ai_mail.apps.handlers.email.inbox_ops import count_new, migrate_inbox_format
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -82,37 +83,8 @@ def _get_inbox_lock():
 
 
 def _migrate_inbox_format(inbox_data: Dict, inbox_file: Path) -> Dict:
-    """Auto-migrate old inbox format to v2 schema."""
-    migrated = False
-
-    if isinstance(inbox_data, list):
-        inbox_data = {"messages": inbox_data}
-        migrated = True
-
-    if "inbox" in inbox_data and "messages" not in inbox_data:
-        old_messages = inbox_data.pop("inbox", [])
-        inbox_data["messages"] = old_messages if isinstance(old_messages, list) else []
-        migrated = True
-
-    if "messages" not in inbox_data:
-        inbox_data["messages"] = []
-        migrated = True
-
-    if "mailbox" not in inbox_data:
-        inbox_data["mailbox"] = "inbox"
-        migrated = True
-
-    if "total_messages" not in inbox_data:
-        inbox_data["total_messages"] = len(inbox_data["messages"])
-        migrated = True
-
-    if "unread_count" not in inbox_data:
-        inbox_data["unread_count"] = sum(
-            1
-            for msg in inbox_data["messages"]
-            if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
-        )
-        migrated = True
+    """Auto-migrate old inbox format to v2 schema, persisting when anything changed. Caller holds the lock."""
+    inbox_data, migrated = migrate_inbox_format(inbox_data)
 
     if migrated:
         try:
@@ -573,11 +545,7 @@ def deliver_email_to_branch(
 
             inbox_data["total_messages"] = len(inbox_data["messages"])
             messages = inbox_data["messages"]
-            new_count = sum(
-                1
-                for msg in messages
-                if msg.get("status") == "new" or (msg.get("status") is None and not msg.get("read", False))
-            )
+            new_count = count_new(messages)
             opened_count = sum(1 for msg in messages if msg.get("status") == "opened")
             inbox_data["unread_count"] = new_count
 
@@ -653,11 +621,7 @@ def deliver_to_inbox_file(inbox_file: Path, email_data: Dict) -> Tuple[bool, str
             sweep_closed(inbox_data, inbox_file.parent)
 
             inbox_data["total_messages"] = len(inbox_data["messages"])
-            inbox_data["unread_count"] = sum(
-                1
-                for m in inbox_data["messages"]
-                if m.get("status") == "new" or (m.get("status") is None and not m.get("read", False))
-            )
+            inbox_data["unread_count"] = count_new(inbox_data["messages"])
 
             try:
                 with open(inbox_file, "w", encoding="utf-8") as fh:

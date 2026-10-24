@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_upsert.py
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-10
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py's upsert_key handling."""
@@ -623,7 +623,6 @@ def test_send_to_single_forwards_upsert_key(recorded_bus):
         _fake_deliver,
         None,
         lambda *a, **k: None,
-        None,
         upsert_key="warn:disk",
     )
 

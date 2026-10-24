@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: AI_MAIL Central File Writer
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-27
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -33,6 +33,7 @@ from typing import Dict, Any, List, Tuple
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
+from aipass.ai_mail.apps.handlers.registry.read import check_registry_readable, get_all_branches
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -45,39 +46,24 @@ if sys.platform == "win32":
 _REPO_ROOT = find_repo_root()
 AI_CENTRAL_DIR = _REPO_ROOT / ".ai_central"
 CENTRAL_FILE = AI_CENTRAL_DIR / "AI_MAIL.central.json"
-
-# Archive/output subtrees pruned from the walk, matched as exact path components (a substring hid real branches).
-# Never reuse seedgo's skip list: it names .ai_mail.local, which this walk must find.
-EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups", "dropbox", "docs.local", "artifacts", "system_logs"})
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 
-def _raise_walk_error(err: OSError) -> None:
-    """os.walk's onerror hook: a directory it cannot list is raised, not skipped.
-
-    A stale central file is honest; counts over a partly unread tree are not.
-    """
-    raise err
-
-
 def find_all_inbox_files() -> List[Path]:
-    """Find all inbox.json files in .ai_mail.local directories.
+    """Return each registry branch's .ai_mail.local/inbox.json that exists, in registry order.
 
-    Prunes excluded subtrees, not results: this runs on every delivery, and a full walk times out broadcasts.
+    Raises RegistryUnreadable for a registry that cannot be read: get_all_branches alone answers [] for it,
+    and a stale central file is honest where counts over no branches are not.
     """
+    check_registry_readable(BRANCH_REGISTRY)
     inbox_files = []
-
-    for dirpath, dirnames, _filenames in os.walk(_REPO_ROOT, onerror=_raise_walk_error):
-        # Mutating dirnames in place is what stops os.walk descending.
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
-
-        if ".ai_mail.local" not in dirnames:
-            continue
-
-        inbox_path = Path(dirpath) / ".ai_mail.local" / "inbox.json"
+    for branch in get_all_branches():
+        branch_path = Path(branch["path"])
+        if not branch_path.is_absolute():
+            branch_path = _REPO_ROOT / branch_path
+        inbox_path = branch_path / ".ai_mail.local" / "inbox.json"
         if inbox_path.is_file():
             inbox_files.append(inbox_path)
-
     return inbox_files
 
 

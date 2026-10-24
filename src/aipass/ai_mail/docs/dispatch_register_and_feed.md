@@ -2,7 +2,7 @@
 
 # The dispatch register, completion reports and the notification feed
 
-**Branch** ai_mail · **Code** `apps/handlers/notify.py`, `apps/handlers/email/delivery.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/daemon.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/register.py`
+**Branch** ai_mail · **Code** `apps/handlers/notify.py`, `apps/handlers/email/delivery.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/register.py`
 
 ---
 
@@ -20,11 +20,11 @@ line : {"ts": ISO8601, "kind": "mail"|"wake"|"dispatch"|"system",
 
 - **Append-only, one object per line.** Readers never write; the feed carries no
   read flags — BAUD tracks read state locally.
-- **Four writers, four kinds** — `delivery.py` (`mail`), `wake.py` (`wake`),
-  `daemon.py` (`dispatch`, spawn), `dispatch_monitor.py` (`dispatch`, completion).
+- **Three writers, three kinds** — `delivery.py` (`mail`), `wake.py` (`wake`),
+  `dispatch_monitor.py` (`dispatch`, completion).
   An off-contract `kind` is recorded as `system` and the substitution is logged,
   never silently accepted.
-- **Concurrency** — those four are separate processes. Each append is a single
+- **Concurrency** — those three are separate processes. Each append is a single
   `O_APPEND` write; the trim is a read-modify-write. Both take the same advisory
   lock (`.notifications.lock`, a sibling file — the trim replaces the feed inode),
   so an append can never land inside a trim and be dropped.
@@ -70,7 +70,7 @@ does not require an offset, and a hand-seeded line may be naive. Parse
 defensively; comparing a naive `ts` against an aware one raises, and a reader
 that crashes on the cursor comparison stops serving the feed entirely.
 
-Tests point `FEED_PATH` at a tmp file via an autouse conftest fixture: four
+Tests point `FEED_PATH` at a tmp file via an autouse conftest fixture: three
 call sites write feed lines as a side effect, and an unguarded suite run
 appends fake dispatch events to the real feed BAUD renders.
 
@@ -238,7 +238,7 @@ live register.
 
 ## Related
 
-- [wake_pipeline.md](wake_pipeline.md) — the spawn path `wake_branch()`, `daemon.py`
+- [wake_pipeline.md](wake_pipeline.md) — the spawn path `wake_branch()`
   and `dispatch_monitor.py` run before a register row or a feed line ever exists.
 - [wake_lanes.md](wake_lanes.md) — `wake_branch()` itself: the admin, cross-project,
   and `@all` lanes it dispatches through before a register row is even closed.

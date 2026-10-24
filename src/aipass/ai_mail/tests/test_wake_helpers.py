@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -988,3 +988,34 @@ class TestIsBranchOccupied:
 
         monkeypatch.setattr(os, "readlink", _fail_readlink)
         assert is_branch_occupied(tmp_path) is False
+
+
+def test_prepend_path_uses_the_platform_separator(monkeypatch):
+    """The PATH joiner is os.pathsep, not a literal colon: a Windows PATH joined with ':' loses every entry after it."""
+    monkeypatch.setattr(wake_mod.os, "pathsep", ";")
+    env = {"PATH": "C:\\tools"}
+
+    wake_mod.prepend_path(env, "C:\\venv\\Scripts")
+    wake_mod.prepend_path(env, "C:\\venv\\Scripts")
+
+    assert env["PATH"] == "C:\\venv\\Scripts;C:\\tools", "prepended once, joined with the platform separator"
+
+
+def test_systemd_scope_env_file_does_not_outlive_the_launch(tmp_path, monkeypatch):
+    """The environment copy handed to systemd-run is removed once the launch returns, pass or fail."""
+    branch_path = tmp_path / "branch"
+    (branch_path / "logs").mkdir(parents=True)
+    env_file = branch_path / "logs" / ".dispatch_env"
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["existed_during_launch"] = env_file.exists()
+        return MagicMock(returncode=1, stderr="unit refused")
+
+    monkeypatch.setattr(wake_mod.subprocess, "run", fake_run)
+
+    ok = wake_mod.spawn_in_systemd_scope(["monitor"], branch_path, {"A": "1"}, "@target", tmp_path / "lock", None, None)
+
+    assert ok is False
+    assert seen["existed_during_launch"] is True, "systemd-run reads the file at launch"
+    assert not env_file.exists(), "the environment copy must not stay on disk"

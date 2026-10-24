@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-03-05
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
-#   - v1.8.0 (2026-10-11): daemon_signals_restored - run_daemon now installs its stop handlers when started
+#   - v1.9.0 (2026-10-23): sandboxed_central answers get_all_branches from the sandbox registry; daemon_* fixtures go
 #   - v1.7.2 (2026-10-10): temp_test_dir, sample_test_data removed - spawn template leftovers no live test requests
 #   - v1.7.1 (2026-10-08): monitor_wake_stubbed patches the public doors wake_sender, log_wake_result
 #   - v1.7.0 (2026-10-08): wake_log_operation_suppressed, repo_root - test_wake.py's own
@@ -27,18 +27,17 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 import pytest
-import signal
 import sys
 from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
 import aipass.ai_mail.apps.handlers.central_writer as central_writer
-import aipass.ai_mail.apps.handlers.dispatch.daemon as daemon_mod
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as monitor_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
 import aipass.ai_mail.apps.handlers.notify as notify_mod
+import aipass.ai_mail.apps.handlers.registry.read as registry_read
 import aipass.ai_mail.apps.modules.email_send as email_send_mod
 import aipass.trigger.apps.modules.core as trigger_core
 from aipass.ai_mail.apps.handlers.dispatch import register, report
@@ -48,31 +47,6 @@ from aipass.cli.apps.modules import display
 
 # Archived tests import modules that no longer exist; state the skip rather than rely on norecursedirs.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
-
-
-@pytest.fixture
-def daemon_json_silenced():
-    """Prevent log_operation from writing real JSON files during tests."""
-    with patch("aipass.ai_mail.apps.handlers.dispatch.daemon.json_handler") as mock_jh:
-        mock_jh.log_operation.return_value = True
-        yield mock_jh
-
-
-@pytest.fixture
-def daemon_paths_in_tmp(tmp_path, monkeypatch):
-    """Redirect all module-level file paths to tmp_path locations."""
-    monkeypatch.setattr(daemon_mod, "CONFIG_FILE", tmp_path / "safety_config.json")
-    monkeypatch.setattr(daemon_mod, "DAEMON_STATE_FILE", tmp_path / "daemon_state.json")
-    monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", tmp_path / "AIPASS_REGISTRY.json")
-
-
-@pytest.fixture
-def daemon_signals_restored():
-    """Put SIGTERM and SIGINT back as found after a test that starts run_daemon."""
-    saved = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)}
-    yield
-    for signum, handler in saved.items():
-        signal.signal(signum, handler)
 
 
 @pytest.fixture
@@ -181,12 +155,20 @@ def clean_command_state() -> Generator[None, None, None]:
     display.reset_command_state()
 
 
+def _branches_of(registry: Path) -> list:
+    """get_all_branches, answered from `registry` in place of the live one."""
+    with patch.object(registry_read, "BRANCH_REGISTRY_PATH", registry):
+        return registry_read.get_all_branches()
+
+
 @pytest.fixture(autouse=True)
 def sandboxed_central(tmp_path, monkeypatch) -> None:
     """No test reaches the live central file: update_central scans and writes under tmp_path."""
     central = tmp_path / "central_sandbox"
+    registry = central / "AIPASS_REGISTRY.json"
     monkeypatch.setattr(central_writer, "_REPO_ROOT", central)
-    monkeypatch.setattr(central_writer, "BRANCH_REGISTRY", central / "AIPASS_REGISTRY.json")
+    monkeypatch.setattr(central_writer, "BRANCH_REGISTRY", registry)
+    monkeypatch.setattr(central_writer, "get_all_branches", lambda: _branches_of(registry))
     monkeypatch.setattr(central_writer, "AI_CENTRAL_DIR", central / ".ai_central")
     monkeypatch.setattr(central_writer, "CENTRAL_FILE", central / ".ai_central" / "AI_MAIL.central.json")
 

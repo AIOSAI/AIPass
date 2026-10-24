@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **ai_mail audit: sixteen findings and two older defects fixed in one pass; the dispatch status and polling daemon retired** (@ai_mail, on the owner's fix-all; 48 files, suite 1531 to 1389 with 147 daemon and status tests retired and 5 new pins, audit 100). `purge` deleted every file in its list, vectorized or not, so an unreadable mail was lost; it now deletes only what it vectorized. The spawn PATH joined with a literal colon; `os.pathsep`. `load_inbox` read, migrated and wrote the inbox with the lock held only for the write, so a delivery landing in between was erased; read, migrate and persist run under one lock, and `migrate_inbox_format` is the one schema fixer delivery and load share. Archive filenames carry the message id (two same-subject closes in one second overwrote each other) and the deleted copy is written before the inbox write. `central_writer` reads the registry instead of walking the repo (18 inboxes in 11 ms where the walk took 240 ms; aggregated stats identical). `send_to_single` lost a dead parameter that refreshed central twice per send; dispatch send goes through `_send_direct`, and a dispatch to @all is refused up front instead of failing at delivery. `status.py`, `daemon.py`, `test_token.py` and their six test files are out of the tree; nothing outside ai_mail imported them.
+
 ## [2026-10-23] — v2.8.26: a gated CI cure retries until its gate opens, a failed interval job shows the next run it will fire
 
 ### Fixed

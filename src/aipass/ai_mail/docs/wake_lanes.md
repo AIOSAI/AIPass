@@ -1,8 +1,8 @@
 [<- Back to the README](../README.md)
 
-# Wake lanes: admin, cross-project, @all, and the daemon
+# Wake lanes: admin, cross-project, @all, and the reply return path
 
-**Branch** ai_mail · **Code** `apps/handlers/dispatch/wake.py`, `apps/modules/dispatch.py`, `apps/handlers/dispatch/daemon.py`, `apps/handlers/email/delivery.py`, `apps/handlers/users/verified_caller.py`, `apps/handlers/email/reply.py`, `apps/handlers/registry/read.py`
+**Branch** ai_mail · **Code** `apps/handlers/dispatch/wake.py`, `apps/modules/dispatch.py`, `apps/handlers/email/delivery.py`, `apps/handlers/users/verified_caller.py`, `apps/handlers/email/reply.py`, `apps/handlers/registry/read.py`
 
 ---
 
@@ -157,10 +157,6 @@ boundary exemption, narrower than the first:
   inbox found from `AIPASS_CALLER_CWD`.
 - **Fails closed everywhere else:** forged or unknown `in_reply_to`, no mailbox,
   unreadable mailbox, or no `in_reply_to` at all → refused.
-
-## Daemon
-
-The polling daemon (`daemon.py`) watches inboxes for `auto_execute` dispatch emails and spawns agents automatically. It also runs the AIPASS-TEST token protocol: `scan_and_ack_test_emails()` intercepts ping-test messages and auto-replies with "ack" before dispatch processing.
 
 ## Related
 

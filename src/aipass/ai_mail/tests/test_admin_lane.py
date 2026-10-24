@@ -3,7 +3,7 @@
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
 # Version: 1.1.3
 # Created: 2026-08-12
-# Modified: 2026-10-08
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
@@ -40,6 +40,8 @@ def _dispatch_send(args):
 MOD = "aipass.ai_mail.apps.modules.dispatch"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
 _H_SEND = "aipass.ai_mail.apps.handlers.email.send"
+# The dispatch send half runs through email_send._send_direct, which binds these names at import.
+_ES = "aipass.ai_mail.apps.modules.email_send"
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
 _REFERENCE = "aipass.devpulse.apps.modules.door_admin_grant"
@@ -234,17 +236,17 @@ def _send_patches(overrides: dict) -> ExitStack:
     """Default patch set for a dispatch send (mirrors test_dispatch_module)."""
     defaults = {
         f"{_H_SEND}.resolve_sender_info": MagicMock(return_value={"email_address": "@devpulse"}),
-        "aipass.ai_mail.apps.handlers.email.header.prepend_dispatch_header": MagicMock(return_value="body"),
-        f"{_H_SEND}.send_to_single": MagicMock(return_value=(True, None)),
-        "aipass.ai_mail.apps.handlers.email.error_dispatch.on_email_delivered": MagicMock(),
+        f"{_ES}.prepend_dispatch_header": MagicMock(return_value="body"),
+        f"{_ES}.send_to_single": MagicMock(return_value=(True, None)),
+        f"{_ES}.on_email_delivered": MagicMock(),
         "aipass.ai_mail.apps.handlers.users.user.get_current_user": MagicMock(return_value={"name": "t"}),
         "aipass.ai_mail.apps.handlers.registry.read.get_branch_by_email": MagicMock(return_value={}),
-        "aipass.ai_mail.apps.handlers.central_writer.update_central": MagicMock(),
-        "aipass.ai_mail.apps.handlers.email.create.create_email_file": MagicMock(),
-        "aipass.ai_mail.apps.handlers.email.create.load_email_file": MagicMock(),
-        "aipass.ai_mail.apps.handlers.email.delivery.deliver_email_to_branch": MagicMock(),
-        "aipass.ai_mail.apps.handlers.email.error_dispatch.dispatch_send_error": MagicMock(),
-        "aipass.trigger.apps.modules.core.trigger": MagicMock(),
+        f"{_ES}.update_central": MagicMock(),
+        f"{_ES}.create_email_file": MagicMock(),
+        f"{_ES}.load_email_file": MagicMock(),
+        f"{_ES}.deliver_email_to_branch": MagicMock(),
+        f"{_ES}.dispatch_send_error": MagicMock(),
+        f"{_ES}.trigger": MagicMock(),
     }
     defaults.update(overrides)
     stack = ExitStack()

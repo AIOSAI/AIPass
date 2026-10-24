@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.3.1
+# Version: 3.4.0
 # Created: 2026-02-02
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -21,7 +21,6 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, error, warning
 from aipass.ai_mail.apps.handlers.cli.help_flags import wants_help
 from aipass.ai_mail.apps.handlers.json import json_handler
-from aipass.ai_mail.apps.handlers.dispatch.status import load_dispatch_log, check_pid_status, calculate_age
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -38,9 +37,7 @@ Dispatch Module - Agent dispatch management
 
 COMMANDS:
   dispatch @target "Subject" "Body"   - Send dispatch email + wake target
-  dispatch status                     - Show last 5 dispatch spawns with current status
   dispatch register                   - Show outstanding dispatches and which are overdue
-  dispatch daemon                     - Start the continuous dispatch daemon
   dispatch wake @branch               - Wake only (no email sent)
 
 DISPATCH (send + wake):
@@ -63,11 +60,6 @@ MODEL OPTIONS:
   --model opus     Claude Opus 4.6 (default — full reasoning for all tasks)
   --model sonnet   Claude Sonnet 4.6 (cost-effective for lighter tasks)
   --model haiku    Claude Haiku 4.5 (fastest, simplest tasks)
-
-DAEMON:
-  The daemon polls branch inboxes for --dispatch emails and spawns agents.
-  Kill switch: touch <repo_root>/.aipass/autonomous_pause
-  Config: safety_config.json
 """
     console.print(help_text)
 
@@ -95,9 +87,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     # Address forms below stay out of the table: they match on a prefix, not the whole word.
     verbs = {
-        "status": lambda: _orchestrate_status(),
         "register": lambda: _orchestrate_register(),
-        "daemon": lambda: _orchestrate_daemon(),
         "wake": lambda: _orchestrate_wake(args[1:]),
     }
 
@@ -160,62 +150,6 @@ def _monitor_phrase(entry: dict) -> str:
     if alive is False:
         return f"[red]GONE[/red] (pid {entry.get('monitor_pid')})"
     return "[dim]unknown — no pid recorded[/dim]"
-
-
-def _orchestrate_status() -> bool:
-    """Orchestrate dispatch status display."""
-    logger.info("[dispatch] Showing dispatch status")
-
-    try:
-        dispatches = load_dispatch_log()
-    except (OSError, ValueError) as e:
-        error(f"Dispatch log unreadable: {e}")
-        return True
-
-    if not dispatches:
-        console.print("\n[dim]No dispatches recorded yet.[/dim]")
-        return True
-
-    recent = dispatches[-5:][::-1]
-
-    console.print("\n[bold]DISPATCH STATUS[/bold]")
-    console.print("─" * 50)
-
-    active_count = 0
-    for entry in recent:
-        branch = entry.get("branch", "unknown")
-        pid = entry.get("pid")
-        timestamp = entry.get("timestamp", "")
-        spawn_status = entry.get("status", "unknown")
-
-        if spawn_status == "spawned" and pid:
-            current_status = check_pid_status(pid)
-        elif spawn_status == "failed":
-            current_status = "FAILED"
-        else:
-            current_status = "UNKNOWN"
-
-        if current_status == "RUNNING":
-            active_count += 1
-
-        age_str = calculate_age(timestamp)
-
-        if current_status == "RUNNING":
-            status_display = "[green]RUNNING[/green]"
-        elif current_status == "COMPLETED":
-            status_display = "[dim]COMPLETED[/dim]"
-        elif current_status == "FAILED":
-            status_display = "[red]FAILED[/red]"
-        else:
-            status_display = f"[yellow]{current_status}[/yellow]"
-
-        pid_display = f"PID {pid}" if pid else "NO PID"
-        console.print(f"  {branch:<12} {pid_display:<12} {status_display:<18} {age_str}")
-
-    console.print("─" * 50)
-    console.print(f"[dim]Active: {active_count}  |  Total: {len(recent)}[/dim]\n")
-
-    return True
 
 
 def _orchestrate_wake(args: List[str]) -> bool:
@@ -370,65 +304,36 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
 
     # No pre-send progress line: drone replays stdout before stderr, so it would print after the refusal.
 
-    from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info, send_to_single
-    from aipass.ai_mail.apps.handlers.email.create import create_email_file, load_email_file
-    from aipass.ai_mail.apps.handlers.email.delivery import deliver_email_to_branch
-    from aipass.ai_mail.apps.handlers.email.header import prepend_dispatch_header
-    from aipass.ai_mail.apps.handlers.email.error_dispatch import dispatch_send_error, on_email_delivered
+    # _send_direct would broadcast @all; a dispatch wakes one branch.
+    if target.lower() in ("all", "@all"):
+        error(f"Dispatch to {target} not sent: dispatch reaches one branch, broadcast with email @all")
+        return True
+
+    from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info
     from aipass.ai_mail.apps.handlers.users.user import get_current_user
     from aipass.ai_mail.apps.handlers.registry.read import get_branch_by_email
     from aipass.ai_mail.apps.handlers.paths import find_repo_root
+    from aipass.ai_mail.apps.modules.email_send import _send_direct
 
     try:
-        from aipass.ai_mail.apps.handlers.central_writer import update_central
-    except ImportError as e:
-        logger.warning("[dispatch] central_writer import unavailable: %s", e)
-        update_central = None
-
-    _ai_mail_dir = Path(__file__).resolve().parents[2]
-    _repo_root = find_repo_root()
-
-    def _delivery_callback(branch_path, new_count, opened_count, total):
-        on_email_delivered(update_central_fn=update_central)
-
-    try:
-        user_info = resolve_sender_info(from_branch, _repo_root, _ai_mail_dir, get_branch_by_email, get_current_user)
-        message = prepend_dispatch_header(body, no_memory_save=no_memory_save)
-
-        send_ok, send_error = send_to_single(
-            target,
-            subject,
-            message,
-            user_info,
-            True,
-            no_memory_save,
-            None,
-            target,
-            create_email_file,
-            load_email_file,
-            deliver_email_to_branch,
-            _delivery_callback,
-            json_handler.log_operation,
-            update_central,
-        )
-
-        if not send_ok:
-            error(f"Dispatch to {target} not sent: {send_error}")
-            dispatch_send_error(target, subject, send_error or "", deliver_email_to_branch)
-            return True
-
-        console.print(f"[green]Email sent to {target}[/green]")
-
-        try:
-            from aipass.trigger.apps.modules.core import trigger
-
-            trigger.fire("email_dispatched", to=target, subject=subject)
-        except Exception as e:
-            logger.warning("[dispatch] trigger fire failed: %s", e)
-
+        ai_mail_dir = Path(__file__).resolve().parents[2]
+        user_info = resolve_sender_info(from_branch, find_repo_root(), ai_mail_dir, get_branch_by_email, get_current_user)
     except Exception as e:
         logger.error(f"[dispatch] Send phase failed: {e}")
         error(f"Dispatch to {target} not sent: {e}")
+        return True
+
+    sent = _send_direct(
+        target,
+        subject,
+        body,
+        auto_execute=True,
+        dispatched_to=target,
+        no_memory_save=no_memory_save,
+        from_branch=from_branch,
+        user_info=user_info,
+    )
+    if not sent:
         return True
 
     console.print(f"\nWaking {target}...")
@@ -471,40 +376,21 @@ def _announce_wake_back(target: str, sender: str) -> None:
         console.print(f"[dim]Wake-back enabled — sender will be woken when {target} completes (if available)[/dim]")
 
 
-def _orchestrate_daemon() -> bool:
-    """Orchestrate daemon startup."""
-    logger.info("[dispatch] Starting dispatch daemon")
-    console.print("\n[bold]Starting dispatch daemon...[/bold]")
-
-    from aipass.ai_mail.apps.handlers.dispatch.daemon import run_daemon
-
-    run_daemon()
-    return True
-
-
 def print_introspection():
     """Display module introspection info."""
     console.print()
     console.print("[bold cyan]dispatch Module[/bold cyan]")
     console.print(
         "[dim]Orchestrates dispatch commands: combined send+wake,"
-        " status tracking, daemon management, and manual wake.[/dim]"
+        " the dispatch register, and manual wake.[/dim]"
     )
     console.print()
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/dispatch/[/cyan]")
-    console.print("    - [cyan]status.py[/cyan] [dim](load_dispatch_log — load dispatch log entries)[/dim]")
-    console.print(
-        "    - [cyan]status.py[/cyan] [dim](check_pid_status — check if a spawned process is still running)[/dim]"
-    )
-    console.print("    - [cyan]status.py[/cyan] [dim](calculate_age — calculate age string from timestamp)[/dim]")
     console.print("    - [cyan]wake.py[/cyan] [dim](wake_branch — manually wake a branch by spawning an agent)[/dim]")
-    console.print("    - [cyan]daemon.py[/cyan] [dim](run_daemon — start the continuous dispatch daemon)[/dim]")
     console.print("  [cyan]handlers/email/[/cyan] [dim](used by combined dispatch)[/dim]")
-    console.print("    - [cyan]send.py[/cyan] [dim](resolve_sender_info, send_to_single — send email pipeline)[/dim]")
-    console.print("    - [cyan]create.py[/cyan] [dim](create_email_file, load_email_file — email file creation)[/dim]")
-    console.print("    - [cyan]delivery.py[/cyan] [dim](deliver_email_to_branch — inbox delivery)[/dim]")
-    console.print("    - [cyan]header.py[/cyan] [dim](prepend_dispatch_header — dispatch header injection)[/dim]")
+    console.print("    - [cyan]send.py[/cyan] [dim](resolve_sender_info — the sender the mail and the wake share)[/dim]")
+    console.print("  [cyan]modules/email_send.py[/cyan] [dim](_send_direct — the send half of combined dispatch)[/dim]")
     console.print()
 
 

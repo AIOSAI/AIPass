@@ -265,7 +265,7 @@ def close_on_reply(
 
     rows = outstanding(repo_root=repo_root)
 
-    for row in rows:
+    for row in reversed(rows):  # oldest first, or a re-sent dispatch leaves its first row open forever
         if str(row.get("target", "")) != str(replier):
             continue
         if str(row.get("sender", "")) != str(recipient):

@@ -37,7 +37,6 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.email.close_ops import batch_close, batch_close_post_ops
 from aipass.ai_mail.apps.handlers.email.inbox_resolve import resolve_inbox_target
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
-from aipass.ai_mail.apps.modules.email_send import handle_send
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -137,17 +136,16 @@ def handle_command(command: str, args: List[str]) -> bool:
     if command in ("--help", "-h"):
         print_help()
         return True
-    valid = ["send", "email", "inbox", "view", "close", "reply", "sent", "contacts", "read", "register"]
+    # send/email belong to email_send.py alone: two claimants would be settled by directory listing order.
+    valid = ["inbox", "view", "close", "reply", "sent", "contacts", "read", "register"]
     if command not in valid:
         return False
-    # Whole-sequence: a later --help must not reach send/close/reply and mutate a mailbox.
+    # Whole-sequence: a later --help must not reach close/reply and mutate a mailbox.
     if wants_help(args):
         print_help()
         return True
 
     dispatch = {
-        "send": handle_send,
-        "email": handle_send,
         "inbox": handle_inbox,
         "view": handle_view,
         "close": handle_close,

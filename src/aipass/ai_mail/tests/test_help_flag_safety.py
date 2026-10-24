@@ -3,7 +3,7 @@
 # Description: Tests for whole-sequence help-flag detection across the three CLI modules
 # Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py's wants_help() and the three CLI modules it gates."""
@@ -106,31 +106,9 @@ class TestDispatchHelpSafety:
         send.assert_called_once()
         help_out.assert_not_called()
 
-    def test_status_subcommand_still_runs(self):
-        with (
-            patch.object(dispatch_module, "_orchestrate_status", return_value=True) as status,
-            patch.object(dispatch_module, "print_help") as help_out,
-        ):
-            handled = dispatch_module.handle_command("dispatch", ["status"])
-
-        assert handled is True
-        status.assert_called_once()
-        help_out.assert_not_called()
-
 
 class TestEmailHelpSafety:
     """`email`/`send` reach a real delivery; the other verbs mutate the inbox."""
-
-    def test_trailing_help_never_reaches_the_send_path(self):
-        with (
-            patch.object(email_module, "handle_send") as send,
-            patch.object(email_module, "print_help") as help_out,
-        ):
-            handled = email_module.handle_command("email", ["@devpulse", "Subject", "Body", "--help"])
-
-        assert handled is True
-        help_out.assert_called_once()
-        send.assert_not_called()
 
     def test_trailing_help_never_closes_a_message(self):
         with (

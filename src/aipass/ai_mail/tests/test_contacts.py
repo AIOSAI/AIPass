@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_contacts.py
 # Description: Tests for the contacts address book handler
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-11
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/email/contacts.py."""
@@ -174,3 +174,14 @@ def test_conftest_isolates_contacts_file_by_default():
 
     assert contacts_mod.CONTACTS_FILE != live_path
     assert contacts_mod.CONTACTS_FILE.name == "contacts.json"
+
+
+def test_register_contact_skips_the_write_when_nothing_changed(isolated_contacts, tmp_path):
+    """A re-registration with the same project and inbox leaves the book byte-identical: no rewrite per delivery."""
+    inbox = str(tmp_path / "path" / "to" / "inbox.json")
+    assert register_contact("devpulse", "AIPass", inbox) is True
+    before = isolated_contacts.read_bytes()
+
+    assert register_contact("devpulse", "AIPass", inbox) is True
+
+    assert isolated_contacts.read_bytes() == before

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email_send.py
 # Description: Email Send Orchestration (extracted from email.py)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-22
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """
@@ -191,13 +191,16 @@ def _send_direct(
     no_memory_save=False,
     from_branch=None,
     upsert_key=None,
+    user_info=None,
 ) -> bool:
     """Direct email send - thin wrapper over send handlers.
 
     upsert_key rewrites the recipient's open message with that key in place (bumped counter) instead of adding one.
+    user_info, when given, is the sender already resolved; from_branch is then not read.
     """
     try:
-        user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
+        if user_info is None:
+            user_info = resolve_sender_info(from_branch, _REPO_ROOT, _AI_MAIL_DIR, get_branch_by_email, get_current_user)
         if auto_execute:
             message = prepend_dispatch_header(message, no_memory_save=no_memory_save)
 
@@ -222,12 +225,11 @@ def _send_direct(
             deliver_email_to_branch,
             _delivery_callback,
             json_handler.log_operation,
-            update_central,
             upsert_key=upsert_key,
         )
 
         if success:
-            label = "\\[dispatch: queued for daemon]" if auto_execute else ""
+            label = "\\[dispatch]" if auto_execute else ""
             if upsert_key:
                 label = f"\\[upsert: {upsert_key}]"
             console.print(f"[green]Email sent to {to_branch} {label}[/green]")

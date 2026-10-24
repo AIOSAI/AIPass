@@ -28,7 +28,7 @@ apps/
   modules/
     email.py                  # inbox, view, reply, close, sent, contacts
     email_send.py             # Send orchestration: direct, interactive, broadcast
-    dispatch.py               # Dispatch send+wake, register, status, daemon control
+    dispatch.py               # Dispatch send+wake, register, manual wake
   handlers/
     paths.py                  # find_repo_root() + the case-exact registry walk
     notify.py                 # Notification feed writer (JSONL; BAUD reads it)
@@ -39,12 +39,9 @@ apps/
       wake.py                 # The wake path: gates, model resolution, three spawn lanes
       wake_dashboard.py       # Refreshes the RECIPIENT's dashboard before the spawn
       dispatch_monitor.py     # Wraps the claude process (bounce, lock cleanup, sandbox)
-      daemon.py               # Polls inboxes, spawns agents for dispatch emails
       register.py             # Append-only dispatch register — open/close/outstanding
       report.py               # Completion report: emails_sent, memories_edited, duration
       session_pointer.py      # Durable resume-session pointer
-      status.py               # Dispatch log I/O
-      test_token.py           # AIPASS-TEST ping protocol (auto-ack)
     email/
       delivery.py             # Core delivery pipeline — the one writer into a mailbox
       send.py                 # Sender resolution + send orchestration
@@ -93,8 +90,6 @@ docs/                         # The depth — indexed from README.md
 
 ## Gotchas
 
-- `dispatch status` can print "No dispatches recorded yet." while work is running — it reads
-  a different log. `dispatch register` is the trustworthy view.
 - `--help` anywhere in a command sequence EXPLAINS and never executes; that is a contract,
   pinned by tests.
 - The two ids: a message carries its own id and the sender's `sent_id`. Echo the message's

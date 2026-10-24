@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_completion_ordering.py
 # Description: The terminal moment's ordering, FPLAN-0452 P0's second fix
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-23
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- the terminal moment's ordering."""
@@ -95,7 +95,7 @@ class TestTheDispatchIdDoesNotLeakToChildren:
         source = (MONITOR.parent / "wake.py").read_text(encoding="utf-8")
 
         register_call = source.index("register.open_dispatch(")
-        assert register_call < source.index("_spawn_in_systemd_scope(\n")
+        assert register_call < source.index("spawn_in_systemd_scope(\n")
         assert register_call < source.index("process = subprocess.Popen(")
 
     def test_expected_by_uses_the_monitors_own_timeout_not_an_invented_one(self):

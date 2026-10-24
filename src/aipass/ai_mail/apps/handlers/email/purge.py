@@ -92,6 +92,7 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
         return {"success": True, "purged_count": 0}
 
     emails_data = []
+    loaded_files = []
     load_errors = []
     for file_path in files:
         try:
@@ -99,6 +100,7 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
                 email_data = json.load(f)
                 email_data["_source_file"] = str(file_path.name)
                 emails_data.append(email_data)
+                loaded_files.append(file_path)
         except Exception as e:
             logger.warning("[purge] Failed to load email file %s: %s", file_path.name, e)
             load_errors.append(f"{file_path.name}: {e}")
@@ -118,7 +120,8 @@ def _purge_email_files(files: List[Path], folder_type: str) -> Dict[str, Any]:
 
     deleted_count = 0
     delete_errors = []
-    for file_path in files:
+    # Only what the bank now holds: an unreadable file was never vectorized, so it stays.
+    for file_path in loaded_files:
         try:
             file_path.unlink()
             deleted_count += 1

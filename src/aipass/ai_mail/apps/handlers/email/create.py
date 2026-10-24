@@ -20,6 +20,7 @@ from typing import Dict, Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.handlers.dispatch.report import stamp_dispatch_id
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -39,9 +40,6 @@ def _get_append_footer():
 
         _append_footer = append_footer
     return _append_footer
-
-
-from aipass.ai_mail.apps.handlers.dispatch.report import stamp_dispatch_id
 
 
 def create_email_file(
@@ -83,7 +81,8 @@ def create_email_file(
 
     safe_subject = "".join(c if c.isalnum() or c in (" ", "-", "_") else "_" for c in subject)
     safe_subject = safe_subject[:50].strip()  # Limit length
-    filename = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{safe_subject}.json"
+    # The id keeps a group send's same-subject records, written in one second, from overwriting each other.
+    filename = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{email_data['id']}_{safe_subject}.json"
 
     mailbox_path = Path(user_info["mailbox_path"])
     sent_folder = mailbox_path / "sent"

@@ -81,7 +81,7 @@ The standard AIPass three-layer shape. `apps/ai_mail.py` is a thin entry point t
 discovers modules and routes to the first one claiming a command. `apps/modules/` holds the
 orchestration, one module per surface: `email` (inbox, view, reply, close, contacts),
 `email_send` (direct, interactive and broadcast sending) and `dispatch` (send-plus-wake,
-register, status, daemon). Three doors sit beside them, re-exports for other branches and
+register, manual wake). Three doors sit beside them, re-exports for other branches and
 not commands: `door_wake`, `door_verified_caller` and `door_session_pointer`.
 `apps/handlers/` is fenced: another branch that imports it directly is refused at import
 time, and reaches it through a door. `apps/handlers/` holds the implementation, grouped one directory
@@ -104,7 +104,7 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 |---|---|
 | [docs/README.md](docs/README.md) | What belongs in `docs/` and what belongs in a local scratch directory |
 | [docs/wake_pipeline.md](docs/wake_pipeline.md) | The wake path end to end: the spawn lanes, safety limits, the scheduled lane, unattended wakes, the Fable grant, and the recipient dashboard refresh |
-| [docs/wake_lanes.md](docs/wake_lanes.md) | The admin lane, the cross-project bridge, `@all` scope, out-of-scope addresses, the reply return path and the daemon |
+| [docs/wake_lanes.md](docs/wake_lanes.md) | The admin lane, the cross-project bridge, `@all` scope, out-of-scope addresses, and the reply return path |
 | [docs/dispatch_register_and_feed.md](docs/dispatch_register_and_feed.md) | The append-only register, completion reports, crash coverage and its latency, and the notification feed |
 | [docs/sending_and_delivery.md](docs/sending_and_delivery.md) | Listing rules, what a broadcast costs, repeat signals (`upsert_key`), the two message ids, refused sends and the mail lifecycle |
 | [docs/identity_and_boundaries.md](docs/identity_and_boundaries.md) | Sender identity, the verified-caller rail, cross-project mail and wakes, the import guard and the case-exact registry walk |
