@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handoff_platform/__init__.py
 # Description: OS-dispatched CLI session launch — tmux, wt.exe, fallback
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-20
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -15,6 +15,7 @@ All public functions return data; presentation is handled by the module layer.
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 import sys
@@ -41,8 +42,7 @@ def build_cli_cmd(cli: str, flag_variant: str) -> str:
 def build_manual_command(cli: str, prompt: str, cwd: str, flag_variant: str = "default") -> str:
     """Return the equivalent manual shell command for user display."""
     cli_cmd = build_cli_cmd(cli, flag_variant)
-    safe_prompt = prompt.replace('"', '\\"')
-    return f'cd {cwd} && {cli_cmd} "{safe_prompt}"'
+    return f"cd {shlex.quote(cwd)} && {cli_cmd} {shlex.quote(prompt)}"
 
 
 def return_path_breadcrumb(cwd: str) -> str:
@@ -52,7 +52,7 @@ def return_path_breadcrumb(cwd: str) -> str:
     session stores are per-directory, so that hint fails from anywhere else.
     `--continue` from the right directory needs no id.
     """
-    return f"cd {cwd} && claude --continue"
+    return f"cd {shlex.quote(cwd)} && claude --continue"
 
 
 def _find_terminal_emulator() -> str | None:
@@ -71,18 +71,17 @@ def launch_terminal(cli: str, prompt: str, cwd: str, flag_variant: str = "defaul
         return False
 
     cli_cmd = build_cli_cmd(cli, flag_variant)
-    safe_prompt = prompt.replace('"', '\\"')
-    shell_cmd = f'cd "{cwd}" && {cli_cmd} "{safe_prompt}"'
+    shell_cmd = f"cd {shlex.quote(cwd)} && {cli_cmd} {shlex.quote(prompt)}"
 
     try:
         if term == "gnome-terminal":
             subprocess.Popen(["gnome-terminal", "--", "bash", "-c", shell_cmd])
         elif term == "xfce4-terminal":
-            subprocess.Popen(["xfce4-terminal", "-e", f"bash -c '{shell_cmd}'"])
+            subprocess.Popen(["xfce4-terminal", "-e", "bash -c " + shlex.quote(shell_cmd)])
         elif term == "konsole":
             subprocess.Popen(["konsole", "-e", "bash", "-c", shell_cmd])
         elif term == "xterm":
-            subprocess.Popen(["xterm", "-e", f"bash -c '{shell_cmd}'"])
+            subprocess.Popen(["xterm", "-e", "bash -c " + shlex.quote(shell_cmd)])
         else:
             return False
         logger.info("[handoff_platform] opened %s in %s (cwd=%s)", term, cli, cwd)
@@ -103,7 +102,6 @@ def launch_tmux(cli: str, prompt: str, cwd: str, flag_variant: str = "default") 
         return False
 
     cli_cmd = build_cli_cmd(cli, flag_variant)
-    safe_prompt = prompt.replace('"', '\\"')
 
     try:
         subprocess.run(
@@ -117,7 +115,7 @@ def launch_tmux(cli: str, prompt: str, cwd: str, flag_variant: str = "default") 
             timeout=10,
         )
         subprocess.run(
-            ["tmux", "send-keys", "-t", _TMUX_SESSION, f'{cli_cmd} "{safe_prompt}"', "Enter"],
+            ["tmux", "send-keys", "-t", _TMUX_SESSION, f"{cli_cmd} {shlex.quote(prompt)}", "Enter"],
             check=True,
             timeout=10,
         )
@@ -176,7 +174,6 @@ def launch_inline(
     ``which``, ``chdir`` and ``execvp`` are test seams so the test never patches os or shutil.
     """
     import os
-    import shlex
 
     which = shutil.which if which is None else which
     chdir = os.chdir if chdir is None else chdir

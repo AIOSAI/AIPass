@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -488,7 +488,9 @@ def check_provider_manifest(
         event_entries = provider_hooks.get(event, [])
         hook_matcher = hook.get("matcher", "")
         found = any(
-            isinstance(e, dict) and command in json.dumps(e) and e.get("matcher", "") == hook_matcher
+            isinstance(e, dict)
+            and e.get("matcher", "") == hook_matcher
+            and any(isinstance(h, dict) and h.get("command") == command for h in e.get("hooks", []))
             for e in event_entries
         )
         if not found:
@@ -1202,6 +1204,8 @@ def _compute_doctor_groups(
         groups["Services"] = [r for r in services if r.label != "wire verify"] + wire_recheck
 
         owner_fix = _fix_owner_seating()
+        if any(r.glyph == GLYPH_PASS for r in owner_fix):
+            owner_fix = _check_owner_seating()  # exit 0 is not proof the seat is clean
         identity = groups.get("Identity", [])
         groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
 

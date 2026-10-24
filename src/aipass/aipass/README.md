@@ -33,6 +33,9 @@ another URL instead of the public repo (the install sandbox).
 **Set up.** `aipass init run` walks the ten stages — welcome, system detect,
 profile, style questions, tool choice, first agent, ping sweep, smoke test,
 handoff, done. Every stage saves its answer, so an interrupted run resumes.
+`aipass init <target>` scaffolds a project in one step; whether it may is judged
+on the target, by the guard in `bootstrap.py` (no agent branch, no existing or
+enclosing project), never on the directory you run it from.
 `aipass init update` brings an existing project's scaffold forward, which is a
 decision with rules of its own rather than a repair.
 

@@ -3,7 +3,7 @@
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
 # Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -714,3 +714,16 @@ def test_update_refuses_when_the_ignore_file_is_there_but_unreadable(tmp_path):
 
     assert type(refused.value.__cause__) is type(platform_error)
     assert _files_and_bytes(target) == before
+
+
+def test_update_project_repoints_a_dangling_venv_link(tmp_path, monkeypatch):
+    """apply=True repoints a .venv link whose home moved instead of raising FileExistsError."""
+    host, target = _make_nested_project(tmp_path)
+    (host / ".venv").mkdir()
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
+    monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
+    (target / ".venv").symlink_to(tmp_path / "old_home" / ".venv")
+
+    bootstrap.update_project(target, apply=True)
+
+    assert (target / ".venv").resolve() == (host / ".venv").resolve()

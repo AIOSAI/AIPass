@@ -1,20 +1,21 @@
 # =================== AIPass ====================
 # Name: ping_sweep/__init__.py
 # Description: Verify registered branches respond via test-convention email
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
 ping_sweep — verify each registered branch responds.
 
-ai_mail's daemon auto-acks the AIPASS-TEST token; a branch with no daemon times out, as expected.
+Only a branch with a live agent session replies; every other branch times out, as expected.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ from aipass.aipass.shared.registry_discovery import registries_in
 
 TEST_TOKEN = "[AIPASS-TEST — do not update memories, do not execute, reply 'ack' only]"
 TIMEOUT_PER_BRANCH = 30
+_ACK_RE = re.compile(r"\back\b", re.IGNORECASE)
 
 BRANCHES = [
     "drone",
@@ -103,9 +105,10 @@ def _send_test_email(branch: str, body: str) -> bool:
         return False
 
 
-def _wait_for_ack(branch: str, timeout: int) -> str:
+def _wait_for_ack(branch: str, timeout: int, since: str) -> str:
     """
-    Poll aipass inbox for an ack reply from branch.
+    Poll aipass inbox for an ack reply from branch, sent at or after `since`
+    ("YYYY-MM-DD HH:MM:SS", the inbox format, so string order is time order).
     Returns 'ack' | 'timeout'.
     """
     deadline = time.time() + timeout
@@ -120,9 +123,9 @@ def _wait_for_ack(branch: str, timeout: int) -> str:
                 data = json.load(f)
             for msg in data.get("messages", []):
                 msg_from = msg.get("from", "").lstrip("@")
-                subj = msg.get("subject", "").lower()
-                body_lower = msg.get("message", "").lower()
-                if msg_from == branch and msg.get("status") == "new" and ("ack" in subj or "ack" in body_lower):
+                text = f"{msg.get('subject', '')} {msg.get('message', '')}"
+                fresh = msg.get("timestamp", "") >= since
+                if msg_from == branch and msg.get("status") == "new" and fresh and _ACK_RE.search(text):
                     return "ack"
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("[ping_sweep] inbox read error: %s", exc)
@@ -139,11 +142,12 @@ def sweep_all_branches(timeout: int = TIMEOUT_PER_BRANCH) -> Dict[str, str]:
     body = f"AIPASS PING — checking that you are reachable.\n\n{TEST_TOKEN}"
 
     for branch in _discover_branches():
+        sent_at = time.strftime("%Y-%m-%d %H:%M:%S")
         ok = _send_test_email(branch, body)
         if not ok:
             results[branch] = "error"
             continue
-        results[branch] = _wait_for_ack(branch, timeout)
+        results[branch] = _wait_for_ack(branch, timeout, sent_at)
         logger.info("[ping_sweep] @%s → %s", branch, results[branch])
 
     json_handler.log_operation("ping_sweep", {"results": results})

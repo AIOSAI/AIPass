@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-07-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -72,15 +72,21 @@ def phone_face_step_stays_offline():
 class TestLooksLikeAipassTree:
     """Detecting whether a directory already holds an AIPass source tree."""
 
-    def test_setup_sh_present(self, tmp_path: Path) -> None:
-        """A directory with setup.sh reads as an AIPass tree."""
-        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    def test_setup_sh_and_aipass_registry_present(self, tmp_path: Path) -> None:
+        """A directory with setup.sh and AIPASS_REGISTRY.json reads as an AIPass tree."""
+        _aipass_tree(tmp_path)
         assert _looks_like_aipass_tree(tmp_path) is True
 
-    def test_registry_present(self, tmp_path: Path) -> None:
-        """A directory with a *_REGISTRY.json reads as an AIPass tree."""
+    def test_setup_sh_alone_is_not_a_tree(self, tmp_path: Path) -> None:
+        """Any project with a setup.sh is not an AIPass home."""
+        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        assert _looks_like_aipass_tree(tmp_path) is False
+
+    def test_project_registry_is_not_a_tree(self, tmp_path: Path) -> None:
+        """A user project (setup.sh + MYPROJ_REGISTRY.json) is not the AIPass home."""
+        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
         (tmp_path / "MYPROJ_REGISTRY.json").write_text("{}", encoding="utf-8")
-        assert _looks_like_aipass_tree(tmp_path) is True
+        assert _looks_like_aipass_tree(tmp_path) is False
 
     def test_empty_dir(self, tmp_path: Path) -> None:
         """An empty directory is not an AIPass tree."""
@@ -118,14 +124,14 @@ class TestResolveHome:
 
         Pins: a headless install inside a checkout went to ~/AIPass instead.
         """
-        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        _aipass_tree(tmp_path)
         monkeypatch.chdir(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": ""}, clear=False):
             assert _resolve_home(None, here=False, non_interactive=True) == tmp_path.resolve()
 
     def test_uses_valid_env(self, tmp_path: Path) -> None:
         """A valid AIPASS_HOME pointing at a real tree is honoured."""
-        (tmp_path / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        _aipass_tree(tmp_path)
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}, clear=False):
             assert _resolve_home(None, here=False, non_interactive=True) == tmp_path.resolve()
 
@@ -306,6 +312,12 @@ class TestCloneRepo:
         assert "git clone failed (exit 128) — git's own message is above" in capsys.readouterr().err
 
 
+def _aipass_tree(home: Path) -> None:
+    """Make `home` read as an AIPass tree: setup.sh and AIPASS_REGISTRY.json."""
+    (home / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (home / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+
 def _checkout(tmp_path: Path) -> Path:
     """A directory that reads as a checkout: a .git directory, made without running git (no git from this seat)."""
     repo = tmp_path / "checkout"
@@ -405,6 +417,21 @@ class TestSource:
             with pytest.raises(SystemExit):
                 handle_command("install", ["--no-chat", "--source"])
         assert [c.kwargs["source"] for c in run.call_args_list] == [str(tmp_path), None, ""]
+
+    def test_a_url_token_is_never_printed_or_logged(self, tmp_path: Path, capsys) -> None:
+        """A --source URL's user:token@ is stripped from the printed Source line, the dry run and the log."""
+        url = "https://user:s3cret-token@example.org/AIPass.git"
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=tmp_path / "AIPass"),
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}._run_setup", return_value=False),
+            patch(f"{_MOD}.json_handler", autospec=True) as jh,
+        ):
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--source", url, "--dry-run", "--no-chat"])
+        out = capsys.readouterr().out
+        assert "s3cret-token" not in out + str(jh.log_operation.call_args_list)
+        assert "https://example.org/AIPass.git" in out
 
     def test_the_help_lists_source(self, capsys: pytest.CaptureFixture[str]) -> None:
         print_help()
@@ -583,13 +610,14 @@ class TestRunInstall:
             patch(f"{_MOD}._clone_repo", return_value=True),
             patch(f"{_MOD}._run_setup", return_value=True),
             patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
-            patch(f"{_MOD}._check_and_fix_owner"),
+            patch(f"{_MOD}._check_and_fix_owner") as owner,
             patch(f"{_MOD}._install_phone_face", return_value=True) as face,
             patch(f"{_MOD}._end_in_chat") as nxt,
             patch(_BUS) as bus,
         ):
             rc = run_install(non_interactive=True, dry_run=False)
         assert rc == 0
+        owner.assert_called_once_with(home, "/x/drone")
         bus.fire.assert_called_once_with(
             "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
@@ -749,7 +777,7 @@ class TestHandleCommand:
         """
         home = tmp_path / "AIPass"
         home.mkdir()
-        (home / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        _aipass_tree(home)
         with (
             patch(f"{_MOD}.is_throwaway_path", return_value=False),
             patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run,
@@ -1253,6 +1281,16 @@ class TestCheckAndFixOwner:
             _check_and_fix_owner(tmp_path)
         assert mock_run.call_count == 1
         assert mock_run.call_args[0][0] == ["drone", "@spawn", "sync-registry", "--check"]
+        assert mock_run.call_args.kwargs["cwd"] == str(tmp_path)
+
+    def test_the_given_drone_binary_runs(self, tmp_path) -> None:
+        """A drone found in the home's venv is used, not whatever PATH holds."""
+        with patch(
+            "aipass.aipass.apps.modules.install.subprocess.run",
+            return_value=MagicMock(returncode=0, stdout="", stderr=""),
+        ) as mock_run:
+            _check_and_fix_owner(tmp_path, str(tmp_path / ".venv" / "bin" / "drone"))
+        assert mock_run.call_args[0][0][0] == str(tmp_path / ".venv" / "bin" / "drone")
 
     def test_issues_trigger_fix(self, tmp_path) -> None:
         check_proc = MagicMock(returncode=1, stdout="", stderr="")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.1.6
+# Version: 1.1.7
 # Created: 2026-05-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -71,9 +71,26 @@ class TestBuildManualCommand:
         assert "hello" in result
 
     def test_escapes_quotes_in_prompt(self, tmp_path) -> None:
-        """Double quotes in prompt are escaped."""
+        """Double quotes in prompt survive the shell as one argument."""
         result = build_manual_command("claude", 'say "hi"', str(tmp_path))
-        assert '\\"hi\\"' in result
+        assert shlex.split(result)[-1] == 'say "hi"'
+
+    def test_a_hostile_cwd_and_prompt_each_stay_one_argument(self, tmp_path) -> None:
+        """A space, an apostrophe and $(x) never split the cd target or the prompt.
+        Mutant: an unquoted cwd splits at the space and goes red."""
+        cwd = str(tmp_path / "it's a $(x) dir")
+        prompt = 'don\'t $(rm) "me"'
+        assert shlex.split(build_manual_command("claude", prompt, cwd)) == ["cd", cwd, "&&", "claude", prompt]
+        assert shlex.split(return_path_breadcrumb(cwd)) == ["cd", cwd, "&&", "claude", "--continue"]
+        for term in ("xterm", "xfce4-terminal"):
+            with (
+                patch("aipass.aipass.apps.handlers.handoff_platform._find_terminal_emulator", return_value=term),
+                patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.Popen") as popen,
+            ):
+                assert launch_terminal("claude", prompt, cwd) is True
+            bash, flag, shell_cmd = shlex.split(popen.call_args.args[0][-1])
+            assert (bash, flag) == ("bash", "-c")
+            assert shlex.split(shell_cmd) == ["cd", cwd, "&&", "claude", prompt]
 
     def test_skip_permissions_in_manual(self, tmp_path) -> None:
         """Manual command includes flag when skip-permissions."""

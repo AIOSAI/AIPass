@@ -3,7 +3,7 @@
 # Description: Tests for aipass adopt — project adoption handler
 # Version: 1.2.0
 # Created: 2026-07-20
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -28,6 +28,7 @@ from aipass.aipass.apps.handlers.new_project.adopt import (
 )
 from aipass.aipass.apps.modules import adopt as adopt_module
 from aipass.aipass.apps.modules.adopt import handle_command
+from aipass.aipass.shared.registry_discovery import registries_in
 
 
 @pytest.fixture()
@@ -327,6 +328,52 @@ def test_adopt_registry_minted_before_spawn(host_env):
     ):
         adopt_project(target, no_agent=False)
     assert seen["registry_present"] is True
+
+
+def test_adopt_spawn_failure_leaves_no_registry_and_rerun_proceeds(host_env):
+    _, target = host_env
+    with (
+        _no_home(),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+        patch(
+            "aipass.aipass.apps.handlers.new_project.spawn_agent",
+            return_value={"success": False, "error": "boom"},
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="boom"):
+            adopt_project(target, no_agent=False)
+    assert not registries_in(target)
+    with _no_home(), patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"):
+        result = adopt_project(target, no_agent=True)
+    assert (target / result["registry_file"]).is_file()
+
+
+def test_adopt_manifest_omits_pre_existing_scaffold_files(host_env):
+    """A file the project already had is the project's: init update must never treat it as ours."""
+    _, target = host_env
+    (target / ".claude" / "commands").mkdir(parents=True)
+    (target / ".claude" / "commands" / "prep.md").write_text("my own prep\n", encoding="utf-8")
+    with _no_home(), patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"):
+        adopt_project(target, no_agent=True)
+    recorded = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))["files"]
+    assert ".claude/commands/prep.md" not in recorded
+    assert ".claude/settings.json" in recorded
+
+
+def test_adopt_replaces_dangling_venv_symlink(host_env, tmp_path):
+    _, target = host_env
+    aipass_home = tmp_path / "fake_aipass_home"
+    (aipass_home / ".venv").mkdir(parents=True)
+    (target / ".venv").symlink_to(tmp_path / "gone")
+    with (
+        patch(
+            "aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home",
+            return_value=str(aipass_home),
+        ),
+        patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
+    ):
+        adopt_project(target, no_agent=True)
+    assert (target / ".venv").resolve() == (aipass_home / ".venv").resolve()
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.5.1
+# Version: 1.5.2
 # Created: 2026-07-11
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -359,6 +359,16 @@ def settings_diff(before: dict, after: dict) -> List[str]:
     )
 
 
+def _read_settings(settings_path: Path) -> dict:
+    """The settings file as a dict; {} when absent or empty. Raises rather than plan from {} over a typo."""
+    if not settings_path.exists() or not settings_path.read_text(encoding="utf-8").strip():
+        return {}
+    settings = json_handler.read_json(settings_path)
+    if not isinstance(settings, dict):
+        raise SettingsBackupError(f"settings unreadable at {settings_path} (not a JSON object) — not touching it")
+    return settings
+
+
 def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None) -> Optional[SettingsPlan]:
     """What the doctor's wire door would write, computed without writing.
 
@@ -374,7 +384,9 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
 
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
-    settings = (json_handler.read_json(settings_path) if settings_path.exists() else {}) or {}
+    # resolve(): the atomic replace would swap a symlinked settings.json for a regular file.
+    settings_path = settings_path.resolve()
+    settings = _read_settings(settings_path)
     before = copy.deepcopy(settings)
 
     existing_hooks = settings.get("hooks", {}) or {}
@@ -392,6 +404,8 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
 def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent: Optional[str] = None) -> List[str]:
     """Write a plan through its backed-up door: backup, write, receipt. Returns the action lines."""
     actions = list(plan.actions)
+    if _read_settings(plan.settings_path) != plan.before:
+        raise SettingsBackupError(f"settings changed since planned at {plan.settings_path} — re-run")
     record = backup_before_write(plan.settings_path, door or plan.door)
     _write_with_receipt(plan.settings_path, copy.deepcopy(plan.after), record, actions, plan.updated_line, consent)
     json_handler.log_operation("apply_settings_plan", {"door": door or plan.door, "actions": len(actions)})
@@ -412,7 +426,8 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
 
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
-    settings = (json_handler.read_json(settings_path) if settings_path.exists() else {}) or {}
+    settings_path = settings_path.resolve()
+    settings = _read_settings(settings_path)
 
     merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
     settings["hooks"] = merged_hooks

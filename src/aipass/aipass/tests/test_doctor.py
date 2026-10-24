@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-04-16
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -29,7 +29,7 @@ from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_PASS,
     GLYPH_WARN,
 )
-from aipass.aipass.apps.modules import _doctor_wire
+from aipass.aipass.apps.modules import _doctor_wire, doctor
 from aipass.aipass.apps.modules._doctor_wire import (
     check_wire_verify,
     merge_manifest_rows,
@@ -592,6 +592,24 @@ class TestProviderManifest:
             results = check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.detail.count("PreCompact:pre_compact_prep") == 1
+
+    def test_a_hook_whose_name_only_prefixes_another_is_still_missing(self, tmp_path) -> None:
+        """pre_compact is missing even though pre_compact_rollover (a longer name) is wired."""
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        cmd = "$AIPASS_HOME/bin/hook-bridge PreCompact:pre_compact"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [{"command": cmd, "event": "PreCompact"}]}}}),
+            encoding="utf-8",
+        )
+        provider_settings = tmp_path / ".claude" / "settings.json"
+        wired = {"hooks": [{"type": "command", "command": cmd + "_rollover"}]}
+        provider_settings.write_text(json.dumps({"hooks": {"PreCompact": [wired]}}), encoding="utf-8")
+        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
+            results = check_provider_manifest(settings_path=provider_settings)
+        hooks_result = [r for r in results if r.label == "hooks"][0]
+        assert hooks_result.glyph == GLYPH_WARN
+        assert "PreCompact:pre_compact" in hooks_result.detail
 
     def test_env_vars_all_present(self, tmp_path) -> None:
         """All manifest env vars present in provider settings → PASS."""
@@ -1198,6 +1216,19 @@ class TestDoctorFixAsks:
         return settings, settings.read_bytes(), claude / ".backup" / "settings"
 
     @staticmethod
+    def _groups_via_run_doctor(**kwargs) -> dict:
+        """The groups run_doctor would print, caught at the printer."""
+        printed: dict = {}
+
+        def record(groups: dict) -> tuple[int, int, int]:
+            printed.update(groups)
+            return 0, 0, 0
+
+        with patch("aipass.aipass.apps.modules.doctor._print_doctor_groups", side_effect=record):
+            run_doctor(**kwargs)
+        return printed
+
+    @staticmethod
     def _consents(folder) -> list:
         lines = (folder / "receipts.jsonl").read_text(encoding="utf-8").splitlines()
         return [json.loads(line)["summary"][0] for line in lines]
@@ -1270,3 +1301,27 @@ class TestDoctorFixAsks:
         assert settings.read_bytes() != original
         assert "Apply these" not in capsys.readouterr().out
         assert self._consents(folder) == ["consent: install", "consent: install"]
+
+    def test_g_an_unparseable_settings_file_is_a_fail_row_and_stays_byte_identical(self, tmp_path, monkeypatch) -> None:
+        """A JSON typo in the settings file refuses the plan; the row FAILs and nothing is written."""
+        settings, _original, _folder = self._world(tmp_path, monkeypatch)
+        settings.write_text('{"permissions": {},}', encoding="utf-8")
+        broken = settings.read_bytes()
+        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
+            groups = self._groups_via_run_doctor(fix=True, yes=True)
+
+        (row,) = [r for r in groups["Services"] if r.label == _doctor_wire.SETTINGS_FIX_LABEL]
+        assert row.glyph == GLYPH_FAIL
+        assert "unreadable" in row.detail
+        assert settings.read_bytes() == broken
+
+    def test_h_an_owner_fix_that_exits_zero_shows_the_recheck(self, tmp_path, monkeypatch) -> None:
+        """sync-registry --fix exits 0 but the seat is still broken: the recheck's FAIL row shows, not a tick."""
+        self._world(tmp_path, monkeypatch)
+        still = CheckResult("owner/unseated", GLYPH_FAIL, "still unseated", "")
+        monkeypatch.setattr(doctor, "_fix_owner_seating", lambda: [CheckResult("owner fix", GLYPH_PASS, "ok", "")])
+        monkeypatch.setattr(doctor, "_check_owner_seating", lambda: [still])
+        with patch("sys.stdin", _Stdin("", tty=False)), _home_at(tmp_path):
+            groups = self._groups_via_run_doctor(fix=True, yes=True)
+
+        assert groups["Identity"] == [still]

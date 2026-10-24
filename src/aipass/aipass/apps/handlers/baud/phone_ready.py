@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: phone_ready.py
 # Description: Read what the phone needs after the face lands: the tailnet address, @api's bind, a live server
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-12
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -89,7 +89,9 @@ def server_answers(host: str, port: int) -> str:
     if ":" in probe_host:
         probe_host = f"[{probe_host}]"
     try:
-        with urllib.request.urlopen(f"http://{probe_host}:{port}/", timeout=_PROBE_TIMEOUT):
+        # No proxy: http_proxy would carry a probe of this machine's own bind off the machine.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(f"http://{probe_host}:{port}/", timeout=_PROBE_TIMEOUT):
             return SERVER_SERVING
     except urllib.error.HTTPError as exc:
         logger.info("[baud] the server on %s:%s answered %s", host, port, exc.code)

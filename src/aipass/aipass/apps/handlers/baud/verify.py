@@ -1,15 +1,14 @@
 # =================== AIPass ====================
 # Name: verify.py
 # Description: Verify a baud phone tarball against a sha256sum-format SHA256SUMS file
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-13
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
-Verify the phone tarball, and the baud-cli binary beside it (FPLAN-0589), against
-the release's one SHA256SUMS. No line for the file and a digest mismatch both refuse,
-never warn; a mismatched download is deleted so nothing later picks it up.
+Verify the phone tarball and the baud-cli binary (FPLAN-0589) against the release's one SHA256SUMS.
+No line or a digest mismatch refuses, never warns; a mismatched download is deleted so nothing uses it.
 """
 
 from __future__ import annotations
@@ -60,10 +59,7 @@ def sha256_file(path: Path) -> str:
 
 
 def verify_tarball(tarball: Path, sums_file: Path, delete_on_mismatch: bool) -> str:
-    """Check `tarball` (or any release file: the baud-cli binary too) against its line in `sums_file`.
-
-    delete_on_mismatch is False for a file handed over with --from: it is the user's to keep.
-    """
+    """Check `tarball` (or any release file) against `sums_file`; a --from file is the user's to keep."""
     try:
         text = sums_file.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
@@ -75,6 +71,8 @@ def verify_tarball(tarball: Path, sums_file: Path, delete_on_mismatch: bool) -> 
             f"{sums_file.name} has no line for {tarball.name}. Refusing to install a file that cannot be verified."
         )
 
+    # shortcut: sums come from the same release, so this catches corruption not tampering;
+    # sign SHA256SUMS (minisign) when releases are signed
     actual = sha256_file(tarball)
     if actual != expected:
         if delete_on_mismatch:

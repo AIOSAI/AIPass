@@ -3,7 +3,7 @@
 # Description: Tests for aipass new — project creation handler
 # Version: 1.2.0
 # Created: 2026-07-17
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -336,6 +336,8 @@ def test_create_project_cleans_up_on_failure(host_env, monkeypatch):
     def _fail_git(args, **kwargs):
         from unittest.mock import MagicMock
 
+        if args[:2] == ["git", "var"]:
+            return _mock_git_run(args)
         result = MagicMock()
         result.returncode = 1
         result.stderr = "simulated failure"
@@ -353,6 +355,32 @@ def test_create_project_cleans_up_on_failure(host_env, monkeypatch):
         create_project("failproj", no_agent=True)
 
     assert not (host_env / "projects" / "failproj").exists()
+
+
+def test_create_project_refuses_without_git_identity_before_building(host_env, monkeypatch):
+    monkeypatch.chdir(host_env)
+    calls = []
+
+    def _no_identity(args, **kwargs):
+        calls.append(args)
+        if args[:2] == ["git", "var"]:
+            result = _mock_git_run(args)
+            result.returncode = 128
+            result.stderr = "fatal: unable to auto-detect email address"
+            return result
+        return _mock_git_run(args)
+
+    with (
+        patch("subprocess.run", side_effect=_no_identity),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project") as enroll,
+        pytest.raises(RuntimeError, match="user.email"),
+    ):
+        create_project("noident", no_agent=True)
+
+    assert not (host_env / "projects" / "noident").exists()
+    assert calls == [["git", "var", "GIT_COMMITTER_IDENT"]]
+    enroll.assert_not_called()
 
 
 def test_create_project_registry_before_scaffold(host_env, monkeypatch):

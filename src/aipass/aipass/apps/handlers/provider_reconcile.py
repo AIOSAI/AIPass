@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_reconcile.py
 # Description: Detect and fix stale rules in provider settings
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-05
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """provider_reconcile — detect and fix stale rules in ~/.claude/settings.json.
@@ -38,6 +38,7 @@ def plan_stale_deny(settings_path: Optional[Path] = None, base: Optional[dict] =
     """
     if settings_path is None:
         settings_path = Path.home() / ".claude" / "settings.json"
+    settings_path = settings_path.resolve()
     if base is None:
         if not settings_path.exists():
             return None
