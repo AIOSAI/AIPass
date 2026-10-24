@@ -1,8 +1,8 @@
 # README Currency Proof — Documentation Accuracy
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Created:** 2026-03-22
-**Modified:** 2026-03-22
-**Status:** Placeholder
+**Modified:** 2026-10-24
+**Status:** Active
 
 ---
 
@@ -26,20 +26,20 @@ Result:       FAIL — count mismatch (off by 2)
 
 ### 2. Undocumented Standards
 
-Every `*_check.py` in the pack should have a corresponding mention in the README. A standard that exists in the pack but is never mentioned in the README is "undocumented."
+Every `*_check.py` in the pack has a row in the standards table on the pack's docs pages, `docs/<pack>*.md`, which the README indexes. A standard with no row is "undocumented."
 
 ```
 Pack contains:  stderr_routing_check.py
-README mentions: (no reference to stderr_routing)
+Docs tables:    (no stderr_routing row)
 Result:          FAIL — undocumented standard
 ```
 
 ### 3. Stale References
 
-The README should not reference standards that no longer exist in the pack. If a standard was archived or removed, its README entry must also be removed.
+A table row names a standard that no longer exists in the pack. When a standard is archived or removed, its row goes too.
 
 ```
-README mentions: diagnostics_check.py
+Docs tables:     | diagnostics |
 Pack contains:   (no such file — moved to .archive/)
 Result:          FAIL — stale reference
 ```
@@ -48,12 +48,10 @@ Result:          FAIL — stale reference
 
 ## How Detection Works
 
-<!-- TODO: Document the exact detection algorithm once scanner is built -->
-
 1. **Count extraction**: Parse the README for numeric patterns near keywords like "standards", "checkers", "active"
 2. **Standard enumeration**: Glob `*_check.py` in the pack directory, extract standard names
-3. **Cross-reference**: For each standard name, search the README text for a mention
-4. **Stale detection**: For each standard name found in the README, verify the corresponding `*_check.py` exists
+3. **Table rows**: Read the first cell of every `| name |` table row on `docs/<pack>*.md`
+4. **Cross-reference**: Names match exactly after lower-casing; a pack name with no row is undocumented, a row with no pack file is stale
 
 ---
 
@@ -61,10 +59,9 @@ Result:          FAIL — stale reference
 
 A standard is undocumented if:
 - Its `*_check.py` file exists in the pack directory
-- The README.md contains no reference to that standard's name
-- It is not listed in any standards table or section of the README
+- No table row on `docs/<pack>*.md` starts with that standard's name
 
-This does not require a full section per standard — a mention in a list or table is sufficient. But total absence means the README is incomplete.
+A mention in prose does not count: the table is the one listing a reader scans.
 
 ---
 
@@ -73,15 +70,15 @@ This does not require a full section per standard — a mention in a list or tab
 | Failure | Cause | Fix |
 |---------|-------|-----|
 | Count mismatch | Standards added/removed without updating README count | Update the count |
-| Undocumented standard | New checker added, README not updated | Add entry to README |
-| Stale reference | Standard archived/removed, README not updated | Remove the entry |
+| Undocumented standard | New checker added, docs table not updated | Add its row |
+| Stale reference | Standard archived/removed, docs table not updated | Remove the row |
 
 ---
 
 ## How to Fix
 
 1. **Count**: Run `ls *_check.py | wc -l` in the pack directory, update the README count
-2. **Undocumented**: Add a line or section for each missing standard
+2. **Undocumented**: Add a table row for each missing standard
 3. **Stale**: Remove or mark as archived any references to non-existent standards
 
 ---

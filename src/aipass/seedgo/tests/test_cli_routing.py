@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for seedgo's entry point routing, help and introspection
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-09-03
 # Modified: 2026-10-24
 # =============================================
@@ -15,6 +15,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's loading; discover_modules runs whole
 
+import re
 import sys
 
 import pytest
@@ -69,6 +70,17 @@ def test_print_help_has_usage_and_examples(capsys):
     out = capsys.readouterr().out
     assert "USAGE:" in out
     assert "Examples:" in out
+
+
+def test_print_help_names_the_verbs_that_run_and_no_branch_for_diagnostics(capsys):
+    branch_entry.print_help()
+
+    out = capsys.readouterr().out
+    commands = out[out.index("Commands:") :]
+    for verb in ("ratchet", "tests", "bypass"):
+        assert re.search(rf"\b{verb},", commands), f"'{verb}' missing from the Commands line"
+    assert "diagnostics @" not in out
+    assert "diagnostics_audit @" not in out
 
 
 def test_no_args_triggers_introspection(monkeypatch, capsys):
@@ -187,9 +199,11 @@ def test_subcommand_help_does_not_execute_the_command(monkeypatch, stub_module):
     assert stub_module.calls == [("probe", ["--help"])]
 
 
-def test_subcommand_help_on_unknown_command_falls_back_to_general_help(monkeypatch, stub_module, capsys):
-    """`seedgo ghost --help` shows the general help and exits 0."""
+def test_subcommand_help_on_unknown_command_refuses_and_shows_general_help(monkeypatch, stub_module, capsys):
+    """`seedgo ghost --help` is still an unknown command: general help, exit 1."""
     result = _run(monkeypatch, ["nonexistent", "--help"])
 
-    assert result == 0
-    assert "USAGE:" in capsys.readouterr().out
+    out, err = capsys.readouterr()
+    assert result == 1
+    assert "Unknown command: nonexistent" in err
+    assert "USAGE:" in out

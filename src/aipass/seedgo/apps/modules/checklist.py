@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-15
 # Modified: 2026-10-24
 # =============================================
@@ -306,6 +306,10 @@ def handle_command(command: str, args: List[str]) -> bool:
             resolved = candidate
         else:
             resolved = (Path.cwd() / resolved).resolve()
+
+    if not resolved.exists():
+        error(f"File not found: {resolved}", suggestion="Usage: drone @seedgo checklist <file|dir>")
+        raise CommandRefused(refusal.EXIT_NO_UNITS, str(resolved))
 
     if resolved.is_dir():
         # The audit's corpus filter: package markers and (disabled) files out, every other _*.py in.

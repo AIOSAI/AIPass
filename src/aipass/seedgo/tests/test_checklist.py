@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.3.5
+# Version: 1.3.6
 # Created: 2026-03-24
 # Modified: 2026-10-24
 # =============================================
@@ -20,7 +20,8 @@ import pytest
 from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 from aipass.seedgo.apps.handlers.audit import branch_audit
 from aipass.seedgo.apps.handlers.bypass import bypass_handler
-from aipass.seedgo.apps.modules import checklist
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused, checklist
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +90,17 @@ def test_run_checklist_file_not_found(tmp_path):
     assert results[0]["passed"] is False
     assert results[0]["standard"] == "(error)"
     assert results[0]["detail"] == f"File not found: {missing.resolve()}"
+
+
+def test_a_missing_target_refuses_with_no_units_never_exit_zero(tmp_path, capsys):
+    missing = tmp_path / "nonexistent.py"
+
+    with pytest.raises(CommandRefused) as refused:
+        checklist.handle_command("checklist", [str(missing)])
+
+    assert refused.value.code == refusal.EXIT_NO_UNITS
+    err = capsys.readouterr().err
+    assert "File not found:" in err and missing.name in err
 
 
 def test_run_checklist_non_python_file(tmp_path):

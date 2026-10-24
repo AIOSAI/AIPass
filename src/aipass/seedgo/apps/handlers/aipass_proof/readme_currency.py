@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: readme_currency.py
 # Description: Verify README.md accuracy against actual pack state
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-22
 # Modified: 2026-10-24
 # =============================================
 
 """README Currency Proof -- Compare README checker counts and standard lists against actual pack.
 
-Checks that the seedgo branch README.md accurately reflects the current state
-of the standards pack: correct checker count, all standards documented, no stale
-references to removed standards.
+Checks that the seedgo branch README.md carries no stale checker count, and that the
+pack's docs pages (docs/<pack>*.md, indexed from the README) table every standard
+in the pack with no stale rows for removed ones.
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from pathlib import Path
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+
+TABLE_ROW = re.compile(r"^\| ([a-z_0-9]+)\b", re.MULTILINE)
 
 
 def _standard_name_from_file(filename: str) -> str:
@@ -57,24 +59,11 @@ def _extract_readme_count_references(
     return results
 
 
-def _extract_readme_standard_names(readme_text: str) -> set[str]:
-    """Extract standard names mentioned in the README.
-
-    Looks for the 'Checker Packs' section listing. Handles comma-separated
-    lists like 'architecture, CLI, CLI flags, ... and diagnostics patterns'.
-    """
+def _extract_table_standard_names(pack_name: str, docs_dir: Path) -> set[str]:
+    """The first cell of every table row on the pack's docs pages, where the README indexes the standards."""
     names: set[str] = set()
-
-    checks_pattern = re.compile(r"pack\s+checks?:\s*(.+?)(?:\.|$)", re.IGNORECASE | re.DOTALL)
-    match = checks_pattern.search(readme_text)
-    if match:
-        raw_list = match.group(1)
-        raw_list = re.sub(r",?\s+and\s+", ",", raw_list)
-        for item in raw_list.split(","):
-            item = item.strip().rstrip(".")
-            if item:
-                names.add(_normalize_name(item))
-
+    for page in sorted(docs_dir.glob(f"{pack_name}*.md")):
+        names |= {_normalize_name(m.group(1)) for m in TABLE_ROW.finditer(page.read_text(encoding="utf-8"))}
     return names
 
 
@@ -128,7 +117,7 @@ def scan(pack_dir: Path) -> dict:
                     f"Line {ref['line']}: README says {ref['number']} but actual count is {actual_check_count}"
                 )
 
-    readme_names = _extract_readme_standard_names(readme_text)
+    readme_names = _extract_table_standard_names(pack_dir.name, seedgo_root / "docs")
 
     actual_lookup: dict[str, str] = {_normalize_name(n): n for n in actual_names}
     readme_lookup: dict[str, str] = {_normalize_name(n): n for n in readme_names}

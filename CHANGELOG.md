@@ -12,6 +12,7 @@ PyPI version — not the changelog header.
 ## [Unreleased]
 
 ### Fixed
+- **seedgo**: `checklist <missing path>` printed [FAIL] and exited 0 (now exit 3, EXIT_NO_UNITS); `--help` offered `diagnostics @branch` rows the verbs never took, omitted `ratchet`, `tests` and `bypass prune`, and an unknown verb followed by `--help` exited 0 (now 1); `proof aipass`'s readme_currency read a README sentence that the cap had removed and reported 82 undocumented standards (it now reads the standards tables the README indexes: 82/82). Battle test 2026-10-24.
 - **flow**: `close DPLAN-9999` named the wrong prefix in its not-found message ("FPLAN-9999"); `list all` showed a blank status for closed plans because Rich read `[closed]` as a markup tag; an unknown verb followed by `--help` exited 0 (now 1, the output is a refusal); the list header says "fleet" so the count is not mistaken for a branch dashboard's. Battle test 2026-10-24.
 - **setup.sh**: `--no-symlink` printed "Setup complete" and then exited 1 on an unbound `LINUX_SYMLINK_DIR` (the variable was only assigned inside the symlink branch under `set -u`); the final summary now reads it with a default. Found by the 2026-10-24 battle test in a docker container.
 

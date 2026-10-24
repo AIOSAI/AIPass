@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-04-26
 # Modified: 2026-10-24
 # =============================================
@@ -1193,8 +1193,10 @@ class TestPrintResults:
     def _printed(tmp_path, capsys, results) -> str:
         """`checklist <file>` with run_checklist answering ``results``; what the user reads."""
         capsys.readouterr()
+        target = tmp_path / "file.py"
+        target.write_text("x = 1\n", encoding="utf-8")
         with patch.object(checklist, "run_checklist", return_value=results):
-            assert checklist.handle_command("checklist", [str(tmp_path / "file.py")]) is True
+            assert checklist.handle_command("checklist", [str(target)]) is True
         return capsys.readouterr().out
 
     def test_print_all_passed(self, tmp_path, capsys):

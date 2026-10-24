@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_aipass_proof.py
 # Description: Unit tests for handlers/aipass_proof/
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-24
 # Modified: 2026-10-24
 # =============================================
@@ -133,6 +133,8 @@ def test_readme_currency_matches_names_exactly_not_by_substring(tmp_path):
     pack.mkdir(parents=True)
     (pack / "cli_check.py").write_text("x = 1\n", encoding="utf-8")
     (pack / "cli_flags_check.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "README.md").write_text("The pack checks: cli.\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# seedgo\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "aipass_standards.md").write_text("| cli | all_files |\n", encoding="utf-8")
 
     assert readme_currency_scan(pack)["undocumented"] == ["cli_flags"]
