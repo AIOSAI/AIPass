@@ -180,11 +180,14 @@ def delete_branch(
     if confirm and not dry_run:
         try:
             answer = input("Are you sure? (y/N): ").strip().lower()
-        except (EOFError, KeyboardInterrupt) as e:
+        except EOFError:
+            logger.warning("[delete] no answer on stdin for %s - needs --yes", branch_name)
+            return {**_error_result(branch_name, "needs --yes in a non-interactive shell"), "unconfirmed": True}
+        except KeyboardInterrupt as e:
             logger.warning("Delete confirmation prompt interrupted: %s", e)
             answer = ""
         if answer != "y":
-            return _error_result(branch_name, "Cancelled by user")
+            return {**_error_result(branch_name, "Cancelled by user"), "unconfirmed": True}
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive_dir = project_root / ".archive" / "deleted_branches" / f"{branch_name}_{timestamp}"

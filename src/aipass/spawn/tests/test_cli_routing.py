@@ -326,7 +326,9 @@ class TestPrintIntrospection:
         Mutant: the core.py line dropped from the listing -> red."""
 
         print_introspection()
-        assert "core.py" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "core.py" in out
+        assert "sync-registry: sync_registry.py" in out
 
 
 class TestSyncRegistryCheckFlags:

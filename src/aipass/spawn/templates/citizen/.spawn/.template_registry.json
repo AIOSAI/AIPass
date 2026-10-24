@@ -201,7 +201,7 @@
       "path": ".trinity/observations.json"
     },
     "f014": {
-      "content_hash": "5d9eb2def769",
+      "content_hash": "8f16ca495272",
       "has_branch_placeholder": false,
       "name": "passport.json",
       "path": ".trinity/passport.json"
@@ -431,7 +431,7 @@
   },
   "metadata": {
     "description": "Template file tracking registry for ID-based updates",
-    "last_updated": "2026-10-17",
+    "last_updated": "2026-10-24",
     "version": "1.0.0"
   }
 }

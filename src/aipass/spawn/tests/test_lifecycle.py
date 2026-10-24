@@ -227,6 +227,24 @@ class TestDeleteBranch:
         assert result["error"] == "Cancelled by user"
         assert mock_branch.exists()
 
+    def test_delete_without_yes_on_closed_stdin_names_the_flag(
+        self, repo_root, mock_branch, mock_registry, monkeypatch, capsys
+    ):
+        """A non-interactive shell (stdin at EOF) is told to pass --yes, never 'FAILED'.
+
+        Mutant: the EOF arm falls back to 'Cancelled by user' -> red."""
+
+        monkeypatch.setattr("sys.stdin", io.StringIO(""))
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            code = handle_delete(["@test_api"])
+
+        out = capsys.readouterr()
+        said = out.out + out.err
+        assert code == 1
+        assert "needs --yes in a non-interactive shell" in said
+        assert "FAILED" not in said
+        assert mock_branch.exists()
+
     @pytest.mark.parametrize("where", ["outside", "root"])
     def test_delete_refuses_a_row_that_escapes_the_project(self, tmp_path, repo_root, mock_registry, where):
         """A row resolving outside the project, or to the root itself, is refused before any archive or rmtree."""

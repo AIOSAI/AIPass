@@ -326,17 +326,23 @@ def print_introspection():
     console.print()
     console.print("[yellow]Connected Modules:[/yellow]")
     console.print("  [cyan]modules/[/cyan]")
-    console.print("    [dim]- core.py (handle_command, spawn_agent — agent creation orchestrator)[/dim]")
-    console.print("    [dim]- update.py (handle_update — single/all branch updates)[/dim]")
-    console.print("    [dim]- delete.py (handle_delete — archive and deregister branch)[/dim]")
-    console.print("    [dim]- retire_project.py (handle_retire_project — retire a whole project, admin seat)[/dim]")
-    console.print("    [dim]- sync_registry.py (handle_sync_registry — registry repair)[/dim]")
-    console.print("    [dim]- regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]")
-    console.print("    [dim]- repair.py (handle_repair — project structure repair)[/dim]")
-    console.print("    [dim]- migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]")
-    console.print("    [dim]- export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
+    console.print("    [dim]- create: core.py (handle_command, spawn_agent — agent creation orchestrator)[/dim]")
+    console.print("    [dim]- update: update.py (handle_update — single/all branch updates)[/dim]")
+    console.print("    [dim]- delete: delete.py (handle_delete — archive and deregister branch)[/dim]")
     console.print(
-        "    [dim]- grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
+        "    [dim]- retire-project: retire_project.py (handle_retire_project — retire a whole project, admin seat)[/dim]"
+    )
+    console.print("    [dim]- sync-registry: sync_registry.py (handle_sync_registry — registry repair)[/dim]")
+    console.print(
+        "    [dim]- regenerate-registry: regenerate_registry.py (handle_regenerate_registry — regenerate template registry)[/dim]"
+    )
+    console.print("    [dim]- repair: repair.py (handle_repair — project structure repair)[/dim]")
+    console.print(
+        "    [dim]- migrate-passports: migrate_passports.py (handle_migrate_passports — passport 2.0 fleet migration)[/dim]"
+    )
+    console.print("    [dim]- export-seeds: export_seeds.py (handle_export_seeds — tracked passport seed export)[/dim]")
+    console.print(
+        "    [dim]- grant-admin, grant-ci-cure: grant_admin.py (handle_grant_admin, handle_grant_ci_cure — registry seat flag ceremonies)[/dim]"
     )
     console.print()
     console.print("[dim]Run 'drone @spawn --help' for usage information[/dim]")

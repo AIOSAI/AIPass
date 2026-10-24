@@ -112,6 +112,8 @@ def _print_summary(result: dict, dry_run: bool) -> None:
     if success:
         # console.print renders markup; error() writes plain text, so it gets mode bare.
         console.print(f"[green]Delete [dim]{mode}[/dim]{branch}[/green]" if mode else f"[green]Delete {branch}[/green]")
+    elif result.get("unconfirmed"):
+        error(f"Delete not run {mode}{branch}")
     else:
         error(f"Delete FAILED {mode}{branch}")
 
