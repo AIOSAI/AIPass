@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_lifecycle.py
 # Description: Integration test for full skill lifecycle
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # Category: skills/tests
 # =============================================
 
@@ -18,8 +18,8 @@ from pathlib import Path
 
 from aipass.skills.apps.handlers.template import copy_template, get_template
 from aipass.skills.apps.modules.creator import create_skill
-from aipass.skills.apps.modules.discovery import discover_skills_in_path, parse_frontmatter  # noqa: F401
-from aipass.skills.apps.handlers.loader_handler import import_handler, parse_full_skill_md
+from aipass.skills.apps.handlers.discovery_handler import discover_skills_in_path, read_skill_md
+from aipass.skills.apps.handlers.loader_handler import import_handler
 from aipass.skills.apps.modules.runner import run_skill
 
 
@@ -52,7 +52,7 @@ class TestFullLifecycle:
         assert skills[0]["has_handler"] is False
 
         # Load (parse full SKILL.md)
-        result = parse_full_skill_md(skill_path / "SKILL.md")
+        result = read_skill_md(skill_path / "SKILL.md")
         metadata, body = result[0], result[1]
         assert metadata is not None
         assert isinstance(metadata, dict)
@@ -112,7 +112,7 @@ class TestCatalogSkillsLifecycle:
         assert github[0]["has_handler"] is False
 
         # Parse full SKILL.md
-        result = parse_full_skill_md(github[0]["path"] / "SKILL.md")
+        result = read_skill_md(github[0]["path"] / "SKILL.md")
         metadata, body = result[0], result[1]
         assert metadata is not None
         assert isinstance(metadata, dict)

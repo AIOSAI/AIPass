@@ -1,7 +1,7 @@
 ---
 name: drone_commands
 description: Execute drone commands -- the AIPass CLI interface for all module operations
-version: 1.0.0
+version: 1.1.0
 tags: [system, cli, drone, aipass]
 requires:
   pip: []
@@ -25,9 +25,9 @@ Execute drone commands programmatically. Drone is the AIPass CLI router that dis
 ## Usage
 
 ```bash
-drone @skills run drone_commands run --args '{"command": "drone @ai_mail inbox"}'
+drone @skills run drone_commands run 'command=@ai_mail inbox'
 drone @skills run drone_commands list
-drone @skills run drone_commands help --args '{"module": "ai_mail"}'
+drone @skills run drone_commands help module=ai_mail
 ```
 
 ## How Drone Routing Works
@@ -70,7 +70,7 @@ The `run` action returns the full stdout/stderr from the drone command.
 
 ## Notes
 
-- Commands execute in the AIPASS_ROOT directory by default
-- Timeout defaults to 30 seconds (configurable)
-- Never runs commands that modify system state without explicit action
+- The program is always `drone`: the command is split into arguments and run without a shell, so `;`, `&&` and `|` reach drone as plain arguments
+- Commands run in the caller's working directory, which drone reads as the caller's identity
+- Timeout defaults to 30 seconds (`timeout=<seconds>`)
 - All output is captured, never printed directly

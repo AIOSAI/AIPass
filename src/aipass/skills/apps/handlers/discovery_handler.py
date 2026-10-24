@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery_handler.py
 # Description: Skill discovery handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """
@@ -94,42 +94,37 @@ def discover_skills_in_path(search_path, source_label):
     return skills
 
 
-def parse_frontmatter(skill_md_path):
-    """Parse YAML frontmatter from a SKILL.md file."""
+def read_skill_md(skill_md_path):
+    """Read a SKILL.md once: (frontmatter metadata, body), or (None, None) without a readable --- block."""
     try:
         content = Path(skill_md_path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        logger.warning(f"Failed to read frontmatter from: {skill_md_path}")
-        return None
+        logger.warning(f"Failed to read SKILL.md: {skill_md_path}")
+        return None, None
 
-    return _extract_frontmatter(content)
-
-
-def _extract_frontmatter(content):
-    """Extract and parse YAML frontmatter from file content."""
     lines = content.strip().splitlines()
     if not lines or lines[0].strip() != "---":
-        return None
-
-    end_idx = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            end_idx = i
-            break
-
+        return None, None
+    end_idx = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), None)
     if end_idx is None:
-        return None
+        return None, None
 
-    frontmatter_text = "\n".join(lines[1:end_idx])
+    return _parse_frontmatter_text("\n".join(lines[1:end_idx])), "\n".join(lines[end_idx + 1 :]).strip()
 
+
+def parse_frontmatter(skill_md_path):
+    """Parse YAML frontmatter from a SKILL.md file."""
+    return read_skill_md(skill_md_path)[0]
+
+
+def _parse_frontmatter_text(frontmatter_text):
+    """Parse the text between the --- fences: PyYAML when present, else the simple parser."""
     if yaml is not None:
         try:
             return yaml.safe_load(frontmatter_text)
         except yaml.YAMLError:
             logger.warning("YAML parse failed — falling back to simple parser")
-            return _simple_frontmatter_parse(frontmatter_text)
-    else:
-        return _simple_frontmatter_parse(frontmatter_text)
+    return _simple_frontmatter_parse(frontmatter_text)
 
 
 def _simple_frontmatter_parse(text):

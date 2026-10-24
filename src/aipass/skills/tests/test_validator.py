@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_validator.py
 # Description: Unit tests for skills validator
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-10-24
 # Category: skills/tests
 # =============================================
 
@@ -24,6 +24,16 @@ class TestValidateSkill:
         assert result["missing_pip"] == []
         assert result["missing_bins"] == []
         assert result["missing_config"] == []
+
+    def test_an_empty_requires_block_means_no_requirements(self):
+        # Pins a shipped defect: YAML `requires:` with nothing under it is None, and .get() raised.
+        result = validate_skill({"requires": None})
+        assert (result["valid"], result["missing_pip"]) == (True, [])
+
+    def test_a_requires_list_is_malformed_never_met(self):
+        result = validate_skill({"requires": ["psutil"]})
+        assert result["valid"] is False
+        assert result["malformed"] == "requires must map pip/bins/config to lists, not a list"
 
     def test_empty_requirements(self):
         result = validate_skill({"requires": {"pip": [], "bins": [], "config": []}})

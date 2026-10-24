@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: test_runner.py
 # Description: Unit tests for skills runner
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # Category: skills/tests
 # =============================================
 
-"""Tests for apps/modules/runner.py and the system_status skill it runs."""
+"""Tests for apps/modules/runner.py and the built-in skills it runs (system_status, drone_commands, branch_health, inbox_check)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that runner.py and runner_handler.py parse and import
 
 import os
+import subprocess
 import time
 from collections import namedtuple
 
@@ -69,6 +70,36 @@ class TestRunSkillHandler:
         result = run_skill("nonexistent_skill_xyz")
         assert result["success"] is False
         assert result["error"] is not None
+
+
+class TestDroneCommandsNeverUsesAShell:
+    """drone_commands runs drone and only drone: shell syntax in the command is a plain argument."""
+
+    def test_a_chained_command_reaches_drone_as_arguments_not_a_second_program(self, monkeypatch):
+        # Pins a shipped defect: shell=True ran "echo" after drone, past every bash hook gate.
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs.get("shell", False)))
+            return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        result = run_skill("drone_commands", action="run", args={"command": "drone @flow list; echo pwned"})
+
+        assert result["success"] is True
+        assert calls == [(["drone", "@flow", "list;", "echo", "pwned"], False)]
+
+
+class TestABranchNameIsNeverAPath:
+    """branch_health and inbox_check take a branch name as their action, never a path."""
+
+    @pytest.mark.parametrize("skill", ["branch_health", "inbox_check"])
+    @pytest.mark.parametrize("name", ["..", "../..", os.path.join("x", "y")])
+    def test_a_path_shaped_name_is_refused_before_any_read(self, skill, name):
+        # Pins a shipped defect: "../.." walked every .py file above src/aipass.
+        result = run_skill(skill, action=name)
+        assert result["success"] is False
+        assert result["error"] == f"Not a branch name: {name!r}"
 
 
 class TestRunSkillMarkdown:

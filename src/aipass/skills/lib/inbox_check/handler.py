@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: handler.py - Inbox Check skill handler
 # Date: 2026-03-29
-# Version: 1.0.0
+# Version: 1.1.0
+# Modified: 2026-10-24
 # Category: skills/lib/inbox_check
 # =============================================
 
@@ -56,10 +57,6 @@ def _find_inboxes():
                 if inbox.is_file():
                     yield (branch_dir.name, inbox)
 
-    skills_inbox = src / "skills" / ".ai_mail.local" / "inbox.json"
-    if skills_inbox.is_file():
-        yield ("skills", skills_inbox)
-
 
 def _read_inbox(inbox_path):
     """Read and parse an inbox.json file. Returns list of messages."""
@@ -99,14 +96,7 @@ def _scan_all(detail=False):
         if detail:
             lines.append(f"\n  {branch_name} ({new_count} new / {len(messages)} total):")
             if messages:
-                for msg in messages:
-                    if not isinstance(msg, dict):
-                        continue
-                    status = msg.get("status", "unknown")
-                    sender = msg.get("from", msg.get("sender", "unknown"))
-                    subject = msg.get("subject", msg.get("message", "(no subject)"))
-                    marker = "*" if status == "new" else " "
-                    lines.append(f"    {marker} [{status}] from {sender}: {subject}")
+                lines += [f"  {line}" for line in _message_lines(messages)]
             else:
                 lines.append("      (empty)")
         else:
@@ -124,22 +114,28 @@ def _scan_all(detail=False):
     return {"success": True, "output": output, "error": None}
 
 
+def _message_lines(messages):
+    """One line per message: marker, status, sender, subject."""
+    lines = []
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        status = msg.get("status", "unknown")
+        sender = msg.get("from", msg.get("sender", "unknown"))
+        subject = msg.get("subject", msg.get("message", "(no subject)"))
+        marker = "*" if status == "new" else " "
+        lines.append(f"  {marker} [{status}] from {sender}: {subject}")
+    return lines
+
+
 def _scan_branch(branch_name):
     """Show inbox for a specific branch."""
-    src = _src_root()
+    # A branch is one directory name; anything path-shaped would read outside src/aipass.
+    if not branch_name or Path(branch_name).name != branch_name or branch_name in (".", ".."):
+        return {"success": False, "output": "", "error": f"Not a branch name: {branch_name!r}"}
 
-    candidates = [
-        src / "aipass" / branch_name / ".ai_mail.local" / "inbox.json",
-        src / branch_name / ".ai_mail.local" / "inbox.json",
-    ]
-
-    inbox_path = None
-    for candidate in candidates:
-        if candidate.is_file():
-            inbox_path = candidate
-            break
-
-    if inbox_path is None:
+    inbox_path = _src_root() / "aipass" / branch_name / ".ai_mail.local" / "inbox.json"
+    if not inbox_path.is_file():
         return {
             "success": True,
             "output": f"Inbox Check -- {branch_name}\n  No inbox found for branch '{branch_name}'.",
@@ -151,14 +147,7 @@ def _scan_branch(branch_name):
 
     lines = [f"Inbox Check -- {branch_name} ({new_count} new / {len(messages)} total):"]
     if messages:
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            status = msg.get("status", "unknown")
-            sender = msg.get("from", msg.get("sender", "unknown"))
-            subject = msg.get("subject", msg.get("message", "(no subject)"))
-            marker = "*" if status == "new" else " "
-            lines.append(f"  {marker} [{status}] from {sender}: {subject}")
+        lines += _message_lines(messages)
     else:
         lines.append("  (empty inbox)")
 

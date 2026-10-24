@@ -1,52 +1,54 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Skill runner module."""
 
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
-from aipass.skills.apps.modules.loader import load_skill
+from aipass.skills.apps.modules.loader import load_skill, print_skill_info
 from aipass.skills.apps.handlers.runner_handler import run_handler, run_markdown
 from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled, off_reason
 from aipass.skills.apps.handlers.json import json_handler
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Handle commands routed by the entry point."""
+    """Handle the run command routed by the entry point."""
+    if command != "run":
+        return False
     if not args:
         print_introspection()
-        return True
-    if "--help" in args:
+        error("Error: skill name required. Usage: skills run <name> [action] [args...]")
+        return False
+    if args[0] in ("--help", "-h", "help"):
         print_introspection()
         return True
 
-    if command == "run":
-        name = args[0]
-        action = args[1] if len(args) > 1 else None
-        extra_args = _parse_run_args(args[2:]) if len(args) > 2 else {}
+    name = args[0]
+    # Flags only: the bare word "help" is a published action (drone_commands), so it runs.
+    if any(arg in ("--help", "-h") for arg in args[1:]):
+        return print_skill_info(name)
 
-        result = run_skill(name, action=action, args=extra_args)
+    action = args[1] if len(args) > 1 else None
+    result = run_skill(name, action=action, args=_parse_run_args(args[2:]))
 
-        if result["success"]:
-            if result["output"]:
-                for line in result["output"].splitlines():
-                    console.print(f"  {line}")
-        else:
-            err = result.get("error", "Unknown error")
-            error(f"Error: {err}")
+    if not result["success"]:
+        error(f"Error: {result.get('error', 'Unknown error')}")
+        return False
 
-        return result["success"]
-
-    return False
+    logger.info(f"run: executed skill '{name}' action={action}")
+    # A skill's output is its own text: printed verbatim, never parsed as Rich markup.
+    for line in (result["output"] or "").splitlines():
+        console.print(f"  {line}", markup=False)
+    return True
 
 
 def _parse_run_args(arg_list):
-    """Parse extra arguments into a dict."""
+    """Parse key=value and positional arguments into a dict (positionals as arg0, arg1, ...)."""
     result = {}
     positional_idx = 0
     for arg in arg_list:

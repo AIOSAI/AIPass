@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry.py
 # Description: Skill registry management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Skill registry: one deduplicated catalogue built from the search paths."""
@@ -47,8 +47,3 @@ def get_skill(name, registry):
         if skill["name"] == name:
             return skill
     return None
-
-
-def get_skill_names(registry):
-    """Get all skill names from the registry."""
-    return sorted(skill["name"] for skill in registry)
