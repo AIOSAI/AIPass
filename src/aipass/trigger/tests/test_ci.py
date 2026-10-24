@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ci.py
 # Description: Tests for the CI red lane module - poll, reply, verdict, status - and the handlers it drives
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-10-23
 # Modified: 2026-10-24
 # =============================================
@@ -179,6 +179,17 @@ class TestPoll:
         _mute_hooks(ci_lane)
         _dispatched_hooks_red(ci_lane)
         _mute_hooks(ci_lane, muted=False)
+        ci_lane.add_run("901", conclusion="success", created="2026-10-23T06:00:00Z")
+        ci.poll()
+        assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "superseded"
+        assert ci_lane.mails == [] and ci_lane.wakes == []
+
+    def test_a_dead_dispatch_claim_of_a_superseded_red_closes_without_a_dispatch(self, ci_lane):
+        stale = {"claimed": "2026-01-01T00:00:00Z", "workflow": "CI", "step": "audit", "lines": ["hooks: 99%"]}
+        runs = {"900": {"verdict": "red", "triaged": True, "workflow": "CI"}}
+        cures = {"900@hooks": {"run_id": "900", "owner": "hooks", "state": "dispatching", **stale}}
+        (ci_lane.root / "ci_ledger.json").write_text(json.dumps({"runs": runs, "cures": cures}), encoding="utf-8")
+        ci_lane.add_run("900", created="2026-10-23T05:00:00Z")
         ci_lane.add_run("901", conclusion="success", created="2026-10-23T06:00:00Z")
         ci.poll()
         assert ci_lane.ledger()["cures"]["900@hooks"]["state"] == "superseded"

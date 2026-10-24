@@ -17,7 +17,7 @@ step. A green run sends nothing. The verbs are in `drone @trigger ci --help`, an
    (`ci-poll`, every 10 minutes, no agent woken for the poll itself). It reads
    `drone @git run list` and records every dev run in the ledger. Only the **newest run per
    workflow** counts. An older red is marked `superseded` and never dispatched, and so is any
-   of its cures still `queued` or `gated`: a run that a newer run (green or red) replaces
+   of its cures still `queued`, `gated` or `dispatching` under a stale claim: a run that a newer run (green or red) replaces
    closes its waiting cure with no dispatch. A cure whose owner is already awake keeps going.
    A new red is claimed in the same locked write (`triaging`, with a `claimed` stamp), so a
    second poll running at the same time skips it. A run whose log read fails is released for
