@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-03-30
-# Modified: 2026-10-22
+# Modified: 2026-10-24
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -177,6 +177,10 @@ def _rerouted_hint(command: str) -> str:
     return f" {hint}" if hint else ""
 
 
+class NoPassportError(PermissionError):
+    """No passport above the caller's cwd: a designed refusal, logged at INFO and never escalated."""
+
+
 class Caller(NamedTuple):
     """An identified caller: who they claim to be, and where they said it from.
 
@@ -235,10 +239,9 @@ def _resolve_caller() -> Caller:
             break
         current = parent
 
-    # WARNING: failing closed on a non-branch cwd is designed behaviour, not a fault.
     msg = f"No .trinity/passport.json found in directory hierarchy (caller cwd: {cwd}) — cannot verify caller"
-    logger.warning(msg)
-    raise PermissionError(msg)
+    logger.info(msg)
+    raise NoPassportError(msg)
 
 
 def _find_caller() -> str:

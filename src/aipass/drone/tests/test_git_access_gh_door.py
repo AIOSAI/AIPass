@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_gh_door.py
 # Description: Tests for the gh passthrough verbs, release edit, restore and the external-repo door (--repo)
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-10-08
-# Modified: 2026-10-21
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/git/repo_door.py, the gh verbs and release edit of apps/modules/git_module.py."""
@@ -72,58 +72,51 @@ class TestGhPassthroughAccess:
 class TestGhPassthroughRouting:
     """handle_command routes passthrough to subprocess."""
 
+    @pytest.mark.parametrize(
+        ("command", "args"),
+        [
+            ("issue", ["list"]),
+            ("run", ["list"]),
+            ("workflow", ["list"]),
+            ("issue", []),
+            ("issue", ["create", "--title", "Bug", "--body", "Details"]),
+        ],
+    )
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
     @patch("aipass.drone.apps.modules.git_module.subprocess.run")
-    def test_issue_list(self, mock_run: MagicMock, _mock_auth: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="Issue #1\nIssue #2\n", stderr="")
-        result = handle_command("issue", ["list"])
-        assert result["exit_code"] == 0
-        assert "Issue #1" in result["stdout"]
-        mock_run.assert_called_once_with(
-            ["gh", "issue", "list"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+    def test_a_passthrough_hands_gh_its_args_and_returns_gh_output(
+        self, mock_run: MagicMock, _mock_auth: MagicMock, command: str, args: list[str]
+    ) -> None:
+        mock_run.return_value = MagicMock(returncode=0, stdout="out\n", stderr="")
+        assert handle_command(command, args) == {"stdout": "out\n", "stderr": "", "exit_code": 0}
+        mock_run.assert_called_once_with(["gh", command, *args], capture_output=True, text=True, timeout=60)
+
+    @pytest.mark.parametrize(
+        ("args", "argv"),
+        [
+            (["watch", "1"], ["gh", "run", "watch", "1", "--interval", "60"]),
+            (["watch", "1", "-i", "5"], ["gh", "run", "watch", "1", "-i", "5"]),
+            (["watch", "1", "--interval", "5"], ["gh", "run", "watch", "1", "--interval", "5"]),
+            (["watch", "1", "--interval=5"], ["gh", "run", "watch", "1", "--interval=5"]),
+        ],
+    )
+    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
+    @patch("aipass.drone.apps.modules.git_module.subprocess.run")
+    def test_run_watch_streams_live_for_45_minutes_polling_every_60s_unless_told(
+        self, mock_run: MagicMock, _mock_auth: MagicMock, args: list[str], argv: list[str]
+    ) -> None:
+        mock_run.return_value = MagicMock(returncode=0, stdout=None, stderr=None)
+        assert handle_command("run", args) == {"stdout": "", "stderr": "", "exit_code": 0}
+        mock_run.assert_called_once_with(argv, capture_output=False, text=True, timeout=45 * 60)
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
-    @patch("aipass.drone.apps.modules.git_module.subprocess.run")
-    def test_run_list(self, mock_run: MagicMock, _mock_auth: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="run 123\n", stderr="")
-        result = handle_command("run", ["list"])
-        assert result["exit_code"] == 0
-        mock_run.assert_called_once_with(
-            ["gh", "run", "list"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
-    @patch("aipass.drone.apps.modules.git_module.subprocess.run")
-    def test_workflow_list(self, mock_run: MagicMock, _mock_auth: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="CI workflow\n", stderr="")
-        result = handle_command("workflow", ["list"])
-        assert result["exit_code"] == 0
-        mock_run.assert_called_once_with(
-            ["gh", "workflow", "list"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
-    @patch("aipass.drone.apps.modules.git_module.subprocess.run")
-    def test_passthrough_no_args(self, mock_run: MagicMock, _mock_auth: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="usage info\n", stderr="")
-        result = handle_command("issue")
-        assert result["exit_code"] == 0
-        mock_run.assert_called_once_with(
-            ["gh", "issue"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+    @patch(
+        "aipass.drone.apps.modules.git_module.subprocess.run",
+        side_effect=subprocess.TimeoutExpired(["gh", "run", "watch"], 45 * 60),
+    )
+    def test_run_watch_past_the_ceiling_names_it(self, _mock_run: MagicMock, _mock_auth: MagicMock) -> None:
+        result = handle_command("run", ["watch", "1"])
+        assert result == {"stdout": "", "stderr": "gh run timed out after 2700s", "exit_code": 1}
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
     @patch("aipass.drone.apps.modules.git_module.subprocess.run")
@@ -149,18 +142,6 @@ class TestGhPassthroughRouting:
         result = handle_command("issue", ["list"])
         assert result["exit_code"] == 1
         assert "timed out" in result["stderr"]
-
-    @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
-    @patch("aipass.drone.apps.modules.git_module.subprocess.run")
-    def test_passthrough_multiple_args(self, mock_run: MagicMock, _mock_auth: MagicMock) -> None:
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-        handle_command("issue", ["create", "--title", "Bug", "--body", "Details"])
-        mock_run.assert_called_once_with(
-            ["gh", "issue", "create", "--title", "Bug", "--body", "Details"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
 
 
 class TestGhPassthroughHelp:
@@ -941,7 +922,7 @@ class TestRepoDoorRunReads:
         [
             (["list"], ["gh", "run", "list", "--repo", "AIOSAI/ext"]),
             (["view", "123", "--log-failed"], ["gh", "run", "view", "123", "--log-failed", "--repo", "AIOSAI/ext"]),
-            (["watch", "123"], ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext"]),
+            (["watch", "123"], ["gh", "run", "watch", "123", "--repo", "AIOSAI/ext", "--interval", "60"]),
         ],
     )
     def test_the_door_hands_gh_the_origins_owner_name(
@@ -1242,7 +1223,8 @@ class TestReleaseEdit:
         result = _chore("release", ["edit", "v2.8.20"], answers, calls)
 
         assert result == {
-            "stdout": f"Release v2.8.20 of github.com/{_SLUG}: notes rewritten from CHANGELOG.md, 15 -> {len(_V2820)} characters.",
+            "stdout": f"Release v2.8.20 of github.com/{_SLUG}: notes rewritten from CHANGELOG.md, "
+            f"15 -> {len(_V2820)} characters.",
             "stderr": "",
             "exit_code": 0,
         }

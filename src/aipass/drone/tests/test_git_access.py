@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-05-12
-# Modified: 2026-10-23
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -583,14 +583,26 @@ class TestRegistryIdIsNotASecret:
 class TestGitAccessLogSeverity:
     """Severity is owned by auth.py: designed refusals warn, real denials error."""
 
-    def test_missing_passport_logs_warning_not_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Failing closed on a non-branch CWD is designed behaviour, not a fault."""
+    def test_missing_passport_logs_info_never_warning(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Failing closed on a non-branch CWD is designed behaviour: refused, never escalated."""
         monkeypatch.chdir(tmp_path)
         with patch("aipass.drone.apps.plugins.devpulse_ops.auth.logger") as mock_logger:
             with pytest.raises(PermissionError, match="No .trinity/passport.json"):
                 verify_git_access("status")
-        mock_logger.warning.assert_called_once()
+        mock_logger.info.assert_called_once()
+        mock_logger.warning.assert_not_called()
         mock_logger.error.assert_not_called()
+
+    def test_a_passport_less_read_is_refused_and_git_module_logs_it_at_info(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        with patch("aipass.drone.apps.modules.git_module.logger") as mock_logger:
+            result = handle_command("status")
+        assert result["exit_code"] == 1
+        assert "No .trinity/passport.json" in result["stderr"]
+        mock_logger.info.assert_called_once()
+        mock_logger.warning.assert_not_called()
 
     def test_owner_tier_denial_still_logs_error(self, seedgo_dir: Path) -> None:
         """An identified branch reaching for owner-tier IS a fault — must still page."""

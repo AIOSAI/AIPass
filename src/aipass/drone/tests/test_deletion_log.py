@@ -6,7 +6,7 @@
 # Modified: 2026-10-24
 # =============================================
 
-"""Tests for apps/handlers/deletion_log.py, the safe_delete path that writes it, and apps/modules/door_deletion_log.py."""
+"""Tests for apps/handlers/deletion_log.py, the safe_delete path writing it and apps/modules/door_deletion_log.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -451,7 +452,8 @@ class TestLogLocation:
 
 
 class TestAnotherBranchRecordsThroughTheDoor:
-    ROW = {
+    # Any, not the inferred dict[str, str]: unpacked, a str-valued dict reads to pyright as a str project_root.
+    ROW: dict[str, Any] = {
         "lane": "spawn_retire",
         "outcome": "retired",
         "caller": "spawn",

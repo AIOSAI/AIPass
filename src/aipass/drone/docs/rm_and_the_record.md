@@ -97,9 +97,12 @@ rmtree would take every branch, `.trinity/` and all, so a second guard looks the
 
 - **Bounded.** The walk is sorted and stops at the first foreign `.trinity/`. The live `..` answers
   in about a millisecond.
-- **The caller's own tree is pruned whole**, template skeleton included (outermost-wins makes the
+- **The walk skips the caller's own tree**, template skeleton included (outermost-wins makes the
   skeleton the caller's). A target already inside a branch returns at once, because the sibling
   guard has answered for everything below it.
+- **A target that is the caller's own branch, or holds it, is refused** by a check of its own after
+  the walk: `drone rm .` and `drone rm ..` from a branch both refuse with `Protected: path is your
+  own branch <name>/ or holds it`.
 - **Unchanged:** targets inside the caller's own branch, and targets in the system temp dir, where
   a `.trinity/` is test scaffolding, not a citizen. Stale mode is unaffected; it never reaches this
   lane.
@@ -107,7 +110,7 @@ rmtree would take every branch, `.trinity/` and all, so a second guard looks the
 - **A folder the walk cannot list refuses the delete.** A guard that could not look must not report
   clear.
 - **Whether you may delete the folder you are standing in is the host's call, not ours.** POSIX
-  allows it, so `drone rm ..` from a branch completes. Windows holds the current directory open
+  allows it, so removing a folder of your own branch while standing in it completes. Windows holds the current directory open
   without delete sharing and refuses with `WinError 32` — the fence's verdict is identical on both
   hosts, and what fails there is the removal. The message and the record name where the process was
   standing and say to run it from outside. The suite marks the end-to-end case `deletable_cwd`,

@@ -174,9 +174,10 @@ AIPass lane argv-for-argv so translation elsewhere cannot move it.
 
 ---
 
-## gh passthrough, and the two rewrites
+## gh passthrough, the two rewrites and the long watch
 
-`issue`, `run` and `workflow` pass straight through to the `gh` CLI. Two exceptions:
+`issue`, `run` and `workflow` pass straight through to the `gh` CLI with a 60-second timeout. Three
+exceptions:
 
 **`issue view <n>`.** gh's default view is a GraphQL query requesting `repository.issue.projectCards`,
 a Projects-classic field GitHub rejects outright, so the call returns the deprecation notice and no
@@ -193,6 +194,11 @@ through `gh api`: each job's full log (only the failed jobs for `--log-failed`),
 the job name and a tab, with a notice on stderr saying so. `-R/--repo`, `--job` and `--attempt` are
 honoured, and a job whose log the API refuses fails the command by name (`TestRunLogFallback` in
 `tests/test_git_module.py`).
+
+**`run watch <id>`.** A CI run takes about 30 minutes, so watch waits up to 45 before it gives up,
+and gh polls every 60 seconds unless the caller passes its own `-i/--interval`. Its output is not
+captured: gh's own run state reaches the terminal on every poll, so a human sees it is alive. Past
+the ceiling the command fails with `gh run timed out after 2700s`.
 
 These three verbs take gh's **own** `--repo OWNER/NAME`, which is why they are not external-repo
 door verbs.
