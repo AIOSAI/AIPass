@@ -73,7 +73,7 @@
     {
       "file": "apps/handlers/registry.py",
       "standard": "unused_function",
-      "reason": "backfill_owner_and_registry_id() is a migration function for TDPLAN-0012 \u2014 called manually to backfill existing registries. is_owner() is part of the frozen interface contract (TDPLAN-0012) \u2014 consumed by @ai_mail and @devpulse via direct import."
+      "reason": "is_owner() is part of the frozen interface contract (TDPLAN-0012) \u2014 consumed by @ai_mail and @devpulse via direct import."
     },
     {
       "file": "apps/handlers/atomic_write.py",
