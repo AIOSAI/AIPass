@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: unified_stream.py
 # Description: Unified Display Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2025-11-23
 # Modified: 2026-10-24
 # =============================================
@@ -71,7 +71,7 @@ BRANCH_COLORS = {
 }
 
 
-def print_event(event_type: str, branch: str, message: str, level: str = "info", pid: Optional[int] = None):
+def print_event(branch: str, message: str, level: str = "info", pid: Optional[int] = None):
     """Format and print event with branch attribution."""
     with _print_lock:
         timestamp = datetime.now().strftime("%H:%M:%S")

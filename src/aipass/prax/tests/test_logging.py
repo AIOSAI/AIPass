@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-29
 # Modified: 2026-10-24
 # =============================================
@@ -332,13 +332,10 @@ class TestConcurrentFirstCallsBuildOneLogger:
 
     def test_racing_first_calls_build_the_logger_once(self, monkeypatch, tmp_path):
         self._sandbox(monkeypatch, tmp_path)
+        # Each build reads the log config once, so the reads count the builds.
         builds = []
-        real_build = setup_handler._build_individual_logger
-        monkeypatch.setattr(
-            setup_handler,
-            "_build_individual_logger",
-            lambda name, *rest: builds.append(name) or real_build(name, *rest),
-        )
+        real_config = setup_handler.load_log_config
+        monkeypatch.setattr(setup_handler, "load_log_config", lambda: builds.append(1) or real_config())
         barrier = threading.Barrier(self.THREADS)
         results = []
 
@@ -355,7 +352,7 @@ class TestConcurrentFirstCallsBuildOneLogger:
             handler.close()
             results[0].removeHandler(handler)
 
-        assert builds == ["build_probe"]
+        assert len(builds) == 1
 
 
 class TestSameModuleNameInTwoBranches:

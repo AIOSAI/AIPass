@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers_display.py
 # Description: Unit tests for the monitor's command parsing and stream display
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
 # Modified: 2026-10-24
 # =============================================
@@ -160,7 +160,7 @@ class TestPrintEvent:
 
     def test_includes_branch_name(self, capsys):
         """One line reaches the console and it carries the branch name."""
-        unified_stream.print_event("log", "SEEDGO", "audit complete")
+        unified_stream.print_event("SEEDGO", "audit complete")
         # The line carries a host clock, so the count and the label are the claim.
         lines = capsys.readouterr().out.splitlines()
         assert len(lines) == 1
@@ -168,30 +168,30 @@ class TestPrintEvent:
 
     def test_includes_message(self, capsys):
         """Output should include the event message."""
-        unified_stream.print_event("system", "CLI", "started successfully")
+        unified_stream.print_event("CLI", "started successfully")
         assert capsys.readouterr().out.rstrip("\n").endswith(" started successfully")
 
     def test_with_pid(self, capsys):
         """Output should include PID when provided."""
-        unified_stream.print_event("file", "PRAX", "changed", pid=12345)
+        unified_stream.print_event("PRAX", "changed", pid=12345)
         assert "[PRAX:12345" in capsys.readouterr().out
 
     def test_error_level_coloring(self, monkeypatch):
         """Error-level messages should use red color."""
         buffer = _colour_console(monkeypatch)
-        unified_stream.print_event("log", "FLOW", "something broke", level="error")
+        unified_stream.print_event("FLOW", "something broke", level="error")
         assert "\x1b[31msomething broke\x1b[0m" in buffer.getvalue()
 
     def test_branch_color_lookup(self, monkeypatch):
         """Should use branch-specific color from BRANCH_COLORS."""
         buffer = _colour_console(monkeypatch)
-        unified_stream.print_event("file", "SEEDGO", "test")
+        unified_stream.print_event("SEEDGO", "test")
         assert "\x1b[32mSEEDGO " in buffer.getvalue()  # SEEDGO -> green
 
     def test_unknown_branch_uses_white(self, monkeypatch):
         """Unknown branches should use white as default color."""
         buffer = _colour_console(monkeypatch)
-        unified_stream.print_event("file", "XYZUNKNOWN", "test")
+        unified_stream.print_event("XYZUNKNOWN", "test")
         assert "\x1b[37mXYZUNKNOWN " in buffer.getvalue()
 
 

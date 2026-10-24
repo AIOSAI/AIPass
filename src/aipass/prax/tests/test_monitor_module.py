@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_monitor_module.py
 # Description: Tests for the unified monitoring module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-03
 # Modified: 2026-10-24
 # =============================================
@@ -350,9 +350,7 @@ class TestRenderEvent:
 
         with patch.object(mod, "_get_pid_for_branch", return_value=42):
             mod._print_event_to_console(event)
-        _doubled("print_event").assert_called_once_with(
-            "file_change", "FLOW", "STATUS.local.md modified", "info", pid=42
-        )
+        _doubled("print_event").assert_called_once_with("FLOW", "STATUS.local.md modified", "info", pid=42)
 
     def test_render_command_event_action_with_empty_target(self):
         """Command event with action 'audit:' (empty after colon) passes target=None."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_sweep.py
 # Description: Tests for stale log sweep in log_audit
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-07-10
 # Modified: 2026-10-24
 # =============================================
@@ -225,7 +225,8 @@ class TestTruncateAndHome:
         log = tmp_path / "big.log"
         original = "".join(f"line {i}\n" for i in range(50))
         log.write_text(original, encoding="utf-8")
-        monkeypatch.setattr(lw.os, "replace", MagicMock(side_effect=OSError("disk full")))
+        # A directory where the temp file goes: the write fails on every OS, root included.
+        (tmp_path / ".big.log.trunc").mkdir()
 
         assert lw.truncate_log_file(log, keep_lines=5) == (0, 0)
         assert log.read_text(encoding="utf-8") == original
@@ -234,4 +235,7 @@ class TestTruncateAndHome:
         """The watchdog watches where the loggers write, AIPASS_TEST_LOG_DIR included."""
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
 
-        assert lw._get_system_logs_dir() == tmp_path / "system"
+        (tmp_path / "system").mkdir()
+        (tmp_path / "system" / "probe.log").write_text("one\n", encoding="utf-8")
+
+        assert [row["name"] for row in lw.scan_log_files()] == ["probe.log"]

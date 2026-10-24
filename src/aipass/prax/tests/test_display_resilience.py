@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-12
 # Modified: 2026-10-24
 # =============================================
@@ -61,28 +61,28 @@ class TestEventTextIsUntrustedMarkup:
 
     def test_closing_tag_in_message_does_not_raise(self):
         """A tailed line containing [/usr/bin] renders instead of killing the render."""
-        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("DRONE", CRASHING_MESSAGE, "info"))
         assert "/usr/bin" in output
 
     def test_closing_tag_keeps_its_brackets(self):
         """The path is shown as written — brackets included, nothing swallowed."""
-        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("DRONE", CRASHING_MESSAGE, "info"))
         assert "[/usr/bin]" in output
 
     def test_lowercase_tag_in_message_survives(self):
         """[event_queue] is a valid-looking Rich tag; it must still reach the screen."""
-        output = self._render(lambda m: m.print_event("log", "PRAX", EATEN_MESSAGE, "warning"))
+        output = self._render(lambda m: m.print_event("PRAX", EATEN_MESSAGE, "warning"))
         assert "[event_queue]" in output
 
     def test_branch_label_still_visible(self):
         """Escaping must not cost the bracketed branch column."""
-        output = self._render(lambda m: m.print_event("log", "SEEDGO", "audit complete", "info"))
+        output = self._render(lambda m: m.print_event("SEEDGO", "audit complete", "info"))
         assert "[SEEDGO" in output
         assert "audit complete" in output
 
     def test_lowercase_branch_label_survives(self):
         """A label Rich would read as a tag keeps its brackets (uppercase was luck)."""
-        output = self._render(lambda m: m.print_event("log", "commons/feed", "post", "info"))
+        output = self._render(lambda m: m.print_event("commons/feed", "post", "info"))
         assert "COMMONS/FEED" in output
 
     def test_hook_event_message_is_escaped(self):
@@ -109,7 +109,7 @@ class TestEventTextIsUntrustedMarkup:
 
     def test_canary_unescaped_message_raises(self):
         """Proof the assertions above can fail: the line interpolated raw into the same markup explodes."""
-        output = self._render(lambda m: m.print_event("log", "DRONE", CRASHING_MESSAGE, "info"))
+        output = self._render(lambda m: m.print_event("DRONE", CRASHING_MESSAGE, "info"))
         assert "[/usr/bin]" in output
 
         buffer = io.StringIO()

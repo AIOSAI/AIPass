@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: monitor.py
 # Description: Unified Monitoring Module
-# Version: 0.5.0
+# Version: 0.5.1
 # Created: 2025-11-23
 # Modified: 2026-10-24
 # =============================================
@@ -315,7 +315,7 @@ def _print_event_to_console(event) -> None:
     elif event.event_type == "hook":
         print_hook_event(event.branch, event.message, event.action)
     else:
-        print_event(event.event_type, event.branch, event.message, event.level, pid=_get_pid_for_branch(event.branch))
+        print_event(event.branch, event.message, event.level, pid=_get_pid_for_branch(event.branch))
 
 
 def _reset_render_failure_state() -> None:

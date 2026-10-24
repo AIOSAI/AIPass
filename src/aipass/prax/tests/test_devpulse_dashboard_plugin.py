@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_devpulse_dashboard_plugin.py
 # Description: Tests for devpulse dashboard plugin
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-05-16
 # Modified: 2026-10-24
 # =============================================
@@ -17,6 +17,8 @@
 
 import json
 import os
+import subprocess
+import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -254,8 +256,9 @@ class TestDispatchSection:
 
     @pytest.fixture(autouse=True)
     def _registry(self, branch_path, monkeypatch):
-        """Registered branches are siblings of branch_path, named the way the registry lists them."""
-        parent = branch_path.parent
+        """Registered branches under this test's own tmp_path, named the way the registry lists them."""
+        # Never branch_path.parent: that is pytest's shared base, so one test's lock reached the next.
+        parent = branch_path / "registered"
         self.branches = {name: parent / name for name in ("ai_mail", "prax", "seedgo", "daemon")}
         for path in self.branches.values():
             (path / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
@@ -286,15 +289,13 @@ class TestDispatchSection:
         assert dispatch["agents_active"] == ["daemon"]
         assert dispatch["details"]["daemon"] == {"pid": os.getpid(), "timestamp": "2026-05-16T14:00:00"}
 
-    def test_a_dead_pid_lock_is_not_active(self, branch_path, monkeypatch):
+    @pytest.mark.skipif(sys.platform == "win32", reason="os.kill terminates on Windows, so a pid is never probed there")
+    def test_a_dead_pid_lock_is_not_active(self, branch_path):
         """A lock left by a process that is gone is not an active dispatch."""
-        monkeypatch.setattr(dispatch_section.sys, "platform", "linux")
-
-        def _gone(pid, sig):
-            raise ProcessLookupError(pid)
-
-        monkeypatch.setattr(dispatch_section.os, "kill", _gone)
-        self._lock("prax", {"pid": 424242, "timestamp": "2026-05-16T14:00:00", "branch": "/x/prax"})
+        gone = subprocess.run(
+            [sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, encoding="utf-8"
+        )
+        self._lock("prax", {"pid": int(gone.stdout), "timestamp": "2026-05-16T14:00:00", "branch": "/x/prax"})
 
         assert self._section(branch_path)["agents_active"] == []
 
