@@ -56,9 +56,16 @@ logged, the same way a missing `id` or `schedule` is.
 | Type | Fields | Due when |
 |------|--------|----------|
 | `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. N must be a positive number (`30`, `0.5`): text, `null`, `true`, zero or a negative is refused at discovery and logged with the file and the job, so the job is never due. Absent, N reads as 60. |
-| `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per day. |
-| `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per hour. |
-| `once` | `due_date: "YYYY-MM-DD"` | Date <= today, then marks completed. |
+| `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per window. A window that wraps midnight is one window. |
+| `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per window. A window that wraps the hour is one window. |
+| `once` | `due_date: "YYYY-MM-DD"` or `"YYYY-MM-DDTHH:MM"` | From that instant on (a bare date means midnight), then marks completed. An unreadable `due_date` is never due. |
+
+A `time` that does not read for its type (`"HH:MM"` with hours 0-23 for `daily` and `rotation`,
+a minute 0-59 for `hourly`) is refused at discovery and logged with the file and the job.
+
+When a schedule file cannot be read, or one of its jobs is refused, that owner's existing
+runstate rows are kept: the tick prunes rows only for owners whose file was read whole, so a
+half-read schedule never erases its jobs' history.
 | `rotation` | `time: "HH:MM"` | Daily window — but wakes the next citizen on the fleet roster, not the owner. See [docs/rounds.md](rounds.md). |
 
 ### Optional schedule fields
@@ -90,8 +97,9 @@ slot fires on the next tick and says so in `run.log` at WARNING.
 when it crosses the hour (a `time` past minute 44), the same shape as daily's midnight
 refusal.
 
-**`catch_up` is bounded by `_already_ran_today`**, so a caught-up run can never
-double-fire the day it lands in, and it never widens the window backwards — a job is
+**`catch_up` is bounded by the window's own run check**: once any run lands at or after
+today's window opened, the window no longer reads as closed unrun, so a caught-up run can
+never double-fire the day it lands in, and it never widens the window backwards — a job is
 still not due *before* its window opens. A daily window whose tail crosses midnight
 (`time` later than 23:44) never closes inside its own calendar day and is refused
 rather than guessed at, in both directions.

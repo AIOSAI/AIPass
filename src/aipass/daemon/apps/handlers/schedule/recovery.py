@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: recovery.py
 # Description: Gap detection, missed-window enumeration, catch-up queue and drain policy
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-08
 # Modified: 2026-10-24
 # =============================================

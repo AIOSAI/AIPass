@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: inbox_sweep.py
 # Description: Fleet inbox sweep — wake branches sitting on mail unread past 24h
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-11
 # Modified: 2026-10-24
 # =============================================

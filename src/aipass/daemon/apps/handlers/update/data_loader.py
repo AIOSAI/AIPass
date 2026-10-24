@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: data_loader.py
 # Description: DAEMON Data Loading Handler
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-01-29
 # Modified: 2026-10-24
 # =============================================

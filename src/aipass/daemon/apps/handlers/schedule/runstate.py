@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-06-15
 # Modified: 2026-10-24
 # =============================================

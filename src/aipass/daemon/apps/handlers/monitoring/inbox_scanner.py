@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: inbox_scanner.py
 # Description: Cheap cross-branch scan for unread mail sitting past a staleness threshold
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-11
 # Modified: 2026-10-24
 # =============================================

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-15
 # Modified: 2026-10-24
 # =============================================
@@ -24,11 +24,11 @@ from unittest.mock import patch
 import pytest
 
 from aipass.daemon.apps.handlers.schedule import discovery
+from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.schedule.discovery import (
     discover_jobs,
     active_citizens,
     citizen_class_for,
-    declared_residency,
     framework_root,
     REQUIRED_JOB_KEYS,
     RESIDENCY_CORE,
@@ -719,57 +719,6 @@ def error_text(mock_logger) -> str:
     return "\n".join(str(call) for call in mock_logger.error.call_args_list)
 
 
-class TestDeclaredResidency:
-    """The single reader for citizenship.residency. Never raises."""
-
-    def test_reads_the_declared_value(self, tmp_path):
-        write_passport(tmp_path, residency=RESIDENCY_RESIDENT)
-        assert declared_residency(tmp_path) == RESIDENCY_RESIDENT
-
-    def test_missing_passport_declares_nothing(self, tmp_path):
-        assert declared_residency(tmp_path) is None
-
-    def test_unreadable_passport_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, raw="{not json")
-        assert declared_residency(tmp_path) is None
-
-    def test_absent_field_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, citizen_class="specialist")
-        assert declared_residency(tmp_path) is None
-
-    def test_non_string_value_declares_nothing(self, tmp_path):
-        write_passport(tmp_path, raw=json.dumps({"citizenship": {"residency": 5}}))
-        assert declared_residency(tmp_path) is None
-
-    @pytest.mark.parametrize(
-        "raw, label",
-        [
-            ("[]", "list root"),
-            ('"core"', "string root"),
-            ("5", "number root"),
-            ("null", "null root"),
-            ("true", "bool root"),
-            ('{"citizenship": "core"}', "citizenship present but not a dict"),
-        ],
-    )
-    def test_a_malformed_passport_declares_nothing_and_does_not_raise(self, tmp_path, raw, label):
-        """Every shape that used to crash the whole fleet lane now returns None.
-
-        History, because the pin is worth more than the assertion: daemon's own
-        deleted copy guarded only the ROOT, registry_scope 2.1.0 guarded neither,
-        and 2.2.0 guards both after @memory found that the second `.get` in
-        `data.get("citizenship", {}).get("residency")` was unprotected — a shape
-        this branch never tested and could not have reported.
-
-        declared_residency is called once per citizen by fleet_branches, so a
-        raise here is not one refused branch: it is every lane in the fleet,
-        killed by one bad file. Parametrized rather than one case, because a fix
-        verified against a list alone leaves the other five alive.
-        """
-        write_passport(tmp_path, raw=raw)
-        assert declared_residency(tmp_path) is None, label
-
-
 class TestRegistryLedDiscovery:
     """Candidate discovery finds REGISTRIES, one level down, dots refused."""
 
@@ -988,7 +937,7 @@ class TestLiveFleet:
         citizens = [c for c in active_citizens() if c["source"].startswith("projects/")]
         assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
         for citizen in citizens:
-            assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
+            assert fleet.declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen
 
     def test_an_external_citizen_is_labelled_external_never_core(self):
         # The fence. A citizen outside AIPass home may never read as core: the

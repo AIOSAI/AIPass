@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2026-06-15
 # Modified: 2026-10-24
 # =============================================
@@ -52,12 +52,6 @@ _CORE_REGISTRY_NAME = "AIPASS_REGISTRY.json"
 
 # Reads its mail live; must never be woken into an interactive session by a scheduled job.
 MANAGER_CLASS = "manager"
-
-
-def declared_residency(branch_path: Path) -> Optional[str]:
-    """What the passport at *branch_path* declares itself to be.
-    Delegates to @memory's fleet gateway; kept here because callers and tests import it from discovery."""
-    return fleet.declared_residency(branch_path)
 
 
 def _source_label(record: dict, repo_root: Path) -> str:
