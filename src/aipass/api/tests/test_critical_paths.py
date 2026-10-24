@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_critical_paths.py
 # Description: Critical path tests for API branch core functions
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-31
 # Modified: 2026-10-24
 # =============================================
@@ -105,19 +105,17 @@ class TestGetResponse:
     @patch(f"{MODULE}.make_api_request")
     @patch(f"{MODULE}.get_cached_client")
     @patch(f"{MODULE}.get_api_key")
-    @patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")
     @patch(f"{MODULE}.get_caller_info")
     def test_successful_call(
         self,
         mock_caller_info,
-        mock_provision_walk,
         mock_get_key,
         mock_get_client,
         mock_make_req,
         mock_extract,
         mock_track,
     ):
-        """Full successful pipeline: detect caller, get key, make request, extract, track; no provisioning walk."""
+        """Full successful pipeline: detect caller, get key, make request, extract, track."""
         tracked = threading.Event()
         mock_track.side_effect = lambda *a: tracked.set()
         mock_caller_info.return_value = {"caller_name": "test-branch"}
@@ -137,7 +135,6 @@ class TestGetResponse:
         assert result["id"] == "gen-abc123"
         assert tracked.wait(5)
         mock_track.assert_called_once()
-        mock_provision_walk.assert_not_called()
 
     @patch(f"{MODULE}.track_usage")
     @patch(f"{MODULE}.extract_response")

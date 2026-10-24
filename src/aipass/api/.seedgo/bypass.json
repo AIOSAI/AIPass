@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T22:43:23.516578",
     "description": "Standards bypass configuration for this branch — pruned 2026-08-13 (APLAN-0013): only rules proven to suppress a real finding in the audit OR checklist lane are kept",
-    "updated": "2026-10-16"
+    "updated": "2026-10-24"
   },
   "bypass": [
     {
@@ -89,26 +89,26 @@
     {
       "file": "apps/handlers/host/server.py",
       "standard": "logged_fallback",
-      "lines": [302],
-      "reason": "_outside_room_for: a census that cannot answer leaves the attach on the ordinary naming rule, the same as no outside room. The caller acts identically on both, by design (docstring: A CENSUS THAT CANNOT ANSWER IS NOT AN ANSWER OF 'NO'); the attach still refuses downstream (api, fleet green leg 9). Re-ruled by devpulse 2026-10-10 (3ef9df96): the outside-room check is an improvement to the attach and a failed census read must not refuse it; a distinct sentinel would only move the 'treat as no room' decision to a caller that does not want it. Line moved 600 -> 592 when cf762733 moved UnavailableHTTPException to denials.py, 592 -> 594 with DPLAN-0406's pair route import and docstring line, 594 -> 596 with DPLAN-0411's backup route import and docstring line, 596 -> 595 with DPLAN-0414's machine route import and two docstring rows rewrapped, 595 -> 594 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped, 594 -> 302 in the comment sweep (2026-10-17)."
+      "lines": [306],
+      "reason": "_outside_room_for: a census that cannot answer leaves the attach on the ordinary naming rule, the same as no outside room. The caller acts identically on both, by design (docstring: A CENSUS THAT CANNOT ANSWER IS NOT AN ANSWER OF 'NO'); the attach still refuses downstream (api, fleet green leg 9). Re-ruled by devpulse 2026-10-10 (3ef9df96): the outside-room check is an improvement to the attach and a failed census read must not refuse it; a distinct sentinel would only move the 'treat as no room' decision to a caller that does not want it. Line moved 600 -> 592 when cf762733 moved UnavailableHTTPException to denials.py, 592 -> 594 with DPLAN-0406's pair route import and docstring line, 594 -> 596 with DPLAN-0411's backup route import and docstring line, 596 -> 595 with DPLAN-0414's machine route import and two docstring rows rewrapped, 595 -> 594 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped, 594 -> 302 in the comment sweep (2026-10-17); 302 -> 306 with the 2026-10-24 edits above it."
     },
     {
       "file": "apps/handlers/host/server.py",
       "standard": "exception_text_in_response",
-      "lines": [450],
-      "reason": "UploadRefused (devpulse ruling 3ef9df96, 2026-10-10): raised only at uploads.py:72, :85, :124, :166, each sentence built from constants and the caller's own declared values (Content-Length, byte counts); it never wraps another exception's text. The sentence is written for the client and the client needs it. If a builder ever wraps a foreign exception, the row returns to the cure (denials.py). Line moved 791 -> 793 with DPLAN-0411's backup route import and docstring line, 793 -> 792 with DPLAN-0414's machine route import and two docstring rows rewrapped, 792 -> 791 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped, 791 -> 448 in the comment sweep (2026-10-17), the uploads.py raises with it; 448 -> 450 with the /v1/dir offset parameter and its docstring row (2026-10-18)."
+      "lines": [454],
+      "reason": "UploadRefused (devpulse ruling 3ef9df96, 2026-10-10): raised only at uploads.py:72, :85, :124, :166, each sentence built from constants and the caller's own declared values (Content-Length, byte counts); it never wraps another exception's text. The sentence is written for the client and the client needs it. If a builder ever wraps a foreign exception, the row returns to the cure (denials.py). Line moved 791 -> 793 with DPLAN-0411's backup route import and docstring line, 793 -> 792 with DPLAN-0414's machine route import and two docstring rows rewrapped, 792 -> 791 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped, 791 -> 448 in the comment sweep (2026-10-17), the uploads.py raises with it; 448 -> 450 with the /v1/dir offset parameter and its docstring row (2026-10-18); 450 -> 454 with the 2026-10-24 edits above it, the uploads.py raises unchanged."
     },
     {
       "file": "apps/handlers/host/server.py",
       "standard": "exception_text_in_response",
-      "lines": [616],
-      "reason": "MachineDoorFailed (devpulse ruling 3ef9df96, 2026-10-10): the vitals route's raises are machine.py:96 (the DOOR_RAISED constant) and :106 (a message built from type(vitals).__name__); no foreign words possible. If a raise ever carries another exception's text, the row returns to the cure (denials.py). Line moved 974 -> 976 with DPLAN-0411's backup route import and docstring line, 976 -> 975 with DPLAN-0414's machine route import and two docstring rows rewrapped, 975 -> 974 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped; the machine.py raises moved 168/178 -> 223/233 with read_processes above them; 974 -> 614 and 223/233 -> 96/106 in the comment sweep (2026-10-17); 614 -> 616 with the /v1/dir offset parameter and its docstring row (2026-10-18)."
+      "lines": [620],
+      "reason": "MachineDoorFailed (devpulse ruling 3ef9df96, 2026-10-10): the vitals route's raises are machine.py:96 (the DOOR_RAISED constant) and :106 (a message built from type(vitals).__name__); no foreign words possible. If a raise ever carries another exception's text, the row returns to the cure (denials.py). Line moved 974 -> 976 with DPLAN-0411's backup route import and docstring line, 976 -> 975 with DPLAN-0414's machine route import and two docstring rows rewrapped, 975 -> 974 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped; the machine.py raises moved 168/178 -> 223/233 with read_processes above them; 974 -> 614 and 223/233 -> 96/106 in the comment sweep (2026-10-17); 614 -> 616 with the /v1/dir offset parameter and its docstring row (2026-10-18); 616 -> 620 with the 2026-10-24 edits above it, the machine.py raises unchanged."
     },
     {
       "file": "apps/handlers/host/server.py",
       "standard": "exception_text_in_response",
-      "lines": [727, 743],
-      "reason": "VerbRefused (devpulse ruling 3ef9df96, 2026-10-10): raised at verbs.py:62, :265, :278 from constants and the caller's own message length, and at :283 as str(ReadRefused) from resolve_branch_root, whose sentences are api's own at reads.py:93, :105, :116 echoing the caller's branch or project name. Never a program's stderr or an OSError. Its subclass ProjectRefused is raised only inside verbs.new_project, which these two routes (wake, kill) never call. If that changes, the rows return to the cure (denials.py). Lines moved 1119/1135 -> 1121/1137 with DPLAN-0411's backup route import and docstring line, 1121/1137 -> 1120/1136 with DPLAN-0414's machine route import and two docstring rows rewrapped, 1120/1136 -> 1119/1135 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped; the verbs.py raises moved 201/404/454/459 -> 213/524/574/579 with FPLAN-0649's new_project section and import; 1119/1135 -> 725/741 and the cited raises in the comment sweep (2026-10-17); 725/741 -> 727/743 with the /v1/dir offset parameter and its docstring row (2026-10-18)."
+      "lines": [734, 750],
+      "reason": "VerbRefused (devpulse ruling 3ef9df96, 2026-10-10): raised at verbs.py:62, :265, :278 from constants and the caller's own message length, and at :283 as str(ReadRefused) from resolve_branch_root, whose sentences are api's own at reads.py:93, :105, :116 echoing the caller's branch or project name. Never a program's stderr or an OSError. Its subclass ProjectRefused is raised only inside verbs.new_project, which these two routes (wake, kill) never call. If that changes, the rows return to the cure (denials.py). Lines moved 1119/1135 -> 1121/1137 with DPLAN-0411's backup route import and docstring line, 1121/1137 -> 1120/1136 with DPLAN-0414's machine route import and two docstring rows rewrapped, 1120/1136 -> 1119/1135 with FPLAN-0649's new-project route import, its docstring row and three docstring rows rewrapped; the verbs.py raises moved 201/404/454/459 -> 213/524/574/579 with FPLAN-0649's new_project section and import; 1119/1135 -> 725/741 and the cited raises in the comment sweep (2026-10-17); 725/741 -> 727/743 with the /v1/dir offset parameter and its docstring row (2026-10-18); 727/743 -> 734/750 with the 2026-10-24 edits above them, re-checked the same day: the verbs.py raises now sit at :62, :66 (a new constant sentence on a leading dash), :269, :282 and :287 (str(ReadRefused)), resolve_branch_root's at reads.py:94, :106, :117."
     },
     {
       "file": "apps/handlers/host/new_project_route.py",
@@ -248,12 +248,6 @@
       "reason": "FILE-WIDE, the checker passes no line. One shutil.which answering nothing on PATH, so the route's missing-binary answer does not depend on whether the runner has baud installed (api, fleet green leg 10)."
     },
     {
-      "file": "apps/handlers/openrouter/provision.py",
-      "standard": "logged_fallback",
-      "lines": [140, 180],
-      "reason": "Provisioning is non-blocking by design: the failure is logged at error with its reason, and the one caller, client.get_response step 1b, discards the answer inside its deliberate catch, so a raise would only move the fallback. devpulse's ruling of 10-03 (leg 11 dispatch); no product change (api, fleet green leg 11). Lines moved 227/282 -> 140/180 in the comment sweep (2026-10-17)."
-    },
-    {
       "file": "tests/support_host_attach.py",
       "standard": "through_the_command",
       "lines": [101],
@@ -268,8 +262,8 @@
     {
       "file": "tests/test_host_perf.py",
       "standard": "through_the_command",
-      "lines": [649, 659, 660, 663],
-      "reason": "649: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 659-663: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11). Lines moved 920/945/946/949 -> 923/948/949/952 with DPLAN-0406's /v1/pair entry in LOOP_FREE_POSTS, 923/948/949/952 -> 925/950/951/954 with DPLAN-0411's /v1/backup/run entry, 925/950/951/954 -> 928/953/954/957 with DPLAN-0412's /v1/backup/cancel entry, 928/953/954/957 -> 931/956/957/960 with FPLAN-0649's /v1/verbs/new-project entry, 931/956/957/960 -> 649/659/660/663 in the comment sweep (2026-10-17)."
+      "lines": [713, 723, 724, 727],
+      "reason": "649: the close order of the two PTY ends on a failed spawn is visible only through _spawn_pty's close_fd seam. 659-663: an over-release of the session semaphore is an accounting bug no request can produce; the test uses the module's own bounded semaphore, since a stand-in would pass with the module downgraded. A public door would exist for these tests alone. HELD since leg 9 (api, fleet green leg 11). Lines moved 920/945/946/949 -> 923/948/949/952 with DPLAN-0406's /v1/pair entry in LOOP_FREE_POSTS, 923/948/949/952 -> 925/950/951/954 with DPLAN-0411's /v1/backup/run entry, 925/950/951/954 -> 928/953/954/957 with DPLAN-0412's /v1/backup/cancel entry, 928/953/954/957 -> 931/956/957/960 with FPLAN-0649's /v1/verbs/new-project entry, 931/956/957/960 -> 649/659/660/663 in the comment sweep (2026-10-17); 649/659/660/663 -> 713/723/724/727 after the ruff format (2026-10-24)."
     },
     {
       "file": "tests/test_cleanup.py",
@@ -292,14 +286,47 @@
     {
       "file": "tests/test_host_read_lane_changes.py",
       "standard": "through_the_command",
-      "lines": [155, 156, 226, 234, 256, 280],
-      "reason": "The git-changes ReadCache (host_git._changes): its stored entry aged past the TTL (154, 155), its entries and failures inspected after a refusal and a recovery (225, 279), and its single-flight lock counted (233, 255). An inspection between tests is not a route the product has, and a public one would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12). Moved with the tests from test_host_read_lane.py:890, 891, 1001, 1017, 1041, 1072 in the oversize split; the clear around each case (153, 155) went to conftest.py with its fixture (api, 2026-10-08). Lines moved 210/211/321/337/361/392 -> 154/155/225/233/255/279 in the comment sweep (2026-10-17); 154/155/225/233/255/279 -> 155/156/226/234/256/280 with the PATCH_READS_LOGGER constant (2026-10-19)."
+      "lines": [156, 157, 227, 235, 257, 281],
+      "reason": "The git-changes ReadCache (host_git._changes): its stored entry aged past the TTL (154, 155), its entries and failures inspected after a refusal and a recovery (225, 279), and its single-flight lock counted (233, 255). An inspection between tests is not a route the product has, and a public one would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch) (api, fleet green leg 12). Moved with the tests from test_host_read_lane.py:890, 891, 1001, 1017, 1041, 1072 in the oversize split; the clear around each case (153, 155) went to conftest.py with its fixture (api, 2026-10-08). Lines moved 210/211/321/337/361/392 -> 154/155/225/233/255/279 in the comment sweep (2026-10-17); 154/155/225/233/255/279 -> 155/156/226/234/256/280 with the PATCH_READS_LOGGER constant (2026-10-19); 155/156/226/234/256/280 -> 156/157/227/235/257/281 after the ruff format (2026-10-24)."
     },
     {
       "file": "tests/conftest.py",
       "standard": "through_the_command",
       "lines": [180, 182, 364, 366],
       "reason": "_refusals._reset_refusals() empties the refusal memory around every test (364, 366), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 143, 145: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09. Lines moved 225/227/466/468 -> 143/145/327/329 in the comment sweep (2026-10-17); 143/145/327/329 -> 180/182/364/366 with the keyring test backend (2026-10-22)."
+    },
+    {
+      "file": "tests/test_host_perf.py",
+      "standard": "through_the_command",
+      "lines": [
+        206
+      ],
+      "reason": "getattr(host_server, '_WRITE_LOCK') is read, never called, to record whether the shared lock is held while each read-modify-write route runs; the lock is the only serialization those routes have off the loop, and whether it is held is visible to no request. A public lock accessor would be a door for the test alone (api, 2026-10-24)."
+    },
+    {
+      "file": "tests/test_host_perf.py",
+      "standard": "through_the_command",
+      "lines": [
+        509
+      ],
+      "reason": "host_fleet._snapshots._flights is inspected after 50 distinct project reads to prove no per-project flight lock is left behind; a leaked lock grows for the life of the server and no route reports the cache's internals. An inspection between tests is not a route the product has, and a public one would be a door for the test alone (api, 2026-10-24)."
+    },
+    {
+      "file": "tests/test_host_attach_pump.py",
+      "standard": "through_the_command",
+      "lines": [
+        705
+      ],
+      "reason": "_spawn_pty is called with its close_fd seam so a failed openpty or set_winsize shows which PTY ends were closed and that the reserved slot came back; the same seam as test_host_perf.py's 713 row. open_attach and open_monitor reach _spawn_pty but cannot hand it close_fd, and a public door would exist for these tests alone (api, 2026-10-24)."
+    },
+    {
+      "file": "apps/modules/host_api.py",
+      "standard": "unused_function",
+      "functions": [
+        "set_bind",
+        "install_unit"
+      ],
+      "reason": "The installer's doors (docs/host_autostart.md, 'The installer's doors'), called from @aipass, not inside api: aipass/aipass/apps/handlers/baud/phone_setup.py:114/118 (set_bind) and :143/157 (install_unit), on the host_api module handed in by aipass/aipass/apps/modules/baud.py:103. phone_setup reaches them through getattr(host_config, name), so the checker's name search finds no call. NAME-SCOPED so a genuinely dead door here is still caught (api, 2026-10-24)."
     }
   ],
   "notes": {

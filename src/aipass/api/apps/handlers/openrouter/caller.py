@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: caller.py
 # Description: OpenRouter Caller Detection Handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """OpenRouter Caller Detection Handler"""
 
 import inspect
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 from aipass.prax import logger
 
@@ -52,14 +52,6 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Caller detection failed: {e}")
         return None
-
-
-def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
-    """Compatibility wrapper for provision handler."""
-    caller_info = get_caller_info()
-    if caller_info:
-        return caller_info.get("caller_name"), caller_info.get("json_folder")
-    return None, None
 
 
 def detect_caller_category(caller_path: Path) -> str:
