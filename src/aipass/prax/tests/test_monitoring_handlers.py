@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-04-25
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py, the detector and its branch registry."""
@@ -185,6 +185,18 @@ class TestDetectFromPath:
             detector.detect_from_path(resolved)
 
         assert resolved in detector.log_map
+
+    def test_an_unlabelled_transcript_logs_once_however_often_it_is_written(self, tmp_path):
+        """A live ~/.codex transcript fires on every append; 885 lines/min came from re-logging each one."""
+        mod = _import_branch_detector()
+        detector = _make_detector_with_branches(mod)
+        transcript = tmp_path / ".codex" / "sessions" / "rollout.jsonl"
+
+        answers = [detector.detect_from_path(str(transcript)) for _ in range(3)]
+
+        assert answers == ["UNKNOWN"] * 3
+        unlabelled = [c for c in _detector_log().info.call_args_list if "Could not detect branch" in c.args[0]]
+        assert len(unlabelled) == 1
 
 
 class TestDetectFromLog:
