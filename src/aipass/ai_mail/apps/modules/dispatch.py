@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.5.0
+# Version: 3.6.0
 # Created: 2026-02-02
 # Modified: 2026-10-25
 # =============================================
@@ -265,6 +265,8 @@ def _orchestrate_wake(args: List[str]) -> bool:
     if not success:
         # The status block never marks the command failed; without this a dead wake exits 0.
         error(f"Wake failed for {branch_email} — see the step status above")
+    elif dispatch_status.busy_detail():
+        _refuse_busy(dispatch_status.busy_detail(), branch_email)
 
     return True
 
@@ -398,10 +400,20 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     if not wake_ok:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)
         error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
+    elif dispatch_status.busy_detail():
+        _refuse_busy(dispatch_status.busy_detail(), target)
     else:
         _announce_wake_back(target, verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")))
 
     return True
+
+
+def _refuse_busy(detail: str, target: str) -> None:
+    """A held lock delivered the mail and woke nothing: log it and exit non-zero, so the sender re-sends."""
+    logger.warning("[dispatch] %s not woken — %s", target, detail)
+    error(
+        f"{detail}. The running session may finish without reading it — re-wake when it is done: drone @ai_mail dispatch wake {target}"
+    )
 
 
 def _announce_wake_back(target: str, sender: str) -> None:

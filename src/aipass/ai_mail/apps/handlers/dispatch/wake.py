@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.5.0
+# Version: 3.6.0
 # Created: 2026-03-02
 # Modified: 2026-10-25
 # =============================================
@@ -84,6 +84,9 @@ KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku", "fable"})
 DEFAULT_MODEL = "opus"
 
 MANAGER_CLASS = "manager"
+
+# The step a held dispatch lock records; warn there means delivered and NOT woken.
+BUSY_STEP = "lock"
 
 PROVIDER_CLAUDE = session_pointer.CLAUDE
 PROVIDER_CODEX = session_pointer.CODEX
@@ -223,6 +226,14 @@ class DispatchStatus:
             if step[1] == label:
                 return step
         return None
+
+    def busy_detail(self) -> str:
+        """Why the target was not woken because its lock was held, or "" when it was not busy.
+
+        wake_branch returns True there (the mail is delivered); a CLI caller must still say so and fail.
+        """
+        step = self.find_step(BUSY_STEP)
+        return step[2] if step and step[0] == "warn" else ""
 
     @property
     def summary(self) -> str:
@@ -713,10 +724,12 @@ def wake_branch(
             status.fail("lock", f"Active agent (PID {pid}, since {since})")
             logger.warning("[wake] BLOCKED %s — active agent PID %s", email, pid)
             return status, False
-        else:
-            status.info("lock", f"Agent active (PID {pid}) — email routed to inbox")
-            status.info("delivery", "Agent will process email during current session")
-            return status, True
+        # A held lock may be a session woken for other work, or a monitor draining after its agent
+        # exited: neither is promised to read this mail. Delivered, NOT woken, and said so.
+        detail = f"{email} busy (PID {pid}, since {since}) — NOT woken; the mail waits in its inbox"
+        status.warn(BUSY_STEP, detail)
+        logger.warning("[wake] NOT WOKEN %s — dispatch lock held by PID %s since %s", email, pid, since)
+        return status, True
 
     status.ok("lock", "No active lock — agent is sleeping")
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_blocklist.py
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-20
-# Modified: 2026-10-23
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
@@ -84,6 +84,7 @@ class TestOrchestrateWakeBlocklist:
         # wake_branch is imported lazily inside _orchestrate_wake: patch it at the source module.
         status_mock = MagicMock()
         status_mock.format.return_value = ""
+        status_mock.busy_detail.return_value = ""
         wake_return = (status_mock, True)
 
         with (
@@ -125,6 +126,7 @@ class TestOrchestrateWakeBlocklist:
         blocked = MagicMock(return_value=True)
         status_mock = MagicMock()
         status_mock.format.return_value = ""
+        status_mock.busy_detail.return_value = ""
         wake = MagicMock(return_value=(status_mock, True))
         overrides = {
             "aipass.ai_mail.apps.handlers.dispatch.wake.is_wake_blocked": blocked,

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-29
 # Modified: 2026-10-25
 # =============================================
@@ -324,17 +324,36 @@ class TestWakeBranch:
         assert ok is False
         assert any(s[0] == "fail" and "lock" in s[1] for s in status.steps)
 
-    def test_lock_exists_auto_false_delivers_to_inbox(self, tmp_path, monkeypatch):
-        """Lock active + auto=False returns info + True (routed to inbox)."""
+    def test_a_held_lock_warns_not_woken_logs_it_and_promises_nothing(self, tmp_path, monkeypatch):
+        """15:17:08 @seedgo: a live lock printed an info row, logged nothing, and the mail was never read."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
             check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
             clean_zombies=lambda: 0,
         )
+        log = MagicMock()
+        monkeypatch.setattr(wake_mod, "logger", log)
+        calls = _record_spawn_routes(monkeypatch)
+
         status, ok = wake_branch("@testbranch", auto=False)
-        assert ok is True
-        assert any(s[0] == "info" and "delivery" in s[1] for s in status.steps)
+
+        assert ok is True, "the mail is delivered; the bool still means 'did what it should'"
+        assert calls["popen"] == []
+        assert status.busy_detail() == (
+            "@testbranch busy (PID 111, since 2026-01-01T00:00:00) — NOT woken; the mail waits in its inbox"
+        )
+        assert status.find_step("delivery") is None, "no promise that the running session reads it"
+        assert any("NOT WOKEN" in c.args[0] for c in log.warning.call_args_list)
+
+    def test_a_free_lock_leaves_no_busy_detail(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True and status.busy_detail() == ""
 
     def test_branch_occupied_blocks(self, tmp_path, monkeypatch):
         """Interactive session running -> blocked."""

@@ -160,7 +160,7 @@
       "file": "apps/modules/dispatch.py",
       "standard": "logged_fallback",
       "lines": [
-        367
+        369
       ],
       "reason": "Same CLI handler contract (ai_mail, fleet green legs 9 and 10): 326 is the send phase failing to resolve the sender, which has already called error() (mark_command_failed). True tells the router the command was recognised."
     },
@@ -189,7 +189,7 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        363
+        374
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 11; re-lined in legs 13 and 16): is_manager's FileNotFoundError arm answers False because a branch with no passport has declared no class, which is what wake_branch's manager gate also does for a missing passport (pinned: test_missing_passport_continues). A passport that exists but cannot be read is the other arm, and since leg 11 it fails closed (True) under @devpulse's ruling e; since leg 12 an unreadable registry fails closed too."
     },
@@ -274,8 +274,8 @@
       "file": "apps/handlers/dispatch/wake.py",
       "standard": "logged_fallback",
       "lines": [
-        288,
-        309
+        299,
+        320
       ],
       "reason": "The value is the true answer (ai_mail, fleet green leg 12; re-lined in legs 13 and 16). 362 and 386: _spawn_in_systemd_scope documents False as 'fall back to direct Popen', the same as a non-zero systemd-run, and its caller 1166 does exactly that."
     },
