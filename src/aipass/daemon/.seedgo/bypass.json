@@ -67,7 +67,7 @@
     {
       "file": "apps/handlers/schedule/command_job.py",
       "standard": "logged_fallback",
-      "lines": [99],
+      "lines": [106],
       "reason": "command_job_problem (daemon, fleet green leg 5): only ValueError is caught, and command_argv raises ValueError on purpose as its refusal, with a message that is never empty; every other exception, the 'check broke' case, propagates. So the string is the refusal reason, the same kind as every other return of the function, and the caller refuses the job and names why."
     },
     {

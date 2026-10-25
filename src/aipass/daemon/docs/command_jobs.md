@@ -33,6 +33,7 @@ one call covers every branch. The slot names a Sunday, 04:00. The live file's `_
 |-------|----------|---------|
 | `command` | yes, instead of `prompt` | One drone command line. `drone` must be the first token. |
 | `timeout_seconds` | no, default **600** | A positive whole number. When it runs out, the command's whole process tree is stopped and the fire is FAILED. 600 matches drone's own executor default. |
+| `ok_exit_codes` | no, default none | A list of non-zero exit codes (1 to 255) the owner counts as a pass, e.g. `[6]` for "budget spent, progress recorded". Such an exit is `fired` and its finish mail says passed; the exit code still shows. A timeout is never a pass. |
 | `notify` | no | `{"email": "@devpulse"}` sends an ai_mail **email** (never a wake) on start and on finish. `true` and `false` are accepted and send nothing. |
 | `wake` | ignored | A command job wakes nobody. Discovery drops the block and logs a warning if one is present. |
 
@@ -55,7 +56,7 @@ one call covers every branch. The slot names a Sunday, 04:00. The live file's `_
 - **Never a rotation.** A rotation wakes tonight's citizen on the roster. A command wakes nobody,
   so the two cannot be combined, and the combination is refused.
 
-**What a fire records.** Exit 0 is `fired`. A non-zero exit, a timeout, or a command that could
+**What a fire records.** Exit 0, or a code listed in `ok_exit_codes`, is `fired`. Any other exit, a timeout, or a command that could
 not start is `failed`, with the detail `exit 2, 0.4s — <last lines of output>`. A command job is
 **never** `blocked`: no seat is in use, so no gate can refuse it, and it never takes the
 active-agent lock. The runstate row is exactly a wake job's row (`last_run`, `last_status`,

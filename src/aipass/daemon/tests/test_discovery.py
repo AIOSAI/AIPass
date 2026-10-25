@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -231,6 +231,15 @@ class TestCommandJobValidation:
     @pytest.mark.parametrize("notify", [True, False, {"email": "@devpulse"}])
     def test_a_good_notify_is_accepted(self, notify, one_branch):
         assert discovered_ids(one_branch, command_job(notify=notify)) == ["keep", "sweep"]
+
+    @pytest.mark.parametrize("codes", [6, [0], [256], [True], ["6"], [6.0]])
+    def test_bad_ok_exit_codes_are_refused(self, codes, one_branch, caplog):
+        with caplog.at_level("WARNING"):
+            assert discovered_ids(one_branch, command_job(ok_exit_codes=codes)) == ["keep"]
+        assert "ok_exit_codes must be a list of exit codes from 1 to 255" in caplog.text
+
+    def test_listed_ok_exit_codes_are_accepted(self, one_branch):
+        assert discovered_ids(one_branch, command_job(ok_exit_codes=[6, 255])) == ["keep", "sweep"]
 
     def test_a_wake_block_is_ignored_with_a_warning(self, one_branch, caplog):
         """Mutant killed: the 'wake block ignored' warning removed from _validate_job."""
