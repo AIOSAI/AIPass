@@ -23,6 +23,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.daemon.apps.handlers.schedule.command_job import ok_exit_codes_for
 from aipass.daemon.apps.handlers.schedule import discovery
 from aipass.memory.apps.modules import fleet
 from aipass.daemon.apps.handlers.schedule.discovery import (
@@ -238,8 +239,10 @@ class TestCommandJobValidation:
             assert discovered_ids(one_branch, command_job(ok_exit_codes=codes)) == ["keep"]
         assert "ok_exit_codes must be a list of exit codes from 1 to 255" in caplog.text
 
-    def test_listed_ok_exit_codes_are_accepted(self, one_branch):
+    def test_listed_ok_exit_codes_are_accepted_and_reach_the_fire(self, one_branch):
         assert discovered_ids(one_branch, command_job(ok_exit_codes=[6, 255])) == ["keep", "sweep"]
+        sweep = next(job for job in discover_jobs() if job["id"] == "sweep")
+        assert ok_exit_codes_for(sweep) == (6, 255), "discovery must carry the field the fire reads"
 
     def test_a_wake_block_is_ignored_with_a_warning(self, one_branch, caplog):
         """Mutant killed: the 'wake block ignored' warning removed from _validate_job."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.5.1
+# Version: 2.5.2
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -303,6 +303,8 @@ def _jobs_for_citizen(citizen: dict, skipped_owners: set) -> List[dict]:
                 entry.update(command=job["command"], branch_path=str(citizen["path"]), wake={})
                 if "timeout_seconds" in job:
                     entry["timeout_seconds"] = job["timeout_seconds"]
+                if "ok_exit_codes" in job:
+                    entry["ok_exit_codes"] = job["ok_exit_codes"]
             else:
                 entry["prompt"] = job["prompt"]
             if "notify" in job:
