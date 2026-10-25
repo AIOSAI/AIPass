@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.0.5
+# Version: 1.1.0
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -60,6 +60,49 @@ class TestResolveSessionPid:
         me = os.getpid()
         with patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == me):
             assert cc_sessions.resolve_session_pid() == me
+
+
+class TestProcessReaders:
+    """process_args, cli_ancestor and the Codex line in resolve_session_pid; the chain is faked, no CLI is started."""
+
+    def _chain(self, argvs):
+        me = os.getpid()
+        pids = [me + i for i in range(len(argvs))]
+        ppid_map = dict(zip(pids, pids[1:], strict=False))
+        return (
+            patch.object(cc_sessions, "_has_session_file", return_value=False),
+            patch.object(cc_sessions, "_get_ppid_portable", side_effect=lambda p: ppid_map.get(p)),
+            patch.object(cc_sessions, "process_args", side_effect=lambda p: argvs[pids.index(p)]),
+        )
+
+    def test_this_process_args_name_its_interpreter(self):
+        args = cc_sessions.process_args(os.getpid())
+        assert args is not None
+        assert args[0] == sys.argv[0] or "python" in Path(args[0]).name
+
+    def test_an_absent_process_answers_none(self):
+        assert cc_sessions.process_args(2**22 + 12345) is None
+
+    def test_cli_ancestor_returns_the_nearest_named_program(self):
+        chain = [["python", "x.py"], ["/home/u/.local/bin/claude", "-p", "Hi."], ["systemd", "--user"]]
+        a, b, c = self._chain(chain)
+        with a, b, c:
+            assert cc_sessions.cli_ancestor("claude") == ["/home/u/.local/bin/claude", "-p", "Hi."]
+            assert cc_sessions.cli_ancestor("codex") is None
+
+    def test_a_codex_chain_logs_one_debug_line_and_no_info(self, caplog):
+        a, b, c = self._chain([["python", "codex.py"], ["/x/bin/codex", "exec"], ["systemd"]])
+        with a, b, c, patch.object(cc_sessions.logger, "debug") as debug:
+            assert cc_sessions.resolve_session_pid() is None
+        assert "No session-file ancestor found" not in caplog.text
+        assert debug.call_count == 1
+        assert "Codex session, no Claude session file" in debug.call_args.args[0]
+
+    def test_a_chain_without_codex_still_logs_info(self, caplog):
+        a, b, c = self._chain([["python", "claude.py"], ["bash"], ["systemd"]])
+        with a, b, c:
+            assert cc_sessions.resolve_session_pid() is None
+        assert "No session-file ancestor found" in caplog.text
 
 
 class TestHasSessionFile:

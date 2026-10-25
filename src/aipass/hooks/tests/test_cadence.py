@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.9.0
+# Version: 1.10.0
 # Description: Tests for cadence module (DPLAN-0200): the fire decision; regroup and counter in test_cadence_regroup.py
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-10-22
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/cadence.py: the fire decision."""
@@ -772,6 +772,11 @@ class TestTurnToken:
         assert cadence.turn_token({"transcript_path": str(empty)}) == 0
         assert cadence.turn_token({"transcript_path": str(tmp_path / "missing.jsonl")}) == -1
         assert cadence.turn_token({}) == -1
+
+    def test_a_missing_transcript_at_turn_zero_logs_no_info_line(self, tmp_path, caplog):
+        caplog.set_level("DEBUG")
+        assert cadence.turn_token({"transcript_path": str(tmp_path / "missing.jsonl")}) == -1
+        assert not [r for r in caplog.records if r.levelname == "INFO" and "transcript" in r.getMessage()]
 
     def test_two_unmeasurable_turns_in_a_row_still_count(self, tmp_path):
         state_file = _write_state(tmp_path, turn=3, token=-1)

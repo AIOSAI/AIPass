@@ -1403,13 +1403,13 @@
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
-      "lines": [141, 169, 175, 178, 181, 204, 279],
+      "lines": [191, 219, 225, 228, 231, 254, 329],
       "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
     },
     {
       "file": "apps/modules/cadence.py",
       "standard": "logged_fallback",
-      "lines": [288, 440, 445, 532, 714, 799, 856, 940],
+      "lines": [291, 443, 448, 535, 717, 802, 859, 943],
       "reason": "Fleet green leg 5: cadence decides which turn an injector fires on and guards no write. On doubt each answers its documented empty value (turn 0, 'never fired', not grounded, nothing pending), logged: the worst case is a grounding block early, late or twice, never a write let through."
     },
     {

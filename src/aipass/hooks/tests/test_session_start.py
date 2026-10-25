@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
@@ -22,6 +22,7 @@ from unittest.mock import patch
 import pytest
 
 import aipass.hooks.apps.modules.cadence as cadence_mod
+import aipass.hooks.apps.modules.cc_sessions as cc_sessions_mod
 from aipass.hooks.apps.handlers.lifecycle.session_start import handle, handle_culture, handle_session_pointer
 from aipass.hooks.apps.modules.cadence import should_fire
 
@@ -39,14 +40,49 @@ def _pointer(branch) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def _rollout(tmp_path, source: str) -> str:
+    """A Codex rollout whose first line is session_meta, as the SessionStart hook finds it."""
+    path = tmp_path / "rollout.jsonl"
+    meta = {"type": "session_meta", "payload": {"id": "s-codex", "source": source}}
+    path.write_text(json.dumps(meta) + "\n", encoding="utf-8")
+    return str(path)
+
+
+@pytest.fixture
+def claude_argv(monkeypatch):
+    """Stand in for the process walk: the argv of the nearest `claude` ancestor (an interactive one by default)."""
+    argv = {"args": ["/home/u/.local/bin/claude", "--resume", "s-claude"]}
+    monkeypatch.setattr(cc_sessions_mod, "cli_ancestor", lambda name: argv["args"] if name == "claude" else None)
+    return argv
+
+
+@pytest.mark.usefixtures("claude_argv")
 class TestSessionPointer:
     def test_a_codex_session_start_records_the_session_and_codex(self, tmp_path):
         branch = _branch(tmp_path)
-        hook_data = {"session_id": "s-codex", "source": "startup", "cwd": str(branch), "provider": "codex"}
+        hook_data = {
+            "session_id": "s-codex",
+            "source": "startup",
+            "cwd": str(branch),
+            "provider": "codex",
+            "transcript_path": _rollout(tmp_path, "cli"),
+        }
         assert handle_session_pointer(hook_data) == {"stdout": "", "exit_code": 0}
         pointer = _pointer(branch)
         assert pointer is not None
         assert (pointer["session_id"], pointer["provider"], pointer["set_by"]) == ("s-codex", "codex", "session-start")
+
+    def test_a_codex_exec_session_writes_no_pointer(self, tmp_path):
+        branch = _branch(tmp_path)
+        hook_data = {"session_id": "s-codex", "cwd": str(branch), "provider": "codex"}
+        handle_session_pointer({**hook_data, "transcript_path": _rollout(tmp_path, "exec")})
+        assert _pointer(branch) is None
+
+    def test_an_unreadable_codex_rollout_writes_no_pointer(self, tmp_path):
+        branch = _branch(tmp_path)
+        hook_data = {"session_id": "s-codex", "cwd": str(branch), "provider": "codex"}
+        handle_session_pointer({**hook_data, "transcript_path": str(tmp_path / "missing.jsonl")})
+        assert _pointer(branch) is None
 
     def test_a_payload_naming_no_provider_records_claude(self, tmp_path):
         branch = _branch(tmp_path)
@@ -54,6 +90,19 @@ class TestSessionPointer:
         pointer = _pointer(branch)
         assert pointer is not None
         assert (pointer["session_id"], pointer["provider"]) == ("s-claude", "claude")
+
+    @pytest.mark.parametrize("flag", ["-p", "--print"])
+    def test_a_headless_claude_session_writes_no_pointer(self, tmp_path, claude_argv, flag):
+        claude_argv["args"] = ["/home/u/.local/bin/claude", "--resume", "s-claude", flag, "Hi."]
+        branch = _branch(tmp_path)
+        handle_session_pointer({"session_id": "s-claude", "source": "resume", "cwd": str(branch)})
+        assert _pointer(branch) is None
+
+    def test_no_claude_ancestor_writes_no_pointer(self, tmp_path, claude_argv):
+        claude_argv["args"] = None
+        branch = _branch(tmp_path)
+        handle_session_pointer({"session_id": "s-claude", "source": "startup", "cwd": str(branch)})
+        assert _pointer(branch) is None
 
     def test_a_compact_leaves_the_pointer_alone(self, tmp_path):
         branch = _branch(tmp_path)

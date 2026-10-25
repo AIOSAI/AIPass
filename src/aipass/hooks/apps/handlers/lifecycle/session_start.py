@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -15,6 +15,7 @@ compact (PreCompact reset already; twice re-arms the regroup token).
 """
 
 import importlib
+import json
 import os
 from pathlib import Path
 
@@ -52,6 +53,24 @@ def handle_culture(hook_data: dict) -> dict:
     return {"stdout": culture.read_text(encoding="utf-8"), "exit_code": 0}
 
 
+def _interactive(provider: str, hook_data: dict) -> bool:
+    """Whether a person runs this session: Codex's rollout session_meta source is not "exec", Claude's argv has no -p.
+
+    Unreadable answers False: a missed pointer costs a resume, a headless one reopens a chat nobody sits in."""
+    if provider == "codex":
+        try:
+            with open(hook_data.get("transcript_path") or "", encoding="utf-8") as fh:
+                meta = json.loads(fh.readline())
+        except (OSError, ValueError) as exc:
+            logger.info("[HOOKS] session_start: codex rollout unreadable: %s", exc)
+            return False
+        source = meta.get("payload", {}).get("source") if isinstance(meta, dict) else None
+        return isinstance(source, str) and source != "exec"
+    sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+    args = sessions.cli_ancestor("claude")
+    return args is not None and not {"-p", "--print"} & set(args[1:])
+
+
 def handle_session_pointer(hook_data: dict) -> dict:
     """Record this session as the branch's resume target, with the CLI running it, so a resume reopens that CLI.
 
@@ -64,6 +83,9 @@ def handle_session_pointer(hook_data: dict) -> dict:
     if not (branch / ".trinity" / "passport.json").is_file():
         return {"stdout": "", "exit_code": 0}
     provider = hook_data.get("provider") or "claude"
+    if not _interactive(provider, hook_data):
+        logger.info("[HOOKS] session_start: headless %s session %s, pointer left as is", provider, session_id)
+        return {"stdout": "", "exit_code": 0}
     try:
         door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
         written = door.write_pointer(branch, session_id, "session-start", provider=provider)

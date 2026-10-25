@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
@@ -90,6 +90,12 @@ class TestReadLatestUsage:
     def test_returns_none_for_missing_file(self, tmp_path):
         usage = read_latest_usage(str(tmp_path / "nope.jsonl"))
         assert usage is None
+
+    def test_a_missing_transcript_at_turn_zero_logs_no_info_line(self, tmp_path, caplog):
+        caplog.set_level("DEBUG")
+        assert read_latest_usage(str(tmp_path / "nope.jsonl")) is None
+        assert read_latest_model(str(tmp_path / "nope.jsonl")) == ""
+        assert not [r for r in caplog.records if r.levelname == "INFO" and "transcript" in r.getMessage()]
 
     def test_returns_none_for_empty_path(self):
         assert read_latest_usage("") is None

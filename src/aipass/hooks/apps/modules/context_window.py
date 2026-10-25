@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Shared transcript reader (usage + model) and model-aware compact-window resolver (DPLAN-0253)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Live context fill and the model from a session transcript, and the window Claude Code runs.
@@ -121,6 +121,9 @@ def read_latest_usage(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> di
     """Tail a transcript JSONL and return the most recent assistant message's usage dict."""
     try:
         message = _latest_assistant_message(transcript_path, lambda m: isinstance(m.get("usage"), dict), tail_bytes)
+    except FileNotFoundError:
+        logger.debug("[HOOKS] context_window: no transcript yet (turn 0): %s", transcript_path)
+        return None
     except OSError as exc:
         logger.info("[HOOKS] context_window: transcript read failed: %s", exc)
         return None
@@ -137,6 +140,9 @@ def read_latest_model(transcript_path: str, tail_bytes: int = _TAIL_BYTES) -> st
     """The model id of the most recent assistant turn, or "" when the transcript names none."""
     try:
         message = _latest_assistant_message(transcript_path, _is_real_model, tail_bytes)
+    except FileNotFoundError:
+        logger.debug("[HOOKS] context_window: no transcript yet (turn 0): %s", transcript_path)
+        return ""
     except OSError as exc:
         logger.info("[HOOKS] context_window: transcript read failed: %s", exc)
         return ""

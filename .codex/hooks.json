@@ -217,6 +217,15 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py SessionStart:session_pointer",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
