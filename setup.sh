@@ -931,6 +931,18 @@ else
         echo "  AIPASS_HOME already in $PROFILE"
     fi
 
+    # ~/.bashrc returns early when not interactive; ~/.profile reaches every login shell (Codex's shell snapshot, cron).
+    if [ "$IS_MACOS" -eq 0 ] && [ -f "$HOME/.profile" ]; then
+        if ! grep -q "AIPASS_HOME" "$HOME/.profile" 2>/dev/null; then
+            echo "" >> "$HOME/.profile"
+            echo "# AIPass — cross-project access (login shells, interactive or not)" >> "$HOME/.profile"
+            echo "export AIPASS_HOME=\"$SCRIPT_DIR\"" >> "$HOME/.profile"
+            echo "  AIPASS_HOME added to $HOME/.profile"
+        else
+            echo "  AIPASS_HOME already in $HOME/.profile"
+        fi
+    fi
+
     # Mac: ensure ~/.local/bin is on PATH so the drone symlink resolves.
     # Linux already symlinks into /usr/local/bin (already on PATH everywhere).
     if [ "$IS_MACOS" -eq 1 ]; then

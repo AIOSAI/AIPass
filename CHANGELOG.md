@@ -14,6 +14,8 @@ PyPI version — not the changelog header.
 ### Added
 
 - **ai_mail**: `dispatch --provider codex [--model <slug>]` wakes a branch on the Codex CLI (`codex exec --json`, or `codex exec resume <thread_id>` when the branch's pointer names a Codex thread) through the same monitor, lock, register row and wake-back as a Claude wake. The session pointer and the register row carry `provider`; a pointer for the other provider starts fresh. The monitor reads startup from the live stream, the thread id from `thread.started` and the result from the last `agent_message`; an `error` event or a run with no `turn.completed` bounces and is not re-run. `--model` is passed to Codex verbatim; none means Codex's own config. Codex hooks ride the repo `.codex/hooks.json` written from the manifest's `cli.codex` rows (the hand scripts it replaced rest in `.codex/hooks/.archive/`).
+- **hooks**: `SessionStart:session_pointer` records every interactive session as its branch's resume target, with the CLI that runs it: the Codex bridge tags each payload `provider: codex`, a payload without the tag is Claude's, a `compact` start leaves the pointer alone, a cwd without a passport writes nothing. Rows in `.aipass/hooks.json` and in both manifest `cli` blocks.
+- **commands**: `/codex` (Claude Code) and `$claude` (Codex skill) move a chat to the other CLI in one turn: memories saved, the live thread written to `.ai_mail.local/handoff.md`, and the tmux pane respawned with the other CLI greeted by the handoff. The pane is found by walking the shell's ancestry, else by command and path (Codex runs its shells from a daemon, not the pane). `setup.sh` also exports `AIPASS_HOME` in `~/.profile`, which every login shell, Codex's daemon included, reads.
 
 ### Fixed
 
