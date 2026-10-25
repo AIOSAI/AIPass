@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Codex bridge.
@@ -30,6 +30,8 @@ GUARDED_EVENTS = frozenset({"PreToolUse"})
 
 PATCH_TOOL = "apply_patch"
 
+PROVIDER = "codex"
+
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 ADD, UPDATE, DELETE = "*** Add File: ", "*** Update File: ", "*** Delete File: "
@@ -43,13 +45,16 @@ BROKEN = (
 
 
 def _normalize_stdin(stdin_data: str) -> str:
-    """Remap Codex field names to engine-expected names."""
+    """Remap Codex field names to engine-expected names, and name the provider (a payload without one is Claude's)."""
     if not stdin_data.strip():
         return stdin_data
     try:
         parsed = json.loads(stdin_data)
+        if not isinstance(parsed, dict):
+            return stdin_data
         if "input" in parsed and "tool_input" not in parsed:
             parsed["tool_input"] = parsed.pop("input")
+        parsed.setdefault("provider", PROVIDER)
         return json.dumps(parsed)
     except (json.JSONDecodeError, TypeError) as exc:
         logger.info("[HOOKS:codex] stdin normalization failed: %s", exc)

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.1.0
-# Description: Tests for the SessionStart handlers: cadence reset and the culture file
+# Version: 1.2.0
+# Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -22,10 +22,53 @@ from unittest.mock import patch
 import pytest
 
 import aipass.hooks.apps.modules.cadence as cadence_mod
-from aipass.hooks.apps.handlers.lifecycle.session_start import handle, handle_culture
+from aipass.hooks.apps.handlers.lifecycle.session_start import handle, handle_culture, handle_session_pointer
 from aipass.hooks.apps.modules.cadence import should_fire
 
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
+
+
+def _branch(tmp_path):
+    (tmp_path / ".trinity").mkdir()
+    (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    return tmp_path
+
+
+def _pointer(branch) -> dict | None:
+    path = branch / ".ai_mail.local" / "session.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+class TestSessionPointer:
+    def test_a_codex_session_start_records_the_session_and_codex(self, tmp_path):
+        branch = _branch(tmp_path)
+        hook_data = {"session_id": "s-codex", "source": "startup", "cwd": str(branch), "provider": "codex"}
+        assert handle_session_pointer(hook_data) == {"stdout": "", "exit_code": 0}
+        pointer = _pointer(branch)
+        assert pointer is not None
+        assert (pointer["session_id"], pointer["provider"], pointer["set_by"]) == ("s-codex", "codex", "session-start")
+
+    def test_a_payload_naming_no_provider_records_claude(self, tmp_path):
+        branch = _branch(tmp_path)
+        handle_session_pointer({"session_id": "s-claude", "source": "resume", "cwd": str(branch)})
+        pointer = _pointer(branch)
+        assert pointer is not None
+        assert (pointer["session_id"], pointer["provider"]) == ("s-claude", "claude")
+
+    def test_a_compact_leaves_the_pointer_alone(self, tmp_path):
+        branch = _branch(tmp_path)
+        handle_session_pointer({"session_id": "s1", "source": "compact", "cwd": str(branch)})
+        assert _pointer(branch) is None
+
+    def test_no_passport_means_no_branch_and_no_write(self, tmp_path):
+        handle_session_pointer({"session_id": "s1", "source": "startup", "cwd": str(tmp_path)})
+        assert _pointer(tmp_path) is None
+
+    @pytest.mark.parametrize("session_id", ["", None, 7])
+    def test_no_usable_session_id_writes_nothing(self, tmp_path, session_id):
+        branch = _branch(tmp_path)
+        handle_session_pointer({"session_id": session_id, "source": "startup", "cwd": str(branch)})
+        assert _pointer(branch) is None
 
 
 class TestCulture:

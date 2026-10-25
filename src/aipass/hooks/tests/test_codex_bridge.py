@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/bridges/codex.py."""
@@ -77,16 +77,24 @@ class TestNormalizeStdin:
     def test_remaps_input_to_tool_input(self, bridge, tmp_path):
         file_path = str(tmp_path / "x.py")
         bridge.run("PreToolUse", {"tool_name": "Edit", "input": {"file_path": file_path}})
-        assert bridge.calls == [{"tool_name": "Edit", "tool_input": {"file_path": file_path}}]
+        assert bridge.calls == [{"tool_name": "Edit", "tool_input": {"file_path": file_path}, "provider": "codex"}]
 
     def test_preserves_existing_tool_input(self, bridge, tmp_path):
         payload = {"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "x.py")}}
         bridge.run("PreToolUse", payload)
-        assert bridge.calls == [payload]
+        assert bridge.calls == [{**payload, "provider": "codex"}]
 
     def test_no_clobber_when_both_present(self, bridge):
         bridge.run("PreToolUse", {"tool_input": {"a": 1}, "input": {"b": 2}})
-        assert bridge.calls == [{"tool_input": {"a": 1}, "input": {"b": 2}}]
+        assert bridge.calls == [{"tool_input": {"a": 1}, "input": {"b": 2}, "provider": "codex"}]
+
+    def test_every_payload_names_codex_as_its_provider(self, bridge):
+        bridge.run("SessionStart", {"session_id": "s1", "source": "startup"})
+        assert bridge.calls == [{"session_id": "s1", "source": "startup", "provider": "codex"}]
+
+    def test_a_provider_the_payload_already_names_is_kept(self, bridge):
+        bridge.run("SessionStart", {"session_id": "s1", "provider": "other"})
+        assert bridge.calls[0]["provider"] == "other"
 
     def test_whitespace_stdin_reaches_the_engine_unchanged(self, bridge):
         bridge.run("Stop", "   ")
@@ -208,7 +216,7 @@ class TestApplyPatchMapping:
     def test_a_bash_call_reaches_the_engine_unchanged(self, bridge, tmp_path):
         payload = {"cwd": str(tmp_path), "tool_name": "Bash", "tool_input": {"command": "ls"}}
         bridge.run("PreToolUse", payload)
-        assert bridge.calls == [payload]
+        assert bridge.calls == [{**payload, "provider": "codex"}]
 
     def test_per_file_contexts_merge_into_one_document(self, bridge, tmp_path):
         bridge.answers["Write"] = ("lint fixed in new.py", 0)

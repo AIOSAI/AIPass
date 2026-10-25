@@ -221,6 +221,12 @@
       "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle_culture",
       "matcher": "",
       "timeout": 30
+    },
+    "session_pointer": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle_session_pointer",
+      "matcher": "",
+      "timeout": 30
     }
   }
 }
