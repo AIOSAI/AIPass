@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-10-05
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -73,6 +73,18 @@ def _verify(tmp_path, provider: dict, project: dict) -> dict:
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"hooks": {**_PRETOOL, **provider}}), encoding="utf-8")
     return wire_verify.verify_wiring(provider_path=settings, project_config={"hooks_enabled": True, **project})
+
+
+def _codex_file(tmp_path, *event_args: str):
+    """A project .codex/hooks.json wiring each Event[:hook] through the Codex bridge."""
+    hooks: dict = {}
+    for arg in event_args:
+        entry = _provider_entry(arg)
+        entry["hooks"][0]["command"] = entry["hooks"][0]["command"].replace("claude.py", "codex.py")
+        hooks.setdefault(arg.split(":", 1)[0], []).append(entry)
+    path = tmp_path / "codex_hooks.json"
+    path.write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
+    return path
 
 
 def _never_fires(event: str, hook: str) -> str:
@@ -350,15 +362,46 @@ class TestReadProviderHooks:
         }
 
 
+class TestCodexOnlyHandlers:
+    def _verify(self, tmp_path, codex_path):
+        settings = tmp_path / "settings.json"
+        provider = {**_PRETOOL, "SessionStart": [_provider_entry("SessionStart:cadence_reset")]}
+        settings.write_text(json.dumps({"hooks": provider}), encoding="utf-8")
+        project = {"hooks_enabled": True, "SessionStart": {"cadence_reset": _ENABLED, "culture": _ENABLED}}
+        return wire_verify.verify_wiring(provider_path=settings, project_config=project, codex_path=codex_path)
+
+    def test_a_handler_wired_only_in_the_codex_file_is_wired_not_an_error(self, tmp_path):
+        result = self._verify(tmp_path, _codex_file(tmp_path, "SessionStart:culture"))
+        assert result["errors"] == []
+        assert "SessionStart:culture: wired for Codex only" in result["info"]
+
+    def test_a_handler_in_neither_provider_still_never_fires(self, tmp_path):
+        result = self._verify(tmp_path, _codex_file(tmp_path, "SessionStart:cadence_reset"))
+        assert result["errors"] == [_never_fires("SessionStart", "culture")]
+
+    def test_a_claude_bridge_row_in_the_codex_file_does_not_count(self, tmp_path):
+        codex_path = tmp_path / "codex_hooks.json"
+        claude_row = {"SessionStart": [_provider_entry("SessionStart:culture")]}
+        codex_path.write_text(json.dumps({"hooks": claude_row}), encoding="utf-8")
+        assert self._verify(tmp_path, codex_path)["errors"] == [_never_fires("SessionStart", "culture")]
+
+    def test_no_codex_file_is_claude_only(self, tmp_path):
+        result = self._verify(tmp_path, tmp_path / "missing.json")
+        assert result["errors"] == [_never_fires("SessionStart", "culture")]
+
+
 class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
 
-    def test_routes_verify(self, capsys):
+    def test_routes_verify_with_the_projects_codex_file(self, capsys, tmp_path):
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
-        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
+        with (
+            patch.object(wire_verify, "locate_config", return_value=("AIPASS", tmp_path)),
+            patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify,
+        ):
             assert wire_verify.handle_command("verify", []) is True
-        mock_verify.assert_called_once_with()
+        mock_verify.assert_called_once_with(codex_path=tmp_path / ".codex" / "hooks.json")
         err = capsys.readouterr().err
         assert "Wire check passed" in err
         assert "0 errors, 0 warnings" in err
@@ -393,9 +436,12 @@ class TestHandleCommand:
     def test_clean_run_does_not_exit(self, capsys):
         """The passing path must stay a normal return — only ERROR findings exit."""
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
-        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
+        with (
+            patch.object(wire_verify, "locate_config", return_value=("NONE", None)),
+            patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify,
+        ):
             assert wire_verify.handle_command("verify", []) is True
-        mock_verify.assert_called_once_with()
+        mock_verify.assert_called_once_with(codex_path=None)
         err = capsys.readouterr().err
         assert "Wire check passed" in err
         assert "cosmetic" in err

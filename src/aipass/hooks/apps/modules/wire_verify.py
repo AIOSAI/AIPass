@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
 
 Cross-checks ~/.claude/settings.json (provider hooks) against
-.aipass/hooks.json (project hook config). Detects:
+.aipass/hooks.json (project hook config). A per-handler entry wired only in the
+project's .codex/hooks.json (a Codex-only handler) counts as wired. Detects:
   - Empty provider hook arrays (event key exists but nothing fires)
   - Enabled handlers with no provider bridge entry (handler never dispatched)
   - Duplicate provider entries (handler fires multiple times)
@@ -30,7 +31,7 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
-from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config, locate_config
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -41,6 +42,7 @@ HELP_COMMANDS = [
 ]
 
 _BRIDGE_MARKER = "bridges/claude.py"
+_CODEX_MARKER = "bridges/codex.py"
 _META_KEYS = frozenset({"_comment", "hooks_enabled"})
 
 
@@ -55,18 +57,18 @@ def _read_provider_hooks(path=None):
         return {}
 
 
-def _extract_bridge_arg(entry):
+def _extract_bridge_arg(entry, marker=_BRIDGE_MARKER):
     """Extract the bridge event arg from a provider entry's command string.
 
     Returns e.g. 'UserPromptSubmit:tier0_kernel' or 'Stop', or None if not a bridge entry.
     """
     for hook in entry.get("hooks", []):
         cmd = hook.get("command", "")
-        if _BRIDGE_MARKER not in cmd:
+        if marker not in cmd:
             continue
         parts = cmd.split()
         for i, part in enumerate(parts):
-            if part.endswith("claude.py") or _BRIDGE_MARKER in part:
+            if part.endswith(marker.rsplit("/", 1)[-1]) or marker in part:
                 if i + 1 < len(parts):
                     return parts[i + 1]
     return None
@@ -100,7 +102,20 @@ def _build_provider_index(provider_hooks, errors):
     return index
 
 
-def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info):
+def _codex_wired(codex_path) -> frozenset[str]:
+    """Every ``Event:hook`` a Codex hooks.json sends through the Codex bridge; none when there is no file."""
+    if codex_path is None or not Path(codex_path).is_file():
+        return frozenset()
+    wired: set[str] = set()
+    for entries in _read_provider_hooks(codex_path).values():
+        for entry in entries:
+            arg = _extract_bridge_arg(entry, _CODEX_MARKER)
+            if arg:
+                wired.add(arg)
+    return frozenset(wired)
+
+
+def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, codex_wired=frozenset()):
     """Check one project config event against its provider index entry."""
     enabled_hooks = {
         name: defn for name, defn in hooks_group.items() if isinstance(defn, dict) and defn.get("enabled", False)
@@ -127,6 +142,9 @@ def _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info):
     else:
         for hook_name, hook_defn in enabled_hooks.items():
             if hook_name not in filtered:
+                if f"{event_type}:{hook_name}" in codex_wired:
+                    info.append(f"{event_type}:{hook_name}: wired for Codex only")
+                    continue
                 errors.append(
                     f"{event_type}:{hook_name}: enabled in project config"
                     " but no provider bridge entry — handler never fires"
@@ -171,8 +189,8 @@ def _check_guarded_tools(provider_hooks, errors):
             )
 
 
-def verify_wiring(provider_path=None, project_config=None):
-    """Cross-check provider settings against project hook config.
+def verify_wiring(provider_path=None, project_config=None, codex_path=None):
+    """Cross-check provider settings against project hook config; *codex_path* is the project's .codex/hooks.json.
 
     Returns dict with keys: errors (list), warnings (list), info (list), ok (bool).
     """
@@ -192,12 +210,13 @@ def verify_wiring(provider_path=None, project_config=None):
 
     provider_index = _build_provider_index(provider_hooks, errors)
     _check_guarded_tools(provider_hooks, errors)
+    codex_wired = _codex_wired(codex_path)
 
     for event_type, hooks_group in config.items():
         if event_type in _META_KEYS or not isinstance(hooks_group, dict):
             continue
         pidx = provider_index.get(event_type)
-        _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info)
+        _check_event_wiring(event_type, hooks_group, pidx, errors, warnings, info, codex_wired)
 
     for event in provider_hooks:
         if event not in config and not provider_index.get(event, {}).get("empty"):
@@ -247,7 +266,8 @@ def handle_command(command, args) -> bool:
 
     if not args:
         print_introspection()
-        results = verify_wiring()
+        _, root = locate_config()
+        results = verify_wiring(codex_path=root / ".codex" / "hooks.json" if root else None)
         _render_results(results)
         if not results["ok"]:
             # The --help below promises this. Returning True routes as "handled",
@@ -261,7 +281,7 @@ def handle_command(command, args) -> bool:
         CONSOLE.print()
         CONSOLE.print("  drone @hooks verify     Cross-check provider settings vs project config")
         CONSOLE.print()
-        CONSOLE.print("Reads ~/.claude/settings.json and .aipass/hooks.json,")
+        CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and .codex/hooks.json,")
         CONSOLE.print("verifies every enabled handler has a working provider bridge entry.")
         CONSOLE.print("Exits non-zero on any ERROR finding.")
         return True

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.5.2
+# Version: 1.6.0
 # Created: 2026-07-11
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -11,7 +11,8 @@
 Hooks are strip-and-readd (stale bridge entries go); env, permissions and the
 top-level settings scalars are additive only: a value the user set is reported,
 never overwritten. The manifest is the single source; this file holds no defaults.
-Both doors (setup.sh install, doctor --fix) back up before the write, receipt after.
+``cli.codex`` hooks go whole into the repo's .codex/hooks.json. Both doors (setup.sh,
+doctor --fix) back up before the write, receipt after.
 """
 
 from __future__ import annotations
@@ -350,12 +351,10 @@ def _serialized(settings: dict) -> List[str]:
     return json.dumps(settings, indent=2, ensure_ascii=False).splitlines()
 
 
-def settings_diff(before: dict, after: dict) -> List[str]:
+def settings_diff(before: dict, after: dict, label: str = "settings.json") -> List[str]:
     """A unified diff of the settings as they are against the settings as they would land."""
     return list(
-        difflib.unified_diff(
-            _serialized(before), _serialized(after), "settings.json (now)", "settings.json (after)", lineterm=""
-        )
+        difflib.unified_diff(_serialized(before), _serialized(after), f"{label} (now)", f"{label} (after)", lineterm="")
     )
 
 
@@ -401,6 +400,49 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
     return _make_plan(settings_path, before, settings, actions, DOOR_DOCTOR_FIX, "Updated ~/.claude/settings.json")
 
 
+def codex_hooks_path(manifest_path: Path) -> Path:
+    """The repo's Codex hooks file: ``<repo root>/.codex/hooks.json``, the root taken from the manifest."""
+    return manifest_path.parent.parent / ".codex" / "hooks.json"
+
+
+def codex_hooks_document(manifest: dict) -> Optional[dict]:
+    """The whole Codex hooks file the manifest's ``cli.codex.hooks`` rows make; None when it has none.
+
+    Codex reads Claude's hook shape, so the Claude entry builder serves both.
+    """
+    rows = manifest.get("cli", {}).get("codex", {}).get("hooks", [])
+    if not rows:
+        return None
+    return {"hooks": _build_manifest_hook_entries(rows)}
+
+
+def plan_codex_hooks(manifest_path: Path, door: str = DOOR_DOCTOR_FIX) -> Optional[SettingsPlan]:
+    """Replace ``.codex/hooks.json`` whole (it is AIPass's) to match ``cli.codex``; None when it does.
+
+    No rows plans nothing, rather than empty a file the manifest has not caught up with."""
+    manifest = json_handler.read_json(manifest_path)
+    if manifest is None:
+        return None
+    wanted = codex_hooks_document(manifest)
+    if wanted is None:
+        return None
+    codex_path = codex_hooks_path(manifest_path).resolve()
+    before = _read_settings(codex_path)
+    if before == wanted:
+        return None
+    count = sum(len(entries) for entries in wanted["hooks"].values())
+    return SettingsPlan(
+        codex_path,
+        before,
+        wanted,
+        [f"Wrote {count} Codex hook(s) from cli.codex"],
+        [f"Write {count} Codex hook(s) from cli.codex into {codex_path}"],
+        [],
+        door,
+        f"Updated {codex_path}",
+    )
+
+
 def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent: Optional[str] = None) -> List[str]:
     """Write a plan through its backed-up door: backup, write, receipt. Returns the action lines."""
     actions = list(plan.actions)
@@ -413,12 +455,10 @@ def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent:
 
 
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
-    """Write the manifest's hooks, env, permissions and settings scalars into ~/.claude/settings.json.
+    """Write the manifest's Claude wiring into ~/.claude/settings.json, then cli.codex into .codex/hooks.json.
 
-    setup.sh is the only caller; doctor --fix uses plan_wire_provider, sharing the merge
-    helpers. The scalars land here so a fresh clone is wired from its first session.
-    Raises on an unreadable manifest rather than leave stale wiring in place.
-    """
+    setup.sh is the only caller; doctor --fix plans the same writes. Raises on an
+    unreadable manifest rather than leave stale wiring in place."""
     manifest = json_handler.read_json(manifest_path)
     if manifest is None:
         raise FileNotFoundError(f"provider manifest unreadable: {manifest_path}")
@@ -441,5 +481,8 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
     _write_with_receipt(
         settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks, env, permissions, settings)"
     )
+    codex = plan_codex_hooks(manifest_path, DOOR_SETUP_SH)
+    if codex is not None:
+        actions.extend(apply_settings_plan(codex))
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions

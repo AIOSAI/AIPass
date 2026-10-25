@@ -8,11 +8,12 @@
 modules** in production code —
 
 - [`shared/json_ops.py`](../shared/json_ops.py) (`backup_json`, `deep_merge`,
-  via `spawn/apps/handlers/json_ops.py`),
+  via `spawn/apps/handlers/update_ops.py`),
 - [`shared/project_home.py`](../shared/project_home.py) (`_detect_aipass_home`,
   via `handlers/placeholders.py`),
 - [`shared/registry_discovery.py`](../shared/registry_discovery.py)
-  (`find_registry`, via `handlers/registry.py`).
+  (`find_registry` via `handlers/registry.py`, `registries_in` via
+  `handlers/delete_ops.py`).
 
 This branch's `.seedgo/bypass.json` names the same dependency in its
 `backup_json` rule. The fourth module is

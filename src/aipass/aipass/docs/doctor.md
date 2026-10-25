@@ -73,9 +73,16 @@ The one difference: install re-points `AIPASS_HOME` to the tree being installed,
 and says so; `doctor --fix` never does, so a fix from a second checkout cannot
 take the home from the first (the home-agreement row flags that split).
 
+Codex reads the same hook shape from the repo's `.codex/hooks.json`. Both doors
+write that file from the manifest's `cli.codex.hooks` rows, the repo root taken
+from the manifest's location. The file belongs wholly to AIPass, so it is
+replaced whole rather than merged. A manifest with no `cli.codex` rows leaves
+it as it is. The `codex hooks` row passes when the file holds exactly what the
+rows make, and warns, naming `aipass doctor --fix`, when it is missing or differs.
+
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
-the planned changes, one line each, then a unified diff of the file, and ask
-once: `Apply these N changes to ~/.claude/settings.json? [y/N]`. Anything but
+the planned changes, one line each, then a unified diff per file, and ask
+once: `Apply these N changes to the provider settings? [y/N]`. Anything but
 `y` writes nothing. With no terminal to ask on, `doctor --fix` writes nothing
 and its row says `not applied: no tty — aipass doctor --fix --yes`; `--yes`
 writes without the question. The install tail never asks: it runs inside the
@@ -89,7 +96,8 @@ and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 Before any of these doors writes the personal settings file (`doctor --fix`,
 the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
-`settings.json.<date>T<time>.<door>`. Then, after the write, it adds one line to
+`settings.json.<date>T<time>.<door>`. A write to `.codex/hooks.json` backs up
+to `.codex/.backup/settings/` the same way. Then, after the write, it adds one line to
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
