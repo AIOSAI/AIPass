@@ -79,7 +79,7 @@ When branch raises standards issue (email, dispatch, user relaying):
 
 Before changing checker/standard: prove catches real case AND doesn't catch false positives. Rule: break first, see violation, then fix.
 
-Before reporting a leg, run the touched tests as a clean checkout too: `PYTHONPATH=docs.local python -m pytest <files> -p clean_checkout_probe` hides the git-ignored AIPASS_REGISTRY.json from this process only. A seat green with the marker present is not CI green.
+Before reporting a leg, run the touched tests as a clean checkout too: `PYTHONPATH=tools python -m pytest <files> -p clean_checkout_probe` hides the git-ignored AIPASS_REGISTRY.json from this process only. A seat green with the marker present is not CI green.
 
 When fixing own compliance: eat own dogfood. Seedgo can't pass own audit → nothing else matters.
 

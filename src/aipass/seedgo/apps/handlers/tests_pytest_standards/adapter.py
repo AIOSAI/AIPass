@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapter.py
 # Description: the pytest execution adapter - the 6-function contract
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-29
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """The pytest adapter. Eight functions, two constants, and nothing else.
@@ -176,6 +176,7 @@ def build_env(target: Path, workdir: Path, options: dict) -> envcopy.EnvSpec:
         scope_to_diff=bool(options.get("scope_to_diff")),
         diff_scope_ref=options.get("diff_scope_ref"),
         campaign_budget_seconds=options.get("budget_seconds"),
+        campaign_functions=options.get("campaign_functions"),
     )
 
 
@@ -420,6 +421,9 @@ def _pseudo_tested_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, ob
 
     try:
         sites = gutting.discover_functions(spec.target_copy)
+        if spec.campaign_functions is not None:
+            wanted = set(spec.campaign_functions)
+            sites = [site for site in sites if f"{site.relpath}::{site.qualname}" in wanted]
         campaign = gutting.run_campaign(
             _suite_target(spec),
             sites,

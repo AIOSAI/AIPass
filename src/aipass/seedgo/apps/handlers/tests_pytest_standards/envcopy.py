@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-29
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """The scratch environment a suite is measured inside. Law M10 made concrete.
@@ -106,6 +106,9 @@ class EnvSpec:
     #: The operator's `--budget` for the mutation campaigns; None is each campaign's default.
     campaign_budget_seconds: Optional[int] = None
 
+    #: `relpath::qualname` the pseudo-tested campaign is narrowed to; None probes every function.
+    campaign_functions: Optional[List[str]] = None
+
     @property
     def m10_complete(self) -> bool:
         """True when nothing in this env can write through to the real tree."""
@@ -132,6 +135,7 @@ class EnvSpec:
             # Published so an opted-in run and a default run never produce the same document.
             "execution_groups": list(self.execution_groups),
             "campaign_budget_seconds": self.campaign_budget_seconds,
+            "campaign_functions": self.campaign_functions,
         }
 
 
@@ -401,6 +405,7 @@ def build_env(
     diff_scope_ref: Optional[str] = None,
     scope_to_diff: bool = False,
     campaign_budget_seconds: Optional[int] = None,
+    campaign_functions: Optional[Sequence[str]] = None,
 ) -> EnvSpec:
     """Materialise the scratch env and return how to run pytest inside it."""
     target = target.resolve()
@@ -451,6 +456,7 @@ def build_env(
         execution_groups=normalise_execution_groups(execution_groups),
         diff_scope=scope,
         campaign_budget_seconds=campaign_budget_seconds,
+        campaign_functions=None if campaign_functions is None else list(campaign_functions),
     )
 
     # `m10_complete: false` must be findable later: a write could have reached the real repo.
