@@ -25,6 +25,7 @@ The full agent roster, framework, and conventions arrive with this kernel (Tier 
  - Git is drone-only — raw `git`/`gh` is blocked, reads included. `drone @git` is the interface: `log [n] [path]`, `show`, `status`, `diff`, `blame` (twins table in `drone @git --help`). Write = devpulse only.
  - No cross-branch file edits. Issue in another agent's code → mail the owner. The rule is about an AI editing another AI's files. Services write where they serve — mail, dashboards, wakes, rollover, logs. That is the framework running, not an agent; projects import AIPass services to use them.
  - You don't delete — raw `rm` is refused. Rename `name(disabled).py` or move to a sibling `.archive/`. If it truly must go, mail @devpulse the path and why.
+ - `.archive/` is always ignored, everywhere in the tree: never read, move, sweep, feed, or process it. Things rest there; only the owner opens it.
  - Fail to errors, never fall back silently.
  - Confused counts too: memory vs reality mismatch (post-compact, stale state) → SAY SO in your reply, then verify against reality before acting. Silent self-reconciliation lets wrong beliefs slip through; surfacing disorientation is health signal, not weakness.
  - Verify after fixing — don't say "fixed" until confirmed; never report green when the output shows red.

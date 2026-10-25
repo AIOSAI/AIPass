@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **prompts**: the tier 0 kernel states the standing rule that `.archive/` is ignored everywhere in the tree: never read, moved, swept, fed or processed by any agent or sweep.
+
 ## [2026-10-24] — v2.8.27: the whole fleet's ponytail audit fix-alls, dashboard and registry writes under locks, rollover stores before it trims, the battle test's fixes
 
 ### Fixed
