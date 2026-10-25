@@ -13,7 +13,7 @@ The `dispatch` command sends an email and wakes the target branch in one step. D
 ## Wake Pipeline
 
 1. `dispatch.py` orchestrates: send email via `send_to_single()`, then wake via `wake_branch()`
-2. `wake.py` resolves the branch from the registry, checks `citizen_class` (managers are mail-only — wake skips, unless the scheduled lane below applies), finds the `claude` binary, spawns a subprocess
+2. `wake.py` resolves the branch from the registry, checks `citizen_class` (managers are mail-only — wake skips, unless the scheduled lane below applies), finds the `claude` (or, with `--provider codex`, the `codex`) binary, spawns a subprocess
 3. `dispatch_monitor.py` wraps the claude process with safety features:
    - **Startup health check** — monitors JSONL session files for 90s, kills if no activity
    - **Auto-retry** — 3 strikes: attempt 1+2 resume, attempt 3 fresh (new session)
@@ -156,6 +156,46 @@ returns a `ModelDecision(model, refusal)`:
   `wake._spawn_manager_interactive` (interactive tmux) and the headless `base_args` in
   `wake.wake_branch`, and both take the value `wake_branch` already resolved. No second
   path can reach Fable.
+
+## The Codex provider (`--provider codex`)
+
+`dispatch` and `dispatch wake` take `--provider claude|codex` (default `claude`); any other
+value is refused before the mail is sent. `wake_branch(..., provider="codex")` spawns the
+Codex CLI through the same monitor, lock, register and wake-back as a Claude wake, with
+the same prompt text.
+
+```
+codex exec [-m <model>] --json -o <branch>/logs/dispatch_last_message.txt \
+  --dangerously-bypass-approvals-and-sandbox "<prompt>"                      # fresh
+codex exec resume <thread_id> [-m <model>] --json -o ... "<prompt>"          # resume
+```
+
+- **Model.** `--model` is passed verbatim as `-m`; without it no `-m` is sent and Codex
+  uses `~/.codex/config.toml`. `resolve_wake_model` and the Fable grant are not consulted:
+  both are Claude's. The status block prints `provider → codex` and `model → <slug>` or
+  `model → codex config default`.
+- **No `--cd`.** The monitor already runs with `cwd=<branch>`, and `resume` has no `--cd`.
+- **Managers are Claude-only.** A codex wake of a `citizen_class: manager` fails the
+  `manager` step in every lane.
+- **The pointer.** `.ai_mail.local/session.json` carries `provider`; a pointer without the
+  key is a Claude pointer. A pointer for one provider never resumes the other (`pointer is
+  for claude, waking on codex - starting fresh`). A Codex pointer resumes only while its
+  rollout file `~/.codex/sessions/YYYY/MM/DD/rollout-*-<thread_id>.jsonl` exists; otherwise
+  the wake is fresh (Codex has no `-c`). `--fresh` always starts a new thread.
+- **Codex mints the thread id**, so a fresh codex wake writes no pointer before the spawn.
+  After a successful run the monitor records `thread.started.thread_id` with
+  `set_by: "monitor-codex"`, `provider: "codex"`.
+- **The monitor** is told `--provider=codex` before `--`. Startup is any byte on stdout
+  within `STARTUP_TIMEOUT` (the `--json` stream is live), not the `~/.claude` JSONL probe.
+  A run succeeds when it exits 0, the stream has `turn.completed`, and it has no `error`
+  event. Exit 0 without that is `CODEX_STREAM_FAILED` (-5): bounced with the error line
+  verbatim and never re-run, because the turn ran and may already have acted. The result is
+  the LAST `agent_message` (the text `-o` writes); the report takes it and `usage` from the
+  stream. Retries re-run the argv; strike 3 of a `resume` drops `resume <id>` to a fresh
+  `exec`.
+- **Processes.** `pgrep -x 'claude|codex'` and the zombie scan see both CLIs.
+- **Not covered for Codex:** no `--max-turns` equivalent (`HARD_TIMEOUT` bounds the run) and
+  no rate-limit reading; `_check_rate_limited` reads stderr as for Claude.
 
 ## The recipient's dashboard is refreshed before the spawn
 

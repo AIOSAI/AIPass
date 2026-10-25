@@ -133,10 +133,12 @@ health while covering nothing.
 
 ```
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "sender": "@devpulse", "target": "@ai_mail",
- "subject": "...", "expected_by": "<iso>", "status": "outstanding"}
+ "subject": "...", "expected_by": "<iso>", "status": "outstanding", "provider": "claude"}
 {"dispatch_id": "<uuid4>", "ts": "<iso>", ..., "status": "outstanding", "monitor_pid": 12345}
 {"dispatch_id": "<uuid4>", "ts": "<iso>", "status": "completed", "report_path": "..."}
 ```
+
+`provider` names the CLI the wake spawned, `claude` or `codex`.
 
 The middle line is the **pid annotation**: a second
 `outstanding` record appended once the spawn returns a pid, which `open_dispatch`

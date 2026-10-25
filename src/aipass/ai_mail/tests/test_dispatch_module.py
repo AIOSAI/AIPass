@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-23
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -379,6 +379,25 @@ class TestOrchestrateWake:
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "opus"
 
+    def test_provider_flag_reaches_wake_branch(self, monkeypatch):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with patch(f"{_H_WAKE}.wake_branch", wake):
+            _wake(["@canary", "--provider", "codex"])
+
+        assert wake.call_args.kwargs["provider"] == "codex"
+
+    def test_an_unknown_provider_refuses_the_wake(self, monkeypatch, capsys):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with patch(f"{_H_WAKE}.wake_branch", wake):
+            _wake(["@canary", "--provider", "gemini"])
+
+        wake.assert_not_called()
+        assert "unknown provider 'gemini'" in capsys.readouterr().err
+
     def _run_sender_flag(self, monkeypatch) -> list[dict]:
         """Run `wake @branch --sender @custom` and return the wake_branch calls."""
         wake_calls: list[dict] = []
@@ -648,6 +667,29 @@ class TestOrchestrateDispatchSend:
 
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "sonnet"
+
+    def test_provider_flag_reaches_wake_branch_beside_the_model(self, monkeypatch):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": wake}):
+            _send(["@canary", "Subject", "Body", "--provider", "codex", "--model", "gpt-6.1-sol"])
+
+        assert wake.call_args.kwargs["provider"] == "codex"
+        assert wake.call_args.kwargs["model"] == "gpt-6.1-sol"
+
+    def test_an_unknown_provider_is_refused_before_any_mail_is_sent(self, monkeypatch, capsys):
+        send = MagicMock(return_value=(True, None))
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with _send_patches({f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": wake}):
+            _send(["@canary", "Subject", "Body", "--provider", "gemini"])
+
+        send.assert_not_called()
+        wake.assert_not_called()
+        err = capsys.readouterr().err
+        assert "not sent" in err and "unknown provider 'gemini'" in err
 
     def test_no_memory_save_flag(self, monkeypatch):
         """--no-memory-save flag is passed to prepend_dispatch_header."""

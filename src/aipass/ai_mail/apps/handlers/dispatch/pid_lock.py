@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-04
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -189,6 +189,10 @@ def _read_session_type_darwin(pid_str: str) -> str:
     return "interactive"
 
 
+# The agent CLIs a wake can spawn; pgrep reads the pattern as an exact-match regex.
+AGENT_PROCESS_NAMES = ("claude", "codex")
+AGENT_PROCESS_PATTERN = "|".join(AGENT_PROCESS_NAMES)
+
 # Session types that should NOT block dispatch (idle/background sessions)
 _NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
 
@@ -197,7 +201,7 @@ def is_branch_occupied(branch_path: Path) -> bool:
     """Check if an interactive Claude session is running in this branch directory."""
     resolved = str(branch_path.resolve())
     try:
-        result = subprocess.run(["pgrep", "-x", "claude"], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(["pgrep", "-x", AGENT_PROCESS_PATTERN], capture_output=True, text=True, timeout=5)
         if result.returncode != 0:
             return False
         for pid_str in result.stdout.strip().split("\n"):
@@ -223,7 +227,7 @@ def clean_zombies() -> int:
         result = subprocess.run(["ps", "-eo", "pid,stat,comm"], capture_output=True, text=True, timeout=5)
         for line in result.stdout.strip().split("\n"):
             parts = line.split()
-            if len(parts) >= 3 and parts[2] == "claude" and "Z" in parts[1]:
+            if len(parts) >= 3 and parts[2] in AGENT_PROCESS_NAMES and "Z" in parts[1]:
                 count += 1
                 logger.info("[wake] Found zombie Claude process PID %s", parts[0])
     except (subprocess.SubprocessError, OSError):

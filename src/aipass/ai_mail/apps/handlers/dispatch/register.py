@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: register.py
 # Description: Dispatch Register
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """The dispatch register — what was promised, written before anything spawns.
@@ -154,6 +154,7 @@ def open_dispatch(
     expected_seconds: int,
     repo_root: Optional[Path] = None,
     wake_back: bool = True,
+    provider: str = "claude",
 ) -> Optional[str]:
     """Record that a dispatch was promised, and return its id.
 
@@ -173,6 +174,7 @@ def open_dispatch(
         "subject": str(subject),
         "expected_by": (now + timedelta(seconds=expected_seconds)).isoformat(),
         "status": STATUS_OUTSTANDING,
+        "provider": str(provider),
     }
     if not wake_back:
         # A reader can then tell a declined wake-back from a lost one.

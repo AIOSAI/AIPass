@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
-"""Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model and marking."""
+"""Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
@@ -1067,3 +1067,138 @@ class TestModelPolicyReachesBothSpawnLanes:
         cmd = calls["popen"][0]["cmd"]
         assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
         assert calls["tmux"] == []
+
+
+class TestCodexWake:
+    """provider="codex" spawns `codex exec` with the same prompt, its own model rule and its own pointer."""
+
+    THREAD = "01a1746b-c9c8-7891-ae8e-666b368caf13"
+
+    @pytest.fixture
+    def fake_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(_Path, "home", classmethod(lambda cls: home))
+        return home
+
+    def _wake(self, tmp_path, monkeypatch, **kwargs):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+        status, ok = wake_branch("@testbranch", provider="codex", **kwargs)
+        return branch_path, calls, status, ok
+
+    def _plant_codex_pointer(self, branch_path, home):
+        wake_mod.session_pointer.write_pointer(branch_path, self.THREAD, "monitor-codex", provider="codex")
+        day = home / ".codex" / "sessions" / "2026" / "10" / "25"
+        day.mkdir(parents=True)
+        (day / f"rollout-2026-10-25T11-56-24-{self.THREAD}.jsonl").write_text("{}\n", encoding="utf-8")
+
+    def _tail(self, branch_path, args):
+        return [
+            "--json",
+            "-o",
+            str(branch_path / "logs" / "dispatch_last_message.txt"),
+            "--dangerously-bypass-approvals-and-sandbox",
+            args[-1],
+        ]
+
+    def test_a_fresh_codex_wake_with_a_model_spawns_exec_dash_m_and_writes_no_pointer(
+        self, tmp_path, monkeypatch, fake_home
+    ):
+        branch_path, calls, status, ok = self._wake(tmp_path, monkeypatch, model="gpt-6.1-sol", fresh=True)
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == ["codex", "exec", "-m", "gpt-6.1-sol", *self._tail(branch_path, args)]
+        assert args[-1].startswith("Hi. Check inbox") and "seedgo" in args[-1]
+        assert wake_mod.session_pointer.read_pointer(branch_path) is None
+        assert status.find_step("provider") == ("ok", "provider", "codex")
+        assert status.find_step("model") == ("ok", "model", "gpt-6.1-sol")
+
+    def test_a_codex_wake_without_a_model_passes_no_dash_m_and_says_config_default(
+        self, tmp_path, monkeypatch, fake_home
+    ):
+        branch_path, calls, status, _ = self._wake(tmp_path, monkeypatch)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == ["codex", "exec", *self._tail(branch_path, args)]
+        assert status.find_step("model") == ("ok", "model", "codex config default")
+
+    def test_a_codex_pointer_resumes_its_thread_by_id(self, tmp_path, monkeypatch, fake_home):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._plant_codex_pointer(branch_path, fake_home)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch", provider="codex", model="gpt-6.1-sol")
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == ["codex", "exec", "resume", self.THREAD, "-m", "gpt-6.1-sol", *self._tail(branch_path, args)]
+        assert status.find_step("session") == ("ok", "session", f"resuming {self.THREAD} (pointer)")
+
+    def test_fresh_ignores_a_live_codex_pointer(self, tmp_path, monkeypatch, fake_home):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._plant_codex_pointer(branch_path, fake_home)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch", provider="codex", fresh=True)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args[:2] == ["codex", "exec"] and "resume" not in args
+
+    def test_a_claude_pointer_never_becomes_a_codex_resume(self, tmp_path, monkeypatch, fake_home):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        wake_mod.session_pointer.write_pointer(branch_path, self.THREAD, "wake-fresh")
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch", provider="codex")
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "resume" not in args and self.THREAD not in args
+        assert status.find_step("session")[0] == "info"
+
+    def test_the_monitor_is_told_codex_and_the_register_row_says_so(self, tmp_path, monkeypatch, fake_home):
+        _, calls, _, _ = self._wake(tmp_path, monkeypatch)
+
+        cmd = calls["popen"][0]["cmd"]
+        assert "--provider=codex" in cmd[: cmd.index("--")]
+        rows = register_mod.outstanding()
+        assert [row["provider"] for row in rows] == ["codex"]
+
+    def test_a_claude_wake_carries_no_provider_flag_and_registers_claude(self, tmp_path, monkeypatch, fake_home):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch")
+
+        cmd = calls["popen"][0]["cmd"]
+        assert not any(arg.startswith("--provider") for arg in cmd)
+        assert status.find_step("provider") == ("ok", "provider", "claude")
+        assert [row["provider"] for row in register_mod.outstanding()] == ["claude"]
+
+    def test_an_unknown_provider_fails_before_any_spawn(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", provider="gemini")
+
+        assert ok is False
+        assert status.find_step("provider")[0] == "fail" and "gemini" in status.find_step("provider")[2]
+        assert calls["popen"] == []
+
+    def test_a_manager_refuses_codex_even_in_the_scheduled_lane(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", provider="codex", scheduled=True)
+
+        assert ok is False
+        step = status.find_step("manager")
+        assert step[0] == "fail" and "Claude-only" in step[2]
+        assert calls["popen"] == [] and calls["tmux"] == []

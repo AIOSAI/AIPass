@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_session_pointer.py
 # Description: Tests for the durable per-branch session pointer
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -442,9 +442,10 @@ def test_pointer_file_is_valid_json_on_disk(branch):
     write_pointer(branch, "sess-1", "wake")
     raw = pointer_path(branch).read_text(encoding="utf-8")
     parsed = json.loads(raw)
-    assert set(parsed) == {"session_id", "set_at", "set_by", "cwd"}
-    # Indented, not a blob: one newline after the brace and one after each of the four keys.
-    assert raw.count("\n") == 5, raw
+    assert set(parsed) == {"session_id", "set_at", "set_by", "cwd", "provider"}
+    assert parsed["provider"] == "claude"
+    # Indented, not a blob: one newline after the brace and one after each of the five keys.
+    assert raw.count("\n") == 6, raw
 
 
 class TestTheMismatchMessageIsReadableOnBothPlatforms:
@@ -539,3 +540,62 @@ class TestAnUnnameableHomeDoesNotRaise:
         somewhere = str(tmp_path / "anywhere")
         assert transcript_dir(somewhere) is None
         assert transcript_file(somewhere, "sess") is None
+
+
+class TestTheProviderOnThePointer:
+    """A pointer resumes only the provider that wrote it; Codex threads live under ~/.codex/sessions."""
+
+    THREAD = "01a1746b-c9c8-7891-ae8e-666b368caf13"
+
+    def _rollout(self, home: Path) -> Path:
+        day = home / ".codex" / "sessions" / "2026" / "10" / "25"
+        day.mkdir(parents=True)
+        rollout = day / f"rollout-2026-10-25T11-56-24-{self.THREAD}.jsonl"
+        rollout.write_text("{}\n", encoding="utf-8")
+        return rollout
+
+    def test_a_pointer_without_the_key_still_resumes_a_claude_wake(self, branch, fake_home):
+        pointer_path(branch).parent.mkdir(parents=True)
+        pointer_path(branch).write_text(
+            json.dumps({"session_id": "sess-old", "cwd": str(branch.resolve())}), encoding="utf-8"
+        )
+        _make_transcript(branch, "sess-old")
+
+        assert resolve_resume_target(branch)[0] == "sess-old"
+
+    def test_a_claude_pointer_starts_a_codex_wake_fresh_and_says_why(self, branch, fake_home):
+        write_pointer(branch, "sess-live", "wake")
+        _make_transcript(branch, "sess-live")
+
+        session_id, reason = resolve_resume_target(branch, provider="codex")
+
+        assert session_id is None
+        assert reason == "pointer is for claude, waking on codex - starting fresh"
+
+    def test_a_codex_pointer_never_resumes_a_claude_wake(self, branch, fake_home):
+        write_pointer(branch, self.THREAD, "monitor-codex", provider="codex")
+        self._rollout(fake_home)
+
+        session_id, reason = resolve_resume_target(branch)
+
+        assert session_id is None
+        assert "pointer is for codex, waking on claude" in reason
+
+    def test_a_codex_pointer_resumes_when_its_rollout_file_exists(self, branch, fake_home):
+        write_pointer(branch, self.THREAD, "monitor-codex", provider="codex")
+        rollout = self._rollout(fake_home)
+
+        session_id, reason = resolve_resume_target(branch, provider="codex")
+
+        assert session_id == self.THREAD
+        assert str(rollout) in reason
+        assert read_pointer(branch)["provider"] == "codex"
+
+    def test_a_codex_pointer_with_no_rollout_starts_fresh_never_minus_c(self, branch, fake_home):
+        write_pointer(branch, self.THREAD, "monitor-codex", provider="codex")
+
+        session_id, reason = resolve_resume_target(branch, provider="codex")
+
+        assert session_id is None
+        assert "not found" in reason and reason.endswith("starting fresh")
+        assert "falling back to -c" not in reason

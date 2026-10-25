@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Added
+
+- **ai_mail**: `dispatch --provider codex [--model <slug>]` wakes a branch on the Codex CLI (`codex exec --json`, or `codex exec resume <thread_id>` when the branch's pointer names a Codex thread) through the same monitor, lock, register row and wake-back as a Claude wake. The session pointer and the register row carry `provider`; a pointer for the other provider starts fresh. The monitor reads startup from the live stream, the thread id from `thread.started` and the result from the last `agent_message`; an `error` event or a run with no `turn.completed` bounces and is not re-run. `--model` is passed to Codex verbatim; none means Codex's own config. Codex hooks ride the repo `.codex/hooks.json` written from the manifest's `cli.codex` rows (the hand scripts it replaced rest in `.codex/hooks/.archive/`).
+
 ### Fixed
 
 - **flow**: the post-close runner's stale-lock takeover is serialized under an OS lock on `<lock>.takeover` and re-reads staleness inside it; two runners that read the same dead pid could both take over, the slower one deleting the faster one's live lock. 46 dead registry rows (the `/tmp` and external-path quarantine plus the test-made FPLAN-9990) dropped and saved to flow's `.archive/`, their 22 backup copies archived; `register`/`unregister` with a missing argument pinned at exit 2 with the usage line. (@flow's 2026-10-25 rounds, the owner's cleanup ruling.)

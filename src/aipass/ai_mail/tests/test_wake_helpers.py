@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's helpers and pid_lock.py: status, locks, pids, resolve_branch."""
@@ -642,6 +642,15 @@ def test_clean_zombies_none_found(monkeypatch):
     assert count == 0
 
 
+def test_clean_zombies_counts_a_codex_zombie_and_never_another_process(monkeypatch):
+    class FakeResult:
+        stdout = "  100 Z+   codex\n  200 Z    node\n  300 Ss   codex\n"
+        returncode = 0
+
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: FakeResult())
+    assert clean_zombies() == 1
+
+
 def test_clean_zombies_subprocess_error(monkeypatch):
     """Returns 0 on subprocess failure."""
     monkeypatch.setattr(
@@ -963,6 +972,31 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "daemon")
         assert is_branch_occupied(tmp_path) is False
+
+    def test_an_interactive_codex_in_the_branch_occupies_it(self, tmp_path, monkeypatch):
+        """pgrep is asked for codex as well as claude, exact-match; a codex in the dir blocks the wake."""
+        import re
+
+        monkeypatch.setattr("sys.platform", "linux")
+        resolved = str(tmp_path.resolve())
+        asked = []
+
+        class FakeResult:
+            returncode = 0
+            stdout = "100\n"
+
+        def fake_run(cmd, **kw):
+            asked.append(list(cmd))
+            return FakeResult()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(os, "readlink", lambda p: resolved)
+        monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "interactive")
+
+        assert is_branch_occupied(tmp_path) is True
+        assert asked[0][:2] == ["pgrep", "-x"]
+        assert all(re.fullmatch(asked[0][2], name) for name in ("claude", "codex"))
+        assert not re.fullmatch(asked[0][2], "codex-helper")
 
     def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
         """subprocess failure returns False."""
