@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.0.2
-# Description: Tests for SessionStart cadence reset handler
+# Version: 1.1.0
+# Description: Tests for the SessionStart handlers: cadence reset and the culture file
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-10-05
+# Modified: 2026-10-24
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -22,10 +22,26 @@ from unittest.mock import patch
 import pytest
 
 import aipass.hooks.apps.modules.cadence as cadence_mod
-from aipass.hooks.apps.handlers.lifecycle.session_start import handle
+from aipass.hooks.apps.handlers.lifecycle.session_start import handle, handle_culture
 from aipass.hooks.apps.modules.cadence import should_fire
 
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
+
+
+class TestCulture:
+    def test_the_culture_file_under_aipass_home_is_injected_whole(self, tmp_path, monkeypatch):
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "AGENTS.md").write_text("# AIPass - Culture\nCode is truth.\n", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        assert handle_culture({}) == {"stdout": "# AIPass - Culture\nCode is truth.\n", "exit_code": 0}
+
+    def test_no_culture_file_injects_nothing(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        assert handle_culture({}) == {"stdout": "", "exit_code": 0}
+
+    def test_aipass_home_unset_injects_nothing(self, monkeypatch):
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        assert handle_culture({}) == {"stdout": "", "exit_code": 0}
 
 
 def _reset_cadence_globals(monkeypatch: pytest.MonkeyPatch) -> None:

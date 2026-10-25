@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.0.0
-# Description: Resets cadence counter on new chat / clear (SessionStart)
+# Version: 1.1.0
+# Description: Resets cadence counter on new chat / clear; injects the culture file (SessionStart)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-10-17
+# Modified: 2026-10-24
 # =============================================
 
 """Resets cadence counter on SessionStart so loaders re-fire at turn 0.
@@ -14,6 +14,8 @@ Skips resume (context carries grounding) and compact (PreCompact reset already; 
 """
 
 import importlib
+import os
+from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -37,3 +39,13 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}
+
+
+def handle_culture(hook_data: dict) -> dict:
+    """Inject .claude/AGENTS.md, the culture file: Codex reads the root AGENTS.md natively, never this one."""
+    home = os.environ.get("AIPASS_HOME", "")
+    culture = Path(home) / ".claude" / "AGENTS.md" if home else None
+    if culture is None or not culture.is_file():
+        logger.warning("[HOOKS] session_start: no culture file at %s, none injected", culture or "(AIPASS_HOME unset)")
+        return {"stdout": "", "exit_code": 0}
+    return {"stdout": culture.read_text(encoding="utf-8"), "exit_code": 0}

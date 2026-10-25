@@ -215,6 +215,12 @@
       "handler": "aipass.hooks.apps.handlers.lifecycle.release_notice.handle",
       "matcher": "",
       "timeout": 30
+    },
+    "culture": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle_culture",
+      "matcher": "",
+      "timeout": 30
     }
   }
 }
