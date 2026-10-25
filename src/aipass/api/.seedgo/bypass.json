@@ -195,7 +195,7 @@
     {
       "file": "tests/conftest.py",
       "standard": "stdlib_patch",
-      "reason": "FILE-WIDE, the checker passes no line. The tmux_preflight fixture answers shutil.which for tmux alone and forwards every other lookup, so the attach lane's PTY cases measure the pump and not the runner's package list. It moved here from test_host_attach.py in the oversize split because three files use it (api, 2026-10-08); the reason is that file's row of leg 10. A new stdlib patch in conftest is hidden by this rule, so it is re-read each leg."
+      "reason": "FILE-WIDE, the checker passes no line. The tmux_preflight fixture answers shutil.which for tmux alone and forwards every other lookup, so the attach lane's PTY cases measure the pump and not the runner's package list. It moved here from test_host_attach.py in the oversize split because three files use it (api, 2026-10-08); the reason is that file's row of leg 10. The no_fsync fixture makes os.fsync a no-op for the session: every json write fsyncs into a tmp dir no test reads after a crash, and that cost was half the suite's wall time; no test asserts fsync (api, 2026-10-25). A new stdlib patch in conftest is hidden by this rule, so it is re-read each leg."
     },
     {
       "file": "tests/test_host_read_lane_changes.py",
@@ -292,8 +292,8 @@
     {
       "file": "tests/conftest.py",
       "standard": "through_the_command",
-      "lines": [180, 182, 364, 366],
-      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (364, 366), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 143, 145: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09. Lines moved 225/227/466/468 -> 143/145/327/329 in the comment sweep (2026-10-17); 143/145/327/329 -> 180/182/364/366 with the keyring test backend (2026-10-22)."
+      "lines": [180, 182, 373, 375],
+      "reason": "_refusals._reset_refusals() empties the refusal memory around every test (373, 375), so a refusal recorded by one test never answers another. A reset between tests is not a route the product has, and a public reset would be a door for the test alone. devpulse's ruling a of 10-03 (leg 12 dispatch), which replaces the earlier HELD (api, fleet green leg 12). 143, 145: the git-changes ReadCache (host_git._changes) cleared around each case, the same ruling; moved with _clean_git_changes_cache from test_host_read_lane.py:153, 155 in the oversize split (api, 2026-10-08), named and requested per file since 2026-10-09. Lines moved 225/227/466/468 -> 143/145/327/329 in the comment sweep (2026-10-17); 143/145/327/329 -> 180/182/364/366 with the keyring test backend (2026-10-22); 364/366 -> 373/375 with the no_fsync fixture (2026-10-25)."
     },
     {
       "file": "tests/test_host_perf.py",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_auth_audit.py
 # Description: Tests for failed-auth auditing with peer address (security C1)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/host/server.py, its failed-auth audit with the peer address."""
@@ -48,7 +48,7 @@ def _refusals(audit) -> list:
 
 
 @pytest.fixture
-def audited(tmp_path: Path):
+def audited(tmp_path: Path, host_app: Any):
     """A client whose audit trail is captured rather than written."""
     from fastapi.testclient import TestClient
 
@@ -57,7 +57,7 @@ def audited(tmp_path: Path):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
             with patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
                 with patch(PATCH_SERVER_JSON) as audit:
-                    client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+                    client = TestClient(host_app, raise_server_exceptions=False)
                     audit.log_operation.reset_mock()
                     yield client, audit
 

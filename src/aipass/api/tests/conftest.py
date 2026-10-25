@@ -1,18 +1,18 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for api tests
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-05
-# Modified: 2026-10-22
+# Modified: 2026-10-25
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.3.0 (2026-10-25): no_fsync for the session; host_app shared by request-only fixtures
 #   - v2.2.0 (2026-10-22): dict-backed keyring for every test (autouse); no test reaches the login keyring
 #   - v2.1.0 (2026-09-27): Console width pin + command-state reset (C1, C2);
 #     host imports hoisted to module level; mock_json_handler removed (unused)
 #   - v2.0.0 (2026-03-27): Added mock_infrastructure, mock_logger,
 #     mock_json_handler fixtures for test quality compliance
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
@@ -331,6 +331,15 @@ def pinned_console_width() -> None:
         console.width = 200
 
 
+@pytest.fixture(autouse=True, scope="session")
+def no_fsync() -> Generator[None, None, None]:
+    """os.fsync as a no-op for the whole run: every json write fsyncs into a tmp dir no test reads after a crash,
+    and the fleet cache resets around each test log four such writes; at ~4 ms each they were half the suite."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(os, "fsync", lambda fd: None)
+        yield
+
+
 @pytest.fixture(autouse=True)
 def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
@@ -372,3 +381,18 @@ def _no_leaked_pump_reservations() -> Generator[None, None, None]:
     # Spawn-only tests hold a pump slot they never hang up; production's release is pinned by its own tests.
     yield
     _attach._PUMP_SLOTS = threading.BoundedSemaphore(_attach.PUMP_WORKERS)
+
+
+from aipass.api.apps.handlers.host import server as _host_server
+
+
+@pytest.fixture(scope="session")
+def host_app() -> Any:
+    """One create_app() for the fixtures that only send requests: each build costs ~100 ms of route wiring.
+    Handlers resolve their collaborators per request, so a test's patches still land; only the face is fixed
+    at build, so test_host_face.py and any fixture that adds a route or configures the face build their own."""
+    # Built against an empty dict keyring, as every per-test build sees it: the login keyring could name a face.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(keyring.core, "_keyring_backend", DictKeyring())
+        mp.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+        return _host_server.create_app()

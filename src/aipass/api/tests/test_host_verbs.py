@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_verbs.py
 # Description: Tests for the host API verb lane — wake, kill, lock (FPLAN-0411 Phase 3)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/host/verbs.py and the server routes that reach it: wake, kill, lock."""
@@ -563,7 +563,7 @@ class TestNoMechanismIsReimplementedHere:
 
 
 @pytest.fixture
-def client(tmp_path: Path):
+def client(tmp_path: Path, host_app: Any):
     """A test client over a temporary token store."""
     from fastapi.testclient import TestClient
 
@@ -582,7 +582,7 @@ def client(tmp_path: Path):
         patch(PATCH_VERBS_LOGGER),
         patch(PATCH_SEATED, return_value=PROJECT),
     ):
-        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+        yield TestClient(host_app, raise_server_exceptions=False)
 
 
 def _body(**extra: Any) -> dict:
