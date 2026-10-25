@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-10-12
 # Modified: 2026-10-25
 # =============================================
@@ -265,6 +265,16 @@ class TestRun:
 
         assert refused.value.code == refusal.EXIT_BUDGET_EXHAUSTED == 6
         assert _series(fleet)[0]["budget_exhausted"] is True
+
+    def test_an_expired_budget_exits_six_even_when_the_lane_refused_with_two(self, fleet, probe):
+        """The live shape: the lane returns EXIT_UNPROVEN beside the T-BUDGET fragment line."""
+        probe["document"] = _fragment()
+        probe["code"] = refusal.EXIT_UNPROVEN
+
+        with pytest.raises(CommandRefused) as refused:
+            ratchet.handle_command("ratchet", ["run"])
+
+        assert refused.value.code == refusal.EXIT_BUDGET_EXHAUSTED
 
     def test_the_run_after_a_fragment_probes_only_what_it_left_and_says_slice_two(self, fleet, probe, monkeypatch):
         monkeypatch.setattr(series, "REPO_ROOT", fleet.parent)

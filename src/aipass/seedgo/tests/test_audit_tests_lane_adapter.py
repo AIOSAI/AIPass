@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-10-08
 # Modified: 2026-10-25
 # =============================================
@@ -595,8 +595,24 @@ class TestSnapshotDiff:
         fingerprint = m10.snapshot_tree(tmp_path, 8)[str(probe)]
         assert fingerprint[4] == ""
 
-    def test_a_file_that_vanished_is_absent_rather_than_an_error(self, tmp_path):
-        assert m10._fingerprint(str(tmp_path / "gone.txt"), m10.HASH_SIZE_LIMIT) is None
+    @pytest.mark.skipif(
+        sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
+        reason="mode bits do not stop Windows or root from statting a listed file",
+    )
+    def test_a_listed_file_that_cannot_be_statted_is_absent_rather_than_an_error(self, tmp_path):
+        """The vanish race, on disk: a read-only directory lists its names and refuses every stat under it."""
+        tree = tmp_path / "tree"
+        locked = tree / "locked"
+        locked.mkdir(parents=True)
+        (tree / "kept.txt").write_text("x", encoding="utf-8")
+        (locked / "gone.txt").write_text("x", encoding="utf-8")
+        locked.chmod(0o400)
+        try:
+            snapshot = m10.snapshot_tree(tree)
+        finally:
+            locked.chmod(0o700)
+
+        assert set(snapshot) == {str(tree / "kept.txt")}
 
     def test_an_untouched_tree_diffs_to_nothing(self, tmp_path):
         (tmp_path / "a.txt").write_text("x", encoding="utf-8")

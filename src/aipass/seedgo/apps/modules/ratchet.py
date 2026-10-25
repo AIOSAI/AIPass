@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: ratchet.py
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-10-12
 # Modified: 2026-10-25
 # =============================================
@@ -140,10 +140,10 @@ def _run(budget: int) -> None:
 
 
 def _exit_code(code: int, line: dict) -> int:
-    """The lane's own refusal code, else 6 for a campaign that ran out of clock, else 2."""
-    if code in refusal.REFUSAL_CODES:
-        return code
-    return refusal.EXIT_BUDGET_EXHAUSTED if line["budget_exhausted"] else refusal.EXIT_UNPROVEN
+    """6 for a campaign that ran out of clock, whatever the lane returned; else the lane's refusal code; else 2."""
+    if line["budget_exhausted"]:
+        return refusal.EXIT_BUDGET_EXHAUSTED
+    return code if code in refusal.REFUSAL_CODES else refusal.EXIT_UNPROVEN
 
 
 def _record(argument: str) -> None:
