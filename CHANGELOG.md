@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Fixed
+
+- **flow**: the post-close runner's stale-lock takeover is serialized under an OS lock on `<lock>.takeover` and re-reads staleness inside it; two runners that read the same dead pid could both take over, the slower one deleting the faster one's live lock. 46 dead registry rows (the `/tmp` and external-path quarantine plus the test-made FPLAN-9990) dropped and saved to flow's `.archive/`, their 22 backup copies archived; `register`/`unregister` with a missing argument pinned at exit 2 with the usage line. (@flow's 2026-10-25 rounds, the owner's cleanup ruling.)
+
 ### Changed
 
 - **prompts**: the tier 0 kernel states the standing rule that `.archive/` is ignored everywhere in the tree: never read, moved, swept, fed or processed by any agent or sweep.
