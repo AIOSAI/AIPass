@@ -13,6 +13,7 @@ PyPI version — not the changelog header.
 
 ### Added
 
+- **devpulse**: the watchdog sees a Codex session. A branch whose session pointer names provider `codex` is watched through its one rollout under `~/.codex/sessions`, re-read from the pointer on each refresh so a `/codex` switch is followed; a Codex turn is in flight until the rollout's last line is an `event_msg` of type `task_complete` or `turn_aborted` (Codex writes no session-end record), an unparseable tail counts as in flight. The wire and the sign-in take this seat's session id from `CLAUDE_CODE_SESSION_ID`, else from a Codex pointer's thread id (`agent.py` 1.6.0, `dispatches.py` 2.1.0 `seat_session_id`, `wire.py` 2.5.0, `watchdog.py` 2.2.0, `docs/watchdog.md`; seven pins in the existing test files, one mutant red). ai_mail's `door_session_pointer` 1.1.0 exports `codex_thread_file`, `CLAUDE`, `CODEX` for it.
 - **seedgo**: `host_coupled_oracle`, a tests-only standard (branch level): a test that passes its own `os.getpid()`/`getppid()` to an args/cmdline/title reader, or pins a literal runner `call_count == N` on a function that both forks on platform and runs a subprocess, is host-coupled and fails. Born of PR #807's three clone-only reds (pytest-xdist retitles its workers; macOS reads args through `ps`). Two pins on reductions of the real tests, seven mutants red, fleet 0 hits after hooks' cures.
 
 ### Changed

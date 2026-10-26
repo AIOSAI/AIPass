@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: agent.py
 # Description: Watchdog Agent Handler — block until dispatched agent exits
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 # Liveness is ai_mail's dispatch lock: dispatch_monitor deletes it on any exit.
@@ -22,6 +22,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.ai_mail.apps.modules.door_session_pointer import CLAUDE, CODEX, codex_thread_file, read_pointer
 
 
 def _stderr(msg: str) -> None:
@@ -136,58 +137,9 @@ def _resolve_branch_path(agent_id: str) -> Path | None:
     return None
 
 
-def _pid_alive_windows(pid: int) -> bool:
-    """Windows-safe liveness check via OpenProcess + GetExitCodeProcess."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]  # Windows-only
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return False
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
-
-
 def _pid_alive(pid: int) -> bool:
-    """Return True if the process is alive (not zombie)."""
-    if sys.platform == "win32":
-        try:
-            return _pid_alive_windows(pid)
-        except Exception as exc:
-            logger.info("[watchdog.agent] PID %s Windows check failed (assuming alive): %s", pid, exc)
-            return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError as exc:
-        logger.info("[watchdog.agent] PID %s not found: %s", pid, exc)
-        return False
-    except PermissionError as exc:
-        logger.info("[watchdog.agent] PID %s permission denied (alive): %s", pid, exc)
-        return True
-    except OSError as exc:
-        logger.info("[watchdog.agent] PID %s os.kill error (assuming dead): %s", pid, exc)
-        return False
-    # Never gate this on Linux: os.kill(pid, 0) succeeds for a zombie on every platform.
-    # registry.py owns the one is_zombie rule; no second copy.
-    if _registry.is_zombie(pid):
-        return False
-    return True
+    """registry.py owns the one liveness rule (Windows OpenProcess, zombie check); a probe that raises is seen."""
+    return _registry.is_pid_alive(pid)
 
 
 def _get_jsonl_projects_dir(branch_path: Path) -> Path:
@@ -197,10 +149,11 @@ def _get_jsonl_projects_dir(branch_path: Path) -> Path:
     return Path.home() / ".claude" / "projects" / encoded
 
 
-def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
-    """Non-blank newline-delimited lines from a bounded tail read of ``path``.
+def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str] | None:
+    """Non-blank newline-delimited lines from a bounded tail read of ``path``; ``None`` when it cannot be read.
 
-    A line cut by the bound fails to parse downstream and is skipped.
+    A line cut by the bound fails to parse downstream and is skipped. ``None`` is no verdict: the
+    caller treats it as in flight and never caches it.
     """
     try:
         size = path.stat().st_size
@@ -210,7 +163,7 @@ def _tail_lines(path: Path, max_bytes: int = 1_000_000) -> list[str]:
             chunk = fh.read()
     except OSError as exc:
         logger.info("[watchdog.agent] tail read failed for %s: %s", path.name, exc)
-        return []
+        return None
     if not chunk:
         return []
     text = chunk.decode("utf-8", errors="replace")
@@ -250,8 +203,30 @@ def _inflight_from_lines(lines: list[str], source: str = "?") -> bool:
     return False
 
 
+# turn_aborted is how an interrupted rollout ends; Codex writes no session_end/shutdown record.
+_CODEX_TURN_END = frozenset({"task_complete", "turn_aborted"})
+
+
+def _codex_inflight_from_lines(lines: list[str], source: str = "?") -> bool:
+    """True unless the rollout's last line is an ``event_msg`` ending the turn.
+
+    An unparseable last line is Codex mid-write, so it counts as in flight.
+    """
+    if not lines:
+        return False
+    try:
+        entry = json.loads(lines[-1])
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.info("[watchdog.agent] unparseable rollout tail in %s, treated as in flight: %s", source, exc)
+        return True
+    payload = entry.get("payload") if isinstance(entry, dict) else None
+    ended = entry.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") in _CODEX_TURN_END
+    return not ended
+
+
 class TranscriptScanner:
-    """Cached per-tick view of one branch's ``~/.claude/projects/<dir>`` tree.
+    """Cached per-tick view of one branch's ``~/.claude/projects/<dir>`` tree, or of the one
+    Codex rollout its session pointer names when built with ``branch_path``.
 
     A full walk and tail re-read every tick cost a few percent of a core per watch, so a
     tick is one ``os.stat`` pass and the tail verdict is cached on ``(size, mtime)``.
@@ -261,8 +236,12 @@ class TranscriptScanner:
     REFRESH_INTERVAL = 60.0
     _VERDICT_CACHE_MAX = 64
 
-    def __init__(self, projects_dir: Path, now: float) -> None:
+    def __init__(self, projects_dir: Path, now: float, branch_path: Path | None = None) -> None:
         self.projects_dir = projects_dir
+        self.branch_path = branch_path
+        self.provider = CLAUDE
+        self._codex_thread: str | None = None
+        self._watched: tuple[str, str] | None = None
         self._top_dir = str(projects_dir)
         self._paths: list[str] = []
         self._last_refresh = now
@@ -275,11 +254,40 @@ class TranscriptScanner:
         self._stat_pass()  # seed sizes: watch start is the baseline, not "everything is new"
 
     def refresh(self, now: float) -> None:
-        """Re-walk the tree for ``.jsonl`` files (``os.walk`` — pathlib.rglob
+        """Re-read the pointer, then re-list the watched files with the provider's lister."""
+        self._follow_pointer()
+        paths, unreadable = self._codex_paths() if self.provider == CODEX else self._claude_paths()
+        self._paths = paths
+        self.unreadable = unreadable
+        self._last_refresh = now
+
+    def _follow_pointer(self) -> None:
+        """Pick the provider from the branch's pointer, so a ``/codex`` switch is followed next refresh."""
+        if self.branch_path is None:
+            return
+        pointer = read_pointer(self.branch_path) or {}
+        codex = pointer.get("provider") == CODEX
+        self.provider = CODEX if codex else CLAUDE
+        self._codex_thread = pointer.get("session_id") if codex else None
+
+    def _codex_paths(self) -> tuple[list[str], dict[str, str]]:
+        thread_file = codex_thread_file(self._codex_thread) if self._codex_thread else None
+        self._note_watched(str(thread_file))
+        return ([str(thread_file)] if thread_file is not None else []), {}
+
+    def _note_watched(self, path: str) -> None:
+        if self._watched != (self.provider, path):
+            self._watched = (self.provider, path)
+            logger.debug("[watchdog.agent] scanner watching provider=%s path=%s", self.provider, path)
+
+    def _claude_paths(self) -> tuple[list[str], dict[str, str]]:
+        """Walk the tree for ``.jsonl`` files (``os.walk`` — pathlib.rglob
         spent most of the old tick in ``relative_to``/path-object overhead).
 
         An unlistable directory lands in ``unreadable``, never dropped in silence.
         """
+        if self.branch_path is not None:
+            self._note_watched(self._top_dir)
         paths: list[str] = []
         unreadable: dict[str, str] = {}
 
@@ -297,9 +305,7 @@ class TranscriptScanner:
                 self.projects_dir,
                 "; ".join(f"{path}: {err}" for path, err in unreadable.items()),
             )
-        self._paths = paths
-        self.unreadable = unreadable
-        self._last_refresh = now
+        return paths, unreadable
 
     def _stat_pass(self) -> dict:
         """Stat every known file; update ``sizes``/``newest``; return the previous sizes."""
@@ -360,7 +366,11 @@ class TranscriptScanner:
         hit = self._verdicts.get(path)
         if hit is not None and hit[0] == key:
             return hit[1]
-        verdict = _inflight_from_lines(_tail_lines(Path(path)), source=os.path.basename(path))
+        lines = _tail_lines(Path(path))
+        if lines is None:
+            return True
+        rule = _codex_inflight_from_lines if self.provider == CODEX else _inflight_from_lines
+        verdict = rule(lines, source=os.path.basename(path))
         if len(self._verdicts) >= self._VERDICT_CACHE_MAX:
             self._verdicts = {p: v for p, v in self._verdicts.items() if p in self.sizes}
         self._verdicts[path] = (key, verdict)
@@ -368,19 +378,17 @@ class TranscriptScanner:
 
 
 def _read_lock(lock_file: Path) -> dict | None:
-    """Read the dispatch lock: its dict, None when absent, ``{}`` when held but unreadable.
+    """Read the dispatch lock: its dict, None when absent, ``{"unreadable": reason}`` when held but unreadable.
 
     An unparseable lock is still a dispatch in flight, the same rule as ai_mail's pid_lock.
     """
-    if not lock_file.exists():
-        return None
     try:
         data = json.loads(lock_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return None  # released between the exists() and the read
+        return None
     except (OSError, ValueError) as exc:
         logger.warning("[watchdog.agent] lock %s unreadable, treated as held: %s", lock_file, exc)
-        return {}
+        return {"unreadable": str(exc)}
     return data if isinstance(data, dict) else {}
 
 
@@ -476,11 +484,12 @@ class StallTracker:
         now: float,
         pid: object,
         scanner: TranscriptScanner | None = None,
+        branch_path: Path | None = None,
     ) -> None:
         self.agent_id = agent_id
         self.jsonl_dir = jsonl_dir
         self.pid = pid
-        self.scanner = scanner if scanner is not None else TranscriptScanner(jsonl_dir, now)
+        self.scanner = scanner if scanner is not None else TranscriptScanner(jsonl_dir, now, branch_path)
         self.last_activity_at = now
         self.in_flight_since: float | None = None
         self.stall_reported = False
@@ -626,7 +635,7 @@ def watch_agent(
         _stderr(f"[watchdog.agent] {agent_id}: lock present, monitor PID={initial_pid}")
 
         jsonl_dir = _get_jsonl_projects_dir(branch_path)
-        tracker = StallTracker(agent_id, jsonl_dir, time.monotonic(), initial_pid)
+        tracker = StallTracker(agent_id, jsonl_dir, time.monotonic(), initial_pid, branch_path=branch_path)
 
         while True:
             elapsed = time.monotonic() - started_at

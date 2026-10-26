@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
@@ -618,6 +618,37 @@ def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, monkeypatch):
     wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
     assert seen["session"] == "runtime-xyz"
+
+
+def _codex_pointer_cwd(tmp_path: Path, monkeypatch, thread_id: str) -> None:
+    """Run from a branch whose session pointer names a Codex thread."""
+    branch = tmp_path / "seat"
+    (branch / ".ai_mail.local").mkdir(parents=True)
+    pointer = {"session_id": thread_id, "provider": "codex", "cwd": str(branch)}
+    (branch / ".ai_mail.local" / "session.json").write_text(json.dumps(pointer), encoding="utf-8")
+    monkeypatch.chdir(branch)
+
+
+def test_wire_takes_codex_thread_from_pointer_without_env(tmp_path, monkeypatch):
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    _codex_pointer_cwd(tmp_path, monkeypatch, "codex-thread-9")
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    assert seen["session"] == "codex-thread-9"
+
+
+def test_env_session_id_wins_over_codex_pointer(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "conv-abc-123")
+    _codex_pointer_cwd(tmp_path, monkeypatch, "codex-thread-9")
+
+    assert watch_dispatches.seat_session_id() == "conv-abc-123"
 
 
 def test_wire_records_the_wrapper_carrying_it(tmp_path, monkeypatch):

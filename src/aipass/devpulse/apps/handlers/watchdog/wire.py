@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -393,7 +393,7 @@ def arm_wire(
     my_target = _stdout_target()
     my_session = _session_dir_of(my_target)
     # The statusline matches the conversation id; the tasks-dir name is only a fallback.
-    session_name = os.environ.get("CLAUDE_CODE_SESSION_ID") or (my_session.name if my_session is not None else None)
+    session_name = _dispatches.seat_session_id() or (my_session.name if my_session is not None else None)
 
     # A continuous wire refuses when it cannot see its wrapper, or sees a run_in_background
     # file that is heard only on exit. The refusal itself exits, so it is heard; --once stays legal.
