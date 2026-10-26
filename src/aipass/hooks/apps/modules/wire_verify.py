@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-09
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Wire verification — catches silent hook-wiring breaks.
 
 Cross-checks ~/.claude/settings.json (provider hooks) against
-.aipass/hooks.json (project hook config). A per-handler entry wired only in the
-project's .codex/hooks.json (a Codex-only handler) counts as wired. Detects:
+.aipass/hooks.json (project hook config). A per-handler entry wired only in
+Codex's user-level hooks.json ($CODEX_HOME or ~/.codex; a Codex-only handler)
+counts as wired, and that file missing is an ERROR. Detects:
   - Empty provider hook arrays (event key exists but nothing fires)
   - Enabled handlers with no provider bridge entry (handler never dispatched)
   - Duplicate provider entries (handler fires multiple times)
@@ -31,7 +32,8 @@ from pathlib import Path
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config import gates
-from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config, locate_config
+from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
+from aipass.hooks.apps.modules.context_window import codex_hooks_path
 from aipass.hooks.apps.handlers.json import files as json_files
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -194,7 +196,9 @@ def _check_guarded_tools(provider_hooks, errors, marker=_BRIDGE_MARKER, tools=No
 
 
 def verify_wiring(provider_path=None, project_config=None, codex_path=None):
-    """Cross-check provider settings against project hook config; *codex_path* is the project's .codex/hooks.json.
+    """Cross-check provider settings against project hook config; *codex_path* is Codex's user-level hooks.json.
+
+    A *codex_path* that names no file is an ERROR: a Codex seat with no hooks file runs ungated.
 
     Returns dict with keys: errors (list), warnings (list), info (list), ok (bool).
     """
@@ -211,7 +215,12 @@ def verify_wiring(provider_path=None, project_config=None, codex_path=None):
 
     provider_index = _build_provider_index(provider_hooks, errors)
     _check_guarded_tools(provider_hooks, errors)
-    if codex_path is not None and Path(codex_path).is_file():
+    if codex_path is not None and not Path(codex_path).is_file():
+        errors.append(
+            f"Codex hooks file missing: {codex_path}, so a Codex seat runs ungated. "
+            "Fix: aipass doctor --fix, then run codex once and choose 'Trust all and continue'"
+        )
+    elif codex_path is not None:
         _check_guarded_tools(_read_provider_hooks(codex_path), errors, _CODEX_MARKER, _CODEX_GUARDED_TOOLS, " (Codex)")
     codex_wired = _codex_wired(codex_path)
 
@@ -264,13 +273,10 @@ def handle_command(command, args) -> bool:
 
     if not args:
         print_introspection()
-        _, root = locate_config()
-        results = verify_wiring(codex_path=root / ".codex" / "hooks.json" if root else None)
+        results = verify_wiring(codex_path=codex_hooks_path())
         _render_results(results)
         if not results["ok"]:
-            # The --help below promises this. Returning True routes as "handled",
-            # which hooks.main() turns into exit 0 — a wiring break would print
-            # FAILED and still report success to anything reading the exit code.
+            # Returning True would become exit 0: a wiring break must fail anything reading the exit code.
             sys.exit(1)
         return True
 
@@ -279,7 +285,8 @@ def handle_command(command, args) -> bool:
         CONSOLE.print()
         CONSOLE.print("  drone @hooks verify     Cross-check provider settings vs project config")
         CONSOLE.print()
-        CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and .codex/hooks.json,")
+        CONSOLE.print("Reads ~/.claude/settings.json, .aipass/hooks.json and Codex's user-level hooks.json")
+        CONSOLE.print("($CODEX_HOME, else ~/.codex); a missing Codex file is an ERROR. It")
         CONSOLE.print("verifies every enabled handler has a working provider bridge entry.")
         CONSOLE.print("Exits non-zero on any ERROR finding.")
         return True

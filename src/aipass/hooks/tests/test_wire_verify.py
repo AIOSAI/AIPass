@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -82,7 +82,7 @@ _CODEX_PRETOOL = {
 
 
 def _codex_file(tmp_path, *event_args: str, pretool: bool = True):
-    """A project .codex/hooks.json wiring each Event[:hook] through the Codex bridge, with its PreToolUse row."""
+    """A user-level Codex hooks.json wiring each Event[:hook] through the Codex bridge, with its PreToolUse row."""
     hooks: dict = {"PreToolUse": [_CODEX_PRETOOL]} if pretool else {}
     for arg in event_args:
         entry = _provider_entry(arg)
@@ -397,23 +397,24 @@ class TestCodexOnlyHandlers:
         assert [e for e in result["errors"] if e.startswith("PreToolUse (Codex): Bash ")]
         assert [e for e in result["errors"] if e.startswith("PreToolUse (Codex): apply_patch ")]
 
-    def test_no_codex_file_is_claude_only(self, tmp_path):
-        result = self._verify(tmp_path, tmp_path / "missing.json")
-        assert result["errors"] == [_never_fires("SessionStart", "culture")]
+    def test_a_missing_codex_file_is_an_error_naming_the_cure_not_a_skipped_check(self, tmp_path):
+        missing = tmp_path / "missing.json"
+        result = self._verify(tmp_path, missing)
+        assert result["ok"] is False
+        (absent,) = [e for e in result["errors"] if str(missing) in e]
+        assert "aipass doctor --fix" in absent and "Trust all and continue" in absent
 
 
 class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
 
-    def test_routes_verify_with_the_projects_codex_file(self, capsys, tmp_path):
+    def test_routes_verify_with_the_codex_home_hooks_file(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
-        with (
-            patch.object(wire_verify, "locate_config", return_value=("AIPASS", tmp_path)),
-            patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify,
-        ):
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
-        mock_verify.assert_called_once_with(codex_path=tmp_path / ".codex" / "hooks.json")
+        mock_verify.assert_called_once_with(codex_path=tmp_path / "codex_home" / "hooks.json")
         err = capsys.readouterr().err
         assert "Wire check passed" in err
         assert "0 errors, 0 warnings" in err
@@ -445,15 +446,15 @@ class TestHandleCommand:
                 wire_verify.handle_command("verify", [])
         assert exc.value.code != 0
 
-    def test_clean_run_does_not_exit(self, capsys):
+    def test_clean_run_does_not_exit(self, capsys, tmp_path, monkeypatch):
         """The passing path must stay a normal return — only ERROR findings exit."""
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
-        with (
-            patch.object(wire_verify, "locate_config", return_value=("NONE", None)),
-            patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify,
-        ):
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
-        mock_verify.assert_called_once_with(codex_path=None)
+        mock_verify.assert_called_once_with(codex_path=tmp_path / ".codex" / "hooks.json")
         err = capsys.readouterr().err
         assert "Wire check passed" in err
         assert "cosmetic" in err

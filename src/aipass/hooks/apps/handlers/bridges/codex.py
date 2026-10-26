@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.5.0
+# Version: 2.5.1
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -10,7 +10,8 @@
 
 """Codex bridge.
 
-Called from .codex/hooks.json, which the provider wire writes from the manifest's cli.codex rows.
+Called from Codex's user-level hooks.json ($CODEX_HOME or ~/.codex), which the provider wire writes
+from the manifest's cli.codex rows.
 Codex speaks Claude's hook protocol and names its shell tool Bash; its file tool is apply_patch, one
 patch over many files, so each file becomes the Claude call the gates judge (Write, MultiEdit, a
 shell delete or move) and the first refusal answers for the whole patch. Codex blocks by

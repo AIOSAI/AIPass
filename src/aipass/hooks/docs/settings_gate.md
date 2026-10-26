@@ -12,7 +12,7 @@ No AI changes a provider's settings alone, on either CLI, from any seat. The own
 |---|---|
 | Codex settings | `~/.codex/*.toml` (`config.toml`, profiles, requirements), `~/.codex/hooks.json`, `~/.codex/auth.json`, `~/.codex/rules/**`; the same under `$CODEX_HOME` |
 | Claude settings | `~/.claude/settings.json`, `~/.claude/settings.local.json` |
-| AIPass provider wiring | `$AIPASS_HOME/.claude/provider_manifest.json`, `$AIPASS_HOME/.codex/hooks.json` |
+| AIPass provider wiring | `$AIPASS_HOME/.claude/provider_manifest.json`; `$AIPASS_HOME/.codex/hooks.json`, retired: Codex's rows live in its user-level `hooks.json`, and the repo path stays protected so the file never returns unnoticed (Codex loads both and would fire every hook twice) |
 | Provider installer | `aipass doctor --fix`, `setup.sh`, `provider_wire.py`, run from Bash |
 
 A path counts from either end of a symlink: a link anywhere that lands on a protected file is that file.
