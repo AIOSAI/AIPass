@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline.py
 # Description: Rollover pipeline — the rollover module's run, status and triggers, normalize
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-04-25
-# Modified: 2026-10-23
+# Modified: 2026-10-26
 # Category: memory/tests
 # =============================================
 
@@ -626,7 +626,7 @@ class TestRolloverSurvivesCarriedDebt:
         result = ext.extract_items(file_path)
 
         assert result["success"] is True, result.get("error")
-        assert ext.commit_trimmed(file_path, result["trimmed"])["success"] is True
+        assert ext.commit_trimmed(file_path, result["trimmed"], result["source"])["success"] is True
         after = json.loads(file_path.read_text(encoding="utf-8"))["sessions"]
         assert len(after) < before_count, "the lane reported success and the file never shrank"
         assert result["extracted_count"] == before_count - len(after), (
@@ -641,7 +641,7 @@ class TestRolloverSurvivesCarriedDebt:
         # The run must have archived something, or "still there" passes on a dead lane.
         assert result["success"] is True, result.get("error")
         assert result["extracted_count"] > 0, "nothing was archived — this pin would pass vacuously"
-        ext.commit_trimmed(file_path, result["trimmed"])
+        ext.commit_trimmed(file_path, result["trimmed"], result["source"])
 
         head = json.loads(file_path.read_text(encoding="utf-8"))["sessions"][0]
         assert head["summary"] == "X" * 343, "rollover edited an entry it only moves past"
@@ -650,7 +650,7 @@ class TestRolloverSurvivesCarriedDebt:
         """A file that shrank leaves the second run strictly less to do (no duplicate-work loop)."""
         file_path = self._seedgo_shaped_file(tmp_path)
         first = ext.extract_items(file_path)
-        ext.commit_trimmed(file_path, first["trimmed"])
+        ext.commit_trimmed(file_path, first["trimmed"], first["source"])
         second = ext.extract_items(file_path)
 
         assert first["extracted_count"] > 0

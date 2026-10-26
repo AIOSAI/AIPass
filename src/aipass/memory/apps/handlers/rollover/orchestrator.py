@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -268,7 +268,9 @@ def execute_rollover() -> Dict[str, Any]:
 
         # Stored, so the file may shrink. A refused write leaves the entries in place and the
         # next run upserts the same content-hash ids: a retry, never a loss.
-        commit_result = extractor.commit_trimmed(trigger.file_path, extract_result.get("trimmed"))
+        commit_result = extractor.commit_trimmed(
+            trigger.file_path, extract_result.get("trimmed"), extract_result.get("source")
+        )
         if not commit_result["success"]:
             error_msg = commit_result.get("error", "Unknown error")
             logger.error(f"[rollover] Trim refused for {trigger} after storage: {error_msg}")

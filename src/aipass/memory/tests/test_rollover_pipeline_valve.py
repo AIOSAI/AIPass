@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline_valve.py
 # Description: Rollover pipeline - the extractor's safety valve, snapshot budget and newest-first guard
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-10-26
 # Category: memory/tests
 # =============================================
 
@@ -403,7 +403,7 @@ class TestARefusedWriteMustNotReadAsASuccessfulRollover:
         assert result["success"] is True, result.get("error")
         writer.assert_not_called()
 
-        committed = ext.commit_trimmed(file_path, result["trimmed"])
+        committed = ext.commit_trimmed(file_path, result["trimmed"], result["source"])
 
         assert writer.call_args.args[0] == file_path, "the refusal must come from the rolled file's own write"
         assert committed["success"] is False
