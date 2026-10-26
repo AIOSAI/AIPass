@@ -16,13 +16,7 @@ the same content. We do **not** keep separate prompts per CLI. Only the *deliver
 | Runtime | How the same content is delivered |
 |---|---|
 | **Claude Code** | **Tiered**: `tier0_kernel.md` + `tier1_navmap.md` at every fresh context and post-compaction, no periodic beat |
-| **Codex CLI** | Injected **once at SessionStart** (no per-turn cadence): the same tier content, combined |
-
-> ⚠️ **Migration in progress.** The Codex SessionStart hook
-> (`.codex/hooks/session_start_identity.py`) currently still reads the legacy
-> `aipass_global_prompt.md`. @hooks is wiring it onto the tier files. **Retire for one
-> runtime = retire for all** — once Codex is on the tiers, `aipass_global_prompt.md` is
-> read by nothing and moves to `.archive/`.
+| **Codex CLI** | The same: the user-level `~/.codex/hooks.json` calls the same bridge, engine and handlers, so the tiers reach a Codex session on the same cadence |
 
 ## Files
 

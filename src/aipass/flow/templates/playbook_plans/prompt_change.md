@@ -33,7 +33,7 @@ Any change to an injected prompt — the kernel, the navmap, a branch-local prom
 ## 1. Identify the change
 - [ ] Which prompt? (`.aipass/tier0_kernel.md` / `.aipass/tier1_navmap.md` / a branch's `.aipass/aipass_local_prompt.md` / identity / a NEW prompt / retiring one)
 - [ ] Kind? edit content · change cadence · add a new injected prompt · retire one
-- [ ] Owners of the files you'll touch — devpulse owns the tier files + project prompts; **@hooks** owns the engine, handlers, cadence, **and the Codex SessionStart hook** (`.codex/hooks/`); **@aipass** owns init/bootstrap; **@spawn** owns branch templates
+- [ ] Owners of the files you'll touch — devpulse owns the tier files + project prompts; **@hooks** owns the engine, handlers, cadence and both provider bridges (`apps/handlers/bridges/`); **@aipass** owns init/bootstrap; **@spawn** owns branch templates
 
 ## 2. Content
 - [ ] Edit the `.md`. Follow `.aipass/PROMPT_STYLE.md`.
@@ -44,7 +44,7 @@ Any change to an injected prompt — the kernel, the navmap, a branch-local prom
 - [ ] **Registration** — `.aipass/hooks.json`: handler entry present + `"enabled": true` (or `false` + a `_retired` note if retiring). New prompt → add the handler entry.
 - [ ] **Cadence** — `cadence_config.json` loaders: correct `period`/`offset` (tier0 `period:1` = every turn; navmap `period:5`). New loader → add it.
 - [ ] **Bridge (Claude Code)** — `~/.claude/settings.json`: a `UserPromptSubmit:<handler>` bridge line exists (machine-local — edit directly for the live machine). Retiring → remove the stale line.
-- [ ] **Codex runtime** — `.codex/hooks/session_start_identity.py` reads the tier `.md` files at SessionStart (tier0_kernel + tier1_navmap, each size-capped). New tier → add it to what this hook reads; retiring → stop reading the old prompt. Same content as Claude, different delivery. **@hooks owns — dispatch.**
+- [ ] **Codex runtime** — the same handlers run through the Codex bridge (`~/.codex/hooks.json`, written by `aipass doctor --fix` from `.claude/provider_manifest.json`). A new prompt handler needs its `cli.codex` manifest row next to the `cli.claude` one; retiring one removes both. Same content, same cadence, two bridges. **@hooks owns — dispatch.**
 - [ ] New handler file lives at `src/aipass/hooks/apps/handlers/prompt/<name>.py` — **@hooks owns it; dispatch them to build it.**
 
 ## 4. Seed propagation — so FRESH installs get it (the step that's always forgotten)
