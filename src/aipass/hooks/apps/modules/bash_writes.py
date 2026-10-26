@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 2.4.0
+# Version: 2.5.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -20,7 +20,7 @@ import shlex
 from pathlib import Path, PureWindowsPath
 
 from aipass.cli.apps.modules import err_console
-from aipass.hooks.apps.modules.shell_programs import sed_actions, sed_scripts
+from aipass.hooks.apps.modules.shell_programs import named_operands, sed_actions, sed_scripts
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -574,3 +574,14 @@ def _heredocs_by_segment(segments: list[list[str]], bodies: list[str]) -> dict[i
 def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
     """Return every (path, why) this command can be seen to write."""
     return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]
+
+
+def changed_paths(command: str, cwd: str) -> list[str]:
+    """Every path *command* can be seen to change: shell_reader.mutated_paths plus each operand of a program
+    that does not only read (``crudini --set <file>``, ``ed <file>``). Imported late: shell_reader imports this module."""
+    from aipass.hooks.apps.modules import shell_reader
+
+    paths = [str(path) for path, _role, _how in shell_reader.mutated_paths(command, cwd)]
+    invocations = shell_reader.invocations(command, cwd)
+    paths.extend(str(path) for _program, path in named_operands(invocations))
+    return paths

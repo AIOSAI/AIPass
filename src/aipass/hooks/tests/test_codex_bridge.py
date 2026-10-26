@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
 # Branch: hooks
 # Layer: tests
@@ -161,6 +161,15 @@ class TestWrapOutput:
         answer = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "lint fixed"}}
         bridge.default = (json.dumps(answer), 0)
         assert bridge.run("PostToolUse", {"tool_name": "Bash", "tool_input": {"command": "ls"}}) == answer
+
+    def test_an_ask_on_pretooluse_reaches_codex_as_a_deny_with_its_reason(self, bridge):
+        reason = "Provider settings: Write on ~/.codex/config.toml"
+        ask = {"hookEventName": "PreToolUse", "permissionDecision": "ask", "permissionDecisionReason": reason}
+        bridge.default = (json.dumps({"hookSpecificOutput": ask}), 0)
+        answer = bridge.run("PreToolUse", {"tool_name": "Bash", "tool_input": {"command": "ls"}})
+        assert answer["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert answer["hookSpecificOutput"]["permissionDecisionReason"] == reason
+        assert answer["systemMessage"] == reason
 
     def test_a_block_on_an_unguarded_event_stays_a_block_not_a_deny(self, bridge):
         block = {"decision": "block", "reason": "seat taken"}

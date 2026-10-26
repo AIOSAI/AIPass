@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: settings_backup.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Backs up ~/.claude/settings*.json and appends a receipt before any tool writes it (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-15
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """The tool doors of the settings-backup contract (FPLAN-0645).
@@ -92,15 +92,6 @@ def _settings_file(raw: str, cwd: str, claude_dir: Path) -> Path | None:
         ):
             return candidate
     return None
-
-
-def _bash_paths(command: str, cwd: str) -> list[str]:
-    """Every path the shell reader sees *command* change: git_gate's protected lane, read the same way."""
-    reader = importlib.import_module("aipass.hooks.apps.modules.shell_reader")
-    programs = importlib.import_module("aipass.hooks.apps.modules.shell_programs")
-    paths = [str(path) for path, _role, _how in reader.mutated_paths(command, cwd)]
-    paths.extend(str(path) for _program, path in programs.named_operands(reader.invocations(command, cwd)))
-    return paths
 
 
 def _actor(cwd: str) -> str:
@@ -199,7 +190,8 @@ def handle(hook_data: dict) -> dict:
         cwd = hook_data.get("cwd", "") or os.getcwd()
         if tool_name == "Bash":
             command = str(tool_input.get("command", ""))
-            raws = _bash_paths(command, cwd) if command else []
+            writes = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+            raws = writes.changed_paths(command, cwd) if command else []
         else:
             raw = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
             raws = [str(raw)] if raw else []
