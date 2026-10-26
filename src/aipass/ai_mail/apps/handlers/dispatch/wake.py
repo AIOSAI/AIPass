@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.7.0
+# Version: 3.8.0
 # Created: 2026-03-02
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -505,6 +505,7 @@ def _spawn_manager_interactive(
     model: str,
     status: "DispatchStatus",
     claude_bin: str,
+    provider: str = PROVIDER_CLAUDE,
 ) -> Tuple["DispatchStatus", bool]:
     """Spawn an interactive tmux session for a manager branch.
 
@@ -528,6 +529,12 @@ def _spawn_manager_interactive(
         f"--permission-mode bypassPermissions "
         f'"$(cat {shlex.quote(str(prompt_file))})"'
     )
+    if provider == PROVIDER_CODEX:
+        model_flag = f"-m {shlex.quote(model)} " if model else ""
+        claude_line = (
+            f"{shlex.quote(claude_bin)} {model_flag}--dangerously-bypass-approvals-and-sandbox "
+            f'"$(cat {shlex.quote(str(prompt_file))})"'
+        )
     try:
         subprocess.run(
             ["tmux", "new-session", "-d", "-s", session, "-c", str(branch_path)],
@@ -661,10 +668,6 @@ def wake_branch(
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
-        if citizen_class == MANAGER_CLASS and provider != PROVIDER_CLAUDE:
-            status.fail("manager", f"{email} is a manager — manager wakes are Claude-only, {provider} refused")
-            logger.warning("[wake] %s is a manager — %s wake refused (Claude-only lane)", email, provider)
-            return status, False
         if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
             # Woken nothing, sent nothing: the caller owns the mail.
             status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
@@ -754,7 +757,7 @@ def wake_branch(
 
     if manager_scheduled:
         return _spawn_manager_interactive(
-            branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin
+            branch_path, email, custom_message or DEFAULT_PROMPT, resolved_model, status, claude_bin, provider
         )
 
     # An unreadable safety config refuses the wake: its max_turns may be lower than the default.
