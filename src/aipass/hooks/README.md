@@ -141,6 +141,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
+| [docs/provider_parity.md](docs/provider_parity.md) | `parity`: the same prompts headless on Claude and Codex, compared hook by hook from engine.jsonl |
 
 ---
 

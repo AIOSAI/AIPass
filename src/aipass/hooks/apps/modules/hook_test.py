@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.2.0
-# Description: Portable hook test runner — fires every hook with mock data
+# Version: 1.3.0
+# Description: Portable hook test runner — every hook with mock data; provider parity with real sessions
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Portable hook test runner.
@@ -14,18 +14,27 @@ Every fire aims at a throwaway branch skeleton (hook_data cwd, process cwd and A
 so no run touches the real branch's memory.
 """
 
+import argparse
 import json
 import os
 import shutil
+import sys
 import tempfile
 import time
+from datetime import date
 from pathlib import Path
+
+from rich.table import Table
 
 from aipass.hooks.apps.modules import engine
 from aipass.hooks.apps.modules.engine import dispatch
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
-from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.config.loader import aipass_home, config_unavailable_reason, find_project_config
+from aipass.hooks.apps.handlers.config.trust_registry import read_registry
 from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.handlers.parity import runner
+from aipass.hooks.apps.modules.write_ownership import project_of
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import err_console
 
@@ -33,7 +42,10 @@ CONSOLE = err_console
 
 HELP_COMMANDS = [
     ("test [--verbose]", "Fire every hook with mock data and report results"),
+    ("parity [--branch @x] [--lane A,..] [--json]", "Same prompts headless on Claude and Codex, hook by hook"),
 ]
+
+REPORTS_DIR = module_file(__file__).parents[2] / "artifacts" / "reports"
 
 _SYNTHETIC_PATH = os.path.join(tempfile.gettempdir(), "hook_test_synthetic.txt")
 
@@ -274,6 +286,100 @@ def print_results(results: dict, verbose: bool = False) -> None:
     )
 
 
+def resolve_branch(target: str) -> Path | None:
+    """A path, or @name looked up in AIPass's registry, then in each trusted project's."""
+    if not target.startswith("@"):
+        path = Path(target).expanduser()
+        return path.resolve() if path.is_dir() else None
+    name = target[1:].lower()
+    for root in [aipass_home(), *(Path(p) for p in read_registry().get("projects", {}))]:
+        project = project_of(root) if root else None
+        for row in (project.branches or ()) if project else ():
+            if row.name == name:
+                return row.path
+    return None
+
+
+def _other_branch(branch: Path) -> Path:
+    """A sibling branch in the same project: lane C's cross-branch write target."""
+    project = project_of(branch)
+    for row in (project.branches or ()) if project else ():
+        if row.path != branch:
+            return row.path
+    return branch.parent / "parity_other_branch"
+
+
+def run_parity(branch: Path, lanes: list[str], providers: list[str]) -> dict:
+    """Each lane's prompt once per provider (a shared prompt runs once), then compared row by row."""
+    notes = [f"lane A probe mail: {runner.send_probe_mail(branch)}"] if "A" in lanes else []
+    other = _other_branch(branch)
+    sessions: dict[tuple[str, str], tuple[str, list[dict], bool]] = {}
+    rows = []
+    for lane in lanes:
+        prompt = runner.lane_prompt(lane, branch, other)
+        for provider in providers:
+            if (provider, prompt) not in sessions:
+                sessions[(provider, prompt)] = runner.run_session(provider, prompt, branch)
+                notes.append(f"lane {lane} {provider}: session {sessions[(provider, prompt)][0] or 'none'}")
+        for row in (r for r in runner.ROWS if r.lane == lane):
+            readings = {}
+            for provider in providers:
+                session_id, entries, moved = sessions[(provider, prompt)]
+                readings[provider] = runner.observe(row, entries, moved) if session_id and entries else runner.NO_DATA
+            rows.append({**row.__dict__, "readings": readings, "verdict": runner.verdict(row, readings)})
+    ok = not [r for r in rows if r["verdict"] in runner.FAILING]
+    return {"branch": str(branch), "rows": rows, "notes": notes, "ok": ok}
+
+
+def print_parity(results: dict) -> None:
+    """One table: row, Claude, Codex, verdict; accepted differences carry their reason."""
+    table = Table(title=f"parity @ {results['branch']}")
+    for column in ("Lane", "Row", *runner.PROVIDERS, "Verdict"):
+        table.add_column(column)
+    styles = {runner.SAME: "green", runner.ACCEPTED: "yellow"}
+    for row in results["rows"]:
+        mark = f"{row['verdict']} ({row['accepted']})" if row["verdict"] == runner.ACCEPTED else row["verdict"]
+        cells = [row["readings"].get(p, "-") for p in runner.PROVIDERS]
+        style = styles.get(row["verdict"], "bold red")
+        table.add_row(row["lane"], row["label"], *cells, f"[{style}]{mark}[/{style}]")
+    CONSOLE.print(table)
+    for note in results["notes"]:
+        CONSOLE.print(f"[dim]{note}[/dim]")
+
+
+def _parity_command(args: list) -> bool:
+    """drone @hooks parity: exit 1 on a real difference, so a merge train can gate on it."""
+    if wants_help(args):
+        CONSOLE.print("[bold cyan]parity[/bold cyan] — the same scripted prompts on Claude and Codex, compared")
+        CONSOLE.print("  drone @hooks parity [--branch @canary|<path>] [--lane A,B,C,D,E,F] [--provider claude,codex]")
+        CONSOLE.print("  --json   also write artifacts/reports/parity_<date>.json")
+        CONSOLE.print("Lane J is A,B,C with --branch at an external project's citizen. Exit 1 on DIFFERENT or no data.")
+        return True
+    parser = argparse.ArgumentParser(prog="drone @hooks parity", add_help=False)
+    parser.add_argument("--branch", default="@canary")
+    parser.add_argument("--lane", default=",".join(runner.LANES))
+    parser.add_argument("--provider", default=",".join(runner.PROVIDERS))
+    parser.add_argument("--json", action="store_true")
+    opts, _unknown = parser.parse_known_args(args)
+    branch = resolve_branch(opts.branch)
+    lanes = [lane for part in opts.lane.upper().split(",") for lane in (("A", "B", "C") if part == "J" else (part,))]
+    providers = [p for p in opts.provider.lower().split(",") if p in runner.PROVIDERS]
+    bad = [lane for lane in lanes if lane not in runner.LANES]
+    if branch is None or bad or not providers:
+        CONSOLE.print(f"[red]parity: no branch {opts.branch!r}, unknown lane {bad}, or no provider[/red]")
+        sys.exit(1)
+    results = run_parity(branch, list(dict.fromkeys(lanes)), providers)
+    print_parity(results)
+    if opts.json:
+        json_files.make_directory(REPORTS_DIR)
+        report = REPORTS_DIR / f"parity_{date.today().isoformat()}.json"
+        json_files.write_json_file(report, results)
+        CONSOLE.print(f"[dim]written: {report}[/dim]")
+    if not results["ok"]:
+        sys.exit(1)
+    return True
+
+
 def print_introspection() -> None:
     """Print module introspection for drone discovery."""
     CONSOLE.print("[cyan]hook_test[/cyan] — Portable hook test runner")
@@ -281,7 +387,9 @@ def print_introspection() -> None:
 
 
 def handle_command(command: str, args: list) -> bool:
-    """Route 'test' command."""
+    """Route the 'test' and 'parity' commands."""
+    if command == "parity":
+        return _parity_command(args)
     if command != "test":
         return False
 
