@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-04-16
 # Modified: 2026-10-26
 # =============================================
@@ -899,7 +899,7 @@ class TestCodexHooksRow:
     def test_a_missing_codex_file_warns_and_fix_yes_writes_it_until_the_row_passes(self, tmp_path) -> None:
         rows = [{"command": f"{self._BRIDGE} Stop", "event": "Stop"}]
         manifest, home = self._world(tmp_path, rows)
-        codex = tmp_path / "repo" / ".codex" / "hooks.json"
+        codex = tmp_path / "codex_home" / "hooks.json"
 
         (before,) = self._rows(manifest, home)
         with _home_at(home):
@@ -923,7 +923,7 @@ class TestCodexHooksRow:
     def test_the_fix_json_plan_diffs_each_file_once_and_writes_nothing_without_yes(self, tmp_path) -> None:
         rows = [{"command": f"{self._BRIDGE} Stop", "event": "Stop"}]
         manifest, home = self._world(tmp_path, rows, {"includeGitInstructions": False})
-        codex = tmp_path / "repo" / ".codex" / "hooks.json"
+        codex = tmp_path / "codex_home" / "hooks.json"
 
         with _home_at(home):
             report = _doctor_wire.settings_fix_report(manifest)

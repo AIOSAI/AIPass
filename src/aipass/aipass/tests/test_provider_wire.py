@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
-# Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
-# Version: 1.8.0
+# Description: Tests for provider_wire — manifest-driven hook merges for both CLIs, backup and receipt first; doctor's codex hook rows
+# Version: 1.9.0
 # Created: 2026-08-01
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -26,6 +26,8 @@ from pathlib import Path
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers import provider_wire, settings_backup
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
+from aipass.aipass.apps.modules._doctor_wire import check_codex_hooks
 from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny
 from aipass.aipass.apps.handlers.settings_backup import SettingsBackupError
 from aipass.aipass.apps.handlers.provider_wire import (
@@ -33,6 +35,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     STATE_MISSING,
     STATE_SET,
     apply_settings_plan,
+    codex_trust_keys,
     plan_codex_hooks,
     manifest_settings,
     plan_wire_provider,
@@ -801,13 +804,14 @@ _CODEX_FILE = {
 
 
 def _codex_world(tmp_path, rows: list, existing: dict | None = None):
-    """A repo whose manifest carries cli.codex rows, a settings file outside it; returns manifest, settings, codex."""
+    """A repo whose manifest carries cli.codex rows, a settings file outside it, and the user-level
+    Codex hooks file in conftest's CODEX_HOME; returns manifest, settings, codex."""
     manifest = tmp_path / "repo" / ".claude" / "provider_manifest.json"
     manifest.parent.mkdir(parents=True)
     manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}, "codex": {"hooks": rows}}}), encoding="utf-8")
     settings_path = tmp_path / "home" / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True)
-    codex = tmp_path / "repo" / ".codex" / "hooks.json"
+    codex = tmp_path / "codex_home" / "hooks.json"
     if existing is not None:
         codex.parent.mkdir()
         codex.write_text(json.dumps(existing), encoding="utf-8")
@@ -815,7 +819,7 @@ def _codex_world(tmp_path, rows: list, existing: dict | None = None):
 
 
 class TestCodexHooks:
-    """cli.codex rows land whole in <repo root>/.codex/hooks.json, in Claude's hook shape."""
+    """cli.codex rows merge into the user-level $CODEX_HOME/hooks.json, in Claude's hook shape, AIPass first."""
 
     def test_the_install_door_writes_the_codex_file_in_claude_shape_with_its_receipt(self, tmp_path) -> None:
         manifest, settings_path, codex = _codex_world(tmp_path, _CODEX_ROWS)
@@ -827,19 +831,38 @@ class TestCodexHooks:
         (receipt,) = _receipts(codex)
         assert receipt["door"] == settings_backup.DOOR_SETUP_SH
         assert receipt["after_sha256"] == hashlib.sha256(codex.read_bytes()).hexdigest()
+        assert not (tmp_path / "repo" / ".codex").exists()
 
-    def test_a_hand_edited_codex_file_is_replaced_whole_after_its_backup(self, tmp_path) -> None:
-        stray = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}, "extra": 1}
-        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS, stray)
+    def test_the_users_rows_are_kept_behind_the_aipass_groups_after_a_backup(self, tmp_path) -> None:
+        """Mutant: putting foreign groups first shifts every AIPass trust key and goes red."""
+        mine = {"hooks": [{"type": "command", "command": "echo mine"}]}
+        stale = {"hooks": [{"type": "command", "command": f"{_CODEX} Old"}, {"type": "command", "command": "echo too"}]}
+        users = {"hooks": {"Stop": [mine, stale], "SessionEnd": [mine]}, "extra": 1}
+        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS, users)
         original = codex.read_text(encoding="utf-8")
 
         plan = plan_codex_hooks(manifest)
         assert plan is not None
         apply_settings_plan(plan)
 
-        assert json.loads(codex.read_text(encoding="utf-8")) == _CODEX_FILE
+        written = json.loads(codex.read_text(encoding="utf-8"))
+        too = {"hooks": [{"type": "command", "command": "echo too"}]}
+        assert written == {
+            "hooks": {**_CODEX_FILE["hooks"], "Stop": [*_CODEX_FILE["hooks"]["Stop"], mine, too], "SessionEnd": [mine]},
+            "extra": 1,
+        }
         (backup,) = _backups(codex)
         assert (_folder(codex) / backup).read_text(encoding="utf-8") == original
+        assert plan_codex_hooks(manifest) is None
+
+    def test_the_trust_keys_are_the_user_file_snake_event_group_and_index(self, tmp_path) -> None:
+        path = tmp_path / "codex_home" / "hooks.json"
+
+        assert codex_trust_keys(path, _CODEX_FILE) == [
+            f"{path}:user_prompt_submit:0:0",
+            f"{path}:pre_tool_use:0:0",
+            f"{path}:stop:0:0",
+        ]
 
     def test_a_matching_file_plans_nothing(self, tmp_path) -> None:
         manifest, _settings, _codex = _codex_world(tmp_path, _CODEX_ROWS, _CODEX_FILE)
@@ -856,3 +879,68 @@ class TestCodexHooks:
         assert codex.read_text(encoding="utf-8") == original
         assert not [a for a in actions if "Codex" in a]
         assert not (codex.parent / ".backup").exists()
+
+
+class TestCodexDoctorRows:
+    """Doctor's codex hooks rows: the user-level file, its trust in config.toml, a repo file firing twice."""
+
+    def _config(self, tmp_path, keys: list) -> None:
+        tables = "".join(f'[hooks.state."{k}"]\ntrusted_hash = "sha256:x"\n' for k in keys)
+        (tmp_path / "codex_home" / "config.toml").write_text(tables, encoding="utf-8")
+
+    def _rows(self, manifest) -> list:
+        doc = json.loads(manifest.read_text(encoding="utf-8"))
+        return [(r.label, r.glyph, r.detail, r.remediation) for r in check_codex_hooks(doc, manifest)]
+
+    def test_a_current_and_trusted_user_file_passes_both_rows(self, tmp_path) -> None:
+        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS, _CODEX_FILE)
+        self._config(tmp_path, codex_trust_keys(codex, _CODEX_FILE))
+
+        assert self._rows(manifest) == [
+            ("codex hooks", GLYPH_PASS, "3 Codex hooks match cli.codex", ""),
+            ("codex trust", GLYPH_PASS, "3 AIPass rows trusted", ""),
+        ]
+
+    def test_one_untrusted_row_warns_with_the_trust_step(self, tmp_path) -> None:
+        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS, _CODEX_FILE)
+        self._config(tmp_path, codex_trust_keys(codex, _CODEX_FILE)[1:])
+
+        trust = (
+            "codex trust",
+            GLYPH_WARN,
+            "Codex hooks not trusted (1 of 3 rows)",
+            "Run `codex` once and choose 'Trust all and continue'",
+        )
+        assert self._rows(manifest)[1] == trust
+
+    def test_bridge_rows_in_the_repo_file_fail_and_fix_leaves_that_file(self, tmp_path) -> None:
+        """Mutant: dropping the double-fire check loses the FAIL row and goes red."""
+        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS)
+        repo = tmp_path / "repo" / ".codex" / "hooks.json"
+        repo.parent.mkdir()
+        repo.write_text(json.dumps(_CODEX_FILE), encoding="utf-8")
+        original = repo.read_bytes()
+
+        rows = self._rows(manifest)
+        apply_settings_plan(plan_codex_hooks(manifest))
+
+        detail = f"Codex hooks double-fire: {repo} still holds bridge rows"
+        assert rows[-1] == (
+            "codex double-fire",
+            GLYPH_FAIL,
+            detail,
+            "Remove them by hand: --fix leaves the project's file",
+        )
+        assert repo.read_bytes() == original
+        assert json.loads(codex.read_text(encoding="utf-8")) == _CODEX_FILE
+
+    def test_a_repo_file_with_only_its_own_rows_is_no_double_fire(self, tmp_path) -> None:
+        manifest, _settings, _codex = _codex_world(tmp_path, _CODEX_ROWS)
+        repo = tmp_path / "repo" / ".codex" / "hooks.json"
+        repo.parent.mkdir()
+        repo.write_text(
+            json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}}),
+            encoding="utf-8",
+        )
+
+        assert [r[0] for r in self._rows(manifest)] == ["codex hooks"]

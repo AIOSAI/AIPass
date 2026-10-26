@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-05-08
 # Modified: 2026-10-26
 # =============================================
@@ -38,10 +38,12 @@ from aipass.aipass.apps.handlers.provider_wire import (
     codex_config_path,
     codex_hooks_document,
     codex_hooks_path,
+    codex_trust_keys,
     manifest_settings,
     plan_codex_hooks,
     plan_wire_provider,
     read_codex_config,
+    repo_codex_double_fire,
     settings_diff,
     settings_gaps,
 )
@@ -118,10 +120,42 @@ def check_settings_scalars(
 
 
 CODEX_HOOKS_LABEL = "codex hooks"
+CODEX_TRUST_LABEL = "codex trust"
+CODEX_DOUBLE_FIRE_LABEL = "codex double-fire"
+TRUST_ALL = "Run `codex` once and choose 'Trust all and continue'"
 
 
 def check_codex_hooks(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
-    """One row: does the repo's .codex/hooks.json hold exactly what cli.codex makes? None without rows."""
+    """The user-level hooks file, its trust, and a repo file firing the bridge twice. None without rows."""
+    rows = _codex_hooks_rows(manifest, manifest_path)
+    double = repo_codex_double_fire(manifest_path) if rows else None
+    if double is not None:
+        detail = f"Codex hooks double-fire: {double} still holds bridge rows"
+        rows.append(
+            SettingsCheckResult(
+                CODEX_DOUBLE_FIRE_LABEL, GLYPH_FAIL, detail, "Remove them by hand: --fix leaves the project's file"
+            )
+        )
+    return rows
+
+
+def _codex_trust_row(wanted: dict) -> SettingsCheckResult:
+    """Does config.toml hold a trusted_hash for every AIPass row of the user-level file?"""
+    config, problem = read_codex_config(codex_config_path())
+    if problem:
+        return SettingsCheckResult(CODEX_TRUST_LABEL, GLYPH_WARN, problem, TRUST_ALL)
+    state = config.get("hooks", {}).get("state", {})
+    keys = codex_trust_keys(codex_hooks_path(), wanted)
+    untrusted = [k for k in keys if "trusted_hash" not in (state.get(k) or {})]
+    if untrusted:
+        return SettingsCheckResult(
+            CODEX_TRUST_LABEL, GLYPH_WARN, f"Codex hooks not trusted ({len(untrusted)} of {len(keys)} rows)", TRUST_ALL
+        )
+    return SettingsCheckResult(CODEX_TRUST_LABEL, GLYPH_PASS, f"{len(keys)} AIPass rows trusted", "")
+
+
+def _codex_hooks_rows(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
+    """Does the user-level hooks file hold cli.codex's rows first, and are they trusted?"""
     wanted = codex_hooks_document(manifest)
     if wanted is None:
         return []
@@ -132,9 +166,12 @@ def check_codex_hooks(manifest: dict, manifest_path: Path) -> List[SettingsCheck
         logger.warning("[doctor] codex hooks unreadable: %s", exc)
         return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_WARN, str(exc), f"Run: {WIRE_COMMAND}")]
     if plan is None:
-        return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_PASS, f"{count} Codex hooks match cli.codex", "")]
+        return [
+            SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_PASS, f"{count} Codex hooks match cli.codex", ""),
+            _codex_trust_row(wanted),
+        ]
     state = "differs from" if plan.before else "missing, wanted by"
-    detail = f"{codex_hooks_path(manifest_path)} {state} cli.codex ({count} hooks)"
+    detail = f"{codex_hooks_path()} {state} cli.codex ({count} hooks)"
     return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_WARN, detail, f"Run: {WIRE_COMMAND}")]
 
 

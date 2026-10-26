@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-07-11
 # Modified: 2026-10-26
 # =============================================
@@ -11,8 +11,8 @@
 Hooks are strip-and-readd (stale bridge entries go); env, permissions and the
 top-level settings scalars are additive only: a value the user set is reported,
 never overwritten. The manifest is the single source; this file holds no defaults.
-``cli.codex`` hooks go whole into the repo's .codex/hooks.json. Both doors (setup.sh,
-doctor --fix) back up before the write, receipt after.
+``cli.codex`` hooks merge into the user-level Codex hooks.json, AIPass groups first. Both
+doors (setup.sh, doctor --fix) back up before the write, receipt after.
 """
 
 from __future__ import annotations
@@ -400,10 +400,18 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
     return _make_plan(settings_path, before, settings, actions, DOOR_DOCTOR_FIX, "Updated ~/.claude/settings.json")
 
 
-def codex_config_path() -> Path:
-    """Codex's config.toml: under $CODEX_HOME when set, else ~/.codex."""
+CODEX_BRIDGE_MARK = "src/aipass/hooks/apps/handlers/bridges/codex.py"
+
+
+def codex_home() -> Path:
+    """$CODEX_HOME when set, else ~/.codex."""
     home = os.environ.get("CODEX_HOME")
-    return (Path(home) if home else Path.home() / ".codex") / "config.toml"
+    return Path(home) if home else Path.home() / ".codex"
+
+
+def codex_config_path() -> Path:
+    """Codex's config.toml in codex_home()."""
+    return codex_home() / "config.toml"
 
 
 def read_codex_config(path: Path) -> tuple[dict, str]:
@@ -423,9 +431,69 @@ def read_codex_config(path: Path) -> tuple[dict, str]:
         return {}, f"{path} unreadable: {exc}"
 
 
-def codex_hooks_path(manifest_path: Path) -> Path:
-    """The repo's Codex hooks file: ``<repo root>/.codex/hooks.json``, the root taken from the manifest."""
+def codex_hooks_path() -> Path:
+    """The user-level Codex hooks file, which Codex reads from every cwd: codex_home()/hooks.json."""
+    return codex_home() / "hooks.json"
+
+
+def repo_codex_hooks_path(manifest_path: Path) -> Path:
+    """The repo-level ``<repo root>/.codex/hooks.json``, the root taken from the manifest."""
     return manifest_path.parent.parent / ".codex" / "hooks.json"
+
+
+def is_bridge_group(group: Any) -> bool:
+    """Does this hook group run the AIPass Codex bridge?"""
+    hooks = group.get("hooks", []) if isinstance(group, dict) else []
+    return any(CODEX_BRIDGE_MARK in str(h.get("command", "")) for h in hooks if isinstance(h, dict))
+
+
+def _foreign_part(group: Any) -> Optional[Any]:
+    """The group with its bridge rows taken out; None when nothing else is left."""
+    if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+        return group
+    kept = [h for h in group["hooks"] if not (isinstance(h, dict) and CODEX_BRIDGE_MARK in str(h.get("command", "")))]
+    return {**group, "hooks": kept} if kept else None
+
+
+def merge_codex_hooks(before: dict, wanted: dict) -> dict:
+    """*before* with its bridge rows replaced by *wanted*'s; every other row kept, behind them.
+
+    Codex keys trust by ``<file>:<event>:<group>:<index>``, so AIPass groups go first in each
+    event: a foreign group ahead would shift every AIPass key and untrust it."""
+    merged = copy.deepcopy(before)
+    old = before.get("hooks")
+    old = old if isinstance(old, dict) else {}
+    hooks: Dict[str, Any] = {}
+    for event in [*wanted["hooks"], *(e for e in old if e not in wanted["hooks"])]:
+        foreign = [part for g in old.get(event, []) or [] if (part := _foreign_part(g)) is not None]
+        groups = copy.deepcopy(wanted["hooks"].get(event, [])) + foreign
+        if groups:
+            hooks[event] = groups
+    merged["hooks"] = hooks
+    return merged
+
+
+def repo_codex_double_fire(manifest_path: Path) -> Optional[Path]:
+    """The repo-level hooks file when it still holds bridge rows, which Codex fires beside the user-level ones."""
+    path = repo_codex_hooks_path(manifest_path)
+    try:
+        doc = _read_settings(path)
+    except SettingsBackupError as exc:
+        logger.warning("[provider_wire] repo codex hooks unreadable, double-fire unknown: %s", exc)
+        return None
+    events = doc.get("hooks")
+    events = events if isinstance(events, dict) else {}
+    return path if any(is_bridge_group(g) for groups in events.values() for g in groups or []) else None
+
+
+def codex_trust_keys(hooks_path: Path, wanted: dict) -> List[str]:
+    """The ``[hooks.state]`` keys Codex trusts the AIPass rows under, once they sit first."""
+    keys = []
+    for event, groups in wanted["hooks"].items():
+        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+        for g, group in enumerate(groups):
+            keys.extend(f"{hooks_path}:{snake}:{g}:{i}" for i in range(len(group["hooks"])))
+    return keys
 
 
 def codex_hooks_document(manifest: dict) -> Optional[dict]:
@@ -440,7 +508,7 @@ def codex_hooks_document(manifest: dict) -> Optional[dict]:
 
 
 def plan_codex_hooks(manifest_path: Path, door: str = DOOR_DOCTOR_FIX) -> Optional[SettingsPlan]:
-    """Replace ``.codex/hooks.json`` whole (it is AIPass's) to match ``cli.codex``; None when it does.
+    """Merge ``cli.codex`` into the user-level Codex hooks file; None when it already matches.
 
     No rows plans nothing, rather than empty a file the manifest has not caught up with."""
     manifest = json_handler.read_json(manifest_path)
@@ -449,15 +517,16 @@ def plan_codex_hooks(manifest_path: Path, door: str = DOOR_DOCTOR_FIX) -> Option
     wanted = codex_hooks_document(manifest)
     if wanted is None:
         return None
-    codex_path = codex_hooks_path(manifest_path).resolve()
+    codex_path = codex_hooks_path()
     before = _read_settings(codex_path)
-    if before == wanted:
+    after = merge_codex_hooks(before, wanted)
+    if before == after:
         return None
     count = sum(len(entries) for entries in wanted["hooks"].values())
     return SettingsPlan(
         codex_path,
         before,
-        wanted,
+        after,
         [f"Wrote {count} Codex hook(s) from cli.codex"],
         [f"Write {count} Codex hook(s) from cli.codex into {codex_path}"],
         [],
@@ -478,7 +547,7 @@ def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent:
 
 
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
-    """Write the manifest's Claude wiring into ~/.claude/settings.json, then cli.codex into .codex/hooks.json.
+    """Write the manifest's Claude wiring into ~/.claude/settings.json, then cli.codex into Codex's hooks.json.
 
     setup.sh is the only caller; doctor --fix plans the same writes. Raises on an
     unreadable manifest rather than leave stale wiring in place."""

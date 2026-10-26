@@ -6,7 +6,7 @@
 # Modified: 2026-10-26
 #
 # CHANGELOG (Max 5 entries):
-#   - v1.5.0 (2026-10-26): no_real_codex keeps doctor's Codex rows off the real binary
+#   - v1.5.0 (2026-10-26): no_real_codex keeps doctor's Codex rows off the real binary and ~/.codex
 #   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
 #   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
 #   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
@@ -87,8 +87,10 @@ def pinned_console_width() -> None:
 
 
 @pytest.fixture(autouse=True)
-def no_real_codex(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor's Codex rows see no codex on PATH unless a test hands them a fake."""
+def no_real_codex(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctor's Codex rows see no codex on PATH unless a test hands them a fake, and
+    CODEX_HOME is tmp_path/codex_home, so no test reads or writes the real ~/.codex."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
     monkeypatch.setattr("aipass.aipass.apps.modules._doctor_wire._codex_which", lambda name: None)
 
 

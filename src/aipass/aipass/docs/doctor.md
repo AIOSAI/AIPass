@@ -77,12 +77,19 @@ the registry root when it is an AIPass tree (it holds `src/aipass`), else the
 tree an external project's `.claude/settings.local.json` or `settings.json`
 names in `env.AIPASS_HOME`. Two AIPass trees fail the row.
 
-Codex reads the same hook shape from the repo's `.codex/hooks.json`. Both doors
-write that file from the manifest's `cli.codex.hooks` rows, the repo root taken
-from the manifest's location. The file belongs wholly to AIPass, so it is
-replaced whole rather than merged. A manifest with no `cli.codex` rows leaves
-it as it is. The `codex hooks` row passes when the file holds exactly what the
-rows make, and warns, naming `aipass doctor --fix`, when it is missing or differs.
+Codex reads the same hook shape from the user-level `$CODEX_HOME/hooks.json`
+(`~/.codex/hooks.json` when `CODEX_HOME` is unset), from every directory. Both
+doors merge the manifest's `cli.codex.hooks` rows into it: rows running the
+AIPass Codex bridge are replaced, every other row is kept, and the AIPass groups
+come first in each event. A manifest with no `cli.codex` rows leaves the file
+as it is. The `codex hooks` row passes when the AIPass rows match the manifest,
+and warns, naming `aipass doctor --fix`, when they are missing or differ. Once
+they match, `codex trust` checks that `~/.codex/config.toml` holds a
+`trusted_hash` under `[hooks.state."<file>:<event>:<group>:<index>"]` for each
+of them, and warns with the step that trusts them: run `codex` once and choose
+'Trust all and continue'. `codex double-fire` fails when the repo's
+`.codex/hooks.json` still holds bridge rows, since Codex loads both files and
+runs every hook twice; `--fix` leaves that file to the project.
 Next to it, the `codex binary`, `codex login`, `codex model` and `codex pins`
 rows read the Codex side and never write `~/.codex/config.toml`; see
 [`two_clis.md`](two_clis.md).
@@ -103,8 +110,8 @@ and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 Before any of these doors writes the personal settings file (`doctor --fix`,
 the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
-`settings.json.<date>T<time>.<door>`. A write to `.codex/hooks.json` backs up
-to `.codex/.backup/settings/` the same way. Then, after the write, it adds one line to
+`settings.json.<date>T<time>.<door>`. A write to Codex's `hooks.json` backs up
+to `.backup/settings/` beside it the same way. Then, after the write, it adds one line to
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be

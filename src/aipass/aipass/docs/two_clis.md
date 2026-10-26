@@ -16,7 +16,7 @@ reads at startup and how a ritual is typed. This page is the map of both.
 | Instructions | `AGENTS.md`, natively | `AGENTS.md`, natively |
 | Shared skills | `.claude/skills/`, a symlink to `../.agents/skills` | `.agents/skills/`, natively |
 | CLI-only skills | `.claude/commands/codex.md` (the switch to Codex) | `.codex/skills/claude/` (the switch back) |
-| Hooks | `~/.claude/settings.json` | the repo's `.codex/hooks.json` |
+| Hooks | `~/.claude/settings.json` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` |
 | Session pointer | `.ai_mail.local/session.json` in the branch | the same file |
 | Handoff on a switch | `.ai_mail.local/handoff.md` in the branch | the same file |
 
@@ -29,9 +29,17 @@ link; `aipass doctor` checks both (see [`doctor.md`](doctor.md)).
 
 **Hooks.** `.claude/provider_manifest.json` holds the hook rows for both CLIs:
 `cli.claude` and `cli.codex`. `aipass doctor --fix` and `setup.sh` write the
-first into `~/.claude/settings.json` and the second, whole, into the repo's
-`.codex/hooks.json`. Codex reads the same hook shape as Claude Code. The event
-table lives in @hooks' `docs/wiring.md`.
+first into `~/.claude/settings.json` and the second into the user-level
+`$CODEX_HOME/hooks.json` (`~/.codex/hooks.json` when `CODEX_HOME` is unset),
+which Codex reads from every directory. Codex reads the same hook shape as
+Claude Code. The file is the user's, so the write is a merge: rows running the
+AIPass Codex bridge are replaced, every other row is kept, and the AIPass groups
+come first in each event. Codex keys its trust by
+`<file>:<event>:<group>:<index>`, with no directory in it, so one trust of the
+file covers every project, and a foreign group ahead of the AIPass ones would
+shift their keys and untrust them. Codex loads a repo's `.codex/hooks.json`
+beside the user-level file without deduplicating, so bridge rows in both fire
+twice. The event table lives in @hooks' `docs/wiring.md`.
 
 **Doctor's Codex rows.** Beside `codex hooks`, `aipass doctor` reads the Codex
 side and never writes it. `codex binary` prints the version, or passes as
