@@ -83,6 +83,9 @@ from the manifest's location. The file belongs wholly to AIPass, so it is
 replaced whole rather than merged. A manifest with no `cli.codex` rows leaves
 it as it is. The `codex hooks` row passes when the file holds exactly what the
 rows make, and warns, naming `aipass doctor --fix`, when it is missing or differs.
+Next to it, the `codex binary`, `codex login`, `codex model` and `codex pins`
+rows read the Codex side and never write `~/.codex/config.toml`; see
+[`two_clis.md`](two_clis.md).
 
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
 the planned changes, one line each, then a unified diff per file, and ask

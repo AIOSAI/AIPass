@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-04-16
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -933,6 +933,111 @@ class TestCodexHooksRow:
         assert f"Write 1 Codex hook(s) from cli.codex into {codex.resolve()}" in report["planned"]
         assert report["applied"] is False
         assert not codex.exists()
+
+
+class TestCodexCliRows:
+    """Codex's binary, login, model and config pins: read-only rows, a fake codex, never the real one."""
+
+    _PINS = (
+        "include_collaboration_mode_instructions = false\n[features]\nmemories = false\n"
+        "collaboration_modes = false\n[tools.experimental_request_user_input]\nenabled = false\n"
+    )
+    _CATALOG = {"models": [{"slug": "gpt-a", "visibility": "list"}, {"slug": "gpt-h", "visibility": "hide"}]}
+
+    def _rows(self, monkeypatch, config: str | None, login_rc: int = 0) -> list:
+        answers = {
+            "--version": (0, "codex-cli 0.164.0\n"),
+            "login": (login_rc, "Logged in using ChatGPT\n" if login_rc == 0 else "Not logged in\n"),
+            "debug": (0, json.dumps(self._CATALOG)),
+        }
+
+        def run(args, **_kw):
+            rc, out = answers[args[1]]
+            return subprocess.CompletedProcess(args, rc, out, "")
+
+        monkeypatch.setattr(_doctor_wire, "_codex_which", lambda name: "/usr/bin/codex")
+        monkeypatch.setattr(_doctor_wire, "_codex_run", run)
+        path = self._config_path
+        if config is not None:
+            path.write_text(config, encoding="utf-8")
+        return [(r.label, r.glyph, r.detail, r.remediation) for r in _doctor_wire.check_codex_cli(path)]
+
+    @pytest.fixture(autouse=True)
+    def _at(self, tmp_path) -> None:
+        self._config_path = tmp_path / "config.toml"
+
+    def test_a_wired_codex_passes_every_row(self, monkeypatch) -> None:
+        rows = self._rows(monkeypatch, 'model = "gpt-a"\n' + self._PINS)
+
+        assert rows == [
+            ("codex binary", GLYPH_PASS, "codex-cli 0.164.0", ""),
+            ("codex login", GLYPH_PASS, "Logged in using ChatGPT", ""),
+            ("codex model", GLYPH_PASS, "gpt-a in this login's catalog", ""),
+            ("codex pins", GLYPH_PASS, "4 config pins set", ""),
+        ]
+
+    def test_no_codex_on_path_is_one_pass_row_and_nothing_runs(self, tmp_path) -> None:
+        assert _doctor_wire.check_codex_cli(tmp_path / "config.toml") == [
+            ("codex binary", GLYPH_PASS, "not on PATH — Codex is optional, rows skipped", "")
+        ]
+
+    def test_a_logged_out_codex_warns_with_the_login_command(self, monkeypatch) -> None:
+        rows = self._rows(monkeypatch, self._PINS, login_rc=1)
+
+        assert ("codex login", GLYPH_WARN, "Not logged in", "Run: codex login") in rows
+        assert ("codex model", GLYPH_PASS, "none set — Codex's default", "") in rows
+
+    def test_a_model_outside_the_catalog_warns_naming_the_listed_ones(self, monkeypatch) -> None:
+        rows = self._rows(monkeypatch, 'model = "gpt-gone"\n' + self._PINS)
+
+        fix = f"Set model in {self._config_path} by hand to one of: gpt-a"
+        assert ("codex model", GLYPH_WARN, "gpt-gone not in this login's catalog", fix) in rows
+
+    def test_each_missing_or_wrong_pin_is_one_warn_naming_the_line_to_add(self, monkeypatch) -> None:
+        rows = self._rows(monkeypatch, "[features]\nmemories = true\n")
+
+        path = self._config_path
+        assert [r[1:] for r in rows if r[0] == "codex pins"] == [
+            (GLYPH_WARN, "features.memories is true", f"Add to {path} under [features]: memories = false"),
+            (
+                GLYPH_WARN,
+                "include_collaboration_mode_instructions missing",
+                f"Add to {path} above the first [table]: include_collaboration_mode_instructions = false",
+            ),
+            (
+                GLYPH_WARN,
+                "features.collaboration_modes missing",
+                f"Add to {path} under [features]: collaboration_modes = false",
+            ),
+            (
+                GLYPH_WARN,
+                "tools.experimental_request_user_input.enabled missing",
+                f"Add to {path} under [tools.experimental_request_user_input]: enabled = false",
+            ),
+        ]
+
+    def test_a_missing_config_warns_on_model_and_pins(self, monkeypatch) -> None:
+        rows = self._rows(monkeypatch, None)
+
+        missing = f"{self._config_path} missing"
+        assert rows[2:] == [("codex model", GLYPH_WARN, missing, ""), ("codex pins", GLYPH_WARN, missing, "")]
+
+    def test_doctor_shows_the_codex_rows_after_codex_hooks_and_fix_never_writes_config(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        world = TestCodexHooksRow()
+        rows = [{"command": f"{world._BRIDGE} Stop", "event": "Stop"}]
+        manifest, home = world._world(tmp_path, rows)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+        config = tmp_path / "codex" / "config.toml"
+        config.parent.mkdir()
+        config.write_text("[features]\nmemories = true\n", encoding="utf-8")
+        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest), _home_at(home):
+            labels = [r.label for r in check_provider_manifest() if r.label.startswith("codex")]
+            _doctor_wire.fix_provider_settings(manifest, yes=True)
+
+        assert labels == ["codex hooks", "codex binary"]
+        assert config.read_text(encoding="utf-8") == "[features]\nmemories = true\n"
 
 
 # =============================================================================

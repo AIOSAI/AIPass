@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handoff_platform/__init__.py
 # Description: OS-dispatched CLI session launch — tmux, wt.exe, fallback
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-04-20
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -29,6 +29,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
 _TMUX_SESSION = "aipass-handoff"
+CODEX_BYPASS_FLAG = "--dangerously-bypass-approvals-and-sandbox"
 
 
 def build_cli_cmd(cli: str, flag_variant: str) -> str:
@@ -36,6 +37,9 @@ def build_cli_cmd(cli: str, flag_variant: str) -> str:
     parts = [cli]
     if cli == "claude" and flag_variant == "skip-permissions":
         parts.append("--dangerously-skip-permissions")
+    elif cli == "codex":
+        # The hooks gate both CLIs, so Codex runs in the posture the rooms and dispatch use.
+        parts.append(CODEX_BYPASS_FLAG)
     return " ".join(parts)
 
 
@@ -45,14 +49,15 @@ def build_manual_command(cli: str, prompt: str, cwd: str, flag_variant: str = "d
     return f"cd {shlex.quote(cwd)} && {cli_cmd} {shlex.quote(prompt)}"
 
 
-def return_path_breadcrumb(cwd: str) -> str:
-    """The exact line to get back into this agent's Claude Code session.
+def return_path_breadcrumb(cwd: str, cli: str = "claude") -> str:
+    """The exact line to get back into this agent's session on *cli*.
 
     Claude Code's own exit hint prints a bare `--resume <id>` with no cwd —
     session stores are per-directory, so that hint fails from anywhere else.
-    `--continue` from the right directory needs no id.
+    `--continue` (Codex: `resume --last`) from the right directory needs no id.
     """
-    return f"cd {shlex.quote(cwd)} && claude --continue"
+    resume = "codex resume --last" if cli == "codex" else "claude --continue"
+    return f"cd {shlex.quote(cwd)} && {resume}"
 
 
 def _find_terminal_emulator() -> str | None:
@@ -187,7 +192,7 @@ def launch_inline(
 
     chdir(cwd)
     argv = [cli_path, *cli_cmd.split()[1:], prompt]
-    breadcrumb = return_path_breadcrumb(cwd)
+    breadcrumb = return_path_breadcrumb(cwd, cli)
     shell_cmd = f"{shlex.join(argv)}; printf '\\n%s\\n' {shlex.quote(breadcrumb)}"
     shell = which("bash") or which("sh") or "/bin/sh"
     logger.info("[handoff_platform] exec inline via shell: %s (cwd=%s)", shell_cmd, cwd)

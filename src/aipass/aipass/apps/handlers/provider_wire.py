@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-07-11
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -398,6 +398,29 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
     actions.extend(_merge_permissions(settings, claude_section))
     actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
     return _make_plan(settings_path, before, settings, actions, DOOR_DOCTOR_FIX, "Updated ~/.claude/settings.json")
+
+
+def codex_config_path() -> Path:
+    """Codex's config.toml: under $CODEX_HOME when set, else ~/.codex."""
+    home = os.environ.get("CODEX_HOME")
+    return (Path(home) if home else Path.home() / ".codex") / "config.toml"
+
+
+def read_codex_config(path: Path) -> tuple[dict, str]:
+    """(the parsed config, '') or ({}, why it could not be read). Read-only: the owner edits it."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        logger.warning("[provider_wire] no tomllib: config.toml unread below Python 3.11")
+        return {}, "reading config.toml needs Python 3.11+"
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8")), ""
+    except FileNotFoundError:
+        logger.info("[provider_wire] no codex config at %s", path)
+        return {}, f"{path} missing"
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        logger.warning("[provider_wire] codex config unreadable: %s: %s", path, exc)
+        return {}, f"{path} unreadable: {exc}"
 
 
 def codex_hooks_path(manifest_path: Path) -> Path:

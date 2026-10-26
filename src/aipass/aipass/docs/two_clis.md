@@ -33,6 +33,24 @@ first into `~/.claude/settings.json` and the second, whole, into the repo's
 `.codex/hooks.json`. Codex reads the same hook shape as Claude Code. The event
 table lives in @hooks' `docs/wiring.md`.
 
+**Doctor's Codex rows.** Beside `codex hooks`, `aipass doctor` reads the Codex
+side and never writes it. `codex binary` prints the version, or passes as
+optional when `codex` is not on PATH, and then the other three rows are
+skipped. `codex login` runs `codex login status` and warns on a non-zero exit.
+`codex model` checks that the `model` in `~/.codex/config.toml` (under
+`$CODEX_HOME` when that is set) is in the catalog `codex debug models` fetches
+for this login. `codex pins` checks four settings that must read `false`:
+`memories` and `collaboration_modes` under `[features]`, the top-level
+`include_collaboration_mode_instructions`, and `enabled` under
+`[tools.experimental_request_user_input]`. Each missing or wrong pin is a
+warning naming the line to add by hand. `--fix` never touches `config.toml`.
+
+**Handing off to either CLI.** `aipass handoff launch --cli codex` and an init
+run that chose Codex start `codex --dangerously-bypass-approvals-and-sandbox`,
+the posture dispatch uses, because the hooks are the gates on both CLIs. The way
+back printed after the session is `codex resume --last` from the agent's
+directory; Claude Code's is `claude --continue`.
+
 **The session pointer and the handoff.** Each interactive session start writes
 the branch's resume target, with the CLI running it, to
 `.ai_mail.local/session.json`, so a resume reopens the right CLI. A switch

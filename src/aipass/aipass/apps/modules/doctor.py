@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.7.1
+# Version: 1.8.0
 # Created: 2026-04-16
 # Modified: 2026-10-26
 # =============================================
@@ -56,7 +56,7 @@ from aipass.aipass.apps.modules._doctor_fix import (
 )
 from aipass.aipass.apps.modules._doctor_wire import (
     _prompt_auto_wire as prompt_auto_wire,
-    check_codex_hooks,
+    check_codex_side,
     check_settings_scalars,
     check_wire_verify,
     fix_provider_settings,
@@ -575,7 +575,7 @@ def check_provider_manifest(
 
     settings_rows, missing_settings = check_settings_scalars(manifest, settings_path)
     results.extend(CheckResult(*row) for row in settings_rows)
-    results.extend(CheckResult(*row) for row in check_codex_hooks(manifest, manifest_path))
+    results.extend(CheckResult(*row) for row in check_codex_side(manifest, manifest_path))
 
     # Gate on what the wire verb would actually change, not on the glyphs: a settings key
     # the user set to their own value warns forever and must never trigger the prompt.
