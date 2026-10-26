@@ -11,6 +11,8 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+## [2026-10-25] — v2.8.28: Codex as a second provider (dispatch, hooks, context gauge, one skills dir for both CLIs), the owner's settings gate, the ratchet's budget exit, the api suite at 75 s
+
 ### Added
 
 - **hooks**: `settings_gate`, the provider-settings gate (fail-closed, PreToolUse, before `settings_backup`): no AI changes `~/.codex/*.toml`, `hooks.json`, `auth.json`, `rules/**` (and the same under `$CODEX_HOME`), `~/.claude/settings*.json`, the repo's `.claude/provider_manifest.json` or `.codex/hooks.json`, or runs `aipass doctor --fix`/`setup.sh`/`provider_wire.py`, without the owner. Interactive Claude Code asks (its own settings stay with Claude Code's native prompt); a Codex caller and every headless seat are denied, the reason pointing at @devpulse. The Codex bridge turns any PreToolUse `ask` into a `deny`, since Codex runs the call on an ask. `docs/settings_gate.md`. (hooks suite 2,730 passed.)
