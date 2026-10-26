@@ -794,50 +794,24 @@ if [ -f "$COMMANDS_SRC/memo.md" ]; then
 fi
 
 # --- Install Codex CLI hooks ---
+# One door, the code `aipass doctor --fix` runs for the hooks: cli.codex merged into the
+# user-level $CODEX_HOME/hooks.json (else ~/.codex/hooks.json), then the four config pins set
+# line by line in config.toml, every other line (the owner's model among them) kept.
 if command -v codex &>/dev/null; then
-    if [ -f "$SCRIPT_DIR/.codex/hooks.json" ]; then
-        echo "Installing Codex CLI hooks ..."
-        mkdir -p "$HOME/.codex"
-
-        python3 - "$SCRIPT_DIR" "$HOME/.codex/config.toml" << 'PYEOF'
+    echo "Installing Codex CLI hooks ..."
+    if "$VENV_PYTHON" - "$SCRIPT_DIR/.claude/provider_manifest.json" << 'PYEOF'
 import sys
 from pathlib import Path
 
-repo_root = sys.argv[1]
-config_path = Path(sys.argv[2])
+from aipass.aipass.apps.handlers.provider_wire import refresh_codex
 
-# Read existing config or start fresh
-existing = {}
-if config_path.exists():
-    for line in config_path.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("[") and not line.startswith("#") and "=" in line:
-            key, val = line.split("=", 1)
-            existing[key.strip()] = val.strip()
-
-# Preserve model if set
-model = existing.get("model", '"o4-mini"')
-
-config = f'''model = {model}
-check_for_update_on_startup = false
-
-[features]
-codex_hooks = true
-
-[experimental_features]
-multi_agent = true
-multi_agent_v2 = true
-
-[projects."{repo_root}"]
-trust_level = "trusted"
-'''
-
-config_path.write_text(config)
-print(f"  config.toml -> {config_path}")
-print(f"  hooks.json -> {repo_root}/.codex/hooks.json (project-level, travels with repo)")
+for action in refresh_codex(Path(sys.argv[1])):
+    print(f"  {action}")
 PYEOF
+    then
+        echo "  Trust them once: run codex and choose 'Trust all and continue' (headless runs skip untrusted hooks)."
     else
-        echo "Skipping Codex hooks (no .codex/hooks.json found in repo)"
+        echo "  Codex hooks NOT installed (see the error above); run aipass doctor for the Codex rows."
     fi
 else
     echo "Skipping Codex CLI (not installed)"
@@ -1082,7 +1056,7 @@ if [ "$FAIL" -eq 0 ]; then
     echo ""
     echo "CLI integrations:"
     echo "  Claude Code: hooks installed to ~/.claude/settings.json"
-    command -v codex &>/dev/null && echo "  Codex CLI:   hooks at .codex/hooks.json + config at ~/.codex/config.toml"
+    command -v codex &>/dev/null && echo "  Codex CLI:   hooks merged into ${CODEX_HOME:-~/.codex}/hooks.json, pins in its config.toml (trust them once in codex)"
     echo ""
 
     # Last thing on screen before the chat launches — everything collected

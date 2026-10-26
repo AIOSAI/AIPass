@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-05-08
 # Modified: 2026-10-26
 # =============================================
@@ -35,6 +35,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     SettingsGap,
     SettingsPlan,
     apply_settings_plan,
+    CODEX_PINS,
     codex_config_path,
     codex_hooks_document,
     codex_hooks_path,
@@ -179,13 +180,6 @@ CODEX_BINARY_LABEL = "codex binary"
 CODEX_LOGIN_LABEL = "codex login"
 CODEX_MODEL_LABEL = "codex model"
 CODEX_PINS_LABEL = "codex pins"
-# (key path, its table header or None for top level); each must read false.
-CODEX_PINS = (
-    (("features", "memories"), "[features]"),
-    (("include_collaboration_mode_instructions",), None),
-    (("features", "collaboration_modes"), "[features]"),
-    (("tools", "experimental_request_user_input", "enabled"), "[tools.experimental_request_user_input]"),
-)
 # Seams: the suite's conftest makes codex absent, so no test runs the real binary.
 _codex_which = shutil.which
 _codex_run = subprocess.run

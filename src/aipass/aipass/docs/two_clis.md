@@ -39,7 +39,13 @@ come first in each event. Codex keys its trust by
 file covers every project, and a foreign group ahead of the AIPass ones would
 shift their keys and untrust them. Codex loads a repo's `.codex/hooks.json`
 beside the user-level file without deduplicating, so bridge rows in both fire
-twice. The event table lives in @hooks' `docs/wiring.md`.
+twice. `setup.sh` runs the Codex half only when `codex` is on PATH, and then
+also sets the four config pins in `config.toml` (see the Codex rows below), one
+line each, keeping every other line, the `model` line among them. It refuses a
+file it cannot edit that way, such as a pin set by a dotted key, and writes
+nothing. Codex then asks once to trust the hooks: run `codex` and choose 'Trust
+all and continue'. A headless run skips untrusted hooks silently. The event
+table lives in @hooks' `docs/wiring.md`.
 
 **Doctor's Codex rows.** Beside `codex hooks`, `aipass doctor` reads the Codex
 side and never writes it. `codex binary` prints the version, or passes as

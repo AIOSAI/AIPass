@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven hook merges for both CLIs, backup and receipt first; doctor's codex hook rows
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-08-01
 # Modified: 2026-10-26
 # =============================================
@@ -37,6 +37,8 @@ from aipass.aipass.apps.handlers.provider_wire import (
     apply_settings_plan,
     codex_trust_keys,
     plan_codex_hooks,
+    refresh_codex,
+    set_codex_pins,
     manifest_settings,
     plan_wire_provider,
     platform_bridge_command,
@@ -821,14 +823,23 @@ def _codex_world(tmp_path, rows: list, existing: dict | None = None):
 class TestCodexHooks:
     """cli.codex rows merge into the user-level $CODEX_HOME/hooks.json, in Claude's hook shape, AIPass first."""
 
-    def test_the_install_door_writes_the_codex_file_in_claude_shape_with_its_receipt(self, tmp_path) -> None:
+    def test_the_claude_door_leaves_codex_to_its_own_door(self, tmp_path) -> None:
         manifest, settings_path, codex = _codex_world(tmp_path, _CODEX_ROWS)
 
         actions = refresh_provider_hooks(manifest, settings_path=settings_path)
 
+        assert not codex.parent.exists()
+        assert not [a for a in actions if "Codex" in a]
+
+    def test_the_install_door_writes_the_codex_file_in_claude_shape_with_its_receipt(self, tmp_path) -> None:
+        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS)
+
+        actions = refresh_codex(manifest)
+
         assert json.loads(codex.read_text(encoding="utf-8")) == _CODEX_FILE
         assert "Wrote 3 Codex hook(s) from cli.codex" in actions
-        (receipt,) = _receipts(codex)
+        assert actions[-1] == f"Codex hooks: 3 AIPass row(s) in {codex}"
+        receipt = next(r for r in _receipts(codex) if r["file"] == "hooks.json")
         assert receipt["door"] == settings_backup.DOOR_SETUP_SH
         assert receipt["after_sha256"] == hashlib.sha256(codex.read_bytes()).hexdigest()
         assert not (tmp_path / "repo" / ".codex").exists()
@@ -873,12 +884,12 @@ class TestCodexHooks:
         manifest, settings_path, codex = _codex_world(tmp_path, [], _CODEX_FILE)
         original = codex.read_text(encoding="utf-8")
 
-        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+        actions = refresh_codex(manifest)
 
         assert plan_codex_hooks(manifest) is None
         assert codex.read_text(encoding="utf-8") == original
-        assert not [a for a in actions if "Codex" in a]
-        assert not (codex.parent / ".backup").exists()
+        assert not [a for a in actions if "hook(s)" in a]
+        assert [r["file"] for r in _receipts(codex)] == ["config.toml"]
 
 
 class TestCodexDoctorRows:
@@ -944,3 +955,87 @@ class TestCodexDoctorRows:
         )
 
         assert [r[0] for r in self._rows(manifest)] == ["codex hooks"]
+
+
+_PINS_TOML = """include_collaboration_mode_instructions = false
+[features]
+collaboration_modes = false
+memories = false
+
+[tools.experimental_request_user_input]
+enabled = false
+"""
+
+
+class TestCodexPins:
+    """setup.sh sets the four Codex config pins line by line, keeping every other line of config.toml."""
+
+    def test_a_missing_config_gets_the_four_pins_and_nothing_else(self, tmp_path) -> None:
+        config = tmp_path / "codex_home" / "config.toml"
+        config.parent.mkdir()
+
+        actions = set_codex_pins(config)
+
+        assert config.read_text(encoding="utf-8") == _PINS_TOML
+        assert actions[0] == (
+            f"Set Codex pins in {config}: features.memories, include_collaboration_mode_instructions,"
+            " features.collaboration_modes, tools.experimental_request_user_input.enabled"
+        )
+
+    def test_the_owners_lines_stay_and_only_the_wrong_pin_lines_change(self, tmp_path) -> None:
+        """Mutant: inserting a table pin at the end of the file, not under its header, goes red."""
+        config = tmp_path / "config.toml"
+        owner = (
+            'model = "gpt-6.1-sol"  # mine\n'
+            "\n"
+            "[features]\n"
+            "hooks = true\n"
+            "memories = true\n"
+            "\n"
+            '[projects."/x"]\n'
+            'trust_level = "trusted"\n'
+        )
+        config.write_text(owner, encoding="utf-8")
+
+        set_codex_pins(config)
+
+        assert config.read_text(encoding="utf-8") == (
+            'model = "gpt-6.1-sol"  # mine\n'
+            "\n"
+            "include_collaboration_mode_instructions = false\n"
+            "[features]\n"
+            "collaboration_modes = false\n"
+            "hooks = true\n"
+            "memories = false\n"
+            "\n"
+            '[projects."/x"]\n'
+            'trust_level = "trusted"\n'
+            "\n"
+            "[tools.experimental_request_user_input]\n"
+            "enabled = false\n"
+        )
+        (backup,) = _backups(config)
+        assert (_folder(config) / backup).read_text(encoding="utf-8") == owner
+
+    def test_set_pins_write_nothing(self, tmp_path) -> None:
+        config = tmp_path / "config.toml"
+        config.write_text(_PINS_TOML, encoding="utf-8")
+
+        assert set_codex_pins(config) == []
+        assert not _folder(config).exists()
+
+    @pytest.mark.parametrize(
+        "text", ["features.memories = true\n", "[features\n", '[features]\nnote = """\nmemories = x\n"""\n']
+    )
+    def test_a_config_it_cannot_edit_line_by_line_is_refused_untouched(self, tmp_path, text) -> None:
+        """A dotted pin collides with the [features] header the edit adds; a broken file is not parsed at all;
+        a pin-shaped line inside a string would be edited while the pin stays unset.
+        Mutant: dropping the after-edit pin check writes the third and goes red."""
+        config = tmp_path / "config.toml"
+        config.write_text(text, encoding="utf-8")
+
+        with pytest.raises(SettingsBackupError, match="not touching it"):
+            set_codex_pins(config)
+
+        assert config.read_text(encoding="utf-8") == text
+        assert not _folder(config).exists()

@@ -144,9 +144,10 @@
       "file": "apps/handlers/provider_wire.py",
       "standard": "unused_function",
       "functions": [
-        "refresh_provider_hooks"
+        "refresh_provider_hooks",
+        "refresh_codex"
       ],
-      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09."
+      "reason": "Called from setup.sh's venv-python heredoc via dynamic import (setup.sh:704-707, DPLAN-0279) — a cross-language caller the AST/corpus scanner can't see. That heredoc is its ONLY caller: auto_wire_provider is a sibling, not a chain (both call _strip_and_readd_hooks independently), so there is no in-process Python caller to make this reachable. Covered directly by tests/test_provider_wire.py. Verified live 2026-08-09. refresh_codex (2026-10-26): the same pattern from setup.sh's Codex block (codex on PATH), its only caller; covered by TestCodexHooks and TestCodexPins."
     },
     {
       "file": "apps/aipass.py",
