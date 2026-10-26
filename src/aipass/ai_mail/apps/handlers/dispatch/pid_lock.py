@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: pid_lock.py
 # Description: Process liveness, branch occupancy and the dispatch lock
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-04
 # Modified: 2026-10-25
 # =============================================
@@ -21,7 +21,7 @@ import sys
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -196,28 +196,69 @@ AGENT_PROCESS_PATTERN = "|".join(AGENT_PROCESS_NAMES)
 # Session types that should NOT block dispatch (idle/background sessions)
 _NON_BLOCKING_SESSION_TYPES = {"dispatched", "daemon"}
 
+# Codex subcommands that are never a person's session: the app-server daemon family (spawned by the
+# first TUI in a folder, parented by systemd --user, outliving every room) and headless `exec`.
+# codex-code-mode-host never reaches here: its comm is not `codex`, so pgrep -x skips it.
+CODEX_NON_SESSION_SUBCOMMANDS = frozenset({"app-server", "mcp-server", "exec"})
 
-def is_branch_occupied(branch_path: Path) -> bool:
-    """Check if an interactive Claude session is running in this branch directory."""
+
+def _read_argv(pid_str: str) -> List[str]:
+    """A process's argv. Raises OSError when it cannot be read (gone, foreign, or no reader on this OS)."""
+    if sys.platform == "linux":
+        with open(f"/proc/{pid_str}/cmdline", "rb") as f:
+            raw = f.read()
+        return [part.decode("utf-8", "replace") for part in raw.split(b"\0") if part]
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["ps", "-p", pid_str, "-ww", "-o", "command="], capture_output=True, text=True, timeout=5
+            )
+        except subprocess.SubprocessError as e:
+            raise OSError(f"ps could not read PID {pid_str}: {e}") from e
+        if result.returncode != 0:
+            raise OSError(f"ps found no PID {pid_str}")
+        return result.stdout.split()
+    raise OSError(f"no argv reader on {sys.platform}")
+
+
+def _is_codex_non_session(pid_str: str) -> bool:
+    """True for a codex process whose first argument is a non-session subcommand.
+
+    An unreadable argv counts as a session: refusing a wake is safer than spawning beside a live one.
+    """
+    try:
+        argv = _read_argv(pid_str)
+    except OSError as e:
+        logger.info("[wake] Cannot read argv for codex PID %s, counted as a session: %s", pid_str, e)
+        return False
+    return len(argv) > 1 and argv[1] in CODEX_NON_SESSION_SUBCOMMANDS
+
+
+def branch_occupant(branch_path: Path) -> Optional[str]:
+    """The CLI ("claude" or "codex") of an interactive session in this branch directory, or None."""
     resolved = str(branch_path.resolve())
     try:
-        result = subprocess.run(["pgrep", "-x", AGENT_PROCESS_PATTERN], capture_output=True, text=True, timeout=5)
+        # -l prints "<pid> <comm>": the comm is what matched, so it names the CLI.
+        result = subprocess.run(["pgrep", "-l", "-x", AGENT_PROCESS_PATTERN], capture_output=True, text=True, timeout=5)
         if result.returncode != 0:
-            return False
-        for pid_str in result.stdout.strip().split("\n"):
-            pid_str = pid_str.strip()
-            if not pid_str:
+            return None
+        for line in result.stdout.strip().split("\n"):
+            fields = line.split()
+            if not fields:
                 continue
+            pid_str = fields[0]
+            cli = fields[1] if len(fields) > 1 else "agent"
             cwd = _get_pid_cwd(pid_str)
-            if cwd is None:
+            if cwd is None or str(Path(cwd).resolve()) != resolved:
                 continue
-            if str(Path(cwd).resolve()) == resolved:
-                session_type = _read_session_type(pid_str)
-                if session_type not in _NON_BLOCKING_SESSION_TYPES:
-                    return True
+            if _read_session_type(pid_str) in _NON_BLOCKING_SESSION_TYPES:
+                continue
+            if cli == "codex" and _is_codex_non_session(pid_str):
+                continue
+            return cli
     except (subprocess.SubprocessError, OSError):
         logger.info("[wake] Failed to check branch occupancy")
-    return False
+    return None
 
 
 def clean_zombies() -> int:

@@ -193,7 +193,11 @@ codex exec resume <thread_id> [-m <model>] --json -o ... "<prompt>"          # r
   the LAST `agent_message` (the text `-o` writes); the report takes it and `usage` from the
   stream. Retries re-run the argv; strike 3 of a `resume` drops `resume <id>` to a fresh
   `exec`.
-- **Processes.** `pgrep -x 'claude|codex'` and the zombie scan see both CLIs.
+- **Processes.** `pgrep -l -x 'claude|codex'` and the zombie scan see both CLIs; the occupancy row
+  names the one it found (`Interactive codex session in ...`). A `codex` whose first argument is
+  `app-server`, `mcp-server` or `exec` is not a session: the app-server daemon a TUI leaves behind
+  in its folder (parented by `systemd --user`) never blocks a wake. An unreadable argv counts as a
+  session.
 - **Not covered for Codex:** no `--max-turns` equivalent (`HARD_TIMEOUT` bounds the run) and
   no rate-limit reading; `_check_rate_limited` reads stderr as for Claude.
 

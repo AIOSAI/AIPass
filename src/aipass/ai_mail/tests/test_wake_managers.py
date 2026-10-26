@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake_managers.py
 # Description: Tests for the wake's manager lanes, the wake-back opt-out, the Fable grant read and the dashboard refresh
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's manager lanes, wake-back and wake_dashboard.py's refresh."""
@@ -535,8 +535,8 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
 
     def test_occupancy_is_the_blocked_step(self, tmp_path, monkeypatch):
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        occupied = MagicMock(return_value=True)
-        _patch_wake_deps(monkeypatch, is_branch_occupied=occupied)
+        occupied = MagicMock(return_value="claude")
+        _patch_wake_deps(monkeypatch, branch_occupant=occupied)
 
         status, ok = wake_branch("@testbranch", auto=True)
 

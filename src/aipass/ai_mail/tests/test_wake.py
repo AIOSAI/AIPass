@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-29
 # Modified: 2026-10-25
 # =============================================
@@ -83,8 +83,8 @@ class TestWakeBranchSpawnEnv:
         pid_alive = MagicMock(return_value=True)
         monkeypatch.setattr(wake_mod, "check_pid_alive", pid_alive)
         monkeypatch.setattr(wake_mod, "clean_zombies", lambda: 0)
-        occupied = MagicMock(return_value=False)
-        monkeypatch.setattr(wake_mod, "is_branch_occupied", occupied)
+        occupied = MagicMock(return_value=None)
+        monkeypatch.setattr(wake_mod, "branch_occupant", occupied)
         monkeypatch.setattr(wake_mod, "acquire_lock", lambda p, pid: (True, "ok"))
         sleep = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
@@ -358,12 +358,22 @@ class TestWakeBranch:
     def test_branch_occupied_blocks(self, tmp_path, monkeypatch):
         """Interactive session running -> blocked."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        occupied = MagicMock(return_value=True)
-        _patch_wake_deps(monkeypatch, is_branch_occupied=occupied)
+        occupied = MagicMock(return_value="claude")
+        _patch_wake_deps(monkeypatch, branch_occupant=occupied)
         status, ok = wake_branch("@testbranch")
         occupied.assert_called_once_with(branch_path)
         assert ok is False
         assert any(s[0] == "fail" and "blocked" in s[1] for s in status.steps)
+
+    def test_the_occupancy_row_names_the_cli_it_found(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, branch_occupant=lambda p: "codex")
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is False
+        step = status.find_step("occupancy")
+        assert step[0] == "warn" and step[2].startswith("Interactive codex session in ")
 
     def test_fresh_true_no_continue_flag(self, tmp_path, monkeypatch):
         """fresh=True -> claude_cmd does NOT include '-c' flag."""

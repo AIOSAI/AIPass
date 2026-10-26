@@ -263,10 +263,10 @@
       "file": "apps/handlers/dispatch/pid_lock.py",
       "standard": "logged_fallback",
       "lines": [
-        245,
-        250,
-        253,
-        256
+        286,
+        291,
+        294,
+        297
       ],
       "reason": "check_pid_alive (public since leg 15; ai_mail, fleet green legs 9 and 10, under @devpulse's leg 10 ruling b for the os.kill family; moved from wake.py to pid_lock.py unchanged in leg 13): os.kill(pid, 0) answers through its exception. ProcessLookupError IS 'no such process' (False, 246) and PermissionError IS 'it exists, owned by another user' (True, 249); neither is a fallback. The two guessed arms, named as guesses: 241, the Windows probe raised, answers alive, the fail-closed direction (an occupied branch is not woken over and its lock is not reclaimed); 252, any other OSError, answers dead, but POSIX defines no other error for signal 0 (EINVAL needs a bad signal, EPERM and ESRCH are the two arms above), so the arm is unreachable there and Windows never reaches it. Since leg 13 this is the liveness rule of the one dispatch lock check, the wake's."
     },

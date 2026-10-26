@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_wake_helpers.py
 # Description: Tests for the wake's small parts - dispatch status, the grant read, pid lock and branch resolution
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
 # Modified: 2026-10-25
 # =============================================
@@ -29,7 +29,7 @@ from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     check_lock,
     check_pid_alive,
     clean_zombies,
-    is_branch_occupied,
+    branch_occupant,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
     resolve_branch,
@@ -222,7 +222,7 @@ def test_check_pid_alive_zombie(monkeypatch, tmp_path):
     assert check_pid_alive(42) is False
 
 
-# --- pid_lock's process readers, through is_branch_occupied -----------
+# --- pid_lock's process readers, through branch_occupant -----------
 #
 # The cwd and session-type readers are reached through the occupancy check,
 # their one caller: one claude pid, its cwd, its session type.
@@ -246,11 +246,11 @@ class _Ran:
 
 
 def _processes(monkeypatch, pid, lsof=None, ps=None):
-    """pgrep answers one claude *pid*; lsof and ps answer as handed (darwin)."""
+    """pgrep -l answers one claude *pid*; lsof and ps answer as handed (darwin)."""
 
     def run(cmd, *a, **kw):
         if cmd[0] == "pgrep":
-            return _Ran(0, f"{pid}\n")
+            return _Ran(0, f"{pid} claude\n")
         answer = {"lsof": lsof, "ps": ps}[cmd[0]]
         if isinstance(answer, BaseException):
             raise answer
@@ -273,13 +273,13 @@ def test_read_session_type_found(monkeypatch, tmp_path):
     """Linux: a daemon session read from the environ does not block."""
     environ = b"HOME=/home/user\x00AIPASS_SESSION_TYPE=daemon\x00PATH=/usr/bin\x00"
     _linux_claude_in(monkeypatch, tmp_path, tmp_path, environ)
-    assert is_branch_occupied(tmp_path) is False
+    assert branch_occupant(tmp_path) is None
 
 
 def test_read_session_type_not_set(monkeypatch, tmp_path):
     """Linux: no session type in the environ reads interactive, which blocks."""
     _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"HOME=/home/user\x00PATH=/usr/bin\x00")
-    assert is_branch_occupied(tmp_path) is True
+    assert branch_occupant(tmp_path) == "claude"
 
 
 def test_read_session_type_non_linux(monkeypatch, tmp_path):
@@ -291,7 +291,7 @@ def test_read_session_type_non_linux(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "win32")
     _processes(monkeypatch, 123)
     monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()))
-    assert is_branch_occupied(tmp_path) is False
+    assert branch_occupant(tmp_path) is None
 
 
 def test_read_session_type_unreadable_environ(monkeypatch, tmp_path):
@@ -306,7 +306,7 @@ def test_read_session_type_unreadable_environ(monkeypatch, tmp_path):
         raise OSError("no such file")
 
     monkeypatch.setattr("builtins.open", _no_environ)
-    assert is_branch_occupied(tmp_path) is True
+    assert branch_occupant(tmp_path) == "claude"
 
 
 def _darwin_claude(monkeypatch, cwd_stdout, ps):
@@ -319,40 +319,40 @@ def test_read_session_type_darwin_found(monkeypatch):
     """macOS: a dispatched session read from ps -wwE does not block."""
     ps = _Ran(0, "/usr/bin/claude AIPASS_SESSION_TYPE=dispatched HOME=/Users/u")
     _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", ps)
-    assert is_branch_occupied(_DARWIN_BRANCH) is False
+    assert branch_occupant(_DARWIN_BRANCH) is None
 
 
 def test_read_session_type_darwin_not_set(monkeypatch):
     """macOS: no session type in ps output reads interactive, which blocks."""
     _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(0, "/usr/bin/claude HOME=/Users/u"))
-    assert is_branch_occupied(_DARWIN_BRANCH) is True
+    assert branch_occupant(_DARWIN_BRANCH) == "claude"
 
 
 def test_read_session_type_darwin_ps_failure(monkeypatch):
     """macOS: a ps that fails reads interactive, which blocks."""
     _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(1))
-    assert is_branch_occupied(_DARWIN_BRANCH) is True
+    assert branch_occupant(_DARWIN_BRANCH) == "claude"
 
 
 def test_get_pid_cwd_linux(monkeypatch, tmp_path):
     """Linux: the cwd is read from /proc/{pid}/cwd; a session standing there blocks."""
     _linux_claude_in(monkeypatch, tmp_path, tmp_path / "project", b"PATH=/usr/bin\x00")
-    assert is_branch_occupied(tmp_path / "project") is True
-    assert is_branch_occupied(tmp_path / "elsewhere") is False
+    assert branch_occupant(tmp_path / "project") == "claude"
+    assert branch_occupant(tmp_path / "elsewhere") is None
 
 
 def test_get_pid_cwd_linux_oserror(monkeypatch, tmp_path):
     """Linux: a cwd that cannot be read is no session in the branch."""
     _linux_claude_in(monkeypatch, tmp_path, tmp_path, b"PATH=/usr/bin\x00")
     monkeypatch.setattr(os, "readlink", lambda p: (_ for _ in ()).throw(OSError("no proc")))
-    assert is_branch_occupied(tmp_path) is False
+    assert branch_occupant(tmp_path) is None
 
 
 def test_get_pid_cwd_darwin(monkeypatch):
     """macOS: the cwd is read from lsof's name line; a session standing there blocks."""
     _darwin_claude(monkeypatch, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n", _Ran(0, "/usr/bin/claude"))
-    assert is_branch_occupied(_DARWIN_BRANCH) is True
-    assert is_branch_occupied(_DARWIN_BRANCH.parent) is False
+    assert branch_occupant(_DARWIN_BRANCH) == "claude"
+    assert branch_occupant(_DARWIN_BRANCH.parent) is None
 
 
 def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(monkeypatch):
@@ -364,7 +364,7 @@ def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(mon
     This is the mechanism behind CI 35058244702.
     """
     _darwin_claude(monkeypatch, "p123\nnD:\\build\\project\n", _Ran(0, "/usr/bin/claude"))
-    assert is_branch_occupied(_Path("D:\\build\\project")) is False
+    assert branch_occupant(_Path("D:\\build\\project")) is None
 
 
 def test_get_pid_cwd_darwin_failure(monkeypatch):
@@ -372,7 +372,7 @@ def test_get_pid_cwd_darwin_failure(monkeypatch):
     monkeypatch.setattr("sys.platform", "darwin")
     failed = _Ran(1, f"p123\nn{_DARWIN_BRANCH.as_posix()}\n")
     _processes(monkeypatch, 123, lsof=failed, ps=_Ran(0, "/usr/bin/claude"))
-    assert is_branch_occupied(_DARWIN_BRANCH) is False
+    assert branch_occupant(_DARWIN_BRANCH) is None
 
 
 def test_get_pid_cwd_unsupported_platform(monkeypatch, tmp_path):
@@ -380,7 +380,7 @@ def test_get_pid_cwd_unsupported_platform(monkeypatch, tmp_path):
     monkeypatch.setattr("sys.platform", "sunos5")
     _processes(monkeypatch, 123)
     monkeypatch.setattr(os, "readlink", lambda p: str(tmp_path.resolve()))
-    assert is_branch_occupied(tmp_path) is False
+    assert branch_occupant(tmp_path) is None
 
 
 # test_is_zombie_linux_not_zombie and _zombie retired: they
@@ -916,11 +916,11 @@ class TestLoadConfig:
         assert self._turns(tmp_path, monkeypatch, json.dumps({"max_turns_per_wake": 50})) == "50"
 
 
-# --- is_branch_occupied tests -------------------------------------------
+# --- branch_occupant tests -------------------------------------------
 
 
 class TestIsBranchOccupied:
-    """Tests for is_branch_occupied() — checks for interactive Claude sessions."""
+    """Tests for branch_occupant(): the CLI of an interactive session in a branch, or None."""
 
     def test_no_claude_processes(self, tmp_path, monkeypatch):
         """pgrep returns non-zero (no claude processes) -> not occupied."""
@@ -930,7 +930,7 @@ class TestIsBranchOccupied:
             stdout = ""
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        assert is_branch_occupied(tmp_path) is False
+        assert branch_occupant(tmp_path) is None
 
     def test_claude_in_different_dir(self, tmp_path, monkeypatch):
         """Claude running in a different directory -> not occupied."""
@@ -938,11 +938,11 @@ class TestIsBranchOccupied:
 
         class FakeResult:
             returncode = 0
-            stdout = "100\n"
+            stdout = "100 claude\n"
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: "/some/other/dir")
-        assert is_branch_occupied(tmp_path) is False
+        assert branch_occupant(tmp_path) is None
 
     def test_claude_in_same_dir_interactive(self, tmp_path, monkeypatch):
         """Claude in same dir with interactive session -> occupied."""
@@ -951,13 +951,13 @@ class TestIsBranchOccupied:
 
         class FakeResult:
             returncode = 0
-            stdout = "100\n"
+            stdout = "100 claude\n"
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         # _read_session_type returns "interactive" for this PID
         monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "interactive")
-        assert is_branch_occupied(tmp_path) is True
+        assert branch_occupant(tmp_path) == "claude"
 
     def test_claude_in_same_dir_daemon_not_blocking(self, tmp_path, monkeypatch):
         """Claude in same dir with daemon session -> not blocking."""
@@ -966,37 +966,48 @@ class TestIsBranchOccupied:
 
         class FakeResult:
             returncode = 0
-            stdout = "100\n"
+            stdout = "100 claude\n"
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "daemon")
-        assert is_branch_occupied(tmp_path) is False
+        assert branch_occupant(tmp_path) is None
 
-    def test_an_interactive_codex_in_the_branch_occupies_it(self, tmp_path, monkeypatch):
-        """pgrep is asked for codex as well as claude, exact-match; a codex in the dir blocks the wake."""
+    def _scan(self, tmp_path, monkeypatch, comm, argv):
+        """pgrep answers one pid with `comm`; its cwd is the branch, its argv is `argv` (/proc is the edge)."""
         import re
 
         monkeypatch.setattr("sys.platform", "linux")
         resolved = str(tmp_path.resolve())
         asked = []
 
-        class FakeResult:
-            returncode = 0
-            stdout = "100\n"
-
         def fake_run(cmd, **kw):
             asked.append(list(cmd))
-            return FakeResult()
+            return _Ran(0, f"100 {comm}\n")
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         monkeypatch.setattr(os, "readlink", lambda p: resolved)
         monkeypatch.setattr(pid_lock_mod, "_read_session_type", lambda pid_str: "interactive")
+        monkeypatch.setattr(pid_lock_mod, "_read_argv", lambda pid_str: argv)
+        occupant = branch_occupant(tmp_path)
+        assert asked[0][:3] == ["pgrep", "-l", "-x"]
+        assert all(re.fullmatch(asked[0][3], name) for name in ("claude", "codex"))
+        assert not re.fullmatch(asked[0][3], "codex-helper")
+        return occupant
 
-        assert is_branch_occupied(tmp_path) is True
-        assert asked[0][:2] == ["pgrep", "-x"]
-        assert all(re.fullmatch(asked[0][2], name) for name in ("claude", "codex"))
-        assert not re.fullmatch(asked[0][2], "codex-helper")
+    def test_an_interactive_codex_tui_in_the_branch_occupies_it_and_is_named(self, tmp_path, monkeypatch):
+        assert self._scan(tmp_path, monkeypatch, "codex", ["codex"]) == "codex"
+
+    def test_the_codex_app_server_daemon_in_the_branch_is_not_a_session(self, tmp_path, monkeypatch):
+        """19:25 @canary: the app-server trio outlived the room and every dispatch read occupied."""
+        assert self._scan(tmp_path, monkeypatch, "codex", ["codex", "app-server", "--listen", "ws://x"]) is None
+
+    def test_mcp_server_and_headless_exec_are_not_sessions_either(self, tmp_path, monkeypatch):
+        assert self._scan(tmp_path, monkeypatch, "codex", ["codex", "mcp-server"]) is None
+        assert self._scan(tmp_path, monkeypatch, "codex", ["/usr/bin/codex", "exec", "--json", "hi"]) is None
+
+    def test_a_claude_whose_argv_looks_like_a_subcommand_still_occupies(self, tmp_path, monkeypatch):
+        assert self._scan(tmp_path, monkeypatch, "claude", ["claude", "exec"]) == "claude"
 
     def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
         """subprocess failure returns False."""
@@ -1005,7 +1016,7 @@ class TestIsBranchOccupied:
             raise subprocess.SubprocessError("pgrep failed")
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        assert is_branch_occupied(tmp_path) is False
+        assert branch_occupant(tmp_path) is None
 
     def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
         """OSError on readlink is caught, continues to next PID."""
@@ -1021,7 +1032,7 @@ class TestIsBranchOccupied:
             raise OSError("no such file")
 
         monkeypatch.setattr(os, "readlink", _fail_readlink)
-        assert is_branch_occupied(tmp_path) is False
+        assert branch_occupant(tmp_path) is None
 
 
 def test_prepend_path_uses_the_platform_separator(monkeypatch):

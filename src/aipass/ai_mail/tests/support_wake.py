@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: support_wake.py
 # Description: Shared helpers for test_wake.py and its split siblings - the wake fixtures and spawn recorder
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Helpers for the tests of apps/handlers/dispatch/wake.py (no test_ prefix: never collected)."""
@@ -46,7 +46,7 @@ def _patch_wake_deps(monkeypatch, resolve_claude=False, **overrides):
     defaults = {
         "check_lock": lambda p: None,
         "clean_zombies": lambda: 0,
-        "is_branch_occupied": lambda p: False,
+        "branch_occupant": lambda p: None,
         "acquire_lock": lambda p, pid: (True, "ok"),
         "check_pid_alive": lambda pid: True,
         # Stubbed: a unit test must not read the fleet's real .central.json files.

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.6.0
+# Version: 3.7.0
 # Created: 2026-03-02
 # Modified: 2026-10-25
 # =============================================
@@ -29,9 +29,9 @@ from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     acquire_lock,
     check_lock,
+    branch_occupant,
     check_pid_alive,
     clean_zombies,
-    is_branch_occupied,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
     refresh_recipient_dashboard as _refresh_recipient_dashboard,
@@ -733,10 +733,11 @@ def wake_branch(
 
     status.ok("lock", "No active lock — agent is sleeping")
 
-    if is_branch_occupied(branch_path):
-        status.warn("occupancy", f"Interactive Claude session in {branch_path}")
+    occupant = branch_occupant(branch_path)
+    if occupant:
+        status.warn("occupancy", f"Interactive {occupant} session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
-        logger.warning("[wake] BLOCKED %s — interactive session", email)
+        logger.warning("[wake] BLOCKED %s — interactive %s session", email, occupant)
         return status, False
 
     status.ok("occupancy", "No interactive session")
