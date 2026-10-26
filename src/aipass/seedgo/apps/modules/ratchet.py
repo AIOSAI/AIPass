@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: ratchet.py
 # Description: the execution ratchet - pick one branch a week, probe it, record the point
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-10-12
-# Modified: 2026-10-18
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -11,7 +11,8 @@ The `ratchet` verb (DPLAN-0405, FPLAN-9994 phase 1).
 
 seedgo's `.daemon/schedule.json` runs `ratchet run` as a COMMAND job (no wake, no model): the probe is deterministic.
 
-No hand-off dispatch, `verify`, `trend`, mail or slices yet: their absence is not a decision.
+A budget fragment comes back the next week and probes only what it left, slice by slice.
+No hand-off dispatch, `verify`, `trend` or mail yet: their absence is not a decision.
 
 THE SERIES IS THE CLOCK, never the artifact - see `handlers/ratchet/series.py`.
 """
@@ -121,6 +122,8 @@ def _run(budget: int) -> None:
     """Pick, probe, archive, append. The probe's refusal still writes its line."""
     lines = series.read()
     chosen, reason = pick.choose(_branch_names(), lines)
+    chain = series.fragment_chain(chosen, lines)
+    functions = series.unprobed(chain[-1]) if chain else None
     json_handler.log_operation("ratchet_run_started", {"branch": chosen, "budget_seconds": budget})
 
     console.print()
@@ -128,12 +131,19 @@ def _run(budget: int) -> None:
     console.print(f"[dim]audit-tests @{chosen} --pseudo-tested, campaign budget {budget}s[/dim]")
 
     started = time.time()
-    document, code = _probe(chosen, budget)
-    line = _write_point(document, chosen, series.TRIGGER_WEEKLY, reason)
+    document, code = _probe(chosen, budget, functions)
+    line = _write_point(document, chosen, series.TRIGGER_WEEKLY, reason, len(chain) + 1)
 
     _print_point(line, time.time() - started)
     if code in refusal.REFUSAL_CODES or line["status"] not in RECORDED_STATUSES:
-        raise CommandRefused(code if code in refusal.REFUSAL_CODES else refusal.EXIT_UNPROVEN, chosen)
+        raise CommandRefused(_exit_code(code, line), chosen)
+
+
+def _exit_code(code: int, line: dict) -> int:
+    """6 for a campaign that ran out of clock, whatever the lane returned; else the lane's refusal code; else 2."""
+    if line["budget_exhausted"]:
+        return refusal.EXIT_BUDGET_EXHAUSTED
+    return code if code in refusal.REFUSAL_CODES else refusal.EXIT_UNPROVEN
 
 
 def _record(argument: str) -> None:
@@ -159,9 +169,11 @@ def _record(argument: str) -> None:
     _print_point(line, None)
 
 
-def _probe(branch: str, budget: int) -> Tuple[dict, int]:
-    """Run the audit-tests lane on one branch with the campaign opted in."""
-    options = {"execution_groups": [PROBE_GROUP], "budget_seconds": budget}
+def _probe(branch: str, budget: int, functions: Optional[List[str]] = None) -> Tuple[dict, int]:
+    """Run the audit-tests lane on one branch with the campaign opted in, narrowed to `functions` when given."""
+    options: dict = {"execution_groups": [PROBE_GROUP], "budget_seconds": budget}
+    if functions is not None:
+        options["campaign_functions"] = functions
     target = runner.resolve_targets(f"@{branch}")[0]
     try:
         result = runner.run_target(target, options)
@@ -171,11 +183,13 @@ def _probe(branch: str, budget: int) -> Tuple[dict, int]:
     return result.document, result.code
 
 
-def _write_point(document: dict, branch: str, trigger: str, reason: str) -> dict:
+def _write_point(document: dict, branch: str, trigger: str, reason: str, slice_number: int = 1) -> dict:
     """Archive the artifact and append its series line."""
     run_id = str((document.get("provenance") or {}).get("run_id") or "")
     archived = series.archive(document, branch, run_id) if run_id else None
-    line = series.build_line(document, branch=branch, trigger=trigger, pick_reason=reason, archived=archived)
+    line = series.build_line(
+        document, branch=branch, trigger=trigger, pick_reason=reason, archived=archived, slice_number=slice_number
+    )
     series.append(line)
     return line
 
@@ -214,7 +228,7 @@ def _print_help() -> None:
     console.print(f"  {series.ARTIFACT_DIR / series.ARCHIVE_DIRNAME}  the artifact behind each line")
     console.print()
     console.print("[yellow]Not yet[/yellow]")
-    console.print("  hand-off, verify, trend and the Sunday mail - FPLAN-9994 phases 2 to 4")
+    console.print("  hand-off, verify, trend and the Sunday mail")
     console.print()
 
 

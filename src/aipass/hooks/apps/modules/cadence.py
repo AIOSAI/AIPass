@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.12.0
+# Version: 2.12.1
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -129,6 +129,9 @@ def _get_turn_token(hook_data: dict) -> int:
         return -1
     try:
         return os.path.getsize(tp)
+    except FileNotFoundError:
+        logger.debug("[HOOKS] cadence: no transcript yet (turn 0): %s", tp)
+        return -1
     except OSError as exc:
         logger.info("[HOOKS] cadence: transcript stat failed: %s", exc)
         return -1

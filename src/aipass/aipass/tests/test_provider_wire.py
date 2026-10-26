@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge, backup and receipt first
-# Version: 1.7.1
+# Version: 1.8.0
 # Created: 2026-08-01
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -33,6 +33,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     STATE_MISSING,
     STATE_SET,
     apply_settings_plan,
+    plan_codex_hooks,
     manifest_settings,
     plan_wire_provider,
     platform_bridge_command,
@@ -778,3 +779,80 @@ class TestAipassHomeRepoint:
         actions = refresh_provider_hooks(manifest, settings_path=settings_path)
 
         assert not [a for a in actions if "AIPASS_HOME" in a]
+
+
+_CODEX = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py"
+_CODEX_ROWS = [
+    {"command": f"{_CODEX} UserPromptSubmit:temporal", "event": "UserPromptSubmit", "timeout": 90},
+    {"command": f"{_CODEX} PreToolUse", "event": "PreToolUse", "matcher": "Bash|apply_patch"},
+    {"command": f"{_CODEX} Stop", "event": "Stop"},
+]
+_CODEX_FILE = {
+    "hooks": {
+        "UserPromptSubmit": [
+            {"hooks": [{"type": "command", "command": f"{_CODEX} UserPromptSubmit:temporal", "timeout": 90}]}
+        ],
+        "PreToolUse": [
+            {"matcher": "Bash|apply_patch", "hooks": [{"type": "command", "command": f"{_CODEX} PreToolUse"}]}
+        ],
+        "Stop": [{"hooks": [{"type": "command", "command": f"{_CODEX} Stop"}]}],
+    }
+}
+
+
+def _codex_world(tmp_path, rows: list, existing: dict | None = None):
+    """A repo whose manifest carries cli.codex rows, a settings file outside it; returns manifest, settings, codex."""
+    manifest = tmp_path / "repo" / ".claude" / "provider_manifest.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}, "codex": {"hooks": rows}}}), encoding="utf-8")
+    settings_path = tmp_path / "home" / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    codex = tmp_path / "repo" / ".codex" / "hooks.json"
+    if existing is not None:
+        codex.parent.mkdir()
+        codex.write_text(json.dumps(existing), encoding="utf-8")
+    return manifest, settings_path, codex
+
+
+class TestCodexHooks:
+    """cli.codex rows land whole in <repo root>/.codex/hooks.json, in Claude's hook shape."""
+
+    def test_the_install_door_writes_the_codex_file_in_claude_shape_with_its_receipt(self, tmp_path) -> None:
+        manifest, settings_path, codex = _codex_world(tmp_path, _CODEX_ROWS)
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        assert json.loads(codex.read_text(encoding="utf-8")) == _CODEX_FILE
+        assert "Wrote 3 Codex hook(s) from cli.codex" in actions
+        (receipt,) = _receipts(codex)
+        assert receipt["door"] == settings_backup.DOOR_SETUP_SH
+        assert receipt["after_sha256"] == hashlib.sha256(codex.read_bytes()).hexdigest()
+
+    def test_a_hand_edited_codex_file_is_replaced_whole_after_its_backup(self, tmp_path) -> None:
+        stray = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]}, "extra": 1}
+        manifest, _settings, codex = _codex_world(tmp_path, _CODEX_ROWS, stray)
+        original = codex.read_text(encoding="utf-8")
+
+        plan = plan_codex_hooks(manifest)
+        assert plan is not None
+        apply_settings_plan(plan)
+
+        assert json.loads(codex.read_text(encoding="utf-8")) == _CODEX_FILE
+        (backup,) = _backups(codex)
+        assert (_folder(codex) / backup).read_text(encoding="utf-8") == original
+
+    def test_a_matching_file_plans_nothing(self, tmp_path) -> None:
+        manifest, _settings, _codex = _codex_world(tmp_path, _CODEX_ROWS, _CODEX_FILE)
+
+        assert plan_codex_hooks(manifest) is None
+
+    def test_no_codex_rows_never_empties_the_codex_file(self, tmp_path) -> None:
+        manifest, settings_path, codex = _codex_world(tmp_path, [], _CODEX_FILE)
+        original = codex.read_text(encoding="utf-8")
+
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+
+        assert plan_codex_hooks(manifest) is None
+        assert codex.read_text(encoding="utf-8") == original
+        assert not [a for a in actions if "Codex" in a]
+        assert not (codex.parent / ".backup").exists()

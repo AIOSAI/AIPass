@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_verb_new_project.py
 # Description: Tests for POST /v1/verbs/new-project, the phone's new-project door (FPLAN-0649)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-16
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/host/new_project_route.py and verbs.new_project behind it."""
@@ -81,7 +81,7 @@ def journal(store: Path):
 
 
 @pytest.fixture
-def client(store: Path, journal: Any):
+def client(store: Path, journal: Any, host_app: Any):
     """A test client over the conftest token store, every log of the lane silenced."""
     from contextlib import ExitStack
 
@@ -90,7 +90,7 @@ def client(store: Path, journal: Any):
     with ExitStack() as stack:
         for target in PATCH_QUIET:
             stack.enter_context(patch(target))
-        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+        yield TestClient(host_app, raise_server_exceptions=False)
 
 
 def _post(client: Any, body: Any, scope: str = "operate") -> Any:

@@ -1,19 +1,18 @@
 # =================== AIPass ====================
 # Name: pick.py
 # Description: the ratchet pick - the unit probed least recently, read from the series
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-12
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
-"""
-LEAST RECENTLY PROBED, AND THE SERIES SAYS WHEN. A unit never probed comes
-first; ties break on the lowercased name, never the gitignored registry's order.
-Every probe line counts as a visit, so a red suite cannot win every pick."""
+"""LEAST RECENTLY PROBED, AND THE SERIES SAYS WHEN. Never-probed first, ties on the lowercased name, not the registry's order.
+Every line is a visit, so a red suite cannot win every pick; a budget fragment comes back first, finished slice by slice."""
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.ratchet import series
 
 MODULE_NAME = "ratchet.pick"
 
@@ -42,8 +41,16 @@ def choose(names: Sequence[str], lines: Sequence[dict]) -> Tuple[str, str]:
     if not rows:
         raise ValueError("no branches were discovered, so there is nothing to pick")
 
+    fragments = sorted(
+        (str(chain[-1].get("date") or ""), name.lower(), name, len(chain))
+        for name in names
+        if (chain := series.fragment_chain(name, lines))
+    )
     name, date = rows[0]
-    if date is None:
+    if fragments:
+        date, _, name, done = fragments[0]
+        reason = f"continuing a budget fragment: slice {done + 1}, last fragment {date[:10]}"
+    elif date is None:
         never = sum(1 for _, seen in rows if seen is None)
         reason = f"never probed; first alphabetically of {never} never-probed branch(es)"
     else:

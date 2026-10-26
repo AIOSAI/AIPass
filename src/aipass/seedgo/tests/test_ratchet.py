@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_ratchet.py
 # Description: Template v1 — the ratchet verb, its pick and its series
-# Version: 1.2.1
+# Version: 1.3.1
 # Created: 2026-10-12
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/ratchet.py and the handlers it drives."""
@@ -93,6 +93,17 @@ def probe(monkeypatch):
     return state
 
 
+def _fragment(run_id="f1", started="2026-10-25T04:11:00+00:00"):
+    """An artifact whose campaign budget expired with `apps/a.py::later` unprobed."""
+    document = _artifact(run_id=run_id, started=started, status="refused")
+    group = document["groups"]["pytest.pseudo_tested"]
+    group["budget_exhausted"] = True
+    group["mutants"].append(
+        {"relpath": "apps/a.py", "qualname": "later", "outcome": "not_run", "reason": "budget_exhausted"}
+    )
+    return document
+
+
 def _series(store):
     """The series lines on disk, parsed."""
     path = store / series.SERIES_NAME
@@ -136,6 +147,15 @@ class TestPick:
         out, _ = capsys.readouterr()
         assert "next probe: BETA" in out
         assert "last probe 2026-10-05" in out
+
+    def test_a_branch_whose_last_line_is_a_budget_fragment_beats_a_never_probed_one(self, fleet, probe, capsys):
+        series.append({"branch": "alpha", "date": "2026-10-25T04:11:00+00:00", "budget_exhausted": True}, fleet)
+
+        ratchet.handle_command("ratchet", ["pick"])
+
+        out, _ = capsys.readouterr()
+        assert "next probe: alpha" in out
+        assert "budget fragment" in out
 
     def test_a_broken_series_line_refuses_and_names_the_line(self, fleet, probe, capsys):
         fleet.mkdir(parents=True, exist_ok=True)
@@ -236,6 +256,41 @@ class TestRun:
 
         assert refused.value.code == refusal.EXIT_UNPROVEN
         assert _series(fleet)[0]["status"] == "refused"
+
+    def test_an_expired_campaign_budget_exits_six_not_two_and_still_writes_its_line(self, fleet, probe):
+        probe["document"] = _fragment()
+
+        with pytest.raises(CommandRefused) as refused:
+            ratchet.handle_command("ratchet", ["run"])
+
+        assert refused.value.code == refusal.EXIT_BUDGET_EXHAUSTED == 6
+        assert _series(fleet)[0]["budget_exhausted"] is True
+
+    def test_an_expired_budget_exits_six_even_when_the_lane_refused_with_two(self, fleet, probe):
+        """The live shape: the lane returns EXIT_UNPROVEN beside the T-BUDGET fragment line."""
+        probe["document"] = _fragment()
+        probe["code"] = refusal.EXIT_UNPROVEN
+
+        with pytest.raises(CommandRefused) as refused:
+            ratchet.handle_command("ratchet", ["run"])
+
+        assert refused.value.code == refusal.EXIT_BUDGET_EXHAUSTED
+
+    def test_the_run_after_a_fragment_probes_only_what_it_left_and_says_slice_two(self, fleet, probe, monkeypatch):
+        monkeypatch.setattr(series, "REPO_ROOT", fleet.parent)
+        probe["document"] = _fragment()
+        with pytest.raises(CommandRefused):
+            ratchet.handle_command("ratchet", ["run"])
+        probe["document"] = _artifact(run_id="r2", started="2026-11-01T04:00:00+00:00")
+
+        ratchet.handle_command("ratchet", ["run"])
+
+        first, second = _series(fleet)
+        assert [name for name, _ in probe["calls"]] == ["alpha", "alpha"]
+        assert "campaign_functions" not in probe["calls"][0][1]
+        assert probe["calls"][1][1]["campaign_functions"] == ["apps/a.py::later"]
+        assert (first["slice"], second["slice"]) == ("1/2", "2/2")
+        assert second["pick_reason"].startswith("continuing a budget fragment")
 
 
 class TestRecord:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_sandbox.py
 # Description: Tests for the dispatch monitor's sandbox gate and its broker-fd handshake
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's sandbox gate and broker handshake (FPLAN-0250)."""
@@ -485,7 +485,7 @@ class TestBrokerFdHandshake:
         captured_env = {}
         captured_pass_fds = []
 
-        def capture_run(cmd, stdout_log, stderr_fh, cwd, env, branch, pass_fds=()):
+        def capture_run(cmd, stdout_log, stderr_fh, cwd, env, branch, pass_fds=(), provider="claude"):
             captured_env.update(env)
             captured_pass_fds.append(pass_fds)
             return (0, False)
@@ -554,7 +554,7 @@ class TestBrokerFdHandshake:
 
         env_snapshots = []
 
-        def capture_run(cmd, stdout_log, stderr_fh, cwd, env, branch, pass_fds=()):
+        def capture_run(cmd, stdout_log, stderr_fh, cwd, env, branch, pass_fds=(), provider="claude"):
             env_snapshots.append(dict(env))
             return (0, False)
 

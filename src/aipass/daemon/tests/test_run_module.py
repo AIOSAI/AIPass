@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_module.py
 # Description: Tests for the drone @daemon run module
-# Version: 1.3.0
+# Version: 1.3.1
 # Created:2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
@@ -999,6 +999,21 @@ class TestCommandJobFire:
         finish_subject, finish_body = runs[-1]["argv"][3:]
         assert finish_subject.startswith("Command job FAILED: @commons/sweep (exit 2, ")
         assert "Exit code: 2" in finish_body
+
+    def test_a_listed_ok_exit_code_is_fired_and_mailed_passed(self, tmp_path, monkeypatch, no_wake):
+        outcome, detail, runs, _ = self._fire(
+            tmp_path, monkeypatch, "sys.exit(6)\n", ok_exit_codes=[6], notify={"email": "@devpulse"}
+        )
+        assert outcome == OUTCOME_FIRED
+        assert detail is None
+        finish_subject, finish_body = runs[-1]["argv"][3:]
+        assert finish_subject.startswith("Command job passed: @commons/sweep (exit 6, ")
+        assert "Exit code: 6" in finish_body
+
+    def test_an_exit_code_not_listed_still_fails(self, tmp_path, monkeypatch, no_wake):
+        outcome, detail, _, _ = self._fire(tmp_path, monkeypatch, "sys.exit(2)\n", ok_exit_codes=[6])
+        assert outcome == OUTCOME_FAILED
+        assert detail.startswith("exit 2, ")
 
     def test_a_mail_that_fails_never_changes_the_answer(self, tmp_path, monkeypatch, no_wake, caplog):
         with caplog.at_level("WARNING"):

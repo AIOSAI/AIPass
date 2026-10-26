@@ -1,19 +1,24 @@
+---
+name: compass
+description: Record the decision just made into compass, the rated decision store, with the user's rating (good, bad, impressive, interesting) and note. The user fires it when they notice a decision worth keeping.
+---
+
 # Compass — Record a Decision
 
 Purpose: Capture the decision just made into compass (the rated decision engine) with the user's rating and note. The user fires this when they notice a decision worth recording — they supply the judgement, you supply the decision text from the conversation. This is the human-triggered answer to the "noticing" problem: the user notices, you describe and store.
 
-Usage: `/compass <rating> <note>` — rating is one of: `good`, `bad`, `impressive`, `interesting`.
+Usage: `/compass <rating> <note>` in Claude Code, `$compass <rating> <note>` in Codex — rating is one of: `good`, `bad`, `impressive`, `interesting`.
 
 Examples:
 - `/compass good chose to continue the dead agent instead of starting fresh`
 - `/compass bad reached into the branch instead of dispatching`
 - `/compass impressive` (rating only — you write context, decision, and note from the conversation)
 
-Arguments: `$ARGUMENTS`
+Arguments: the words the user typed after the command name.
 
 ## Execution
 
-1. Parse `$ARGUMENTS`:
+1. Parse the words after the command name:
    - First token = `rating`. It MUST be one of `good | bad | impressive | interesting`. If it isn't, don't guess — ask the user which rating they meant and stop.
    - Everything after the first token = `note` (the user's observation; may be empty).
 2. From the recent conversation, identify the decision being rated. Compose TWO short, concrete, single-line strings:

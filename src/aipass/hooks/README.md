@@ -7,7 +7,7 @@ platforms (Claude Code, Codex) with per-project configuration, full logging and 
 one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
 makes.
 **Module:** `aipass.hooks`
-**Version:** 1.3.0
+**Version:** 1.4.0
 
 ---
 
@@ -130,6 +130,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed while injectors skip, the merged output, the import-time cwd rule |
 | [docs/project_config.md](docs/project_config.md) | Which config runs and when trust matters, the project template and what it ships, the release notice |
 | [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, the protected files, the rm gate, and the settings backup |
+| [docs/settings_gate.md](docs/settings_gate.md) | No AI changes a provider's settings alone: Claude asks the owner, Codex and headless seats are denied |
 | [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files, the project fence, the admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | What a shell command can be seen to write, and what it misses |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |

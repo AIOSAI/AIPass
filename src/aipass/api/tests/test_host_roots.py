@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_roots.py
 # Description: Tests for the roots roster and the widened name fence
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-18
-# Modified: 2026-10-18
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/host/reads.py's four-kind name fence, /v1/dir paging and the /v1/roots route."""
@@ -578,7 +578,7 @@ fastapi_required = pytest.mark.skipif(
 
 
 @pytest.fixture
-def client(tmp_path: Path):
+def client(tmp_path: Path, host_app: Any):
     """TestClient with an isolated token store."""
     from fastapi.testclient import TestClient
 
@@ -587,7 +587,7 @@ def client(tmp_path: Path):
     with patch(PATCH_SECRETS_BASE, store), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
             _, raw = host_tokens.issue_token("phone", "read")
-            yield TestClient(host_server.create_app(), raise_server_exceptions=False), raw
+            yield TestClient(host_app, raise_server_exceptions=False), raw
 
 
 @fastapi_required

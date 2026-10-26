@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.1.1
+# Version: 1.4.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
-"""Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model and marking."""
+"""Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
@@ -83,8 +83,8 @@ class TestWakeBranchSpawnEnv:
         pid_alive = MagicMock(return_value=True)
         monkeypatch.setattr(wake_mod, "check_pid_alive", pid_alive)
         monkeypatch.setattr(wake_mod, "clean_zombies", lambda: 0)
-        occupied = MagicMock(return_value=False)
-        monkeypatch.setattr(wake_mod, "is_branch_occupied", occupied)
+        occupied = MagicMock(return_value=None)
+        monkeypatch.setattr(wake_mod, "branch_occupant", occupied)
         monkeypatch.setattr(wake_mod, "acquire_lock", lambda p, pid: (True, "ok"))
         sleep = MagicMock()
         monkeypatch.setattr("aipass.ai_mail.apps.handlers.dispatch.wake.time.sleep", sleep)
@@ -324,27 +324,56 @@ class TestWakeBranch:
         assert ok is False
         assert any(s[0] == "fail" and "lock" in s[1] for s in status.steps)
 
-    def test_lock_exists_auto_false_delivers_to_inbox(self, tmp_path, monkeypatch):
-        """Lock active + auto=False returns info + True (routed to inbox)."""
+    def test_a_held_lock_warns_not_woken_logs_it_and_promises_nothing(self, tmp_path, monkeypatch):
+        """15:17:08 @seedgo: a live lock printed an info row, logged nothing, and the mail was never read."""
         _make_wake_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(
             monkeypatch,
             check_lock=lambda p: {"pid": 111, "timestamp": "2026-01-01T00:00:00"},
             clean_zombies=lambda: 0,
         )
+        log = MagicMock()
+        monkeypatch.setattr(wake_mod, "logger", log)
+        calls = _record_spawn_routes(monkeypatch)
+
         status, ok = wake_branch("@testbranch", auto=False)
-        assert ok is True
-        assert any(s[0] == "info" and "delivery" in s[1] for s in status.steps)
+
+        assert ok is True, "the mail is delivered; the bool still means 'did what it should'"
+        assert calls["popen"] == []
+        assert status.busy_detail() == (
+            "@testbranch busy (PID 111, since 2026-01-01T00:00:00) — NOT woken; the mail waits in its inbox"
+        )
+        assert status.find_step("delivery") is None, "no promise that the running session reads it"
+        assert any("NOT WOKEN" in c.args[0] for c in log.warning.call_args_list)
+
+    def test_a_free_lock_leaves_no_busy_detail(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is True and status.busy_detail() == ""
 
     def test_branch_occupied_blocks(self, tmp_path, monkeypatch):
         """Interactive session running -> blocked."""
         branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
-        occupied = MagicMock(return_value=True)
-        _patch_wake_deps(monkeypatch, is_branch_occupied=occupied)
+        occupied = MagicMock(return_value="claude")
+        _patch_wake_deps(monkeypatch, branch_occupant=occupied)
         status, ok = wake_branch("@testbranch")
         occupied.assert_called_once_with(branch_path)
         assert ok is False
         assert any(s[0] == "fail" and "blocked" in s[1] for s in status.steps)
+
+    def test_the_occupancy_row_names_the_cli_it_found(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, branch_occupant=lambda p: "codex")
+
+        status, ok = wake_branch("@testbranch")
+
+        assert ok is False
+        step = status.find_step("occupancy")
+        assert step[0] == "warn" and step[2].startswith("Interactive codex session in ")
 
     def test_fresh_true_no_continue_flag(self, tmp_path, monkeypatch):
         """fresh=True -> claude_cmd does NOT include '-c' flag."""
@@ -1067,3 +1096,138 @@ class TestModelPolicyReachesBothSpawnLanes:
         cmd = calls["popen"][0]["cmd"]
         assert cmd[cmd.index("--model") + 1] == DEFAULT_MODEL
         assert calls["tmux"] == []
+
+
+class TestCodexWake:
+    """provider="codex" spawns `codex exec` with the same prompt, its own model rule and its own pointer."""
+
+    THREAD = "01a1746b-c9c8-7891-ae8e-666b368caf13"
+
+    @pytest.fixture
+    def fake_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setattr(_Path, "home", classmethod(lambda cls: home))
+        return home
+
+    def _wake(self, tmp_path, monkeypatch, **kwargs):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+        status, ok = wake_branch("@testbranch", provider="codex", **kwargs)
+        return branch_path, calls, status, ok
+
+    def _plant_codex_pointer(self, branch_path, home):
+        wake_mod.session_pointer.write_pointer(branch_path, self.THREAD, "monitor-codex", provider="codex")
+        day = home / ".codex" / "sessions" / "2026" / "10" / "25"
+        day.mkdir(parents=True)
+        (day / f"rollout-2026-10-25T11-56-24-{self.THREAD}.jsonl").write_text("{}\n", encoding="utf-8")
+
+    def _tail(self, branch_path, args):
+        return [
+            "--json",
+            "-o",
+            str(branch_path / "logs" / "dispatch_last_message.txt"),
+            "--dangerously-bypass-approvals-and-sandbox",
+            args[-1],
+        ]
+
+    def test_a_fresh_codex_wake_with_a_model_spawns_exec_dash_m_and_writes_no_pointer(
+        self, tmp_path, monkeypatch, fake_home
+    ):
+        branch_path, calls, status, ok = self._wake(tmp_path, monkeypatch, model="gpt-6.1-sol", fresh=True)
+
+        assert ok is True
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == ["codex", "exec", "-m", "gpt-6.1-sol", *self._tail(branch_path, args)]
+        assert args[-1].startswith("Hi. Check inbox") and "seedgo" in args[-1]
+        assert wake_mod.session_pointer.read_pointer(branch_path) is None
+        assert status.find_step("provider") == ("ok", "provider", "codex")
+        assert status.find_step("model") == ("ok", "model", "gpt-6.1-sol")
+
+    def test_a_codex_wake_without_a_model_passes_no_dash_m_and_says_config_default(
+        self, tmp_path, monkeypatch, fake_home
+    ):
+        branch_path, calls, status, _ = self._wake(tmp_path, monkeypatch)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == ["codex", "exec", *self._tail(branch_path, args)]
+        assert status.find_step("model") == ("ok", "model", "codex config default")
+
+    def test_a_codex_pointer_resumes_its_thread_by_id(self, tmp_path, monkeypatch, fake_home):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._plant_codex_pointer(branch_path, fake_home)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch", provider="codex", model="gpt-6.1-sol")
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args == ["codex", "exec", "resume", self.THREAD, "-m", "gpt-6.1-sol", *self._tail(branch_path, args)]
+        assert status.find_step("session") == ("ok", "session", f"resuming {self.THREAD} (pointer)")
+
+    def test_fresh_ignores_a_live_codex_pointer(self, tmp_path, monkeypatch, fake_home):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._plant_codex_pointer(branch_path, fake_home)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        wake_branch("@testbranch", provider="codex", fresh=True)
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert args[:2] == ["codex", "exec"] and "resume" not in args
+
+    def test_a_claude_pointer_never_becomes_a_codex_resume(self, tmp_path, monkeypatch, fake_home):
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        wake_mod.session_pointer.write_pointer(branch_path, self.THREAD, "wake-fresh")
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch", provider="codex")
+
+        args = _claude_args(calls["popen"][0]["cmd"])
+        assert "resume" not in args and self.THREAD not in args
+        assert status.find_step("session")[0] == "info"
+
+    def test_the_monitor_is_told_codex_and_the_register_row_says_so(self, tmp_path, monkeypatch, fake_home):
+        _, calls, _, _ = self._wake(tmp_path, monkeypatch)
+
+        cmd = calls["popen"][0]["cmd"]
+        assert "--provider=codex" in cmd[: cmd.index("--")]
+        rows = register_mod.outstanding()
+        assert [row["provider"] for row in rows] == ["codex"]
+
+    def test_a_claude_wake_carries_no_provider_flag_and_registers_claude(self, tmp_path, monkeypatch, fake_home):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, _ = wake_branch("@testbranch")
+
+        cmd = calls["popen"][0]["cmd"]
+        assert not any(arg.startswith("--provider") for arg in cmd)
+        assert status.find_step("provider") == ("ok", "provider", "claude")
+        assert [row["provider"] for row in register_mod.outstanding()] == ["claude"]
+
+    def test_an_unknown_provider_fails_before_any_spawn(self, tmp_path, monkeypatch):
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", provider="gemini")
+
+        assert ok is False
+        assert status.find_step("provider")[0] == "fail" and "gemini" in status.find_step("provider")[2]
+        assert calls["popen"] == []
+
+    def test_a_manager_refuses_codex_even_in_the_scheduled_lane(self, tmp_path, monkeypatch):
+        _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        status, ok = wake_branch("@testbranch", provider="codex", scheduled=True)
+
+        assert ok is False
+        step = status.find_step("manager")
+        assert step[0] == "fail" and "Claude-only" in step[2]
+        assert calls["popen"] == [] and calls["tmux"] == []

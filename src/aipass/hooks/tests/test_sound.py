@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_sound.py
-# Version: 1.0.3
+# Version: 1.1.0
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-10-05
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -66,7 +66,9 @@ class TestSpeak:
         )
         assert mock_sub.Popen.call_count == 1
         (play_cmd,), play_kwargs = mock_sub.Popen.call_args
-        assert play_cmd[-1] == wav
+        assert play_cmd[:2] == ["sh", "-c"] and play_cmd[-1] == wav
+        assert play_cmd[2].endswith('; rm -f "$1"'), "the player's shell must remove the wav after playback"
+        assert staged[0].exists(), "playback owns the wav once it starts"
         assert play_kwargs == {"stdout": mock_sub.DEVNULL, "stderr": mock_sub.DEVNULL}
 
     def test_speak_skips_when_muted(self):
@@ -113,6 +115,23 @@ class TestSpeak:
 
         assert mock_sub.run.call_count == 1
         mock_logger.info.assert_called_once_with("[HOOKS] speak: piper timed out")
+        assert not list(tmp_path.glob("*.wav")), "a timed-out synthesis leaves no wav behind"
+
+    def test_a_failed_synthesis_leaves_no_wav(self, tmp_path):
+        with (
+            patch("aipass.hooks.apps.sound.is_muted", return_value=False),
+            patch("aipass.hooks.apps.sound.PIPER_BIN") as mock_bin,
+            patch("aipass.hooks.apps.sound.PIPER_VOICE") as mock_voice,
+            patch("aipass.hooks.apps.sound.subprocess") as mock_sub,
+        ):
+            mock_bin.exists.return_value = True
+            mock_voice.exists.return_value = True
+            mock_sub.run.return_value = MagicMock(returncode=1)
+
+            speak("test", tmp_dir=str(tmp_path))
+
+        mock_sub.Popen.assert_not_called()
+        assert not list(tmp_path.glob("*.wav"))
 
     def test_speak_graceful_on_os_error(self, tmp_path):
         """A missing piper binary is caught and the reason carried into the log."""

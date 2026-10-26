@@ -27,10 +27,13 @@
       },
       "command": "drone @seedgo ratchet run",
       "timeout_seconds": 3600,
+      "ok_exit_codes": [
+        6
+      ],
       "notify": {
         "email": "@devpulse"
       },
-      "_note": "WHAT: the execution ratchet (DPLAN-0405, FPLAN-9994 phase 1). Picks the branch probed least recently from .seedgo/ratchet_series.jsonl, runs audit-tests --pseudo-tested on it under a 1800 s campaign budget, archives the artifact to .seedgo/ratchet/ and appends one series line. Every probe writes its line. A not_applicable week (the target could not be measured, the reason in the line) exits 0; only a lane that could not run exits non-zero, so this job reads FAILED only then. WHEN: Sunday 04:00, behind shadow-cycle-weekly (next_run 03:56): ticks serialise under tick_lock and due jobs fire in file order, so the two never overlap. It holds the tick for up to 3600 s, so @prax's Sunday 04:00 tmp sweep and 04:30 module scan fire on the first tick after it. WHY notify.email: phase 1 sends no mail of its own; daemon's finish mail to @devpulse carries the exit code and the output tail until phase 4's Sunday mail lands. Phase 2 adds the hand-off dispatch to the probed branch's owner."
+      "_note": "WHAT: the execution ratchet (DPLAN-0405, FPLAN-9994 phase 1). Picks the branch probed least recently from .seedgo/ratchet_series.jsonl, runs audit-tests --pseudo-tested on it under a 1800 s campaign budget, archives the artifact to .seedgo/ratchet/ and appends one series line. Every probe writes its line. A not_applicable week (the target could not be measured, the reason in the line) exits 0; a campaign that ran out of budget exits 6 and its branch is picked again next week, continuing from the first unprobed function (slice k/N), so ok_exit_codes [6] makes that week a pass in @daemon's finish mail. Only a lane that could not run exits non-zero otherwise (2), so this job reads FAILED only then. WHEN: Sunday 04:00, behind shadow-cycle-weekly (next_run 03:56): ticks serialise under tick_lock and due jobs fire in file order, so the two never overlap. It holds the tick for up to 3600 s, so @prax's Sunday 04:00 tmp sweep and 04:30 module scan fire on the first tick after it. WHY notify.email: phase 1 sends no mail of its own; daemon's finish mail to @devpulse carries the exit code and the output tail until phase 4's Sunday mail lands. Phase 2 adds the hand-off dispatch to the probed branch's owner."
     }
   ]
 }

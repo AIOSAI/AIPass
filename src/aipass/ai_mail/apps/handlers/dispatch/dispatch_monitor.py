@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.10.0
+# Version: 2.11.0
 # Created: 2026-03-02
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -75,6 +75,11 @@ MAX_WAKE_DEPTH = 3
 
 # argv, not env: the monitor's env becomes the agent's and would leak into its own dispatches.
 NO_WAKE_BACK_FLAG = "--no-wake-back"
+# `--provider=codex` before "--" picks the codex probe, parser and retry shape; absent means claude.
+PROVIDER_FLAG_PREFIX = "--provider="
+CODEX = session_pointer.CODEX
+# Exit 0 whose stream shows an `error` event or no `turn.completed`: a failed Codex turn.
+CODEX_STREAM_FAILED = -5
 WAKE_RESULT_DECLINED = "declined"
 
 
@@ -360,13 +365,20 @@ def _make_fresh_cmd(claude_cmd: list) -> list:
     return fresh
 
 
-def cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path) -> Tuple[list, str]:
+def cmd_for_attempt(claude_cmd: list, attempt: int, branch_path: Path, provider: str = "claude") -> Tuple[list, str]:
     """Build the command for one attempt of the 3-strike loop. Returns (cmd, mode).
 
     A door: main() calls it per attempt; it keeps the --resume/--session-id shapes wake.py builds.
 
     The CLI refuses a reused --session-id, so each attempt is built for where the last left the session.
+    Codex carries no session flags: attempts 1-2 re-run its argv, strike 3 drops `resume <id>`.
     """
+    if provider == CODEX:
+        is_resume = claude_cmd[1:3] == ["exec", "resume"]
+        if attempt < 3 or not is_resume:
+            return list(claude_cmd), "resume" if is_resume else "fresh"
+        return [claude_cmd[0], "exec", *claude_cmd[4:]], "fresh"
+
     has_resume = _has_resume(claude_cmd)
     session_id = _session_id_in(claude_cmd)
     default_mode = "resume" if has_resume else "fresh"
@@ -457,6 +469,54 @@ def reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> N
         logger.warning("[monitor] Could not reconcile pointer for %s to session %s", branch_path, actual)
 
 
+def parse_codex_stream(stdout_log: str) -> dict:
+    """Read a `codex exec --json` stream: session_id, result, usage, error, succeeded.
+
+    session_id is thread.started's thread_id; result the LAST agent_message (what -o writes);
+    succeeded needs turn.completed and no `error` event. error is the first error line, verbatim.
+    """
+    parsed: dict = {"session_id": None, "result": "", "usage": None, "error": "", "succeeded": False}
+    try:
+        lines = Path(stdout_log).read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        logger.info("[monitor] No codex stream to parse at %s: %s", stdout_log, e)
+        return parsed
+    completed = False
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as e:
+            logger.info("[monitor] codex stream line is not JSON, skipped: %s", e)
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        item = event.get("item")
+        if not isinstance(item, dict):
+            item = {}
+        if kind == "thread.started" and parsed["session_id"] is None:
+            parsed["session_id"] = event.get("thread_id")
+        elif kind == "item.completed" and item.get("type") == "agent_message":
+            parsed["result"] = str(item.get("text", ""))
+        elif kind == "turn.completed":
+            completed = True
+            parsed["usage"] = event.get("usage")
+        elif kind == "error" and not parsed["error"]:
+            parsed["error"] = line.strip()
+    parsed["succeeded"] = completed and not parsed["error"]
+    return parsed
+
+
+def reconcile_codex_pointer(branch_path: Path, stdout_log: str) -> None:
+    """Point the branch at the thread Codex ran: it minted the id, so the stream is a fact, not a guess."""
+    thread_id = parse_codex_stream(stdout_log)["session_id"]
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        logger.warning("[monitor] codex stream for %s carried no thread.started — pointer unchanged", branch_path)
+        return
+    if not session_pointer.write_pointer(branch_path, thread_id.strip(), "monitor-codex", provider=CODEX):
+        logger.warning("[monitor] Could not record codex thread %s for %s", thread_id, branch_path)
+
+
 # Exit 0 with this marker is incomplete, not success: the ceiling killed the tasks, maybe the reply.
 BG_TASKS_MARKER = "Background tasks still running"
 
@@ -495,8 +555,15 @@ def _parse_result_json(stdout_log: str) -> dict:
     return {}
 
 
-def _summarize_result_json(stdout_log: str) -> str:
+def _summarize_result_json(stdout_log: str, provider: str = "claude") -> str:
     """One-line diagnostic summary of the result JSON for bounce emails."""
+    if provider == CODEX:
+        stream = parse_codex_stream(stdout_log)
+        if stream["error"]:
+            return f"codex error event: {stream['error'][:400]}"
+        if not stream["succeeded"]:
+            return f"codex turn never completed, last agent_message: {stream['result'][:400] or '(none)'}"
+        return f"codex turn completed, last agent_message: {stream['result'][:400]}"
     data = _parse_result_json(stdout_log)
     if not data:
         return "(no result JSON captured)"
@@ -599,8 +666,24 @@ def _kill_process(process: subprocess.Popen, branch_email: str):
             logger.warning("[monitor] %s SIGKILL didn't work", branch_email)
 
 
+def _stdout_written(stdout_log: str) -> bool:
+    """True once the attempt's stdout holds a byte: Codex streams --json live."""
+    try:
+        return Path(stdout_log).stat().st_size > 0
+    except OSError as e:
+        logger.info("[monitor] stdout %s not stattable yet: %s", stdout_log, e)
+        return False
+
+
 def run_with_startup_check(
-    claude_cmd: list, stdout_log: str, stderr_fh, cwd: str, spawn_env: dict, branch_email: str, pass_fds: tuple = ()
+    claude_cmd: list,
+    stdout_log: str,
+    stderr_fh,
+    cwd: str,
+    spawn_env: dict,
+    branch_email: str,
+    pass_fds: tuple = (),
+    provider: str = "claude",
 ) -> tuple:
     """
     Run claude with startup timeout check.
@@ -633,9 +716,9 @@ def run_with_startup_check(
             stdout_fh.close()
         return -2, False
 
-    # Startup is read from the JSONL transcripts: --output-format json buffers stdout.
-    projects_dir = session_pointer.transcript_dir(cwd)
-    if projects_dir is None:
+    # Claude's startup is read from the JSONL transcripts: --output-format json buffers stdout.
+    projects_dir = None if provider == CODEX else session_pointer.transcript_dir(cwd)
+    if projects_dir is None and provider != CODEX:
         # After the spawn: raising would orphan a live agent with the lock held. The probe is optional.
         logger.warning("[monitor] no home directory — skipping the JSONL startup probe for %s", cwd)
     initial_sizes = _snapshot_jsonl_sizes(projects_dir) if projects_dir else {}
@@ -644,6 +727,9 @@ def run_with_startup_check(
 
     try:
         while time.time() < deadline:
+            if provider == CODEX and _stdout_written(stdout_log):
+                started = True
+                break
             if projects_dir is not None and _check_jsonl_activity(projects_dir, initial_sizes):
                 started = True
                 break
@@ -655,7 +741,7 @@ def run_with_startup_check(
 
         if not started and process.poll() is None:
             logger.warning(
-                "[monitor] %s no JSONL activity after %ds — startup timeout (killing)", branch_email, STARTUP_TIMEOUT
+                "[monitor] %s no startup activity after %ds — startup timeout (killing)", branch_email, STARTUP_TIMEOUT
             )
             _kill_process(process, branch_email)
             return -3, True
@@ -683,7 +769,8 @@ def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
 
 def main():
     """
-    Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back] -- <claude_args...>
+    Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back]
+           [--provider=codex] -- <agent_argv...>
 
     --no-wake-back declines the completion wake-back; sender is still used for bounce mail.
     """
@@ -699,6 +786,10 @@ def main():
     # Only the window before "--": everything after it is claude's argv.
     monitor_flags = sys.argv[5:sep_idx]
     wake_back = NO_WAKE_BACK_FLAG not in monitor_flags
+    provider = next(
+        (flag[len(PROVIDER_FLAG_PREFIX) :] for flag in monitor_flags if flag.startswith(PROVIDER_FLAG_PREFIX)),
+        "claude",
+    )
     claude_cmd = sys.argv[sep_idx + 1 :]
 
     if not claude_cmd:
@@ -785,7 +876,7 @@ def main():
     cmd = list(claude_cmd)
 
     for attempt in range(1, 4):
-        cmd, mode = cmd_for_attempt(claude_cmd, attempt, branch_path)
+        cmd, mode = cmd_for_attempt(claude_cmd, attempt, branch_path, provider)
         if attempt == 3 and mode == "fresh" and cmd != claude_cmd:
             logger.info("[monitor] %s attempt %d/3: switching to --fresh", branch_email, attempt)
 
@@ -836,7 +927,11 @@ def main():
             spawn_env,
             branch_email,
             pass_fds=attempt_pass_fds,
+            provider=provider,
         )
+        if provider == CODEX and exit_code == 0 and not parse_codex_stream(stdout_log)["succeeded"]:
+            logger.warning("[monitor] %s codex exited 0 without a clean turn.completed — failed", branch_email)
+            exit_code = CODEX_STREAM_FAILED
 
         if broker_sock is not None:
             broker_sock.close()
@@ -860,6 +955,10 @@ def main():
                 bg_orphaned = True
             if attempt > 1:
                 logger.info("[monitor] %s succeeded on attempt %d/3", branch_email, attempt)
+            break
+
+        if exit_code == CODEX_STREAM_FAILED:
+            # The turn ran and may have acted (mail, memories); a re-run would repeat that work.
             break
 
         if startup_failed:
@@ -886,7 +985,9 @@ def main():
     duration = int(time.time() - start_time)
 
     # Success only. `cmd` is the LAST attempt's: strike 3 remints, so the original would misreport.
-    if exit_code == 0:
+    if exit_code == 0 and provider == CODEX:
+        reconcile_codex_pointer(branch_path, stdout_log)
+    elif exit_code == 0:
         reconcile_pointer(branch_path, stdout_log, cmd)
 
     max_turns_hit = False
@@ -930,7 +1031,7 @@ def main():
         elif "overloaded" in content.lower() or "529" in content:
             reason = f"API overloaded (all {len(attempts)} attempts failed, {duration}s)"
 
-        reason += f"\n\nLast attempt result JSON: {_summarize_result_json(stdout_log)}"
+        reason += f"\n\nLast attempt result JSON: {_summarize_result_json(stdout_log, provider)}"
 
         bounce_delivered = _note_undelivered_bounce(
             _send_bounce(branch_email, reason, sender, lock_file, stderr_log), branch_email, reason, sender
@@ -943,7 +1044,7 @@ def main():
             f"Agent exited 0 after {duration}s but background tasks were still running and were "
             f"terminated at the headless print-mode ceiling. Work handed to those tasks is gone "
             f"and no reply may have been sent — re-dispatch if the task is not complete.\n\n"
-            f"Result JSON: {_summarize_result_json(stdout_log)}"
+            f"Result JSON: {_summarize_result_json(stdout_log, provider)}"
         )
         bounce_delivered = _note_undelivered_bounce(
             _send_bounce(branch_email, reason, sender, lock_file, stderr_log), branch_email, reason, sender
@@ -991,7 +1092,7 @@ def main():
             bg_orphaned=bg_orphaned,
             max_turns_hit=max_turns_hit,
             wake_result=wake_result,
-            result_json=_parse_result_json(stdout_log),
+            result_json=parse_codex_stream(stdout_log) if provider == CODEX else _parse_result_json(stdout_log),
         )
         report_path = report_mod.write_report(report)
         if report_path is None:

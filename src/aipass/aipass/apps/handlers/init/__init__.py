@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Init handler package — public API
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-04
-# Modified: 2026-05-04
+# Modified: 2026-10-25
 # =============================================
 
 """Init handler package — public entry point for bootstrap and scaffold_content.
@@ -31,6 +31,7 @@ from aipass.aipass.shared.scaffold_content import (
     global_prompt_md,
     inbox_json,
     prep_md,
+    prep_skill_md,
     with_source,
 )
 
@@ -44,6 +45,7 @@ __all__ = [
     "is_projects_child",
     "manifest_hashes",
     "prep_md",
+    "prep_skill_md",
     "read_manifest",
     "stamped_version",
     "update_project",

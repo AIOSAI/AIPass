@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: gates.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Which hooks are gates, and how each one fails — in code, never in config
 # Branch: hooks
 # Layer: apps/handlers/config
 # Created: 2026-09-30
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Gates are not injectors (DPLAN-0356 item 2).
@@ -28,6 +28,7 @@ FAIL_CLOSED: dict[str, str] = {
     f"{_SECURITY}.edit_gate.tripwire_snapshot": "the shell-memory tripwire's before-image",
     f"{_SECURITY}.edit_gate.tripwire": "the shell-memory tripwire's report",
     f"{_SECURITY}.settings_backup.handle": "the backup and receipt before ~/.claude/settings*.json changes",
+    f"{_SECURITY}.settings_gate.handle": "the owner's accept on every provider-settings change (Claude and Codex)",
 }
 
 #: handler path -> why its failure is allowed.
@@ -87,6 +88,11 @@ _BUILTIN: dict = {
             "enabled": True,
             "handler": f"{_SECURITY}.edit_gate.tripwire_snapshot",
             "matcher": "Bash",
+        },
+        "settings_gate": {
+            "enabled": True,
+            "handler": f"{_SECURITY}.settings_gate.handle",
+            "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit",
         },
         # Last: the engine stops at the first block, so a copy is taken only for a call every gate allowed.
         "settings_backup": {

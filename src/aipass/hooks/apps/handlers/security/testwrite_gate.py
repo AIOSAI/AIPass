@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.4.0
+# Version: 1.4.1
 # Description: Blocks agent creation of NEW test files (PreToolUse) + the test template pointer (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -87,7 +87,7 @@ def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[Path]:
     file_path = tool_input.get("file_path", "")
     if not file_path:
         return []
-    return [Path(file_path)]
+    return [Path(cwd) / file_path]  # relative to the payload's cwd, never this process's
 
 
 # A `-m <runner>` run executes existing tests and creates no file; a bare `python script.py` can write anything.

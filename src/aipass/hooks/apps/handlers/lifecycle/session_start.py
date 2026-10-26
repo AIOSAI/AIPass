@@ -1,19 +1,23 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.0.0
-# Description: Resets cadence counter on new chat / clear (SessionStart)
+# Version: 1.3.0
+# Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
-"""Resets cadence counter on SessionStart so loaders re-fire at turn 0.
+"""SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
 
-Skips resume (context carries grounding) and compact (PreCompact reset already; twice re-arms the regroup token).
+The cadence reset re-fires loaders at turn 0. It skips resume (context carries grounding) and
+compact (PreCompact reset already; twice re-arms the regroup token).
 """
 
 import importlib
+import json
+import os
+from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -37,3 +41,56 @@ def handle(hook_data: dict) -> dict:
         return {"stdout": "", "exit_code": 0}
 
     return {"stdout": "", "exit_code": 0, "sound": "cadence reset"}
+
+
+def handle_culture(hook_data: dict) -> dict:
+    """Inject .claude/AGENTS.md, the culture file: Codex reads the root AGENTS.md natively, never this one."""
+    home = os.environ.get("AIPASS_HOME", "")
+    culture = Path(home) / ".claude" / "AGENTS.md" if home else None
+    if culture is None or not culture.is_file():
+        logger.warning("[HOOKS] session_start: no culture file at %s, none injected", culture or "(AIPASS_HOME unset)")
+        return {"stdout": "", "exit_code": 0}
+    return {"stdout": culture.read_text(encoding="utf-8"), "exit_code": 0}
+
+
+def _interactive(provider: str, hook_data: dict) -> bool:
+    """Whether a person runs this session: Codex's rollout session_meta source is not "exec", Claude's argv has no -p.
+
+    Unreadable answers False: a missed pointer costs a resume, a headless one reopens a chat nobody sits in."""
+    if provider == "codex":
+        try:
+            with open(hook_data.get("transcript_path") or "", encoding="utf-8") as fh:
+                meta = json.loads(fh.readline())
+        except (OSError, ValueError) as exc:
+            logger.info("[HOOKS] session_start: codex rollout unreadable: %s", exc)
+            return False
+        source = meta.get("payload", {}).get("source") if isinstance(meta, dict) else None
+        return isinstance(source, str) and source != "exec"
+    sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
+    args = sessions.cli_ancestor("claude")
+    return args is not None and not {"-p", "--print"} & set(args[1:])
+
+
+def handle_session_pointer(hook_data: dict) -> dict:
+    """Record this session as the branch's resume target, with the CLI running it, so a resume reopens that CLI.
+
+    A compact keeps the session, so its pointer is already right. A bridge that names no provider is Claude's.
+    """
+    session_id = hook_data.get("session_id")
+    if hook_data.get("source") == "compact" or not isinstance(session_id, str) or not session_id:
+        return {"stdout": "", "exit_code": 0}
+    branch = Path(hook_data.get("cwd") or os.getcwd())
+    if not (branch / ".trinity" / "passport.json").is_file():
+        return {"stdout": "", "exit_code": 0}
+    provider = hook_data.get("provider") or "claude"
+    if not _interactive(provider, hook_data):
+        logger.info("[HOOKS] session_start: headless %s session %s, pointer left as is", provider, session_id)
+        return {"stdout": "", "exit_code": 0}
+    try:
+        door = importlib.import_module("aipass.ai_mail.apps.modules.door_session_pointer")
+        written = door.write_pointer(branch, session_id, "session-start", provider=provider)
+    except Exception as exc:  # a missed pointer costs a resume, never the session
+        logger.info("[HOOKS] session_start: session pointer not written for %s: %s", branch, exc)
+        return {"stdout": "", "exit_code": 0}
+    logger.info("[HOOKS] session_start: pointer %s -> %s (%s) written=%s", branch, session_id, provider, written)
+    return {"stdout": "", "exit_code": 0}

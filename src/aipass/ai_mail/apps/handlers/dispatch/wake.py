@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.4.0
+# Version: 3.7.0
 # Created: 2026-03-02
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -29,34 +29,44 @@ from aipass.ai_mail.apps.handlers.dispatch import session_pointer
 from aipass.ai_mail.apps.handlers.dispatch.pid_lock import (
     acquire_lock,
     check_lock,
+    branch_occupant,
     check_pid_alive,
     clean_zombies,
-    is_branch_occupied,
 )
 from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
     refresh_recipient_dashboard as _refresh_recipient_dashboard,
 )
 
 
-def _find_claude_bin() -> str:
-    """Locate the claude binary, checking known install locations if not on PATH.
+def _find_bin(name: str) -> str:
+    """Locate an agent CLI binary, checking known install locations if not on PATH.
 
     Resolved per wake, not at import, so a binary installed after load is found.
     Raises FileNotFoundError naming what was searched; never the bare name.
     """
-    found = shutil.which("claude")
+    found = shutil.which(name)
     if found:
         return found
     candidates = [
-        Path.home() / ".local" / "bin" / "claude",
-        Path("/usr/local/bin/claude"),
-        Path("/usr/bin/claude"),
+        Path.home() / ".local" / "bin" / name,
+        Path("/usr/local/bin") / name,
+        Path("/usr/bin") / name,
     ]
     for candidate in candidates:
         if candidate.exists():
             return str(candidate)
     searched = ", ".join(str(candidate) for candidate in candidates)
-    raise FileNotFoundError(f"claude not found on PATH or at {searched}")
+    raise FileNotFoundError(f"{name} not found on PATH or at {searched}")
+
+
+def _find_claude_bin() -> str:
+    """Locate the claude binary."""
+    return _find_bin("claude")
+
+
+def _find_codex_bin() -> str:
+    """Locate the codex binary."""
+    return _find_bin("codex")
 
 
 _REPO_ROOT = find_repo_root()
@@ -74,6 +84,14 @@ KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku", "fable"})
 DEFAULT_MODEL = "opus"
 
 MANAGER_CLASS = "manager"
+
+# The step a held dispatch lock records; warn there means delivered and NOT woken.
+BUSY_STEP = "lock"
+
+PROVIDER_CLAUDE = session_pointer.CLAUDE
+PROVIDER_CODEX = session_pointer.CODEX
+KNOWN_PROVIDERS: Tuple[str, ...] = (PROVIDER_CLAUDE, PROVIDER_CODEX)
+CODEX_LAST_MESSAGE_FILE = "dispatch_last_message.txt"
 
 # Fable is granted by name, not class. Only the fallback: the live grant is read from CONFIG_FILE.
 FABLE_GRANT_DEFAULT: frozenset[str] = frozenset({"@devpulse"})
@@ -208,6 +226,14 @@ class DispatchStatus:
             if step[1] == label:
                 return step
         return None
+
+    def busy_detail(self) -> str:
+        """Why the target was not woken because its lock was held, or "" when it was not busy.
+
+        wake_branch returns True there (the mail is delivered); a CLI caller must still say so and fail.
+        """
+        step = self.find_step(BUSY_STEP)
+        return step[2] if step and step[0] == "warn" else ""
 
     @property
     def summary(self) -> str:
@@ -531,6 +557,42 @@ def _spawn_manager_interactive(
     return status, True
 
 
+def _codex_cmd(
+    codex_bin: str,
+    branch_path: Path,
+    email: str,
+    prompt: str,
+    model: str,
+    fresh: bool,
+    status: "DispatchStatus",
+) -> List[str]:
+    """The codex argv: `exec`, or `exec resume <thread_id>` when the pointer names a live Codex thread.
+
+    No --cd: the monitor runs with cwd=branch_path, and `resume` has none. Codex mints the thread id,
+    so a fresh wake writes no pointer; the monitor records it from the stream after the run.
+    """
+    last_message = str(branch_path / "logs" / CODEX_LAST_MESSAGE_FILE)
+    tail = [
+        *(["-m", model] if model else []),
+        "--json",
+        "-o",
+        last_message,
+        "--dangerously-bypass-approvals-and-sandbox",
+        prompt,
+    ]
+    if fresh:
+        logger.info("[wake] %s fresh codex thread — no pointer before the spawn, Codex mints the id", email)
+        status.ok("session", "fresh codex thread (--fresh)")
+        return [codex_bin, "exec", *tail]
+    resume_id, reason = session_pointer.resolve_resume_target(branch_path, provider=PROVIDER_CODEX)
+    logger.info("[wake] %s session decision: %s", email, reason)
+    if resume_id:
+        status.ok("session", f"resuming {resume_id} (pointer)")
+        return [codex_bin, "exec", "resume", resume_id, *tail]
+    status.info("session", "no codex pointer — fresh thread")
+    return [codex_bin, "exec", *tail]
+
+
 def wake_branch(
     branch_email: str,
     custom_message: Optional[str] = None,
@@ -543,15 +605,17 @@ def wake_branch(
     admin: bool = False,
     subject: Optional[str] = None,
     wake_back: bool = True,
+    provider: str = PROVIDER_CLAUDE,
 ) -> Tuple[DispatchStatus, bool]:
     """
-    Spawn a Claude agent at the target branch with step-by-step status.
+    Spawn an agent (Claude, or Codex with provider="codex") at the target branch with step-by-step status.
 
     admin is an ALREADY-DECIDED verdict (dispatch.py ran the grant check), never a request.
     True means "did what it should", not "woke an agent": check status.find_step("manager").
     """
     json_handler.log_operation(
-        "wake_branch", {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL}
+        "wake_branch",
+        {"branch": branch_email, "fresh": fresh, "auto": auto, "model": model or DEFAULT_MODEL, "provider": provider},
     )
 
     status = DispatchStatus()
@@ -576,6 +640,11 @@ def wake_branch(
     branch_path, email = result
     status.ok("resolve", f"{email} → {branch_path}")
 
+    if provider not in KNOWN_PROVIDERS:
+        status.fail("provider", f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}")
+        return status, False
+    status.ok("provider", provider)
+
     # Before the passport read: an unreadable passport must never be why @devpulse is spawned.
     if (scheduled or admin) and is_wake_blocked(email):
         lane = "scheduled" if scheduled else "admin"
@@ -592,6 +661,10 @@ def wake_branch(
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
         citizen_class = passport.get("identity", {}).get("citizen_class", "")
+        if citizen_class == MANAGER_CLASS and provider != PROVIDER_CLAUDE:
+            status.fail("manager", f"{email} is a manager — manager wakes are Claude-only, {provider} refused")
+            logger.warning("[wake] %s is a manager — %s wake refused (Claude-only lane)", email, provider)
+            return status, False
         if citizen_class == MANAGER_CLASS and not (scheduled or admin or sender == "@daemon"):
             # Woken nothing, sent nothing: the caller owns the mail.
             status.info("manager", f"{email} is a manager — wake skipped, caller must mail")
@@ -624,13 +697,18 @@ def wake_branch(
         logger.warning("[wake] %s passport unreadable, waking in a lane that wakes managers too: %s", email, exc)
 
     # Decided ONCE for both spawn lanes; a second site would let the rule drift.
-    decision = resolve_wake_model(email, model)
-    resolved_model = decision.model
-    if decision.refusal:
-        # WARN, not fail: the only place the caller learns the model was not honoured.
-        status.warn("model", decision.refusal)
+    if provider == PROVIDER_CODEX:
+        # The Claude default and the Fable grant are Claude's; Codex takes the slug verbatim or its config.
+        resolved_model = model or ""
+        status.ok("model", model or "codex config default")
     else:
-        status.ok("model", resolved_model)
+        decision = resolve_wake_model(email, model)
+        resolved_model = decision.model
+        if decision.refusal:
+            # WARN, not fail: the only place the caller learns the model was not honoured.
+            status.warn("model", decision.refusal)
+        else:
+            status.ok("model", resolved_model)
 
     zombie_count = clean_zombies()
     if zombie_count > 0:
@@ -646,26 +724,29 @@ def wake_branch(
             status.fail("lock", f"Active agent (PID {pid}, since {since})")
             logger.warning("[wake] BLOCKED %s — active agent PID %s", email, pid)
             return status, False
-        else:
-            status.info("lock", f"Agent active (PID {pid}) — email routed to inbox")
-            status.info("delivery", "Agent will process email during current session")
-            return status, True
+        # A held lock may be a session woken for other work, or a monitor draining after its agent
+        # exited: neither is promised to read this mail. Delivered, NOT woken, and said so.
+        detail = f"{email} busy (PID {pid}, since {since}) — NOT woken; the mail waits in its inbox"
+        status.warn(BUSY_STEP, detail)
+        logger.warning("[wake] NOT WOKEN %s — dispatch lock held by PID %s since %s", email, pid, since)
+        return status, True
 
     status.ok("lock", "No active lock — agent is sleeping")
 
-    if is_branch_occupied(branch_path):
-        status.warn("occupancy", f"Interactive Claude session in {branch_path}")
+    occupant = branch_occupant(branch_path)
+    if occupant:
+        status.warn("occupancy", f"Interactive {occupant} session in {branch_path}")
         status.fail("blocked", "Cannot spawn — interactive session running")
-        logger.warning("[wake] BLOCKED %s — interactive session", email)
+        logger.warning("[wake] BLOCKED %s — interactive %s session", email, occupant)
         return status, False
 
     status.ok("occupancy", "No interactive session")
 
     # The binary, then the dashboard: after every gate that can refuse, before any lock or spawn.
     try:
-        claude_bin = _find_claude_bin()
+        claude_bin = _find_codex_bin() if provider == PROVIDER_CODEX else _find_claude_bin()
     except FileNotFoundError as e:
-        status.fail("claude", str(e))
+        status.fail(provider, str(e))
         logger.warning("[wake] %s not woken: %s", email, e)
         return status, False
 
@@ -713,8 +794,10 @@ def wake_branch(
         "json",
     ]
 
+    if provider == PROVIDER_CODEX:
+        claude_cmd = _codex_cmd(claude_bin, branch_path, email, prompt, resolved_model, fresh, status)
     # The session comes from session_pointer, not -c's file mtime; -c is the no-pointer fallback.
-    if fresh:
+    elif fresh:
         session_id = session_pointer.mint_session_id()
         # Before the spawn, so no crash leaves a live session nobody recorded.
         if not session_pointer.write_pointer(branch_path, session_id, "wake-fresh"):
@@ -741,7 +824,11 @@ def wake_branch(
     # wake_back rides argv, never spawn_env, which becomes the agent's own environment.
     from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import NO_WAKE_BACK_FLAG
 
+    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import PROVIDER_FLAG_PREFIX
+
     monitor_flags = [] if wake_back else [NO_WAKE_BACK_FLAG]
+    if provider != PROVIDER_CLAUDE:
+        monitor_flags.append(f"{PROVIDER_FLAG_PREFIX}{provider}")
     monitor_cmd = [
         sys.executable,
         str(MONITOR_SCRIPT),
@@ -782,6 +869,7 @@ def wake_branch(
         subject=subject or "",
         expected_seconds=HARD_TIMEOUT,
         wake_back=wake_back,
+        provider=provider,
     )
     if dispatch_id:
         spawn_env["AIPASS_DISPATCH_ID"] = dispatch_id

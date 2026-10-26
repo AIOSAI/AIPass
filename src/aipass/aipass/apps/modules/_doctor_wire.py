@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-05-08
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -34,7 +34,10 @@ from aipass.aipass.apps.handlers.provider_wire import (
     SettingsGap,
     SettingsPlan,
     apply_settings_plan,
+    codex_hooks_document,
+    codex_hooks_path,
     manifest_settings,
+    plan_codex_hooks,
     plan_wire_provider,
     settings_diff,
     settings_gaps,
@@ -111,6 +114,27 @@ def check_settings_scalars(
     return rows, settable
 
 
+CODEX_HOOKS_LABEL = "codex hooks"
+
+
+def check_codex_hooks(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
+    """One row: does the repo's .codex/hooks.json hold exactly what cli.codex makes? None without rows."""
+    wanted = codex_hooks_document(manifest)
+    if wanted is None:
+        return []
+    count = sum(len(entries) for entries in wanted["hooks"].values())
+    try:
+        plan = plan_codex_hooks(manifest_path)
+    except SettingsBackupError as exc:
+        logger.warning("[doctor] codex hooks unreadable: %s", exc)
+        return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_WARN, str(exc), f"Run: {WIRE_COMMAND}")]
+    if plan is None:
+        return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_PASS, f"{count} Codex hooks match cli.codex", "")]
+    state = "differs from" if plan.before else "missing, wanted by"
+    detail = f"{codex_hooks_path(manifest_path)} {state} cli.codex ({count} hooks)"
+    return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_WARN, detail, f"Run: {WIRE_COMMAND}")]
+
+
 SETTINGS_FIX_LABEL = "settings fix"
 YES_COMMAND = "aipass doctor --fix --yes"
 NOT_APPLIED_NO_TTY = f"not applied: no tty — {YES_COMMAND}"
@@ -122,7 +146,7 @@ CONSENT_INSTALL = "install"
 
 
 def plan_settings_fix(manifest_path: Optional[Path], settings_path: Optional[Path] = None) -> List[SettingsPlan]:
-    """The settings changes --fix would make: the wire, then the stale-deny removal on top of it.
+    """The changes --fix would make: the wire, the stale-deny removal on top of it, the Codex hooks.
 
     The second is computed from the first's result, so applying both lands exactly the diff shown.
     """
@@ -133,20 +157,32 @@ def plan_settings_fix(manifest_path: Optional[Path], settings_path: Optional[Pat
     stale = plan_stale_deny(settings_path, base=plans[0].after if plans else None)
     if stale is not None:
         plans.append(stale)
+    codex = plan_codex_hooks(manifest_path) if manifest_path is not None else None
+    if codex is not None:
+        plans.append(codex)
     return plans
+
+
+def plans_diff(plans: List[SettingsPlan]) -> List[str]:
+    """One unified diff per file the plans touch: its first plan's before against its last plan's after."""
+    lines: List[str] = []
+    for path in dict.fromkeys(plan.settings_path for plan in plans):
+        same_file = [plan for plan in plans if plan.settings_path == path]
+        lines.extend(settings_diff(same_file[0].before, same_file[-1].after, str(path)))
+    return lines
 
 
 def _render_settings_plan(plans: List[SettingsPlan]) -> int:
     """Print every planned change, one per line, then the unified diff. Returns the change count."""
     planned = [line for plan in plans for line in plan.planned]
-    console.print(f"\n[bold]Planned changes to ~/.claude/settings.json ({len(planned)}):[/bold]")
+    console.print(f"\n[bold]Planned changes to the provider settings ({len(planned)}):[/bold]")
     for line in planned:
         console.print(f"  • {line}", markup=False, highlight=False)
     for plan in plans:
         for note in plan.notes:
             console.print(f"  {note}", markup=False, highlight=False, style="dim")
     console.print()
-    for line in settings_diff(plans[0].before, plans[-1].after):
+    for line in plans_diff(plans):
         console.print(line, markup=False, highlight=False)
     console.print()
     return len(planned)
@@ -155,7 +191,7 @@ def _render_settings_plan(plans: List[SettingsPlan]) -> int:
 def _ask_apply(count: int) -> Optional[str]:
     """Ask the one question on a tty. Returns the consent string, or None for n / EOF / Ctrl-C."""
     try:
-        answer = input(f"Apply these {count} changes to ~/.claude/settings.json? [y/N]: ").strip().lower()
+        answer = input(f"Apply these {count} changes to the provider settings? [y/N]: ").strip().lower()
     except (EOFError, KeyboardInterrupt) as exc:
         logger.info("[doctor] settings question interrupted: %s", type(exc).__name__)
         answer = "n"
@@ -219,7 +255,7 @@ def settings_fix_report(manifest_path: Optional[Path], yes: bool = False) -> dic
     report = {
         "planned": [line for plan in plans for line in plan.planned],
         "notes": [note for plan in plans for note in plan.notes],
-        "diff": settings_diff(plans[0].before, plans[-1].after) if plans else [],
+        "diff": plans_diff(plans),
         "applied": False,
     }
     if plans and yes:

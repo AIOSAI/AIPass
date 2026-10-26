@@ -73,9 +73,16 @@ The one difference: install re-points `AIPASS_HOME` to the tree being installed,
 and says so; `doctor --fix` never does, so a fix from a second checkout cannot
 take the home from the first (the home-agreement row flags that split).
 
+Codex reads the same hook shape from the repo's `.codex/hooks.json`. Both doors
+write that file from the manifest's `cli.codex.hooks` rows, the repo root taken
+from the manifest's location. The file belongs wholly to AIPass, so it is
+replaced whole rather than merged. A manifest with no `cli.codex` rows leaves
+it as it is. The `codex hooks` row passes when the file holds exactly what the
+rows make, and warns, naming `aipass doctor --fix`, when it is missing or differs.
+
 Nothing is written before you see it. `doctor --fix` and plain `doctor` print
-the planned changes, one line each, then a unified diff of the file, and ask
-once: `Apply these N changes to ~/.claude/settings.json? [y/N]`. Anything but
+the planned changes, one line each, then a unified diff per file, and ask
+once: `Apply these N changes to the provider settings? [y/N]`. Anything but
 `y` writes nothing. With no terminal to ask on, `doctor --fix` writes nothing
 and its row says `not applied: no tty — aipass doctor --fix --yes`; `--yes`
 writes without the question. The install tail never asks: it runs inside the
@@ -89,7 +96,8 @@ and [`apps/modules/_doctor_wire.py`](../apps/modules/_doctor_wire.py).
 Before any of these doors writes the personal settings file (`doctor --fix`,
 the install tail's doctor run, setup.sh's settings refresh, the stale-deny cleanup),
 it copies the file into `~/.claude/.backup/settings/` as
-`settings.json.<date>T<time>.<door>`. Then, after the write, it adds one line to
+`settings.json.<date>T<time>.<door>`. A write to `.codex/hooks.json` backs up
+to `.codex/.backup/settings/` the same way. Then, after the write, it adds one line to
 `receipts.jsonl` in the same folder: when, which door, who, the backup's name,
 and the file's sha256 before and after. `doctor --fix` prints both paths. The
 backups are never pruned or rotated. If the backup or the receipt cannot be
@@ -98,12 +106,27 @@ write itself fails, the command fails too and no receipt is written; the
 backup taken just before it stays. Code:
 [`apps/handlers/settings_backup.py`](../apps/handlers/settings_backup.py).
 
+## Both CLIs see every shared skill
+
+The Scaffold group carries three rows about the skills in `.agents/skills/`.
+`shared skills` passes when each `SKILL.md` has a `name` and a `description` in
+its frontmatter. `skills link` passes when `.claude/skills` is a symlink
+resolving to `.agents/skills`, and warns when it is missing, a copy, or points
+elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
+beside the skill, so `/prep` is offered twice. `doctor --fix` makes a missing
+link and renames an unedited legacy `prep.md` to `prep(disabled).md`, one
+`skills fix` row per change; a copy, a foreign link and an edited `prep.md` are
+left for you. On Windows the link needs `git config core.symlinks true` and the
+right to make links; without them `--fix` writes a copy that will not follow
+`.agents/skills`, and the row says so.
+
 ## What it will not do
 
 `doctor --fix` will not apply a scaffold update. An update can replace files, so
 it is a decision and not a repair — the plan goes to a human first. The one
 exception is a stamp-only plan; [`scaffold_update.md`](scaffold_update.md) has
-the rule.
+the rule. The skills link and the legacy `prep.md` above are repairs, not an
+update: neither overwrites a file.
 
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),

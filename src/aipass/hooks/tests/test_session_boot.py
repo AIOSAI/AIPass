@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Tests for session boot wrapper (menu-based attach/start/close)
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py."""
@@ -97,7 +97,7 @@ class TestBoot:
             session_boot.boot(cwd=str(tmp_path))
         mock_exec.assert_called_once_with("tmux", ["tmux", "attach-session", "-t", "hooks"])
 
-    def test_live_session_resume_continues_dead_window(self, tmp_path):
+    def test_a_dead_window_resumes_the_picked_session_by_id_not_continue(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
             patch.dict("os.environ", _kept_redirect(), clear=True),
@@ -111,7 +111,8 @@ class TestBoot:
         ):
             session_boot.boot(cwd=str(tmp_path))
         args = mock_exec.call_args[0][1]
-        assert "--continue" in args
+        assert args[args.index("--resume") + 1] == "abc"
+        assert "--continue" not in args
 
     def test_live_session_resume_bg_does_takeover(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "bg"}]
@@ -237,6 +238,18 @@ class TestStopSession:
             session_boot._stop_session(session, "/usr/local/bin/claude")
         mock_kill.assert_not_called()
 
+    def test_a_failed_tmux_kill_falls_through_to_the_signal(self, tmp_path):
+        live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
+        with (
+            patch.object(session_boot, "_find_tmux_session_for_pid", return_value="hooks"),
+            patch(f"{_MOD}.subprocess.run") as mock_run,
+            patch(f"{_MOD}._kill") as mock_kill,
+        ):
+            mock_run.return_value.returncode = 1
+            _boot(tmp_path, live, "c")
+        assert [c for c in mock_run.call_args_list if c.args[0] == ["tmux", "kill-session", "-t", "hooks"]]
+        mock_kill.assert_called()
+
     def test_tmux_session_killed(self, tmp_path, capsys):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
@@ -244,9 +257,11 @@ class TestStopSession:
             patch(f"{_MOD}.subprocess.run") as mock_run,
             patch(f"{_MOD}._kill") as mock_kill,
         ):
+            mock_run.return_value.returncode = 0
             result = _boot(tmp_path, live, "c")
         kill_calls = [c for c in mock_run.call_args_list if c.args[0] == ["tmux", "kill-session", "-t", "hooks"]]
         assert len(kill_calls) == 1
+        assert kill_calls[0].kwargs["timeout"] > 0
         mock_kill.assert_not_called()
         assert "PID 1234: killed tmux session 'hooks'" in capsys.readouterr().err
         assert result["action"] == "closed"
@@ -754,7 +769,7 @@ class TestExtraArgsThreading:
         ):
             _boot(tmp_path, live, "", extra_args=["--permission-mode", "plan"])
         cmd = mock_exec.call_args[0][1]
-        assert "--continue" in cmd
+        assert cmd[cmd.index("--resume") + 1] == "abc"
         assert "--permission-mode" in cmd
         assert "plan" in cmd
 
@@ -836,7 +851,7 @@ class TestExtraArgsThreading:
         ):
             session_boot.boot(cwd=str(tmp_path), extra_args=["--permission-mode", "plan"])
         cmd = mock_exec.call_args[0][1]
-        assert "--continue" in cmd
+        assert cmd[cmd.index("--resume") + 1] == "abc"
         assert "--permission-mode" in cmd
         assert "plan" in cmd
 

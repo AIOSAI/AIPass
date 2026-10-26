@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-07-17
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -23,7 +23,12 @@ from datetime import date
 from pathlib import Path
 
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
-from aipass.aipass.apps.handlers.init.bootstrap import _managed_manifest_entries
+from aipass.aipass.apps.handlers.init.bootstrap import (
+    PREP_SKILL_REL,
+    SKILLS_LINK_REL,
+    _managed_manifest_entries,
+    link_skills,
+)
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.prax import logger
 from aipass.spawn import spawn_agent
@@ -139,8 +144,8 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
     return created
 
 
-def _scaffold_aipass(target: Path, name: str) -> list[str]:
-    """Write AIPass scaffold files (tiers, hooks, AGENTS.md, settings, .venv)."""
+def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
+    """Write AIPass scaffold files (tiers, hooks, AGENTS.md, settings, the prep skill, .venv); returns files, notes."""
     from aipass.aipass.shared.project_home import (
         claude_local_settings,
         _claude_settings,
@@ -195,10 +200,12 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
         )
         created.append(".claude/settings.local.json")
 
-    commands_dir = claude_dir / "commands"
-    commands_dir.mkdir(exist_ok=True)
-    sm.write_text_lf(commands_dir / "prep.md", sc.prep_md())
-    created.append(".claude/commands/prep.md")
+    prep_path = target / PREP_SKILL_REL
+    prep_path.parent.mkdir(parents=True)
+    sm.write_text_lf(prep_path, sc.prep_skill_md())
+    created.append(PREP_SKILL_REL)
+    note = link_skills(target)
+    created.append(SKILLS_LINK_REL)
 
     # `aipass new` mints the whole tree, so every file is ours; without the stamp the first
     # `init update` reads them as unknown provenance and writes sidecars.
@@ -212,7 +219,7 @@ def _scaffold_aipass(target: Path, name: str) -> list[str]:
             link.symlink_to(venv)
             created.append(".venv")
 
-    return created
+    return created, [note] if note else []
 
 
 def _git_init(target: Path, name: str, template: str) -> None:
@@ -298,7 +305,7 @@ def create_project(
         logger.info("[aipass new] registry minted: %s (%s)", registry_file, registry_id)
 
         template_files = _write_template(target, name, template)
-        scaffold_files = _scaffold_aipass(target, name)
+        scaffold_files, notes = _scaffold_aipass(target, name)
 
         spawn_result = None
         if not no_agent:
@@ -318,6 +325,7 @@ def create_project(
             "agent_created": spawn_result is not None,
             "agent_home": str(_agent_home(target, name)) if spawn_result else None,
             "spawn_result": spawn_result,
+            "notes": notes,
         }
     except Exception:
         if target.exists():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_artifacts.py
 # Description: Tests for what each dispatch attempt leaves behind - stdout, exit codes, result JSON, the lock
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py's attempt artifacts: stdout, stderr, result JSON, lock."""
@@ -34,7 +34,7 @@ def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
 
     calls = {"n": 0}
 
-    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=(), provider="claude"):
         calls["n"] += 1
         Path(stdout_path).write_text(f'{{"result": "attempt-{calls["n"]}-failure"}}', encoding="utf-8")
         return (1, False)
@@ -112,7 +112,7 @@ def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp
     not just the bare exit code."""
     argv, lock_file, stderr_log = main_argv
 
-    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=(), provider="claude"):
         Path(stdout_path).write_text(
             '{"is_error": true, "subtype": "error_during_execution", "result": "boom detail"}',
             encoding="utf-8",
@@ -151,7 +151,7 @@ def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
     argv, lock_file, stderr_log = main_argv
     successor_pid = os.getpid() + 999
 
-    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=(), provider="claude"):
         lock_file.write_text(json.dumps({"pid": successor_pid}), encoding="utf-8")
         return (0, False)
 
@@ -177,7 +177,7 @@ def test_bg_tasks_still_running_treated_as_incomplete(monkeypatch, main_argv, tm
     stderr is NOT a silent success -- it bounces and exits nonzero."""
     argv, lock_file, stderr_log = main_argv
 
-    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=(), provider="claude"):
         with open(stderr_log, "a", encoding="utf-8") as f:
             f.write(f"{BG_TASKS_MARKER} after 600s; terminating.\n")
         return (0, False)
@@ -208,7 +208,7 @@ def test_bg_tasks_marker_from_prior_attempt_does_not_leak_forward(monkeypatch, m
     argv, lock_file, stderr_log = main_argv
     calls = {"n": 0}
 
-    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=()):
+    def fake_run(cmd, stdout_path, stderr_fh, cwd, spawn_env, branch_email, pass_fds=(), provider="claude"):
         calls["n"] += 1
         if calls["n"] == 1:
             with open(stderr_log, "a", encoding="utf-8") as f:

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: sound.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Shared sound utilities — Piper TTS and WAV playback with mute support
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-22
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Shared sound functions for hook handlers. Checks mute flag before playing."""
@@ -67,6 +67,7 @@ def speak(text: str, tmp_dir: str | None = None) -> None:
     if not PIPER_BIN.exists() or not PIPER_VOICE.exists():
         return
 
+    wav_path, playing = "", False
     try:
         wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=tmp_dir)
         wav_path = wav_file.name
@@ -81,15 +82,20 @@ def speak(text: str, tmp_dir: str | None = None) -> None:
         )
 
         if piper_result.returncode == 0 and Path(wav_path).exists():
+            # The player's own shell removes the wav when playback ends: the prompt path never waits on it.
             subprocess.Popen(
-                _PLAY_CMD + [wav_path],
+                ["sh", "-c", " ".join(_PLAY_CMD) + ' "$1"; rm -f "$1"', "sh", wav_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            playing = True
     except subprocess.TimeoutExpired:
         logger.info("[HOOKS] speak: piper timed out")
     except OSError as exc:
         logger.info("[HOOKS] speak: playback error: %s", exc)
+    finally:
+        if wav_path and not playing:
+            Path(wav_path).unlink(missing_ok=True)
 
 
 def play(sound_path: Path) -> None:

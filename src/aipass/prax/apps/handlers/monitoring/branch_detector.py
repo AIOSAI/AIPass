@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_detector.py
 # Description: Branch Attribution Handler
-# Version: 0.1.1
+# Version: 0.1.2
 # Created: 2025-11-23
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -458,6 +458,8 @@ class BranchDetector:
                 return result
 
             logger.info(f"Could not detect branch for path: {file_path}")
+            # Cached so a live transcript outside ~/Projects (~/.codex/sessions) logs once, not per write.
+            self.log_map[path_str] = "UNKNOWN"
             return "UNKNOWN"
 
         except Exception as e:

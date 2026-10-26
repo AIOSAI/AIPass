@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_gauge.py
-# Version: 1.2.0
-# Description: Tests for context_gauge prompt handler (guard per window since 1.1.0; real model window since 1.2.0)
+# Version: 1.3.0
+# Description: Tests for context_gauge prompt handler (guard per window; real model window; the Codex rollout)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-19
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/prompt/context_gauge.py."""
@@ -31,6 +31,7 @@ CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 def no_user_settings(tmp_path, monkeypatch):
     """The user-level settings file moves under tmp_path and stays absent, so no live window leaks in."""
     monkeypatch.setattr(context_window, "user_settings_path", lambda: tmp_path / "home" / "user_settings.json")
+    monkeypatch.setattr(context_window, "codex_config_path", lambda: tmp_path / "home" / "codex_config.toml")
 
 
 def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, model=""):
@@ -46,6 +47,23 @@ def _write_transcript(path, input_tokens=0, cache_read=0, cache_creation=0, mode
         },
     }
     path.write_text(json.dumps(entry), encoding="utf-8")
+
+
+def _codex_rollout(path, total_tokens, window=475_000, model="gpt-6.1-sol"):
+    """A Codex rollout in the shape 0.164 writes: session_meta, turn_context, the newest token_count."""
+    usage = {"input_tokens": total_tokens - 568, "cached_input_tokens": 7680, "output_tokens": 568}
+    info = {
+        "total_token_usage": dict(usage, total_tokens=total_tokens),
+        "last_token_usage": dict(usage, total_tokens=total_tokens),
+    }
+    if window is not None:
+        info["model_context_window"] = window
+    lines = [
+        {"type": "session_meta", "payload": {"id": "s", "cwd": "/x", "source": "cli", "cli_version": "0.164.0"}},
+        {"type": "turn_context", "payload": {"cwd": "/x", "model": model, "effort": "medium"}},
+        {"type": "event_msg", "payload": {"type": "token_count", "info": info, "rate_limits": {}}},
+    ]
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
 
 
 class TestContextGaugeHandle:
@@ -221,3 +239,53 @@ class TestGaugeGuardIsPerWindow:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestCodexRollout:
+    """A Codex rollout: fill, window and compact point from the rollout and Codex's config; the call is $prep."""
+
+    def test_a_codex_rollout_nudges_with_its_own_window_and_point(self, tmp_path):
+        rollout = tmp_path / "rollout.jsonl"
+        # window 475k is the usable 95% of 500k; Codex compacts at 90% of 500k = 450k; 80% of that = 360k
+        _codex_rollout(rollout, total_tokens=380_000)
+        hook_data = {
+            "session_id": "s-codex",
+            "transcript_path": str(rollout),
+            "cwd": str(tmp_path),
+            "provider": "codex",
+        }
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle(hook_data)
+        assert result["stdout"].startswith(
+            "CONTEXT GAUGE: ~380k of 475k context (80%, as the status line counts it); auto-compact at ~450k. "
+        )
+        assert "$prep" in result["stdout"]
+        assert "/prep" not in result["stdout"]
+
+    def test_codex_config_lowers_the_compact_point(self, tmp_path):
+        (tmp_path / "home").mkdir()
+        (tmp_path / "home" / "codex_config.toml").write_text(
+            "model_auto_compact_token_limit = 400000\n", encoding="utf-8"
+        )
+        rollout = tmp_path / "rollout.jsonl"
+        _codex_rollout(rollout, total_tokens=385_000)
+        hook_data = {"session_id": "s-cfg", "transcript_path": str(rollout), "cwd": str(tmp_path), "provider": "codex"}
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle(hook_data)
+        assert "auto-compact at ~400k. Compact fires soon." in result["stdout"]
+        assert "Run $prep now" in result["stdout"]
+
+    def test_without_a_rollout_window_codex_config_sets_it(self, tmp_path):
+        (tmp_path / "home").mkdir()
+        (tmp_path / "home" / "codex_config.toml").write_text("model_context_window = 200000\n", encoding="utf-8")
+        rollout = tmp_path / "rollout.jsonl"
+        _codex_rollout(rollout, total_tokens=150_000, window=None)
+        hook_data = {
+            "session_id": "s-nowin",
+            "transcript_path": str(rollout),
+            "cwd": str(tmp_path),
+            "provider": "codex",
+        }
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path):
+            result = handle(hook_data)
+        assert "~150k of 190k context (79%, as the status line counts it); auto-compact at ~180k." in result["stdout"]

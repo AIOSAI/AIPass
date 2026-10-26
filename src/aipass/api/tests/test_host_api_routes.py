@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_api_routes.py
 # Description: Tests for the host API's live app — the extra guard, ping, bearer auth, scopes, the declared routes
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-10-08
-# Modified: 2026-10-19
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for create_app(), its auth and the declared routes in apps/handlers/host/server.py."""
@@ -79,12 +79,12 @@ fastapi_required = pytest.mark.skipif(
 
 
 @pytest.fixture
-def client(store: Path):
+def client(store: Path, host_app: Any):
     """A TestClient over the real app, with the token store isolated."""
     from fastapi.testclient import TestClient
 
     with patch(PATCH_SERVER_LOGGER):
-        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+        yield TestClient(host_app, raise_server_exceptions=False)
 
 
 @fastapi_required
@@ -215,14 +215,14 @@ class TestTheDeclaredRoutesAnswerThroughTheRealApp:
     """
 
     @pytest.fixture
-    def routed(self, store: Path):
+    def routed(self, store: Path, host_app: Any):
         """The real app plus a read token and an operate token for it."""
         from fastapi.testclient import TestClient
 
         with patch(PATCH_SERVER_LOGGER):
             _, read_raw = host_tokens.issue_token("phone", "read")
             _, operate_raw = host_tokens.issue_token("ops-phone", "operate")
-            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            client = TestClient(host_app, raise_server_exceptions=False)
             yield client, read_raw, operate_raw
 
     def test_agent_settings_reads_through_the_route(self, routed: Any) -> None:
@@ -426,7 +426,7 @@ class TestTheBackupDoorAnswersThroughTheRealApp:
     """POST /v1/backup/run and /cancel, GET /v1/backup/job and /status, wired."""
 
     @pytest.fixture
-    def backup(self, store: Path, seated: Path, monkeypatch: Any):
+    def backup(self, store: Path, seated: Path, monkeypatch: Any, host_app: Any):
         """The real app, a read and an operate token, a fresh job table, and drone replaced at backup.py."""
         from fastapi.testclient import TestClient
 
@@ -444,7 +444,7 @@ class TestTheBackupDoorAnswersThroughTheRealApp:
         ):
             _, read_raw = host_tokens.issue_token("phone", "read")
             _, operate_raw = host_tokens.issue_token("ops-phone", "operate")
-            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            client = TestClient(host_app, raise_server_exceptions=False)
             yield (
                 client,
                 {"Authorization": f"Bearer {read_raw}"},
@@ -705,7 +705,7 @@ class TestTheMachineProcessesRoute:
     """GET /v1/machine/processes: the skill's dict verbatim, refused exactly as /v1/machine."""
 
     @pytest.fixture
-    def processes(self, store: Path):
+    def processes(self, store: Path, host_app: Any):
         """The real app, a read token, and @skills' process door replaced where it lives."""
         from fastapi.testclient import TestClient
 
@@ -718,7 +718,7 @@ class TestTheMachineProcessesRoute:
             patch(PATCH_PROCESSES_DOOR, autospec=True) as door,
         ):
             _, raw = host_tokens.issue_token("phone", "read")
-            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            client = TestClient(host_app, raise_server_exceptions=False)
             yield client, {"Authorization": f"Bearer {raw}"}, door, log
 
     def test_the_route_requires_a_token(self, processes: Any) -> None:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-07-20
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -25,7 +25,15 @@ from aipass.aipass.apps.handlers.new_project import (
     _write_registry,
 )
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
-from aipass.aipass.apps.handlers.init.bootstrap import _link_venv, _managed_manifest_entries
+from aipass.aipass.apps.handlers.init.bootstrap import (
+    LINK_STATE_MISSING,
+    PREP_SKILL_REL,
+    SKILLS_LINK_REL,
+    _link_venv,
+    _managed_manifest_entries,
+    link_skills,
+    shared_skills_state,
+)
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.project_home import (
     claude_local_settings,
@@ -98,6 +106,7 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
 
     aipass_home = _detect_aipass_home()
     files: list[str] = []
+    notes: list[str] = []
 
     # First: the target may be a public repo, so nothing AIPass-managed lands before it is ignored.
     gitignore_action = _gitignore_safety(target, dry_run=dry_run)
@@ -148,7 +157,11 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
                 planned=files,
             )
 
-        _write_if_missing(claude_dir / "commands" / "prep.md", sc.prep_md(), dry_run=dry_run, planned=files)
+        _write_if_missing(target / PREP_SKILL_REL, sc.prep_skill_md(), dry_run=dry_run, planned=files)
+        if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
+            note = None if dry_run else link_skills(target)
+            notes.extend([note] if note else [])
+            files.append(str(target / SKILLS_LINK_REL))
 
         if aipass_home:
             venv = Path(aipass_home) / ".venv"
@@ -198,4 +211,5 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
         "agent_created": agent_created,
         "agent_home": str(agent_home) if will_have_agent else None,
         "spawn_result": spawn_result,
+        "notes": notes,
     }

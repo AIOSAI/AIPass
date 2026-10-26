@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: pre_compact_prep.py
-# Version: 1.1.3
+# Version: 1.3.0
 # Description: Stamps a mechanical AUTO-COMPACT SNAPSHOT into the compacting branch's memory (PreCompact)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-20
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Mechanical /prep AT compact time (DPLAN-0253).
@@ -22,6 +22,7 @@ this handler must never corrupt memory or raise out of PreCompact."""
 
 import importlib
 import json
+import os
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -41,11 +42,12 @@ def _find_repo_root(start: Path) -> Path | None:
 
 def _context_fill_pct(hook_data: dict, cwd: str) -> str | None:
     context_window = importlib.import_module("aipass.hooks.apps.modules.context_window")
-    usage = context_window.read_latest_usage(hook_data.get("transcript_path", ""))
+    transcript_path = hook_data.get("transcript_path", "")
+    usage = context_window.read_latest_usage(transcript_path)
     if usage is None:
         return None
     fill = context_window.context_fill_tokens(usage)
-    window = context_window.resolve_compact_window(cwd)
+    window = context_window.resolve_compact_window(cwd, transcript_path=transcript_path)
     if window <= 0:
         return None
     pct = round(fill / window * 100)
@@ -189,7 +191,26 @@ def _stamp_session_entry(branch_dir: Path, summary: str, cap: int) -> bool:
     if not local_path.is_file():
         logger.info("[HOOKS] pre_compact_prep: no local.json at %s — skipping stamp", local_path)
         return False
+    try:
+        import fcntl
+    except ImportError:  # shortcut: Windows has no fcntl and stamps unlocked; use msvcrt.locking if that races
+        logger.info("[HOOKS] pre_compact_prep: no fcntl here, stamping %s unlocked", local_path)
+        return _stamp_locked(local_path, summary, cap)
+    # The lock is on .trinity/ itself: a sidecar file there is a stray to @memory's push.
+    try:
+        folder = os.open(local_path.parent, os.O_RDONLY)
+    except OSError as exc:
+        logger.warning("[HOOKS] pre_compact_prep: .trinity lock unavailable, skipping stamp: %s", exc)
+        return False
+    try:
+        fcntl.flock(folder, fcntl.LOCK_EX)
+        return _stamp_locked(local_path, summary, cap)
+    finally:
+        os.close(folder)
 
+
+def _stamp_locked(local_path: Path, summary: str, cap: int) -> bool:
+    """Read, insert and write local.json; the caller holds the .trinity folder lock across all three."""
     try:
         data = json.loads(local_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

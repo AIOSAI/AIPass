@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_boot.py
-# Version: 4.6.0
+# Version: 4.6.1
 # Description: Boot wrapper — attach-first menu, resumes by pointer (0448), steps aside while dispatched (0449)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-06-30
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Boot wrapper for Claude Code sessions.
@@ -93,11 +93,11 @@ def _tmux_kill_session(name: str) -> bool:
     since shutil.which would read the real PATH in tests that mock only subprocess.run.
     """
     try:
-        subprocess.run(["tmux", "kill-session", "-t", name], check=False)
+        result = subprocess.run(["tmux", "kill-session", "-t", name], check=False, timeout=10)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.info("[SESSION_BOOT] tmux kill-session unavailable: %s", exc)
         return False
-    return True
+    return result.returncode == 0
 
 
 def _find_tmux_session_for_pid(pid: int) -> str | None:
@@ -266,10 +266,12 @@ def _resume_session(
         _execvp("tmux", ["tmux", "attach-session", "-t", tmux_session])
         return {"exit_code": 0, "action": "attached", "tmux_session": tmux_session}
 
-    logger.info("[SESSION_BOOT] Continuing dead-window session via --continue")
     sid = session.get("sessionId", "")
+    # --continue opens the newest chat in the cwd, which need not be the one picked.
+    resume = ["--resume", sid] if sid else ["--continue"]
+    logger.info("[SESSION_BOOT] Resuming dead-window session via %s", " ".join(resume))
     nf = _name_flag(branch, sid, extra_args)
-    return _exec_in_tmux(branch, "", [claude_bin] + defaults + ["--continue"] + ea + nf)
+    return _exec_in_tmux(branch, "", [claude_bin] + defaults + resume + ea + nf)
 
 
 def _make_session_name(branch: str, session_id: str = "") -> str:
@@ -930,7 +932,7 @@ def _reclaim_dispatched(
     import importlib
 
     cc_sessions = importlib.import_module("aipass.hooks.apps.modules.cc_sessions")
-    for action in cc_sessions.reclaim(branch):
+    for action in cc_sessions.reclaim(branch_cwd):
         sys.stderr.write(f"  {action}\n")
 
     lock_file = Path(branch_cwd) / ".ai_mail.local" / ".dispatch.lock"

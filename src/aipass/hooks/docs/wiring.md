@@ -61,6 +61,23 @@ Wire a new per-handler entry with the name as it appears in `hooks.json`.
 
 ---
 
+## Codex
+
+Codex speaks Claude Code's hook protocol (same event names, `tool_input`, `additionalContext`, `permissionDecision`) and reads a `hooks.json` of the same `matcher` + `command` shape, so `codex.py` is Claude's bridge plus four differences:
+
+| Codex | What `codex.py` does |
+|---|---|
+| Shell tool is `Bash`, `tool_input.command` | Nothing: the gates read it as they read Claude's |
+| File tool is `apply_patch`, one patch text over many files | Each file becomes the Claude call the gates judge: Add File → `Write`, Update File → `MultiEdit` (one edit per `@@` hunk), Delete File → a shell `rm`, Move to → a shell `mv`. The engine runs once per call; the first refusal denies the whole patch. A patch naming no file is denied unjudged. |
+| Blocks by `permissionDecision`, never by exit code | Any exit 2 on PreToolUse becomes a deny envelope, JSON or not. A block on another event passes through as `{"decision": "block"}` |
+| No `CLAUDE_CODE_SESSION_ID` in a hook's environment | The payload's `session_id` is set as that variable, so cadence and the ledgers count this seat's turns, never the launcher's |
+
+`codex.py` also names itself in every payload (`"provider": "codex"`; a payload without the key is Claude's). `SessionStart:session_pointer` (`lifecycle/session_start.handle_session_pointer`) writes that provider and the session id into the branch's `.ai_mail.local/session.json` through ai_mail's `door_session_pointer`, so a resume reopens the CLI that last ran. It writes only for a session a person runs: a Codex session whose rollout (`transcript_path`) opens with a `session_meta` `source` other than `exec`, or a Claude session whose nearest `claude` ancestor process has no `-p`/`--print` (`cc_sessions.cli_ancestor`). It skips a headless run, an unreadable rollout, a compact, a cwd without `.trinity/passport.json`, and a missing session id.
+
+Codex has no Notification event and no `manual`/`auto` PreCompact matcher, so a Codex PreCompact row is one per handler. Codex reads the repo-root `AGENTS.md` natively but not `.claude/AGENTS.md`; `SessionStart:culture` (`lifecycle/session_start.handle_culture`) injects that file from `$AIPASS_HOME`. `drone @hooks verify` reads the project's `.codex/hooks.json` too: a per-handler row wired only through `codex.py` reports `wired for Codex only`, never `handler never fires`. A Codex hook runs only once trusted: `~/.codex/config.toml` `[hooks.state]` keeps one entry per hook, keyed by file, event and position, with its hash; `codex exec --dangerously-bypass-hook-trust` skips that for automation.
+
+---
+
 ## Related
 
 - [engine.md](engine.md) — what the engine does with the event once the bridge hands it over

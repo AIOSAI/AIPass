@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.0.3
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-10-23
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -18,7 +18,8 @@ from contextlib import ExitStack
 import pytest
 from unittest.mock import MagicMock, patch
 
-from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
+from aipass.ai_mail.apps.handlers.dispatch.wake import BUSY_STEP, DispatchStatus
+from aipass.cli.apps.modules import display
 from aipass.ai_mail.apps.modules.dispatch import (
     handle_command,
     print_help,
@@ -276,6 +277,7 @@ class TestOrchestrateWake:
         """Successful wake prints status and returns True."""
         mock_status = MagicMock()
         mock_status.format.return_value = "WAKE OK: @branch woke up"
+        mock_status.busy_detail.return_value = ""
 
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
@@ -303,6 +305,7 @@ class TestOrchestrateWake:
         """
         mock_status = MagicMock()
         mock_status.format.return_value = "WAKE FAILED: spawn error"
+        mock_status.busy_detail.return_value = ""
 
         errors: list[str] = []
         monkeypatch.setattr(f"{MOD}.error", lambda msg: errors.append(msg))
@@ -328,6 +331,7 @@ class TestOrchestrateWake:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Capture wake_branch call arguments."""
@@ -356,6 +360,7 @@ class TestOrchestrateWake:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track model argument passed to wake_branch."""
@@ -379,11 +384,42 @@ class TestOrchestrateWake:
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "opus"
 
+    def test_provider_flag_reaches_wake_branch(self, monkeypatch):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with patch(f"{_H_WAKE}.wake_branch", wake):
+            _wake(["@canary", "--provider", "codex"])
+
+        assert wake.call_args.kwargs["provider"] == "codex"
+
+    def test_a_busy_target_fails_the_wake_verb_with_a_re_wake_line(self, monkeypatch, capsys):
+        busy = DispatchStatus()
+        busy.warn(BUSY_STEP, "@seedgo busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with patch(f"{_H_WAKE}.wake_branch", MagicMock(return_value=(busy, True))):
+            _wake(["@seedgo"])
+
+        assert "NOT woken" in capsys.readouterr().err
+        assert display.command_failed() is True
+
+    def test_an_unknown_provider_refuses_the_wake(self, monkeypatch, capsys):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with patch(f"{_H_WAKE}.wake_branch", wake):
+            _wake(["@canary", "--provider", "gemini"])
+
+        wake.assert_not_called()
+        assert "unknown provider 'gemini'" in capsys.readouterr().err
+
     def _run_sender_flag(self, monkeypatch) -> list[dict]:
         """Run `wake @branch --sender @custom` and return the wake_branch calls."""
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track sender argument passed to wake_branch."""
@@ -432,6 +468,7 @@ class TestOrchestrateWake:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track custom message argument passed to wake_branch."""
@@ -469,6 +506,7 @@ def _send_patches(overrides: dict | None = None) -> ExitStack:
     """
     mock_status = MagicMock()
     mock_status.format.return_value = "WAKE OK"
+    mock_status.busy_detail.return_value = ""
 
     defaults = {
         f"{_H_SEND}.resolve_sender_info": MagicMock(return_value={"email_address": "@ai_mail"}),
@@ -565,6 +603,7 @@ class TestOrchestrateDispatchSend:
 
         mock_status = MagicMock()
         mock_status.format.return_value = "WAKE FAILED"
+        mock_status.busy_detail.return_value = ""
         patches = _send_patches(
             {
                 "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch": MagicMock(return_value=(mock_status, False)),
@@ -581,6 +620,7 @@ class TestOrchestrateDispatchSend:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track fresh flag passed to wake_branch."""
@@ -629,6 +669,7 @@ class TestOrchestrateDispatchSend:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track model argument passed to wake_branch in dispatch send."""
@@ -648,6 +689,47 @@ class TestOrchestrateDispatchSend:
 
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "sonnet"
+
+    def test_provider_flag_reaches_wake_branch_beside_the_model(self, monkeypatch):
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with _send_patches({f"{_H_WAKE}.wake_branch": wake}):
+            _send(["@canary", "Subject", "Body", "--provider", "codex", "--model", "gpt-6.1-sol"])
+
+        assert wake.call_args.kwargs["provider"] == "codex"
+        assert wake.call_args.kwargs["model"] == "gpt-6.1-sol"
+
+    def test_an_unknown_provider_is_refused_before_any_mail_is_sent(self, monkeypatch, capsys):
+        send = MagicMock(return_value=(True, None))
+        wake = MagicMock(return_value=(DispatchStatus(), True))
+        monkeypatch.setattr(f"{MOD}.console", _mock_console([]))
+
+        with _send_patches({f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": wake}):
+            _send(["@canary", "Subject", "Body", "--provider", "gemini"])
+
+        send.assert_not_called()
+        wake.assert_not_called()
+        err = capsys.readouterr().err
+        assert "not sent" in err and "unknown provider 'gemini'" in err
+
+    def test_a_busy_target_sends_the_mail_then_fails_the_command_and_says_re_wake(self, monkeypatch, capsys):
+        busy = DispatchStatus()
+        busy.warn(BUSY_STEP, "@seedgo busy (PID 166599, since 2026-10-25T15:16:22) — NOT woken; the mail waits")
+        send = MagicMock(return_value=(True, None))
+        printed: list[str] = []
+        monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
+
+        with _send_patches(
+            {f"{_ES}.send_to_single": send, f"{_H_WAKE}.wake_branch": MagicMock(return_value=(busy, True))}
+        ):
+            _send(["@seedgo", "Subject", "Body"])
+
+        send.assert_called_once()
+        err = capsys.readouterr().err
+        assert "NOT woken" in err and "drone @ai_mail dispatch wake @seedgo" in err
+        assert display.command_failed() is True
+        assert not any("Wake-back enabled" in line for line in printed)
 
     def test_no_memory_save_flag(self, monkeypatch):
         """--no-memory-save flag is passed to prepend_dispatch_header."""
@@ -760,6 +842,7 @@ class TestWakeBackMessaging:
 
         mock_status = MagicMock()
         mock_status.format.return_value = "WAKE FAILED"
+        mock_status.busy_detail.return_value = ""
         patches = _send_patches(
             {
                 f"{_H_WAKE}.wake_branch": MagicMock(return_value=(mock_status, False)),
@@ -883,6 +966,7 @@ class TestSpoofedSenderRefusal:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track the sender that reached wake_branch."""
@@ -905,6 +989,7 @@ class TestSpoofedSenderRefusal:
         wake_calls: list[dict] = []
         mock_status = MagicMock()
         mock_status.format.return_value = "OK"
+        mock_status.busy_detail.return_value = ""
 
         def mock_wake(branch, msg=None, fresh=False, sender="@devpulse", model=None, **kwargs):
             """Track the sender that reached wake_branch."""
@@ -934,7 +1019,7 @@ class TestSpoofedSenderRefusal:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        wake = MagicMock(return_value=(MagicMock(), True))
+        wake = MagicMock(return_value=(DispatchStatus(), True))
         send = MagicMock(return_value=(True, None))
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_ES}.send_to_single": send})
         with patches:

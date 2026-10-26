@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: command_job.py
 # Description: Command jobs - a scheduled drone command run as a subprocess, no wake
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-11
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Command jobs (DPLAN-0338): a schedule job that runs a drone command instead of waking an agent.
@@ -55,11 +55,13 @@ class CommandResult:
     timed_out: bool = False
     error: str = ""
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    ok_exit_codes: tuple = ()
 
     @property
     def ok(self) -> bool:
-        """Exit 0, inside the timeout, started at all. Anything else is a failure."""
-        return self.exit_code == 0 and not self.timed_out and not self.error
+        """Exit 0 or one the job lists, inside the timeout, started at all. Anything else is a failure."""
+        passed = self.exit_code == 0 or self.exit_code in self.ok_exit_codes
+        return passed and not self.timed_out and not self.error
 
 
 def command_argv(command) -> List[str]:
@@ -83,6 +85,11 @@ def timeout_for(job: dict):
     return job.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
 
 
+def ok_exit_codes_for(job: dict) -> tuple:
+    """The non-zero exit codes the job's owner counts as a pass, from ``ok_exit_codes``."""
+    return tuple(job.get("ok_exit_codes", ()))
+
+
 def notify_email(job: dict) -> str:
     """The citizen address ``notify.email`` names, or '' when the job asks for no mail."""
     notify = job.get("notify")
@@ -104,6 +111,12 @@ def command_job_problem(job: dict) -> str:
     timeout = timeout_for(job)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
         return f"timeout_seconds must be a positive whole number of seconds, got {timeout!r}"
+
+    codes = job.get("ok_exit_codes", [])
+    if not isinstance(codes, list) or not all(
+        isinstance(code, int) and not isinstance(code, bool) and 1 <= code <= 255 for code in codes
+    ):
+        return f"ok_exit_codes must be a list of exit codes from 1 to 255, got {codes!r}"
 
     notify = job.get("notify")
     if notify is not None and not isinstance(notify, (bool, dict)):
@@ -205,7 +218,7 @@ def _execute(argv: List[str], cwd, timeout_seconds) -> CommandResult:
     return CommandResult(exit_code, elapsed, output_tail(text), timed_out=timed_out, timeout_seconds=timeout_seconds)
 
 
-def run_command(command: str, cwd, timeout_seconds=DEFAULT_TIMEOUT_SECONDS) -> CommandResult:
+def run_command(command: str, cwd, timeout_seconds=DEFAULT_TIMEOUT_SECONDS, ok_exit_codes=()) -> CommandResult:
     """Run a command job's drone command in ``cwd`` and say how it ended. Never raises.
 
     ``cwd`` is required: falling back to the tick's own cwd would sign the work as the project.
@@ -220,6 +233,7 @@ def run_command(command: str, cwd, timeout_seconds=DEFAULT_TIMEOUT_SECONDS) -> C
         )
 
     result = _execute(list(LAUNCHER) + argv[1:], cwd, timeout_seconds)
+    result.ok_exit_codes = tuple(ok_exit_codes)
     json_handler.log_operation("command_job_run", {"exit_code": result.exit_code, "timed_out": result.timed_out})
     return result
 

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_pre_compact_prep.py
-# Version: 1.0.4
+# Version: 1.2.0
 # Description: Tests for pre_compact_prep lifecycle handler
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/lifecycle/pre_compact_prep.py."""
@@ -17,6 +17,7 @@
 import contextlib
 import json
 import sys
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ from aipass.hooks.apps.handlers.lifecycle import pre_compact_prep
 from aipass.hooks.apps.handlers.lifecycle.pre_compact_prep import (
     handle,
 )
+from aipass.hooks.apps.handlers.json import files as json_files
+from aipass.hooks.apps.modules import context_window
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.pre_compact_prep"
 
@@ -62,6 +65,44 @@ class TestHandle:
         assert newest["number"] == 4
         assert newest["status"] == "auto-compact"
         assert "AUTO-COMPACT SNAPSHOT" in newest["summary"]
+
+    def test_a_codex_rollout_stamps_its_fill_over_its_window(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(context_window, "codex_config_path", lambda: tmp_path / "codex_config.toml")
+        branch_dir = _make_branch(tmp_path)
+        rollout = tmp_path / "rollout.jsonl"
+        meta = {"type": "session_meta", "payload": {"id": "s", "source": "cli"}}
+        info = {"last_token_usage": {"input_tokens": 21_545, "output_tokens": 568, "total_tokens": 22_113}}
+        info["model_context_window"] = 475_000
+        count = {"type": "event_msg", "payload": {"type": "token_count", "info": info}}
+        rollout.write_text(json.dumps(meta) + "\n" + json.dumps(count) + "\n", encoding="utf-8")
+
+        with patch(f"{MODULE}._find_repo_root", return_value=None):
+            result = handle({"cwd": str(branch_dir), "transcript_path": str(rollout), "provider": "codex"})
+
+        assert "context ~22k/475k (5%)" in result["stdout"]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="the stamp lock is fcntl's; Windows stamps unlocked")
+    def test_two_concurrent_stamps_keep_both_snapshots(self, tmp_path, monkeypatch):
+        branch_dir = _make_branch(tmp_path)
+        real_write = json_files.write_json_file
+
+        both_read = threading.Barrier(2)
+
+        def slow_write(path, data):
+            # Unlocked, both stamps reach their write having read zero sessions; locked, the wait runs out alone.
+            with contextlib.suppress(threading.BrokenBarrierError):
+                both_read.wait(timeout=1)
+            real_write(path, data)
+
+        monkeypatch.setattr(json_files, "write_json_file", slow_write)
+        with patch(f"{MODULE}._find_repo_root", return_value=None):
+            threads = [threading.Thread(target=handle, args=({"cwd": str(branch_dir)},)) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        sessions = json.loads((branch_dir / ".trinity" / "local.json").read_text(encoding="utf-8"))["sessions"]
+        assert sorted(entry["number"] for entry in sessions) == [1, 2]
 
     def test_prepends_number_as_max_plus_one(self, tmp_path):
 

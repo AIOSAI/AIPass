@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_ops.py
 # Description: Process lock file operations handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-04-22
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -181,12 +181,17 @@ def acquire_lock(lock_file: Path) -> bool:
     if not is_lock_stale(lock_file):
         return False
 
-    # Gone already (released between the read and here) is fine; refused is raised.
-    lock_file.unlink(missing_ok=True)
-
-    if not try_create_lock(lock_file):
-        logger.info("Another process grabbed lock during retry: %s", lock_file)
-        return False
+    # Two callers can read the same dead pid; unguarded, the slower one unlinks the faster's live lock.
+    # A takeover lasts milliseconds, so a guard held past the timeout raises TimeoutError, an OSError.
+    with os_file_lock(lock_file.with_name(lock_file.name + ".takeover"), timeout=5.0):
+        if not is_lock_stale(lock_file):
+            logger.info("Lock taken over by another process before this one: %s", lock_file)
+            return False
+        # Gone already (released between the read and here) is fine; refused is raised.
+        lock_file.unlink(missing_ok=True)
+        if not try_create_lock(lock_file):
+            logger.info("Another process grabbed lock during retry: %s", lock_file)
+            return False
 
     json_handler.log_operation("lock_acquired", {"lock_file": str(lock_file), "stale_recovery": True})
     return True

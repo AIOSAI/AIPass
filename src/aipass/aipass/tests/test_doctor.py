@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor: the command, the run and the provider checks
-# Version: 1.6.1
+# Version: 1.7.0
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/doctor.py and apps/modules/_doctor_wire.py: the run and the provider checks."""
@@ -876,6 +876,63 @@ class TestHooksJsonCheck:
         assert len(hooks_results) == 1
         assert hooks_results[0].glyph == GLYPH_WARN
         assert "init update" in hooks_results[0].remediation
+
+
+class TestCodexHooksRow:
+    """The codex hooks row: .codex/hooks.json measured against cli.codex, and --fix writing it."""
+
+    _BRIDGE = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/codex.py"
+
+    def _world(self, tmp_path, rows: list, settings: dict | None = None):
+        manifest = tmp_path / "repo" / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        claude = {"hooks": [], "settings": settings or {}}
+        manifest.write_text(json.dumps({"cli": {"claude": claude, "codex": {"hooks": rows}}}), encoding="utf-8")
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        return manifest, home
+
+    def _rows(self, manifest, home) -> list:
+        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest), _home_at(home):
+            return [r for r in check_provider_manifest() if r.label == "codex hooks"]
+
+    def test_a_missing_codex_file_warns_and_fix_yes_writes_it_until_the_row_passes(self, tmp_path) -> None:
+        rows = [{"command": f"{self._BRIDGE} Stop", "event": "Stop"}]
+        manifest, home = self._world(tmp_path, rows)
+        codex = tmp_path / "repo" / ".codex" / "hooks.json"
+
+        (before,) = self._rows(manifest, home)
+        with _home_at(home):
+            fixed = _doctor_wire.fix_provider_settings(manifest, yes=True)
+        (after,) = self._rows(manifest, home)
+
+        assert before.glyph == GLYPH_WARN
+        assert before.detail == f"{codex} missing, wanted by cli.codex (1 hooks)"
+        assert before.remediation == "Run: aipass doctor --fix"
+        assert fixed == []
+        written = json.loads(codex.read_text(encoding="utf-8"))
+        assert written == {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": f"{self._BRIDGE} Stop"}]}]}}
+        assert after.glyph == GLYPH_PASS
+        assert after.detail == "1 Codex hooks match cli.codex"
+
+    def test_a_manifest_without_codex_rows_shows_no_codex_row(self, tmp_path) -> None:
+        manifest, home = self._world(tmp_path, [])
+
+        assert self._rows(manifest, home) == []
+
+    def test_the_fix_json_plan_diffs_each_file_once_and_writes_nothing_without_yes(self, tmp_path) -> None:
+        rows = [{"command": f"{self._BRIDGE} Stop", "event": "Stop"}]
+        manifest, home = self._world(tmp_path, rows, {"includeGitInstructions": False})
+        codex = tmp_path / "repo" / ".codex" / "hooks.json"
+
+        with _home_at(home):
+            report = _doctor_wire.settings_fix_report(manifest)
+
+        heads = [line for line in report["diff"] if line.startswith("--- ")]
+        assert heads == [f"--- {(home / '.claude' / 'settings.json').resolve()} (now)", f"--- {codex.resolve()} (now)"]
+        assert f"Write 1 Codex hook(s) from cli.codex into {codex.resolve()}" in report["planned"]
+        assert report["applied"] is False
+        assert not codex.exists()
 
 
 # =============================================================================

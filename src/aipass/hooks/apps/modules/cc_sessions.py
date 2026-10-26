@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.4.1
+# Version: 3.6.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-30
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Read Claude Code native session files (~/.claude/sessions/<pid>.json).
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config.loader import aipass_home
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -29,7 +30,8 @@ CONSOLE = err_console
 def _claude_home() -> Path:
     """Home directory for Claude's state, or an unusable sentinel if unknown.
 
-    Path.home() raises when home is unresolvable (Windows without %USERPROFILE%); at module scope that is an import crash.
+    Path.home() raises when home is unresolvable (Windows without %USERPROFILE%);
+    at module scope that is an import crash.
     """
     try:
         return Path.home()
@@ -76,6 +78,52 @@ def _has_session_file(pid: int) -> bool:
     return (CC_SESSIONS_DIR / f"{pid}.json").is_file()
 
 
+def process_args(pid: int) -> list[str] | None:
+    """The argv of a process ([] for a kernel thread), or None when it cannot be read."""
+    import subprocess as _sp
+
+    if _PLATFORM.startswith("linux"):
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError as exc:
+            logger.info("[%s] cmdline read failed for PID %d: %s", __name__, pid, exc)
+            return None
+        return [arg for arg in raw.decode("utf-8", errors="replace").split("\0") if arg]
+    # shortcut: ps joins argv with spaces, so an arg holding one splits; fine for argv0 and flags, upgrade if more is read.
+    try:
+        result = _sp.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+    except (OSError, _sp.TimeoutExpired) as exc:
+        logger.info("[%s] args lookup failed for PID %d: %s", __name__, pid, exc)
+        return None
+    return result.stdout.split() if result.returncode == 0 else None
+
+
+def _argv0_name(pid: int) -> str:
+    args = process_args(pid)
+    return Path(args[0]).name if args else ""
+
+
+def _ancestors() -> list[int]:
+    """This process and up to 11 parents, nearest first; the walk stops at init or a failed lookup."""
+    pid = os.getpid()
+    chain = [pid]
+    while len(chain) < 12:
+        ppid = _get_ppid_portable(pid)
+        if not ppid or ppid == pid or ppid <= 1:
+            break
+        chain.append(ppid)
+        pid = ppid
+    return chain
+
+
+def cli_ancestor(name: str) -> list[str] | None:
+    """The argv of the nearest ancestor whose program is named `name` (e.g. "claude"), or None when none is."""
+    for pid in _ancestors():
+        if _argv0_name(pid) == name:
+            return process_args(pid)
+    return None
+
+
 def resolve_session_pid() -> int | None:
     """Walk the parent process chain to find the persistent claude session PID.
 
@@ -92,6 +140,9 @@ def resolve_session_pid() -> int | None:
         if not ppid or ppid == pid or ppid <= 1:
             break
         pid = ppid
+    if any(_argv0_name(int(p)) == "codex" for p in ancestors):
+        logger.debug("[%s] Codex session, no Claude session file (chain: %s)", __name__, " -> ".join(ancestors))
+        return None
     logger.info("[%s] No session-file ancestor found (chain: %s)", __name__, " -> ".join(ancestors))
     return None
 
@@ -325,14 +376,30 @@ def _stop_session(session: dict) -> str:
     return f"PID {pid} ({branch}): already dead"
 
 
-def reclaim(branch_filter: str | None = None) -> list[str]:
-    """Properly stop sessions, optionally filtered to a branch. Returns action log."""
+def registered_branch_dir(name: str) -> str | None:
+    """The directory AIPASS_REGISTRY.json registers for branch *name*, or None when it names none."""
+    home = aipass_home()
+    registry = home / "AIPASS_REGISTRY.json" if home is not None else None
+    if registry is None or not registry.is_file():
+        return None
+    branches = json.loads(registry.read_text(encoding="utf-8")).get("branches", [])
+    for entry in branches:
+        if isinstance(entry, dict) and str(entry.get("name", "")).lower() == name.lower() and entry.get("path"):
+            return str(home / entry["path"])
+    return None
+
+
+def reclaim(branch_dir: str | None = None) -> list[str]:
+    """Properly stop sessions, optionally only those whose cwd is *branch_dir*. Returns action log.
+
+    The whole directory, never its last name: two projects can each hold a branch called hooks."""
+    target = str(Path(branch_dir).resolve()) if branch_dir else None
     actions = []
     for session in read_all_sessions():
         pid = session.get("pid")
         if not pid or not _is_pid_alive(pid) or not _session_pid_matches(session):
             continue
-        if branch_filter and _session_branch(session) != branch_filter:
+        if target and str(Path(session.get("cwd") or "?").resolve()) != target:
             continue
         action = _stop_session(session)
         actions.append(action)
@@ -394,7 +461,11 @@ def handle_command(command: str, args: list) -> bool:
             if len(args) > 1:
                 branch_filter = args[1].lstrip("@")
             CONSOLE.print(f"[bold cyan]sessions reclaim[/bold cyan]{f' @{branch_filter}' if branch_filter else ''}")
-            actions = reclaim(branch_filter)
+            branch_dir = registered_branch_dir(branch_filter) if branch_filter else None
+            if branch_filter and branch_dir is None:
+                CONSOLE.print(f"  @{branch_filter} is not a registered branch: nothing reclaimed")
+                return True
+            actions = reclaim(branch_dir)
             if not actions:
                 CONSOLE.print("  No live sessions to reclaim")
             else:

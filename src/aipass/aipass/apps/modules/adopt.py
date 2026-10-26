@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-20
-# Modified: 2026-07-20
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.cli.apps.modules import console, error, success
+from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
@@ -106,6 +106,8 @@ def handle_command(command: str, args: list[str]) -> bool:
     console.print()
     verb = "Would adopt" if dry_run else "Adopted"
     success(f"{verb} '{result['name']}' at {result['target']}")
+    for note in result.get("notes", []):
+        warning(note)
     console.print()
     console.print(f"  [dim]Registry:[/dim]   {result['registry_file']}")
     console.print(f"  [dim]Gitignore:[/dim]  {result['gitignore_action']}")

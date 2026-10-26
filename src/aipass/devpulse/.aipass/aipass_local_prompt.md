@@ -78,6 +78,7 @@ Default is continue (`-c`). Reason before dispatching:
 
  - Steer a working agent with `email` (no wake), never re-dispatch.
  - Email lands only at hook boundaries — not an interrupt. Briefs for builds over ~10 min carry: re-check inbox before reporting done.
+ - A dispatch brief is a plan in the recipient's branch: `drone @flow create <branch path> "Subject" fplan`, the brief as its body, the mail names the plan id. Tracked, on the dashboard, the agent logs into it. docs.local never holds a brief; briefs as files are for sub-agents only (the owner, 2026-10-25).
  - A contract between two sides lives in the plan driving the build, as a section — never a side file in docs.local. Amend it there and mail both sides what changed. When the build lands, the owning doc states the shape in its own words.
  - A tracked doc never points at a plan, a .trinity entry, docs.local/ or dropbox/ — a reader of the repo cannot open them. Docs are the result; the plan is the reference (the owner, 2026-10-17).
  - Agents split by a project fence: extract the spec from the deciding side early, relay it as a file, never retyped.

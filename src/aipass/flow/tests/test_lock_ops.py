@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_lock_ops.py
 # Description: Tests for lock_ops handler — atomic lock file management
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""
@@ -269,6 +269,25 @@ class TestAcquireLock:
         assert result is True
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
 
+    def test_a_stale_read_overtaken_by_a_live_takeover_leaves_the_new_holder_alone(self, tmp_path):
+        """Two runners saw the same dead pid; the first took over before the second unlinked."""
+        lock = tmp_path / ".test.lock"
+        lock.write_text("999999999", encoding="utf-8")
+        real_is_lock_stale = lock_ops.is_lock_stale
+        reads: list[bool] = []
+
+        def stale_then_overtaken(path):
+            if not reads:
+                reads.append(True)
+                path.write_text(str(os.getppid()), encoding="utf-8")
+                return True
+            return real_is_lock_stale(path)
+
+        with patch(f"{_MOD}.is_lock_stale", side_effect=stale_then_overtaken):
+            result = lock_ops.acquire_lock(lock)
+        assert result is False
+        assert lock.read_text(encoding="utf-8") == str(os.getppid())
+
     def test_raises_when_stale_lock_unlink_fails(self, tmp_path):
         """A stale lock that cannot be removed raises; it is not reported as held.
 
@@ -307,7 +326,7 @@ class TestAcquireLock:
         lock.write_text("999999999", encoding="utf-8")
 
         def stale_then_released(path: Path) -> bool:
-            path.unlink()
+            path.unlink(missing_ok=True)
             return True
 
         with patch(f"{_MOD}.is_lock_stale", side_effect=stale_then_released) as stale_check:
@@ -316,7 +335,7 @@ class TestAcquireLock:
             except OSError as exc:
                 pytest.fail(f"acquire_lock raised {exc!r} for a lock released before its unlink")
 
-        stale_check.assert_called_once_with(lock)
+        assert [c.args for c in stale_check.call_args_list] == [(lock,), (lock,)]
         assert acquired is True
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
 

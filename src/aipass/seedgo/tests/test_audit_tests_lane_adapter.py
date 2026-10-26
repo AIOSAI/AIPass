@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane_adapter.py
 # Description: audit-tests pytest adapter, its nominators and the M10 env copy (split from test_audit_tests_lane.py)
-# Version: 1.2.2
+# Version: 1.3.1
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/tests_pytest_standards/adapter.py, envcopy.py and apps/handlers/audit_tests/m10.py."""
@@ -273,6 +273,40 @@ class TestCampaignBudget:
 
         assert spec.campaign_budget_seconds == 3600
         assert spec.to_document()["campaign_budget_seconds"] == 3600
+
+    def test_named_campaign_functions_narrow_the_pseudo_tested_campaign_to_them(self, monkeypatch, tmp_path):
+        """A budget fragment's continuation probes only what the last slice left (the ratchet's next slice)."""
+        sites = [mutation_shapes.FunctionSite("apps/a.py", name, 1, 2, False, 1) for name in ("done", "left")]
+        seen = {}
+
+        def _record(target, given, **kwargs):
+            seen["sites"] = [site.qualname for site in given]
+            raise RuntimeError("recorded")
+
+        monkeypatch.setattr(gutting, "discover_functions", lambda *args, **kwargs: sites)
+        monkeypatch.setattr(gutting, "run_campaign", _record)
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [gutting.GROUP]
+        spec.campaign_functions = ["apps/a.py::left"]
+
+        adapter.nominate(spec)
+        narrowed = seen["sites"]
+        spec.campaign_functions = None
+        adapter.nominate(spec)
+
+        assert narrowed == ["left"]
+        assert seen["sites"] == ["done", "left"]
+
+    def test_build_env_carries_the_campaign_functions_onto_the_spec_it_publishes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(envcopy, "rsync", lambda source, destination: shutil.copytree(source, destination) and None)
+        target = tmp_path / "proj"
+        (target / "tests").mkdir(parents=True)
+        (target / "tests" / "test_a.py").write_text("def test_a(): pass\n", encoding="utf-8")
+
+        spec = adapter.build_env(target, tmp_path / "env", {"campaign_functions": ["apps/a.py::left"]})
+
+        assert spec.campaign_functions == ["apps/a.py::left"]
+        assert spec.to_document()["campaign_functions"] == ["apps/a.py::left"]
 
 
 class TestEnvLayout:
@@ -561,8 +595,24 @@ class TestSnapshotDiff:
         fingerprint = m10.snapshot_tree(tmp_path, 8)[str(probe)]
         assert fingerprint[4] == ""
 
-    def test_a_file_that_vanished_is_absent_rather_than_an_error(self, tmp_path):
-        assert m10._fingerprint(str(tmp_path / "gone.txt"), m10.HASH_SIZE_LIMIT) is None
+    @pytest.mark.skipif(
+        sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
+        reason="mode bits do not stop Windows or root from statting a listed file",
+    )
+    def test_a_listed_file_that_cannot_be_statted_is_absent_rather_than_an_error(self, tmp_path):
+        """The vanish race, on disk: a read-only directory lists its names and refuses every stat under it."""
+        tree = tmp_path / "tree"
+        locked = tree / "locked"
+        locked.mkdir(parents=True)
+        (tree / "kept.txt").write_text("x", encoding="utf-8")
+        (locked / "gone.txt").write_text("x", encoding="utf-8")
+        locked.chmod(0o400)
+        try:
+            snapshot = m10.snapshot_tree(tree)
+        finally:
+            locked.chmod(0o700)
+
+        assert set(snapshot) == {str(tree / "kept.txt")}
 
     def test_an_untouched_tree_diffs_to_nothing(self, tmp_path):
         (tmp_path / "a.txt").write_text("x", encoding="utf-8")

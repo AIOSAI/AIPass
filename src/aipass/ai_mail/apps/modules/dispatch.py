@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.4.0
+# Version: 3.6.0
 # Created: 2026-02-02
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -44,6 +44,7 @@ DISPATCH (send + wake):
   drone @ai_mail dispatch @branch "Subject" "Body"                    # Send + wake
   drone @ai_mail dispatch @branch "Subject" "Body" --fresh            # Send + fresh wake
   drone @ai_mail dispatch @branch "Subject" "Body" --model opus       # Send + wake with Opus
+  drone @ai_mail dispatch @branch "Subject" "Body" --provider codex --model gpt-6.1-sol  # Wake on Codex
   drone @ai_mail dispatch @branch "Subject" "Body" --no-memory-save
 
 WAKE ONLY:
@@ -60,6 +61,11 @@ MODEL OPTIONS:
   --model opus     Claude Opus 4.6 (default — full reasoning for all tasks)
   --model sonnet   Claude Sonnet 4.6 (cost-effective for lighter tasks)
   --model haiku    Claude Haiku 4.5 (fastest, simplest tasks)
+
+PROVIDER OPTIONS:
+  --provider claude   Claude Code (default)
+  --provider codex    Codex CLI; --model is passed verbatim as -m, absent means ~/.codex/config.toml.
+                      Managers stay Claude-only.
 """
     console.print(help_text)
 
@@ -152,17 +158,29 @@ def _monitor_phrase(entry: dict) -> str:
     return "[dim]unknown — no pid recorded[/dim]"
 
 
+def _provider_refusal(provider: str) -> str:
+    """Why `provider` cannot be woken on, or "" when it can."""
+    from aipass.ai_mail.apps.handlers.dispatch.wake import KNOWN_PROVIDERS
+
+    if provider in KNOWN_PROVIDERS:
+        return ""
+    return f"unknown provider {provider!r} — known: {', '.join(KNOWN_PROVIDERS)}"
+
+
 def _orchestrate_wake(args: List[str]) -> bool:
     """Orchestrate manual branch wake."""
     if not args or args[0] in ["--help", "-h", "help"]:
         console.print("\n[bold]Wake - Manual branch spawn[/bold]")
-        console.print('  Usage: dispatch wake @branch ["custom message"]')
+        console.print(
+            '  Usage: dispatch wake @branch ["custom message"] [--fresh] [--model M] [--provider claude|codex]'
+        )
         console.print('  Or:    drone wake @branch ["custom message"]\n')
         return True
 
     use_fresh = "--fresh" in args
     use_sender = "@devpulse"
     use_model = None
+    use_provider = "claude"
     filtered = []
     i = 0
     while i < len(args):
@@ -177,11 +195,20 @@ def _orchestrate_wake(args: List[str]) -> bool:
             use_model = args[i + 1]
             i += 2
             continue
+        if args[i] == "--provider" and i + 1 < len(args):
+            use_provider = args[i + 1]
+            i += 2
+            continue
         filtered.append(args[i])
         i += 1
 
     if not filtered:
         error("Missing branch argument")
+        return True
+
+    provider_refusal = _provider_refusal(use_provider)
+    if provider_refusal:
+        error(f"Wake refused: {provider_refusal}")
         return True
 
     branch_email = filtered[0]
@@ -230,6 +257,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
         sender=resolve_wake_sender(use_sender),
         model=use_model,
         admin=is_admin,
+        provider=use_provider,
     )
 
     console.print(dispatch_status.format())
@@ -237,6 +265,8 @@ def _orchestrate_wake(args: List[str]) -> bool:
     if not success:
         # The status block never marks the command failed; without this a dead wake exits 0.
         error(f"Wake failed for {branch_email} — see the step status above")
+    elif dispatch_status.busy_detail():
+        _refuse_busy(dispatch_status.busy_detail(), branch_email)
 
     return True
 
@@ -247,6 +277,7 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
     no_memory_save = False
     from_branch = None
     use_model = None
+    use_provider = "claude"
     filtered = []
     i = 0
     while i < len(args):
@@ -269,14 +300,26 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
             use_model = args[i + 1]
             i += 2
             continue
+        if args[i] == "--provider" and i + 1 < len(args):
+            use_provider = args[i + 1]
+            i += 2
+            continue
         filtered.append(args[i])
         i += 1
 
     if len(filtered) < 3:
-        error('Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save]')
+        error(
+            'Usage: dispatch @target "Subject" "Body" [--fresh] [--no-memory-save] [--model M] [--provider claude|codex]'
+        )
         return True
 
     target = filtered[0]
+
+    # Before the send: a typo'd provider must not deliver mail that no agent will be woken for.
+    provider_refusal = _provider_refusal(use_provider)
+    if provider_refusal:
+        error(f"Dispatch to {target} not sent: {provider_refusal}")
+        return True
     subject = filtered[1]
     body = filtered[2]
 
@@ -350,16 +393,27 @@ def _orchestrate_dispatch_send(args: List[str]) -> bool:
         model=use_model,
         admin=is_admin,
         subject=subject,
+        provider=use_provider,
     )
     console.print(dispatch_status.format())
 
     if not wake_ok:
         logger.warning("[dispatch] Wake failed for %s — email was sent", target)
         error(f"Email sent but wake failed — retry: drone @ai_mail dispatch wake {target}")
+    elif dispatch_status.busy_detail():
+        _refuse_busy(dispatch_status.busy_detail(), target)
     else:
         _announce_wake_back(target, verified_caller.resolve_wake_sender(user_info.get("email_address", "@ai_mail")))
 
     return True
+
+
+def _refuse_busy(detail: str, target: str) -> None:
+    """A held lock delivered the mail and woke nothing: log it and exit non-zero, so the sender re-sends."""
+    logger.warning("[dispatch] %s not woken — %s", target, detail)
+    error(
+        f"{detail}. The running session may finish without reading it — re-wake when it is done: drone @ai_mail dispatch wake {target}"
+    )
 
 
 def _announce_wake_back(target: str, sender: str) -> None:

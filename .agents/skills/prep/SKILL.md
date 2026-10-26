@@ -1,3 +1,8 @@
+---
+name: prep
+description: Session wrap-up. Update memories, check plans, review git state, check inbox, flag loose ends. Use before closing a session or compacting context.
+---
+
 # Session Wrap-Up
 
 Purpose: Button up everything at the end of a session — or before a /compact. Memories, plans, git — all tidy. Works for both closing out a chat and preparing for compaction.

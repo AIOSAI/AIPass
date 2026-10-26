@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_manager.py
 # Description: Unit tests for apps/modules/template_manager.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/template_manager.py."""
@@ -15,6 +15,7 @@
 import pytest
 from unittest.mock import patch
 
+from aipass.cli.apps.modules import resolve_exit
 from aipass.flow.apps.modules.template_manager import handle_command
 
 _MOD = "aipass.flow.apps.modules.template_manager"
@@ -75,6 +76,19 @@ class TestSuggestPrefix:
         Mutant: first_word[0].upper() + "PLAN" -> first_word[0].lower() + "PLAN" reddens this.
         """
         assert "drone @flow register Flow FPLAN\n" in _scan_suggestion("Flow", capsys)
+
+
+class TestMissingArgumentExit:
+    """register and unregister short of their arguments: a usage error on stderr, exit 2."""
+
+    @pytest.mark.parametrize(("command", "args"), [("register", []), ("register", ["testing"]), ("unregister", [])])
+    def test_a_missing_argument_exits_nonzero_with_usage_and_never_exits_0(
+        self, command: str, args: list[str], capsys: pytest.CaptureFixture[str]
+    ):
+        assert handle_command(command, args) is True
+        _out, err = capsys.readouterr()
+        assert f"Usage: drone @flow {command}" in err
+        assert resolve_exit(True) == 2
 
 
 class TestHandleCommandRouting:

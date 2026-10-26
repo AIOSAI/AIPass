@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor_pointer.py
 # Description: Tests for the dispatch monitor's session-pointer aware retry loop
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
-"""Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation."""
+"""Tests for apps/handlers/dispatch/dispatch_monitor.py's session-pointer aware retry loop and reconciliation, Claude and Codex."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(shared) — main()'s attempts and the bounce: tests/test_dispatch_monitor.py
@@ -18,7 +18,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as mod
-from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import cmd_for_attempt, main, reconcile_pointer
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import (
+    cmd_for_attempt,
+    main,
+    parse_codex_stream,
+    reconcile_pointer,
+    run_with_startup_check,
+)
 
 pytestmark = pytest.mark.usefixtures("monitor_json_silenced", "monitor_logger_silenced", "monitor_wake_stubbed")
 
@@ -494,3 +500,156 @@ def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, poin
     assert pointer["set_by"] == "monitor-retry-fresh", pointer
     bounce.assert_called_once()
     assert bounce.call_args.args[0] == "@test_branch"
+
+
+# Verbatim lines of a live `codex exec --json` wake of @canary (2026-10-25): the stream's
+# skeleton, every agent_message, and its last event; the command_execution items are dropped.
+CODEX_STREAM = [
+    '{"type":"thread.started","thread_id":"01a1746b-c9c8-7891-ae8e-666b368caf13"}',
+    '{"type":"turn.started"}',
+    '{"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"Canary has one new email, no active plans, and no open todos. I’ll read and process the mail, then save the outcome in memory. All findings here are canary test data.\\n"}}',
+    '{"type":"item.completed","item":{"id":"item_11","type":"agent_message","text":"The probe asked for my provider/model, branch and working directory, and confirmation that memories loaded. I replied to @devpulse and the mail is closed. I identified as OpenAI Codex/GPT-6 from runtime instructions, with the exact backend variant unverified. I’ll now record this as session #59 using the memo skill.\\n"}}',
+    '{"type":"item.completed","item":{"id":"item_22","type":"agent_message","text":"Session #59 is saved and verified. The inbox is empty, and memory health reports zero entry-size violations. The requested standards audit is still running; no code or tests were changed.\\n"}}',
+    '{"type":"item.completed","item":{"id":"item_24","type":"agent_message","text":"Processed the probe, replied to @devpulse, and confirmed the inbox is empty.\\n\\nSaved session #59 in `.trinity/local.json`. Memory health passed; final checklist passed. Seedgo audit reported 100% (86/87 files cached).\\n\\nAll findings are canary test data."}}',
+    '{"type":"turn.completed","usage":{"input_tokens":825068,"cached_input_tokens":783360,"cache_write_input_tokens":0,"output_tokens":1871,"reasoning_output_tokens":247}}',
+]
+CODEX_THREAD = "01a1746b-c9c8-7891-ae8e-666b368caf13"
+CODEX_ERROR = '{"type":"error","message":"stream disconnected before completion"}'
+
+
+def _codex_cmd(resume=False):
+    head = ["codex", "exec", "resume", CODEX_THREAD] if resume else ["codex", "exec"]
+    return [*head, "-m", "gpt-6.1-sol", "--json", "-o", "last.txt", "--dangerously-bypass-approvals-and-sandbox", "Hi."]
+
+
+def _write_stream(path, lines):
+    Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+class TestTheCodexStream:
+    def test_the_live_capture_yields_its_thread_its_last_message_and_success(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, CODEX_STREAM)
+
+        parsed = parse_codex_stream(str(log))
+
+        assert parsed["session_id"] == CODEX_THREAD
+        assert parsed["result"].startswith("Processed the probe, replied to @devpulse")
+        assert parsed["result"].endswith("All findings are canary test data.")
+        assert parsed["usage"]["output_tokens"] == 1871
+        assert parsed["succeeded"] is True and parsed["error"] == ""
+
+    def test_an_error_event_fails_the_turn_even_after_turn_completed(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, [*CODEX_STREAM[:-1], CODEX_ERROR, CODEX_STREAM[-1]])
+
+        parsed = parse_codex_stream(str(log))
+
+        assert parsed["succeeded"] is False
+        assert parsed["error"] == CODEX_ERROR
+
+    def test_a_stream_without_turn_completed_is_a_failure(self, tmp_path):
+        log = tmp_path / "stdout.log"
+        _write_stream(log, CODEX_STREAM[:-1])
+
+        assert parse_codex_stream(str(log))["succeeded"] is False
+
+
+class TestTheCodexRetryLadder:
+    def test_attempts_1_and_2_rerun_a_codex_resume_as_built(self, tmp_path):
+        for attempt in (1, 2):
+            assert cmd_for_attempt(_codex_cmd(resume=True), attempt, tmp_path, "codex") == (
+                _codex_cmd(resume=True),
+                "resume",
+            )
+
+    def test_strike_3_drops_resume_and_its_thread_and_keeps_the_tail(self, tmp_path, pointer_home):
+        assert cmd_for_attempt(_codex_cmd(resume=True), 3, tmp_path, "codex") == (_codex_cmd(), "fresh")
+        assert mod.session_pointer.read_pointer(tmp_path) is None, "Codex mints the id: no pointer is guessed"
+
+    def test_strike_3_of_a_fresh_codex_run_is_unchanged(self, tmp_path):
+        assert cmd_for_attempt(_codex_cmd(), 3, tmp_path, "codex") == (_codex_cmd(), "fresh")
+
+
+class TestTheCodexStartupProbe:
+    """Codex streams live, so any stdout byte is startup; Claude's ~/.claude probe is not consulted."""
+
+    def _run(self, tmp_path, monkeypatch, script):
+        import os
+        import subprocess
+        import sys
+
+        monkeypatch.setattr(mod, "STARTUP_TIMEOUT", 3)
+        monkeypatch.setattr(mod, "POLL_INTERVAL", 0.1)
+        monkeypatch.setattr(mod.session_pointer, "transcript_dir", MagicMock(side_effect=AssertionError("probed")))
+        return run_with_startup_check(
+            [sys.executable, "-c", script],
+            str(tmp_path / "stdout.log"),
+            subprocess.DEVNULL,
+            str(tmp_path),
+            dict(os.environ),
+            "@canary",
+            provider="codex",
+        )
+
+    def test_a_first_stdout_line_counts_as_started(self, tmp_path, monkeypatch):
+        script = "import time; print('{}', flush=True); time.sleep(1)"
+        assert self._run(tmp_path, monkeypatch, script) == (0, False)
+
+    def test_a_silent_codex_is_killed_at_the_startup_timeout(self, tmp_path, monkeypatch):
+        assert self._run(tmp_path, monkeypatch, "import time; time.sleep(30)") == (-3, True)
+
+
+def _run_codex_main(monkeypatch, main_argv, tmp_path, lines, exit_code=0):
+    argv, lock_file, _ = main_argv
+    argv = [*argv[: argv.index("--")], "--provider=codex", "--", *_codex_cmd()]
+    runs = []
+
+    def fake_run(cmd, stdout_log, *args, **kwargs):
+        runs.append(kwargs.get("provider"))
+        _write_stream(stdout_log, lines)
+        return exit_code, False
+
+    bounce = MagicMock(return_value=True)
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-codex")
+    monkeypatch.setattr("sys.argv", argv)
+    monkeypatch.setattr(mod, "run_with_startup_check", fake_run)
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
+    monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
+    monkeypatch.setattr("aipass.ai_mail.apps.handlers.paths.find_repo_root", MagicMock(return_value=tmp_path / "repo"))
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    return exc_info.value.code, runs, bounce, lock_file.parent.parent
+
+
+class TestTheCodexMonitorRun:
+    def test_a_clean_codex_run_records_the_minted_thread_as_a_codex_pointer(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        code, runs, bounce, branch_path = _run_codex_main(monkeypatch, main_argv, tmp_path, CODEX_STREAM)
+
+        assert code == 0 and runs == ["codex"]
+        bounce.assert_not_called()
+        pointer = mod.session_pointer.read_pointer(branch_path)
+        assert (pointer["session_id"], pointer["provider"], pointer["set_by"]) == (
+            CODEX_THREAD,
+            "codex",
+            "monitor-codex",
+        )
+        report = tmp_path / ".dispatch_register_root" / ".aipass" / "dispatch_reports" / "dsp-codex.json"
+        data = json.loads(report.read_text(encoding="utf-8"))
+        assert data["result_excerpt"].startswith("Processed the probe")
+        assert data["output_tokens"] == 1871
+
+    def test_an_error_event_on_exit_0_bounces_verbatim_once_and_never_reruns(
+        self, monkeypatch, main_argv, pointer_home, tmp_path
+    ):
+        code, runs, bounce, branch_path = _run_codex_main(
+            monkeypatch, main_argv, tmp_path, [*CODEX_STREAM[:-1], CODEX_ERROR]
+        )
+
+        assert code == 1
+        assert len(runs) == 1, "the turn ran and may have acted; a re-run would repeat it"
+        bounce.assert_called_once()
+        assert CODEX_ERROR in bounce.call_args.args[1]
+        assert mod.session_pointer.read_pointer(branch_path) is None

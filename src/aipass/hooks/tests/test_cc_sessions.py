@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.0.5
+# Version: 1.2.2
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -15,6 +15,7 @@
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -60,6 +61,58 @@ class TestResolveSessionPid:
         me = os.getpid()
         with patch.object(cc_sessions, "_has_session_file", side_effect=lambda p: p == me):
             assert cc_sessions.resolve_session_pid() == me
+
+
+class TestProcessReaders:
+    """process_args, cli_ancestor and the Codex line in resolve_session_pid; the chain is faked, no CLI is started."""
+
+    def _chain(self, argvs):
+        me = os.getpid()
+        pids = [me + i for i in range(len(argvs))]
+        ppid_map = dict(zip(pids, pids[1:], strict=False))
+        return (
+            patch.object(cc_sessions, "_has_session_file", return_value=False),
+            patch.object(cc_sessions, "_get_ppid_portable", side_effect=lambda p: ppid_map.get(p)),
+            patch.object(cc_sessions, "process_args", side_effect=lambda p: argvs[pids.index(p)]),
+        )
+
+    def test_a_child_process_args_name_its_interpreter(self):
+        # A child, not this process: pytest-xdist retitles its workers, so our own args read "[pytest-xdist".
+        code = "import time; print('up', flush=True); time.sleep(30)"
+        child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, encoding="utf-8")
+        try:
+            assert child.stdout is not None and child.stdout.readline() == "up\n"  # exec'd: the args are its own
+            args = cc_sessions.process_args(child.pid)
+        finally:
+            child.terminate()
+            child.wait()
+        assert args
+        # Not sys.executable itself: a macOS framework build execs .../MacOS/Python.
+        assert "python" in Path(args[0]).name.lower()
+
+    def test_an_absent_process_answers_none(self):
+        assert cc_sessions.process_args(2**22 + 12345) is None
+
+    def test_cli_ancestor_returns_the_nearest_named_program(self):
+        chain = [["python", "x.py"], ["/home/u/.local/bin/claude", "-p", "Hi."], ["systemd", "--user"]]
+        a, b, c = self._chain(chain)
+        with a, b, c:
+            assert cc_sessions.cli_ancestor("claude") == ["/home/u/.local/bin/claude", "-p", "Hi."]
+            assert cc_sessions.cli_ancestor("codex") is None
+
+    def test_a_codex_chain_logs_one_debug_line_and_no_info(self, caplog):
+        a, b, c = self._chain([["python", "codex.py"], ["/x/bin/codex", "exec"], ["systemd"]])
+        with a, b, c, patch.object(cc_sessions.logger, "debug") as debug:
+            assert cc_sessions.resolve_session_pid() is None
+        assert "No session-file ancestor found" not in caplog.text
+        assert debug.call_count == 1
+        assert "Codex session, no Claude session file" in debug.call_args.args[0]
+
+    def test_a_chain_without_codex_still_logs_info(self, caplog):
+        a, b, c = self._chain([["python", "claude.py"], ["bash"], ["systemd"]])
+        with a, b, c:
+            assert cc_sessions.resolve_session_pid() is None
+        assert "No session-file ancestor found" in caplog.text
 
 
 class TestHasSessionFile:
@@ -111,7 +164,9 @@ class TestGetPpidPortable:
             patch("subprocess.run", side_effect=OSError("no ps")) as ps,
         ):
             assert cc_sessions.resolve_session_pid() is None
-        assert ps.call_count == 1
+        # Only the ppid lookups count: on macOS the codex check's args read is a ps too, after the walk.
+        ppid_lookups = [c for c in ps.call_args_list if "ppid=" in c.args[0]]
+        assert len(ppid_lookups) == 1
 
 
 class TestIsPidAlive:
@@ -420,9 +475,29 @@ class TestReclaim:
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_stop_session", return_value="stopped") as mock_stop,
         ):
-            actions = cc_sessions.reclaim("devpulse")
+            actions = cc_sessions.reclaim(str(tmp_path / "devpulse"))
         assert actions == []
         mock_stop.assert_not_called()
+
+    def test_reclaim_stops_only_the_branch_at_that_path_not_a_namesake(self, tmp_path):
+        mine, other = tmp_path / "aipass" / "hooks", tmp_path / "project" / "hooks"
+        sessions_dir = tmp_path / "sessions"
+        for folder in (mine, other, sessions_dir):
+            folder.mkdir(parents=True)
+        my_pid = os.getpid()
+        rows = {my_pid: mine, my_pid + 1: other}
+        for pid, cwd in rows.items():
+            row = {"pid": pid, "sessionId": str(pid), "cwd": str(cwd), "kind": "interactive"}
+            (sessions_dir / f"{pid}.json").write_text(json.dumps(row), encoding="utf-8")
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", sessions_dir),
+            patch.object(cc_sessions, "_is_pid_alive", return_value=True),
+            patch.object(cc_sessions, "_session_pid_matches", return_value=True),
+            patch.object(cc_sessions, "_stop_session", side_effect=lambda s: f"stopped {s['cwd']}") as mock_stop,
+        ):
+            actions = cc_sessions.reclaim(str(mine))
+        assert actions == [f"stopped {mine}"]
+        assert mock_stop.call_count == 1
 
     def test_reclaim_empty_no_actions(self, tmp_path):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
@@ -497,12 +572,23 @@ class TestIntrospection:
         assert err.startswith("sessions reclaim\n")
         assert "No live sessions to reclaim" in err
 
-    def test_handle_command_sessions_reclaim_branch(self, tmp_path, capsys):
+    def test_handle_command_sessions_reclaim_branch(self, tmp_path, capsys, monkeypatch):
+        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions.handle_command("sessions", ["reclaim", "@hooks"]) is True
         err = capsys.readouterr().err
         assert err.startswith("sessions reclaim @hooks\n")
         assert "No live sessions to reclaim" in err
+
+    def test_reclaiming_an_unregistered_branch_stops_nothing_and_says_so(self, tmp_path, capsys, monkeypatch):
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        with patch.object(cc_sessions, "_stop_session") as mock_stop:
+            assert cc_sessions.handle_command("sessions", ["reclaim", "@ghost"]) is True
+        assert "@ghost is not a registered branch" in capsys.readouterr().err
+        mock_stop.assert_not_called()
 
     def test_handle_command_help(self, capsys):
         assert cc_sessions.handle_command("--help", []) is True

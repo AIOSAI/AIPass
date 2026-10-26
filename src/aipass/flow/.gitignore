@@ -12,3 +12,5 @@ build/
 *.log
 *.tmp
 *.swp
+.post_close_runner.lock
+.post_close_runner.lock.takeover

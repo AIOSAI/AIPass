@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-08-14
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/host/fleet.py, the baud --snapshot contract, and the host lane that serves it."""
@@ -677,13 +677,13 @@ fastapi_required = pytest.mark.skipif(
 
 
 @pytest.fixture
-def client(tmp_path: Path):
+def client(tmp_path: Path, host_app: Any):
     """A TestClient over the real app with an isolated token store."""
     from fastapi.testclient import TestClient
 
     with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
-            yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+            yield TestClient(host_app, raise_server_exceptions=False)
 
 
 @pytest.fixture

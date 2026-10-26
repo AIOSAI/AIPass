@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_register.py
 # Description: Tests for the dispatch register append-only log
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-10-23
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
@@ -68,6 +68,14 @@ class TestWrittenBeforeAnythingSpawns:
         assert record["subject"] == "Build the register"
         assert record["status"] == register.STATUS_OUTSTANDING
         assert record["expected_by"] > record["ts"], "expected_by must be in the future of ts"
+
+    def test_the_row_names_its_provider_claude_unless_told(self, repo):
+        import json
+
+        register.open_dispatch("@devpulse", "@canary", "one", 7200, repo_root=repo)
+        register.open_dispatch("@devpulse", "@canary", "two", 7200, repo_root=repo, provider="codex")
+
+        assert [json.loads(line)["provider"] for line in _lines(repo)] == ["claude", "codex"]
 
     def test_expected_by_comes_from_the_caller_not_a_number_invented_here(self, repo):
         """The spec forbids an invented timeout — expected_seconds is the contract.

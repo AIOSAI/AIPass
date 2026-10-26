@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hook_test.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Description: Portable hook test runner — fires every hook with mock data
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-10
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Portable hook test runner.
@@ -21,6 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from aipass.hooks.apps.modules import engine
 from aipass.hooks.apps.modules.engine import dispatch
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.loader import config_unavailable_reason, find_project_config
@@ -105,6 +106,19 @@ def _build_skeleton(real_branch: Path, destination: Path) -> Path:
     return branch
 
 
+def _dispatch_seen(event_type: str, stdin_data: str, config: dict) -> tuple[str, int, list[dict]]:
+    """engine.dispatch, plus each handler's own result: past a crashed injector the event still exits 0."""
+    seen: list[dict] = []
+    run_handler, run_hook = engine._run_handler, engine._run_hook
+    engine._run_handler = lambda *a, **k: seen.append(run_handler(*a, **k)) or seen[-1]
+    engine._run_hook = lambda *a, **k: seen.append(run_hook(*a, **k)) or seen[-1]
+    try:
+        output, exit_code = dispatch(event_type, stdin_data, config)
+    finally:
+        engine._run_handler, engine._run_hook = run_handler, run_hook
+    return output, exit_code, seen
+
+
 def _test_single_hook(event_type: str, hook_name: str, hook_def: dict, stdin_data: str, verbose: bool) -> dict:
     """Dispatch one hook and return its result dict."""
     single_config = {"hooks_enabled": True, event_type: {hook_name: hook_def}}
@@ -112,8 +126,19 @@ def _test_single_hook(event_type: str, hook_name: str, hook_def: dict, stdin_dat
 
     start = time.monotonic()
     try:
-        output, exit_code = dispatch(event_type, stdin_data, single_config)
+        output, exit_code, seen = _dispatch_seen(event_type, stdin_data, single_config)
         elapsed_ms = round((time.monotonic() - start) * 1000, 1)
+        own = seen[-1] if seen else {}
+        crashed = enabled and exit_code != 2 and own.get("exit_code") == -1
+        if crashed:
+            error = str(own.get("stderr", ""))[:200]
+            return {
+                "hook": hook_name,
+                "status": "crashed",
+                "elapsed_ms": elapsed_ms,
+                "exit_code": exit_code,
+                "error": error,
+            }
 
         if not enabled:
             status = "disabled"

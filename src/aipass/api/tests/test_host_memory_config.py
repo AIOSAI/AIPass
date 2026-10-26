@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_host_memory_config.py
 # Description: Tests for the host API memory-config lane — @memory's rollover limits
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-08-16
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/host/memory_config.py and its routes in apps/handlers/host/server.py."""
@@ -23,7 +23,6 @@ import pytest
 
 from aipass.api.apps.handlers.host import denials as host_denials
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
-from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 
@@ -570,13 +569,13 @@ class TestTheMemoryConfigRoutes:
     """The HTTP surface: reads are read scope, every write is operate."""
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, host_app: Any):
         """A TestClient over the real app with an isolated token store."""
         from fastapi.testclient import TestClient
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
             with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
-                yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+                yield TestClient(host_app, raise_server_exceptions=False)
 
     @pytest.fixture
     def read_auth(self, client) -> dict:
@@ -698,13 +697,13 @@ class TestARefusalIsOneShapeWhereverItHappens:
     """
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, host_app: Any):
         """A TestClient over the real app with an isolated token store."""
         from fastapi.testclient import TestClient
 
         with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
             with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
-                yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+                yield TestClient(host_app, raise_server_exceptions=False)
 
     @pytest.fixture
     def operate_auth(self, client) -> dict:

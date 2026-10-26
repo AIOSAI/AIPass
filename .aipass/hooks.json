@@ -114,6 +114,11 @@
       "handler": "aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot",
       "matcher": "Bash"
     },
+    "settings_gate": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.security.settings_gate.handle",
+      "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
+    },
     "settings_backup": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.security.settings_backup.handle",
@@ -213,6 +218,18 @@
     "release_notice": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.release_notice.handle",
+      "matcher": "",
+      "timeout": 30
+    },
+    "culture": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle_culture",
+      "matcher": "",
+      "timeout": 30
+    },
+    "session_pointer": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.lifecycle.session_start.handle_session_pointer",
       "matcher": "",
       "timeout": 30
     }

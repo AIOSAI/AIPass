@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.8.0
+# Version: 1.8.1
 # Created: 2026-06-15
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -126,7 +126,7 @@ def _mail_notice(to: str, subject: str, body: str) -> None:
 def _fire_command_job(job: dict) -> tuple:
     """Run a command job's drone command as a subprocess. No wake, no seat, no tokens.
 
-    Never BLOCKED: exit 0 is FIRED; anything else is FAILED with the output tail as detail.
+    Never BLOCKED: exit 0 or a code in the job's ok_exit_codes is FIRED; anything else is FAILED with the output tail as detail.
     """
     owner, job_id, command = job["owner"], job["id"], job["command"]
     mail_to = command_job.notify_email(job)
@@ -136,7 +136,9 @@ def _fire_command_job(job: dict) -> tuple:
     if mail_to:
         _mail_notice(mail_to, *command_job.start_mail(job))
 
-    result = command_job.run_command(command, job.get("branch_path"), command_job.timeout_for(job))
+    result = command_job.run_command(
+        command, job.get("branch_path"), command_job.timeout_for(job), command_job.ok_exit_codes_for(job)
+    )
     done = command_job.done_text(result)
     _log(f"DONE: {owner}/{job_id} — {done}")
     (logger.info if result.ok else logger.warning)("[run] DONE %s/%s %s", owner, job_id, done)

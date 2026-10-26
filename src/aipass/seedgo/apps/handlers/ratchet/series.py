@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: series.py
 # Description: the ratchet series - one append-only line per probe, and the archived artifact behind it
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-10-12
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -16,10 +16,11 @@ Everything written goes through `portable()`: an absolute home path turns CI's
 home-paths gate red. A refused probe is still a line, so the pick moves on."""
 
 import json
+import math
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -41,7 +42,8 @@ SERIES_VERSION = "ratchet-series/1"
 
 GROUP_KEY = "pytest.pseudo_tested"
 
-WHOLE_BRANCH = "1/1"
+#: gutting.REASON_BUDGET_EXHAUSTED, spelled here because a handler package never imports another.
+UNPROBED_REASON = "budget_exhausted"
 
 TRIGGER_WEEKLY = "weekly"
 TRIGGER_RECORD = "record"
@@ -95,6 +97,35 @@ def append(line: dict, directory: Optional[Path] = None) -> Path:
     )
     logger.info(f"[RATCHET] series line for {line.get('branch')} ({line.get('status')}) appended to {path}")
     return path
+
+
+def fragment_chain(branch: str, lines: Sequence[dict]) -> List[dict]:
+    """The branch's trailing run of budget-fragment lines, oldest first; empty when its last line is not one."""
+    own = [line for line in lines if str(line.get("branch") or "").lower() == branch.lower()]
+    chain: List[dict] = []
+    for line in reversed(own):
+        if not line.get("budget_exhausted"):
+            break
+        chain.insert(0, line)
+    return chain
+
+
+def unprobed(line: dict, root: Optional[Path] = None) -> List[str]:
+    """`relpath::qualname` of every function a fragment's budget left unprobed, read from its archive.
+
+    A fragment with no archive raises: continuing from nothing would re-probe the whole tree."""
+    if not line.get("archive"):
+        raise ValueError(f"the {line.get('branch')} fragment {line.get('run_id')} names no archive to continue from")
+    path = (Path(root) if root else REPO_ROOT) / str(line["archive"])
+    group = campaign_group(json.loads(path.read_text(encoding="utf-8"))) or {}
+    return _keys(_unprobed_mutants(group))
+
+
+def _unprobed_mutants(group: dict) -> List[dict]:
+    """The campaign's mutants the budget never reached."""
+    return [
+        m for m in group.get("mutants") or [] if m.get("outcome") == "not_run" and m.get("reason") == UNPROBED_REASON
+    ]
 
 
 def holds_run(run_id: str, lines: List[dict]) -> bool:
@@ -167,8 +198,9 @@ def build_line(
     pick_reason: str,
     archived: Optional[Path],
     now: Optional[float] = None,
+    slice_number: int = 1,
 ) -> dict:
-    """One series line from one audit-tests artifact."""
+    """One series line from one audit-tests artifact. `slice_number` counts this branch's fragments, this one included."""
     group = campaign_group(document) or {}
     provenance = document.get("provenance") or {}
     stamped = now if now is not None else time.time()
@@ -181,7 +213,7 @@ def build_line(
         "run_id": provenance.get("run_id") or f"unrun-{int(stamped)}",
         "date": provenance.get("started") or time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(stamped)),
         "branch": branch,
-        "slice": WHOLE_BRANCH,
+        "slice": _slice(slice_number, group),
         "trigger": trigger,
         "pick_reason": pick_reason,
         "status": status,
@@ -205,6 +237,15 @@ def build_line(
     }
     line["open_survivors"] = len(pseudo_tested) if status == "measured" else None
     return portable(line)
+
+
+def _slice(number: int, group: dict) -> str:
+    """`k/N`: N forecasts the slices the tree needs at this slice's rate, so a finished tree reads `k/k`."""
+    left = len(_unprobed_mutants(group))
+    if not left:
+        return f"{number}/{number}"
+    probed = group.get("functions_probed") or 0
+    return f"{number}/{number + (math.ceil(left / probed) if probed else 1)}"
 
 
 def _status(document: dict, group: dict) -> str:

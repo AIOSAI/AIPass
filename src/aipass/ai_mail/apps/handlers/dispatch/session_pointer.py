@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: session_pointer.py
 # Description: Durable per-branch "current session" pointer for dispatch
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-20
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Durable per-branch current-session pointer.
@@ -25,6 +25,9 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 
 POINTER_DIR_NAME = ".ai_mail.local"
 POINTER_FILE_NAME = "session.json"
+
+CLAUDE = "claude"
+CODEX = "codex"
 
 # MiB, to match what `ls -lh` and `du -h` show.
 _BYTES_PER_MB = 1024 * 1024
@@ -89,6 +92,15 @@ def transcript_file(cwd: str | Path, session_id: str) -> Optional[Path]:
     return directory / f"{session_id}.jsonl"
 
 
+def codex_thread_file(thread_id: str) -> Optional[Path]:
+    """Return Codex's rollout file for a thread, or None when it is absent or the home cannot be named."""
+    home = _claude_home()
+    if home is None:
+        return None
+    matches = sorted((home / ".codex" / "sessions").glob(f"*/*/*/rollout-*-{thread_id}.jsonl"))
+    return matches[0] if matches else None
+
+
 def pointer_path(branch_path: Path) -> Path:
     """Return the pointer file path for a branch."""
     return Path(branch_path) / POINTER_DIR_NAME / POINTER_FILE_NAME
@@ -124,7 +136,7 @@ def read_pointer(branch_path: Path) -> Optional[dict]:
     return data
 
 
-def write_pointer(branch_path: Path, session_id: str, set_by: str) -> bool:
+def write_pointer(branch_path: Path, session_id: str, set_by: str, provider: str = CLAUDE) -> bool:
     """Record `session_id` as the branch's current session. Returns success.
 
     Atomic (temp + fsync + os.replace): a half-written id would fail the next ``--resume``. Never raises.
@@ -136,6 +148,8 @@ def write_pointer(branch_path: Path, session_id: str, set_by: str) -> bool:
         "set_by": set_by,
         # Resolved: resolve_resume_target compares it to detect a moved or copied branch.
         "cwd": str(Path(branch_path).resolve()),
+        # A pointer without the key is a Claude pointer: every pointer written before the key existed.
+        "provider": provider,
     }
 
     tmp_name = None
@@ -189,55 +203,65 @@ def _quote_path(value: object) -> str:
     return f"'{value}'"
 
 
-def resolve_resume_target(branch_path: Path, max_transcript_mb: Optional[float] = None) -> Tuple[Optional[str], str]:
+def resolve_resume_target(
+    branch_path: Path, max_transcript_mb: Optional[float] = None, provider: str = CLAUDE
+) -> Tuple[Optional[str], str]:
     """Decide which session a dispatch to `branch_path` should resume.
 
-    An id only when the pointer parses, its cwd matches this branch, and the transcript exists; never raises.
+    An id only when the pointer parses, names this provider, its cwd matches this branch, and the
+    transcript exists; never raises. Codex has no -c, so its fallback is a fresh thread.
     """
+    fallback = "falling back to -c" if provider == CLAUDE else "starting fresh"
     try:
         pointer = read_pointer(branch_path)
     except (TypeError, AttributeError, ValueError) as e:
         # Only a non-path argument gets here; narrow so a real bug is not hidden as a -c fallback.
         logger.warning("[session_pointer] read_pointer raised for %s: %s", branch_path, e)
-        return None, f"pointer unreadable ({type(e).__name__}: {e}) - falling back to -c"
+        return None, f"pointer unreadable ({type(e).__name__}: {e}) - {fallback}"
 
     if pointer is None:
-        return None, f"no usable pointer at {pointer_path(branch_path)} - falling back to -c"
+        return None, f"no usable pointer at {pointer_path(branch_path)} - {fallback}"
 
     session_id = str(pointer.get("session_id", "")).strip()
+
+    pointer_provider = pointer.get("provider", CLAUDE)
+    if pointer_provider != provider:
+        return None, f"pointer is for {pointer_provider}, waking on {provider} - starting fresh"
 
     try:
         expected_cwd = str(Path(branch_path).resolve())
     except OSError as e:
         logger.warning("[session_pointer] Cannot resolve branch path %s: %s", branch_path, e)
-        return None, f"branch path {branch_path} could not be resolved ({e}) - falling back to -c"
+        return None, f"branch path {branch_path} could not be resolved ({e}) - {fallback}"
 
     pointer_cwd = pointer.get("cwd")
     if pointer_cwd != expected_cwd:
         return None, (
             f"pointer cwd mismatch - pointer says {_quote_path(pointer_cwd)} but this branch resolves to "
-            f"{_quote_path(expected_cwd)} (moved or copied branch?) - falling back to -c"
+            f"{_quote_path(expected_cwd)} (moved or copied branch?) - {fallback}"
         )
 
-    candidates = _transcript_candidates(branch_path, session_id)
+    if provider == CODEX:
+        candidates = None if _claude_home() is None else [codex_thread_file(session_id)]
+    else:
+        candidates = _transcript_candidates(branch_path, session_id)
     if candidates is None:
         return None, (
-            "cannot determine this machine's home directory, so there is no ~/.claude/projects "
-            "to search - falling back to -c"
+            f"cannot determine this machine's home directory, so there is no transcript store to search - {fallback}"
         )
 
     found = None
     for candidate in candidates:
         try:
-            if candidate.is_file():
+            if candidate is not None and candidate.is_file():
                 found = candidate
                 break
         except OSError as e:
             logger.warning("[session_pointer] Cannot stat transcript %s: %s", candidate, e)
 
     if found is None:
-        checked = " or ".join(str(c) for c in candidates)
-        return None, f"transcript for session {session_id} not found at {checked} - falling back to -c"
+        checked = " or ".join(str(c) for c in candidates if c is not None) or "~/.codex/sessions"
+        return None, f"transcript for session {session_id} not found at {checked} - {fallback}"
 
     if max_transcript_mb is None:
         return session_id, f"pointer valid - resuming session {session_id} (transcript {found})"

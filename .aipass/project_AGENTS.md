@@ -13,4 +13,4 @@ Use drone commands for all operations. Never raw git, gh, file access, or python
 
 # Memories
 
-Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`.
+Update `.trinity/` at natural breakpoints, after milestones, and on `/memo` (Claude Code) or `$memo` (Codex).

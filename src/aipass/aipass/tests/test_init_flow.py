@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.2.8
+# Version: 1.2.9
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -1234,7 +1234,7 @@ class TestInitUpdateGitAuth:
         Mutant: "devpulse's go" cut to "devpulse" in the preview line reddens this.
         """
         target = self._stamp_behind_scaffold(tmp_path)
-        (target / ".claude" / "commands" / "prep.md").write_text("# mine\n", encoding="utf-8")
+        (target / ".agents" / "skills" / "prep" / "SKILL.md").write_text("# mine\n", encoding="utf-8")
         capsys.readouterr()
         with patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0):
             rc = _init_update([str(target), "--dry-run"])
