@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_settings_gate.py
-# Version: 1.0.0
+# Version: 1.2.0
 # Description: Tests for the provider-settings gate: the decision table, the paths, the Bash shapes, the installers
 # Branch: hooks
 # Layer: tests
@@ -18,6 +18,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -173,7 +174,14 @@ class TestUnprotected:
 
 class TestInstallers:
     @pytest.mark.parametrize(
-        "command", ["aipass doctor --fix", "bash setup.sh", "python3 src/aipass/aipass/apps/provider_wire.py"]
+        "command",
+        [
+            "aipass doctor --fix",
+            "bash setup.sh",
+            "./setup.sh",
+            "python3 src/aipass/aipass/apps/provider_wire.py",
+            "timeout 60 ./setup.sh",
+        ],
     )
     def test_an_installer_asks_on_claude_and_is_denied_on_codex(self, seat, command):
         assert _decision(_bash(seat, command)) == "ask"
@@ -181,6 +189,43 @@ class TestInstallers:
 
     def test_doctor_without_fix_only_reads(self, seat):
         assert _decision(_bash(seat, "aipass doctor", provider="codex")) == "allow"
+
+    @pytest.mark.parametrize("command", ["cat setup.sh", "rg needle setup.sh", "head provider_wire.py"])
+    def test_reading_an_installer_is_not_running_it(self, seat, command):
+        assert _decision(_bash(seat, command)) == "allow"
+        assert _decision(_bash(seat, command, provider="codex")) == "allow"
+
+
+def test_a_test_run_deny_never_lands_in_the_live_gate_log(seat):
+    live = Path(__file__).resolve().parents[1] / "logs" / "settings_gate.log"
+    before = live.read_bytes() if live.exists() else b""
+    assert _decision(_bash(seat, "mv ~/.codex ~/.codex.saved", provider="codex")) == "deny"
+    assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real refusal"
+
+
+class TestDirectories:
+    @pytest.mark.parametrize(
+        "command",
+        ["mv ~/.codex ~/.codex.saved", "rm -r ~/.codex/rules", "mv ~/.claude ~/elsewhere", "mv ~ ../moved-home"],
+    )
+    def test_moving_or_deleting_a_settings_directory_is_a_settings_write(self, seat, command):
+        assert _decision(_bash(seat, command)) in ("ask", "allow")
+        assert _decision(_bash(seat, command, provider="codex")) == "deny"
+        seat["argv"]["claude"] = HEADLESS
+        assert _decision(_bash(seat, command)) == "deny"
+
+    def test_moving_the_codex_directory_asks_on_an_interactive_claude(self, seat):
+        assert _decision(_bash(seat, "mv ~/.codex ~/.codex.saved")) == "ask"
+
+    @pytest.mark.parametrize("command", ["cp notes.txt ~/", "cp -r src ~", "echo hi > ~/notes.txt"])
+    def test_a_copy_into_the_home_that_holds_them_is_untouched(self, seat, command):
+        assert _decision(_bash(seat, command, provider="codex")) == "allow"
+
+    def test_a_copy_into_the_codex_directory_is_a_codex_write(self, seat):
+        assert _decision(_bash(seat, "cp config.toml ~/.codex/", provider="codex")) == "deny"
+
+    def test_listing_a_settings_directory_is_untouched(self, seat):
+        assert _decision(_bash(seat, "ls ~/.codex ~/.claude", provider="codex")) == "allow"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need privileges on Windows")

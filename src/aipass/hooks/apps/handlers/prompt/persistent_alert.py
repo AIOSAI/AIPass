@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: persistent_alert.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Injects advisory banners for active alerts on UserPromptSubmit — on arrival, then on cadence
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Injects advisory banners for active alerts from .aipass/alerts.json.
@@ -114,7 +114,7 @@ def _cap_body(body: str, alert_id: str) -> str:
     if len(body) <= _BODY_CHAR_CAP:
         return body
     logger.info("[HOOKS] persistent_alert: body of %s is %d chars, cut to %d", alert_id, len(body), _BODY_CHAR_CAP)
-    marker = f"… [cut at {_BODY_CHAR_CAP} chars — full text: drone @hooks alerts]"
+    marker = f"… [cut at {_BODY_CHAR_CAP} chars — full text: .aipass/alerts.json, id {alert_id}]"
     return body[: _BODY_CHAR_CAP - len(marker)].rstrip() + marker
 
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.0.2
+# Version: 1.1.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-05
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/hook_test.py."""
@@ -107,7 +107,10 @@ class TestRunTest:
         with patch(f"{_MOD}.find_project_config", return_value=config):
             result = hook_test.run_test()
         assert "PreToolUse" in result
-        assert result["PreToolUse"][0]["status"] in ("crashed", "fired (empty output)")
+        bad = result["PreToolUse"][0]
+        assert bad["status"] == "crashed"
+        assert "nonexistent" in bad["error"]
+        assert bad["exit_code"] == 0
 
 
 class TestPrintResults:

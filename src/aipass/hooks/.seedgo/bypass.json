@@ -1413,7 +1413,7 @@
     {
       "file": "apps/modules/cc_sessions.py",
       "standard": "logged_fallback",
-      "lines": [191, 219, 225, 228, 231, 254, 329],
+      "lines": [192, 220, 226, 229, 232, 255, 330],
       "reason": "Fleet green leg 5, read for presence_gate (its one gate caller). 203 and 212 answer 'alive' on doubt: the gate keeps refusing the newer seat. 209 is the real answer (ESRCH = dead). 215: os.kill(pid, 0) raises only ESRCH and EPERM on POSIX, both handled; any other errno is read as dead so a stale record cannot hold a branch shut with an unsatisfiable block (ruling a, DPLAN-0310). 170 start ticks and 321 session_start: None is 'cannot rank', never younger. 238: display text."
     },
     {
@@ -1461,13 +1461,13 @@
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "logged_fallback",
-      "lines": [64, 134, 198, 231],
-      "reason": "Fleet green leg 5: 63 and 133 are counts for the compact snapshot, None renders as unknown, never zero. 197 and 230: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
+      "lines": [65, 135, 204, 218, 251],
+      "reason": "Fleet green leg 5: 65 and 135 are counts for the compact snapshot, None renders as unknown, never zero. 204 (the .trinity lock will not open), 218 and 251: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
     {
       "file": "apps/handlers/lifecycle/session_boot.py",
       "standard": "logged_fallback",
-      "lines": [117, 186, 326, 865],
+      "lines": [117, 186, 328, 867],
       "reason": "Fleet green leg 5: boot display (tmux name, age, pinned CLI version) and the dispatch-lock read for the boot banner. Guards no write."
     },
     {
@@ -1598,8 +1598,14 @@
     {
       "file": "tests/test_session_boot.py",
       "standard": "through_the_command",
-      "lines": [226, 231, 237],
+      "lines": [227, 232, 238],
       "reason": "_stop_session's bg early return (a bg session is never SIGTERMed): every boot() caller (_menu_single_new, _menu_single_close, _close_all, _new_over_all) filters bg sessions out first, so no boot()/main() route reaches it and no single mutant can turn a boot()-level test red. Kept as a second layer; whether it is deliberate or dead is open with devpulse (2026-10-24)."
+    },
+    {
+      "file": "tests/test_codex_bridge.py",
+      "standard": "import_site",
+      "lines": [241],
+      "reason": "The pin's subject is prax being unimportable: a None entry in sys.modules is what makes that import raise; the bridge is then loaded fresh from its file, never stubbed."
     },
     {
       "file": "tests/test_session_boot_lookups.py",

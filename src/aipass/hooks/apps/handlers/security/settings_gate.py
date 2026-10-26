@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: No AI changes a provider's top-level settings alone: Claude asks the owner, Codex and headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -62,14 +62,24 @@ def _codex_dirs() -> list[Path]:
     return [d.resolve() for d in dirs]
 
 
-def _kind(path: Path) -> str | None:
-    """Which protected class an absolute, resolved path is, or None."""
+def _holds(path: Path, folder: Path, whole: bool) -> bool:
+    """*path* is *folder*, or a call that moves or deletes *path* whole takes an ancestor of it (and so *folder*).
+
+    A copy into an ancestor (`cp notes ~/`) changes only the copied file."""
+    return _same(path, folder) or (whole and any(_same(path, parent) for parent in folder.parents))
+
+
+def _kind(path: Path, whole: bool = False) -> str | None:
+    """Which protected class an absolute, resolved path is, or None. *whole*: the call moves or deletes *path*."""
     for codex in _codex_dirs():
+        if _holds(path, codex, whole):
+            return CODEX
         if _same(path.parent, codex) and (path.suffix.lower() == ".toml" or path.name.lower() in _CODEX_FILES):
             return CODEX
-        if any(_same(parent, codex / "rules") for parent in path.parents):
+        if any(_same(folder, codex / "rules") for folder in (path, *path.parents)):
             return CODEX
-    if _same(path.parent, (Path.home() / ".claude").resolve()) and path.name.lower() in _CLAUDE_FILES:
+    claude = (Path.home() / ".claude").resolve()
+    if _holds(path, claude, whole) or (_same(path.parent, claude) and path.name.lower() in _CLAUDE_FILES):
         return CLAUDE
     loader = importlib.import_module("aipass.hooks.apps.handlers.config.loader")
     root = loader.aipass_home()
@@ -80,33 +90,38 @@ def _kind(path: Path) -> str | None:
     return None
 
 
-def _protected(raw: str, cwd: str) -> tuple[Path, str] | None:
+def _protected(raw: str, cwd: str, whole: bool = False) -> tuple[Path, str] | None:
     """(file, kind) when *raw* lands on a protected file. A symlink counts from either end."""
     spelled = Path(os.path.expanduser(raw))
     if not spelled.is_absolute():
         spelled = Path(cwd) / spelled
     for candidate in (spelled.parent.resolve() / spelled.name, spelled.resolve()):
-        kind = _kind(candidate)
+        kind = _kind(candidate, whole)
         if kind is not None:
             return candidate, kind
     return None
 
 
 def _installer(command: str, cwd: str) -> str | None:
-    """The installer a Bash command runs (aipass doctor --fix, setup.sh, provider_wire.py), or None."""
+    """The installer a Bash command executes (aipass doctor --fix, setup.sh, provider_wire.py), or None.
+
+    Executed means the program itself, or an interpreter's first operand: `cat setup.sh` only reads it."""
     reader = importlib.import_module("aipass.hooks.apps.modules.shell_reader")
     for inv in reader.invocations(command, cwd):
         if inv.program == "aipass" and "doctor" in inv.argv and "--fix" in inv.argv:
             return "aipass doctor --fix"
-        for word in inv.argv:
-            if Path(word).name in _INSTALLER_SCRIPTS:
-                return Path(word).name
+        if inv.program in _INSTALLER_SCRIPTS:
+            return inv.program
+        script = next((word for word in inv.argv[1:] if not word.startswith("-")), "") if inv.language else ""
+        if Path(script).name in _INSTALLER_SCRIPTS:
+            return Path(script).name
     return None
 
 
 def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[tuple[str, str]]:
     """(file, kind) for every protected file this call writes, in call order, each once."""
     found: dict[str, tuple[str, str]] = {}
+    whole: set[str] = set()
     if tool_name == "Bash":
         command = str(tool_input.get("command", ""))
         if not command:
@@ -115,11 +130,15 @@ def _targets(tool_name: str, tool_input: dict, cwd: str) -> list[tuple[str, str]
         if installer is not None:
             found[installer] = (installer, INSTALLER)
         raws = importlib.import_module("aipass.hooks.apps.modules.bash_writes").changed_paths(command, cwd)
+        reader = importlib.import_module("aipass.hooks.apps.modules.shell_reader")
+        # A mutated path is the very thing changed (a copy into a folder is resolved to the file); a bare
+        # operand (`cp x ~/` names `~`) is not, so only the former takes a folder holding settings whole.
+        whole = {str(path) for path, _role, _how in reader.mutated_paths(command, cwd)}
     else:
         raw = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
         raws = [str(raw)] if raw else []
     for raw in raws:
-        hit = _protected(raw, cwd)
+        hit = _protected(raw, cwd, raw in whole)
         if hit is not None:
             found.setdefault(os.path.normcase(str(hit[0])), (str(hit[0]), hit[1]))
     return list(found.values())

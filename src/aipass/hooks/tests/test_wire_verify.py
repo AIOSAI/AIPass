@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_wire_verify.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
@@ -75,9 +75,15 @@ def _verify(tmp_path, provider: dict, project: dict) -> dict:
     return wire_verify.verify_wiring(provider_path=settings, project_config={"hooks_enabled": True, **project})
 
 
-def _codex_file(tmp_path, *event_args: str):
-    """A project .codex/hooks.json wiring each Event[:hook] through the Codex bridge."""
-    hooks: dict = {}
+_CODEX_PRETOOL = {
+    "matcher": "Bash|apply_patch",
+    "hooks": [{"type": "command", "command": "python3 bridges/codex.py PreToolUse"}],
+}
+
+
+def _codex_file(tmp_path, *event_args: str, pretool: bool = True):
+    """A project .codex/hooks.json wiring each Event[:hook] through the Codex bridge, with its PreToolUse row."""
+    hooks: dict = {"PreToolUse": [_CODEX_PRETOOL]} if pretool else {}
     for arg in event_args:
         entry = _provider_entry(arg)
         entry["hooks"][0]["command"] = entry["hooks"][0]["command"].replace("claude.py", "codex.py")
@@ -381,9 +387,15 @@ class TestCodexOnlyHandlers:
 
     def test_a_claude_bridge_row_in_the_codex_file_does_not_count(self, tmp_path):
         codex_path = tmp_path / "codex_hooks.json"
-        claude_row = {"SessionStart": [_provider_entry("SessionStart:culture")]}
+        claude_row = {"PreToolUse": [_CODEX_PRETOOL], "SessionStart": [_provider_entry("SessionStart:culture")]}
         codex_path.write_text(json.dumps({"hooks": claude_row}), encoding="utf-8")
         assert self._verify(tmp_path, codex_path)["errors"] == [_never_fires("SessionStart", "culture")]
+
+    def test_a_codex_file_whose_pretooluse_misses_a_tool_is_an_error_naming_it(self, tmp_path):
+        result = self._verify(tmp_path, _codex_file(tmp_path, "SessionStart:culture", pretool=False))
+        assert result["ok"] is False
+        assert [e for e in result["errors"] if e.startswith("PreToolUse (Codex): Bash ")]
+        assert [e for e in result["errors"] if e.startswith("PreToolUse (Codex): apply_patch ")]
 
     def test_no_codex_file_is_claude_only(self, tmp_path):
         result = self._verify(tmp_path, tmp_path / "missing.json")

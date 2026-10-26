@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: cc_sessions.py
-# Version: 3.5.0
+# Version: 3.6.0
 # Description: CC-native session discovery, listing, and reclaim
 # Branch: hooks
 # Layer: apps/modules
@@ -21,6 +21,7 @@ from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
 from aipass.hooks.apps.handlers.cli.help_flags import wants_help
+from aipass.hooks.apps.handlers.config.loader import aipass_home
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
@@ -375,14 +376,30 @@ def _stop_session(session: dict) -> str:
     return f"PID {pid} ({branch}): already dead"
 
 
-def reclaim(branch_filter: str | None = None) -> list[str]:
-    """Properly stop sessions, optionally filtered to a branch. Returns action log."""
+def registered_branch_dir(name: str) -> str | None:
+    """The directory AIPASS_REGISTRY.json registers for branch *name*, or None when it names none."""
+    home = aipass_home()
+    registry = home / "AIPASS_REGISTRY.json" if home is not None else None
+    if registry is None or not registry.is_file():
+        return None
+    branches = json.loads(registry.read_text(encoding="utf-8")).get("branches", [])
+    for entry in branches:
+        if isinstance(entry, dict) and str(entry.get("name", "")).lower() == name.lower() and entry.get("path"):
+            return str(home / entry["path"])
+    return None
+
+
+def reclaim(branch_dir: str | None = None) -> list[str]:
+    """Properly stop sessions, optionally only those whose cwd is *branch_dir*. Returns action log.
+
+    The whole directory, never its last name: two projects can each hold a branch called hooks."""
+    target = str(Path(branch_dir).resolve()) if branch_dir else None
     actions = []
     for session in read_all_sessions():
         pid = session.get("pid")
         if not pid or not _is_pid_alive(pid) or not _session_pid_matches(session):
             continue
-        if branch_filter and _session_branch(session) != branch_filter:
+        if target and str(Path(session.get("cwd") or "?").resolve()) != target:
             continue
         action = _stop_session(session)
         actions.append(action)
@@ -444,7 +461,11 @@ def handle_command(command: str, args: list) -> bool:
             if len(args) > 1:
                 branch_filter = args[1].lstrip("@")
             CONSOLE.print(f"[bold cyan]sessions reclaim[/bold cyan]{f' @{branch_filter}' if branch_filter else ''}")
-            actions = reclaim(branch_filter)
+            branch_dir = registered_branch_dir(branch_filter) if branch_filter else None
+            if branch_filter and branch_dir is None:
+                CONSOLE.print(f"  @{branch_filter} is not a registered branch: nothing reclaimed")
+                return True
+            actions = reclaim(branch_dir)
             if not actions:
                 CONSOLE.print("  No live sessions to reclaim")
             else:

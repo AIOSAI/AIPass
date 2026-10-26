@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: wire_verify.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Wire verification — cross-checks provider settings vs project hook config
 # Branch: hooks
 # Layer: apps/modules
@@ -174,17 +174,21 @@ def _matcher_reaches(matcher: str, tool: str) -> bool:
         return False
 
 
-def _check_guarded_tools(provider_hooks, errors):
+#: Codex sends a shell call as Bash and every file edit as apply_patch; the bridge splits the patch for the gates.
+_CODEX_GUARDED_TOOLS = frozenset({"Bash", "apply_patch"})
+
+
+def _check_guarded_tools(provider_hooks, errors, marker=_BRIDGE_MARKER, tools=None, side=""):
     """ERROR for every tool a gate guards that no PreToolUse bridge entry sends to the engine (R7)."""
     matchers = [
         entry.get("matcher", "")
         for entry in provider_hooks.get("PreToolUse", [])
-        if _extract_bridge_arg(entry) == "PreToolUse"
+        if _extract_bridge_arg(entry, marker) == "PreToolUse"
     ]
-    for tool in sorted(gates.guarded_tools()):
+    for tool in sorted(gates.guarded_tools() if tools is None else tools):
         if not any(_matcher_reaches(matcher, tool) for matcher in matchers):
             errors.append(
-                f"PreToolUse: {tool} is guarded by the gates but no provider bridge matcher reaches it"
+                f"PreToolUse{side}: {tool} is guarded by the gates but no provider bridge matcher reaches it"
                 " — its gates never run (add it to the manifest's PreToolUse matcher)"
             )
 
@@ -194,10 +198,7 @@ def verify_wiring(provider_path=None, project_config=None, codex_path=None):
 
     Returns dict with keys: errors (list), warnings (list), info (list), ok (bool).
     """
-    errors = []
-    warnings = []
-    info = []
-
+    errors, warnings, info = [], [], []
     provider_hooks = _read_provider_hooks(provider_path)
     if not provider_hooks:
         errors.append("No provider hooks found in ~/.claude/settings.json")
@@ -210,6 +211,8 @@ def verify_wiring(provider_path=None, project_config=None, codex_path=None):
 
     provider_index = _build_provider_index(provider_hooks, errors)
     _check_guarded_tools(provider_hooks, errors)
+    if codex_path is not None and Path(codex_path).is_file():
+        _check_guarded_tools(_read_provider_hooks(codex_path), errors, _CODEX_MARKER, _CODEX_GUARDED_TOOLS, " (Codex)")
     codex_wired = _codex_wired(codex_path)
 
     for event_type, hooks_group in config.items():
@@ -222,12 +225,7 @@ def verify_wiring(provider_path=None, project_config=None, codex_path=None):
         if event not in config and not provider_index.get(event, {}).get("empty"):
             info.append(f"{event}: provider-only event (no project config section)")
 
-    return {
-        "errors": errors,
-        "warnings": warnings,
-        "info": info,
-        "ok": len(errors) == 0,
-    }
+    return {"errors": errors, "warnings": warnings, "info": info, "ok": len(errors) == 0}
 
 
 def _render_results(results):

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -23,8 +23,7 @@ import json
 import os
 import shlex
 import sys
-
-from aipass.prax.apps.modules.logger import system_logger as logger
+import time
 
 GUARDED_EVENTS = frozenset({"PreToolUse"})
 
@@ -44,6 +43,20 @@ BROKEN = (
 )
 
 
+#: Where a break is recorded: @trigger's branch watcher reads src/aipass/*/logs/*.log for ERROR lines.
+BREAK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "logs", "bridge.log")
+
+
+def _log(level: str, message: str, *args: object) -> None:
+    """Log through prax, or to stderr when prax cannot load: the bridge's answer never waits on prax."""
+    try:
+        from aipass.prax.apps.modules.logger import system_logger as logger
+
+        getattr(logger, level)(message, *args)
+    except Exception as exc:
+        sys.stderr.write(f"{message % args} (prax unavailable: {exc})\n")
+
+
 def _normalize_stdin(stdin_data: str) -> str:
     """Remap Codex field names to engine-expected names, and name the provider (a payload without one is Claude's)."""
     if not stdin_data.strip():
@@ -57,7 +70,7 @@ def _normalize_stdin(stdin_data: str) -> str:
         parsed.setdefault("provider", PROVIDER)
         return json.dumps(parsed)
     except (json.JSONDecodeError, TypeError) as exc:
-        logger.info("[HOOKS:codex] stdin normalization failed: %s", exc)
+        _log("info", "[HOOKS:codex] stdin normalization failed: %s", exc)
         return stdin_data
 
 
@@ -195,17 +208,24 @@ def _mount() -> str:
     try:
         return mount.mount(mount.branch_root(__file__))
     except Exception as exc:  # a bad promoted copy: the source still gates, and says so
-        logger.error("[HOOKS:codex] promoted copy unusable, serving the source tree: %s", exc)
+        _log("error", "[HOOKS:codex] promoted copy unusable, serving the source tree: %s", exc)
         return "source (fallback)"
 
 
 def _broken_output(event_type: str, exc: BaseException) -> str:
-    """Deny a guarded event outright; any other event gets an empty document."""
+    """Deny a guarded event outright; any other event gets an empty document. Answer first, record after."""
     reason = BROKEN.format(error=f"{type(exc).__name__}: {exc}")
-    logger.error("[HOOKS:codex] bridge: %s on %s", reason.splitlines()[0], event_type)
+    answer = json.dumps({})
     if event_type in GUARDED_EVENTS:
-        return _wrap_output(event_type, json.dumps({"decision": "block", "reason": reason}), 2)
-    return json.dumps({})
+        answer = _wrap_output(event_type, json.dumps({"decision": "block", "reason": reason}), 2)
+    sys.stderr.write(reason + "\n")
+    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.codex | ERROR | {reason.splitlines()[0]} on {event_type}\n"
+    try:
+        with open(BREAK_LOG, "a", encoding="utf-8") as handle:
+            handle.write(entry)
+    except OSError as err:
+        sys.stderr.write(f"[HOOKS:codex] bridge: the break was not recorded in {BREAK_LOG}: {err}\n")
+    return answer
 
 
 def main() -> None:

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_boot_doors.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for session boot's resume doors: the session pointer and the dispatched-job guard
 # Branch: hooks
 # Created: 2026-10-08
-# Modified: 2026-10-17
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_boot.py: the session-pointer doors and the dispatch guard."""
@@ -326,7 +326,7 @@ class TestDispatchedGuard:
         monkeypatch.setattr(session_boot, "_RECLAIM_POLL_S", 0.05)
 
         def fake_reclaim(branch_filter=None):
-            assert branch_filter == tmp_path.name
+            assert branch_filter == str(tmp_path)
             lock.unlink()
             return ["PID 999: sent SIGTERM"]
 

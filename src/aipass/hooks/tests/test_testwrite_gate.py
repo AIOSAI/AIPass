@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_testwrite_gate.py
-# Version: 1.1.4
+# Version: 1.2.0
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -109,6 +109,14 @@ class TestTheSwitch:
         result = _run(project["seat"], file_path=project["new_test"], tool=tool)
         assert _blocked(result)
         assert "test_brand_new.py" in _reason(result)
+
+    def test_a_relative_new_test_is_judged_from_the_payload_cwd_not_the_process(self, project, tmp_path, monkeypatch):
+        decoy = tmp_path / "elsewhere" / "tests"
+        decoy.mkdir(parents=True)
+        (decoy / "test_relative_new.py").write_text("", encoding="utf-8")
+        monkeypatch.chdir(decoy.parent)
+        _policy(project)
+        assert _blocked(_run(project["seat"], file_path="tests/test_relative_new.py"))
 
     def test_off_blocks_a_new_conftest(self, project: dict):
         """conftest.py carries a test tree's shared setup — it grows the corpus too."""

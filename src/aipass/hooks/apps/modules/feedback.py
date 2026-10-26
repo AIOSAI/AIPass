@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: feedback.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Feedback pulse toggle — on/off control for periodic feedback ask
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-18
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Feedback pulse toggle — on/off control for the periodic feedback ask via drone @hooks feedback."""
@@ -110,6 +110,12 @@ def handle_command(command: str, args: list) -> bool:
             if sentinel.exists():
                 sentinel.unlink()
             json_handler.log_operation("feedback_toggle", {"state": "on"})
+            if not _configured_on():
+                CONSOLE.print(
+                    "[yellow]Feedback pulse still DISABLED in hooks.json[/yellow] (sentinel cleared): it fires only "
+                    "when .aipass/hooks.json has hooks_enabled and UserPromptSubmit.feedback_pulse.enabled true"
+                )
+                return True
             CONSOLE.print("[green]Feedback pulse ENABLED[/green]")
             return True
 

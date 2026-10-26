@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.1.3
+# Version: 1.1.4
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -464,7 +464,7 @@ class TestAlertBodyCap:
         banner = self._banner(tmp_path, "b" * 900)
         body_line = next(line for line in banner.splitlines() if line.startswith("  b"))
         assert len(body_line.strip()) == 300, body_line
-        assert "drone @hooks alerts" in body_line
+        assert body_line.endswith("full text: .aipass/alerts.json, id body-cap]"), "the marker names a real source"
 
     def test_a_body_at_the_cap_is_untouched(self, tmp_path):
         """The cap is a ceiling, not a target: 300 chars renders whole, marker included nowhere."""

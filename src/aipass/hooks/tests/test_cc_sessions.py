@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
@@ -463,9 +463,29 @@ class TestReclaim:
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_stop_session", return_value="stopped") as mock_stop,
         ):
-            actions = cc_sessions.reclaim("devpulse")
+            actions = cc_sessions.reclaim(str(tmp_path / "devpulse"))
         assert actions == []
         mock_stop.assert_not_called()
+
+    def test_reclaim_stops_only_the_branch_at_that_path_not_a_namesake(self, tmp_path):
+        mine, other = tmp_path / "aipass" / "hooks", tmp_path / "project" / "hooks"
+        sessions_dir = tmp_path / "sessions"
+        for folder in (mine, other, sessions_dir):
+            folder.mkdir(parents=True)
+        my_pid = os.getpid()
+        rows = {my_pid: mine, my_pid + 1: other}
+        for pid, cwd in rows.items():
+            row = {"pid": pid, "sessionId": str(pid), "cwd": str(cwd), "kind": "interactive"}
+            (sessions_dir / f"{pid}.json").write_text(json.dumps(row), encoding="utf-8")
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", sessions_dir),
+            patch.object(cc_sessions, "_is_pid_alive", return_value=True),
+            patch.object(cc_sessions, "_session_pid_matches", return_value=True),
+            patch.object(cc_sessions, "_stop_session", side_effect=lambda s: f"stopped {s['cwd']}") as mock_stop,
+        ):
+            actions = cc_sessions.reclaim(str(mine))
+        assert actions == [f"stopped {mine}"]
+        assert mock_stop.call_count == 1
 
     def test_reclaim_empty_no_actions(self, tmp_path):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
@@ -540,12 +560,23 @@ class TestIntrospection:
         assert err.startswith("sessions reclaim\n")
         assert "No live sessions to reclaim" in err
 
-    def test_handle_command_sessions_reclaim_branch(self, tmp_path, capsys):
+    def test_handle_command_sessions_reclaim_branch(self, tmp_path, capsys, monkeypatch):
+        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions.handle_command("sessions", ["reclaim", "@hooks"]) is True
         err = capsys.readouterr().err
         assert err.startswith("sessions reclaim @hooks\n")
         assert "No live sessions to reclaim" in err
+
+    def test_reclaiming_an_unregistered_branch_stops_nothing_and_says_so(self, tmp_path, capsys, monkeypatch):
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        with patch.object(cc_sessions, "_stop_session") as mock_stop:
+            assert cc_sessions.handle_command("sessions", ["reclaim", "@ghost"]) is True
+        assert "@ghost is not a registered branch" in capsys.readouterr().err
+        mock_stop.assert_not_called()
 
     def test_handle_command_help(self, capsys):
         assert cc_sessions.handle_command("--help", []) is True

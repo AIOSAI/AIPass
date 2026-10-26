@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
 # Branch: hooks
 # Layer: tests
@@ -15,6 +15,7 @@
 # seedgo: no-test-needed(documentation) — the Codex protocol notes in the bridge's module docstring
 # seedgo: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
 
+import importlib.util
 import io
 import json
 import os
@@ -233,3 +234,26 @@ class TestApplyPatchMapping:
         patch = "*** Begin Patch\n*** Add File: new.py\n+x\n*** Update File: old.py\n@@\n-1\n+2\n*** End Patch"
         result = bridge.run("PostToolUse", _patch_payload(tmp_path, patch))
         assert result["hookSpecificOutput"]["additionalContext"] == "lint fixed in new.py\nlint fixed in old.py"
+
+
+class TestBrokenEngine:
+    def test_with_prax_unimportable_a_broken_engine_still_denies_pretooluse(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", None)
+        spec = importlib.util.spec_from_file_location("_codex_bridge_fresh", codex.__file__)
+        fresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fresh)
+
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(fresh, "_mount", _engine_gone)
+        monkeypatch.setattr(fresh, "BREAK_LOG", str(tmp_path / "bridge.log"))
+        monkeypatch.setattr(sys, "argv", ["codex.py", "PreToolUse"])
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {}})))
+        fresh.main()
+        out, err = capsys.readouterr()
+        answer = json.loads(out)["hookSpecificOutput"]
+        assert answer["permissionDecision"] == "deny"
+        assert "HOOKS BROKEN" in answer["permissionDecisionReason"]
+        assert "HOOKS BROKEN" in err
+        assert "bridges.codex | ERROR" in (tmp_path / "bridge.log").read_text(encoding="utf-8")

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_feedback_pulse.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for feedback pulse handler and toggle module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
@@ -327,7 +327,8 @@ class TestFeedbackToggleModule:
 
         assert not sentinel.exists()
 
-    def test_handle_command_feedback_on_no_sentinel(self, tmp_path, capsys):
+    def test_handle_command_feedback_on_no_sentinel(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(feedback, "find_project_config", lambda: _PULSE_ON)
         sentinel = tmp_path / "feedback_off"
         with patch(
             "aipass.hooks.apps.modules.feedback._sentinel",
@@ -337,6 +338,18 @@ class TestFeedbackToggleModule:
 
         # The effect: already-enabled reports ENABLED and creates no sentinel.
         assert "Feedback pulse ENABLED" in capsys.readouterr().err
+        assert not sentinel.exists()
+
+    def test_on_while_hooks_json_disables_the_pulse_says_so_and_names_the_switch(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(feedback, "find_project_config", lambda: {"UserPromptSubmit": {"feedback_pulse": {}}})
+        sentinel = tmp_path / "feedback_off"
+        sentinel.touch()
+        with patch("aipass.hooks.apps.modules.feedback._sentinel", return_value=sentinel):
+            assert handle_command("feedback", ["on"]) is True
+
+        err = capsys.readouterr().err
+        assert "ENABLED" not in err
+        assert "DISABLED in hooks.json" in err and "feedback_pulse.enabled" in err
         assert not sentinel.exists()
 
     def test_handle_command_feedback_help(self, capsys):

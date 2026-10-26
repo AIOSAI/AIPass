@@ -15,7 +15,9 @@ No AI changes a provider's settings alone, on either CLI, from any seat. The own
 | AIPass provider wiring | `$AIPASS_HOME/.claude/provider_manifest.json`, `$AIPASS_HOME/.codex/hooks.json` |
 | Provider installer | `aipass doctor --fix`, `setup.sh`, `provider_wire.py`, run from Bash |
 
-A path counts from either end of a symlink: a link anywhere that lands on a protected file is that file. Not protected: a branch's or the repo's `.claude/settings.json` and `.claude/settings.local.json`, `.aipass/hooks.json`, and everything else under `~/.codex` (sessions, logs, skills).
+A path counts from either end of a symlink: a link anywhere that lands on a protected file is that file.
+
+Directories: `~/.codex`, `$CODEX_HOME`, `~/.claude` and `~/.codex/rules` are protected as folders too. A write into one (`cp x ~/.codex/`) is a write to that class. A move or delete of one, or of any folder that holds one (`mv ~/.codex ~/.codex.saved`, `rm -r ~/.codex/rules`, `mv ~ /tmp/h`), changes every file inside, so it is judged the same way. A copy into a folder that only holds one (`cp notes.txt ~/`) changes the copied file alone and passes. Listing or reading a folder is never judged. Not protected: a branch's or the repo's `.claude/settings.json` and `.claude/settings.local.json`, `.aipass/hooks.json`, and everything else under `~/.codex` (sessions, logs, skills).
 
 ## The decision
 
@@ -33,7 +35,7 @@ Codex 0.164 parses `permissionDecision: "ask"` but does not support it. It marks
 
 ## Installers
 
-An AI running `aipass doctor --fix`, `setup.sh` or `provider_wire.py` from Bash rewrites provider files in one call, so the run is judged like a write to the wiring. A person running them in their own terminal passes no hook, so there is no exemption.
+An AI running `aipass doctor --fix`, `setup.sh` or `provider_wire.py` from Bash rewrites provider files in one call, so the run is judged like a write to the wiring. Only an executed installer counts: the program itself (`./setup.sh`, `timeout 60 ./setup.sh`) or an interpreter's script operand (`bash setup.sh`, `python3 provider_wire.py`). A program that reads the file (`cat setup.sh`, `rg needle setup.sh`) passes. A person running them in their own terminal passes no hook, so there is no exemption.
 
 ## What it cannot see
 

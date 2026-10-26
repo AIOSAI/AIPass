@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -158,7 +158,7 @@ class TestSessionsReclaimNeverStopsSessionsOnHelp:
     def test_real_reclaim_still_runs(self):
         with patch.object(cc_sessions, "reclaim", return_value=[]) as target:
             assert cc_sessions.handle_command("sessions", ["reclaim", "@hooks"]) is True
-        target.assert_called_once_with("hooks")
+        target.assert_called_once_with(cc_sessions.registered_branch_dir("hooks"))
 
 
 class TestFeedbackNeverTogglesOnHelp:
