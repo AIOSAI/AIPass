@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.4.0
+# Version: 2.4.1
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -45,6 +45,7 @@ BROKEN = (
 
 #: Where a break is recorded: @trigger's branch watcher reads src/aipass/*/logs/*.log for ERROR lines.
 BREAK_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "logs", "bridge.log")
+LIVE_BREAK_LOG = BREAK_LOG
 
 
 def _log(level: str, message: str, *args: object) -> None:
@@ -219,6 +220,8 @@ def _broken_output(event_type: str, exc: BaseException) -> str:
     if event_type in GUARDED_EVENTS:
         answer = _wrap_output(event_type, json.dumps({"decision": "block", "reason": reason}), 2)
     sys.stderr.write(reason + "\n")
+    if "_pytest" in sys.modules and BREAK_LOG == LIVE_BREAK_LOG:
+        return answer  # prax's own test seam: a suite run's break never lands in the live log medic reads
     entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} | bridges.codex | ERROR | {reason.splitlines()[0]} on {event_type}\n"
     try:
         with open(BREAK_LOG, "a", encoding="utf-8") as handle:

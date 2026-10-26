@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_engine_safeguards.py
 # Description: The hook engine's safeguards: trust, timeouts, one document, the ledger, fail-closed gates, promote
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/modules/engine.py: trust, timeouts, the ledger and the fail-closed gates."""
@@ -898,6 +898,16 @@ class TestTheBridgeFailsClosed:
         datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S")
         assert level == "ERROR"
         assert "half-edited engine" in message and "PreToolUse" in message
+
+    def test_a_suite_run_break_never_lands_in_the_live_bridge_log(self, monkeypatch, capsys, mock_logger):
+        bridge = self._bridge("PreToolUse", monkeypatch)
+        monkeypatch.setattr(bridge, "BREAK_LOG", bridge.LIVE_BREAK_LOG)
+        live = Path(bridge.LIVE_BREAK_LOG)
+        before = live.read_bytes() if live.exists() else b""
+        with pytest.raises(SystemExit):
+            bridge.main()
+        assert "HOOKS BROKEN" in capsys.readouterr().err
+        assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"
 
     def test_pre_tool_use_is_refused(self, monkeypatch, capsys, mock_logger):
         with pytest.raises(SystemExit) as refused:

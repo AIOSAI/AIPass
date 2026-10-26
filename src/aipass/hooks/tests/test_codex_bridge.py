@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
 # Branch: hooks
 # Layer: tests
@@ -20,6 +20,7 @@ import io
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -257,3 +258,13 @@ class TestBrokenEngine:
         assert "HOOKS BROKEN" in answer["permissionDecisionReason"]
         assert "HOOKS BROKEN" in err
         assert "bridges.codex | ERROR" in (tmp_path / "bridge.log").read_text(encoding="utf-8")
+
+    def test_a_suite_run_break_never_lands_in_the_live_bridge_log(self, monkeypatch, capsys):
+        live = Path(codex.LIVE_BREAK_LOG)
+        before = live.read_bytes() if live.exists() else b""
+        monkeypatch.setattr(sys, "argv", ["codex.py", "PreToolUse"])
+        patch = {"tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** End Patch"}}
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(patch)))
+        codex.main()
+        assert "HOOKS BROKEN" in capsys.readouterr().err, "the break must happen for the pin to mean anything"
+        assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"

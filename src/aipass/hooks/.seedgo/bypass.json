@@ -1604,7 +1604,7 @@
     {
       "file": "tests/test_codex_bridge.py",
       "standard": "import_site",
-      "lines": [241],
+      "lines": [242],
       "reason": "The pin's subject is prax being unimportable: a None entry in sys.modules is what makes that import raise; the bridge is then loaded fresh from its file, never stubbed."
     },
     {
