@@ -1175,6 +1175,11 @@
     },
     {
       "file": "apps/modules/context_window.py",
+      "standard": "modules",
+      "reason": "Reads Codex's ~/.codex/config.toml (two int keys) with stdlib tomllib: an external CLI's TOML file, not branch JSON, so json_handler cannot read it. The module IS the transcript/window reader service; the read is one call in _codex_config_int."
+    },
+    {
+      "file": "apps/modules/context_window.py",
       "standard": "json_structure",
       "reason": "Reads external state (session transcript JSONL via tail with stdlib json, branch .claude/settings.local.json through handlers/json/files) — not branch data storage needing json_handler. The module IS the transcript/window reader service (DPLAN-0253), same pattern as cc_sessions.py."
     },
@@ -1415,8 +1420,8 @@
     {
       "file": "apps/modules/context_window.py",
       "standard": "logged_fallback",
-      "lines": [60],
-      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write."
+      "lines": [161, 164, 183, 186, 271],
+      "reason": "Fleet green leg 5: the context gauge's reading; None shows no gauge. Display only, guards no write. 161-186: an unreadable transcript (Claude's or a Codex rollout) reads as no usage / no model. 271: an unset or unreadable Codex config.toml key reads as unset, so Codex's own default window and compact point stand."
     },
     {
       "file": "apps/modules/cc_transcripts.py",
@@ -1451,7 +1456,7 @@
     {
       "file": "apps/handlers/lifecycle/pre_compact_prep.py",
       "standard": "logged_fallback",
-      "lines": [63, 133, 197, 230],
+      "lines": [64, 134, 198, 231],
       "reason": "Fleet green leg 5: 63 and 133 are counts for the compact snapshot, None renders as unknown, never zero. 197 and 230: the session stamp is skipped and logged at WARNING; the agent's own memory is untouched."
     },
     {

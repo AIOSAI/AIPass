@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
@@ -49,6 +49,23 @@ def _branch_settings(tmp_path, name, data):
     claude_dir.mkdir(parents=True, exist_ok=True)
     (claude_dir / name).write_text(json.dumps(data), encoding="utf-8")
     return branch_dir
+
+
+def _codex_rollout(path, total_tokens, window=475_000, model="gpt-6.1-sol"):
+    """A Codex rollout in the shape 0.164 writes: session_meta, turn_context, the newest token_count."""
+    usage = {"input_tokens": total_tokens - 568, "cached_input_tokens": 7680, "output_tokens": 568}
+    info = {
+        "total_token_usage": dict(usage, total_tokens=total_tokens),
+        "last_token_usage": dict(usage, total_tokens=total_tokens),
+    }
+    if window is not None:
+        info["model_context_window"] = window
+    lines = [
+        {"type": "session_meta", "payload": {"id": "s", "cwd": "/x", "source": "cli", "cli_version": "0.164.0"}},
+        {"type": "turn_context", "payload": {"cwd": "/x", "model": model, "effort": "medium"}},
+        {"type": "event_msg", "payload": {"type": "token_count", "info": info, "rate_limits": {}}},
+    ]
+    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
 
 
 class TestFindBranchDir:
@@ -271,3 +288,48 @@ class TestResolveCompactWindow:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestCodexRollout:
+    """The Codex rollout shape, told from its first line, never from its path."""
+
+    @pytest.fixture(autouse=True)
+    def _no_codex_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(context_window, "codex_config_path", lambda: tmp_path / "codex_config.toml")
+
+    def test_usage_and_model_come_from_token_count_and_turn_context(self, tmp_path):
+        rollout = tmp_path / "t.jsonl"
+        _codex_rollout(rollout, total_tokens=22_113)
+        usage = read_latest_usage(str(rollout))
+        assert usage == {
+            "input_tokens": 21_545,
+            "cached_input_tokens": 7680,
+            "output_tokens": 568,
+            "total_tokens": 22_113,
+        }
+        assert context_window.context_fill_tokens(usage) == 22_113
+        assert read_latest_model(str(rollout)) == "gpt-6.1-sol"
+
+    def test_the_first_line_decides_the_shape(self, tmp_path):
+        rollout, claude = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+        _codex_rollout(rollout, total_tokens=1)
+        claude.write_text(
+            json.dumps({"type": "assistant", "message": {"usage": {"input_tokens": 3}}}), encoding="utf-8"
+        )
+        assert context_window.transcript_provider(str(rollout)) == "codex"
+        assert context_window.transcript_provider(str(claude)) == "claude"
+        assert read_latest_usage(str(claude)) == {"input_tokens": 3}
+
+    def test_the_window_is_the_rollouts_and_the_point_is_90_percent_of_the_full_one(self, tmp_path):
+        rollout = tmp_path / "t.jsonl"
+        _codex_rollout(rollout, total_tokens=1, window=258_400)
+        window = context_window.resolve_compact_window(str(tmp_path), "gpt-6.1-sol", str(rollout))
+        assert window == 258_400
+        assert context_window.compact_threshold(window, "codex") == 244_800
+        assert context_window.compact_threshold(200_000) == 167_000
+
+    def test_a_configured_limit_only_lowers_the_point(self, tmp_path):
+        (tmp_path / "codex_config.toml").write_text("model_auto_compact_token_limit = 900000\n", encoding="utf-8")
+        assert context_window.compact_threshold(475_000, "codex") == 450_000
+        (tmp_path / "codex_config.toml").write_text("model_auto_compact_token_limit = 300000\n", encoding="utf-8")
+        assert context_window.compact_threshold(475_000, "codex") == 300_000

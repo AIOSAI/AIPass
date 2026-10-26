@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.2.0
-# Description: Calm heads-up to run /prep as auto-compact approaches (UserPromptSubmit, DPLAN-0253), once per window
+# Version: 1.3.0
+# Description: Calm heads-up to run /prep ($prep on Codex) as auto-compact approaches (UserPromptSubmit, DPLAN-0253), once per window
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-10-19
+# Modified: 2026-10-25
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -72,8 +72,8 @@ def handle(hook_data: dict) -> dict:
         fill = context_window.context_fill_tokens(usage)
         cwd = hook_data.get("cwd", "") or str(Path.cwd())
         model = context_window.read_latest_model(transcript_path)
-        window_size = context_window.resolve_compact_window(cwd, model)
-        trigger = context_window.compact_threshold(window_size)
+        window_size = context_window.resolve_compact_window(cwd, model, transcript_path)
+        trigger = context_window.compact_threshold(window_size, context_window.transcript_provider(transcript_path))
         if trigger <= 0:
             return {"stdout": "", "exit_code": 0}
 
@@ -85,6 +85,7 @@ def handle(hook_data: dict) -> dict:
         )
 
         window = _window_key(hook_data)
+        prep = "$prep" if hook_data.get("provider") == "codex" else "/prep"
 
         if pct >= _ESCALATE_THRESHOLD_PCT and not _already_fired(session_id, window, "95"):
             _mark_fired(session_id, window, "95")
@@ -95,7 +96,7 @@ def handle(hook_data: dict) -> dict:
             return {
                 "stdout": (
                     f"{head} Compact fires soon. "
-                    "Run /prep now if anything is unbanked (just do it, no need to ask), "
+                    f"Run {prep} now if anything is unbanked (just do it, no need to ask), "
                     "then carry on — recovery injection handles the rest."
                 ),
                 "exit_code": 0,
@@ -110,7 +111,7 @@ def handle(hook_data: dict) -> dict:
             return {
                 "stdout": (
                     f"{head} Heads up, auto-compact "
-                    "is coming. Run /prep at the next natural breakpoint (just do it, no need "
+                    f"is coming. Run {prep} at the next natural breakpoint (just do it, no need "
                     "to ask). Compact is survivable by design — keep working calmly."
                 ),
                 "exit_code": 0,
