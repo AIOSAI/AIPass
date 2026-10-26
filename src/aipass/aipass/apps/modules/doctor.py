@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.7.0
+# Version: 1.7.1
 # Created: 2026-04-16
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -340,7 +340,7 @@ def check_identity() -> List[CheckResult]:
 
     reg_path = _find_registry()
     if reg_path:
-        active_home = str(reg_path.parent)
+        active_home = _tree_in_use(reg_path.parent)
         results.append(CheckResult("AIPASS_HOME", GLYPH_PASS, active_home, ""))
     else:
         active_home = os.environ.get("AIPASS_HOME", "")
@@ -1075,6 +1075,27 @@ def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[Chec
             f"or add it to {sm.IGNORE_NAME} to keep it for good",
         )
     ]
+
+
+def _tree_in_use(root: Path) -> str:
+    """The AIPass tree a session at the registry root *root* runs on.
+
+    *root* itself when it is an AIPass tree. An external project keeps its own registry but runs
+    on the tree its .claude settings name (local first); *root* when they name none."""
+    if (root / "src" / "aipass").is_dir():
+        return str(root)
+    for name in ("settings.local.json", "settings.json"):
+        path = root / ".claude" / name
+        if not path.is_file():
+            continue
+        try:
+            named = json.loads(path.read_text(encoding="utf-8")).get("env", {}).get("AIPASS_HOME", "")
+        except (json.JSONDecodeError, OSError, AttributeError) as exc:
+            logger.warning("[doctor] project settings unreadable for AIPASS_HOME: %s: %s", path, exc)
+            continue
+        if named:
+            return str(named)
+    return str(root)
 
 
 _SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "skills fix")

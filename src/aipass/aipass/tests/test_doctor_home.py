@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count and shared-skills rows
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight, the drone count, shared skills."""
@@ -433,6 +433,62 @@ class TestHomeAgreement:
         ):
             rows = check_identity()
         return [r for r in rows if r.label in ("AIPASS_HOME split", "AIPASS_HOME pair")]
+
+    @staticmethod
+    def _run_at_registry(root, configured):
+        """The home rows when doctor stands at a registry root, Claude Code's tree stood in for."""
+        mod = "aipass.aipass.apps.modules.doctor"
+        registry = root / "PROJ_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        with (
+            patch(f"{mod}._find_registry", return_value=registry),
+            patch(f"{mod}._configured_aipass_home", return_value=configured),
+            patch(f"{mod}._check_global_aipass_home", return_value=[]),
+        ):
+            rows = check_identity()
+        return [r for r in rows if r.label in ("AIPASS_HOME", "AIPASS_HOME split", "AIPASS_HOME pair")]
+
+    @staticmethod
+    def _aipass_tree(path):
+        (path / "src" / "aipass").mkdir(parents=True)
+        return path
+
+    @staticmethod
+    def _external_project(path, names_home):
+        (path / ".claude").mkdir(parents=True)
+        settings = {"env": {"AIPASS_HOME": str(names_home)}}
+        (path / ".claude" / "settings.local.json").write_text(json.dumps(settings), encoding="utf-8")
+        return path
+
+    def test_an_external_project_on_the_global_tree_is_no_split(self, tmp_path) -> None:
+        tree = self._aipass_tree(tmp_path / "AIPass")
+        project = self._external_project(tmp_path / "Vera", tree)
+
+        rows = self._run_at_registry(project, str(tree))
+
+        assert [(r.label, r.glyph, r.detail) for r in rows] == [("AIPASS_HOME", GLYPH_PASS, str(tree))]
+
+    def test_an_external_project_on_another_tree_is_still_a_split(self, tmp_path) -> None:
+        tree = self._aipass_tree(tmp_path / "AIPass")
+        other = self._aipass_tree(tmp_path / "AIPass2")
+        project = self._external_project(tmp_path / "Vera", other)
+
+        rows = self._run_at_registry(project, str(tree))
+
+        (split,) = [r for r in rows if r.label == "AIPASS_HOME split"]
+        assert split.glyph == GLYPH_FAIL
+        assert str(other) in split.detail and str(tree) in split.detail
+
+    def test_an_aipass_tree_under_another_trees_settings_is_a_split(self, tmp_path) -> None:
+        tree = self._aipass_tree(tmp_path / "AIPass")
+        checkout = self._aipass_tree(tmp_path / "AIPass2")
+        self._external_project(checkout, tree)
+
+        rows = self._run_at_registry(checkout, str(tree))
+
+        (split,) = [r for r in rows if r.label == "AIPASS_HOME split"]
+        assert split.glyph == GLYPH_FAIL
+        assert str(checkout) in split.detail
 
     def test_split_brain_is_an_error(self, tmp_path) -> None:
         """Two different trees is a real fault, not an advisory."""

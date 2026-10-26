@@ -15,6 +15,10 @@ PyPI version — not the changelog header.
 
 - **seedgo**: `host_coupled_oracle`, a tests-only standard (branch level): a test that passes its own `os.getpid()`/`getppid()` to an args/cmdline/title reader, or pins a literal runner `call_count == N` on a function that both forks on platform and runs a subprocess, is host-coupled and fails. Born of PR #807's three clone-only reds (pytest-xdist retitles its workers; macOS reads args through `ps`). Two pins on reductions of the real tests, seven mutants red, fleet 0 hits after hooks' cures.
 
+### Fixed
+
+- **aipass**: `aipass doctor` run from an external project's root no longer reports `AIPASS_HOME split` against that project. The terminal's tree is the registry root when that root is an AIPass tree (it holds `src/aipass`); in an external project it is the tree the project's `.claude/settings.local.json` (then `settings.json`) names in `env.AIPASS_HOME`. Two AIPass trees still fail the row (`doctor.py` 1.7.1, `tests/test_doctor_home.py` 1.2.0, three pins, two mutants red). Found by Vera-Studio's update to 2.8.28, the first run of the release ritual.
+
 ## [2026-10-25] — v2.8.28: Codex as a second provider (dispatch, hooks, context gauge, one skills dir for both CLIs), the owner's settings gate, the ratchet's budget exit, the api suite at 75 s
 
 ### Added

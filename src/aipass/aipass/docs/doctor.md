@@ -71,7 +71,11 @@ same merge, all four parts, runs from the installer's `refresh_provider_hooks`,
 so both doors agree; under Git Bash on Windows both also set `PYTHONUTF8=1`.
 The one difference: install re-points `AIPASS_HOME` to the tree being installed,
 and says so; `doctor --fix` never does, so a fix from a second checkout cannot
-take the home from the first (the home-agreement row flags that split).
+take the home from the first (the home-agreement row flags that split). The
+row compares the tree Claude Code's settings name with the terminal's tree:
+the registry root when it is an AIPass tree (it holds `src/aipass`), else the
+tree an external project's `.claude/settings.local.json` or `settings.json`
+names in `env.AIPASS_HOME`. Two AIPass trees fail the row.
 
 Codex reads the same hook shape from the repo's `.codex/hooks.json`. Both doors
 write that file from the manifest's `cli.codex.hooks` rows, the repo root taken
