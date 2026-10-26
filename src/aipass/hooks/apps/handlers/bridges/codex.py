@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.4.1
+# Version: 2.4.2
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
@@ -104,7 +104,12 @@ def _wrap_output(event_type: str, output: str, exit_code: int) -> str:
             }
         )
     own = doc.get("hookSpecificOutput") if doc is not None else None
-    if event_type in GUARDED_EVENTS and isinstance(own, dict) and own.get("permissionDecision") == "ask":
+    if (
+        doc is not None
+        and event_type in GUARDED_EVENTS
+        and isinstance(own, dict)
+        and own.get("permissionDecision") == "ask"
+    ):
         # Codex cannot ask: it marks the hook failed and runs the call, so an ask is a deny here.
         own["permissionDecision"] = "deny"
         doc.setdefault("systemMessage", own.get("permissionDecisionReason") or "Blocked by AIPass hook")

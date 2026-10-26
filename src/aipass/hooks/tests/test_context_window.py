@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
@@ -288,6 +288,20 @@ class TestResolveCompactWindow:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestCodexConfigPath:
+    """The seam the gauge tests patch, run for real: $CODEX_HOME wins, else ~/.codex."""
+
+    def test_codex_home_holds_the_config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+        assert context_window.codex_config_path() == tmp_path / "config.toml"
+
+    def test_without_codex_home_it_is_under_the_home_dot_codex(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        for name in ("HOME", "USERPROFILE"):  # Path.home() reads HOME on POSIX, USERPROFILE on Windows
+            monkeypatch.setenv(name, str(tmp_path))
+        assert context_window.codex_config_path() == tmp_path / ".codex" / "config.toml"
 
 
 class TestCodexRollout:
