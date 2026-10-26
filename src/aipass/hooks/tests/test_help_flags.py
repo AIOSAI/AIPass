@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_help_flags.py
-# Version: 1.1.1
+# Version: 1.1.2
 # Description: Help-flag safety — a help flag anywhere means explain, never execute
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the modules that route through it."""
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(documentation) — each module's help text wording, the documentation checker covers it
 # seedgo: no-test-needed(constant) — HELP_FLAGS' spelling list beyond the members asserted here
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -155,10 +156,14 @@ class TestSessionsReclaimNeverStopsSessionsOnHelp:
             assert cc_sessions.handle_command("cc_sessions", ["reclaim", "--help"]) is True
         target.assert_not_called()
 
-    def test_real_reclaim_still_runs(self):
+    def test_real_reclaim_still_runs(self, tmp_path, monkeypatch):
+        # Its own registry: AIPASS_REGISTRY.json is gitignored, so a clean clone has none.
+        registry = {"branches": [{"name": "HOOKS", "path": "src/aipass/hooks"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         with patch.object(cc_sessions, "reclaim", return_value=[]) as target:
             assert cc_sessions.handle_command("sessions", ["reclaim", "@hooks"]) is True
-        target.assert_called_once_with(cc_sessions.registered_branch_dir("hooks"))
+        target.assert_called_once_with(str(tmp_path / "src" / "aipass" / "hooks"))
 
 
 class TestFeedbackNeverTogglesOnHelp:

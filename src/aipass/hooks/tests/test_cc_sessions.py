@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -15,6 +15,7 @@
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -75,10 +76,16 @@ class TestProcessReaders:
             patch.object(cc_sessions, "process_args", side_effect=lambda p: argvs[pids.index(p)]),
         )
 
-    def test_this_process_args_name_its_interpreter(self):
-        args = cc_sessions.process_args(os.getpid())
+    def test_a_child_process_args_name_its_interpreter(self):
+        # A child, not this process: pytest-xdist retitles its workers, so our own args read "[pytest-xdist".
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            args = cc_sessions.process_args(child.pid)
+        finally:
+            child.terminate()
+            child.wait()
         assert args is not None
-        assert args[0] == sys.argv[0] or "python" in Path(args[0]).name
+        assert args[0] == sys.executable
 
     def test_an_absent_process_answers_none(self):
         assert cc_sessions.process_args(2**22 + 12345) is None
@@ -154,7 +161,9 @@ class TestGetPpidPortable:
             patch("subprocess.run", side_effect=OSError("no ps")) as ps,
         ):
             assert cc_sessions.resolve_session_pid() is None
-        assert ps.call_count == 1
+        # Only the ppid lookups count: on macOS the codex check's args read is a ps too, after the walk.
+        ppid_lookups = [c for c in ps.call_args_list if "ppid=" in c.args[0]]
+        assert len(ppid_lookups) == 1
 
 
 class TestIsPidAlive:
