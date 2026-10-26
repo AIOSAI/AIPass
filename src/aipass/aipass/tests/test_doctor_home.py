@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
-# Description: Tests for doctor's home, owner-seating, preflight and citizen-count rows
-# Version: 1.0.1
+# Description: Tests for doctor's home, owner-seating, preflight, citizen-count and shared-skills rows
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
-"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight and the drone count."""
+"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight, the drone count, shared skills."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
@@ -28,6 +28,7 @@ from aipass.aipass.apps.modules.doctor import (
     run_doctor,
     run_doctor_preflight,
 )
+from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.tests.support_doctor import _home_at
 
 
@@ -512,3 +513,110 @@ class TestHomeAgreement:
         assert self._run("", str(tmp_path)) == []
         assert self._run(str(tmp_path), "") == []
         assert self._run("", "") == []
+
+
+class TestSharedSkillsRows:
+    """The Scaffold group's skills rows and their --fix, through run_doctor; every other group answers nothing."""
+
+    @pytest.fixture(autouse=True)
+    def _every_other_edge(self, monkeypatch, tmp_path) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_sandbox"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.fix_provider_settings", lambda *_a, **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_wire_verify", lambda: [])
+        monkeypatch.setattr(f"{mod}._fix_owner_seating", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_owner_seating", lambda: [])
+        self.root = tmp_path / "proj"
+        self.root.mkdir()
+        registry = self.root / "PROJ_REGISTRY.json"
+        registry.write_text(json.dumps({"metadata": {"id": "p"}, "branches": []}), encoding="utf-8")
+        monkeypatch.setattr(f"{mod}._find_registry", lambda: registry)
+        self.printed: dict = {}
+
+        def _record(groups):
+            self.printed.update(groups)
+            return 0, 0, 0
+
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", _record)
+
+    def _skill(self, name: str, frontmatter: str) -> None:
+        skill = self.root / ".agents" / "skills" / name / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text(f"---\n{frontmatter}---\n\nbody\n", encoding="utf-8")
+
+    def _rows(self, **kwargs) -> dict:
+        run_doctor(**kwargs)
+        return {r.label: r for r in self.printed["Scaffold"]}
+
+    def test_named_skills_behind_a_link_pass_both_rows(self) -> None:
+        self._skill("prep", "name: prep\ndescription: wrap up\n")
+        (self.root / ".claude").mkdir()
+        (self.root / ".claude" / "skills").symlink_to("../.agents/skills", target_is_directory=True)
+
+        rows = self._rows()
+
+        assert rows["shared skills"].glyph == GLYPH_PASS
+        assert rows["shared skills"].detail == "1 in .agents/skills, each named and described"
+        assert rows["skills link"].glyph == GLYPH_PASS
+        assert rows["skills link"].detail == ".claude/skills -> .agents/skills"
+
+    def test_a_skill_with_an_empty_description_and_a_missing_link_warn_with_the_cure(self) -> None:
+        self._skill("prep", "name: prep\ndescription:  \n")
+
+        rows = self._rows()
+
+        assert rows["shared skills"].glyph == GLYPH_WARN
+        assert rows["shared skills"].detail == "no name or description: prep"
+        assert rows["skills link"].glyph == GLYPH_WARN
+        assert rows["skills link"].detail == ".claude/skills missing: Claude Code sees none"
+        assert rows["skills link"].remediation.startswith("Run: aipass doctor --fix")
+        assert "git config core.symlinks true" in rows["skills link"].remediation
+        assert "writes a copy that will not follow .agents/skills" in rows["skills link"].remediation
+
+    def test_a_copied_skills_folder_warns_that_it_will_not_follow(self) -> None:
+        self._skill("prep", "name: prep\ndescription: wrap up\n")
+        (self.root / ".claude" / "skills" / "prep").mkdir(parents=True)
+
+        row = self._rows()["skills link"]
+
+        assert row.glyph == GLYPH_WARN
+        assert row.detail == ".claude/skills is a copy, not a link: it will not follow .agents/skills"
+        assert "git config core.symlinks true" in row.remediation
+
+    def test_fix_links_the_folder_and_retires_an_unedited_legacy_prep(self) -> None:
+        self._skill("prep", "name: prep\ndescription: wrap up\n")
+        legacy = self.root / ".claude" / "commands" / "prep.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(sc.prep_md(), encoding="utf-8")
+
+        before = self._rows()
+        after = self._rows(fix=True)
+
+        assert before["legacy prep"].glyph == GLYPH_WARN
+        assert before["legacy prep"].remediation == "Run: aipass doctor --fix"
+        assert (self.root / ".claude" / "skills").resolve() == (self.root / ".agents" / "skills").resolve()
+        assert not legacy.exists()
+        assert (legacy.parent / "prep(disabled).md").read_text(encoding="utf-8") == sc.prep_md()
+        assert after["skills link"].glyph == GLYPH_PASS
+        assert "legacy prep" not in after
+        fixes = [r.detail for r in self.printed["Scaffold"] if r.label == "skills fix"]
+        assert fixes == [
+            "Linked .claude/skills -> ../.agents/skills",
+            "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
+        ]
+
+    def test_fix_leaves_an_edited_legacy_prep_and_says_whose_it_is(self) -> None:
+        self._skill("prep", "name: prep\ndescription: wrap up\n")
+        legacy = self.root / ".claude" / "commands" / "prep.md"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("# my own prep\n", encoding="utf-8")
+
+        rows = self._rows(fix=True)
+
+        assert legacy.read_text(encoding="utf-8") == "# my own prep\n"
+        assert rows["legacy prep"].glyph == GLYPH_WARN
+        assert "is edited, so it is yours and kept" in rows["legacy prep"].detail

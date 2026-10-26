@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-04-16
 # Modified: 2026-10-25
 # =============================================
@@ -1077,11 +1077,72 @@ def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[Chec
     ]
 
 
+_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "skills fix")
+_FIX_COMMAND = "aipass doctor --fix"
+
+
+def _check_shared_skills(root: Path) -> List[CheckResult]:
+    """Do both CLIs see every shared skill? Codex reads .agents/skills, Claude Code the .claude/skills link."""
+    from aipass.aipass.apps.handlers.init import bootstrap as bs
+
+    state = bs.shared_skills_state(root)
+    fix = f"Run: {_FIX_COMMAND}"
+    symlinks = (
+        "on Windows it needs 'git config core.symlinks true' and the right to make links; without "
+        f"them {_FIX_COMMAND} writes a copy that will not follow {bs.SKILLS_REL}"
+    )
+    rows: List[CheckResult] = []
+    if not state["skills"]:
+        rows.append(
+            CheckResult("shared skills", GLYPH_WARN, f"none in {bs.SKILLS_REL}", f"Run 'aipass init update {root}'")
+        )
+    elif state["incomplete"]:
+        detail = f"no name or description: {', '.join(state['incomplete'])}"
+        rows.append(CheckResult("shared skills", GLYPH_WARN, detail, "Give each SKILL.md frontmatter both fields"))
+    else:
+        detail = f"{len(state['skills'])} in {bs.SKILLS_REL}, each named and described"
+        rows.append(CheckResult("shared skills", GLYPH_PASS, detail, ""))
+
+    link = state["link"]
+    if link == bs.LINK_STATE_LINKED:
+        rows.append(CheckResult("skills link", GLYPH_PASS, f"{bs.SKILLS_LINK_REL} -> {bs.SKILLS_REL}", ""))
+    elif link == bs.LINK_STATE_MISSING:
+        detail = f"{bs.SKILLS_LINK_REL} missing: Claude Code sees none"
+        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"{fix} ({symlinks})"))
+    elif link == bs.LINK_STATE_COPY:
+        detail = f"{bs.SKILLS_LINK_REL} is a copy, not a link: it will not follow {bs.SKILLS_REL}"
+        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Make it the link: {symlinks}"))
+    else:
+        detail = f"{bs.SKILLS_LINK_REL} points at {state['link_to']}, not {bs.SKILLS_REL}"
+        rows.append(CheckResult("skills link", GLYPH_WARN, detail, f"Point it at ../{bs.SKILLS_REL}"))
+
+    if state["legacy_prep"] == "managed":
+        detail = f"{bs.LEGACY_PREP_REL} beside {bs.PREP_SKILL_REL}: /prep is offered twice"
+        rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, fix))
+    elif state["legacy_prep"] == "edited":
+        detail = f"{bs.LEGACY_PREP_REL} is edited, so it is yours and kept: /prep is offered twice"
+        rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, f"Fold your edits into {bs.PREP_SKILL_REL}"))
+    return rows
+
+
+def _fix_shared_skills() -> List[CheckResult]:
+    """--fix: make a missing skills link, retire an unedited legacy prep command; one row per change."""
+    from aipass.aipass.apps.handlers.init.bootstrap import repair_shared_skills
+
+    reg_path = _find_registry()
+    if reg_path is None:
+        return []
+    actions = repair_shared_skills(reg_path.parent)
+    json_handler.log_operation("doctor_fix_shared_skills", {"root": str(reg_path.parent), "actions": actions})
+    return [CheckResult("skills fix", GLYPH_PASS, action, "") for action in actions]
+
+
 def _check_scaffold() -> List[CheckResult]:
     """Run Scaffold group checks — is this project's AIPass scaffold current?
 
     Read-only even under ``--fix``: a scaffold update can replace files a manager wrote, so
     it is the owner's decision; doctor reports the drift and names the preview command.
+    The shared-skills rows are the exception --fix repairs: a link and an unedited retire overwrite nothing.
     """
     from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
     from aipass.aipass.apps.handlers.init.bootstrap import _MANIFEST_TRACKED, _handler_names
@@ -1091,9 +1152,10 @@ def _check_scaffold() -> List[CheckResult]:
         return [CheckResult("scaffold", GLYPH_WARN, "no project registry", "Run 'aipass init' to create one")]
 
     root = reg_path.parent
+    skills_rows = _check_shared_skills(root)
     if (root / "src" / "aipass").is_dir() and (root / "pyproject.toml").exists():
         # The source repo's scaffold IS the templates — nothing to compare to.
-        return [CheckResult("scaffold", GLYPH_PASS, "AIPass source repo — hand-maintained", "")]
+        return [CheckResult("scaffold", GLYPH_PASS, "AIPass source repo — hand-maintained", "")] + skills_rows
 
     preview = f"Run 'aipass init update {root} --dry-run' to see the plan"
     results: List[CheckResult] = []
@@ -1155,7 +1217,7 @@ def _check_scaffold() -> List[CheckResult]:
         protected = sum(1 for rel in _MANIFEST_TRACKED if sm.is_ignored(rel, ignored))
         results.append(CheckResult(".updateignore", GLYPH_PASS, f"{protected} file(s) owner-protected", ""))
 
-    return results
+    return results + skills_rows
 
 
 def _compute_doctor_groups(
@@ -1210,6 +1272,13 @@ def _compute_doctor_groups(
             owner_fix = _check_owner_seating()  # exit 0 is not proof the seat is clean
         identity = groups.get("Identity", [])
         groups["Identity"] = [r for r in identity if not r.label.startswith("owner")] + owner_fix
+
+        skills_fix = _fix_shared_skills()
+        if skills_fix:
+            reg_path = _find_registry()
+            rechecked = _check_shared_skills(reg_path.parent) if reg_path else []
+            scaffold = [r for r in groups.get("Scaffold", []) if r.label not in _SKILL_ROW_LABELS]
+            groups["Scaffold"] = scaffold + rechecked + skills_fix
 
     return groups
 

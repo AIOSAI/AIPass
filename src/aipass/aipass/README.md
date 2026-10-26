@@ -126,6 +126,7 @@ Depth lives in [docs/](docs/), one page per command group:
 | [admin_setup.md](docs/admin_setup.md) | The admin lane: the five legs, the threat model, lighting it |
 | [shared_contract.md](docs/shared_contract.md) | `shared/`, the part of this branch @spawn imports |
 | [probe_hygiene.md](docs/probe_hygiene.md) | How this branch probes the system without mutating it |
+| [two_clis.md](docs/two_clis.md) | One citizen on Claude Code and Codex: what each reads, the ritual spellings, the compact flow |
 
 ## Integration Points
 
@@ -155,7 +156,7 @@ exceptions: `shared/`, which @spawn imports in production code, and
 
 ---
 
-**Last Updated:** 2026-10-17
+**Last Updated:** 2026-10-25
 
 ---
 

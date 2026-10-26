@@ -106,12 +106,27 @@ write itself fails, the command fails too and no receipt is written; the
 backup taken just before it stays. Code:
 [`apps/handlers/settings_backup.py`](../apps/handlers/settings_backup.py).
 
+## Both CLIs see every shared skill
+
+The Scaffold group carries three rows about the skills in `.agents/skills/`.
+`shared skills` passes when each `SKILL.md` has a `name` and a `description` in
+its frontmatter. `skills link` passes when `.claude/skills` is a symlink
+resolving to `.agents/skills`, and warns when it is missing, a copy, or points
+elsewhere. `legacy prep` warns when an old `.claude/commands/prep.md` sits
+beside the skill, so `/prep` is offered twice. `doctor --fix` makes a missing
+link and renames an unedited legacy `prep.md` to `prep(disabled).md`, one
+`skills fix` row per change; a copy, a foreign link and an edited `prep.md` are
+left for you. On Windows the link needs `git config core.symlinks true` and the
+right to make links; without them `--fix` writes a copy that will not follow
+`.agents/skills`, and the row says so.
+
 ## What it will not do
 
 `doctor --fix` will not apply a scaffold update. An update can replace files, so
 it is a decision and not a repair — the plan goes to a human first. The one
 exception is a stamp-only plan; [`scaffold_update.md`](scaffold_update.md) has
-the rule.
+the rule. The skills link and the legacy `prep.md` above are repairs, not an
+update: neither overwrites a file.
 
 Code: [`apps/modules/doctor.py`](../apps/modules/doctor.py), with the
 remediation report in [`apps/modules/_doctor_fix.py`](../apps/modules/_doctor_fix.py),

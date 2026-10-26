@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-04
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -87,7 +87,7 @@ def test_init_project_creates_all_expected_files(tmp_path):
         target / "README.md",
         target / ".gitignore",
         target / ".claude" / "settings.json",
-        target / ".claude" / "commands" / "prep.md",
+        target / ".agents" / "skills" / "prep" / "SKILL.md",
         target / "src" / "demo" / "__init__.py",
     ]
     if result["aipass_home"]:
@@ -129,6 +129,7 @@ def test_init_project_return_dict_structure(tmp_path):
         "target",
         "created_files",
         "aipass_home",
+        "notes",
     }
     assert result["project_name"] == "ALPHA"
     assert result["registry_file"] == "ALPHA_REGISTRY.json"
@@ -669,3 +670,50 @@ def test_init_repoints_a_venv_link_left_dangling_by_a_moved_home(tmp_path, monke
     init_project(target, project_name="zeta")
 
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
+
+
+def _refuse_skills_symlink(monkeypatch) -> None:
+    """The filesystem refuses the .claude/skills link, as Windows without the privilege does."""
+
+    def refuse(*_args, **_kwargs):
+        raise OSError("symlink not permitted")
+
+    monkeypatch.setattr(bootstrap, "_make_symlink", refuse)
+
+
+class TestSharedSkillsScaffold:
+    """init writes the prep skill once, in .agents/skills, and links .claude/skills to it."""
+
+    def test_init_writes_the_prep_skill_with_frontmatter_and_links_claude_skills_to_it(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+
+        result = init_project(target, project_name="demo")
+
+        skill = target / ".agents" / "skills" / "prep" / "SKILL.md"
+        text = skill.read_text(encoding="utf-8")
+        assert text == sc.prep_skill_md()
+        assert text.startswith("---\nname: prep\ndescription: Session wrap-up.")
+        link = target / ".claude" / "skills"
+        assert link.is_symlink()
+        assert link.resolve() == (target / ".agents" / "skills").resolve()
+        assert (link / "prep" / "SKILL.md").read_text(encoding="utf-8") == text
+        assert not (target / ".claude" / "commands").exists()
+        assert result["notes"] == []
+
+    def test_a_refused_symlink_writes_a_copy_and_says_it_will_not_follow(self, tmp_path, monkeypatch):
+        _refuse_skills_symlink(monkeypatch)
+        target = tmp_path / "proj"
+        target.mkdir()
+
+        result = init_project(target, project_name="demo")
+
+        copy = target / ".claude" / "skills" / "prep" / "SKILL.md"
+        assert not (target / ".claude" / "skills").is_symlink()
+        assert copy.read_text(encoding="utf-8") == sc.prep_skill_md()
+        (note,) = result["notes"]
+        assert "will not follow .agents/skills" in note
+        assert "git config core.symlinks true" in note
+
+    def test_the_generated_agents_text_names_memo_on_both_clis(self):
+        assert "and on `/memo` (Claude Code) or `$memo` (Codex).\n" in sc.agents_md("DEMO")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-22
-# Modified: 2026-10-21
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -106,7 +106,8 @@ def agents_md(name: str) -> str:
         "\n"
         "# Memories\n"
         "\n"
-        "Update `.trinity/` at natural breakpoints, after milestones, and on `/memo`.\n"
+        "Update `.trinity/` at natural breakpoints, after milestones, and on `/memo` (Claude Code) "
+        "or `$memo` (Codex).\n"
     )
 
 
@@ -281,8 +282,19 @@ def gitignore() -> str:
     )
 
 
+PREP_SKILL_DESCRIPTION = (
+    "Session wrap-up. Update memories, check plans, review git state, check inbox, flag loose ends. "
+    "Use before closing a session or compacting context."
+)
+
+
+def prep_skill_md() -> str:
+    """Generate .agents/skills/prep/SKILL.md, the prep skill both CLIs read (/prep, $prep)."""
+    return f"---\nname: prep\ndescription: {PREP_SKILL_DESCRIPTION}\n---\n\n" + prep_md()
+
+
 def prep_md() -> str:
-    """Generate .claude/commands/prep.md — /prep session wrap-up slash command."""
+    """The prep skill's body; projects scaffolded before the shared skills hold it as .claude/commands/prep.md."""
     return (
         "# Session Wrap-Up\n"
         "\n"

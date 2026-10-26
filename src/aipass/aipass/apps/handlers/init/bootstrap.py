@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.2.1
+# Version: 2.3.0
 # Created: 2026-03-14
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -49,9 +49,118 @@ _MANIFEST_TRACKED: tuple = (
     ".aipass/hooks.json",
     ".claude/settings.json",
     ".claude/settings.local.json",
-    ".claude/commands/prep.md",
+    ".agents/skills/prep/SKILL.md",
     "AGENTS.md",
 )
+
+PREP_SKILL_REL = ".agents/skills/prep/SKILL.md"
+LEGACY_PREP_REL = ".claude/commands/prep.md"
+SKILLS_REL = ".agents/skills"
+SKILLS_LINK_REL = ".claude/skills"
+_SKILLS_LINK_TARGET = Path("..") / ".agents" / "skills"
+LINK_STATE_LINKED = "linked"
+LINK_STATE_MISSING = "missing"
+LINK_STATE_COPY = "copy"
+LINK_STATE_ELSEWHERE = "elsewhere"
+_make_symlink = Path.symlink_to  # the seam a test refuses, as a filesystem without the privilege does
+
+
+def link_skills(target: Path) -> str | None:
+    """Point .claude/skills at .agents/skills so Claude Code sees the skills Codex reads.
+
+    Where the filesystem refuses a symlink (Windows without the privilege), each
+    shared SKILL.md is copied instead. Returns None, or the line saying the copy
+    will not follow the master. An existing .claude/skills is left as it is."""
+    link = target / SKILLS_LINK_REL
+    if link.is_symlink() or link.exists():
+        return None
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        _make_symlink(link, _SKILLS_LINK_TARGET, target_is_directory=True)
+        return None
+    except OSError as exc:
+        logger.warning("symlink %s refused (%s) — copying the skills instead", link, exc)
+    for skill in sorted((target / SKILLS_REL).glob("*/SKILL.md")):
+        dest = link / skill.parent.name / "SKILL.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill, dest)
+    return (
+        f"{SKILLS_LINK_REL} could not be a symlink here, so it is a copy that will not follow {SKILLS_REL}: "
+        "run 'git config core.symlinks true' and make the link"
+    )
+
+
+def _frontmatter_keys(skill: Path) -> set:
+    """The keys with a value in a SKILL.md's leading --- block; empty when it has none."""
+    lines = skill.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0].strip() != "---":
+        return set()
+    keys = set()
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return keys
+        key, sep, value = line.partition(":")
+        if sep and value.strip():
+            keys.add(key.strip())
+    return set()
+
+
+def shared_skills_state(target: Path) -> dict:
+    """What each CLI can see of the shared skills under *target*.
+
+    ``skills`` the folder names under .agents/skills holding a SKILL.md, ``incomplete``
+    those whose frontmatter lacks a name or a description, ``link`` one of the
+    LINK_STATE_* values, ``link_to`` where a symlinked .claude/skills resolves,
+    ``legacy_prep`` "managed", "edited" or "" for an old .claude/commands/prep.md."""
+    master = target / SKILLS_REL
+    skills = sorted(p.parent for p in master.glob("*/SKILL.md"))
+    incomplete = [s.name for s in skills if not {"name", "description"} <= _frontmatter_keys(s / "SKILL.md")]
+    link = target / SKILLS_LINK_REL
+    link_to = ""
+    if link.is_symlink():
+        resolved = link.resolve()
+        state = LINK_STATE_LINKED if resolved == master.resolve() else LINK_STATE_ELSEWHERE
+        link_to = str(resolved)
+    elif link.is_dir():
+        state = LINK_STATE_COPY
+    else:
+        state = LINK_STATE_MISSING
+    legacy = target / LEGACY_PREP_REL
+    legacy_prep = "" if not legacy.is_file() else "managed" if _is_managed_legacy_prep(target, legacy) else "edited"
+    return {
+        "skills": [s.name for s in skills],
+        "incomplete": incomplete,
+        "link": state,
+        "link_to": link_to,
+        "legacy_prep": legacy_prep,
+    }
+
+
+def repair_shared_skills(target: Path) -> list[str]:
+    """Make a missing .claude/skills link, and retire an unedited legacy prep command once the skill exists.
+
+    Returns one line per change. A copy, a foreign link and an edited prep.md are the owner's: left."""
+    actions: list[str] = []
+    if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
+        note = link_skills(target)
+        actions.append(note or f"Linked {SKILLS_LINK_REL} -> {_SKILLS_LINK_TARGET.as_posix()}")
+    legacy = target / LEGACY_PREP_REL
+    if legacy.is_file() and (target / PREP_SKILL_REL).is_file() and _is_managed_legacy_prep(target, legacy):
+        disabled = sm.disabled_path(legacy)
+        if disabled.exists():
+            disabled.unlink()
+        legacy.rename(disabled)
+        actions.append(f"Retired {LEGACY_PREP_REL} -> {disabled.name}: {PREP_SKILL_REL} replaces it")
+    return actions
+
+
+def _is_managed_legacy_prep(target: Path, legacy: Path) -> bool:
+    """True when prep.md is what AIPass wrote: the manifest's hash, or the template body unedited."""
+    digest = sm.hash_file(legacy)
+    return digest is not None and digest in (
+        sm.manifest_hashes(target).get(LEGACY_PREP_REL),
+        sm.sha256_text(sc.prep_md()),
+    )
 
 
 def _link_venv(link: Path, dest: Path) -> None:
@@ -321,13 +430,16 @@ def init_project(
             sm.write_text_lf(local_settings_path, claude_local_settings(aipass_home, nested=is_projects_child(target)))
             created.append(str(local_settings_path))
 
-    # Only prep.md here: memo.md belongs at provider level (~/.claude/commands/).
-    commands_dir = claude_dir / "commands"
-    commands_dir.mkdir(exist_ok=True)
-    prep_path = commands_dir / "prep.md"
+    prep_path = target / PREP_SKILL_REL
     if not prep_path.exists():
-        sm.write_text_lf(prep_path, sc.prep_md())
+        prep_path.parent.mkdir(parents=True, exist_ok=True)
+        sm.write_text_lf(prep_path, sc.prep_skill_md())
         created.append(str(prep_path))
+    notes: list[str] = []
+    if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
+        note = link_skills(target)
+        notes.extend([note] if note else [])
+        created.append(str(target / SKILLS_LINK_REL))
 
     # Sanitized name, never raw: a raw one can nest a slash, carry unimportable
     # punctuation, or end in a dot Windows rejects.
@@ -377,6 +489,7 @@ def init_project(
         "target": str(target),
         "created_files": created,
         "aipass_home": aipass_home,
+        "notes": notes,
     }
 
 
@@ -503,7 +616,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         src = Path(aipass_home) / ".aipass" / tier_file if aipass_home else None
         text = _read_text(src) if src and src.is_file() else None
         managed.append((f".aipass/{tier_file}", aipass_dir / tier_file, text))
-    managed.append((".claude/commands/prep.md", claude_dir / "commands" / "prep.md", sc.prep_md()))
+    managed.append((PREP_SKILL_REL, target / PREP_SKILL_REL, sc.prep_skill_md()))
 
     for rel, dest, template_text in managed:
         current_hash = sm.hash_file(dest)
@@ -622,6 +735,21 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             )
             retires.append(stale_path)
 
+    legacy_prep = target / LEGACY_PREP_REL
+    if legacy_prep.is_file() and not sm.is_ignored(LEGACY_PREP_REL, ignored):
+        if _is_managed_legacy_prep(target, legacy_prep):
+            reason = f"replaced by {PREP_SKILL_REL}; renamed to {sm.disabled_path(legacy_prep).name}"
+            files.append({"path": LEGACY_PREP_REL, "action": sm.ACTION_RETIRE, "reason": reason, "writes": True})
+            retires.append(legacy_prep)
+        else:
+            reason = f"edited here, kept; the template's prep is {PREP_SKILL_REL}"
+            files.append({"path": LEGACY_PREP_REL, "action": sm.ACTION_CURRENT, "reason": reason, "writes": False})
+
+    skills_link = shared_skills_state(target)["link"] == LINK_STATE_MISSING
+    if skills_link:
+        reason = f"symlink to {_SKILLS_LINK_TARGET.as_posix()}"
+        files.append({"path": SKILLS_LINK_REL, "action": sm.ACTION_CREATE, "reason": reason, "writes": True})
+
     venv_link = target / ".venv"
     if not venv_link.exists() and aipass_home:
         aipass_venv = Path(aipass_home) / ".venv"
@@ -645,7 +773,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             manifest_next[rel] = recorded[rel]
 
     stamp_pending = stamped != installed
-    file_writes = bool(writes or retires or symlinks or handlers)
+    file_writes = bool(writes or retires or symlinks or handlers or skills_link)
     pending = file_writes or stamp_pending
     # Stamp-only applies without a go: the receipt is the contract, and a go on a plan
     # touching no file teaches approval without reading. Same queues as ``pending``.
@@ -653,17 +781,21 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
 
     # Every write in this run happens below this line.
     backup_dir: Path | None = None
+    notes: list[str] = []
     if apply:
         aipass_dir.mkdir(exist_ok=True)
         claude_dir.mkdir(exist_ok=True)
-        (claude_dir / "commands").mkdir(exist_ok=True)
         backup_dir = _apply_writes(target, writes, retires, symlinks)
+        if skills_link:
+            note = link_skills(target)
+            notes.extend([note] if note else [])
         sm.write_manifest(target, manifest_next, installed)
         if trust_reenrol:
             trust_reenrol = _enroll_project(target)
 
     updated = [str(dest) for dest, _ in writes if not dest.name.endswith(sm.NEW_SUFFIX)]
     updated += [f".venv (symlink to AIPass runtime: {dest})" for _, dest in symlinks]
+    updated += [f"{SKILLS_LINK_REL} (symlink to {_SKILLS_LINK_TARGET.as_posix()})"] if skills_link else []
 
     return {
         "project_name": name,
@@ -691,6 +823,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         ],
         "removed_files": [str(path) for path in retires],
         "trust_enrolled": trust_reenrol,
+        "notes": notes,
     }
 
 

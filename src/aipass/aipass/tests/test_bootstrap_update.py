@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -68,6 +68,7 @@ def test_update_project_return_dict_structure(tmp_path):
         "skipped_files",
         "removed_files",
         "trust_enrolled",
+        "notes",
     }
     assert result["project_name"] == "UPD"
     assert result["target"] == str(target.resolve())
@@ -110,10 +111,10 @@ def test_managed_files_land_lf_even_where_the_platform_translates(tmp_path, monk
         if path.is_file():
             assert b"\r\n" not in path.read_bytes(), f"{rel} landed with CRLF"
 
-    prep = target / ".claude" / "commands" / "prep.md"
+    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
     manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["files"][".claude/commands/prep.md"] == sc_sha256(sc.prep_md())
-    assert prep.read_bytes() == sc.prep_md().encode("utf-8")
+    assert manifest["files"][".agents/skills/prep/SKILL.md"] == sc_sha256(sc.prep_skill_md())
+    assert prep.read_bytes() == sc.prep_skill_md().encode("utf-8")
 
 
 def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monkeypatch):
@@ -133,7 +134,7 @@ def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monk
     assert first["updated_files"] == []
     assert first["kept_files"] == []
     assert second["updated_files"] == []
-    assert not (target / ".claude" / "commands" / "prep.md.aipass-new").exists()
+    assert not (target / ".agents" / "skills" / "prep" / "SKILL.md.aipass-new").exists()
 
 
 def _age_the_stamp(target: Path) -> None:
@@ -189,7 +190,7 @@ def test_a_kept_file_still_needing_its_sidecar_is_not_stamp_only(tmp_path):
     target.mkdir()
     init_project(target, project_name="keptnew")
     _age_the_stamp(target)
-    (target / ".claude" / "commands" / "prep.md").write_text("# my own prep\n", encoding="utf-8")
+    (target / ".agents" / "skills" / "prep" / "SKILL.md").write_text("# my own prep\n", encoding="utf-8")
 
     plan = update_project(target, apply=False)
 
@@ -206,7 +207,7 @@ def test_a_kept_file_whose_sidecar_is_current_stays_stamp_only(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="keptold")
-    (target / ".claude" / "commands" / "prep.md").write_text("# my own prep\n", encoding="utf-8")
+    (target / ".agents" / "skills" / "prep" / "SKILL.md").write_text("# my own prep\n", encoding="utf-8")
     update_project(target)  # writes the sidecar once
     _age_the_stamp(target)
 
@@ -272,14 +273,14 @@ def test_update_project_idempotent(tmp_path, monkeypatch):
 def test_update_project_keeps_a_managed_file_the_project_edited(tmp_path):
     """The conffile rule: an edited managed file is KEPT, template lands beside it.
 
-    The update must never undo a manager's own work. prep.md is generated locally,
+    The update must never undo a manager's own work. the prep skill is generated locally,
     so the pin holds with or without a detectable AIPASS_HOME.
     """
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="mod")
 
-    prep = target / ".claude" / "commands" / "prep.md"
+    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
     prep.write_text("# My own prep\n", encoding="utf-8")
 
     result = update_project(target)
@@ -287,11 +288,11 @@ def test_update_project_keeps_a_managed_file_the_project_edited(tmp_path):
     assert str(prep.resolve()) in result["kept_files"]
     assert str(prep.resolve()) not in result["updated_files"]
     assert prep.read_text(encoding="utf-8") == "# My own prep\n"
-    sidecar = prep.with_name("prep.md.aipass-new")
+    sidecar = prep.with_name("SKILL.md.aipass-new")
     assert sidecar.is_file()
-    assert sidecar.read_text(encoding="utf-8") == sc.prep_md()
+    assert sidecar.read_text(encoding="utf-8") == sc.prep_skill_md()
 
-    entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
+    entry = next(e for e in result["files"] if e["path"] == ".agents/skills/prep/SKILL.md")
     assert entry["action"] == "kept-local"
 
 
@@ -306,20 +307,20 @@ def test_update_project_rewrites_a_managed_file_nobody_touched(tmp_path):
     target.mkdir()
     init_project(target, project_name="mod")
 
-    prep = target / ".claude" / "commands" / "prep.md"
+    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
     prep.write_text("# superseded template\n", encoding="utf-8")
     manifest_path = target / ".aipass" / "scaffold_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["files"][".claude/commands/prep.md"] = hashlib.sha256(prep.read_bytes()).hexdigest()
+    manifest["files"][".agents/skills/prep/SKILL.md"] = hashlib.sha256(prep.read_bytes()).hexdigest()
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     result = update_project(target)
 
     assert str(prep.resolve()) in result["updated_files"]
-    assert prep.read_text(encoding="utf-8") == sc.prep_md()
-    assert not prep.with_name("prep.md.aipass-new").exists()
+    assert prep.read_text(encoding="utf-8") == sc.prep_skill_md()
+    assert not prep.with_name("SKILL.md.aipass-new").exists()
 
-    backups = list((target / ".aipass" / ".backup").glob("scaffold_*/.claude/commands/prep.md"))
+    backups = list((target / ".aipass" / ".backup").glob("scaffold_*/.agents/skills/prep/SKILL.md"))
     assert len(backups) == 1
     assert backups[0].read_text(encoding="utf-8") == "# superseded template\n"
 
@@ -633,10 +634,10 @@ def test_update_project_skips_files_the_owner_protected(tmp_path):
     init_project(target, project_name="owned")
 
     (target / ".updateignore").write_text(
-        "# mine now\n\n.claude/commands/prep.md\ntier0_kernel.md\n.claude/\n",
+        "# mine now\n\n.agents/skills/prep/SKILL.md\ntier0_kernel.md\n.claude/\n",
         encoding="utf-8",
     )
-    prep = target / ".claude" / "commands" / "prep.md"
+    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
     prep.write_text("# my own prep\n", encoding="utf-8")
 
     result = update_project(target)
@@ -644,10 +645,10 @@ def test_update_project_skips_files_the_owner_protected(tmp_path):
     assert str(prep.resolve()) in result["ignored_files"]
     assert str(prep.resolve()) not in result["kept_files"]
     assert prep.read_text(encoding="utf-8") == "# my own prep\n"
-    assert not prep.with_name("prep.md.aipass-new").exists()
+    assert not prep.with_name("SKILL.md.aipass-new").exists()
     assert not (target / ".aipass" / ".backup").exists()
 
-    entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
+    entry = next(e for e in result["files"] if e["path"] == ".agents/skills/prep/SKILL.md")
     assert entry["action"] == "skipped"
     assert entry["reason"] == ".updateignore"
 
@@ -666,13 +667,13 @@ def test_update_project_leaves_a_protected_file_out_of_the_manifest(tmp_path):
     target.mkdir()
     init_project(target, project_name="unignore")
 
-    prep = target / ".claude" / "commands" / "prep.md"
-    (target / ".updateignore").write_text(".claude/commands/prep.md\n", encoding="utf-8")
+    prep = target / ".agents" / "skills" / "prep" / "SKILL.md"
+    (target / ".updateignore").write_text(".agents/skills/prep/SKILL.md\n", encoding="utf-8")
     prep.write_text("# my own prep\n", encoding="utf-8")
     update_project(target)
 
     manifest = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))
-    assert ".claude/commands/prep.md" not in manifest["files"]
+    assert ".agents/skills/prep/SKILL.md" not in manifest["files"]
 
     # Un-ignore: the file is now unknown provenance, so it is kept, not clobbered.
     (target / ".updateignore").unlink()
@@ -727,3 +728,66 @@ def test_update_project_repoints_a_dangling_venv_link(tmp_path, monkeypatch):
     bootstrap.update_project(target, apply=True)
 
     assert (target / ".venv").resolve() == (host / ".venv").resolve()
+
+
+def _a_project_from_before_the_shared_skills(tmp_path, prep_text: str) -> Path:
+    """A project init made when /prep was .claude/commands/prep.md: that file, no skill, no link."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="legacy")
+    (target / ".claude" / "skills").unlink()
+    skill = target / ".agents" / "skills" / "prep" / "SKILL.md"
+    skill.unlink()
+    legacy = target / ".claude" / "commands" / "prep.md"
+    legacy.parent.mkdir()
+    legacy.write_text(prep_text, encoding="utf-8")
+    manifest_path = target / ".aipass" / "scaffold_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["files"][".agents/skills/prep/SKILL.md"]
+    manifest["files"][".claude/commands/prep.md"] = sc_sha256(sc.prep_md())
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+class TestSharedSkillsUpdate:
+    """init update moves an old project's /prep into the shared skill and links .claude/skills."""
+
+    def test_an_unedited_legacy_prep_is_retired_for_the_skill_and_the_link_is_made(self, tmp_path):
+        target = _a_project_from_before_the_shared_skills(tmp_path, sc.prep_md())
+
+        result = update_project(target)
+
+        legacy = target / ".claude" / "commands" / "prep.md"
+        assert not legacy.exists()
+        assert (target / ".claude" / "commands" / "prep(disabled).md").read_text(encoding="utf-8") == sc.prep_md()
+        skill = target / ".agents" / "skills" / "prep" / "SKILL.md"
+        assert skill.read_text(encoding="utf-8") == sc.prep_skill_md()
+        assert (target / ".claude" / "skills").resolve() == (target / ".agents" / "skills").resolve()
+        entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
+        assert entry["action"] == "retire"
+        assert entry["reason"].startswith("replaced by .agents/skills/prep/SKILL.md")
+        assert str(legacy) in result["removed_files"]
+
+    def test_an_edited_legacy_prep_is_kept_and_named(self, tmp_path):
+        target = _a_project_from_before_the_shared_skills(tmp_path, "# my own prep\n")
+
+        result = update_project(target)
+
+        legacy = target / ".claude" / "commands" / "prep.md"
+        assert legacy.read_text(encoding="utf-8") == "# my own prep\n"
+        entry = next(e for e in result["files"] if e["path"] == ".claude/commands/prep.md")
+        assert entry["action"] == "current"
+        assert entry["writes"] is False
+        assert "edited here, kept" in entry["reason"]
+
+    def test_the_dry_run_plans_the_link_and_the_retire_and_writes_neither(self, tmp_path):
+        target = _a_project_from_before_the_shared_skills(tmp_path, sc.prep_md())
+
+        result = update_project(target, apply=False)
+
+        actions = {e["path"]: e["action"] for e in result["files"]}
+        assert actions[".claude/skills"] == "create"
+        assert actions[".claude/commands/prep.md"] == "retire"
+        assert result["pending"] is True
+        assert not (target / ".claude" / "skills").exists()
+        assert (target / ".claude" / "commands" / "prep.md").is_file()

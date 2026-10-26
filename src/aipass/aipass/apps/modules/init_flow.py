@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.6
+# Version: 1.4.0
 # Created: 2026-04-16
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """
@@ -872,8 +872,10 @@ def run_init(
 
         if not dry_run:
             with activity_spinner("Building project scaffold…"):
-                init_project(cwd)
+                scaffold = init_project(cwd)
             success("Project scaffold ready")
+            for note in scaffold.get("notes", []):
+                warning(note)
         else:
             console.print("[yellow]\\[dry-run][/yellow] would create project scaffold")
 
@@ -997,6 +999,8 @@ def _handle_init_scaffold(args: list[str]) -> int:
     try:
         result = init_project(target, project_name)
         success(f"Project initialized at {target}")
+        for note in result.get("notes", []):
+            warning(note)
         console.print()
 
         package_dir = None
@@ -1192,6 +1196,8 @@ def _handle_init_update(args: list[str]) -> int:
             return auth_rc
         return 2 if result.get("pending") else 0
 
+    for note in result.get("notes", []):
+        warning(note)
     try:
         if result.get("trust_enrolled"):
             success("Enrolled in trust registry — hooks active.")

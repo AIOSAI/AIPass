@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-17
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -30,6 +30,7 @@ from aipass.aipass.apps.handlers.new_project import (
     find_host_root,
 )
 from aipass.aipass.apps.handlers.new_project.adopt import adopt_project
+from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.apps.modules.new_project import handle_command
 from aipass.spawn.apps.modules.door_class_registry import (
@@ -1062,3 +1063,20 @@ def test_e2e_agent_files_are_in_the_birth_commit(_e2e_project):
     rel = Path(result["agent_home"]).relative_to(project).as_posix()
 
     assert any(line.startswith(rel) for line in tracked)
+
+
+def test_create_project_writes_the_prep_skill_and_links_claude_skills_to_it(host_env, monkeypatch):
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        result = create_project("skillproj", template="empty", no_agent=True)
+
+    target = Path(result["target"])
+    assert (target / ".agents" / "skills" / "prep" / "SKILL.md").read_text(encoding="utf-8") == sc.prep_skill_md()
+    assert (target / ".claude" / "skills").resolve() == (target / ".agents" / "skills").resolve()
+    assert ".agents/skills/prep/SKILL.md" in result["files"]
+    assert not (target / ".claude" / "commands").exists()
+    assert result["notes"] == []

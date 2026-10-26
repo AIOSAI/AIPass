@@ -9,7 +9,7 @@ Code is shared, scaffold is not. Every project's `.venv` is a symlink to the
 AIPass runtime and hooks run from `$AIPASS_HOME`, so a merge to main updates
 the *code* under every project the moment it lands. Only the project-local
 files — `tier0_kernel.md`, `tier1_navmap.md`, `hooks.json`, the Claude
-settings, `prep.md` — lag behind. **`setup.sh` never touches a project**; it
+settings, the prep skill — lag behind. **`setup.sh` never touches a project**; it
 installs the source tree. Bringing a project's scaffold forward is this ritual,
 and nothing else does it.
 
@@ -45,6 +45,18 @@ nothing.
 Root `AGENTS.md` is the **seed** — created once, never rewritten,
 because it exists to be filled in. Retired managed files are renamed
 `<name>(disabled)`, never deleted.
+
+## The shared prep skill
+
+`/prep` is a skill both CLIs read: `.agents/skills/prep/SKILL.md`, a managed
+file under the hash rule above, with `.claude/skills` a symlink to
+`../.agents/skills` so Claude Code sees what Codex reads. An update makes a
+missing link. A project scaffolded before the skill holds `/prep` as
+`.claude/commands/prep.md`: the update renames it `prep(disabled).md` when it is
+still what AIPass wrote (the manifest's hash, or the old template unedited), and
+keeps an edited one, saying so in the plan. Where the filesystem refuses the
+link, a copy is written into `.claude/skills/` and the run says the copy will
+not follow `.agents/skills`; [`two_clis.md`](two_clis.md) has the rest.
 
 ## `.updateignore` — the owner decides what an update skips
 

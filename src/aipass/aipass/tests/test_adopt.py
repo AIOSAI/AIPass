@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-20
-# Modified: 2026-10-24
+# Modified: 2026-10-25
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -28,6 +28,7 @@ from aipass.aipass.apps.handlers.new_project.adopt import (
 )
 from aipass.aipass.apps.modules import adopt as adopt_module
 from aipass.aipass.apps.modules.adopt import handle_command
+from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 
 
@@ -351,12 +352,12 @@ def test_adopt_spawn_failure_leaves_no_registry_and_rerun_proceeds(host_env):
 def test_adopt_manifest_omits_pre_existing_scaffold_files(host_env):
     """A file the project already had is the project's: init update must never treat it as ours."""
     _, target = host_env
-    (target / ".claude" / "commands").mkdir(parents=True)
-    (target / ".claude" / "commands" / "prep.md").write_text("my own prep\n", encoding="utf-8")
+    (target / ".agents" / "skills" / "prep").mkdir(parents=True)
+    (target / ".agents" / "skills" / "prep" / "SKILL.md").write_text("my own prep\n", encoding="utf-8")
     with _no_home(), patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"):
         adopt_project(target, no_agent=True)
     recorded = json.loads((target / ".aipass" / "scaffold_manifest.json").read_text(encoding="utf-8"))["files"]
-    assert ".claude/commands/prep.md" not in recorded
+    assert ".agents/skills/prep/SKILL.md" not in recorded
     assert ".claude/settings.json" in recorded
 
 
@@ -534,3 +535,27 @@ def test_aipass_public_commands_includes_adopt(capsys: pytest.CaptureFixture[str
     print_introspection([adopt_module])
     out = capsys.readouterr().out
     assert "Turn an existing projects/ directory into a full project" in out
+
+
+def test_adopt_writes_the_prep_skill_and_links_claude_skills_to_it(host_env):
+    _, target = host_env
+    with _no_home(), patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"):
+        result = adopt_project(target, no_agent=True)
+
+    skill = target / ".agents" / "skills" / "prep" / "SKILL.md"
+    assert skill.read_text(encoding="utf-8") == sc.prep_skill_md()
+    assert (target / ".claude" / "skills").resolve() == (target / ".agents" / "skills").resolve()
+    assert str(target / ".claude" / "skills") in result["files"]
+    assert not (target / ".claude" / "commands").exists()
+    assert result["notes"] == []
+
+
+def test_an_adopt_dry_run_plans_the_skill_link_and_makes_neither(host_env):
+    _, target = host_env
+    with _no_home():
+        result = adopt_project(target, no_agent=True, dry_run=True)
+
+    assert str(target / ".agents" / "skills" / "prep" / "SKILL.md") in result["files"]
+    assert str(target / ".claude" / "skills") in result["files"]
+    assert not (target / ".claude" / "skills").exists()
+    assert not (target / ".agents").exists()
