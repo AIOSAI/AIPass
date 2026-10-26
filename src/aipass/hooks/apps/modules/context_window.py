@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Transcript reader (Claude transcript + Codex rollout) and the compact window and point per CLI
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Live context fill and the model from a session transcript, and the window Claude Code runs.
@@ -60,6 +60,8 @@ NATIVE_1M_MODELS = frozenset(
 
 _BRACKET_SUFFIX = re.compile(r"\[[^\]]*\]$")
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
+# One top-level `key = <int>` line of a TOML file: tomllib is 3.11+ and the project supports 3.10.
+_TOML_INT = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=\s*\+?(\d[\d_]*)\s*(?:#.*)?$")
 
 
 def user_settings_path() -> Path:
@@ -263,13 +265,18 @@ def _codex_config_int(key: str) -> int | None:
     if not path.is_file():
         return None
     try:
-        import tomllib  # 3.11+; on 3.10 the config goes unread and Codex's defaults stand
-
-        value = tomllib.loads(path.read_text(encoding="utf-8")).get(key)
-    except (ImportError, OSError, ValueError) as exc:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
         logger.info("[HOOKS] context_window: codex config read failed: %s", exc)
         return None
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+    for line in lines:
+        if line.lstrip().startswith("["):
+            return None  # a table header ends the top level; a same-named key below it is not Codex's
+        match = _TOML_INT.match(line)
+        if match and match.group(1) == key:
+            value = int(match.group(2).replace("_", ""))
+            return value if value > 0 else None
+    return None
 
 
 def _codex_window(transcript_path: str) -> int:

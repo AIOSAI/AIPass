@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cc_sessions.py
-# Version: 1.2.1
+# Version: 1.2.2
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
@@ -78,14 +78,17 @@ class TestProcessReaders:
 
     def test_a_child_process_args_name_its_interpreter(self):
         # A child, not this process: pytest-xdist retitles its workers, so our own args read "[pytest-xdist".
-        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        code = "import time; print('up', flush=True); time.sleep(30)"
+        child = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True, encoding="utf-8")
         try:
+            assert child.stdout is not None and child.stdout.readline() == "up\n"  # exec'd: the args are its own
             args = cc_sessions.process_args(child.pid)
         finally:
             child.terminate()
             child.wait()
-        assert args is not None
-        assert args[0] == sys.executable
+        assert args
+        # Not sys.executable itself: a macOS framework build execs .../MacOS/Python.
+        assert "python" in Path(args[0]).name.lower()
 
     def test_an_absent_process_answers_none(self):
         assert cc_sessions.process_args(2**22 + 12345) is None

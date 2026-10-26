@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_context_window.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for shared context_window module (model-aware window since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/context_window.py."""
@@ -341,6 +341,20 @@ class TestCodexRollout:
         assert window == 258_400
         assert context_window.compact_threshold(window, "codex") == 244_800
         assert context_window.compact_threshold(200_000) == 167_000
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("model_auto_compact_token_limit = 200_000  # trimmed\n", 200_000),
+            ('model = "gpt"\n[profiles.x]\nmodel_auto_compact_token_limit = 9\n', 450_000),
+            ('model_auto_compact_token_limit = "big"\n', 450_000),
+            ("model_auto_compact_token_limit = 0\n", 450_000),
+        ],
+    )
+    def test_the_config_limit_is_one_top_level_positive_int(self, tmp_path, text, expected):
+        """Read without tomllib (3.11+): the same answer on every supported Python."""
+        (tmp_path / "codex_config.toml").write_text(text, encoding="utf-8")
+        assert context_window.compact_threshold(475_000, "codex") == expected
 
     def test_a_configured_limit_only_lowers_the_point(self, tmp_path):
         (tmp_path / "codex_config.toml").write_text("model_auto_compact_token_limit = 900000\n", encoding="utf-8")
