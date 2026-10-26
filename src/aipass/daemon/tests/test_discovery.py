@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-06-15
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -155,6 +155,19 @@ class TestValidateJob:
         """Mutant killed: interval <= 0 widened to interval <= 1 in _validate_job (0.5 and 1 refused)."""
         job = {"id": "tick", "schedule": {"type": "interval", "interval_minutes": interval}, "prompt": "x"}
         assert discovered_ids(one_branch, job) == ["keep", "tick"]
+
+    @pytest.mark.parametrize("provider", ["opencode", "Codex", "", None, 5])
+    def test_an_unknown_wake_provider_is_refused_and_named(self, provider, one_branch, caplog):
+        job = {"id": "tick", "schedule": {"type": "daily"}, "prompt": "x", "wake": {"provider": provider}}
+        with caplog.at_level("WARNING"):
+            assert discovered_ids(one_branch, job) == ["keep"]
+        assert f"Job 'tick' refused in {one_branch / 'schedule.json'}: wake.provider {provider!r}" in caplog.text
+
+    @pytest.mark.parametrize("provider", ["claude", "codex"])
+    def test_a_known_wake_provider_is_accepted_and_reaches_the_fire(self, provider, one_branch):
+        job = {"id": "tick", "schedule": {"type": "daily"}, "prompt": "x", "wake": {"provider": provider}}
+        assert discovered_ids(one_branch, job) == ["keep", "tick"]
+        assert discover_jobs()[1]["wake"]["provider"] == provider, "discovery must carry the field the fire reads"
 
     def test_required_keys_constant(self):
         # A job says exactly one of prompt or command: JOB_ACTION_KEYS checks it, REQUIRED_JOB_KEYS does not.

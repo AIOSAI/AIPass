@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: job_reference.py
 # Description: The job-authoring reference printed by drone @daemon run --help
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-11
-# Modified: 2026-09-11
+# Modified: 2026-10-26
 # =============================================
 
 """The job-authoring reference that ``drone @daemon run --help`` prints: schema, schedule
@@ -40,7 +40,7 @@ _REFERENCE_LINES = [
     '          "id": "my-job",',
     '          "enabled": true,',
     '          "schedule": { "type": "interval", "interval_minutes": 30 },',
-    '          "wake": { "fresh": true, "model": "haiku" },',
+    '          "wake": { "fresh": true, "model": "haiku", "provider": "claude" },',
     '          "prompt": "Do something, then STOP."',
     "        }",
     "      ]",
@@ -60,7 +60,9 @@ _REFERENCE_LINES = [
     "              [dim]Daily window, but wakes the NEXT citizen on the fleet[/dim]",
     "              [dim]roster instead of the owner. See drone @daemon rotation.[/dim]",
     "",
-    "  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models)",
+    "  [bold]wake options:[/bold]  fresh (bool), model (haiku/sonnet — use light models),",
+    "    provider (claude|codex; absent = claude, any other value refuses the job).",
+    "    [dim]On codex, model is a Codex slug (gpt-6-sol) or absent = Codex's default.[/dim]",
     "",
     '  [bold]Command jobs:[/bold] "command" instead of "prompt" — run as a subprocess, nobody woken',
     '    "command": "drone rm --stale 10d ..", "timeout_seconds": 120,',

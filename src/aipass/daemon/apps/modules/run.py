@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.8.1
+# Version: 1.9.0
 # Created: 2026-06-15
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -175,8 +175,11 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
     wake = job.get("wake", {})
     fresh = wake.get("fresh", True)
     model = wake.get("model")
+    provider = wake.get("provider")
+    # Absent stays absent: the default provider is wake_branch's to name, not a second copy here.
+    provider_kwarg = {"provider": provider} if provider else {}
 
-    _log(f"FIRE: {owner}/{job_id} -> wake_branch({owner}, fresh={fresh}, model={model})")
+    _log(f"FIRE: {owner}/{job_id} -> wake_branch({owner}, fresh={fresh}, model={model}, provider={provider})")
 
     try:
         status, ok = wake_branch(
@@ -191,6 +194,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
             scheduled=True,
             # No job prompt wants an answer; a wake-back would spend a @daemon session on nothing.
             wake_back=False,
+            **provider_kwarg,
         )
         if ok:
             _log(f"OK: {owner}/{job_id} — {status.summary}")

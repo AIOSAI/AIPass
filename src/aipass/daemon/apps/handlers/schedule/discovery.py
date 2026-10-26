@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.5.2
+# Version: 2.6.0
 # Created: 2026-06-15
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -43,6 +43,8 @@ REQUIRED_JOB_KEYS = {"id", "schedule"}
 # A job carries exactly one: prompt wakes the owner, command runs a drone verb and wakes nobody.
 JOB_ACTION_KEYS = ("prompt", "command")
 VALID_SCHEDULE_TYPES = {"daily", "hourly", "interval", "once", "rotation"}
+# The providers ai_mail's wake_branch runs; an absent wake.provider leaves its default (claude).
+VALID_WAKE_PROVIDERS = ("claude", "codex")
 
 SOURCE_AIPASS = "aipass"
 SOURCE_EXTERNAL = "external"
@@ -234,6 +236,16 @@ def _validate_job(job: dict, file_path: Path) -> bool:
         return False
 
     if "command" not in job:
+        wake = job.get("wake")
+        if isinstance(wake, dict) and "provider" in wake and wake["provider"] not in VALID_WAKE_PROVIDERS:
+            logger.warning(
+                "[discovery] Job '%s' refused in %s: wake.provider %r is not one of %s",
+                job["id"],
+                file_path,
+                wake["provider"],
+                ", ".join(VALID_WAKE_PROVIDERS),
+            )
+            return False
         if command_job.notify_email(job):
             logger.warning("[discovery] Job '%s' in %s: notify.email works on command jobs only", job["id"], file_path)
         return True
