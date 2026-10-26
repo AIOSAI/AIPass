@@ -18,6 +18,7 @@ PyPI version — not the changelog header.
 ### Fixed
 
 - **aipass**: `aipass doctor` run from an external project's root no longer reports `AIPASS_HOME split` against that project. The terminal's tree is the registry root when that root is an AIPass tree (it holds `src/aipass`); in an external project it is the tree the project's `.claude/settings.local.json` (then `settings.json`) names in `env.AIPASS_HOME`. Two AIPass trees still fail the row (`doctor.py` 1.7.1, `tests/test_doctor_home.py` 1.2.0, three pins, two mutants red). Found by Vera-Studio's update to 2.8.28, the first run of the release ritual.
+- **hooks**: on Codex, an `apply_patch` that names no file is denied with that reason and logged at WARNING; it is a malformed call, not a broken engine, so it no longer raises `HOOKS BROKEN`. PostToolUse on such a patch runs nothing (`bridges/codex.py` 2.5.0, `tests/test_codex_bridge.py` 2.5.0, four mutants red).
 
 ## [2026-10-25] — v2.8.28: Codex as a second provider (dispatch, hooks, context gauge, one skills dir for both CLIs), the owner's settings gate, the ratchet's budget exit, the api suite at 75 s
 
