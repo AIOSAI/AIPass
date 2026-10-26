@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-03-24
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 import aipass
 from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
 from aipass.seedgo.apps.handlers.aipass_standards import check_support
+from aipass.seedgo.apps.handlers.aipass_standards import host_coupled_oracle_check
 from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
 from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check
 from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
@@ -1889,3 +1890,130 @@ def test_shared_parse_treats_a_valueerror_as_unparseable(monkeypatch):
     assert check_support.parse("x = '\ud800'", tag="t") is None
     assert check_support.parse("x = 1\0", tag="t") is None
     assert logged.log_operation.call_count == 2
+
+
+# host_coupled_oracle_check: reductions of the two PR #807 hooks reds. proc.py is cc_sessions' shape: a
+# module-level platform alias and a local subprocess alias in the one function that forks.
+
+_PROC_PRODUCTION = """import os
+import sys
+from pathlib import Path
+
+_PLATFORM = sys.platform
+
+
+def process_args(pid):
+    import subprocess as _sp
+
+    if _PLATFORM.startswith("linux"):
+        return Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\\0")
+    return _sp.run(["ps", "-o", "args=", "-p", str(pid)], capture_output=True, text=True).stdout.split()
+
+
+def resolve_session_pid():
+    return process_args(os.getppid()) and None
+
+
+def is_pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def is_supported():
+    return sys.platform.startswith("linux")
+
+
+def enable():
+    import subprocess
+
+    if not is_supported():
+        return None
+    return subprocess.run(["systemctl", "--user", "enable", "--now", "demo"])
+"""
+
+_PROC_UNITS = """import os
+import subprocess
+import sys
+from unittest.mock import patch
+
+import pytest
+
+from pkg.demo.apps import proc
+
+
+def test_own_title():
+    assert "python" in proc.process_args(os.getpid())[0]
+
+
+def test_own_liveness():
+    assert proc.is_pid_alive(os.getpid())
+
+
+def test_forked_count():
+    with patch("subprocess.run", side_effect=OSError("no ps")) as ps:
+        proc.resolve_session_pid()
+    assert ps.call_count == 1
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the /proc path")
+def test_forked_count_on_linux_only():
+    with patch("subprocess.run", side_effect=OSError("no ps")) as ps:
+        proc.resolve_session_pid()
+    assert ps.call_count == 1
+
+
+def test_gate_pinned_by_a_fixture():
+    with patch("subprocess.run") as run, patch.object(proc, "is_supported", return_value=True):
+        proc.enable()
+    assert run.call_count == 1
+
+
+def test_a_non_runner_count():
+    with patch.object(proc, "is_pid_alive", return_value=True) as alive:
+        proc.resolve_session_pid()
+    assert alive.call_count == 1
+
+
+def _child_pid():
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"]).pid
+
+
+def test_child_title():
+    assert "python" in proc.process_args(_child_pid())[0]
+"""
+
+
+def _proc_package(tmp_path):
+    """Lay down pkg/demo with apps/proc.py and tests/test_proc.py; return (branch_root, test_file)."""
+    branch = tmp_path / "pkg" / "demo"
+    (branch / "apps").mkdir(parents=True)
+    (branch / "apps" / "proc.py").write_text(_PROC_PRODUCTION, encoding="utf-8")
+    (branch / "tests").mkdir()
+    test_file = branch / "tests" / "test_proc.py"
+    test_file.write_text(_PROC_UNITS, encoding="utf-8")
+    return branch, test_file
+
+
+def test_host_coupled_oracle_convicts_the_title_read_and_the_forked_count_only(tmp_path):
+    """Own pid into process_args and an exact ps count convicted; liveness, a skip mark, a pinned gate and a
+    non-runner mock and a child's pid acquitted."""
+    branch, test_file = _proc_package(tmp_path)
+
+    rows = host_coupled_oracle_check.scan_file(str(test_file), str(branch.parent))
+
+    assert _lines(rows) == [_line_of(_PROC_UNITS, "process_args(os.getpid())"), _line_of(_PROC_UNITS, "ps.call_count")]
+    assert "demo/apps/proc.py:8 process_args" in rows[1][1]
+
+
+def test_host_coupled_oracle_scores_by_clean_test_file_share(tmp_path):
+    """check_branch: one convicted file of two scores 50 and names the file."""
+    branch, _test_file = _proc_package(tmp_path)
+    (branch / "tests" / "test_clean.py").write_text("def test_arithmetic():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+
+    result = host_coupled_oracle_check.check_branch(str(branch))
+
+    assert (result["standard"], result["score"], result["passed"]) == ("HOST_COUPLED_ORACLE", 50, False)
+    assert {row["file"] for row in result["checks"][0]["violations"]} == {"tests/test_proc.py"}

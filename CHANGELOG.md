@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Added
+
+- **seedgo**: `host_coupled_oracle`, a tests-only standard (branch level): a test that passes its own `os.getpid()`/`getppid()` to an args/cmdline/title reader, or pins a literal runner `call_count == N` on a function that both forks on platform and runs a subprocess, is host-coupled and fails. Born of PR #807's three clone-only reds (pytest-xdist retitles its workers; macOS reads args through `ps`). Two pins on reductions of the real tests, seven mutants red, fleet 0 hits after hooks' cures.
+
 ## [2026-10-25] — v2.8.28: Codex as a second provider (dispatch, hooks, context gauge, one skills dir for both CLIs), the owner's settings gate, the ratchet's budget exit, the api suite at 75 s
 
 ### Added
