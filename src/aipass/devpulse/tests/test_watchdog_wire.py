@@ -140,7 +140,7 @@ def _completion(branch: str, dispatch_id: str, minute: int = 0, sender: str = SE
 def _seed_cursor(root: Path) -> None:
     """Absorb the current feed so a later append is the only NEW record (drain_feed's first look is silent)."""
     watch_feed.drain_feed(
-        watch_feed.cursor_file_for(root),
+        watch_feed.cursor_file_for(root, seat=SEAT),
         kinds=("dispatch",),
         feed_file_path=watch_feed.feed_file(root),
     )
@@ -489,6 +489,39 @@ def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
     finally:
         if peer.poll() is None:
             peer.kill()
+
+
+def test_seat_is_the_callers_project_owner_with_its_own_cursor(tmp_path, capsys, monkeypatch):
+    """drone runs the wire in devpulse's directory; the seat comes from the caller's, and cursors are per seat."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    vera_home = tmp_path / "vera-studio" / "src" / "vera_studio" / "vera"
+    vera_home.mkdir(parents=True)
+    (tmp_path / "vera-studio" / "VERA-STUDIO_REGISTRY.json").write_text(
+        json.dumps({"branches": [{"name": "VERA", "email": "@vera", "owner": True, "path": str(vera_home)}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(vera_home))
+    _write_feed(root, [])
+    _seed_cursor(root)  # @devpulse's cursor has absorbed the feed; @vera's must not have
+    _write_feed(root, [_completion("writer", "v-1", sender="@vera"), _completion("hooks", "d-1", sender=SEAT)])
+
+    result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+    out = capsys.readouterr().out
+    assert result["replayed"] == 0 and "MISSED" not in out, "a seat's first drain absorbs, never replays"
+    assert watch_feed.cursor_file_for(root, seat="@vera").is_file()
+    assert not watch_feed.cursor_file_for(root, seat="@vera").samefile(watch_feed.cursor_file_for(root, seat=SEAT))
+
+    _write_feed(root, [_completion("writer", "v-2", sender="@vera"), _completion("hooks", "d-2", sender=SEAT)])
+    result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+    out = capsys.readouterr().out
+    assert result["replayed"] == 1 and "@writer" in out and "@hooks" not in out, "only @vera's completion is hers"
+
+    monkeypatch.delenv("AIPASS_CALLER_CWD")
+    result = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+    out = capsys.readouterr().out
+    assert result["replayed"] == 1 and "@hooks" in out and "@writer" not in out, "@devpulse's cursor is its own"
 
 
 @_POSIX_ARGV0
@@ -985,7 +1018,7 @@ def test_a_death_is_announced_once_ever_not_once_per_wire(tmp_path, capsys, monk
     first = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
     assert first["dead"] == 1
     assert "DEAD @drone" in capsys.readouterr().out
-    assert watch_feed.cursor_file_for(root, name=wire.DEAD_CURSOR_NAME).is_file()
+    assert watch_feed.cursor_file_for(root, name=wire.DEAD_CURSOR_NAME, seat=SEAT).is_file()
 
     second = wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
     assert second["dead"] == 0

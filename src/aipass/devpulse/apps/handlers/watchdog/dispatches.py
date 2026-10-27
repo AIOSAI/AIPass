@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: dispatches.py
 # Description: Watchdog seat attribution — which completions are THIS seat's, and what is still out
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-08-22
 # Modified: 2026-10-26
 # =============================================
@@ -27,9 +27,11 @@ class RegisterUnavailable(RuntimeError):
 
 
 def seat_email(repo_root: Path | None = None) -> str:
-    """The address whose dispatches this seat owns — ``@devpulse`` here."""
+    """The seat's address: the sealed owner of the caller's directory (``AIPASS_CALLER_CWD``, which drone
+    sets while running every handler in devpulse's directory), else of ``repo_root``."""
+    caller_cwd = os.environ.get("AIPASS_CALLER_CWD")
+    address: Any = _owner_address(start_path=Path(caller_cwd) if caller_cwd else repo_root)
     # owner_address() is soft for its refusal message; arming must not guess, so None turns hard.
-    address: Any = _owner_address(start_path=repo_root)
     if not address:
         raise RegisterUnavailable(
             "no sealed owner for this project — cannot decide which dispatches are this seat's. "
@@ -39,7 +41,8 @@ def seat_email(repo_root: Path | None = None) -> str:
 
 
 def seat_session_id(branch_path: Path | None = None) -> str | None:
-    """This seat's conversation id: Claude's env var, else the thread id of a Codex pointer at ``branch_path`` (default CWD)."""
+    """This seat's conversation id: Claude's env var, else the thread id of a Codex pointer at ``branch_path``
+    (default CWD)."""
     env_id = os.environ.get("CLAUDE_CODE_SESSION_ID")
     if env_id:
         return env_id

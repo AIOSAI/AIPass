@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-08-19
 # Modified: 2026-10-26
 # =============================================
@@ -281,8 +281,8 @@ def _result(state: str, **extra) -> dict:
     return base
 
 
-def _dead_cursor_file(repo_root: Path) -> Path:
-    return _feed.cursor_file_for(repo_root, name=DEAD_CURSOR_NAME)
+def _dead_cursor_file(repo_root: Path, seat: str) -> Path:
+    return _feed.cursor_file_for(repo_root, name=DEAD_CURSOR_NAME, seat=seat)
 
 
 def _load_announced(path: Path) -> list[str]:
@@ -364,7 +364,7 @@ def _announce_dead(root: Path, seat: str, announced: list[str]) -> int:
         _stdout_event(_format_dead(row))
         announced.append(_dead_key(row))
     if fresh:
-        _save_announced(_dead_cursor_file(root), announced)
+        _save_announced(_dead_cursor_file(root, seat), announced)
         logger.warning("[watchdog.wire] announced %s dead dispatch(es)", len(fresh))
         json_handler.log_operation("dead_dispatches_announced", {"count": len(fresh)})
     return len(fresh)
@@ -443,7 +443,7 @@ def arm_wire(
     )
     json_handler.log_operation("arm_wire", {"handle": handle, "session": session_name, "once": once})
 
-    feed_cursor_file = _feed.cursor_file_for(root)
+    feed_cursor_file = _feed.cursor_file_for(root, seat=seat)
     feed_source = _feed.feed_file(root)
     feed_state: dict | None = None
 
@@ -466,7 +466,7 @@ def arm_wire(
             logger.info("[watchdog.wire] replayed %s missed completions", replayed)
 
         # A death most likely waits at sign-in: the reboot that killed the monitor killed the old wire.
-        announced = _load_announced(_dead_cursor_file(root))
+        announced = _load_announced(_dead_cursor_file(root, seat))
         dead = _announce_dead(root, seat, announced)
         last_dead_check = time.monotonic()
 
