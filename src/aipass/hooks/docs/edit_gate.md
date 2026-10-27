@@ -34,10 +34,10 @@ and `--confcutdir` included (the rootdir takes pytest's cache).
 | Seat | May write | Never |
 |---|---|---|
 | @devpulse (verified admin grant) | anywhere, system-wide | — |
-| a project's manager row (`owner: true`), outside AIPass | their own branch and their project's files in no branch row | another branch, another project |
+| a project's manager row (`owner: true`), outside AIPass | their own project: its files in no branch row and its citizens' branches | another project |
 | every other seat, @seedgo/@spawn included | their own branch directory | another branch, a project-level file, another project |
 
-A directory name grants nothing. A manager row grants its project's files that lie in no branch row; another branch's row stays its branch's. In AIPass the manager row is the admin seat's, and it writes only as the verified grant.
+A directory name grants nothing. A manager row grants its whole project: the files that lie in no branch row and its citizens' branches (the owner's ruling, 2026-10-26). In AIPass the manager row is the admin seat's, and it writes only as the verified grant.
 
 Reading is never refused by this rule. A file outside every project (a temp file) is nobody's and stays open. A session at a project root has no branch identity: it is the project's own seat and writes the project, fenced at its boundary.
 

@@ -1,17 +1,17 @@
 # =================== AIPass ====================
 # Name: write_ownership.py
-# Version: 2.4.0
+# Version: 2.5.0
 # Description: Who may write whose files: project roots and branch owners read from the registries
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-09-18
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Answers, for the edit gate's two lanes, whose file a write lands in and whether this seat may make it.
 
-Each agent writes its own branch; a non-AIPass project's manager row writes its files outside
-every branch row; only the verified admin seat (a grant, never a name) writes anywhere.
+Each agent writes its own branch; a non-AIPass project's manager row writes its whole project,
+its citizens' branches included; only the verified admin seat (a grant, never a name) writes anywhere.
 Registry rows decide (``owner: true`` marks the manager); the src/<package>/<branch> shape is
 the fallback only where a project has no rows. Blind spot: a write a service makes from Python.
 """
@@ -41,7 +41,8 @@ _SHOWN_CHARS = 120
 
 _WHO = (
     "Who writes where (the owner's rulings, 2026-09-18 and 2026-09-30): each agent its own branch; "
-    "a project's manager its project's files outside every branch row (2026-10-16); "
+    "a project's manager its project's files outside every branch row (2026-10-16) "
+    "and inside its citizens' branches (2026-10-26), AIPass excepted; "
     "the verified admin seat (@devpulse) everywhere."
 )
 
@@ -238,7 +239,9 @@ def ownership_refusal(
 
 
 def _refusal(caller: Project | None, seat: Branch, owner: Branch | None, target: Path, how: str) -> str | None:
-    """The refusal text for a write by *seat* that lands outside it, or None when the target is nobody's."""
+    """The refusal text for a write by *seat* that lands outside it, or None when the target is nobody's or the seat is its project's manager."""
+    if caller is not None and caller.manager is not None and caller.manager.path == seat.path and not caller.is_aipass:
+        return None
     lane = f" ({how})" if how else ""
     if owner is not None:
         verb = "email" if owner.manager else "dispatch"
@@ -247,8 +250,6 @@ def _refusal(caller: Project | None, seat: Branch, owner: Branch | None, target:
             f'{_WHO}\nTo change it, ask its owner: drone @ai_mail {verb} @{owner.name} "Subject" "Body"'
         )
     if caller is None or caller.branches is None:
-        return None
-    if caller.manager is not None and caller.manager.path == seat.path and not caller.is_aipass:
         return None
     manager = caller.manager.name if caller.manager else "the project manager"
     return (

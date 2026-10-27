@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.7.1
+# Version: 1.8.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's scripted lane and apps/modules/bash_writes.py."""
@@ -419,12 +419,22 @@ class TestScriptedLaneDoesNotOverreach:
         # awk is not a read-only program (print > file, system()), so it may not name it.
         assert _run(registered_projects["hooks"], command=f"awk '/def /' {target}")["exit_code"] == 2
 
-    def test_seedgo_and_the_manager_no_longer_write_across_branches_from_a_shell(self, registered_projects: dict):
-        """A name (seedgo) and a manager row (vera) decide nothing in the shell lane either."""
+    def test_seedgo_no_longer_writes_across_branches_from_a_shell(self, registered_projects: dict):
+        """A name (seedgo) decides nothing in the shell lane either."""
         memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
-        writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
         assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 2
-        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 2
+
+    def test_a_projects_manager_writes_its_citizens_branches_and_a_citizen_does_not(
+        self, registered_projects: dict, grant_withheld
+    ):
+        """The owner's ruling, 2026-10-26: a manager changes its own citizens' files; AIPass keeps admin only."""
+        writer = Path(registered_projects["writer"]) / ".updateignore"
+        assert _run(registered_projects["vera_seat"], command=f"cp ./x {writer.as_posix()}")["exit_code"] == 0
+        assert _run(registered_projects["vera_seat"], file_path=str(writer), tool="Write")["exit_code"] == 0
+        sibling = (Path(registered_projects["vera_seedgo"]) / "x.md").as_posix()
+        assert "Cross-branch" in _reason(_run(registered_projects["writer"], command=f"echo x > {sibling}"))
+        hooks = (Path(registered_projects["hooks"]) / "x.py").as_posix()
+        assert "Cross-branch" in _reason(_run(registered_projects["devpulse"], command=f"echo x > {hooks}"))
 
     def test_a_projects_manager_writes_its_unrowed_files_from_a_shell(self, registered_projects: dict):
         root = (registered_projects["vera"] / "README.md").as_posix()
