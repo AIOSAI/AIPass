@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-04-16
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -45,6 +45,7 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_placement,
     check_pyproject,
     check_registry_consistency,
+    check_gitignore_coverage,
     check_root_artifacts,
     detect_pollution,
     disable_shadows,
@@ -786,7 +787,6 @@ def _check_community() -> List[CheckResult]:
 def _check_structure() -> List[CheckResult]:
     """Run Structure group checks — agent placement, pollution, registry consistency."""
     results: List[CheckResult] = []
-
     project_root = find_project_root(Path.cwd())
     if project_root is None:
         results.append(
@@ -832,7 +832,6 @@ def _check_structure() -> List[CheckResult]:
             )
     else:
         results.append(CheckResult("pollution", GLYPH_PASS, "no duplicates", ""))
-
     reg_path = _discover_registry(start_path=project_root)
     if reg_path and reg_path.exists():
         reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
@@ -882,6 +881,7 @@ def _check_structure() -> List[CheckResult]:
             results.append(CheckResult("instruction fence", GLYPH_PASS, "all nested projects fenced", ""))
 
     results.extend(_check_instruction_shadow(project_root))
+    results.extend(CheckResult(*row) for row in check_gitignore_coverage(project_root))
     return results
 
 

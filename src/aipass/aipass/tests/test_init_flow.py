@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.2.9
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -481,6 +481,15 @@ class TestHandleCommand:
                 handle_command("init", [str(tmp_path / "proj")])
         assert exc_info.value.code == 0
         mock_scaffold.assert_called_once_with([str(tmp_path / "proj")])
+
+    def test_a_flag_after_the_target_is_refused_and_nothing_is_scaffolded(self, tmp_path, capsys) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            handle_command("init", [str(tmp_path / "demo"), "--dry-run"])
+
+        assert exc_info.value.code == 1
+        _out, err = capsys.readouterr()
+        assert "takes no flags (got --dry-run)" in " ".join(err.split())
+        assert not (tmp_path / "demo").exists()
 
 
 @pytest.fixture(autouse=True)
@@ -1225,6 +1234,24 @@ class TestInitUpdateGitAuth:
         assert self._squashed("Stamp only: no file would change, so no go is needed") in printed
         assert self._squashed(f"Run: aipass init update {target}") in printed
         assert self._squashed("Apply needs the owner's or devpulse's go") not in printed
+
+    def test_a_dry_run_prints_each_gitignore_line_the_merge_would_add_brackets_and_all(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="lines")
+        (target / ".gitignore").write_text("logs/\n", encoding="utf-8")
+        capsys.readouterr()
+        with patch(f"{_MOD_UPDATE}._run_git_auth_provisioning", return_value=0):
+            rc = _init_update([str(target), "--dry-run"])
+
+        assert rc == 2
+        out, _err = capsys.readouterr()
+        assert "+ .chroma/" in out
+        assert "+ *.py[cod]" in out
+        assert "+ logs/" not in out
+        assert (target / ".gitignore").read_text(encoding="utf-8") == "logs/\n"
 
     def test_a_plan_that_writes_a_file_still_asks_for_the_go(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

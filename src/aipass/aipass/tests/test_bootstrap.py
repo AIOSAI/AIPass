@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.4.2
+# Version: 1.5.0
 # Created: 2026-05-04
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -26,6 +26,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     update_project,
 )
 from aipass.aipass.apps.handlers.init import bootstrap
+from aipass.aipass.apps.handlers.init.scaffold_manifest import read_ignore
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
@@ -284,6 +285,22 @@ def test_init_project_gitignore_content(tmp_path):
     assert ".ai_mail.local/" in content
     assert "__pycache__/" in content
     assert "logs/" in content
+
+
+def test_init_project_ignores_runtime_state_and_seeds_the_aipass_whitelist_and_an_empty_updateignore(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+
+    result = init_project(target, project_name="alpha")
+
+    lines = (target / ".gitignore").read_text(encoding="utf-8").splitlines()
+    for pattern in (".chroma/", "docs.local/", "dropbox/", "**/*_json/", ".spawn/", "*_REGISTRY.json", ".env"):
+        assert pattern in lines
+    whitelist = (target / ".aipass" / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert whitelist == ["*", "!tier0_kernel.md", "!tier1_navmap.md", "!hooks.json", "!.gitignore"]
+    assert (target / ".updateignore").read_text(encoding="utf-8").startswith("# Owner-protected:")
+    assert read_ignore(target) == []
+    assert str(target.resolve() / ".updateignore") in result["created_files"]
 
 
 def test_init_project_claude_settings_content(tmp_path):

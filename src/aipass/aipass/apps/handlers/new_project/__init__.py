@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: New project handler — create projects inside AIPass
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-17
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -24,10 +24,13 @@ from pathlib import Path
 
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
 from aipass.aipass.apps.handlers.init.bootstrap import (
+    NAVMAP_REL,
     PREP_SKILL_REL,
     SKILLS_LINK_REL,
     _managed_manifest_entries,
     link_skills,
+    navmap_stub,
+    write_owner_seeds,
     write_switch_pair,
 )
 from aipass.aipass.shared import scaffold_content as sc
@@ -146,7 +149,8 @@ def _write_template(target: Path, name: str, template: str) -> list[str]:
 
 
 def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
-    """Write AIPass scaffold files (tiers, hooks, AGENTS.md, settings, the prep skill, .venv); returns files, notes."""
+    """Write AIPass scaffold files (kernel, navmap stub, ignore seeds, hooks, AGENTS.md, settings, the prep skill,
+    .venv); returns files, notes."""
     from aipass.aipass.shared.project_home import (
         claude_local_settings,
         _claude_settings,
@@ -164,15 +168,15 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
     aipass_dir = target / ".aipass"
     aipass_dir.mkdir(exist_ok=True)
 
-    if aipass_home:
-        for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-            dest = aipass_dir / tier_file
-            src_path = Path(aipass_home) / ".aipass" / tier_file
-            if src_path.is_file():
-                # Read-then-write, never copy2: a CRLF checkout of AIPASS_HOME would
-                # hand the project bytes no template comparison can match.
-                sm.write_text_lf(dest, src_path.read_text(encoding="utf-8"))
-                created.append(f".aipass/{tier_file}")
+    kernel_src = Path(aipass_home) / ".aipass" / "tier0_kernel.md" if aipass_home else None
+    if kernel_src and kernel_src.is_file():
+        # Read-then-write, never copy2: a CRLF checkout of AIPASS_HOME would
+        # hand the project bytes no template comparison can match.
+        sm.write_text_lf(aipass_dir / "tier0_kernel.md", kernel_src.read_text(encoding="utf-8"))
+        created.append(".aipass/tier0_kernel.md")
+    sm.write_text_lf(target / NAVMAP_REL, navmap_stub(target, reg))
+    created.append(NAVMAP_REL)
+    created.extend(write_owner_seeds(target))
 
     if aipass_home:
         template = Path(aipass_home) / ".aipass" / "project_hooks.json"
@@ -181,11 +185,9 @@ def _scaffold_aipass(target: Path, name: str) -> tuple[list[str], list[str]]:
             created.append(".aipass/hooks.json")
             _enroll_project(target)
 
-    for md_name in sm.SEED_FILES:
-        dest = target / md_name
-        if not dest.exists():
-            sm.write_text_lf(dest, agents_md_seed(reg, aipass_home))
-            created.append(md_name)
+    if not (target / "AGENTS.md").exists():
+        sm.write_text_lf(target / "AGENTS.md", agents_md_seed(reg, aipass_home))
+        created.append("AGENTS.md")
 
     # .claude/settings.json — tracked, permissions only (no machine-local paths)
     claude_dir = target / ".claude"

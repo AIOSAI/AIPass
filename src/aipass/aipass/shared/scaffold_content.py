@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-04-22
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -254,21 +254,53 @@ def global_prompt_md(name: str) -> str:
 
 
 def gitignore() -> str:
-    """Generate .gitignore content — standard AIPass ignores."""
+    """Generate the project root .gitignore: everything spawn and the services write into one installation.
+
+    ``init update`` appends the lines a project's file lacks (``gitignore_lines_missing``), never removes one."""
     return (
-        "# AIPass local state\n"
+        "# AIPass local state (one installation's, never the repo's)\n"
         ".trinity/\n"
         ".ai_mail.local/\n"
         "*.local.*\n"
+        "docs.local/\n"
+        ".ai_central/\n"
+        ".watchdog/\n"
+        ".recovery/\n"
+        ".seed/\n"
+        ".spawn/\n"
+        ".backup/\n"
+        ".backup_system/\n"
+        "*_REGISTRY.json\n"
+        "*_ROOTS.json\n"
+        ".*_REGISTRY.lock\n"
+        "**/.daemon/last_wake_prompt.txt\n"
+        "**/.seedgo/ratchet/\n"
+        "system_logs/\n"
+        "logs/\n"
         "\n"
-        "# Plans (local working docs)\n"
+        "# Module runtime JSON (config/data/log per command)\n"
+        "**/*_json/\n"
+        "\n"
+        "# Branch local directories\n"
+        "artifacts/\n"
+        "dropbox/\n"
+        "tools/\n"
+        "# A citizen whose tools ship negates its own folder below the blanket line:\n"
+        "# !src/<pkg>/<branch>/tools/\n"
+        "\n"
+        "# ChromaDB\n"
+        ".chroma/\n"
+        "\n"
+        "# Plans (managed by flow, local to each installation)\n"
         "DPLAN-*\n"
         "FPLAN-*\n"
+        "RPLAN-*\n"
+        "PPLAN-*\n"
         "APLAN-*\n"
         "TDPLAN-*\n"
         "\n"
-        "# Logs\n"
-        "logs/\n"
+        "# Secrets\n"
+        ".env\n"
         "\n"
         "# Python\n"
         "__pycache__/\n"
@@ -278,27 +310,87 @@ def gitignore() -> str:
         "build/\n"
         ".venv\n"
         "venv/\n"
+        ".pytest_cache/\n"
+        ".ruff_cache/\n"
         "\n"
-        "# IDE\n"
+        "# SQLite WAL sidecars\n"
+        "*.db-wal\n"
+        "*.db-shm\n"
+        "\n"
+        "# IDE / Claude Code per-machine state\n"
         ".vscode/\n"
         ".idea/\n"
+        ".claude/worktrees/\n"
         "\n"
         "# OS\n"
         ".DS_Store\n"
         "Thumbs.db\n"
         "\n"
-        "# Archives\n"
+        "# Archives and disabled files (renamed, never deleted)\n"
         ".archive/\n"
-        "\n"
-        "# Disabled files\n"
         "*(disabled)*\n"
         "\n"
         "# Scaffold update artefacts (aipass init update)\n"
         ".aipass/.backup/\n"
         "*.aipass-new\n"
+    )
+
+
+def gitignore_lines_missing(existing: str, template: str) -> list[str]:
+    """The template's pattern lines *existing* does not hold, in template order; comments and blanks never count."""
+    have = {line.strip() for line in existing.splitlines()}
+    return [
+        line for line in template.splitlines() if line.strip() and not line.startswith("#") and line.strip() not in have
+    ]
+
+
+def aipass_gitignore() -> str:
+    """Generate .aipass/.gitignore: a whitelist, so the scaffold manifest and .aipass/.backup/ never get committed."""
+    return "*\n!tier0_kernel.md\n!tier1_navmap.md\n!hooks.json\n!.gitignore\n"
+
+
+def updateignore() -> str:
+    """Generate the root .updateignore: its header only. What AIPass never rewrites lives in code; rows are the owner's."""
+    return (
+        "# Owner-protected: aipass init update and drone @spawn update never write, back up or retire a match.\n"
+        "# One fnmatch pattern per line, relative to the project root (src/<pkg>/*/docs.local/ reaches every\n"
+        "# citizen); a slashless name matches at any depth, a trailing / claims the whole folder.\n"
+    )
+
+
+NAVMAP_STUB_MARKER = "<!-- aipass:navmap-stub -->"
+
+
+def navmap_md(name: str, citizens: list[tuple[str, str]]) -> str:
+    """Generate the project's .aipass/tier1_navmap.md stub from its registry rows ``(email, description)``.
+
+    The marker comment tells ``init update`` the file is this stub, so an unedited one follows the roster."""
+    roster = "".join(f" - {email} — {desc}\n" for email, desc in citizens) or (
+        " - none yet: `drone @spawn create <name>` makes the first.\n"
+    )
+    return (
+        f"# {name} — Navigation map\n"
+        f"{NAVMAP_STUB_MARKER}\n"
+        "<!-- Tier 1: injected at session start and after compaction beside tier0_kernel.md. Cap 8,000 chars. "
+        "Rewrite it as the project's own map; once edited, init update keeps it and offers its stub beside it. -->\n"
         "\n"
-        "# Registry lock\n"
-        ".*_REGISTRY.lock\n"
+        f"{name}: an AIPass project. Its citizens live in branches under `src/`, each with identity, memory "
+        "and a mailbox; everything routes through `drone`.\n"
+        "\n"
+        "# Citizens\n"
+        "\n"
+        f"{roster}"
+        "\n"
+        "# Drone basics\n"
+        "\n"
+        "```\n"
+        "drone systems                                      # every agent and service\n"
+        "drone @<agent> --help                              # how, before using any agent\n"
+        'drone @ai_mail dispatch @target "Subject" "Body"   # send + wake\n'
+        "drone @ai_mail inbox                               # check mail\n"
+        'drone @flow create . "Subject"                     # new plan\n'
+        "drone @seedgo checklist <file|dir>                 # standards check\n"
+        "```\n"
     )
 
 

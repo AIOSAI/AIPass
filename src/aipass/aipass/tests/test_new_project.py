@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-07-17
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -141,6 +141,16 @@ def test_write_registry_creates_file(host_env, monkeypatch):
     assert data["metadata"]["name"] == "DEMO"
     assert fname == "DEMO_REGISTRY.json"
     assert data["branches"] == []
+
+
+def test_a_new_project_gets_the_ignore_seeds_and_its_own_navmap_stub(host_env, monkeypatch):
+    result = _built(host_env, monkeypatch, "demo")
+    target = Path(result["target"])
+    for rel in (".aipass/.gitignore", ".updateignore", ".aipass/tier1_navmap.md"):
+        assert rel in result["files"]
+    assert (target / ".aipass" / ".gitignore").read_text(encoding="utf-8").startswith("*\n!tier0_kernel.md\n")
+    assert (target / ".updateignore").read_text(encoding="utf-8").startswith("# Owner-protected:")
+    assert (target / ".aipass" / "tier1_navmap.md").read_text(encoding="utf-8").startswith("# DEMO — Navigation map\n")
 
 
 def test_write_template_empty(host_env, monkeypatch):

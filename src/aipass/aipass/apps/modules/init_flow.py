@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-04-16
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -997,6 +997,13 @@ def _handle_init_scaffold(args: list[str]) -> int:
     target = Path(args[0]) if args else Path.cwd()
     project_name = args[1] if len(args) > 1 else None
     try:
+        # Positional only: a flag here was read as the project name and scaffolded `--DRY-RUN_REGISTRY.json`.
+        flags = [arg for arg in args if arg.startswith("-")]
+        if flags:
+            raise ValueError(
+                f"aipass init [target] [name] takes no flags (got {' '.join(flags)}) and writes the scaffold. "
+                "Preview: aipass init run --dry-run, or aipass init update --dry-run for an existing project"
+            )
         result = init_project(target, project_name)
         success(f"Project initialized at {target}")
         for note in result.get("notes", []):
@@ -1105,6 +1112,8 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
     stamped = result.get("stamped_version") or "unstamped"
     console.print(f"[dim]AIPass {result.get('aipass_version', '?')} · project stamped {stamped}[/dim]\n")
 
+    from rich.markup import escape
+
     width = max((len(entry["path"]) for entry in files), default=0)
     for entry in files:
         glyph, colour = _PLAN_GLYPHS.get(entry["action"], ("?", "white"))
@@ -1112,6 +1121,8 @@ def _print_scaffold_plan(result: dict, *, dry_run: bool) -> None:
         console.print(
             f"  [{colour}]{glyph} {label}[/{colour}] {entry['path'].ljust(width)}  [dim]{entry['reason']}[/dim]"
         )
+        for line in entry.get("lines", []):
+            console.print(f"      [dim]+ {escape(line)}[/dim]")
 
     if handlers:
         added = [h["name"] for h in handlers if h["action"] == "add"]

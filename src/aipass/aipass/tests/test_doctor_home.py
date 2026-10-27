@@ -1,18 +1,20 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
 # Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills and shadow rows
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
-"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight, the drone count, shared skills, shadows."""
+"""Tests for apps/modules/doctor.py: AIPASS_HOME rows, seating, preflight, drone count, skills, shadows, gitignore."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 import logging
 import os
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -22,6 +24,7 @@ from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_PASS,
     GLYPH_WARN,
 )
+from aipass.aipass.apps.handlers.structure_scan.structure_scanner import check_gitignore_coverage
 from aipass.aipass.apps.modules.doctor import (
     CheckResult,
     check_identity,
@@ -703,7 +706,7 @@ class TestSharedSkillsRows:
 
 
 class TestInstructionShadowRows:
-    """The Structure group's instruction shadow row and its --fix, through run_doctor; every other group answers nothing."""
+    """The Structure group's instruction shadow row and its --fix, through run_doctor; other groups answer nothing."""
 
     @pytest.fixture(autouse=True)
     def _every_other_edge(self, monkeypatch, tmp_path) -> None:
@@ -847,3 +850,68 @@ class TestInstructionShadowRows:
 
         assert list(rows) == ["instruction shadow"]
         assert rows["instruction shadow"].glyph == GLYPH_PASS
+
+
+class TestGitignoreCoverageRows:
+    """The Structure group's gitignore coverage row, through run_doctor in a real repo under tmp_path."""
+
+    root: Path
+    printed: dict
+    _every_other_edge = TestInstructionShadowRows._every_other_edge
+    _write = TestInstructionShadowRows._write
+
+    def _track(self, *rels: str) -> None:
+        for rel in rels:
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            self._write(rel, "state\n")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-f", *rels], cwd=self.root, check=True)
+
+    def _rows(self, **kwargs) -> dict:
+        run_doctor(**kwargs)
+        return {r.label: r for r in self.printed["Structure"] if r.label.startswith("gitignore coverage")}
+
+    def test_tracked_runtime_folders_and_the_registry_fail_one_row_each_with_the_untrack_line(self) -> None:
+        self._track(".chroma/db.sqlite3", ".chroma/idx/a.bin", "src/p/vera/docs.local/n.md", "src/p/vera/README.md")
+        subprocess.run(["git", "add", "-f", "PROJ_REGISTRY.json"], cwd=self.root, check=True)
+
+        rows = self._rows(fix=True)
+
+        assert sorted(rows) == [
+            "gitignore coverage: .chroma",
+            "gitignore coverage: PROJ_REGISTRY.json",
+            "gitignore coverage: src/p/vera/docs.local",
+        ]
+        chroma = rows["gitignore coverage: .chroma"]
+        assert (chroma.glyph, chroma.detail) == (GLYPH_FAIL, "2 tracked file(s) one installation writes")
+        assert chroma.remediation.startswith("drone @git untrack --recursive .chroma (files stay on disk)")
+        assert rows["gitignore coverage: PROJ_REGISTRY.json"].remediation.startswith("drone @git untrack PROJ_")
+        assert (self.root / ".chroma" / "db.sqlite3").is_file()
+
+    def test_a_tracked_file_gone_from_disk_and_a_project_file_pass(self) -> None:
+        self._track("dropbox/gone.md", "src/p/vera/apps/vera.py")
+        (self.root / "dropbox" / "gone.md").rename(self.root / "gone.md(disabled)")
+
+        rows = self._rows()
+
+        assert list(rows) == ["gitignore coverage"]
+        assert (rows["gitignore coverage"].glyph, rows["gitignore coverage"].detail) == (
+            GLYPH_PASS,
+            "no runtime file tracked",
+        )
+
+    def test_the_aipass_source_tree_is_not_measured_its_templates_ship_tracked(self) -> None:
+        self._track("src/aipass/spawn/templates/citizen/dropbox/README.md", "pyproject.toml")
+
+        rows = self._rows()
+
+        assert list(rows) == ["gitignore coverage"]
+        assert rows["gitignore coverage"].detail.startswith("not measured: the AIPass source tree")
+
+    def test_a_folder_that_is_no_repository_passes_with_nothing_tracked(self) -> None:
+        rows = self._rows()
+
+        assert rows["gitignore coverage"].detail == "not a git repository: nothing tracked"
+        assert check_gitignore_coverage(self.root) == [
+            ("gitignore coverage", GLYPH_PASS, "not a git repository: nothing tracked", "")
+        ]

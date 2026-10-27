@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_manifest.py
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-09-09
-# Modified: 2026-10-21
+# Modified: 2026-10-27
 # =============================================
 
 """Scaffold manifest: which AIPass version wrote which file, and its hash. Conffile rule (dpkg's):
@@ -25,8 +25,9 @@ NEW_SUFFIX: str = ".aipass-new"
 
 BACKUP_REL: Path = Path(".aipass") / ".backup"
 
-#: Created once, never rewritten: a refresh would delete the manager's content.
-SEED_FILES: tuple = ("AGENTS.md",)
+#: Set by every writer since AGENTS.md left the seeds: before it, an update adopted an edited AGENTS.md's
+#: hash, so a manifest without it holds no AGENTS.md hash an overwrite may trust.
+AGENTS_MANAGED_KEY: str = "agents_md_managed"
 
 #: ``_merge_hooks_json`` only adds handlers; this list is the removal side.
 RETIRED_HOOK_HANDLERS: tuple = ("auto_watchdog",)
@@ -110,6 +111,14 @@ def manifest_hashes(target: Path) -> dict:
     return files if isinstance(files, dict) else {}
 
 
+def trusted_hashes(target: Path) -> dict:
+    """``manifest_hashes`` minus an AGENTS.md hash a pre-managed manifest recorded, which may be the owner's edit."""
+    files = dict(manifest_hashes(target))
+    if not read_manifest(target).get(AGENTS_MANAGED_KEY):
+        files.pop("AGENTS.md", None)
+    return files
+
+
 def stamped_version(target: Path) -> str | None:
     """The AIPass version recorded in *target*'s manifest, or None."""
     version = read_manifest(target).get("aipass_version")
@@ -123,6 +132,7 @@ def write_manifest(target: Path, files: dict, version: str | None = None) -> Pat
     document = {
         "aipass_version": version or installed_version(),
         "stamped_at": datetime.now(timezone.utc).isoformat(),
+        AGENTS_MANAGED_KEY: True,
         "files": {key: files[key] for key in sorted(files)},
     }
     write_text_lf(path, json.dumps(document, indent=2, ensure_ascii=False) + "\n")

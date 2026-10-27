@@ -32,7 +32,13 @@ One pass produces seven groups, in this order:
   `mv <file> '<file>(disabled)'`, and whether its text equals `AGENTS.md`
   (different text is the owner's to copy over). `--fix` only renames: never a
   copy or a delete, never over an existing `(disabled)` file, never when the
-  root holds `$HOME` or the file's folder resolves outside the root
+  root holds `$HOME` or the file's folder resolves outside the root. Then
+  gitignore coverage, read-only: a file on disk that git tracks under
+  `.chroma`, `docs.local`, `dropbox`, `.spawn` or a `*_json` folder, or a
+  `*_REGISTRY.json`, is one FAIL per folder or file with its count and
+  `drone @git untrack [--recursive] <path>` as the fix; `--fix` never touches
+  the index. The AIPass source tree is not measured: its `.gitignore` ships
+  spawn's templates tracked on purpose
   ([`apps/handlers/structure_scan/`](../apps/handlers/structure_scan)).
 - **Scaffold** — the stamped scaffold version, tier0 drift, missing and retired
   hook handlers for the project you are standing in. This is the group that

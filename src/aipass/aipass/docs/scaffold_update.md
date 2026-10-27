@@ -8,8 +8,8 @@ sequence that does.*
 Code is shared, scaffold is not. Every project's `.venv` is a symlink to the
 AIPass runtime and hooks run from `$AIPASS_HOME`, so a merge to main updates
 the *code* under every project the moment it lands. Only the project-local
-files — `tier0_kernel.md`, `tier1_navmap.md`, `hooks.json`, the Claude
-settings, the prep skill — lag behind. **`setup.sh` never touches a project**; it
+files — `tier0_kernel.md`, `tier1_navmap.md`, `AGENTS.md`, `hooks.json`, the
+Claude settings, the prep skill, `.gitignore` — lag behind. **`setup.sh` never touches a project**; it
 installs the source tree. Bringing a project's scaffold forward is this ritual,
 and nothing else does it.
 
@@ -42,9 +42,41 @@ conservatively: anything differing from the template is kept as
 `unknown provenance`, so the first update of an existing project overwrites
 nothing.
 
-Root `AGENTS.md` is the **seed** — created once, never rewritten,
-because it exists to be filled in. Retired managed files are renamed
+Root `AGENTS.md` is managed under the same hash rule, against
+`.aipass/project_AGENTS.md`: an unedited copy follows the template, an edited
+one is `kept-local` with the template beside it. A manifest written before
+AGENTS.md was managed lacks `agents_md_managed`; its AGENTS.md hash may be an
+edit adopted by an older update, so it is not trusted and that first update
+overwrites nothing. A project that keeps its own AGENTS.md lists it in
+`.updateignore`.
+
+`.aipass/tier1_navmap.md` is a project stub: the project's name, its citizens
+read from the registry one line each, and the drone basics. An unedited stub
+follows the roster; a file without the stub's marker line (the host's map an
+older scaffold copied, or the project's own) is `kept-local`, the stub written
+beside it.
+
+A live `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` beside AGENTS.md
+makes Claude Code skip AGENTS.md; the update renames it `<name>(disabled)` with
+doctor's own `instruction shadow` fix and its refusals. Hook scripts under
+`.claude/hooks/` that the manifest still records are retired the same way while
+they hold the bytes AIPass wrote. Retired managed files are renamed
 `<name>(disabled)`, never deleted.
+
+## The three ignore files
+
+| File | Written | On update |
+|------|---------|-----------|
+| `.gitignore` | from the template | lines-merge: each template line the file lacks is appended under one `# Added by aipass init update <date>` comment; no owner line is removed or moved. `--dry-run` prints the lines |
+| `.aipass/.gitignore` | whitelist: `*`, then the kernel, navmap, `hooks.json`, itself | created when absent, never rewritten: the manifest and `.aipass/.backup/` stay uncommitted |
+| `.updateignore` | its comment header only | created when absent, never rewritten |
+
+The root template ignores what spawn and the services write into one
+installation: `.trinity/`, `docs.local/`, `dropbox/`, `artifacts/`, `tools/`,
+`**/*_json/`, `.spawn/`, `.chroma/`, `.backup/`, the registry and roots json,
+`.env`, plan files. A citizen whose tools ship negates its own folder, as the
+template's comment shows. An owner who wants a template line gone lists
+`.gitignore` in `.updateignore`, or the merge appends it again.
 
 ## The shared prep skill
 
@@ -82,8 +114,10 @@ tier1_navmap.md
 A matched file is never written, never backed up, and never gets a
 `.aipass-new` beside it; the plan reports it as `skipped (.updateignore)` and
 doctor counts it as owner-protected rather than as drift. `.updateignore`
-outranks both the seed rule and the hash rule. AIPass never creates or edits
-it — it is yours. Nothing is recorded in the manifest for a protected file, so
+outranks every rule above. AIPass seeds it with its header and never edits
+it after — it is yours. What AIPass never rewrites lives in code, so the file
+holds only the owner's choices; `drone @spawn update` reads the same root file,
+so a pattern like `src/<pkg>/*/docs.local/` reaches every citizen. Nothing is recorded in the manifest for a protected file, so
 removing a pattern later puts that file back on the conservative backfill path
 (kept, not overwritten) rather than handing AIPass a hash it never wrote.
 
