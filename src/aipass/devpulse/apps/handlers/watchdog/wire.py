@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.7.0
+# Version: 2.7.1
 # Created: 2026-08-19
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -92,7 +92,7 @@ def _touch_heartbeat() -> None:
 
 
 def _stdout_target_via_lsof(pid: int) -> Path | None:
-    """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``_stdout_target``.
+    """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``stdout_target``.
 
     None on any failure: a wrong path would be read as a wrapper identity.
     """
@@ -114,7 +114,7 @@ def _stdout_target_via_lsof(pid: int) -> Path | None:
     return None
 
 
-def _stdout_target(pid: int | None = None) -> Path | None:
+def stdout_target(pid: int | None = None) -> Path | None:
     """Where a process's stdout actually goes — the wire-identity primitive.
 
     None when the pid is gone or fd/1 is unreadable: the target is unknown.
@@ -129,7 +129,7 @@ def _stdout_target(pid: int | None = None) -> Path | None:
         return None
 
 
-def _session_dir_of(target: Path | None) -> Path | None:
+def session_dir_of(target: Path | None) -> Path | None:
     """The session dir a stdout target belongs to, or None."""
     if target is None or target.parent.name != "tasks":
         return None
@@ -151,13 +151,13 @@ def _wrapper_of(target: Path | None) -> str:
         return WRAPPER_FOREGROUND
     if str(target).startswith("socket:"):
         return WRAPPER_MONITOR
-    if _session_dir_of(target) is not None:
+    if session_dir_of(target) is not None:
         return WRAPPER_BACKGROUND
     return WRAPPER_FOREGROUND
 
 
 def _cmdline_via_ps(pid: int) -> str:
-    """``ps -p <pid> -o command=`` — the portable half of ``_cmdline``."""
+    """``ps -p <pid> -o command=`` — the portable half of ``cmdline``."""
     try:
         done = subprocess.run(
             ["ps", "-p", str(pid), "-o", "command="],
@@ -172,7 +172,7 @@ def _cmdline_via_ps(pid: int) -> str:
     return done.stdout.strip()
 
 
-def _cmdline(pid: int) -> str:
+def cmdline(pid: int) -> str:
     """A process's cmdline, NUL-separated fields joined with spaces. "" on error."""
     if sys.platform != "linux":
         return _cmdline_via_ps(pid)
@@ -184,12 +184,12 @@ def _cmdline(pid: int) -> str:
     return raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
 
 
-def _looks_like_ours(pid: int) -> bool:
+def looks_like_ours(pid: int) -> bool:
     """True if the pid's cmdline names the watchdog.
 
     A takeover must never SIGTERM a recycled pid; its entry is still deregistered.
     """
-    return "watchdog" in _cmdline(pid)
+    return "watchdog" in cmdline(pid)
 
 
 def _sweep_wires(storage_path: Path | None, seat: str) -> None:
@@ -219,8 +219,8 @@ def _sweep_wires(storage_path: Path | None, seat: str) -> None:
             logger.info("[watchdog.wire] left another seat's wire alone handle=%s seat=%s", handle, their_seat)
             continue
 
-        their_session = _session_dir_of(_stdout_target(pid))
-        if _looks_like_ours(pid):
+        their_session = session_dir_of(stdout_target(pid))
+        if looks_like_ours(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
             _stderr(
                 f"watchdog wire: took over stale wire {handle} (pid {pid}, "
@@ -248,7 +248,7 @@ def _sweep_stale_daemons(storage_path: Path | None) -> int:
         pid = watch.get("pid")
         if not isinstance(handle, str):
             continue
-        if isinstance(pid, int) and _registry.is_pid_alive(pid) and _looks_like_ours(pid):
+        if isinstance(pid, int) and _registry.is_pid_alive(pid) and looks_like_ours(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
             _stderr(
                 f"watchdog wire: retired pre-r4 detection daemon {handle} (pid {pid}) "
@@ -397,8 +397,8 @@ def arm_wire(
         logger.error("[watchdog.wire] seat unresolved: %s", exc)
         raise SystemExit(1) from exc
 
-    my_target = _stdout_target()
-    my_session = _session_dir_of(my_target)
+    my_target = stdout_target()
+    my_session = session_dir_of(my_target)
     # The statusline matches the conversation id; the tasks-dir name is only a fallback.
     session_name = _dispatches.seat_session_id() or (my_session.name if my_session is not None else None)
 

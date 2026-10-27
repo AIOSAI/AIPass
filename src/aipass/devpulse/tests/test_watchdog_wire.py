@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_wire.py
 # Description: Tests for the watchdog wire handler (DPLAN-0317 r4 — report, filter, deliver)
-# Version: 2.4.0
+# Version: 2.4.1
 # Created: 2026-08-19
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/watchdog/wire.py: arm_wire delivering THIS seat's dispatch completions."""
@@ -80,7 +80,7 @@ def _no_signal_rebind(monkeypatch):
 
 @pytest.fixture
 def raw_stdout_probe():
-    """Opt-out from ``_a_stdout_target_this_host_can_name``: a test about ``_stdout_target`` meets the real one."""
+    """Opt-out from ``_a_stdout_target_this_host_can_name``: a test about ``stdout_target`` meets the real one."""
     return None
 
 
@@ -92,11 +92,11 @@ def _a_stdout_target_this_host_can_name(request, tmp_path, monkeypatch):
     would all exit 1. The host is found by asking the primitive, not naming a platform.
     The file is NOT under ``tasks/``, so the run_in_background tripwire stays quiet.
     """
-    if "raw_stdout_probe" in request.fixturenames or wire._stdout_target() is not None:
+    if "raw_stdout_probe" in request.fixturenames or wire.stdout_target() is not None:
         return None
     target = tmp_path / "host-stdout.log"
     target.write_text("", encoding="utf-8")
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: target if pid is None else None)
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: target if pid is None else None)
     return target
 
 
@@ -448,7 +448,7 @@ def test_takeover_kills_wire_soldered_to_another_session(tmp_path, capsys, monke
         # Distinct session dirs, so the comparison is not short-circuited by two Nones.
         mine = tmp_path / "sess-mine" / "tasks" / "a.output"
         theirs = tmp_path / "sess-theirs" / "tasks" / "b.output"
-        monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: mine if pid is None else theirs)
+        monkeypatch.setattr(wire, "stdout_target", lambda pid=None: mine if pid is None else theirs)
 
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
@@ -474,7 +474,7 @@ def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
         shared = tmp_path / "same-session" / "tasks"
         monkeypatch.setattr(
             wire,
-            "_stdout_target",
+            "stdout_target",
             lambda pid=None: shared / ("mine.output" if pid is None else "theirs.output"),
         )
 
@@ -535,7 +535,7 @@ def test_another_seats_live_wire_is_left_alone(tmp_path, capsys, monkeypatch):
         _plant_entry(store, "baseline_wire", theirs.pid, {"session": "vera-session", "seat": "@vera"})
         mine = tmp_path / "sess-mine" / "tasks" / "a.output"
         other = tmp_path / "sess-theirs" / "tasks" / "b.output"
-        monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: mine if pid is None else other)
+        monkeypatch.setattr(wire, "stdout_target", lambda pid=None: mine if pid is None else other)
 
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
@@ -605,7 +605,7 @@ def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, mon
         bg_file = tmp_path / "some-session" / "tasks" / "b0l5zsqp7.output"
         bg_file.parent.mkdir(parents=True)
         bg_file.touch()
-        monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: bg_file if pid is None else None)
+        monkeypatch.setattr(wire, "stdout_target", lambda pid=None: bg_file if pid is None else None)
 
         with pytest.raises(SystemExit) as exc_info:
             wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
@@ -631,7 +631,7 @@ def test_once_arm_under_run_in_background_is_allowed(tmp_path, capsys, monkeypat
     bg_file = tmp_path / "some-session" / "tasks" / "b0l5zsqp7.output"
     bg_file.parent.mkdir(parents=True)
     bg_file.touch()
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: bg_file if pid is None else None)
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: bg_file if pid is None else None)
 
     result = wire.arm_wire(repo_root=root, storage_path=store, once=True, wire_poll=0)
 
@@ -656,7 +656,7 @@ def test_wire_records_conversation_id_from_env(tmp_path, monkeypatch):
     store = _store(tmp_path)
     _write_feed(root, [])
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "conv-abc-123")
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -671,7 +671,7 @@ def test_wire_falls_back_to_tasks_dir_without_env(tmp_path, monkeypatch):
     store = _store(tmp_path)
     _write_feed(root, [])
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -695,7 +695,7 @@ def test_wire_takes_codex_thread_from_pointer_without_env(tmp_path, monkeypatch)
     _write_feed(root, [])
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     _codex_pointer_cwd(tmp_path, monkeypatch, "codex-thread-9")
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: tmp_path / "runtime-xyz" / "tasks" / "t.output")
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -716,7 +716,7 @@ def test_wire_records_the_wrapper_carrying_it(tmp_path, monkeypatch):
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("socket:[4532132]"))
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: Path("socket:[4532132]"))
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -730,7 +730,7 @@ def test_a_foreground_wire_is_recorded_as_foreground(tmp_path, monkeypatch):
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("/dev/pts/3"))
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: Path("/dev/pts/3"))
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -747,7 +747,7 @@ def test_the_run_in_background_shape_records_as_background(tmp_path, capsys, mon
     bg_file = tmp_path / "runtime-xyz" / "tasks" / "t.output"
     bg_file.parent.mkdir(parents=True)
     bg_file.write_text("", encoding="utf-8")
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: bg_file)
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: bg_file)
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -762,7 +762,7 @@ def test_a_piped_once_wire_says_the_statusline_will_not_count_it(tmp_path, capsy
     root = _repo(tmp_path)
     store = _store(tmp_path)
     _write_feed(root, [])
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("pipe:[918273]"))
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: Path("pipe:[918273]"))
     seen: dict = {}
     _spy_register(monkeypatch, seen)
 
@@ -789,15 +789,15 @@ def test_wire_no_longer_records_a_daemon_pid(tmp_path, monkeypatch):
 
 def test_session_dir_requires_tasks_parent(tmp_path):
     inside = tmp_path / "abc-session" / "tasks" / "x.output"
-    assert wire._session_dir_of(inside) == tmp_path / "abc-session"
-    assert wire._session_dir_of(tmp_path / "abc-session" / "x.output") is None
-    assert wire._session_dir_of(None) is None
+    assert wire.session_dir_of(inside) == tmp_path / "abc-session"
+    assert wire.session_dir_of(tmp_path / "abc-session" / "x.output") is None
+    assert wire.session_dir_of(None) is None
 
 
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="POSIX-only fixture: it spawns `sleep` and reads another process's fd table. "
-    "On Windows _stdout_target has no probe that can answer (neither /proc nor lsof) and "
+    "On Windows stdout_target has no probe that can answer (neither /proc nor lsof) and "
     "returns None (cannot tell), by design and logged, never a wrong path. NOT widened to "
     "darwin — macOS has both `sleep` and `lsof`, and the lsof branch is exactly the code "
     "FPLAN-0554 added; skipping there would hide the hole it was written to close.",
@@ -808,14 +808,14 @@ def test_stdout_target_reads_proc_truth(tmp_path, raw_stdout_probe):
     with open(target, "wb") as fh:
         proc = subprocess.Popen(["sleep", "5"], stdout=fh)
     try:
-        assert wire._stdout_target(proc.pid) == target
+        assert wire.stdout_target(proc.pid) == target
     finally:
         proc.kill()
 
 
 def test_dead_pid_has_no_stdout_target(raw_stdout_probe):
     assert not watch_registry.is_pid_alive(DEAD_PID)
-    assert wire._stdout_target(DEAD_PID) is None
+    assert wire.stdout_target(DEAD_PID) is None
 
 
 # Off Linux there is no /proc, and ""/None for every pid is a silent lie, not degradation.
@@ -847,7 +847,7 @@ def test_cmdline_off_linux_asks_ps(monkeypatch, pretend_platform):
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline --once\n", argv_seen))
 
-    assert wire._cmdline(4242) == "drone @devpulse watchdog baseline --once"
+    assert wire.cmdline(4242) == "drone @devpulse watchdog baseline --once"
     assert argv_seen == [["ps", "-p", "4242", "-o", "command="]]
 
 
@@ -856,14 +856,14 @@ def test_a_live_wire_off_linux_is_recognised_as_ours(monkeypatch, pretend_platfo
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("drone @devpulse watchdog baseline\n"))
 
-    assert wire._looks_like_ours(4242) is True
+    assert wire.looks_like_ours(4242) is True
 
 
 def test_cmdline_off_linux_is_empty_when_ps_cannot_run(monkeypatch, pretend_platform):
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _missing_binary("ps"))
 
-    assert wire._cmdline(4242) == ""
+    assert wire.cmdline(4242) == ""
 
 
 def test_stdout_target_off_linux_asks_lsof(tmp_path, monkeypatch, raw_stdout_probe, pretend_platform):
@@ -872,7 +872,7 @@ def test_stdout_target_off_linux_asks_lsof(tmp_path, monkeypatch, raw_stdout_pro
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run(f"p4242\nfd1\nn{named}\n", argv_seen))
 
-    assert wire._stdout_target(4242) == named
+    assert wire.stdout_target(4242) == named
     assert argv_seen == [["lsof", "-p", "4242", "-a", "-d", "1", "-Fn"]]
 
 
@@ -882,7 +882,7 @@ def test_stdout_target_off_linux_names_this_process_by_number(monkeypatch, raw_s
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("nsocket:[4532132]\n", argv_seen))
 
-    assert wire._stdout_target() == Path("socket:[4532132]")
+    assert wire.stdout_target() == Path("socket:[4532132]")
     assert argv_seen == [["lsof", "-p", str(os.getpid()), "-a", "-d", "1", "-Fn"]]
 
 
@@ -890,7 +890,7 @@ def test_stdout_target_off_linux_is_none_when_lsof_names_no_file(monkeypatch, ra
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _fake_run("p4242\nfd1\n"))
 
-    assert wire._stdout_target(4242) is None
+    assert wire.stdout_target(4242) is None
 
 
 def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_stdout_probe, pretend_platform):
@@ -898,7 +898,7 @@ def test_stdout_target_off_linux_is_none_when_lsof_cannot_run(monkeypatch, raw_s
     pretend_platform(wire, "darwin")
     monkeypatch.setattr(subprocess, "run", _missing_binary("lsof"))
 
-    assert wire._stdout_target(4242) is None
+    assert wire.stdout_target(4242) is None
 
 
 def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsys, monkeypatch, raw_stdout_probe):
@@ -907,7 +907,7 @@ def test_a_continuous_wire_refuses_when_its_stdout_is_unknowable(tmp_path, capsy
     store = _store(tmp_path)
     _write_feed(root, [])
     asked: list = []
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: asked.append(pid))
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: asked.append(pid))
 
     with pytest.raises(SystemExit) as exit_info:
         wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
@@ -927,7 +927,7 @@ def test_once_still_arms_when_the_stdout_target_is_unknowable(tmp_path, capsys, 
     store = _store(tmp_path)
     _write_feed(root, [])
     asked: list = []
-    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: asked.append(pid))
+    monkeypatch.setattr(wire, "stdout_target", lambda pid=None: asked.append(pid))
 
     result = wire.arm_wire(once=True, repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
 
