@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_verbs_json.py
 # Description: The config verbs' --json machine surface - one document on stdout, payloads, in-band refusals
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-23
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/rollover_json.py — the `--json` surface of the config and rollover verbs."""
@@ -194,6 +194,30 @@ class TestJsonGetBranchPayload:
         assert limits["key_learnings"]["count"] is None
         assert limits["sessions"]["count"] == 22
         assert limits["observations"]["source"] == "defaults"
+
+
+class TestDeclaredExternalResolves:
+    """A citizen of a declared root (@vera) is a branch config can read and write; core rows stay put."""
+
+    @pytest.fixture(autouse=True)
+    def _vera(self, monkeypatch, tmp_path) -> None:
+        vera = {"name": "vera", "path": tmp_path / "Vera-Studio" / "vera", "registry": "VERA_REGISTRY.json"}
+        monkeypatch.setattr(
+            "aipass.memory.apps.handlers.monitor.registry_scope.external_branches",
+            lambda *_args, **_kwargs: [{**vera, "residency": "external"}],
+        )
+
+    def test_get_names_the_external_instead_of_refusing(self, verbs, capsys) -> None:
+        payload = _payload(verbs, capsys, "get", "@vera", "--json")
+        assert payload["ok"] is True
+        assert payload["branch"] == "vera"
+
+    def test_set_round_trips_and_leaves_core_rows_alone(self, verbs, capsys) -> None:
+        memory_before = _rollover_section(verbs)["per_branch"]["memory"]
+        assert _payload(verbs, capsys, "set", "@vera", "sessions", "12", "--json")["ok"] is True
+        assert _payload(verbs, capsys, "get", "@vera", "--json")["limits"]["sessions"]["count"] == 12
+        assert "vera" in _payload(verbs, capsys, "get", "--json")["overrides"]
+        assert _rollover_section(verbs)["per_branch"]["memory"] == memory_before
 
 
 class TestJsonWritePayloads:

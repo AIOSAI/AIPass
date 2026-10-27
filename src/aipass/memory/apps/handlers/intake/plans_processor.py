@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: plans_processor.py
 # Description: Plan Archival Vectorization Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-12
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -24,6 +24,7 @@ from aipass.memory.apps.handlers import repo_root
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.repo_root import module_file
 from aipass.memory.apps.handlers.storage.lane import CHROMA_SUBPROCESS_SCRIPT, EMBED_SUBPROCESS_SCRIPT, run_json
 
@@ -184,6 +185,23 @@ def _is_stale(plan_file: Path, entry: Any, text: str) -> bool:
     return False
 
 
+def _archives(plans_dir: str, root: Path) -> List[tuple[str, Path]]:
+    """``(project, archive dir)`` for the host, each resident project and each declared root; absent dirs skipped.
+
+    An absolute ``plans.path`` names one archive, the host's.
+    """
+    if Path(plans_dir).is_absolute():
+        return [(root.name, Path(plans_dir))]
+    projects = [root] + [reg.parent for reg in registry_scope.resident_registry_paths(root)]
+    projects += registry_scope.declared_roots(root)
+    return [(project.name, project / plans_dir) for project in projects if (project / plans_dir).is_dir()]
+
+
+def _manifest_key(project: str, plan_file: Path, host: str) -> str:
+    """Host rows keep their bare filename so the existing manifest stays valid; other projects are prefixed."""
+    return plan_file.name if project == host else f"{project}/{plan_file.name}"
+
+
 def _embed_texts(texts: List[str], timeout: int = 120) -> dict:
     """Encode texts via subprocess."""
     return run_json(EMBED_SUBPROCESS_SCRIPT, {"texts": texts}, timeout=timeout, label="Embedding")
@@ -205,7 +223,7 @@ def _store_vectors(embeddings, documents, metadatas, collection_name="flow_plans
 
 def process_plans() -> Dict[str, Any]:
     """
-    Process plan files from flow/processed_plans/ into vector storage.
+    Process every visible project's archived plans into vector storage, each chunk tagged with its project.
 
     The manifest is saved after every successful file, so partial failure makes partial progress.
     """
@@ -216,16 +234,20 @@ def process_plans() -> Dict[str, Any]:
 
     plans_dir = plans_config.get("path", ".backup/processed_plans")
     repo_root = _find_repo_root()
-    plans_path = Path(plans_dir) if Path(plans_dir).is_absolute() else repo_root / plans_dir
     extensions = plans_config.get("supported_extensions", [".md"])
     collection_name = plans_config.get("collection_name", "plans")
 
-    if not plans_path.exists():
+    archives = _archives(plans_dir, repo_root)
+    if not archives:
         return {"success": True, "files_processed": 0, "total_chunks": 0, "reason": "plans dir not found"}
 
-    files = []
-    for ext in extensions:
-        files.extend(plans_path.glob(f"*{ext}"))
+    host = repo_root.name
+    files = [
+        (project, plan_file, _manifest_key(project, plan_file, host))
+        for project, plans_path in archives
+        for ext in extensions
+        for plan_file in plans_path.glob(f"*{ext}")
+    ]
 
     if not files:
         return {"success": True, "files_processed": 0, "total_chunks": 0}
@@ -238,22 +260,22 @@ def process_plans() -> Dict[str, Any]:
 
     unprocessed = []
     backfilled = 0
-    for plan_file in files:
-        if plan_file.name not in manifest:
-            unprocessed.append(plan_file)
+    for project, plan_file, key in files:
+        if key not in manifest:
+            unprocessed.append((project, plan_file, key))
             continue
         try:
             text = plan_file.read_text(encoding="utf-8")
         except OSError as exc:
             logger.warning(f"[plans] Cannot read {plan_file.name} to check freshness ({exc}) — re-processing")
-            unprocessed.append(plan_file)
+            unprocessed.append((project, plan_file, key))
             continue
-        if _is_stale(plan_file, manifest[plan_file.name], text):
-            unprocessed.append(plan_file)
-        elif _recorded(manifest[plan_file.name])[1] is None:
+        if _is_stale(plan_file, manifest[key], text):
+            unprocessed.append((project, plan_file, key))
+        elif _recorded(manifest[key])[1] is None:
             # Current content, legacy row: backfill the hash rather than re-embed.
-            manifest[plan_file.name] = {
-                "processed_at": _recorded(manifest[plan_file.name])[0] or datetime.now().isoformat(),
+            manifest[key] = {
+                "processed_at": _recorded(manifest[key])[0] or datetime.now().isoformat(),
                 "content_sha256": _content_hash(text),
             }
             backfilled += 1
@@ -270,7 +292,7 @@ def process_plans() -> Dict[str, Any]:
     files_processed = 0
     total_chunks = 0
 
-    for plan_file in unprocessed:
+    for project, plan_file, key in unprocessed:
         try:
             text = plan_file.read_text(encoding="utf-8")
         except Exception as e:
@@ -280,7 +302,7 @@ def process_plans() -> Dict[str, Any]:
 
         chunks = _chunk_plan_text(text, plan_file.name)
         if not chunks:
-            manifest[plan_file.name] = _manifest_entry(text)
+            manifest[key] = _manifest_entry(text)
             _save_manifest(manifest)
             continue
 
@@ -288,6 +310,7 @@ def process_plans() -> Dict[str, Any]:
         metadatas = [
             {
                 "source_file": plan_file.name,
+                "project": project,
                 "section": c["section"],
                 "processed_at": datetime.now().isoformat(),
                 "type": "plan",
@@ -313,7 +336,7 @@ def process_plans() -> Dict[str, Any]:
             errors.append(f"{plan_file.name}: store error: {store_result.get('error')}")
             continue
 
-        manifest[plan_file.name] = _manifest_entry(text)
+        manifest[key] = _manifest_entry(text)
         _save_manifest(manifest)
         files_processed += 1
         total_chunks += len(texts)

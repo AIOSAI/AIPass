@@ -31,7 +31,9 @@ same: `config get` shows it (`read_only: true` under `--json`), and `set` / `set
 `'todos' is display-only in v1: config get shows its count, config set cannot change it`.
 
 **Bounds:** `1 <= count <= 100`. Zero would roll over every entry immediately; past 100 rollover
-stops being rollover. Unknown branches are refused against the registry — registry is truth. A count
+stops being rollover. A branch resolves through `detector.read_scope()`: core, residents, then the
+citizens of roots declared in `AIPASS_ROOTS.json` (so `@vera` resolves from any seat); anything else is
+refused — registry is truth. A count
 also has to fit its FILE, which is the ceiling below and is always the lower of the two.
 
 **Effective limits resolve per FILE KEY, not per leaf key** — `config get` mirrors

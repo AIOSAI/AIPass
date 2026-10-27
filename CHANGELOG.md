@@ -33,6 +33,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **memory**: `drone @memory config get|set @branch` resolves citizens of declared roots (@vera), so BAUD's settings panel saves for a project citizen; `process-plans` vectorizes every visible project's `.backup/processed_plans` (host, resident projects, declared roots), tags each chunk with its project, and `search` shows the project under the hit.
 - **flow**: a closed plan archives into its own project's `.backup/processed_plans`, never the host's (an external's plan history had landed under `$AIPASS_HOME/.backup`); restore looks there too.
 - **flow**: `drone @flow list` shows the caller's project's plans; `list all` from the host seat still lists every project. Plan numbers stay global.
 - **aipass**: the project `AGENTS.md` template (`.aipass/project_AGENTS.md`) and its generator follow the host startup protocol: memories read one file per call, no README read at startup, dashboard refresh and read, and the todo pad rules. It had drifted; a project scaffolded from it inherited the old startup. `AGENTS.md` is a seed file, so `init update` never rewrites an existing copy; only `init`, `new` and `adopt` write the new text.

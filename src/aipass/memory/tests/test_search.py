@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/search.py."""
@@ -505,6 +505,16 @@ class TestResultMetadataDisplay:
         body = "\n".join(self._panel_bodies(mocks))
         assert "Time:" not in body
         assert "Source:" not in body
+
+    def test_a_plans_project_is_rendered_so_a_vera_plan_reads_apart_from_an_aipass_one(self, monkeypatch):
+        search_mod, mocks = _import_search(monkeypatch)
+        mocks["execute_search"].return_value = self._search_returning(
+            {"source_file": "FPLAN-0660_x.md", "project": "Vera-Studio", "type": "plan"}
+        )
+
+        assert search_mod.show_search_results("keyring") is True
+
+        assert "[dim]Project:[/dim] Vera-Studio" in "\n".join(self._panel_bodies(mocks))
 
     def test_entry_number_zero_is_still_rendered(self, monkeypatch):
         """Entry #0 is falsy but real -- presence, not truthiness, decides."""

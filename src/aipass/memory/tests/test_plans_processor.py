@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_plans_processor.py
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-23
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -818,3 +818,51 @@ class TestProcessPlans:
 
         updated_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert "tiny.md" in updated_manifest
+
+
+class TestEveryDeclaredProjectsArchiveIsRead:
+    """A declared root's archived plans reach vectors tagged with their project; a root with no archive is skipped."""
+
+    _PLAN = "## Objective\nThis objective section has more than enough content to pass the chunk threshold.\n"
+
+    def test_a_declared_roots_plan_is_stored_with_its_project_and_a_prefixed_manifest_key(self, monkeypatch, tmp_path):
+        mod = plans_processor
+        home = tmp_path / "AIPass"
+        (home / ".backup" / "processed_plans").mkdir(parents=True)
+        (home / ".backup" / "processed_plans" / "FPLAN-0001_host.md").write_text(self._PLAN, encoding="utf-8")
+        (tmp_path / "Vera-Studio" / ".backup" / "processed_plans").mkdir(parents=True)
+        (tmp_path / "Vera-Studio" / ".backup" / "processed_plans" / "FPLAN-0002_vera.md").write_text(
+            self._PLAN, encoding="utf-8"
+        )
+        (tmp_path / "Demo").mkdir()
+        rows = [{"path": f"../{name}", "status": "active"} for name in ("Vera-Studio", "Demo")]
+        (home / "AIPASS_ROOTS.json").write_text(json.dumps({"roots": rows}), encoding="utf-8")
+
+        mock_cl = MagicMock()
+        mock_cl.section.return_value = {"enabled": True, "path": ".backup/processed_plans"}
+        monkeypatch.setattr(mod, "config_loader", mock_cl)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: home)
+        manifest_path = tmp_path / ".plans_processed.json"
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "json_handler", MagicMock())
+        monkeypatch.setattr(
+            mod, "_embed_texts", lambda texts, timeout=120: {"success": True, "embeddings": [[0.1]] * len(texts)}
+        )
+        stored = []
+        monkeypatch.setattr(
+            mod,
+            "_store_vectors",
+            lambda emb, docs, metas, collection_name="flow_plans": stored.extend(metas) or {"success": True},
+        )
+
+        result = mod.process_plans()
+
+        assert result["files_processed"] == 2
+        assert {(m["source_file"], m["project"]) for m in stored} == {
+            ("FPLAN-0001_host.md", "AIPass"),
+            ("FPLAN-0002_vera.md", "Vera-Studio"),
+        }
+        assert set(json.loads(manifest_path.read_text(encoding="utf-8"))) == {
+            "FPLAN-0001_host.md",
+            "Vera-Studio/FPLAN-0002_vera.md",
+        }
