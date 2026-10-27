@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_content.py
 # Description: Host Portability Standards Content Handler
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-12
-# Modified: 2026-10-22
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -81,6 +81,10 @@ def get_host_portability_standards() -> str:
         "     A file naming [dim]GIT_CONFIG_GLOBAL[/dim] or [dim]GIT_CONFIG_NOSYSTEM[/dim] also names",
         "     [dim]GIT_AUTHOR_EMAIL[/dim] and [dim]GIT_COMMITTER_EMAIL[/dim], or a [dim]user.email[/dim].",
         "     A runner has no email to auto-detect: [yellow]git commit exits 128[/yellow].",
+        "",
+        "  [red]ARM G -- a stdlib import newer than pyproject's requires-python floor[/red]",
+        "     [dim]import tomllib[/dim] (3.11) under a 3.10 floor: its except branch runs only on",
+        "     the floor's CI lane. Acquitted when the same try/if imports [dim]tomli[/dim].",
         "",
         f"  Arm A also follows a name bound to a {_PROC} literal to where it is",
         "  READ; a bound [dim]Path()[/dim] is judged at its read, not its constructor.",

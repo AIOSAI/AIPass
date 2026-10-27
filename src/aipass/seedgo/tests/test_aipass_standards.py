@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-24
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
@@ -984,6 +984,53 @@ def test_a_concrete_flavour_or_a_carried_flavour_is_acquitted(tmp_path):
         "class _Carried(pathlib.Path):\n    _flavour = type(Path())._flavour\n"
     )
     assert _scan_source(tmp_path, source)[0] == []
+
+
+_DEGRADED_TOMLLIB = """def read(path):
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        return {}, "reading config.toml needs Python 3.11+"
+    return tomllib.loads(path.read_text(encoding="utf-8")), ""
+"""
+
+
+def _floored_branch(tmp_path, floor, files):
+    """A branch under a pyproject declaring *floor*; returns check_branch's violations."""
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nrequires-python = ">={floor}"\n', encoding="utf-8")
+    apps = tmp_path / "apps"
+    apps.mkdir()
+    for name, source in files.items():
+        (apps / name).write_text(source, encoding="utf-8")
+    result = host_portability_check.check_branch(str(tmp_path))
+    return [(v["file"], v["line"]) for check in result["checks"] for v in check.get("violations", [])]
+
+
+def test_a_tomllib_import_with_a_degraded_except_and_no_tomli_is_convicted_below_its_floor(tmp_path):
+    """aipass provider_wire.py before 1.9.1: fourteen tests red on CI's 3.10 lane only."""
+    assert _floored_branch(tmp_path, "3.10", {"wire.py": _DEGRADED_TOMLLIB}) == [("apps/wire.py", 3)]
+
+
+def test_a_tomli_fallback_in_the_same_guard_is_acquitted(tmp_path):
+    """provider_wire 1.9.1 inside a function; aipass.py at module level, its tomli one try deeper."""
+    in_function = _DEGRADED_TOMLLIB.replace(
+        '        return {}, "reading config.toml needs Python 3.11+"\n',
+        "        try:\n            import tomli as tomllib\n        except ImportError:\n"
+        '            return {}, "needs tomli"\n',
+    )
+    module_level = """try:
+    import tomllib
+except ModuleNotFoundError:
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None
+"""
+    assert _floored_branch(tmp_path, "3.10", {"wire.py": in_function, "cli.py": module_level}) == []
+
+
+def test_the_floor_comes_from_pyproject_so_a_311_floor_acquits_tomllib(tmp_path):
+    assert _floored_branch(tmp_path, "3.11", {"wire.py": _DEGRADED_TOMLLIB}) == []
 
 
 def test_a_portable_binary_is_never_read(tmp_path):
