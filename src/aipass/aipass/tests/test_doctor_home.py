@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
-# Description: Tests for doctor's home, owner-seating, preflight, citizen-count and shared-skills rows
-# Version: 1.3.0
+# Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills and shadow rows
+# Version: 1.4.0
 # Created: 2026-10-08
 # Modified: 2026-10-26
 # =============================================
 
-"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight, the drone count, shared skills."""
+"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight, the drone count, shared skills, shadows."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
@@ -700,3 +700,150 @@ class TestSharedSkillsRows:
         assert (self.root / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
         assert skill.read_text(encoding="utf-8") == "# my own switch\n"
         assert rows["provider switch"].glyph == GLYPH_PASS
+
+
+class TestInstructionShadowRows:
+    """The Structure group's instruction shadow row and its --fix, through run_doctor; every other group answers nothing."""
+
+    @pytest.fixture(autouse=True)
+    def _every_other_edge(self, monkeypatch, tmp_path) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        for name in ("_check_system", "check_identity", "_check_community", "_check_scaffold", "_check_sandbox"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.fix_provider_settings", lambda *_a, **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_wire_verify", lambda: [])
+        monkeypatch.setattr(f"{mod}._fix_owner_seating", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_owner_seating", lambda: [])
+        monkeypatch.setattr(f"{mod}._fix_shared_skills", lambda: [])
+        monkeypatch.setattr(f"{mod}._detect_aipass_home", lambda: None)
+        self.root = tmp_path / "proj"
+        (self.root / ".claude").mkdir(parents=True)
+        (self.root / "PROJ_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        (self.root / "AGENTS.md").write_text("# agents\n", encoding="utf-8")
+        monkeypatch.chdir(self.root)
+        monkeypatch.setattr(f"{mod}._shadow_root", lambda: self.root)
+        self.printed: dict = {}
+
+        def _record(groups):
+            self.printed.update(groups)
+            return 0, 0, 0
+
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", _record)
+
+    def _write(self, rel: str, text: str) -> None:
+        (self.root / rel).write_text(text, encoding="utf-8")
+
+    def _rows(self, **kwargs) -> dict:
+        run_doctor(**kwargs)
+        return {r.label: r for r in self.printed["Structure"] if "shadow" in r.label}
+
+    def test_a_root_claude_md_with_other_text_fails_naming_the_rename(self) -> None:
+        self._write("CLAUDE.md", "# old seed\n")
+
+        row = self._rows()["instruction shadow: CLAUDE.md"]
+
+        shadow = self.root / "CLAUDE.md"
+        assert row.glyph == GLYPH_FAIL
+        assert row.detail == "Claude Code reads it, not AGENTS.md; texts differ, copying it over is the owner's call"
+        assert row.remediation == f"mv '{shadow}' '{shadow}(disabled)', or aipass doctor --fix (renames only)"
+
+    def test_a_dot_claude_copy_of_agents_md_fails_and_says_the_texts_are_equal(self) -> None:
+        self._write(".claude/CLAUDE.md", "# agents\n")
+
+        row = self._rows()["instruction shadow: .claude/CLAUDE.md"]
+
+        assert row.glyph == GLYPH_FAIL
+        assert row.detail == "Claude Code reads it, not AGENTS.md; texts equal, the rename is the whole fix"
+
+    def test_only_disabled_claude_files_pass(self) -> None:
+        self._write("CLAUDE.md(disabled)", "# old seed\n")
+
+        rows = self._rows()
+
+        assert list(rows) == ["instruction shadow"]
+        assert rows["instruction shadow"].glyph == GLYPH_PASS
+
+    def test_a_claude_md_with_no_agents_md_beside_it_is_no_shadow_and_is_left(self) -> None:
+        (self.root / "AGENTS.md").rename(self.root / "AGENTS.md(disabled)")
+        self._write("CLAUDE.md", "# the only file\n")
+
+        rows = self._rows(fix=True)
+
+        assert rows["instruction shadow"].glyph == GLYPH_PASS
+        assert (self.root / "CLAUDE.md").read_text(encoding="utf-8") == "# the only file\n"
+
+    def test_fix_renames_every_shadow_and_a_second_run_passes(self) -> None:
+        self._write("CLAUDE.md", "# old seed\n")
+        self._write(".claude/CLAUDE.local.md", "# local\n")
+
+        fixed = self._rows(fix=True)
+        again = self._rows()
+
+        assert not (self.root / "CLAUDE.md").exists()
+        assert (self.root / "CLAUDE.md(disabled)").read_text(encoding="utf-8") == "# old seed\n"
+        assert (self.root / ".claude" / "CLAUDE.local.md(disabled)").read_text(encoding="utf-8") == "# local\n"
+        assert (self.root / "AGENTS.md").read_text(encoding="utf-8") == "# agents\n"
+        assert "instruction shadow: CLAUDE.md" not in fixed
+        assert fixed["instruction shadow"].glyph == GLYPH_PASS
+        assert fixed["shadow fix"].glyph == GLYPH_PASS
+        assert list(again) == ["instruction shadow"]
+        assert again["instruction shadow"].glyph == GLYPH_PASS
+
+    def test_fix_reports_each_rename(self) -> None:
+        self._write("CLAUDE.md", "# old seed\n")
+        self._write(".claude/CLAUDE.md", "# culture\n")
+
+        run_doctor(fix=True)
+
+        assert [r.detail for r in self.printed["Structure"] if r.label == "shadow fix"] == [
+            "Renamed CLAUDE.md -> CLAUDE.md(disabled)",
+            "Renamed .claude/CLAUDE.md -> CLAUDE.md(disabled)",
+        ]
+
+    def test_fix_never_overwrites_an_existing_disabled_file(self) -> None:
+        self._write("CLAUDE.md", "# newer\n")
+        self._write("CLAUDE.md(disabled)", "# older\n")
+
+        rows = self._rows(fix=True)
+
+        assert (self.root / "CLAUDE.md").read_text(encoding="utf-8") == "# newer\n"
+        assert (self.root / "CLAUDE.md(disabled)").read_text(encoding="utf-8") == "# older\n"
+        assert rows["instruction shadow: CLAUDE.md"].glyph == GLYPH_FAIL
+        assert rows["shadow fix"].glyph == GLYPH_WARN
+        assert rows["shadow fix"].detail == "Left CLAUDE.md: CLAUDE.md(disabled) already exists beside it"
+
+    def test_fix_leaves_the_claude_files_of_a_root_that_is_home(self) -> None:
+        self._write(".claude/CLAUDE.md", "# the user's own memory\n")
+
+        with _home_at(self.root):
+            rows = self._rows(fix=True)
+
+        assert (self.root / ".claude" / "CLAUDE.md").read_text(encoding="utf-8") == "# the user's own memory\n"
+        assert rows["shadow fix"].detail == (
+            "Left .claude/CLAUDE.md: the project root holds $HOME, whose CLAUDE files are the user's"
+        )
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
+    def test_fix_leaves_a_claude_folder_that_links_outside_the_root(self, tmp_path) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "CLAUDE.md").write_text("# not this project's\n", encoding="utf-8")
+        (self.root / ".claude").rename(self.root / "unused")
+        (self.root / ".claude").symlink_to(elsewhere, target_is_directory=True)
+
+        rows = self._rows(fix=True)
+
+        assert (elsewhere / "CLAUDE.md").read_text(encoding="utf-8") == "# not this project's\n"
+        assert rows["shadow fix"].detail == "Left .claude/CLAUDE.md: its folder resolves outside the project root"
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
+    def test_a_claude_md_linked_to_agents_md_is_one_file_and_passes(self) -> None:
+        (self.root / "CLAUDE.md").symlink_to("AGENTS.md")
+
+        rows = self._rows()
+
+        assert list(rows) == ["instruction shadow"]
+        assert rows["instruction shadow"].glyph == GLYPH_PASS

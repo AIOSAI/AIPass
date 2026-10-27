@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.1.3
+# Version: 1.2.0
 # Created: 2026-05-14
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -400,6 +400,68 @@ def check_root_artifacts(project_root: Path, aipass_home: Path | str | None = No
         logger.info("[structure_scan] found %d root artifacts at %s", len(hits), project_root)
     json_handler.log_operation("check_root_artifacts", {"count": len(hits), "root": str(project_root)})
     return hits
+
+
+#: Claude Code reads AGENTS.md only when none of these sits in cwd or above.
+_SHADOW_NAMES = ("CLAUDE.md", "CLAUDE.local.md")
+
+
+class InstructionShadow(NamedTuple):
+    """A live CLAUDE file that silences the AGENTS.md beside it in Claude Code."""
+
+    path: Path
+    agents_path: Path
+    equal: bool
+
+
+def find_instruction_shadows(project_root: Path) -> List[InstructionShadow]:
+    """CLAUDE.md / CLAUDE.local.md at *project_root* or its .claude/, beside an AGENTS.md there."""
+    dirs = (project_root, project_root / ".claude")
+    agents = [d / "AGENTS.md" for d in dirs if (d / "AGENTS.md").is_file()]
+    if not agents:
+        return []
+    shadows: List[InstructionShadow] = []
+    for folder in dirs:
+        beside = folder / "AGENTS.md" if (folder / "AGENTS.md").is_file() else agents[0]
+        for name in _SHADOW_NAMES:
+            path = folder / name
+            # One file under both names (a symlink either way) says the same thing to both CLIs.
+            if not path.is_file() or path.resolve() == beside.resolve():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            equal = text == beside.read_text(encoding="utf-8", errors="replace")
+            shadows.append(InstructionShadow(path, beside, equal))
+    json_handler.log_operation("find_instruction_shadows", {"count": len(shadows), "root": str(project_root)})
+    return shadows
+
+
+def _disable_shadow(shadow: InstructionShadow, project_root: Path) -> "tuple[bool, str]":
+    """Rename *shadow* to '<name>(disabled)' beside it. Never copies, deletes or overwrites.
+
+    Refuses when the root holds $HOME (its .claude/CLAUDE.md is the user's own memory) or
+    when the file's folder resolves outside the root, e.g. a .claude symlinked elsewhere.
+    """
+    root = project_root.resolve()
+    home = Path.home().resolve()
+    rel = shadow.path.relative_to(project_root).as_posix()
+    target = shadow.path.with_name(f"{shadow.path.name}(disabled)")
+    if root == home or root in home.parents:
+        return False, f"Left {rel}: the project root holds $HOME, whose CLAUDE files are the user's"
+    if not shadow.path.parent.resolve().is_relative_to(root):
+        return False, f"Left {rel}: its folder resolves outside the project root"
+    if target.exists() or target.is_symlink():
+        return False, f"Left {rel}: {target.name} already exists beside it"
+    shadow.path.rename(target)
+    logger.info("[structure_scan] renamed instruction shadow %s -> %s", shadow.path, target.name)
+    return True, f"Renamed {rel} -> {target.name}"
+
+
+def disable_shadows(project_root: Path) -> "List[tuple[bool, str]]":
+    """Rename every shadow under *project_root*: one (renamed, what happened) per file."""
+    actions = [_disable_shadow(shadow, project_root) for shadow in find_instruction_shadows(project_root)]
+    if actions:
+        json_handler.log_operation("disable_shadows", {"root": str(project_root), "actions": [a for _, a in actions]})
+    return actions
 
 
 def check_pyproject(project_root: Path) -> Dict[str, Any]:

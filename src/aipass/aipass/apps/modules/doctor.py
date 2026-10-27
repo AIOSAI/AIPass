@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-04-16
 # Modified: 2026-10-26
 # =============================================
@@ -47,6 +47,8 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_registry_consistency,
     check_root_artifacts,
     detect_pollution,
+    disable_shadows,
+    find_instruction_shadows,
     find_project_root,
     scan_agents,
 )
@@ -879,7 +881,34 @@ def _check_structure() -> List[CheckResult]:
         else:
             results.append(CheckResult("instruction fence", GLYPH_PASS, "all nested projects fenced", ""))
 
+    results.extend(_check_instruction_shadow(project_root))
     return results
+
+
+def _shadow_root() -> Optional[Path]:
+    """The project doctor stands in: the one root --fix renames shadows under."""
+    return find_project_root(Path.cwd())
+
+
+def _check_instruction_shadow(project_root: Path) -> List[CheckResult]:
+    """A live CLAUDE file beside AGENTS.md: Claude Code reads it and never sees AGENTS.md."""
+    rows: List[CheckResult] = []
+    for shadow in find_instruction_shadows(project_root):
+        agents = shadow.agents_path.relative_to(project_root).as_posix()
+        texts = "equal, the rename is the whole fix" if shadow.equal else "differ, copying it over is the owner's call"
+        label = f"instruction shadow: {shadow.path.relative_to(project_root).as_posix()}"
+        cure = f"mv '{shadow.path}' '{shadow.path}(disabled)', or {_FIX_COMMAND} (renames only)"
+        rows.append(CheckResult(label, GLYPH_FAIL, f"Claude Code reads it, not {agents}; texts {texts}", cure))
+    return rows or [CheckResult("instruction shadow", GLYPH_PASS, "no live CLAUDE file beside AGENTS.md", "")]
+
+
+def _fix_instruction_shadow() -> List[CheckResult]:
+    """--fix: rename each shadow to '(disabled)' beside it; the rechecked rows, then one row per action."""
+    root = _shadow_root()
+    if root is None or not (actions := disable_shadows(root)):
+        return []
+    fixed = [CheckResult("shadow fix", GLYPH_PASS if ok else GLYPH_WARN, action, "") for ok, action in actions]
+    return _check_instruction_shadow(root) + fixed
 
 
 def _check_sandbox() -> List[CheckResult]:
@@ -1308,6 +1337,11 @@ def _compute_doctor_groups(
             rechecked = _check_shared_skills(reg_path.parent) if reg_path else []
             scaffold = [r for r in groups.get("Scaffold", []) if r.label not in _SKILL_ROW_LABELS]
             groups["Scaffold"] = scaffold + rechecked + skills_fix
+
+        shadow_fix = _fix_instruction_shadow()
+        if shadow_fix:
+            structure = [r for r in groups.get("Structure", []) if not r.label.startswith("instruction shadow")]
+            groups["Structure"] = structure + shadow_fix
 
     return groups
 

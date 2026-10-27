@@ -25,7 +25,14 @@ One pass produces seven groups, in this order:
 - **Community** — the mailbox is readable and `dropbox/` is writable.
 - **Structure** — agent placement, stray-file detection, and the instruction
   fence: every nested `projects/<name>` excludes the host's `AGENTS.md` and
-  `CLAUDE.md` pairs through `claudeMdExcludes`
+  `CLAUDE.md` pairs through `claudeMdExcludes`; and the instruction shadow:
+  Claude Code reads `AGENTS.md` only when no `CLAUDE.md` or `CLAUDE.local.md`
+  sits in cwd or above, so a live one at the project root or in `.claude/`
+  beside an `AGENTS.md` is a FAIL naming the file, the
+  `mv <file> '<file>(disabled)'`, and whether its text equals `AGENTS.md`
+  (different text is the owner's to copy over). `--fix` only renames: never a
+  copy or a delete, never over an existing `(disabled)` file, never when the
+  root holds `$HOME` or the file's folder resolves outside the root
   ([`apps/handlers/structure_scan/`](../apps/handlers/structure_scan)).
 - **Scaffold** — the stamped scaffold version, tier0 drift, missing and retired
   hook handlers for the project you are standing in. This is the group that
