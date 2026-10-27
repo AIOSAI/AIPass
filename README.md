@@ -38,7 +38,7 @@
 
 ## Install
 
-**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux or macOS (Windows through WSL2). [Codex](https://github.com/openai/codex) is optional: when its binary is on your PATH, the same agents also run on it.
+**You need:** Python 3.10+, [Claude Code](https://code.claude.com/docs) on a Claude plan that includes it, and Linux or macOS (Windows through WSL2). [Codex](https://github.com/openai/codex) if you want it: with its binary on your PATH, install sets it up as a second CLI, and each agent runs on either, your choice per task.
 
 ```bash
 pipx install aipass
