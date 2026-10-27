@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: Plan Display Handler
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2025-11-15
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -187,9 +187,9 @@ def format_plan_info(plan_key: str, plan_info: Dict[str, Any], prefix: str = "FP
 
 
 def format_plans_list(
-    plans: Dict[str, Dict[str, Any]], filter_status: str | None = None, show_header: bool = True
+    plans: Dict[str, Dict[str, Any]], filter_status: str | None = None, show_header: bool = True, scope: str = "fleet"
 ) -> str:
-    """Format multiple plans for display with optional filtering"""
+    """Format multiple plans for display with optional filtering; ``scope`` names whose plans they are"""
     if not plans:
         return "[dim]No plans found in registry[/dim]"
 
@@ -207,7 +207,8 @@ def format_plans_list(
     if show_header:
         lines.append("")
         status_text = f" ({filter_status})" if filter_status else ""
-        lines.append(f"[bold cyan]╭─ PLAN Registry, fleet{status_text} ─╮[/bold cyan]")
+        scope_text = scope.replace("[", "\\[")
+        lines.append(f"[bold cyan]╭─ PLAN Registry, {scope_text}{status_text} ─╮[/bold cyan]")
         lines.append("")
         lines.append(f"  [dim]{'Number':<8}  {'Status':<8}  {'Location':<30}  {'Subject':<40}  Created[/dim]")
         lines.append("[dim]─" * 120 + "[/dim]")

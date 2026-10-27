@@ -387,7 +387,7 @@
       "file": "apps/handlers/mbank/process.py",
       "standard": "logged_fallback",
       "category": "false_positive",
-      "lines": [179],
+      "lines": [181],
       "reason": "archive_plan's False means 'not archived' on every path: the move raised, the destination is missing, or the source survived. Its three callers each treat it as a failure: close step 3 ('Archive failed - plan file not moved'), the orphan cleanup ('Failed to move orphaned file'), and process_closed_plans (archive_failed, error_count) (flow's decision, leg 10)."
     },
     {

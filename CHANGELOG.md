@@ -33,6 +33,8 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **flow**: a closed plan archives into its own project's `.backup/processed_plans`, never the host's (an external's plan history had landed under `$AIPASS_HOME/.backup`); restore looks there too.
+- **flow**: `drone @flow list` shows the caller's project's plans; `list all` from the host seat still lists every project. Plan numbers stay global.
 - **aipass**: the project `AGENTS.md` template (`.aipass/project_AGENTS.md`) and its generator follow the host startup protocol: memories read one file per call, no README read at startup, dashboard refresh and read, and the todo pad rules. It had drifted; a project scaffolded from it inherited the old startup. `AGENTS.md` is a seed file, so `init update` never rewrites an existing copy; only `init`, `new` and `adopt` write the new text.
 - **hooks**: Claude Code seats in external projects get the AIPass culture file at SessionStart (the Claude manifest has the `SessionStart:culture` row now); inside `AIPASS_HOME` Claude reads `.claude/AGENTS.md` natively and the hook stays silent, so nothing is injected twice.
 - **drone**: `drone @git commit --all` no longer dies with E902 in a project with no root `tests/`, and no longer rewrites files before refusing: the lint gate runs first over the dirs that exist, then `ruff check --fix` and `ruff format` touch only the changed files and the result names every file they rewrote.

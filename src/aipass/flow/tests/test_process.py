@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_process.py
 # Description: Tests for mbank/process.py — additional coverage
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
@@ -214,6 +214,23 @@ class TestArchivePlan:
         assert result is True
         assert not plan_file.exists()
         assert (processed_dir / "FPLAN-0100.md").exists()
+
+    def test_a_plan_archives_into_its_own_projects_backup_not_the_hosts(self, tmp_path, make_project):
+        """An external's closed plan landed in the host's .backup/processed_plans."""
+        branch = make_project("ext") / "src" / "vera"
+        branch.mkdir(parents=True)
+        plan_file = branch / "FPLAN-0300.md"
+        plan_file.write_text("plan content", encoding="utf-8")
+        host_archive = tmp_path / "host" / ".backup" / "processed_plans"
+
+        with patch(f"{_PROC}.PROCESSED_PLANS_DIR", host_archive):
+            result = archive_plan(plan_file)
+
+        assert result is True
+        assert (tmp_path / "ext" / ".backup" / "processed_plans" / "FPLAN-0300.md").read_text(
+            encoding="utf-8"
+        ) == "plan content"
+        assert not host_archive.exists()
 
     def test_archive_handles_duplicate_name(self, tmp_path):
         """When destination already exists, append timestamp to avoid collision."""

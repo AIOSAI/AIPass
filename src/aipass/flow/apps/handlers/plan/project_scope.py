@@ -1,14 +1,12 @@
 # =================== AIPass ====================
 # Name: project_scope.py
 # Description: Project-Scope Resolution (a project is its register)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-22
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
-"""Project Scope Resolution
-
-A project root holds a ``*_REGISTRY.json`` with a top-level ``branches`` key (name alone matches plan registries).
+"""A project root holds a ``*_REGISTRY.json`` with a top-level ``branches`` key (name alone matches plan registries).
 Never consults ``__file__``: scope comes from the caller's location and each row's ``location``.
 """
 
@@ -56,7 +54,6 @@ def _holds_register(directory: Path) -> bool:
 
 def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional[Path]]] = None) -> Optional[Path]:
     """Return the nearest ancestor of `start` (inclusive) holding a register.
-
     None, empty or relative `start` yields None: resolving it would use the process CWD.
     `cache` is per-operation, never module state: it has no invalidation path.
     """
@@ -91,6 +88,15 @@ def find_project_root(start: Optional[Path], cache: Optional[Dict[Path, Optional
     for seen in walked:
         memo[seen] = result
     return result
+
+
+def archive_dir_for(path: Path, host_archive: Path) -> Path:
+    """The ``.backup/processed_plans`` of the project ``path`` sits in; ``host_archive`` only under no register."""
+    root = find_project_root(path)
+    if root is None:
+        logger.warning(f"[{MODULE_NAME}] No project register above {path} — archiving to {host_archive}")
+        return host_archive
+    return root / ".backup" / "processed_plans"
 
 
 def caller_cwd() -> Path:

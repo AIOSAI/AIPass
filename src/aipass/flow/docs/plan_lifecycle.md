@@ -22,8 +22,8 @@ drone @flow close --all --exclude-type APLAN    # Hold a whole plan type back (r
 drone @flow close --dry-run FPLAN-0042          # Preview single close
 
 # List plans
-drone @flow list open                           # List open plans (all types)
-drone @flow list all                            # List all plans
+drone @flow list open                           # Your project's open plans (all types)
+drone @flow list all                            # Your project's plans; every project's from the host seat
 
 # Template management
 drone @flow templates                           # List registered types
@@ -84,7 +84,7 @@ intake fired unlabelled between steps 3 and 4:
 2. **`[2/5]` Mark closed** — sets `status` and the `closed` timestamp, saves the
    type's registry. **Close always succeeds from this point;** every later step
    is non-blocking.
-3. **`[3/5]` Archive** — move to `.backup/processed_plans/` (foreground; sets
+3. **`[3/5]` Archive** — move to the plan's own project's `.backup/processed_plans/` (foreground; sets
    `processed`/`processed_date`/`cleanup_completed`/`cleanup_date` and saves in
    one write)
 4. *(unlabelled)* **Vector intake** — spawns `apps/modules/post_close_runner.py`
@@ -101,7 +101,9 @@ vectorisation is silent. Nothing in flow calls `is_plan_vectorized()`; that
 function lives in `@memory` and is reached only by the separate
 `drone @memory verify <label>` command, which is where a real answer comes from.
 
-Closed plans are archived to `<repo-root>/.backup/processed_plans/`, a shared runtime namespace managed by `@backup` (see `src/aipass/backup/README.md`) and consumed by `@memory` for vectorization.
+Closed plans are archived to `<project-root>/.backup/processed_plans/`, where the project root is the nearest directory above the plan holding a `*_REGISTRY.json` with a `branches` key: an external project's plans stay in that project, never the host's. A plan with no register above it archives to the host's. The host's archive is a shared runtime namespace managed by `@backup` (see `src/aipass/backup/README.md`) and consumed by `@memory` for vectorization; `@memory` reads the host's archive only. Restore looks in the same project archive the row's `file_path` resolves to.
+
+`drone @flow list` shows the rows whose location sits in the caller's project, under a header naming it. Only `list all` from the host project's seat lists every project, under the header `fleet`. A caller standing in no project is refused. Plan numbers stay one sequence across every project.
 
 ---
 

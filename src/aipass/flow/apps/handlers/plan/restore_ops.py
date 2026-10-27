@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: restore_ops.py
 # Description: Plan Restore Implementation Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Plan Restore Operations Handler
@@ -19,6 +19,7 @@ from typing import Dict, Any, List
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
 from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
@@ -161,7 +162,8 @@ def find_backup_copy(plan_info: Dict[str, Any], plan_key: str, backup_dir: Path 
     first (it carries slug and date); the glob fallback is type-scoped because every registry numbers from 0001.
     Returns None when nothing credible was found.
     """
-    archive = backup_dir if backup_dir is not None else PROCESSED_PLANS_DIR
+    row_file = Path(plan_info.get("file_path", "") or "")
+    archive = backup_dir if backup_dir is not None else archive_dir_for(row_file, PROCESSED_PLANS_DIR)
     if not archive.is_dir():
         logger.warning(f"[{MODULE_NAME}] Backup directory not present: {archive}")
         return None
