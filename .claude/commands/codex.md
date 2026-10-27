@@ -7,7 +7,7 @@ Purpose: move this chat from Claude Code to Codex in one turn, in this same term
 ## Execution
 
 0. **Pin the live thread FIRST** — one sentence: what this chat was doing when `/codex` fired (the task, question or build mid-flight; "nothing in flight" counts). It becomes the Resuming line.
-1. **Prep, compact form.** Do the memory steps of `.claude/commands/prep.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the compass review and the git suggestion; note uncommitted files in the handoff instead.
+1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the compass review and the git suggestion; note uncommitted files in the handoff instead.
 2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Codex receives, so write it to the next model, in this shape:
 
    ```
