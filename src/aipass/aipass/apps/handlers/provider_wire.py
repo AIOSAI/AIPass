@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.9.0
+# Version: 1.9.1
 # Created: 2026-07-11
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -426,10 +426,13 @@ def codex_config_path() -> Path:
 def read_codex_config(path: Path) -> tuple[dict, str]:
     """(the parsed config, '') or ({}, why it could not be read). Read-only: the owner edits it."""
     try:
-        import tomllib
-    except ModuleNotFoundError:
-        logger.warning("[provider_wire] no tomllib: config.toml unread below Python 3.11")
-        return {}, "reading config.toml needs Python 3.11+"
+        import tomllib  # type: ignore[import-not-found]  # stdlib 3.11+, absent on 3.10
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            logger.warning("[provider_wire] no tomllib and no tomli: config.toml unread below Python 3.11")
+            return {}, "reading config.toml needs Python 3.11+ or the tomli package"
     try:
         return tomllib.loads(path.read_text(encoding="utf-8")), ""
     except FileNotFoundError:
@@ -473,10 +476,13 @@ def set_codex_pins(config_path: Path, door: str = DOOR_SETUP_SH) -> List[str]:
     Refuses (SettingsBackupError, nothing written) a config.toml it cannot parse, or one where
     the line edit breaks the file or leaves a pin unset (a dotted key, an inline table, a string)."""
     try:
-        import tomllib
-    except ModuleNotFoundError:
-        logger.warning("[provider_wire] no tomllib: Codex pins unset below Python 3.11")
-        return ["Skipped the Codex config pins: setting them needs Python 3.11+"]
+        import tomllib  # type: ignore[import-not-found]  # stdlib 3.11+, absent on 3.10
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            logger.warning("[provider_wire] no tomllib and no tomli: Codex pins unset below Python 3.11")
+            return ["Skipped the Codex config pins: setting them needs Python 3.11+ or the tomli package"]
     before = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     try:
         config = tomllib.loads(before)
