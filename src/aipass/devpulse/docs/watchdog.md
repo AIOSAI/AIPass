@@ -20,7 +20,7 @@ Nothing happening, nothing happens. Arm with the Bash tool, `run_in_background: 
 drone @devpulse watchdog baseline --once
 ```
 
-It syncs whatever queued while you were logged out (`MISSED` lines), then sits silent. It **exits** on the first completion of a dispatch this seat sent, or on a dead monitor — and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out; with nothing out, arm nothing. The newest sign-in owns delivery and logs out any older one. At idle the whole system is one `stat()` a second, 0.033 % of a core, and **zero model turns**.
+It syncs whatever queued while you were logged out (`MISSED` lines), then sits silent. It **exits** on the first completion of a dispatch this seat sent, or on a dead monitor — and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out; with nothing out, arm nothing. The newest sign-in owns delivery and logs out any older one of the same seat; another seat's wire (a project manager's, `metadata.seat` in the registry) is left alone, since it delivers that seat's completions. At idle the whole system is one `stat()` a second, 0.033 % of a core, and **zero model turns**.
 
 Arm it bare: no pipe and no redirect after the command. The wire reads its own stdout to tell which wrapper carries it; behind a pipe it still wakes on exit, but it records `foreground`, the statusline does not count it, and the wire says so on stderr at arm time.
 

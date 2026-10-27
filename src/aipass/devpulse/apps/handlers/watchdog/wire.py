@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-08-19
 # Modified: 2026-10-26
 # =============================================
@@ -192,11 +192,12 @@ def _looks_like_ours(pid: int) -> bool:
     return "watchdog" in _cmdline(pid)
 
 
-def _sweep_wires(storage_path: Path | None) -> None:
-    """One pass over the registry: bury the dead, take over every live wire.
+def _sweep_wires(storage_path: Path | None, seat: str) -> None:
+    """One pass over the registry: bury the dead, take over every live wire of THIS seat.
 
-    Every live wire, same session or not: a wire proves a writer, never a listener;
-    only the arm happening now is known to have ears.
+    Same session or not: a wire proves a writer, never a listener; only the arm happening
+    now is known to have ears. Another seat's wire (a project manager's) is left alone: it
+    delivers that seat's completions, which this arm never would.
     """
     for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
         if watch.get("type") != _WIRE_KIND:
@@ -210,6 +211,12 @@ def _sweep_wires(storage_path: Path | None) -> None:
         if not isinstance(pid, int) or not _registry.is_pid_alive(pid):
             _registry.deregister(handle, storage_path=storage_path)
             _stderr(f"watchdog wire: buried dead wire entry {handle} (pid {pid})")
+            continue
+
+        their_seat = (watch.get("metadata") or {}).get("seat")
+        if their_seat and their_seat != seat:
+            _stderr(f"watchdog wire: {handle} (pid {pid}) is {their_seat}'s wire — left alone")
+            logger.info("[watchdog.wire] left another seat's wire alone handle=%s seat=%s", handle, their_seat)
             continue
 
         their_session = _session_dir_of(_stdout_target(pid))
@@ -417,7 +424,7 @@ def arm_wire(
         logger.error("[watchdog.wire] refused continuous arm under run_in_background stdout=%s", my_target)
         raise SystemExit(1)
 
-    _sweep_wires(storage_path)
+    _sweep_wires(storage_path, seat)
     _sweep_stale_daemons(storage_path)
 
     # A takeover sends SIGTERM; the finally below must still deregister.
@@ -427,6 +434,7 @@ def arm_wire(
         _WIRE_KIND,
         metadata={
             "session": session_name,
+            "seat": seat,
             "wrapper": _wrapper_of(my_target),
             "tasks_dir": my_session.name if my_session is not None else None,
             "stdout": str(my_target) if my_target is not None else None,

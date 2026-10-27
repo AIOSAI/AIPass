@@ -34,6 +34,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **devpulse**: arming the watchdog wire takes over only this seat's older wires; a wire registered by another seat (a project manager's, `metadata.seat`) is left alive and named on stderr, where before every live wire in the registry was SIGTERMed and the other manager's completions went unreported. Entries without a seat (pre-2.6.0) are taken over as before (`wire.py` 2.6.0).
 - **memory**: `drone @memory config get|set @branch` resolves citizens of declared roots (@vera), so BAUD's settings panel saves for a project citizen; `process-plans` vectorizes every visible project's `.backup/processed_plans` (host, resident projects, declared roots), tags each chunk with its project, and `search` shows the project under the hit.
 - **flow**: a closed plan archives into its own project's `.backup/processed_plans`, never the host's (an external's plan history had landed under `$AIPASS_HOME/.backup`); restore looks there too.
 - **flow**: `drone @flow list` shows the caller's project's plans; `list all` from the host seat still lists every project. Plan numbers stay global.

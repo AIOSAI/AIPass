@@ -491,6 +491,33 @@ def test_same_session_wire_is_taken_over_too(tmp_path, capsys, monkeypatch):
             peer.kill()
 
 
+@_POSIX_ARGV0
+def test_another_seats_live_wire_is_left_alone(tmp_path, capsys, monkeypatch):
+    """A project manager's wire delivers its own completions; my arm must not SIGTERM it."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    theirs = _spawn_named("watchdog-wire-vera")
+    try:
+        _plant_entry(store, "baseline_wire", theirs.pid, {"session": "vera-session", "seat": "@vera"})
+        mine = tmp_path / "sess-mine" / "tasks" / "a.output"
+        other = tmp_path / "sess-theirs" / "tasks" / "b.output"
+        monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: mine if pid is None else other)
+
+        wire.arm_wire(repo_root=root, storage_path=store, max_ticks=1, wire_poll=0)
+
+        err = capsys.readouterr().err
+        assert "@vera's wire" in err and "took over stale wire" not in err
+        assert theirs.poll() is None, "another seat's wire must survive my arm"
+        kept = [w for w in _entries(store) if w["type"] == "baseline_wire" and w["pid"] == theirs.pid]
+        assert len(kept) == 1
+        mine_entries = [w for w in _entries(store) if w["type"] == "baseline_wire" and w["pid"] == os.getpid()]
+        assert mine_entries == [], "my own entry is deregistered on exit"
+    finally:
+        if theirs.poll() is None:
+            theirs.kill()
+
+
 def test_recycled_pid_is_never_signalled(tmp_path, capsys):
     """A registry pid whose cmdline is not a watchdog gets buried, not shot."""
     root = _repo(tmp_path)
