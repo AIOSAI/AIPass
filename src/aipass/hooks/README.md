@@ -126,11 +126,11 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 
 | Doc | What it covers |
 |---|---|
-| [docs/wiring.md](docs/wiring.md) | The two-tier model, each event's wiring shape, entry names vs handler filenames |
-| [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed while injectors skip, the merged output, the import-time cwd rule |
-| [docs/project_config.md](docs/project_config.md) | Which config runs and when trust matters, the project template and what it ships, the release notice |
-| [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, the protected files, the rm gate, and the settings backup |
-| [docs/settings_gate.md](docs/settings_gate.md) | No AI changes a provider's settings alone: Claude asks the owner, Codex and headless seats are denied |
+| [docs/wiring.md](docs/wiring.md) | The two-tier model, each event's wiring shape, entry names vs handler files |
+| [docs/engine.md](docs/engine.md) | Dispatch, promote, gates fail closed, injectors skip, the merged output, the cwd rule |
+| [docs/project_config.md](docs/project_config.md) | Which config runs, when trust matters, the project template, the release notice |
+| [docs/git_gate.md](docs/git_gate.md) | Raw git and gh refused for every seat, the drone twins, protected files, the rm gate |
+| [docs/settings_gate.md](docs/settings_gate.md) | No AI changes a provider's settings alone: Claude asks the owner, Codex and headless are denied |
 | [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files, the project fence, the admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | What a shell command can be seen to write, and what it misses |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |
@@ -138,10 +138,10 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/prompt_injection.md](docs/prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, the alert banners |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/comments.md](docs/comments.md) | The comment budget: the metric, the over-budget answer, the `comments` verb |
-| [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
+| [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
-| [docs/provider_parity.md](docs/provider_parity.md) | `parity`: the same prompts headless on Claude and Codex, compared hook by hook from engine.jsonl |
+| [docs/provider_parity.md](docs/provider_parity.md) | `parity`: the same prompts headless on both CLIs, compared hook by hook |
 
 ---
 

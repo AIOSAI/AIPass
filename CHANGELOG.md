@@ -44,6 +44,7 @@ PyPI version — not the changelog header.
 ### Fixed
 
 - **seedgo**: the provider hooks snapshot fixture (`tests/fixtures/provider_hooks_snapshot.json`) carries the Claude `SessionStart:culture` row the provider manifest gained, so the six `test_hooks_snapshot` reds are green.
+- **hooks**: `README.md` back under seedgo's 10,000-char README cap (was 10,099, the ratchet fleet walk red): seven Documentation-table descriptions shortened, wording only.
 - **aipass**: the project `.gitignore` template covers the runtime state spawn and the services write (`.chroma/`, `docs.local/`, `dropbox/`, `artifacts/`, `tools/` with a negation example, `**/*_json/`, `.spawn/`, `.backup/`, the registry and roots json, `.env`, local plans, WAL sidecars, `.claude/worktrees/`); Vera-Studio had 144 of one installation's files tracked on the old template (`scaffold_content.py` 1.4.0).
 - **aipass**: `aipass init update` retires a live `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` beside `AGENTS.md` to `(disabled)` with doctor's shadow fix and its refusals, and retires the pre-2.8.20 `.claude/hooks/*.py` scripts the manifest recorded while they are unedited.
 - **aipass**: `aipass init <target> --dry-run` took the flag as the project name and scaffolded a `--DRY-RUN_REGISTRY.json`; flags are refused before anything is written.
