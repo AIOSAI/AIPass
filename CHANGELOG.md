@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **memory**: `drone @memory pool process` takes the same lock as the background auto-process child, so two runs never race the same pool files. While another run holds it, the verb names the holder's pid, processes nothing and exits 2 (`auto_process.py` 1.2.0 `run_locked`, `pool.py` 1.1.0; two pins in `tests/test_auto_process.py`).
+
 ## [2026-10-27] — v2.8.29: the new-project system after Vera-Studio's day (AGENTS.md managed, the gitignore template and merge, updateignore, doctor's shadow and coverage rows), the watchdog per seat, a manager writes in its citizens, Codex wake lanes and parity
 
 ### Added

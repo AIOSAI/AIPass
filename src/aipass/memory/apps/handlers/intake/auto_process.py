@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auto_process.py
 # Description: Automated pool + rollover entry point
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -320,6 +320,20 @@ def auto_process() -> Dict[str, Any]:
     )
 
     return result
+
+
+def run_locked() -> Dict[str, Any]:
+    """Run auto_process in the foreground under the lane lock the background child takes.
+
+    A live holder answers held with its pid: two runs on one pool would race the same files.
+    """
+    if not _acquire_lock():
+        holder = _read_lock() or {}
+        return {"success": False, "held": True, "pid": holder.get("pid")}
+    try:
+        return auto_process()
+    finally:
+        _release_lock()
 
 
 # This file IS the detached child.

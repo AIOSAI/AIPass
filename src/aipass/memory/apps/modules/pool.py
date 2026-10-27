@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pool.py
 # Description: Pool Module — drone CLI for pool commands
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-06
-# Modified: 2026-10-17
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -70,13 +70,19 @@ def handle_command(command: str, args: List[Any]) -> bool:
 
 def _run_process_command() -> None:
     """Execute pool processing + rollover check and display results."""
-    from aipass.memory.apps.handlers.intake.auto_process import auto_process
+    from aipass.memory.apps.handlers.intake.auto_process import run_locked
 
     console.print()
     console.print("[bold cyan]Processing memory pool...[/bold cyan]")
     console.print()
 
-    result = auto_process()
+    result = run_locked()
+    if result.get("held"):
+        error(
+            f"Pool: another run holds the lock (pid {result.get('pid')}) — nothing processed",
+            suggestion="wait for it to finish, then: drone @memory pool process",
+        )
+        return
 
     json_handler.log_operation(
         "pool_process_command",
@@ -168,6 +174,9 @@ def print_help() -> None:
     console.print()
     console.print("  [green]pool process[/green]   Process pool files + check/run rollover")
     console.print("  [green]pool status[/green]    Show pool file count, config, vector stats")
+    console.print()
+    console.print("  [dim]pool process shares the background run's lock: while one holds it, the verb[/dim]")
+    console.print("  [dim]names the holder's pid, processes nothing and exits 2.[/dim]")
     console.print()
     console.print("[bold cyan]USAGE:[/bold cyan]")
     console.print()
