@@ -28,6 +28,7 @@ PyPI version — not the changelog header.
 
 ### Changed
 
+- **prompts**: `.aipass/tier1_navmap.md` trimmed under its 8,000-char cap (it was 9,422, cut silently at injection); the "Finding your way" section went, the kernel already says it; the settings line names the Codex files beside Claude's.
 - **README**: the install line says Codex as a choice (a second CLI, each agent runs on either, per task), no longer "optional", matching aipass.ai.
 - **ai_mail**: managers wake on Codex in the same lanes as on Claude: headless in the scheduled and admin lanes, and through a tmux session running `codex --dangerously-bypass-approvals-and-sandbox` on a @daemon self-wake. The Claude-only refusal of `--provider codex` for a `citizen_class: manager` is gone; the owner's ruling, after Vera's first Codex release post needed a hand-opened pane (`wake.py` 3.8.0, `dispatch.py` 3.7.0, `docs/wake_pipeline.md`, `tests/test_wake.py` 1.5.0: one refusal pin becomes four cases, two mutants red).
 
