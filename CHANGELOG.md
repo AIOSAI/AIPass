@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-10-27] — v2.8.29: the new-project system after Vera-Studio's day (AGENTS.md managed, the gitignore template and merge, updateignore, doctor's shadow and coverage rows), the watchdog per seat, a manager writes in its citizens, Codex wake lanes and parity
 
 ### Added
 
