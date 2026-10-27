@@ -13,6 +13,8 @@ PyPI version — not the changelog header.
 
 ### Added
 
+- **hooks**: `navmap_cap` (`prompt/navmap.handle_edit`, PostToolUse) says at edit time when `.aipass/tier1_navmap.md` is over its 8,000-char cap, with the count, instead of the injection cutting it silently near 10,000.
+- **hooks**: the project template (`.aipass/project_hooks.json`) carries `culture`, `session_pointer`, `settings_gate`, `settings_backup` and `navmap_cap`, so an external seat gets the culture file, a resume pointer for BAUD, the provider-settings gate and the navmap warning. `compass_recall`, `auto_process`, `comment_budget` and `presence_gate` stay host-only, reasons in `src/aipass/hooks/docs/project_config.md`. Existing projects take the entries through `aipass init update`.
 - **drone**: `drone @git push`: a project's manager pushes its own repo's checked-out branch to origin, never forced, no arguments. In AIPass it refuses and names `dev-pr`; `push --repo` stays the admin door.
 - **drone**: `drone @git issue create|comment --repo AIOSAI/AIPass` from any seat in any project, the body signed with the seat and project (`--body` only; `--body-file`, `--editor` and `--web` refuse there). Issues are the contribution channel; close, edit and delete stay owner-tier.
 - **drone**: git writes are fenced by the session, not the cwd: owner and ci-cure verbs refuse when the running Claude Code session started outside the project (its transcript sits under the launch directory, which a `cd` cannot move), unless the seat is admin. Gate and door logs carry the session id and where it started beside the seat.
@@ -31,6 +33,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **hooks**: Claude Code seats in external projects get the AIPass culture file at SessionStart (the Claude manifest has the `SessionStart:culture` row now); inside `AIPASS_HOME` Claude reads `.claude/AGENTS.md` natively and the hook stays silent, so nothing is injected twice.
 - **drone**: `drone @git commit --all` no longer dies with E902 in a project with no root `tests/`, and no longer rewrites files before refusing: the lint gate runs first over the dirs that exist, then `ruff check --fix` and `ruff format` touch only the changed files and the result names every file they rewrote.
 - **aipass**: projects get the provider switch. `init`, `new` and `adopt` write `/codex` (`.claude/commands/codex.md`) and `$claude` (`.codex/skills/claude/SKILL.md`) as managed scaffold files, `init update` adds them to older projects and keeps edited copies, and doctor's `provider switch` row names a missing one, which `--fix` writes. Before this the pair lived only in the AIPass tree, so no external project could switch CLI.
 - **commands, skills**: the switch files (`/codex` in `.claude/commands/codex.md`, `$claude` in `.codex/skills/claude/SKILL.md`) point their prep step at `.agents/skills/prep/SKILL.md`, where prep lives since the shared skills folder; they named `.claude/commands/prep.md` and `.codex/skills/prep/SKILL.md`, neither of which exists.

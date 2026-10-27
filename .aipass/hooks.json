@@ -138,6 +138,12 @@
       "matcher": "Edit|MultiEdit|Write|NotebookEdit",
       "timeout": 45
     },
+    "navmap_cap": {
+      "enabled": true,
+      "handler": "aipass.hooks.apps.handlers.prompt.navmap.handle_edit",
+      "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
+      "timeout": 10
+    },
     "comment_budget": {
       "enabled": true,
       "handler": "aipass.hooks.apps.handlers.lifecycle.comment_budget.handle",

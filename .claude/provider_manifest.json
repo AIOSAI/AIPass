@@ -148,6 +148,11 @@
           "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SessionStart:session_pointer",
           "event": "SessionStart",
           "timeout": 30
+        },
+        {
+          "command": "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/src/aipass/hooks/apps/handlers/bridges/claude.py SessionStart:culture",
+          "event": "SessionStart",
+          "timeout": 30
         }
       ],
       "env": {
