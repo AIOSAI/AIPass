@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-22
 # Modified: 2026-10-26
 # =============================================
@@ -88,8 +88,8 @@ def agents_md(name: str) -> str:
     """Generate AGENTS.md content, word for word the host's .aipass/project_AGENTS.md."""
     return (
         f"# {name}\n"
-        "<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) "
-        "— the prompt format rules. -->\n"
+        "<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md in the AIPass "
+        "repo root — the prompt format rules. -->\n"
         "\n"
         "Agent workspace powered by AIPass.\n"
         "\n"
@@ -98,8 +98,19 @@ def agents_md(name: str) -> str:
         "On any greeting, silently run this sequence — no narration, no announcing "
         "steps. Just do it and respond with the status.\n"
         "\n"
-        " - Read: `.trinity/passport.json`, `.trinity/local.json`, "
-        "`.trinity/observations.json`, `README.md`\n"
+        "These steps are sequential and dependent — run each ONCE, wait for the result, then "
+        "proceed. Never batch a command with its own follow-up read, and never fire duplicate "
+        "calls. If output looks blank, wait — don't retry.\n"
+        "\n"
+        " - Read, one file per call, never concatenated: `.trinity/passport.json`, "
+        '`.trinity/local.json`, `.trinity/observations.json`. A "persisted output" notice means '
+        "you batched: read the originals one per call, never the persisted file.\n"
+        " - Never read your `README.md` at startup — it is the face for strangers. Your inventory "
+        "is `drone @<self>` (live) and `drone @<self> --help`.\n"
+        " - Refresh: `drone @prax dashboard refresh @<self>` — where `<self>` is your branch name "
+        "(CWD directory name)\n"
+        " - Dashboard: Read `DASHBOARD.local.json` — act on what needs attention (new mail → "
+        "check inbox, active plans → note them). This is your single status glance.\n"
         "\n"
         "Use drone commands for all operations. Never raw git, gh, file access, or python -m "
         "when drone provides it.\n"
@@ -108,6 +119,15 @@ def agents_md(name: str) -> str:
         "\n"
         "Update `.trinity/` at natural breakpoints, after milestones, and on `/memo` (Claude Code) "
         "or `$memo` (Codex).\n"
+        "\n"
+        "Todos[] are a sticky-note pad, not a log: 10 live, each `{number, date, task, priority?}`, "
+        'the task one line under 100 chars ("Check on seedgo\'s errors in logs"), no `status` '
+        "field — the story lives in plans and sessions. **Delete each todo the moment it's done.** "
+        "The oldest roll off by number to your backlog at rollover (PreCompact) and at @memory's "
+        "push; `drone @memory todo backlog` reads them, `todo restore <n>` brings one back. Rolling "
+        "never closes anything, so **reconcile on load**: remove what is finished so it never "
+        "resurfaces as open. A truncated `.trinity` read is a signal, not noise — say so first, "
+        "then measure the file.\n"
     )
 
 

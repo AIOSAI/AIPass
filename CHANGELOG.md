@@ -33,6 +33,7 @@ PyPI version — not the changelog header.
 
 ### Fixed
 
+- **aipass**: the project `AGENTS.md` template (`.aipass/project_AGENTS.md`) and its generator follow the host startup protocol: memories read one file per call, no README read at startup, dashboard refresh and read, and the todo pad rules. It had drifted; a project scaffolded from it inherited the old startup. `AGENTS.md` is a seed file, so `init update` never rewrites an existing copy; only `init`, `new` and `adopt` write the new text.
 - **hooks**: Claude Code seats in external projects get the AIPass culture file at SessionStart (the Claude manifest has the `SessionStart:culture` row now); inside `AIPASS_HOME` Claude reads `.claude/AGENTS.md` natively and the hook stays silent, so nothing is injected twice.
 - **drone**: `drone @git commit --all` no longer dies with E902 in a project with no root `tests/`, and no longer rewrites files before refusing: the lint gate runs first over the dirs that exist, then `ruff check --fix` and `ruff format` touch only the changed files and the result names every file they rewrote.
 - **aipass**: projects get the provider switch. `init`, `new` and `adopt` write `/codex` (`.claude/commands/codex.md`) and `$claude` (`.codex/skills/claude/SKILL.md`) as managed scaffold files, `init update` adds them to older projects and keeps edited copies, and doctor's `provider switch` row names a missing one, which `--fix` writes. Before this the pair lived only in the AIPass tree, so no external project could switch CLI.

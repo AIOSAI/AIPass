@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-05-04
 # Modified: 2026-10-26
 # =============================================
@@ -717,3 +717,21 @@ class TestSharedSkillsScaffold:
 
     def test_the_generated_agents_text_names_memo_on_both_clis(self):
         assert "and on `/memo` (Claude Code) or `$memo` (Codex).\n" in sc.agents_md("DEMO")
+
+
+class TestAgentsStartupProtocol:
+    def test_the_generated_startup_reads_one_file_per_call_refreshes_the_dashboard_and_skips_the_readme(self):
+        text = sc.agents_md("DEMO")
+        assert " - Read, one file per call, never concatenated: `.trinity/passport.json`, " in text
+        assert "`.trinity/observations.json`, `README.md`" not in text
+        assert " - Never read your `README.md` at startup" in text
+        assert " - Refresh: `drone @prax dashboard refresh @<self>`" in text
+        assert " - Dashboard: Read `DASHBOARD.local.json`" in text
+        assert "run each ONCE, wait for the result, then proceed." in text
+
+    def test_the_generated_memories_carry_the_todo_pad_rules(self):
+        text = sc.agents_md("DEMO")
+        assert "Todos[] are a sticky-note pad, not a log: 10 live, each `{number, date, task, priority?}`" in text
+        assert "**Delete each todo the moment it's done.**" in text
+        assert "**reconcile on load**" in text
+        assert text.endswith("say so first, then measure the file.\n")
