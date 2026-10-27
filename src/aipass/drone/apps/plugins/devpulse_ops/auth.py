@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-03-30
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -21,6 +21,7 @@ from typing import NamedTuple
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME
+from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home
 from aipass.drone.apps.modules.router import caller_cwd
 from aipass.drone.apps.modules.registry import (
     RegistryMismatchError,
@@ -48,6 +49,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "alerts",
             "branches",
             "tag-list",
+            "issue-contribute",
         ],
         # export reads the repo and writes only the empty directory it is handed
         "description": "Read-only — available to all branches",
@@ -59,6 +61,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
             "restore",
             "checkout",
             "sync",
+            "push",
             "merge-main",
             "unlock",
             "merge",
@@ -117,6 +120,22 @@ CHORE_SUBCOMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 
+# Any seat may open or comment on an issue upstream: issues are the contribution channel.
+CONTRIBUTE_SUBCOMMANDS = ("create", "comment")
+ISSUE_CONTRIBUTE = "issue-contribute"
+_GH_REPO_FLAGS = ("-R", "--repo")
+
+
+def gh_repo_value(args: list[str]) -> str | None:
+    """The repo a passthrough names with ``-R``/``--repo`` (either spelling, ``=`` or not), else None."""
+    for index, arg in enumerate(args):
+        if arg in _GH_REPO_FLAGS and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith("--repo="):
+            return arg[len("--repo=") :]
+    return None
+
+
 def gh_access_key(command: str, args: list[str]) -> str | None:
     """The tier key a gh passthrough asks the gate for, or None when its subcommand is unknown.
 
@@ -128,6 +147,9 @@ def gh_access_key(command: str, args: list[str]) -> str | None:
     table = GH_SUBCOMMANDS.get(command) or CHORE_SUBCOMMANDS[command]
     if args[0] in table["read"]:
         return command
+    named = (gh_repo_value(args) or "").lower()
+    if command == "issue" and args[0] in CONTRIBUTE_SUBCOMMANDS and named == release_handler.DEFAULT_REPO.lower():
+        return ISSUE_CONTRIBUTE
     if args[0] in table["write"]:
         return f"{command}-write"
     return None
@@ -147,6 +169,9 @@ _AUTH_MODE_ENV = "AIPASS_GIT_AUTH_MODE"
 # These encode AIPass's own flow and would half-run in another project's repo.
 _AIPASS_FLOW_VERBS = frozenset({"pr", "close-pr", "smart-sync", "fix", "delete-branch", "ci-cure"})
 
+# AIPass's own branches reach main only through dev-pr; a plain push would skip the PR.
+_EXTERNAL_ONLY_VERBS = frozenset({"push"})
+
 # authority: not shown to be the owner, ERROR, warn-mode lifts it.
 # capability: proven owner, untranslated verb, WARNING, warn-mode must NOT lift it.
 _AUTHORITY = "authority"
@@ -156,7 +181,6 @@ _CAPABILITY = "capability"
 # Without a pointer the refusal of a real git verb is a dead end.
 _REROUTED_VERBS: dict[str, str] = {
     "add": "Staging is part of commit — use 'commit --all' or 'commit \"<msg>\" <files>'.",
-    "push": "Use 'dev-pr' to push dev and open a PR. An external repo: 'push --repo <path>' (admin seat only).",
     "pull": "Use 'sync'.",
     "fetch": "Fetching is part of 'sync'. An external repo: 'fetch --repo <path>' (admin seat only).",
 }
@@ -409,6 +433,9 @@ def _registry_fact_refusal(command: str, caller: Caller, fact: str) -> Refusal |
             ),
             _AUTHORITY,
         )
+    fence = _session_refusal(caller, repo_root)
+    if fence:
+        return fence
 
     # Must stay after the authority checks: only a proven owner gets _CAPABILITY.
     if registry_path.name != AIPASS_REGISTRY_NAME and command in _AIPASS_FLOW_VERBS:
@@ -417,8 +444,37 @@ def _registry_fact_refusal(command: str, caller: Caller, fact: str) -> Refusal |
             f"these work here: {', '.join(external_owner_verbs())}",
             _CAPABILITY,
         )
+    if registry_path.name == AIPASS_REGISTRY_NAME and command in _EXTERNAL_ONLY_VERBS:
+        return Refusal(
+            f"'{command}' is for a project's own repo; AIPass reaches main through 'dev-pr', "
+            "which pushes dev and opens the PR",
+            _CAPABILITY,
+        )
 
     return None
+
+
+def _session_refusal(caller: Caller, project_root: Path) -> Refusal | None:
+    """Refuse a write when the running session started outside this project, unless the seat is admin.
+
+    The fence is the session, not the cwd: a ``cd`` into another project's seat does not make you that seat.
+    """
+    sid = session_home.session_id()
+    if not sid or session_home.launched_within(sid, caller.home, project_root):
+        return None
+    verdict = repo_door.admin_verdict()
+    if verdict.granted:
+        logger.info("git session fence: admin @%s writes in %s from a foreign session", verdict.caller, project_root)
+        return None
+    return Refusal(
+        (
+            f"this session started in {session_home.describe(sid)}, not in project '{project_root.name}'. "
+            f"Writes belong to the session's own project: standing in {caller.name}'s seat does not make you "
+            f"{caller.name}. Reads still work here. Only the admin seat writes across projects: "
+            'drone @devpulse feedback send "Subject" "Body"'
+        ),
+        _AUTHORITY,
+    )
 
 
 def _fact_holders(registry_data: dict, fact: str) -> list[str]:
@@ -440,7 +496,10 @@ def _ci_cure_access(command: str) -> str:
         msg = f"Branch '{caller_info.name}' is not authorized for '{command}': {refusal.reason}."
         logger.error(msg)
         raise PermissionError(msg)
-    json_handler.log_operation("git_access_verify", {"caller": caller_info.name, "command": command, "tier": "ci-cure"})
+    json_handler.log_operation(
+        "git_access_verify",
+        {"caller": caller_info.name, "command": command, "tier": "ci-cure", "session": session_home.stamp()},
+    )
     return caller_info.name
 
 
@@ -456,7 +515,7 @@ def verify_git_access(command: str) -> str:
         caller = _find_caller()
         json_handler.log_operation(
             "git_access_verify",
-            {"caller": caller, "command": command, "tier": "global"},
+            {"caller": caller, "command": command, "tier": "global", "session": session_home.stamp()},
         )
         return caller
 
@@ -488,6 +547,7 @@ def verify_git_access(command: str) -> str:
                 "tier": "owner",
                 "mode": "warn" if warn_only else "enforce",
                 "would_refuse": refusal.reason if refusal else None,
+                "session": session_home.stamp(),
             },
         )
         return caller_info.name

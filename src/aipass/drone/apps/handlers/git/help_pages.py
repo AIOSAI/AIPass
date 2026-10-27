@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: help_pages.py
 # Description: The @git help pages, one per verb and the whole page
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-10-04
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 """The @git help pages: one per verb, and the whole page.
@@ -317,9 +317,11 @@ def page(command: str | None = None) -> str:
         )
     if command == "push":
         return (
+            "git push               — Push your own project's checked-out branch to its origin [owner]\n"
             "git push --repo <path> — Push an external repo's checked-out branch to its origin [admin seat]\n"
-            "  Same branch name on origin, never forced; git's own refusal comes back untouched.\n"
-            "  Only through the external-repo door — AIPass pushes through dev-pr.\n"
+            "  Same branch name on origin, never forced, no arguments; git's own refusal comes\n"
+            "  back untouched. A project's manager pushes from its own seat; AIPass pushes\n"
+            "  through dev-pr, so a plain push in AIPass refuses and names it.\n"
         )
     if command == "tag":
         return (
@@ -363,6 +365,9 @@ def page(command: str | None = None) -> str:
         "  release list           Published releases and their notes (release --help)\n"
         "  label list             The repo's GitHub labels (label --help)\n"
         "  alerts list [--state S]  The repo's code-scanning alerts (alerts --help)\n"
+        "  issue create|comment --repo AIOSAI/AIPass --body 'text'\n"
+        "                         File upstream from any seat; the body is signed\n"
+        "                         with your seat and project\n"
         "Owner (the repo's registry owner: devpulse in AIPass):\n"
         "  commit <msg> [--all | files]  Commit changes (selective or --all)\n"
         "  untrack <path ...>     Out of the index, files stay on disk (git rm --cached)\n"
@@ -380,6 +385,7 @@ def page(command: str | None = None) -> str:
         "  unlock --force         Force-release the PR lock\n"
         "  tag <vX.Y.Z>           Create and push release tag\n"
         "  fix [--dry-run]        Fix broken git states\n"
+        "  push                   Push your project's checked-out branch (not AIPass: dev-pr)\n"
         "  push --repo <path>     Push an external repo's branch (the door below only)\n"
         "  issue <write>          gh issue create, close, comment, ... (issue --help)\n"
         "  run <write>            gh run rerun, cancel, delete, download\n"
@@ -392,9 +398,11 @@ def page(command: str | None = None) -> str:
         "  ci-cure <run_id> @<owner> <msg> <path ...>  Commit a CI cure on dev, push dev\n"
         "                         (paths under src/aipass/<owner>/ or CHANGELOG.md; ci-cure --help)\n"
         "  An external project's manager, from its own seat, runs: commit, untrack,\n"
-        "  restore, checkout, sync, merge-main, unlock, merge, dev-pr, prune-temp,\n"
+        "  restore, checkout, sync, push, merge-main, unlock, merge, dev-pr, prune-temp,\n"
         "  tag, issue <write>, run <write>, workflow <write>, release <write>, label\n"
         "  <write>, alerts <write>. The rest refuse there.\n"
+        "  Every write is fenced by the session: one started in another project is\n"
+        "  refused here even from this project's seat, unless the seat is admin.\n"
         "\n"
         "RAW GIT READS AND THEIR TWINS (raw git is blocked for agents; use these):\n"
         "  git log -n 5 -- <path>   drone @git log 5 <path>  (deleted path: after --)\n"

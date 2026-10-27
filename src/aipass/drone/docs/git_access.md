@@ -16,8 +16,8 @@ Auth is centralised in `verify_git_access()` and checked **once**, at the top of
 
 | Tier | Who | What it covers |
 |------|-----|----------------|
-| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, and the `gh` reads |
-| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, and the `gh` writes |
+| **Global** | All branches | the read doors and the passthroughs — status, diff, log, show, blame, tracked, export, remote, lock, branches, tag listing, release list, label list, alerts list, the `gh` reads, and `issue create` / `issue comment` aimed at AIOSAI/AIPass |
+| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | everything that writes: commit, untrack, checkout, push (outside AIPass), the PR verbs, branch deletion, prune-temp, sync, merge-main, merge, smart-sync, unlock, tag, fix, release edit, label create, alerts dismiss, and the `gh` writes |
 | **CI cure** | The one citizen whose registry entry carries `ci_cure: true` (@trigger in AIPass) | `ci-cure` alone: commit a CI cure on dev and push dev |
 
 Owner tier is **earned per repo** from four facts in the caller's own project registry:
@@ -28,6 +28,30 @@ The ci-cure tier is earned the same way, minus the manager class: registry tenan
 carrying `ci_cure: true` (the JSON boolean), and path-binding. The fact must sit on exactly one
 entry of the registry; two holders refuse both. `AIPASS_GIT_AUTH_MODE=warn` never lifts a ci-cure
 refusal. Outside AIPass's own registry the verb is a capability refusal: its fence is AIPass's tree.
+
+**Issues are the contribution channel.** `issue create` and `issue comment` with
+`--repo AIOSAI/AIPass` (or `-R`) ask the gate for `issue-contribute`, a global key, so any citizen
+of any project may file upstream. The body is signed `Filed through drone @git by @<seat>, project
+<project>.`; `--body-file`, `--editor` and `--web` are refused, because a body gh reads itself never
+passes through drone to be signed. Every other issue write, and create or comment aimed at any other
+repo, stays `issue-write`, owner tier.
+
+## The fence is the session
+
+Owner and ci-cure writes are bound to the project the running agent session started in, not to
+the directory the shell stands in. Claude Code files a session's transcript under its launch
+directory (`~/.claude/projects/<encoded dir>/<session id>.jsonl`), and the session id is in the
+environment (`CLAUDE_CODE_SESSION_ID`), so `apps/handlers/git/session_home.py` asks one question:
+was this session launched at the seat or above it, inside this project? A `cd` cannot move the
+transcript, and a second session on the same seat cannot overwrite it the way it overwrites
+`.ai_mail.local/session.json`, which is why the transcript is read rather than that pointer.
+
+When the answer is no, every owner and ci-cure verb refuses with an authority refusal naming where
+the session started; reads still run, cwd-based. The admin seat (@ai_mail's verified-caller rail,
+the same rail the `--repo` door asks) is let through. A caller with no session id (a human's shell,
+CI, a Codex session today) stays bound to the cwd seat as before. Every `git_access_verify` record
+and every door ledger line carries `session: {id, started_in}` beside the seat, so an audit names
+the project a write came from.
 
 `drone @git ci-cure <run_id> @<owner> "<message>" <path ...>` commits exactly the named paths on
 `dev` (`git commit --only`, so anything else staged stays staged), pushes `dev` to origin, and
@@ -70,6 +94,9 @@ business re-arming a half-run of our merge flow in someone else's repository.
 they assume our PR conventions, our lock or our events, so against an arbitrary repo they would
 half-run and leave a mess. Every other owner verb runs for the project's manager from its own seat;
 `auth.external_owner_verbs()` is the list, and both the refusal and `drone @git --help` print it.
+`push` is the reverse case: it runs only outside AIPass, sending the checked-out branch to `origin`
+under the same name, never forced and with no arguments. In AIPass it is a capability refusal that
+names `dev-pr`, the one road to main.
 The admin seat's door into an external repo is `--repo` — see
 [external_repo_door.md](external_repo_door.md).
 

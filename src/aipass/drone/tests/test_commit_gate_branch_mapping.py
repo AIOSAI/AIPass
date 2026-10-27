@@ -1,20 +1,24 @@
 # =================== AIPass ====================
 # Name: test_commit_gate_branch_mapping.py
-# Description: Commit gate maps changed files to real citizens, never template trees
-# Version: 1.0.2
+# Description: Commit gate maps changed files to real citizens, never template trees; --all lints what exists
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
-"""Tests for apps/handlers/git/commit_handler.py's commit test gate: which branch a changed file belongs to."""
+"""Tests for apps/handlers/git/commit_handler.py's commit --all gates: the branch a changed file maps to, and lint."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — pathlib's own parent walk and is_relative_to
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes
 
@@ -95,3 +99,58 @@ def test_file_outside_any_branch_maps_to_none(tmp_path: Path) -> None:
     assert _pytest_dirs(calls) == []
     assert not any(cmd[1:2] == ["commit"] for cmd in calls)
     assert "Test failures" not in result["stderr"]
+
+
+def _git(repo: Path, *argv: str) -> str:
+    return subprocess.run(
+        ["git", *argv], cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+
+
+@pytest.fixture()
+def external_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A repo laid out like an external project: tests under src/<pkg>/, no root tests/, one commit."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    repo = tmp_path / "ext"
+    (repo / "src" / "pkg" / "tests").mkdir(parents=True)
+    (repo / "src" / "pkg" / "core.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.invalid")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "init")
+    return repo
+
+
+@pytest.mark.skipif(shutil.which("ruff") is None, reason="the --all lane lints with the ruff on PATH")
+class TestCommitAllInAnExternalLayout:
+    """commit --all lints only the dirs that exist, refuses before rewriting, and names what it rewrote."""
+
+    def test_a_lint_clean_tree_with_no_root_tests_dir_commits_and_names_the_file_ruff_formatted(
+        self, external_repo: Path
+    ) -> None:
+        """Mutant: the targets fixed to src/ tests/ — ruff dies on the missing tests/ with E902."""
+        core = external_repo / "src" / "pkg" / "core.py"
+        core.write_text("x  =  2\n", encoding="utf-8")
+
+        result = commit_changes("chore(pkg): bump", all_files=True, repo_root=external_repo)
+
+        assert result["exit_code"] == 0, result["stderr"]
+        assert "ruff rewrote 1 file(s): src/pkg/core.py" in result["stdout"]
+        assert _git(external_repo, "log", "-1", "--format=%s") == "chore(pkg): bump"
+        assert core.read_text(encoding="utf-8") == "x = 2\n"
+
+    def test_a_lint_dirty_tree_refuses_and_leaves_every_file_as_the_author_wrote_it(self, external_repo: Path) -> None:
+        """Mutant: --fix and format run before the gate — the refusal arrives after the tree was rewritten."""
+        dirty = external_repo / "src" / "pkg" / "core.py"
+        dirty.write_text("import os\nx = 2\n", encoding="utf-8")
+        unformatted = external_repo / "src" / "pkg" / "tool.py"
+        unformatted.write_text("y  =  3\n", encoding="utf-8")
+
+        result = commit_changes("chore(pkg): bump", all_files=True, repo_root=external_repo)
+
+        assert result["exit_code"] == 1
+        assert "Lint errors" in result["stderr"]
+        assert dirty.read_text(encoding="utf-8") == "import os\nx = 2\n"
+        assert unformatted.read_text(encoding="utf-8") == "y  =  3\n"
+        assert _git(external_repo, "log", "-1", "--format=%s") == "init"

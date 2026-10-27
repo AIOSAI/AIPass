@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access — the tiers, the owner gate and its log severity
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py: the git tiers and how owner tier is earned per repo."""
@@ -25,7 +25,8 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
     external_owner_verbs,
     verify_git_access,
 )
-from aipass.drone.apps.handlers.git import help_pages
+from aipass.ai_mail.apps.modules.door_session_pointer import transcript_dir
+from aipass.drone.apps.handlers.git import help_pages, repo_door, session_home
 from aipass.drone.apps.modules.git_module import handle_command
 
 from .conftest import OWNER_REGISTRY_ID, make_owner_project
@@ -635,3 +636,226 @@ class TestGitAccessLogSeverity:
         assert "nope" in result["stderr"]
         mock_logger.warning.assert_called_once()
         mock_logger.error.assert_not_called()
+
+
+_SESSION = "sess-fence-1"
+
+
+@pytest.fixture()
+def start_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[[Path], None]:
+    """Start an agent session in a directory: its id in the env, its transcript where Claude files it."""
+    user_home = tmp_path / "user_home"
+    user_home.mkdir()
+    monkeypatch.setenv("HOME", str(user_home))
+    monkeypatch.setenv("USERPROFILE", str(user_home))
+    monkeypatch.setenv(session_home.SESSION_ENV, _SESSION)
+
+    def start(directory: Path) -> None:
+        transcripts = transcript_dir(directory)
+        assert transcripts is not None
+        transcripts.mkdir(parents=True, exist_ok=True)
+        (transcripts / f"{_SESSION}.jsonl").write_text("{}\n", encoding="utf-8")
+
+    return start
+
+
+def _vera_seat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Vera-Studio with VERA's seat at src/vera, standing in it."""
+    root = tmp_path / "Vera-Studio"
+    seat = make_owner_project(
+        root,
+        branch="VERA",
+        registry_name="VERA-STUDIO_REGISTRY.json",
+        branch_dir=root / "src" / "vera",
+        record_path="src/vera",
+    )
+    monkeypatch.chdir(seat)
+    return seat
+
+
+class TestTheFenceIsTheSession:
+    """A write belongs to the project the session started in, wherever the shell stands."""
+
+    def test_a_session_started_in_another_project_is_refused_every_write_and_keeps_its_reads(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_session: Callable[[Path], None]
+    ) -> None:
+        """Mutant: _session_refusal returns None — the cd into VERA's seat commits as VERA."""
+        _vera_seat(tmp_path, monkeypatch)
+        start_session(tmp_path / "wren" / "src" / "wren")
+
+        for verb in ("commit", "push", "tag"):
+            with pytest.raises(PermissionError) as exc_info:
+                verify_git_access(verb)
+            assert "not in project 'Vera-Studio'" in str(exc_info.value)
+            assert "-wren-src-wren" in str(exc_info.value)
+        assert verify_git_access("status") == "VERA"
+
+    @pytest.mark.parametrize(("started", "allowed"), [("seat", True), ("root", True), ("above", False)])
+    def test_a_session_started_at_the_seat_or_above_it_inside_the_project_writes(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        start_session: Callable[[Path], None],
+        started: str,
+        allowed: bool,
+    ) -> None:
+        """Mutant: the walk does not stop at the project root — a session started above it passes."""
+        seat = _vera_seat(tmp_path, monkeypatch)
+        start_session({"seat": seat, "root": tmp_path / "Vera-Studio", "above": tmp_path}[started])
+
+        if allowed:
+            assert verify_git_access("commit") == "VERA"
+        else:
+            with pytest.raises(PermissionError, match="not in project 'Vera-Studio'"):
+                verify_git_access("commit")
+
+    def test_the_admin_seat_writes_from_a_foreign_session(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_session: Callable[[Path], None]
+    ) -> None:
+        _vera_seat(tmp_path, monkeypatch)
+        start_session(tmp_path / "wren")
+        monkeypatch.setattr(repo_door, "admin_verdict", lambda: repo_door.AdminVerdict(True, "devpulse", ""))
+
+        assert verify_git_access("commit") == "VERA"
+
+    def test_the_gate_log_names_the_session_beside_the_seat(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, start_session: Callable[[Path], None]
+    ) -> None:
+        """Mutant: the session field dropped from the owner-tier record — an audit names only the seat."""
+        seat = _vera_seat(tmp_path, monkeypatch)
+        start_session(seat)
+
+        with patch("aipass.drone.apps.plugins.devpulse_ops.auth.json_handler.log_operation") as log:
+            verify_git_access("commit")
+
+        record = log.call_args.args[1]
+        assert record["caller"] == "VERA"
+        assert record["session"]["id"] == _SESSION
+        assert record["session"]["started_in"].endswith("-Vera-Studio-src-vera")
+
+    def test_no_session_in_the_env_stays_bound_to_the_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A human's shell or CI has no session id; the cwd seat is all there is to read."""
+        _vera_seat(tmp_path, monkeypatch)
+        assert verify_git_access("commit") == "VERA"
+
+
+class TestManagerPush:
+    """A project's manager pushes its own repo; AIPass reaches main through dev-pr."""
+
+    def test_an_external_manager_pushes_the_checked_out_branch_of_its_own_repo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: push off the owner tier — the manager meets 'Unknown git command'."""
+        seat = _vera_seat(tmp_path, monkeypatch)
+        pushed: list[Path] = []
+        monkeypatch.setattr(
+            repo_door, "push_current_branch", lambda root: pushed.append(root) or {"stdout": "ok", "exit_code": 0}
+        )
+
+        result = handle_command("push", [])
+
+        assert result["exit_code"] == 0
+        assert pushed == [seat.parent.parent]
+
+    def test_push_takes_no_arguments_and_never_runs_with_them(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _vera_seat(tmp_path, monkeypatch)
+        pushed: list[Path] = []
+        monkeypatch.setattr(repo_door, "push_current_branch", lambda root: pushed.append(root) or {})
+
+        result = handle_command("push", ["--force"])
+
+        assert result["exit_code"] == 1
+        assert "push takes no arguments" in result["stderr"]
+        assert pushed == []
+
+    def test_a_plain_push_in_aipass_refuses_and_names_dev_pr_even_in_warn_mode(
+        self, devpulse_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: _EXTERNAL_ONLY_VERBS emptied — devpulse pushes dev straight past the PR."""
+        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", "warn")
+        with pytest.raises(PermissionError) as exc_info:
+            verify_git_access("push")
+        assert "cannot run 'push'" in str(exc_info.value)
+        assert "dev-pr" in str(exc_info.value)
+
+
+def _citizen_of_vera_studio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A non-manager citizen of Vera-Studio, standing in its seat."""
+    root = tmp_path / "Vera-Studio"
+    make_owner_project(root, branch="scout", registry_name="VERA-STUDIO_REGISTRY.json", citizen_class="specialist")
+    monkeypatch.chdir(root)
+    return root
+
+
+class TestIssuesFromAnySeat:
+    """create and comment reach AIOSAI/AIPass from any citizen, signed; the other writes stay owner-only."""
+
+    def test_an_upstream_issue_from_any_seat_is_filed_with_its_seat_and_project_in_the_body(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the signature skipped — the issue arrives with no word of where it came from."""
+        _citizen_of_vera_studio(tmp_path, monkeypatch)
+        args = ["create", "--repo", "AIOSAI/AIPass", "--title", "T", "--body", "the defect"]
+        with patch("aipass.drone.apps.modules.git_module.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = "https://github.com/AIOSAI/AIPass/issues/1"
+            run.return_value.stderr = ""
+            result = handle_command("issue", args)
+
+        assert result["exit_code"] == 0
+        argv = run.call_args.args[0]
+        assert argv[:3] == ["gh", "issue", "create"]
+        assert argv[argv.index("--body") + 1] == (
+            "the defect\n\nFiled through drone @git by @scout, project Vera-Studio."
+        )
+
+    def test_a_comment_with_no_body_carries_the_signature_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _citizen_of_vera_studio(tmp_path, monkeypatch)
+        with patch("aipass.drone.apps.modules.git_module.subprocess.run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = ""
+            run.return_value.stderr = ""
+            handle_command("issue", ["comment", "808", "-R", "aiosai/aipass"])
+
+        argv = run.call_args.args[0]
+        assert argv[-2:] == ["--body", "Filed through drone @git by @scout, project Vera-Studio."]
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["close", "808", "--repo", "AIOSAI/AIPass"],
+            ["edit", "808", "--repo", "AIOSAI/AIPass"],
+            ["delete", "808", "--repo", "AIOSAI/AIPass"],
+            ["create", "--repo", "someone/else", "--title", "T", "--body", "b"],
+            ["create", "--title", "T", "--body", "b"],
+        ],
+    )
+    def test_other_issue_writes_and_other_repos_stay_owner_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+    ) -> None:
+        """Mutant: the contribute key ignores the repo — any seat files anywhere gh can reach."""
+        _citizen_of_vera_studio(tmp_path, monkeypatch)
+        with patch("aipass.drone.apps.modules.git_module.subprocess.run") as run:
+            result = handle_command("issue", args)
+
+        assert result["exit_code"] == 1
+        assert "not authorized for 'issue-write'" in result["stderr"]
+        run.assert_not_called()
+
+    @pytest.mark.parametrize("flag", ["--body-file", "-F", "--web", "--editor"])
+    def test_a_body_drone_cannot_sign_is_refused_before_gh(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str
+    ) -> None:
+        _citizen_of_vera_studio(tmp_path, monkeypatch)
+        with patch("aipass.drone.apps.modules.git_module.subprocess.run") as run:
+            result = handle_command("issue", ["create", "--repo", "AIOSAI/AIPass", "--title", "T", flag, "x.md"])
+
+        assert result["exit_code"] == 1
+        assert "give the text with --body" in result["stderr"]
+        run.assert_not_called()

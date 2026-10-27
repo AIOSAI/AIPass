@@ -136,8 +136,11 @@ the paths restored and left, or the refusal. Pinned by `TestRestore` in
 ## The `--all` pre-commit lane
 
 `commit --all` stages the whole repo, which is the correct default since dispatched agents work
-across several branch directories. Before it stages, it runs ruff (`check --fix`, `format`, then
-`check` as a gate) and then pytest for every branch whose files changed, mapping a changed file to
+across several branch directories. Before it stages, it runs ruff `check` as a gate over whichever
+of `src/` and `tests/` exist at the repo root (an external project keeps its tests under
+`src/<pkg>/`), and a lint-dirty tree is refused with nothing changed. Only after the gate passes do
+`check --fix` and `format` run, and only on the Python files `git status` lists as changed; the
+result's stdout names every file they rewrote. Then pytest runs for every branch whose files changed, mapping a changed file to
 its branch by walking up for `.trinity/`. Templates ship complete branch skeletons, so the
 **outermost** hit inside the project wins: citizens never nest, and the innermost hit can be a
 template skeleton inside @spawn.

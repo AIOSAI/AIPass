@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.13.1
+# Version: 1.14.0
 # Created: 2026-03-17
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -81,6 +81,7 @@ _COMMANDS = (
     "restore",
     "checkout",
     "sync",
+    "push",
     "merge-main",
     "unlock",
     "dev-pr",
@@ -93,6 +94,7 @@ _COMMANDS = (
     "prune-temp",
     "tag",
     "tag-list",
+    "issue-contribute",
     "issue-write",
     "run-write",
     "workflow-write",
@@ -137,6 +139,14 @@ _RUN_WATCH_TIMEOUT = 45 * 60
 _RUN_WATCH_INTERVAL = "60"
 
 _DIFF_FLAGS = ("--staged", "--all", "--stat")
+_REFUSE_PUSH_ARGS = "push takes no arguments: drone @git push sends the checked-out branch to origin, never forced."
+# A body gh reads from a file, an editor or the browser never passes through drone to be signed.
+_UNSIGNABLE_BODY_FLAGS = ("-F", "--body-file", "-e", "--editor", "-w", "--web")
+_REFUSE_UNSIGNABLE = (
+    "An issue or comment filed upstream from any seat is signed with its seat and project, "
+    "so give the text with --body; --body-file, --editor and --web are not signed here."
+)
+_CONTRIBUTION_SIGNATURE = "Filed through drone @git by @{caller}, project {project}."
 
 _LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
 
@@ -206,6 +216,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         cmd = "tag-list"
     from aipass.drone.apps.plugins.devpulse_ops.auth import (
         GH_SUBCOMMANDS,
+        ISSUE_CONTRIBUTE,
         NoPassportError,
         gh_access_key,
         verify_git_access,
@@ -237,8 +248,15 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
 
     json_handler.log_operation("git_handle_command", {"command": command, "args": args, "caller": caller})
 
+    if cmd == ISSUE_CONTRIBUTE:
+        signed, refusal = _signed_contribution(args, caller)
+        if refusal:
+            return {"stdout": "", "stderr": refusal, "exit_code": 1}
+        return _handle_gh_passthrough(command, signed)
     if command in _GH_PASSTHROUGH_COMMANDS:
         return _handle_gh_passthrough(command, args)
+    if command == "push":
+        return _handle_push(args)
     if command == "status":
         return _handle_status(args)
     if command == "diff":
@@ -1266,6 +1284,29 @@ def _handle_sync(args: list[str]) -> dict:
     }
 
 
+def _handle_push(args: list[str]) -> dict:
+    """Handle push (owner tier): the checked-out branch of the manager's own repo, to origin, never forced."""
+    if args:
+        return {"stdout": "", "stderr": _REFUSE_PUSH_ARGS, "exit_code": 1}
+    return repo_door.push_current_branch(lock_handler.find_repo_root())
+
+
+def _signed_contribution(args: list[str], caller: str) -> tuple[list[str], str]:
+    """Sign an upstream issue or comment with the seat and project it came from, or say why it cannot be."""
+    if any(arg in _UNSIGNABLE_BODY_FLAGS or arg.startswith("--body-file=") for arg in args):
+        return [], _REFUSE_UNSIGNABLE
+    signature = _CONTRIBUTION_SIGNATURE.format(caller=caller, project=lock_handler.find_repo_root().name)
+    signed = list(args)
+    for index, arg in enumerate(signed):
+        if arg in ("-b", "--body") and index + 1 < len(signed):
+            signed[index + 1] = f"{signed[index + 1]}\n\n{signature}"
+            return signed, ""
+        if arg.startswith("--body="):
+            signed[index] = f"{arg}\n\n{signature}"
+            return signed, ""
+    return [*signed, "--body", signature], ""
+
+
 def _handle_merge_main(args: list[str]) -> dict:
     """Handle the merge-main subcommand (owner tier): origin/main into dev by merge commit."""
     if args:
@@ -1336,6 +1377,9 @@ def _gh_verb_help(command: str) -> str:
         "  watch <id> streams gh's poll every 60 s (or -i), gives up after 45 min\n"
         "  list | view | watch --repo <path> reads another repo's runs (admin seat)\n"
         if command == "run"
+        else "  create | comment --repo AIOSAI/AIPass --body 'text' [any seat]: signed with\n"
+        "  your seat and project; --body-file, --editor and --web refuse there\n"
+        if command == "issue"
         else ""
     )
     return (
