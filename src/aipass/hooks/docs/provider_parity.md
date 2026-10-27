@@ -53,7 +53,7 @@ The probe mail stays in the target's inbox (subject "Parity probe (no action)"):
 
 Marked `accepted (<reason>)`, never counted:
 
-- `start: culture`: native on Claude (the CLI reads `AGENTS.md` / `CLAUDE.md`), a SessionStart row on Codex.
+- `start: culture`: a SessionStart row on both CLIs; on Claude inside `AIPASS_HOME` it is silent, since the CLI reads `.claude/AGENTS.md` natively there.
 - `subagent stop`: the sub-agent mechanism differs (the Agent tool on Claude, multi-agent on Codex).
 
 The settings gate (ask on Claude, deny on Codex), the status line and the Notification hook are accepted differences in the parity matrix, and no lane probes them. PreCompact is not probed: a headless session does not reach compaction.

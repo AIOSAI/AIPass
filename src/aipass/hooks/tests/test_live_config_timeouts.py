@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_live_config_timeouts.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Description: Pins against the live .aipass/hooks.json and .aipass/project_hooks.json
 # Branch: hooks
 # Created: 2026-08-13
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for the live .aipass/ hook configs that apps/handlers/config/loader.py hands the engine."""
@@ -131,6 +131,11 @@ class TestTheTemplateRuling:
             "post_compact_regrounding",
             "registry_gate",
             "feedback_pulse",
+            "culture",
+            "session_pointer",
+            "settings_gate",
+            "settings_backup",
+            "navmap_cap",
         ):
             assert name in entries, f"{name} was ruled project-appropriate and must ship"
 
@@ -142,6 +147,7 @@ class TestTheTemplateRuling:
             "presence_gate",
             "presence_release",
             "auto_process",
+            "comment_budget",
             "compass_recall",
             "user_message_relay",
             "telegram_response",

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_navmap.py
-# Version: 1.1.2
-# Description: Tests for navmap prompt handler
+# Version: 1.2.0
+# Description: Tests for navmap prompt handler and its edit-time cap warning
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-10-05
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/prompt/navmap.py."""
@@ -15,6 +15,7 @@
 # seedgo: no-test-needed(generated) — the navmap text itself; grounding_content.load_navmap reads it from disk
 
 import contextlib
+import json
 import sys
 from collections.abc import Iterator
 from typing import Any
@@ -22,7 +23,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from aipass.hooks.apps.handlers.prompt.navmap import handle
+from aipass.hooks.apps.handlers.prompt.navmap import NAVMAP_CHAR_CAP, handle, handle_edit
 
 _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
@@ -144,3 +145,39 @@ class TestNavmapHandler:
                 handle({"some": "data"})
 
         mock.should_fire.assert_called_once_with("navmap", {"some": "data"})
+
+
+def _navmap(root, chars: int):
+    navmap = root / ".aipass" / "tier1_navmap.md"
+    navmap.parent.mkdir(parents=True, exist_ok=True)
+    navmap.write_text("x" * chars, encoding="utf-8")
+    return navmap
+
+
+class TestNavmapCapWarning:
+    def test_an_edit_over_the_cap_names_the_file_and_the_count(self, tmp_path):
+        navmap = _navmap(tmp_path, NAVMAP_CHAR_CAP + 422)
+        result = handle_edit({"tool_name": "Edit", "tool_input": {"file_path": str(navmap)}})
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert str(navmap) in context
+        assert f"{NAVMAP_CHAR_CAP + 422:,} chars, 422 over" in context
+        assert result["exit_code"] == 0
+
+    def test_an_edit_at_the_cap_is_silent(self, tmp_path):
+        navmap = _navmap(tmp_path, NAVMAP_CHAR_CAP)
+        assert handle_edit({"tool_name": "Write", "tool_input": {"file_path": str(navmap)}})["stdout"] == ""
+
+    def test_another_file_over_the_cap_is_silent(self, tmp_path):
+        other = tmp_path / ".aipass" / "tier0_kernel.md"
+        other.parent.mkdir()
+        other.write_text("x" * (NAVMAP_CHAR_CAP + 1), encoding="utf-8")
+        assert handle_edit({"tool_name": "Edit", "tool_input": {"file_path": str(other)}})["stdout"] == ""
+
+    def test_a_shell_write_over_the_cap_is_caught(self, tmp_path):
+        navmap = _navmap(tmp_path, NAVMAP_CHAR_CAP + 1)
+        hook_data = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo more >> .aipass/tier1_navmap.md"},
+            "cwd": str(tmp_path),
+        }
+        assert str(navmap) in json.loads(handle_edit(hook_data)["stdout"])["systemMessage"]

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: session_start.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Resets cadence counter on new chat / clear; injects the culture file; writes the session pointer
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-07
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """SessionStart: resets the cadence counter, injects the culture file, writes the session pointer.
@@ -44,11 +44,16 @@ def handle(hook_data: dict) -> dict:
 
 
 def handle_culture(hook_data: dict) -> dict:
-    """Inject .claude/AGENTS.md, the culture file: Codex reads the root AGENTS.md natively, never this one."""
+    """Inject the host's $AIPASS_HOME/.claude/AGENTS.md on purpose, projects too: a project's voice is its AGENTS.md.
+
+    Skipped for Claude inside AIPASS_HOME, which reads the file natively there; Codex never does."""
     home = os.environ.get("AIPASS_HOME", "")
     culture = Path(home) / ".claude" / "AGENTS.md" if home else None
     if culture is None or not culture.is_file():
         logger.warning("[HOOKS] session_start: no culture file at %s, none injected", culture or "(AIPASS_HOME unset)")
+        return {"stdout": "", "exit_code": 0}
+    cwd = Path(hook_data.get("cwd") or os.getcwd()).resolve()
+    if (hook_data.get("provider") or "claude") == "claude" and cwd.is_relative_to(Path(home).resolve()):
         return {"stdout": "", "exit_code": 0}
     return {"stdout": culture.read_text(encoding="utf-8"), "exit_code": 0}
 
