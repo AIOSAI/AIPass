@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -105,8 +105,9 @@ def update_branch(
     ignored_detail: list[dict] = []
     md_detail: list[dict] = []
 
-    branch_dir = _resolve_branch_path(branch_name, registry_path)
-    if branch_dir is None:
+    registry_path = Path(registry_path) if registry_path else find_registry()
+    branch_dir = _resolve_branch_path(branch_name, registry_path) if registry_path else None
+    if branch_dir is None or registry_path is None:
         return _result(branch_name, False, counts, [f"Branch '{branch_name}' not found in registry"], dry_run)
     if not branch_dir.is_dir():
         return _result(branch_name, False, counts, [f"Branch directory does not exist: {branch_dir}"], dry_run)
@@ -130,8 +131,23 @@ def update_branch(
 
     # Checked before every other rule in both walks: nothing downstream may reconsider the owner's call.
     ignore_patterns = read_ignore(branch_dir)
-    if ignore_patterns and trace:
-        logger.info("[update] %s declares %d owner-protected pattern(s)", IGNORE_NAME, len(ignore_patterns))
+    # The project root's file covers its citizens too, matched against the project-relative path.
+    project_root = registry_path.parent.resolve()
+    root_patterns: list = []
+    branch_prefix = ""
+    if project_root != branch_dir and branch_dir.is_relative_to(project_root):
+        root_patterns = read_ignore(project_root)
+        branch_prefix = branch_dir.relative_to(project_root).as_posix() + "/"
+    if (ignore_patterns or root_patterns) and trace:
+        logger.info(
+            "[update] %s declares %d branch and %d project-root pattern(s)",
+            IGNORE_NAME,
+            len(ignore_patterns),
+            len(root_patterns),
+        )
+
+    def _protected(rel: str) -> bool:
+        return is_ignored(rel, ignore_patterns) or is_ignored(branch_prefix + rel, root_patterns)
 
     for template_subdir in sorted(template_dir.rglob("*")):
         if not template_subdir.is_dir():
@@ -140,7 +156,7 @@ def update_branch(
             continue
         rel_dir = template_subdir.relative_to(template_dir).as_posix()
         resolved_dir = replace_placeholders(rel_dir, replacements)
-        if is_ignored(resolved_dir, ignore_patterns):
+        if _protected(resolved_dir):
             if trace:
                 logger.info("[update] SKIP (%s): %s/", IGNORE_NAME, resolved_dir)
             continue
@@ -168,7 +184,7 @@ def update_branch(
 
         resolved_path = replace_placeholders(rel_path, replacements)
 
-        if is_ignored(resolved_path, ignore_patterns):
+        if _protected(resolved_path):
             # Must run before the passport heal below can propose a merge.
             ignored_detail.append({"branch_path": resolved_path})
             counts["owner_protected"] += 1

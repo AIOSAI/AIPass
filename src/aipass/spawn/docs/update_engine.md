@@ -17,7 +17,7 @@ phase.
 
 1. **Resolve** — Branch path from the registry, citizen class from its passport, template
    directory from the class.
-2. **Owner protection** — Read the branch's `.updateignore` and drop everything it claims,
+2. **Owner protection** — Read the branch's and the project root's `.updateignore` and drop everything either claims,
    before any other rule. An `.updateignore` that exists but cannot be read raises
    `UpdateIgnoreUnreadable` before any write; `update <class> --all` reports it and goes on
    to the next branch.
@@ -47,6 +47,15 @@ slash also matching that filename at any depth. No negation in v1.
 .trinity/passport.json
 docs.local/
 ```
+
+The `.updateignore` at the project root, beside the `*_REGISTRY.json` the update resolves,
+protects that project's citizens too. Its patterns match the file's project-relative path, the
+`.gitignore` model: a pattern with a slash is root-relative, so
+`src/vera_studio/*/docs.local/` claims every citizen's `docs.local/`, and a slashless name
+such as `README.md` matches at any depth. The branch's own file is optional, for a citizen's
+own claims. Both are read before the walk, branch first, then root; a file either one claims
+is skipped. An unreadable root file refuses the update the same way. A branch outside its
+registry's root takes no root patterns.
 
 A matched file is **never written, never merged, never backed up**, and the preview reports
 it as a skip on its own line rather than as a warning — an owner-protected file is a

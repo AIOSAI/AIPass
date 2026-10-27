@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: update_ignore.py
 # Description: .updateignore parser — the branch owner's decision about what update skips
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-09
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
-"""Owner-protected files: the ``.updateignore`` contract at a BRANCH root.
+"""Owner-protected files: the ``.updateignore`` contract at a branch root and at its project root.
 
 Deliberate twin of aipass's ``scaffold_manifest.py`` parser (no cross-branch imports): change both."""
 
@@ -51,7 +51,9 @@ def is_ignored(rel: str, patterns: list) -> bool:
     for pattern in patterns:
         if pattern.endswith("/"):
             prefix = pattern.rstrip("/")
-            if rel == prefix or rel.startswith(prefix + "/") or fnmatch.fnmatch(rel, prefix + "/*"):
+            # fnmatch(rel, prefix) is the bare directory row of a wildcard prefix, which == never matches.
+            literal = rel == prefix or rel.startswith(prefix + "/")
+            if literal or fnmatch.fnmatch(rel, prefix) or fnmatch.fnmatch(rel, prefix + "/*"):
                 return True
             continue
         if fnmatch.fnmatch(rel, pattern):
