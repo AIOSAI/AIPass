@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_helpers.py
 # Description: Plan Closure Helper Functions
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-05-16
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -19,6 +19,7 @@ from typing import Dict, Any, List
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
 from aipass.flow.apps.handlers.plan.registry_routing import _load_template_registry
 from aipass.flow.apps.handlers.registry.load_registry import next_free_number
 from aipass.flow.apps.handlers.registry.monitor_ops import is_plan_file
@@ -47,7 +48,7 @@ def _find_relocated_plan(plan_file: Path) -> Path | None:
     search_dirs = [
         branch_dir / ".archive",
         branch_dir / "docs.local",
-        PROCESSED_PLANS_DIR,
+        archive_dir_for(plan_file, PROCESSED_PLANS_DIR),
     ]
 
     for search_dir in search_dirs:

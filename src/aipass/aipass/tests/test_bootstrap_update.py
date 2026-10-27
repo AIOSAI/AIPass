@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_update.py
 # Description: Tests for update_project: the plan, stamp-only, the retrofit, seeds and cleanup
-# Version: 1.3.0
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: update_project and the plans it reads."""
@@ -22,7 +22,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     update_project,
 )
 from aipass.aipass.apps.handlers.init import bootstrap
-from aipass.aipass.apps.handlers.init.scaffold_manifest import UpdateIgnoreUnreadable, read_manifest
+from aipass.aipass.apps.handlers.init.scaffold_manifest import MANIFEST_REL, UpdateIgnoreUnreadable, read_manifest
 from aipass.aipass.apps.handlers.init.scaffold_manifest import sha256_text as sc_sha256
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.tests.support_bootstrap import _expected_aipass_home
@@ -325,21 +325,19 @@ def test_update_project_rewrites_a_managed_file_nobody_touched(tmp_path):
     assert backups[0].read_text(encoding="utf-8") == "# superseded template\n"
 
 
-def test_update_project_never_touches_user_owned_files(tmp_path):
-    """Registry, README, STATUS, .gitignore are always in skipped_files."""
+def test_update_project_never_touches_the_registry_or_readme(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="skip")
 
     (target / "README.md").write_text("# My custom README\n", encoding="utf-8")
-    (target / ".gitignore").write_text("# custom\n", encoding="utf-8")
 
     result = update_project(target)
 
     skipped = result["skipped_files"]
     assert any("REGISTRY" in s for s in skipped)
     assert any("README.md" in s for s in skipped)
-    assert any(".gitignore" in s for s in skipped)
+    assert not any(".gitignore" in s for s in skipped)
 
     assert (target / "README.md").read_text(encoding="utf-8") == "# My custom README\n"
 
@@ -368,20 +366,21 @@ def test_update_project_creates_missing_managed_dirs(tmp_path, monkeypatch, thro
     local_settings = target.resolve() / ".claude" / "settings.local.json"
     assert (str(local_settings) in result["updated_files"]) is not throwaway_home
     assert local_settings.exists() is not throwaway_home
-    # tier0_kernel, tier1_navmap, hooks.json, settings.json, prep, plus settings.local.json for a real home
-    assert len(result["updated_files"]) == (5 if throwaway_home else 6)
+    # tier0_kernel, tier1_navmap, .aipass/.gitignore, hooks.json, settings.json, prep, /codex,
+    # plus settings.local.json for a real home
+    assert len(result["updated_files"]) == (7 if throwaway_home else 8)
     assert str((target / "AGENTS.md").resolve()) in result["already_current"]
 
 
 def test_update_project_skipped_files_count(tmp_path):
-    """update_project skips 3 user-owned files."""
+    """update_project skips the registry and README, the project's own."""
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="count")
 
     result = update_project(target)
 
-    assert len(result["skipped_files"]) == 3
+    assert len(result["skipped_files"]) == 2
 
 
 def _make_nested_project(tmp_path):
@@ -513,30 +512,78 @@ def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, mo
     ]
 
 
-def test_update_project_never_rewrites_the_agents_md_seed_or_a_project_claude_md(tmp_path):
-    """Seeds exist to be filled in; a project's own CLAUDE.md is its owner's to retire, not update's.
-
-    No sidecar either: once a seed exists, a template to diff against is noise.
-    """
+def test_update_project_keeps_an_edited_agents_md_and_writes_the_template_beside_it(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="sync")
-
-    for seed_name in ("AGENTS.md", "CLAUDE.md"):
-        (target / seed_name).write_text(f"# My own {seed_name}\n", encoding="utf-8")
+    template = (target / "AGENTS.md").read_text(encoding="utf-8")
+    (target / "AGENTS.md").write_text("# My own AGENTS.md\n", encoding="utf-8")
 
     result = update_project(target)
 
-    for seed_name in ("AGENTS.md", "CLAUDE.md"):
-        seed = target / seed_name
-        assert seed.read_text(encoding="utf-8") == f"# My own {seed_name}\n"
-        assert str(seed.resolve()) not in result["updated_files"]
-        assert not seed.with_name(f"{seed_name}.aipass-new").exists()
-    agents = target / "AGENTS.md"
-    assert str(agents.resolve()) in result["already_current"]
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "# My own AGENTS.md\n"
+    assert (target / "AGENTS.md.aipass-new").read_text(encoding="utf-8") == template
     entry = next(e for e in result["files"] if e["path"] == "AGENTS.md")
-    assert entry["reason"] == "seed — never rewritten"
-    assert not [e for e in result["files"] if e["path"] == "CLAUDE.md"]
+    assert entry["action"] == "kept-local"
+
+
+def test_update_project_rewrites_an_unedited_agents_md_from_an_older_template(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="sync")
+    template = (target / "AGENTS.md").read_text(encoding="utf-8")
+    (target / "AGENTS.md").write_text("# The older template\n", encoding="utf-8")
+    manifest = target / MANIFEST_REL
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["files"]["AGENTS.md"] = sc_sha256("# The older template\n")
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    result = update_project(target)
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == template
+    assert next(e for e in result["files"] if e["path"] == "AGENTS.md")["action"] == "update"
+
+
+def test_update_project_never_overwrites_an_agents_md_whose_edit_a_seed_era_manifest_adopted(tmp_path):
+    """Seed-era updates recorded the on-disk AGENTS.md hash: an edit reads as unmodified there."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="sync")
+    (target / "AGENTS.md").write_text("# Edited under the seed rule\n", encoding="utf-8")
+    manifest = target / MANIFEST_REL
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document.pop("agents_md_managed")
+    document["files"]["AGENTS.md"] = sc_sha256("# Edited under the seed rule\n")
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    update_project(target)
+
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") == "# Edited under the seed rule\n"
+    assert (target / "AGENTS.md.aipass-new").is_file()
+    assert "AGENTS.md" not in json.loads(manifest.read_text(encoding="utf-8"))["files"]
+
+
+def test_update_project_retires_a_claude_md_shadowing_agents_md_and_keeps_its_text(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="sync")
+    (target / "CLAUDE.md").write_text("# My own CLAUDE.md\n", encoding="utf-8")
+    (target / ".claude" / "CLAUDE.md").write_text("# Claimed\n", encoding="utf-8")
+    (target / ".updateignore").write_text(".claude/CLAUDE.md\n", encoding="utf-8")
+
+    planned = update_project(target, apply=False)
+
+    assert (target / "CLAUDE.md").is_file()
+    entry = next(e for e in planned["files"] if e["path"] == "CLAUDE.md")
+    assert entry["action"] == "retire"
+    assert "shadows AGENTS.md (differs)" in entry["reason"]
+    assert next(e for e in planned["files"] if e["path"] == ".claude/CLAUDE.md")["action"] == "skipped"
+
+    update_project(target)
+
+    assert not (target / "CLAUDE.md").exists()
+    assert (target / "CLAUDE.md(disabled)").read_text(encoding="utf-8") == "# My own CLAUDE.md\n"
+    assert (target / ".claude" / "CLAUDE.md").read_text(encoding="utf-8") == "# Claimed\n"
 
 
 def test_update_project_creates_missing_agents_md(tmp_path):
@@ -704,6 +751,7 @@ def test_update_refuses_when_the_ignore_file_is_there_but_unreadable(tmp_path):
     target.mkdir()
     init_project(target, project_name="claimed")
     ignore = target / ".updateignore"
+    ignore.rename(target / "seeded_updateignore")
     ignore.mkdir()
     with pytest.raises(OSError) as asked:  # what this platform raises for the same read
         ignore.read_text(encoding="utf-8")
@@ -739,7 +787,6 @@ def _a_project_from_before_the_shared_skills(tmp_path, prep_text: str) -> Path:
     skill = target / ".agents" / "skills" / "prep" / "SKILL.md"
     skill.unlink()
     legacy = target / ".claude" / "commands" / "prep.md"
-    legacy.parent.mkdir()
     legacy.write_text(prep_text, encoding="utf-8")
     manifest_path = target / ".aipass" / "scaffold_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -791,3 +838,119 @@ class TestSharedSkillsUpdate:
         assert result["pending"] is True
         assert not (target / ".claude" / "skills").exists()
         assert (target / ".claude" / "commands" / "prep.md").is_file()
+
+
+_SWITCH = {".claude/commands/codex.md": sc.codex_command_md(), ".codex/skills/claude/SKILL.md": sc.claude_skill_md()}
+
+
+class TestProviderSwitchPair:
+    """init writes /codex and $claude into a project; the update adds them to an older one, edits kept."""
+
+    def test_init_writes_both_switch_files_verbatim_and_hashes_them(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="switch")
+
+        manifest = read_manifest(target)["files"]
+        for rel, body in _SWITCH.items():
+            assert (target / rel).read_text(encoding="utf-8") == body
+            assert manifest[rel] == sc_sha256(body)
+
+    def test_update_adds_a_missing_switch_file_and_keeps_an_edited_one(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="older")
+        command = target / ".claude" / "commands" / "codex.md"
+        command.unlink()
+        skill = target / ".codex" / "skills" / "claude" / "SKILL.md"
+        skill.write_text("# my own switch\n", encoding="utf-8")
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        del manifest["files"][".claude/commands/codex.md"]
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        result = update_project(target)
+
+        assert command.read_text(encoding="utf-8") == sc.codex_command_md()
+        assert skill.read_text(encoding="utf-8") == "# my own switch\n"
+        actions = {e["path"]: e["action"] for e in result["files"]}
+        assert actions[".claude/commands/codex.md"] == "create"
+        assert actions[".codex/skills/claude/SKILL.md"] == "kept-local"
+
+    def test_a_hand_copy_matching_the_template_is_current_and_adopted(self, tmp_path):
+        target = tmp_path / "proj"
+        target.mkdir()
+        init_project(target, project_name="copied")
+        manifest_path = target / ".aipass" / "scaffold_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for rel in _SWITCH:
+            del manifest["files"][rel]
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        result = update_project(target)
+
+        entries = {e["path"]: e for e in result["files"]}
+        for rel, body in _SWITCH.items():
+            assert entries[rel]["action"] == "current"
+            assert entries[rel]["writes"] is False
+            assert read_manifest(target)["files"][rel] == sc_sha256(body)
+
+
+def test_update_project_appends_missing_gitignore_lines_under_a_dated_comment_and_keeps_owner_lines(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="merge")
+    owner = "# mine\nzeta/\n!tools/keep/\nlogs/\n"
+    (target / ".gitignore").write_text(owner, encoding="utf-8")
+
+    planned = update_project(target, apply=False)
+
+    entry = next(e for e in planned["files"] if e["path"] == ".gitignore")
+    assert entry["action"] == "update"
+    assert ".chroma/" in entry["lines"] and "logs/" not in entry["lines"]
+    assert (target / ".gitignore").read_text(encoding="utf-8") == owner
+
+    update_project(target)
+
+    merged = (target / ".gitignore").read_text(encoding="utf-8")
+    head, added = merged.split("\n# Added by aipass init update ", 1)
+    assert head == owner
+    assert added.splitlines()[1:] == entry["lines"]
+    again = next(e for e in update_project(target)["files"] if e["path"] == ".gitignore")
+    assert (again["action"], again["writes"]) == ("current", False)
+
+
+def test_update_project_seeds_missing_ignore_files_once_and_never_rewrites_them(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="seeds")
+    (target / ".updateignore").rename(target / "seeded_updateignore")
+    (target / ".aipass" / ".gitignore").write_text("*\n", encoding="utf-8")
+
+    result = update_project(target)
+
+    assert (target / ".updateignore").read_text(encoding="utf-8") == sc.updateignore()
+    assert (target / ".aipass" / ".gitignore").read_text(encoding="utf-8") == "*\n"
+    entry = next(e for e in result["files"] if e["path"] == ".updateignore")
+    assert entry["action"] == "create"
+
+
+def test_update_project_retires_an_unedited_old_hook_script_the_manifest_knows_and_leaves_an_edited_one(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="hooks")
+    hooks_dir = target / ".claude" / "hooks"
+    hooks_dir.mkdir()
+    (hooks_dir / "old.py").write_text("print('aipass')\n", encoding="utf-8")
+    (hooks_dir / "edited.py").write_text("print('mine')\n", encoding="utf-8")
+    manifest = target / MANIFEST_REL
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["files"][".claude/hooks/old.py"] = sc_sha256("print('aipass')\n")
+    document["files"][".claude/hooks/edited.py"] = sc_sha256("print('aipass')\n")
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    update_project(target)
+
+    assert not (hooks_dir / "old.py").exists()
+    assert (hooks_dir / "old(disabled).py").read_text(encoding="utf-8") == "print('aipass')\n"
+    assert (hooks_dir / "edited.py").read_text(encoding="utf-8") == "print('mine')\n"

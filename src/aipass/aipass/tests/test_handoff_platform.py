@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.1.7
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -49,14 +49,11 @@ class TestBuildCliCmd:
         result = build_cli_cmd("claude", "skip-permissions")
         assert "--dangerously-skip-permissions" in result
 
-    def test_skip_permissions_for_non_claude(self) -> None:
-        """skip-permissions variant for non-claude CLI does not append flag."""
-        result = build_cli_cmd("codex", "skip-permissions")
-        assert "--dangerously-skip-permissions" not in result
-
-    def test_other_cli(self) -> None:
-        """Other CLI names are returned as-is with default variant."""
-        assert build_cli_cmd("codex", "default") == "codex"
+    @pytest.mark.parametrize("variant", ["default", "skip-permissions"])
+    def test_codex_always_bypasses_approvals_and_sandbox(self, variant) -> None:
+        """Codex launches in the dispatch posture whatever the variant, never with Claude's flag.
+        Mutant: dropping the codex branch returns bare `codex` and goes red."""
+        assert build_cli_cmd("codex", variant) == "codex --dangerously-bypass-approvals-and-sandbox"
 
 
 class TestBuildManualCommand:
@@ -115,6 +112,11 @@ class TestReturnPathBreadcrumb:
         result = return_path_breadcrumb(str(tmp_path / "somewhere"))
         assert "--continue" in result
         assert "--resume" not in result
+
+    def test_codex_resumes_its_last_session(self, tmp_path) -> None:
+        """Codex's way back is `codex resume --last` from the same directory."""
+        cwd = str(tmp_path / "it's here")
+        assert shlex.split(return_path_breadcrumb(cwd, "codex")) == ["cd", cwd, "&&", "codex", "resume", "--last"]
 
     def test_reflects_the_given_cwd(self, tmp_path) -> None:
         """Different cwd values are reflected verbatim in the breadcrumb."""
@@ -460,6 +462,18 @@ class TestLaunchInline:
         _, execvp = self._launch(str(tmp_path / "proj"), flag_variant="skip-permissions")
         _, argv = execvp.call_args[0]
         assert "--dangerously-skip-permissions" in argv[2]
+
+    def test_codex_runs_bypassed_and_prints_its_own_way_back(self, tmp_path) -> None:
+        """Choosing codex execs codex with its bypass flag, then prints `codex resume --last`.
+        Mutant: launch_inline passing no cli to the breadcrumb prints `claude --continue` and goes red."""
+        proj = str(tmp_path / "proj")
+        execvp = MagicMock()
+        which = {"codex": "/usr/bin/codex", "bash": "/bin/bash"}.get
+        launch_inline("codex", "hi", proj, which=which, chdir=MagicMock(), execvp=execvp)
+        shell_cmd = execvp.call_args[0][1][2]
+        expected = shlex.join(["/usr/bin/codex", "--dangerously-bypass-approvals-and-sandbox", "hi"])
+        assert shell_cmd.startswith(expected + ";")
+        assert shell_cmd.endswith(shlex.quote(return_path_breadcrumb(proj, "codex")))
 
     def test_prompt_with_special_chars_is_shell_quoted(self, tmp_path) -> None:
         """A prompt containing shell metacharacters is safely quoted, not interpolated raw."""

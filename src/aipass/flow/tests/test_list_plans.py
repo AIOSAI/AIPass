@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_list_plans.py
 # Description: Unit tests for apps/modules/list_plans.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/list_plans.py."""
@@ -261,3 +261,65 @@ class TestListPlansOrchestrator:
 
             result = list_plans("open")
             assert result is False
+
+
+class TestListIsScopedToTheCallersProject:
+    """An external seat listed the whole host registry; only "all" from the host seat lists every project."""
+
+    @pytest.fixture
+    def seats(self, tmp_path, make_project, monkeypatch):
+        host, ext = make_project("host"), make_project("ext")
+        rows = {"0001": (host / "src" / "a", "host plan"), "0002": (ext / "src" / "v", "ext plan")}
+
+        def load_registry(registry_file=None):
+            if registry_file != "fplan_registry.json":
+                return {"plans": {}}
+            return {
+                "plans": {
+                    num: {"location": str(loc), "subject": subject, "status": "open", "created": "2026-10-26"}
+                    for num, (loc, subject) in rows.items()
+                }
+            }
+
+        monkeypatch.setattr(f"{_MOD}.load_registry", load_registry)
+        monkeypatch.setattr("aipass.flow.apps.handlers.plan.list_ops.find_repo_root", lambda caller: host)
+
+        def sit(directory):
+            monkeypatch.setenv("AIPASS_CALLER_CWD", str(directory))
+
+        return host, ext, tmp_path, sit
+
+    @pytest.mark.parametrize("filter_type", ["open", "all"])
+    def test_an_external_seat_lists_only_its_own_projects_plans(self, seats, filter_type, capsys):
+        _host, ext, _tmp, sit = seats
+        sit(ext / "src" / "v")
+
+        assert list_plans(filter_type) is True
+
+        out, _err = capsys.readouterr()
+        assert "ext plan" in out
+        assert "host plan" not in out
+        assert "PLAN Registry, ext" in out
+
+    def test_the_host_seat_lists_its_own_plans_by_default_and_every_project_under_all(self, seats, capsys):
+        host, _ext, _tmp, sit = seats
+        sit(host / "src" / "a")
+
+        assert list_plans("open") is True
+        scoped, _err = capsys.readouterr()
+        assert list_plans("all") is True
+        fleet, _err = capsys.readouterr()
+
+        assert "host plan" in scoped and "ext plan" not in scoped
+        assert "host plan" in fleet and "ext plan" in fleet
+        assert "PLAN Registry, fleet" in fleet
+
+    def test_a_seat_in_no_project_is_refused_and_lists_nothing(self, seats, capsys):
+        _host, _ext, tmp, sit = seats
+        sit(tmp)
+
+        assert list_plans("all") is False
+
+        out, err = capsys.readouterr()
+        assert "plan" not in out
+        assert "no project" in err

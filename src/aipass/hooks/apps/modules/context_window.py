@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: context_window.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Transcript reader (Claude transcript + Codex rollout) and the compact window and point per CLI
 # Branch: hooks
 # Layer: apps/modules
@@ -254,13 +254,23 @@ def explicit_window(cwd: str) -> int | None:
     return None
 
 
+def codex_home() -> Path:
+    """Codex's home: $CODEX_HOME, else ~/.codex, resolved at call time (tests point it at tmp_path)."""
+    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+
+
 def codex_config_path() -> Path:
-    """Codex's config.toml under $CODEX_HOME or ~/.codex, resolved at call time (tests point it at tmp_path)."""
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
+    """Codex's config.toml in its home."""
+    return codex_home() / "config.toml"
+
+
+def codex_hooks_path() -> Path:
+    """Codex's user-level hooks.json, the only place its hook rows live."""
+    return codex_home() / "hooks.json"
 
 
 def _codex_config_int(key: str) -> int | None:
-    """A positive int `key` from Codex's config.toml; None when unset or unreadable (logged)."""
+    """A positive int `key` from Codex's config.toml; None when unset, 0 when the file is unreadable (logged)."""
     path = codex_config_path()
     if not path.is_file():
         return None
@@ -268,7 +278,7 @@ def _codex_config_int(key: str) -> int | None:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError) as exc:
         logger.info("[HOOKS] context_window: codex config read failed: %s", exc)
-        return None
+        return 0
     for line in lines:
         if line.lstrip().startswith("["):
             return None  # a table header ends the top level; a same-named key below it is not Codex's

@@ -7,7 +7,7 @@ What Claude Code reads from this repo. Codex reads `.codex/` and `.agents/`; the
 ├── AGENTS.md                  # Project instructions Claude Code loads beside the root AGENTS.md (the culture file)
 ├── commands/codex.md          # /codex: the switch to Codex. Claude-only on purpose, so Codex never lists a switch to itself
 ├── skills -> ../.agents/skills   # Symlink. The shared skills (/prep, /memo, /compass) live once, in .agents/skills; Codex scans that folder natively
-├── provider_manifest.json     # The hook rows per CLI (cli.claude, cli.codex). aipass doctor --fix writes them to ~/.claude/settings.json and .codex/hooks.json
+├── provider_manifest.json     # The hook rows per CLI (cli.claude, cli.codex). aipass doctor --fix writes them to ~/.claude/settings.json and ~/.codex/hooks.json
 ├── settings.json              # Project settings: permissions, env (AIPASS_HOME for the bridge commands)
 ├── settings.local.json        # Personal override, untracked
 ├── hooks/                     # Retired hand scripts, all (disabled), plus hook_test.py, hook_report.py and probes/ for diagnostics

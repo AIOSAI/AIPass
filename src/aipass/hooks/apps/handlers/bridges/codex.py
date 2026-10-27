@@ -1,16 +1,17 @@
 # =================== AIPass ====================
 # Name: codex.py
-# Version: 2.4.2
+# Version: 2.5.1
 # Description: Codex bridge — mounts the promoted hook code, maps apply_patch, fails closed on PreToolUse
 # Branch: hooks
 # Layer: apps/handlers/bridges
 # Created: 2026-07-10
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Codex bridge.
 
-Called from .codex/hooks.json, which the provider wire writes from the manifest's cli.codex rows.
+Called from Codex's user-level hooks.json ($CODEX_HOME or ~/.codex), which the provider wire writes
+from the manifest's cli.codex rows.
 Codex speaks Claude's hook protocol and names its shell tool Bash; its file tool is apply_patch, one
 patch over many files, so each file becomes the Claude call the gates judge (Write, MultiEdit, a
 shell delete or move) and the first refusal answers for the whole patch. Codex blocks by
@@ -35,6 +36,11 @@ SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 ADD, UPDATE, DELETE = "*** Add File: ", "*** Update File: ", "*** Delete File: "
 MOVE = "*** Move to: "
+
+UNJUDGED = (
+    "apply_patch names no file the gates can judge, so it does not run. "
+    "Name each file in an *** Add File:, *** Update File: or *** Delete File: header."
+)
 
 BROKEN = (
     "HOOKS BROKEN: the AIPass hook engine could not run ({error}).\n"
@@ -174,7 +180,7 @@ def _patch_calls(patch: str, cwd: str) -> list[tuple[str, dict]]:
 def _claude_payloads(stdin_data: str) -> list[str]:
     """The payloads the engine runs: the one Codex sent, or one per call an apply_patch amounts to.
 
-    A patch that names no file cannot be judged, so it raises and the guarded event is denied.
+    A patch that names no file amounts to no call: an empty list.
     """
     normalized = _normalize_stdin(stdin_data)
     payload = _as_object(normalized)
@@ -183,24 +189,31 @@ def _claude_payloads(stdin_data: str) -> list[str]:
     tool_input = payload.get("tool_input")
     patch = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
     calls = _patch_calls(str(patch), str(payload.get("cwd") or os.getcwd()))
-    if not calls:
-        raise ValueError("apply_patch names no file the gates can judge")
     return [json.dumps({**payload, "tool_name": name, "tool_input": call}) for name, call in calls]
 
 
 def _run_calls(arg: str, stdin_data: str) -> tuple[str, int]:
-    """Run the engine once per payload; the first exit 2 answers for the whole tool call."""
+    """Run the engine once per payload; the first exit 2 answers for the whole tool call.
+
+    No payload is a patch naming no file: a guarded event denies it with the reason, a caller's
+    mistake at WARNING, not a broken engine.
+    """
     from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
     from aipass.hooks.apps.modules.engine import run_event
 
+    event_type = arg.split(":", 1)[0]
+    payloads = _claude_payloads(stdin_data)
+    if not payloads and event_type in GUARDED_EVENTS:
+        _log("warning", "[HOOKS:codex] apply_patch denied on %s: %s", event_type, UNJUDGED)
+        return json.dumps({"decision": "block", "reason": UNJUDGED}), 2
     outputs: list[tuple[str, str, str]] = []
-    for payload in _claude_payloads(stdin_data):
+    for payload in payloads:
         output, exit_code = run_event(arg, payload)
         if exit_code == 2:
             return output, exit_code
         if output:
             outputs.append((str(len(outputs)), "", output))
-    return combine_outputs(arg.split(":", 1)[0], outputs), 0
+    return combine_outputs(event_type, outputs), 0
 
 
 def _mount() -> str:

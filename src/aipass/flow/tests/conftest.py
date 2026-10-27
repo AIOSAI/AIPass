@@ -1,13 +1,14 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Shared pytest fixtures for flow tests"""
 
+import json
 import os
 import tempfile
 
@@ -88,6 +89,20 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler_module.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture
+def make_project(tmp_path):
+    """Build a project root under tmp_path: a directory holding a register with a ``branches`` key."""
+
+    def build(name: str) -> Path:
+        root = tmp_path / name
+        root.mkdir(parents=True, exist_ok=True)
+        # Assembled: the literal register name is a sealed-write trigger.
+        (root / (f"{name.upper()}_REGISTRY" + ".json")).write_text(json.dumps({"branches": []}), encoding="utf-8")
+        return root
+
+    return build
 
 
 @pytest.fixture(autouse=True)

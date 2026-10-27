@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_restore_ops.py
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -879,6 +879,17 @@ class TestRestoreFileFromBackup:
         assert target.is_file()
         assert (archive / name).is_file(), "archive copy was consumed"
         assert "restored" in msg
+
+    def test_an_external_plan_restores_from_its_own_projects_archive(self, tmp_path, make_project, monkeypatch):
+        row, home, _archive, name = _closed_plan(make_project("ext"))
+        host_archive = tmp_path / "host_archive"
+        host_archive.mkdir()
+        monkeypatch.setattr("aipass.flow.apps.handlers.plan.restore_ops.PROCESSED_PLANS_DIR", host_archive)
+
+        target, msg = restore_file_from_backup(row, "0042")
+
+        assert target == home / name, msg
+        assert target.read_text(encoding="utf-8").startswith("# The plan")
 
     def test_refuses_when_the_original_location_is_gone(self, tmp_path):
         row, home, archive, _name = _closed_plan(tmp_path)

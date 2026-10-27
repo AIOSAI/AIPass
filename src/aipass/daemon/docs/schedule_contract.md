@@ -116,5 +116,6 @@ with no **successful** run; when the job's attempts inside it failed, the line s
 
 - `fresh` (bool) — start a fresh Claude session (true) or resume (false)
 - `model` (string, optional) — `"haiku"` or `"sonnet"` recommended for light wakes
+- `provider` (string, optional) — `"claude"` or `"codex"`, passed to `wake_branch(provider=...)`; absent = `claude`, and any other value refuses the job at discovery with a warning naming the job, its file and the value. On `codex`, `model` is a Codex slug (`gpt-6-sol`, `gpt-6.1-sol`) or absent = Codex's config default
 - no wake-back, and not an option: every wake the daemon fires passes `wake_back=False`, so no job's finish wakes `@daemon` to read a reply nobody sends
 

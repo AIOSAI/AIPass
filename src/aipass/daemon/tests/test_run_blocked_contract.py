@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_run_blocked_contract.py
 # Description: Blocked is not ran — a wake that never started must not consume the period
-# Version: 1.1.0
+# Version: 1.2.0
 # Created:2026-08-30
-# Modified: 2026-10-23
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
@@ -134,6 +134,17 @@ class TestScheduledLane:
         for owner in ("@vera", "@commons", "@backup"):
             (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True, job=_job(owner=owner))
             assert fake_wake.call_args.kwargs["wake_back"] is False, owner
+
+    def test_a_named_provider_and_model_reach_the_wake(self):
+        job = _job()
+        job["wake"] = {"fresh": True, "model": "gpt-6-sol", "provider": "codex"}
+        (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True, job=job)
+        assert fake_wake.call_args.kwargs["provider"] == "codex"
+        assert fake_wake.call_args.kwargs["model"] == "gpt-6-sol"
+
+    def test_an_absent_provider_is_not_passed(self):
+        (_outcome, _detail), fake_wake = _fire_with(SPAWNED, True)
+        assert "provider" not in fake_wake.call_args.kwargs, "wake_branch names the default, not the daemon"
 
 
 class TestBlockedClassification:

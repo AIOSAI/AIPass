@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_codex_bridge.py
-# Version: 2.4.0
+# Version: 2.5.0
 # Description: Tests for the Codex bridge: stdin normalization, output envelope, apply_patch mapping
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/bridges/codex.py."""
@@ -26,6 +26,7 @@ import pytest
 
 from aipass.hooks.apps.handlers.bridges import codex
 from aipass.hooks.apps.modules import engine
+from aipass.prax.apps.modules import logger as prax_logger
 
 
 class Bridge:
@@ -218,10 +219,22 @@ class TestApplyPatchMapping:
         assert result["hookSpecificOutput"]["permissionDecisionReason"] == "new test file refused"
         assert [c["tool_name"] for c in bridge.calls] == ["Write"]
 
-    def test_a_patch_naming_no_file_is_denied_unjudged(self, bridge, tmp_path):
+    def test_a_patch_naming_no_file_is_denied_with_a_reason_at_warning_not_as_a_broken_engine(
+        self, bridge, monkeypatch, capsys, tmp_path
+    ):
+        logged: list[tuple[str, str]] = []
+        monkeypatch.setattr(codex, "_log", lambda level, message, *args: logged.append((level, message % args)))
         result = bridge.run("PreToolUse", _patch_payload(tmp_path, "*** Begin Patch\n*** End Patch"))
+        reason = result["hookSpecificOutput"]["permissionDecisionReason"]
         assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "apply_patch names no file" in result["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "apply_patch names no file" in reason
+        assert "HOOKS BROKEN" not in reason + capsys.readouterr().err
+        assert [level for level, _ in logged] == ["warning"]
+        assert "apply_patch names no file" in logged[0][1]
+        assert bridge.received == []
+
+    def test_a_patch_naming_no_file_after_the_tool_ran_adds_nothing(self, bridge, tmp_path):
+        assert bridge.run("PostToolUse", _patch_payload(tmp_path, "*** Begin Patch\n*** End Patch")) == {}
         assert bridge.received == []
 
     def test_a_bash_call_reaches_the_engine_unchanged(self, bridge, tmp_path):
@@ -239,7 +252,7 @@ class TestApplyPatchMapping:
 
 class TestBrokenEngine:
     def test_with_prax_unimportable_a_broken_engine_still_denies_pretooluse(self, monkeypatch, capsys, tmp_path):
-        monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", None)
+        monkeypatch.delattr(prax_logger, "system_logger")
         spec = importlib.util.spec_from_file_location("_codex_bridge_fresh", codex.__file__)
         fresh = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fresh)
@@ -262,9 +275,13 @@ class TestBrokenEngine:
     def test_a_suite_run_break_never_lands_in_the_live_bridge_log(self, monkeypatch, capsys):
         live = Path(codex.LIVE_BREAK_LOG)
         before = live.read_bytes() if live.exists() else b""
+
+        def _engine_gone():
+            raise ImportError("engine gone")
+
+        monkeypatch.setattr(codex, "_mount", _engine_gone)
         monkeypatch.setattr(sys, "argv", ["codex.py", "PreToolUse"])
-        patch = {"tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** End Patch"}}
-        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(patch)))
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Bash", "tool_input": {}})))
         codex.main()
         assert "HOOKS BROKEN" in capsys.readouterr().err, "the break must happen for the pin to mean anything"
         assert (live.read_bytes() if live.exists() else b"") == before, "medic reads that log as a real break"

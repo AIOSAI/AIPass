@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.9.1
+# Version: 1.10.0
 # Created: 2026-09-13
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.deletion_log import NO_CURRENT_DIRECTORY, append_ledger_line, ledger_beside
+from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.git.repo_context import is_aipass_repo
 from aipass.drone.apps.handlers.registry_handler import resolve_aipass_home
 from aipass.drone.apps.handlers.router_handler import caller_cwd, caller_stamp
@@ -749,6 +750,7 @@ def record_use(
         "exit_code": exit_code,
         "reason": reason,
         "theirs_taken": list(theirs_taken or []),
+        "session": session_home.stamp(),
     }
 
     logger.info(

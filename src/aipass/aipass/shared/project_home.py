@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-21
-# Modified: 2026-10-21
+# Modified: 2026-10-27
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
@@ -85,8 +85,8 @@ def claude_md_excludes(aipass_home: str) -> list[str]:
 
 
 def agents_md_seed(name: str, aipass_home: str | None) -> str:
-    """A project's AGENTS.md text: ``.aipass/project_AGENTS.md`` with ``{name}`` filled,
-    else the host root ``AGENTS.md``, else the generated ``agents_md``."""
+    """A project's AGENTS.md, the template ``init update`` manages it against: ``.aipass/project_AGENTS.md``
+    with ``{name}`` filled, else the host root ``AGENTS.md``, else the generated ``agents_md``."""
     if aipass_home:
         home = Path(aipass_home)
         template = home / ".aipass" / "project_AGENTS.md"
@@ -105,11 +105,15 @@ def _normalize_exclude(entry: str) -> str:
     return entry.replace("\\", "/")
 
 
+AUTO_COMPACT_WINDOW = 350000
+
+
 def claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
     """Generate .claude/settings.local.json — machine-local env (gitignored).
 
-    *nested* (under ``<host>/projects/<name>``) also emits ``claudeMdExcludes``."""
-    data: dict = {"env": {"AIPASS_HOME": aipass_home}}
+    *nested* (under ``<host>/projects/<name>``) also emits ``claudeMdExcludes``. ``autoCompactWindow`` is the
+    manager seat's default; the settings gate refuses the seat itself, and a merge never adds it to an existing file."""
+    data: dict = {"env": {"AIPASS_HOME": aipass_home}, "autoCompactWindow": AUTO_COMPACT_WINDOW}
     if nested:
         data["claudeMdExcludes"] = claude_md_excludes(aipass_home)
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"

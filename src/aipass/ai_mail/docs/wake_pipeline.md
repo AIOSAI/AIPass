@@ -175,8 +175,10 @@ codex exec resume <thread_id> [-m <model>] --json -o ... "<prompt>"          # r
   both are Claude's. The status block prints `provider → codex` and `model → <slug>` or
   `model → codex config default`.
 - **No `--cd`.** The monitor already runs with `cwd=<branch>`, and `resume` has no `--cd`.
-- **Managers are Claude-only.** A codex wake of a `citizen_class: manager` fails the
-  `manager` step in every lane.
+- **Managers wake on Codex in the same lanes as on Claude.** Mailed, not woken, by default;
+  headless through the monitor in the scheduled and admin lanes; on a @daemon self-wake, a tmux
+  session runs `codex [-m <model>] --dangerously-bypass-approvals-and-sandbox "$(cat
+  .daemon/last_wake_prompt.txt)"`.
 - **The pointer.** `.ai_mail.local/session.json` carries `provider`; a pointer without the
   key is a Claude pointer. A pointer for one provider never resumes the other (`pointer is
   for claude, waking on codex - starting fresh`). A Codex pointer resumes only while its

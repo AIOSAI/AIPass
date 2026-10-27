@@ -42,6 +42,10 @@ A refused embed or store leaves the live file untouched; the next run upserts th
 IDs, so a retry never duplicates. The watcher skips the rollover outright when the store's
 dependencies are missing.
 
+`commit_trimmed()` re-reads the file before it writes. Storage takes seconds, and the owner may edit
+the file meanwhile; when the file moved since extraction, only the archived entries leave the fresh
+image, so a todo, a meta line or an entry written during storage stays.
+
 **Todos are not in this pipeline.** `detector.check_all_branches()` never counts them, so the fleet
 walk never rolls a pad. `rollover run` rolls ONE branch's pad before the walk (file only, no
 embedding) and `rollover check` counts it after — see

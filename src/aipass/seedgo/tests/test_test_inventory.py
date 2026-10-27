@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.6
+# Version: 1.0.7
 # Created: 2026-09-01
-# Modified: 2026-10-24
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
@@ -229,11 +229,21 @@ class TestExclusions:
         assert statuses["tests/legacy/deep/test_old.py"] == exclusions.STATUS_CONFTEST_IGNORE
         assert statuses["tests/test_live.py"] == exclusions.STATUS_COLLECTED
 
-    @pytest.mark.skipif(sys.version_info < (3, 11), reason="no tomllib below 3.11: read_rules reads no pyproject there")
     def test_a_string_testpaths_is_split_on_whitespace_not_into_letters(self, tmp_path):
         _write(tmp_path, "pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "tests checks"')
 
         assert collection.read_rules(tmp_path).testpaths == ("tests", "checks")
+
+    def test_no_tomllib_and_no_tomli_reads_the_defaults_and_names_why(self, tmp_path, monkeypatch):
+        _write(tmp_path, "pyproject.toml", '[tool.pytest.ini_options]\ntestpaths = "checks"')
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        monkeypatch.setitem(sys.modules, "tomli", None)
+
+        rules = collection.read_rules(tmp_path)
+
+        assert rules.testpaths == collection.DEFAULT_TESTPATHS
+        assert rules.config_source == "pytest defaults"
+        assert "neither tomllib nor tomli" in rules.config_note
 
     def test_importorskip_is_conditional_and_a_bare_skip_is_not(self, tmp_path):
         """THE MEASURED MISS. Whether an `importorskip` file runs is a HOST fact."""

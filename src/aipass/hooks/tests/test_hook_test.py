@@ -1,14 +1,14 @@
 # =================== AIPass ====================
 # Name: test_hook_test.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for the portable hook test runner
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
-"""Tests for apps/modules/hook_test.py."""
+"""Tests for apps/modules/hook_test.py and the parity handler it drives."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
@@ -17,9 +17,14 @@
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+from aipass.hooks.apps.handlers.config import diagnostics
+from aipass.hooks.apps.handlers.parity import runner
 from aipass.hooks.apps.modules import hook_test
 
 _MOD = "aipass.hooks.apps.modules.hook_test"
@@ -343,3 +348,120 @@ class TestBuildSkeleton:
 # _restore_env is read through run_test: test_cwd_and_env_are_restored pins the unset var
 # staying unset (PROBE_ENV_VAR) and the prior value put back (AIPASS_HOME); its direct pins
 # are retired (fleet green leg 9, ruling b).
+
+
+_ALL_FOUR_REFUSE = [("PreToolUse", h, 2) for h in ("pre_edit_gate", "git_gate", "rm_gate", "testwrite_gate")]
+
+
+class FakeClis:
+    """Stands where claude and codex run: records each launch and writes its session's engine lines."""
+
+    def __init__(self, monkeypatch, tmp_path, lines: dict[str, list[tuple[str, str, int]]]) -> None:
+        self.calls: list[dict] = []
+        self.lines = lines
+        self.ids = {"claude": "claude-sess", "codex": "codex-thread"}
+        self.log = tmp_path / "engine.jsonl"
+        monkeypatch.setattr(diagnostics, "LOG_FILE", self.log)
+        monkeypatch.setattr(runner.subprocess, "run", self._run)
+
+    def _run(self, argv, **kwargs):
+        self.calls.append({"argv": argv, **kwargs})
+        provider = argv[0]
+        if provider not in self.ids:
+            return subprocess.CompletedProcess(argv, 0, "sent", "")
+        session = self.ids[provider]
+        with self.log.open("a", encoding="utf-8") as handle:
+            for event, hook, code in self.lines.get(provider, []):
+                entry = {"event": event, "hook": hook, "exit_code": code, "stdout_len": 0, "session_id": session}
+                handle.write(json.dumps(entry) + "\n")
+        if provider == "claude":
+            stdout = json.dumps({"type": "result", "session_id": session})
+        else:
+            stdout = json.dumps({"type": "thread.started", "thread_id": session})
+        return subprocess.CompletedProcess(argv, 0, stdout if session else "", "")
+
+
+def _table(err: str) -> dict[str, list[str]]:
+    """The printed parity table, row label -> [lane, Claude, Codex, verdict]."""
+    cells = [[c.strip() for c in line.strip("│").split("│")] for line in err.splitlines() if line.startswith("│")]
+    return {row[1]: [row[0], *row[2:]] for row in cells if row[0] != "Lane"}
+
+
+def _parity(tmp_path, *flags: str) -> None:
+    branch = tmp_path / "canary"
+    branch.mkdir(exist_ok=True)
+    hook_test.handle_command("parity", ["--branch", str(branch), *flags])
+
+
+class TestParity:
+    def test_the_same_refusals_on_both_providers_read_same_and_exit_clean(self, monkeypatch, tmp_path, capsys):
+        FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "codex": _ALL_FOUR_REFUSE})
+        _parity(tmp_path, "--lane", "C")
+        table = _table(capsys.readouterr().err)
+        assert {label: row[1:] for label, row in table.items()} == {
+            label: ["refused", "refused", "same"]
+            for label in ("cross-branch write", "raw git status", "raw rm", "new test file")
+        }
+
+    def test_a_gate_refusing_on_one_provider_only_is_different_and_exits_1(self, monkeypatch, tmp_path, capsys):
+        codex = [line if line[1] != "rm_gate" else ("PreToolUse", "rm_gate", 0) for line in _ALL_FOUR_REFUSE]
+        FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "codex": codex})
+        with pytest.raises(SystemExit) as exit_info:
+            _parity(tmp_path, "--lane", "C")
+        assert exit_info.value.code == 1
+        table = _table(capsys.readouterr().err)
+        assert table["raw rm"][1:] == ["refused", "not refused", "DIFFERENT"]
+        assert table["raw git status"][3] == "same"
+
+    def test_an_accepted_difference_is_marked_with_its_reason_and_does_not_fail(self, monkeypatch, tmp_path, capsys):
+        starts = [("SessionStart", h, 0) for h in ("cadence_reset", "release_notice", "session_pointer")]
+        FakeClis(monkeypatch, tmp_path, {"claude": starts, "codex": [*starts, ("SessionStart", "culture", 0)]})
+        _parity(tmp_path, "--lane", "B")
+        culture = _table(capsys.readouterr().err)["start: culture"]
+        assert culture[1:3] == ["not reached", "ran"]
+        assert culture[3].startswith("accepted (native on Claude")
+
+    def test_a_session_that_prints_no_id_is_no_data_and_exits_1(self, monkeypatch, tmp_path, capsys):
+        fake = FakeClis(monkeypatch, tmp_path, {"codex": _ALL_FOUR_REFUSE})
+        fake.ids["claude"] = ""
+        with pytest.raises(SystemExit) as exit_info:
+            _parity(tmp_path, "--lane", "C")
+        assert exit_info.value.code == 1
+        table = _table(capsys.readouterr().err)
+        assert [row[1] for row in table.values()] == ["no data"] * 4
+        assert [row[3] for row in table.values()] == ["no data"] * 4
+
+    def test_both_providers_get_the_same_prompt_on_stdin_headless_from_the_branch(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "outer-seat")
+        fake = FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "codex": _ALL_FOUR_REFUSE})
+        _parity(tmp_path, "--lane", "C")
+        claude, codex = fake.calls
+        assert claude["argv"][:2] == ["claude", "-p"] and "bypassPermissions" in claude["argv"]
+        assert codex["argv"] == ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "-"]
+        assert claude["input"] == codex["input"] and "git status" in claude["input"]
+        assert claude["cwd"] == codex["cwd"] == str(tmp_path / "canary")
+        assert claude["env"]["AIPASS_SESSION_TYPE"] == "dispatched"
+        assert not [key for key in claude["env"] if key.startswith("CLAUDE")]
+
+    def test_lane_a_sends_one_probe_mail_to_the_branch_before_the_sessions(self, monkeypatch, tmp_path):
+        fake = FakeClis(monkeypatch, tmp_path, {})
+        with pytest.raises(SystemExit):
+            _parity(tmp_path, "--lane", "A")
+        assert [c["argv"][0] for c in fake.calls] == ["drone", "claude", "codex"]
+        assert fake.calls[0]["argv"][:4] == ["drone", "@ai_mail", "email", "@canary"]
+
+    def test_json_writes_the_report_into_a_reports_folder_it_creates(self, monkeypatch, tmp_path):
+        FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE, "codex": _ALL_FOUR_REFUSE})
+        monkeypatch.setattr(hook_test, "REPORTS_DIR", tmp_path / "artifacts" / "reports")
+        _parity(tmp_path, "--lane", "C", "--json")
+        (report,) = (tmp_path / "artifacts" / "reports").glob("parity_*.json")
+        written = json.loads(report.read_text(encoding="utf-8"))
+        assert written["ok"] is True
+        assert [row["verdict"] for row in written["rows"]] == ["same"] * 4
+
+    def test_one_provider_launches_only_that_cli_and_compares_nothing(self, monkeypatch, tmp_path, capsys):
+        fake = FakeClis(monkeypatch, tmp_path, {"claude": _ALL_FOUR_REFUSE})
+        _parity(tmp_path, "--lane", "C", "--provider", "claude")
+        assert [c["argv"][0] for c in fake.calls] == ["claude"]
+        table = _table(capsys.readouterr().err)
+        assert [row[1:] for row in table.values()] == [["refused", "-", "not compared"]] * 4

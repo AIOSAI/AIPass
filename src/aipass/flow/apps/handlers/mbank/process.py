@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: process.py
 # Description: Memory Processing Handler
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2025-11-25
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
 from aipass.flow.apps.handlers.registry.load_registry import load_registry
 from aipass.flow.apps.handlers.registry.save_registry import registry_lock, save_registry
 from aipass.flow.apps.handlers.repo_root import find_repo_root, module_file
@@ -146,20 +147,21 @@ def is_template_content(content: str) -> bool:
 
 
 def archive_plan(plan_path: Path) -> bool:
-    """Move processed plan file to flow/processed_plans/
+    """Move a processed plan file into its own project's .backup/processed_plans/
 
     Returns True only when the destination exists and the source is gone.
     """
     try:
-        PROCESSED_PLANS_DIR.mkdir(parents=True, exist_ok=True)
+        archive_dir = archive_dir_for(Path(plan_path), PROCESSED_PLANS_DIR)
+        archive_dir.mkdir(parents=True, exist_ok=True)
 
-        destination = PROCESSED_PLANS_DIR / plan_path.name
+        destination = archive_dir / plan_path.name
 
         if destination.exists():
             timestamp = datetime.now().strftime("%H%M%S")
             stem = destination.stem
             suffix = destination.suffix
-            destination = PROCESSED_PLANS_DIR / f"{stem}_{timestamp}{suffix}"
+            destination = archive_dir / f"{stem}_{timestamp}{suffix}"
 
         source_path = Path(plan_path)
 

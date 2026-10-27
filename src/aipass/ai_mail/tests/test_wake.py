@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-29
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py's wake_branch: the spawn, session pointer, model, provider and marking."""
@@ -1220,14 +1220,33 @@ class TestCodexWake:
         assert status.find_step("provider")[0] == "fail" and "gemini" in status.find_step("provider")[2]
         assert calls["popen"] == []
 
-    def test_a_manager_refuses_codex_even_in_the_scheduled_lane(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("lane", [{"scheduled": True}, {"admin": True}])
+    def test_a_manager_wakes_headless_on_codex_in_the_scheduled_and_admin_lanes(self, tmp_path, monkeypatch, lane):
         _make_scheduled_fixtures(tmp_path, monkeypatch)
         _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
         calls = _record_spawn_routes(monkeypatch)
 
-        status, ok = wake_branch("@testbranch", provider="codex", scheduled=True)
+        status, ok = wake_branch("@testbranch", provider="codex", **lane)
 
-        assert ok is False
-        step = status.find_step("manager")
-        assert step[0] == "fail" and "Claude-only" in step[2]
-        assert calls["popen"] == [] and calls["tmux"] == []
+        assert ok is True and status.find_step("manager")[0] == "ok"
+        cmd = calls["popen"][0]["cmd"]
+        assert "--provider=codex" in cmd[: cmd.index("--")]
+        assert _claude_args(cmd)[:2] == ["codex", "exec"]
+        assert calls["tmux"] == []
+        assert [row["provider"] for row in register_mod.outstanding()] == ["codex"]
+
+    @pytest.mark.parametrize("model, model_flag", [(None, ""), ("gpt-6.1-sol", "-m gpt-6.1-sol ")])
+    def test_a_daemon_self_wake_of_a_manager_on_codex_runs_codex_in_tmux(
+        self, tmp_path, monkeypatch, model, model_flag
+    ):
+        branch_path = _make_scheduled_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch, _find_codex_bin=lambda: "codex")
+        calls = _record_spawn_routes(monkeypatch)
+
+        _, ok = wake_branch("@testbranch", sender="@daemon", provider="codex", model=model)
+
+        assert ok is True and calls["popen"] == []
+        prompt_file = branch_path / ".daemon" / "last_wake_prompt.txt"
+        line = _tmux_line(calls, "send-keys")
+        assert f'codex {model_flag}--dangerously-bypass-approvals-and-sandbox "$(cat {prompt_file})"' in line
+        assert "--permission-mode" not in line and "--model" not in line

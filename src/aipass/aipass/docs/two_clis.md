@@ -15,8 +15,8 @@ reads at startup and how a ritual is typed. This page is the map of both.
 |---|---|---|
 | Instructions | `AGENTS.md`, natively | `AGENTS.md`, natively |
 | Shared skills | `.claude/skills/`, a symlink to `../.agents/skills` | `.agents/skills/`, natively |
-| CLI-only skills | `.claude/commands/codex.md` (the switch to Codex) | `.codex/skills/claude/` (the switch back) |
-| Hooks | `~/.claude/settings.json` | the repo's `.codex/hooks.json` |
+| CLI-only skills | `.claude/commands/codex.md` (the switch to Codex), in the AIPass tree and every project | `.codex/skills/claude/SKILL.md` (the switch back), in the AIPass tree and every project |
+| Hooks | `~/.claude/settings.json` | `$CODEX_HOME/hooks.json`, else `~/.codex/hooks.json` |
 | Session pointer | `.ai_mail.local/session.json` in the branch | the same file |
 | Handoff on a switch | `.ai_mail.local/handoff.md` in the branch | the same file |
 
@@ -27,11 +27,51 @@ so both CLIs see the one file. `aipass init`, `aipass new` and `aipass adopt`
 write a project's prep skill at `.agents/skills/prep/SKILL.md` and make the
 link; `aipass doctor` checks both (see [`doctor.md`](doctor.md)).
 
+**The switch pair.** `/codex` and `$claude` are CLI-only on purpose:
+`.claude/commands/` is read by Claude Code alone, `.codex/skills/` by Codex
+alone, so neither CLI offers a switch to itself. Codex finds `.codex/skills`
+walking up from the working directory to the git root, so a branch inside a
+project sees the project's copy. The same three doors write both files into a
+project as managed files; `aipass doctor` names a missing one and `--fix` writes
+it, and `aipass init update` adds them to an older project.
+
 **Hooks.** `.claude/provider_manifest.json` holds the hook rows for both CLIs:
 `cli.claude` and `cli.codex`. `aipass doctor --fix` and `setup.sh` write the
-first into `~/.claude/settings.json` and the second, whole, into the repo's
-`.codex/hooks.json`. Codex reads the same hook shape as Claude Code. The event
+first into `~/.claude/settings.json` and the second into the user-level
+`$CODEX_HOME/hooks.json` (`~/.codex/hooks.json` when `CODEX_HOME` is unset),
+which Codex reads from every directory. Codex reads the same hook shape as
+Claude Code. The file is the user's, so the write is a merge: rows running the
+AIPass Codex bridge are replaced, every other row is kept, and the AIPass groups
+come first in each event. Codex keys its trust by
+`<file>:<event>:<group>:<index>`, with no directory in it, so one trust of the
+file covers every project, and a foreign group ahead of the AIPass ones would
+shift their keys and untrust them. Codex loads a repo's `.codex/hooks.json`
+beside the user-level file without deduplicating, so bridge rows in both fire
+twice. `setup.sh` runs the Codex half only when `codex` is on PATH, and then
+also sets the four config pins in `config.toml` (see the Codex rows below), one
+line each, keeping every other line, the `model` line among them. It refuses a
+file it cannot edit that way, such as a pin set by a dotted key, and writes
+nothing. Codex then asks once to trust the hooks: run `codex` and choose 'Trust
+all and continue'. A headless run skips untrusted hooks silently. The event
 table lives in @hooks' `docs/wiring.md`.
+
+**Doctor's Codex rows.** Beside `codex hooks`, `aipass doctor` reads the Codex
+side and never writes it. `codex binary` prints the version, or passes as
+optional when `codex` is not on PATH, and then the other three rows are
+skipped. `codex login` runs `codex login status` and warns on a non-zero exit.
+`codex model` checks that the `model` in `~/.codex/config.toml` (under
+`$CODEX_HOME` when that is set) is in the catalog `codex debug models` fetches
+for this login. `codex pins` checks four settings that must read `false`:
+`memories` and `collaboration_modes` under `[features]`, the top-level
+`include_collaboration_mode_instructions`, and `enabled` under
+`[tools.experimental_request_user_input]`. Each missing or wrong pin is a
+warning naming the line to add by hand. `--fix` never touches `config.toml`.
+
+**Handing off to either CLI.** `aipass handoff launch --cli codex` and an init
+run that chose Codex start `codex --dangerously-bypass-approvals-and-sandbox`,
+the posture dispatch uses, because the hooks are the gates on both CLIs. The way
+back printed after the session is `codex resume --last` from the agent's
+directory; Claude Code's is `claude --continue`.
 
 **The session pointer and the handoff.** Each interactive session start writes
 the branch's resume target, with the CLI running it, to

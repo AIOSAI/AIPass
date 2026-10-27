@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-10-23
+# Modified: 2026-10-26
 # Category: memory/tests
 # =============================================
 
@@ -21,6 +21,8 @@
 import json
 import subprocess
 import sys
+import types
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers.monitor import detector
@@ -29,6 +31,7 @@ from aipass.trigger.apps.modules import core as trigger_core
 
 # The real lookup, held before any test replaces it at orchestrator's name.
 _REAL_LOCAL_CHROMA_PATH = orchestrator.get_branch_local_chroma_path
+_REAL_EXTRACTOR = orchestrator.extractor
 
 # The post-rollover chain imports these by name at call time, through
 # sys.modules; a dotted target patches whatever module sys.modules holds then.
@@ -685,3 +688,64 @@ class TestTheEmbedRefusalNamesItsCause:
             result = orchestrator.encode_batch_subprocess(["a long entry", "short"])
 
         assert result == {"success": False, "error": "Embedding failed (exit 1): inhomogeneous shape"}
+
+
+class TestAnEditDuringStorageSurvivesTheTrim:
+    """The 2026-10-26 12:16 loss: a todo added while the rollover stored vectors was gone after the trim."""
+
+    def test_a_todo_added_between_extract_and_trim_survives_and_only_the_archived_session_leaves(
+        self, monkeypatch, tmp_path
+    ):
+        ext = _REAL_EXTRACTOR
+        assert isinstance(ext.write_memory_file_simple, types.FunctionType), "extractor bound to a mocked writer"
+        rollover_cfg = {"defaults": {"local": {"sessions": {"count": 10}}}, "per_branch": {}}
+        monkeypatch.setattr(ext, "config_loader", SimpleNamespace(section=lambda name: rollover_cfg))
+
+        local = tmp_path / "standin" / ".trinity" / "local.json"
+        local.parent.mkdir(parents=True)
+        pad = [381, 379, 374, 369, 363, 361, 360, 359, 355]
+        local.write_text(
+            json.dumps(
+                {
+                    "document_metadata": {"document_type": "session_history", "schema_version": "3.0.0"},
+                    "todos_meta": "pad of 10 - next #385",
+                    "todos": [{"number": n, "date": "2026-10-01", "task": f"task {n}"} for n in pad],
+                    "sessions": [
+                        {"number": n, "date": "2026-10-01", "summary": f"session {n}", "status": "completed"}
+                        for n in range(734, 723, -1)
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        def the_edit_lands_while_storing(**kwargs):
+            data = json.loads(local.read_text(encoding="utf-8"))
+            data["todos"].insert(0, {"number": 385, "date": "2026-10-26", "task": "task 385"})
+            data["todos_meta"] = "pad of 10 - next #386"
+            local.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            return {"success": True, "collection": "c", "total_vectors": 1}
+
+        trigger = MagicMock(file_path=local, branch="STANDIN", memory_type="local")
+        monkeypatch.setattr(
+            orchestrator, "detector", MagicMock(check_all_branches=lambda: {"success": True, "triggers": [trigger]})
+        )
+        monkeypatch.setattr(
+            orchestrator, "encode_batch_subprocess", lambda texts: {"success": True, "embeddings": [[0.1]]}
+        )
+        no_local_store = MagicMock(return_value=None)
+        monkeypatch.setattr(orchestrator, "get_branch_local_chroma_path", no_local_store)
+        monkeypatch.setattr(orchestrator, "store_vectors_subprocess", the_edit_lands_while_storing)
+        monkeypatch.setattr(_CENTRAL_UPDATE, MagicMock(return_value={"success": True}))
+        monkeypatch.setattr(_POOL_PROCESS, MagicMock(return_value={"files_processed": 0}))
+        _stub_the_bus(monkeypatch, MagicMock())
+
+        result = orchestrator.execute_rollover()
+
+        after = json.loads(local.read_text(encoding="utf-8"))
+        assert result["success_count"] == 1, result
+        assert [t["number"] for t in after["todos"]] == [385, *pad]
+        assert after["todos_meta"] == "pad of 10 - next #386"
+        assert [s["number"] for s in after["sessions"]] == list(range(734, 724, -1))
+        no_local_store.assert_called_once_with("STANDIN")

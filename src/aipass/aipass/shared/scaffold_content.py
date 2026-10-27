@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_content.py
 # Description: Shared template content generators for project scaffolding
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-04-22
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -88,8 +88,8 @@ def agents_md(name: str) -> str:
     """Generate AGENTS.md content, word for word the host's .aipass/project_AGENTS.md."""
     return (
         f"# {name}\n"
-        "<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) "
-        "— the prompt format rules. -->\n"
+        "<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md in the AIPass "
+        "repo root — the prompt format rules. -->\n"
         "\n"
         "Agent workspace powered by AIPass.\n"
         "\n"
@@ -98,8 +98,19 @@ def agents_md(name: str) -> str:
         "On any greeting, silently run this sequence — no narration, no announcing "
         "steps. Just do it and respond with the status.\n"
         "\n"
-        " - Read: `.trinity/passport.json`, `.trinity/local.json`, "
-        "`.trinity/observations.json`, `README.md`\n"
+        "These steps are sequential and dependent — run each ONCE, wait for the result, then "
+        "proceed. Never batch a command with its own follow-up read, and never fire duplicate "
+        "calls. If output looks blank, wait — don't retry.\n"
+        "\n"
+        " - Read, one file per call, never concatenated: `.trinity/passport.json`, "
+        '`.trinity/local.json`, `.trinity/observations.json`. A "persisted output" notice means '
+        "you batched: read the originals one per call, never the persisted file.\n"
+        " - Never read your `README.md` at startup — it is the face for strangers. Your inventory "
+        "is `drone @<self>` (live) and `drone @<self> --help`.\n"
+        " - Refresh: `drone @prax dashboard refresh @<self>` — where `<self>` is your branch name "
+        "(CWD directory name)\n"
+        " - Dashboard: Read `DASHBOARD.local.json` — act on what needs attention (new mail → "
+        "check inbox, active plans → note them). This is your single status glance.\n"
         "\n"
         "Use drone commands for all operations. Never raw git, gh, file access, or python -m "
         "when drone provides it.\n"
@@ -108,6 +119,15 @@ def agents_md(name: str) -> str:
         "\n"
         "Update `.trinity/` at natural breakpoints, after milestones, and on `/memo` (Claude Code) "
         "or `$memo` (Codex).\n"
+        "\n"
+        "Todos[] are a sticky-note pad, not a log: 10 live, each `{number, date, task, priority?}`, "
+        'the task one line under 100 chars ("Check on seedgo\'s errors in logs"), no `status` '
+        "field — the story lives in plans and sessions. **Delete each todo the moment it's done.** "
+        "The oldest roll off by number to your backlog at rollover (PreCompact) and at @memory's "
+        "push; `drone @memory todo backlog` reads them, `todo restore <n>` brings one back. Rolling "
+        "never closes anything, so **reconcile on load**: remove what is finished so it never "
+        "resurfaces as open. A truncated `.trinity` read is a signal, not noise — say so first, "
+        "then measure the file.\n"
     )
 
 
@@ -234,21 +254,53 @@ def global_prompt_md(name: str) -> str:
 
 
 def gitignore() -> str:
-    """Generate .gitignore content — standard AIPass ignores."""
+    """Generate the project root .gitignore: everything spawn and the services write into one installation.
+
+    ``init update`` appends the lines a project's file lacks (``gitignore_lines_missing``), never removes one."""
     return (
-        "# AIPass local state\n"
+        "# AIPass local state (one installation's, never the repo's)\n"
         ".trinity/\n"
         ".ai_mail.local/\n"
         "*.local.*\n"
+        "docs.local/\n"
+        ".ai_central/\n"
+        ".watchdog/\n"
+        ".recovery/\n"
+        ".seed/\n"
+        ".spawn/\n"
+        ".backup/\n"
+        ".backup_system/\n"
+        "*_REGISTRY.json\n"
+        "*_ROOTS.json\n"
+        ".*_REGISTRY.lock\n"
+        "**/.daemon/last_wake_prompt.txt\n"
+        "**/.seedgo/ratchet/\n"
+        "system_logs/\n"
+        "logs/\n"
         "\n"
-        "# Plans (local working docs)\n"
+        "# Module runtime JSON (config/data/log per command)\n"
+        "**/*_json/\n"
+        "\n"
+        "# Branch local directories\n"
+        "artifacts/\n"
+        "dropbox/\n"
+        "tools/\n"
+        "# A citizen whose tools ship negates its own folder below the blanket line:\n"
+        "# !src/<pkg>/<branch>/tools/\n"
+        "\n"
+        "# ChromaDB\n"
+        ".chroma/\n"
+        "\n"
+        "# Plans (managed by flow, local to each installation)\n"
         "DPLAN-*\n"
         "FPLAN-*\n"
+        "RPLAN-*\n"
+        "PPLAN-*\n"
         "APLAN-*\n"
         "TDPLAN-*\n"
         "\n"
-        "# Logs\n"
-        "logs/\n"
+        "# Secrets\n"
+        ".env\n"
         "\n"
         "# Python\n"
         "__pycache__/\n"
@@ -258,27 +310,87 @@ def gitignore() -> str:
         "build/\n"
         ".venv\n"
         "venv/\n"
+        ".pytest_cache/\n"
+        ".ruff_cache/\n"
         "\n"
-        "# IDE\n"
+        "# SQLite WAL sidecars\n"
+        "*.db-wal\n"
+        "*.db-shm\n"
+        "\n"
+        "# IDE / Claude Code per-machine state\n"
         ".vscode/\n"
         ".idea/\n"
+        ".claude/worktrees/\n"
         "\n"
         "# OS\n"
         ".DS_Store\n"
         "Thumbs.db\n"
         "\n"
-        "# Archives\n"
+        "# Archives and disabled files (renamed, never deleted)\n"
         ".archive/\n"
-        "\n"
-        "# Disabled files\n"
         "*(disabled)*\n"
         "\n"
         "# Scaffold update artefacts (aipass init update)\n"
         ".aipass/.backup/\n"
         "*.aipass-new\n"
+    )
+
+
+def gitignore_lines_missing(existing: str, template: str) -> list[str]:
+    """The template's pattern lines *existing* does not hold, in template order; comments and blanks never count."""
+    have = {line.strip() for line in existing.splitlines()}
+    return [
+        line for line in template.splitlines() if line.strip() and not line.startswith("#") and line.strip() not in have
+    ]
+
+
+def aipass_gitignore() -> str:
+    """Generate .aipass/.gitignore: a whitelist, so the scaffold manifest and .aipass/.backup/ never get committed."""
+    return "*\n!tier0_kernel.md\n!tier1_navmap.md\n!hooks.json\n!.gitignore\n"
+
+
+def updateignore() -> str:
+    """Generate the root .updateignore: its header only. What AIPass never rewrites lives in code; rows are the owner's."""
+    return (
+        "# Owner-protected: aipass init update and drone @spawn update never write, back up or retire a match.\n"
+        "# One fnmatch pattern per line, relative to the project root (src/<pkg>/*/docs.local/ reaches every\n"
+        "# citizen); a slashless name matches at any depth, a trailing / claims the whole folder.\n"
+    )
+
+
+NAVMAP_STUB_MARKER = "<!-- aipass:navmap-stub -->"
+
+
+def navmap_md(name: str, citizens: list[tuple[str, str]]) -> str:
+    """Generate the project's .aipass/tier1_navmap.md stub from its registry rows ``(email, description)``.
+
+    The marker comment tells ``init update`` the file is this stub, so an unedited one follows the roster."""
+    roster = "".join(f" - {email} — {desc}\n" for email, desc in citizens) or (
+        " - none yet: `drone @spawn create <name>` makes the first.\n"
+    )
+    return (
+        f"# {name} — Navigation map\n"
+        f"{NAVMAP_STUB_MARKER}\n"
+        "<!-- Tier 1: injected at session start and after compaction beside tier0_kernel.md. Cap 8,000 chars. "
+        "Rewrite it as the project's own map; once edited, init update keeps it and offers its stub beside it. -->\n"
         "\n"
-        "# Registry lock\n"
-        ".*_REGISTRY.lock\n"
+        f"{name}: an AIPass project. Its citizens live in branches under `src/`, each with identity, memory "
+        "and a mailbox; everything routes through `drone`.\n"
+        "\n"
+        "# Citizens\n"
+        "\n"
+        f"{roster}"
+        "\n"
+        "# Drone basics\n"
+        "\n"
+        "```\n"
+        "drone systems                                      # every agent and service\n"
+        "drone @<agent> --help                              # how, before using any agent\n"
+        'drone @ai_mail dispatch @target "Subject" "Body"   # send + wake\n'
+        "drone @ai_mail inbox                               # check mail\n"
+        'drone @flow create . "Subject"                     # new plan\n'
+        "drone @seedgo checklist <file|dir>                 # standards check\n"
+        "```\n"
     )
 
 
@@ -367,6 +479,98 @@ def prep_md() -> str:
         "Ready to close out or /compact.\n"
         "```\n"
     )
+
+
+def codex_command_md() -> str:
+    """Generate .claude/commands/codex.md, the /codex switch; Claude Code only, Codex never reads it."""
+    return r"""# Switch to Codex
+
+Purpose: move this chat from Claude Code to Codex in one turn, in this same terminal. It is still you: memories saved, the live thread written down, Codex opens where you stood. Works like a compaction, except the next model reads the summary.
+
+**Workflow:** `/codex` → prep → handoff written → this pane becomes Codex, greeting it with the handoff.
+
+## Execution
+
+0. **Pin the live thread FIRST** — one sentence: what this chat was doing when `/codex` fired (the task, question or build mid-flight; "nothing in flight" counts). It becomes the Resuming line.
+1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the compass review and the git suggestion; note uncommitted files in the handoff instead.
+2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Codex receives, so write it to the next model, in this shape:
+
+   ```
+   Hi. You are <branch>, the same citizen, continuing a chat that just moved from Claude Code to Codex on the user's /codex. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
+
+   ## Handoff from Claude Code, <date time>
+   Primary request and intent: what the user asked for, in their words where it matters.
+   Decisions made: rulings, with who made them.
+   Files touched: paths; which are committed, which are not.
+   In flight: dispatches out (ids), sub-agents, background work, open mails.
+   Errors met and how they ended.
+   Current work: where exactly the chat stood.
+   Resuming: the step-0 line, then the next concrete action.
+   ```
+
+   Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
+3. **Switch.** Run, with the Bash tool:
+
+   ```bash
+   p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
+   [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="claude" && $3==d{print $1; exit}')
+   test -n "$PANE" || { echo "not in a tmux pane: open Codex yourself: codex --dangerously-bypass-approvals-and-sandbox \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" 'codex --dangerously-bypass-approvals-and-sandbox "$(cat .ai_mail.local/handoff.md)"'
+   ```
+
+   The posture mirrors BAUD's rooms (`claude --permission-mode bypassPermissions`): the hooks are the gates on both CLIs.
+
+   This kills Claude Code in this pane and starts Codex in its place, in the same directory, with the handoff as its first prompt. The pane is found by walking up from this shell to the process tmux started, never from `$TMUX_PANE`; when the walk finds nothing, by the pane whose command is `claude` and whose path is this directory. Codex runs its shells and hooks from a long-lived app-server daemon that keeps the env of the first Codex that started it: `AIPASS_HOME` must be exported by the login shell (`~/.profile`), not only by `~/.bashrc`, or every hook exits 127 until that daemon is restarted. `-e` carries it to the pane for everything that reads the process env. Nothing runs after it; do not expect to see its output. The Claude transcript stays on disk, resumable by hand with `claude --resume`.
+
+Never exist twice: do not open Codex in a new window or a second pane while this one lives. The pane is the seat.
+"""
+
+
+def claude_skill_md() -> str:
+    """Generate .codex/skills/claude/SKILL.md, the $claude switch; Codex only, Claude Code never reads it."""
+    return r"""---
+name: claude
+description: Switch this chat from Codex to Claude Code in one turn, in this same terminal. Use when the user says /claude, "switch to claude", "back to claude" or "hand over to claude". Saves memories, writes the handoff, replaces this pane with Claude Code greeted by the handoff.
+---
+
+# Switch to Claude Code
+
+Purpose: move this chat from Codex to Claude Code in one turn, in this same terminal. It is still you: memories saved, the live thread written down, Claude opens where you stood. Works like a compaction, except the next model reads the summary.
+
+## Execution
+
+0. **Pin the live thread FIRST** — one sentence: what this chat was doing when the switch was asked (the task, question or build mid-flight; "nothing in flight" counts). It becomes the Resuming line.
+1. **Prep, compact form.** Do the memory steps of `.agents/skills/prep/SKILL.md` (session entry, key learnings, todos reconciled, observations if any) and update any plan this chat touched. Skip the git suggestion; note uncommitted files in the handoff instead.
+2. **Write the handoff** to `.ai_mail.local/handoff.md` (untracked, beside the session pointer). Overwrite; one file, the latest switch. The whole file is the first prompt Claude receives, so write it to the next model, in this shape:
+
+   ```
+   Hi. You are <branch>, the same citizen, continuing a chat that just moved from Codex to Claude Code on the user's /claude. Run your startup protocol first (memories one file per call, dashboard refresh, inbox), then read this handoff and pick up the Resuming line. Say in one line that you are here and what you are on; no recap.
+
+   ## Handoff from Codex, <date time>
+   Primary request and intent: what the user asked for, in their words where it matters.
+   Decisions made: rulings, with who made them.
+   Files touched: paths; which are committed, which are not.
+   In flight: dispatches out (ids), sub-agents, background work, open mails.
+   Errors met and how they ended.
+   Current work: where exactly the chat stood.
+   Resuming: the step-0 line, then the next concrete action.
+   ```
+
+   Facts only, no praise, no narration. Under 2,500 words. The next model has your memories; the handoff carries what memories do not: the live thread.
+3. **Switch.** Run in the shell. The model: `fable` when the branch is devpulse, `opus` for every other branch (the owner's rule: Fable is devpulse's seat only).
+
+   ```bash
+   MODEL=opus; [ "$(basename "$PWD")" = devpulse ] && MODEL=fable
+   p=$$; PANE=""; while [ "$p" -gt 1 ] && [ -z "$PANE" ]; do PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_pid}' 2>/dev/null | awk -v pid="$p" '$2==pid{print $1}'); p=$(awk '{print $4}' /proc/$p/stat); done
+   [ -n "$PANE" ] || PANE=$(tmux list-panes -a -F '#{pane_id} #{pane_current_command} #{pane_current_path}' 2>/dev/null | awk -v d="$PWD" '$2=="codex" && $3==d{print $1; exit}')
+   test -n "$PANE" || { echo "not in a tmux pane: open Claude yourself: claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""; exit 1; }
+   tmux respawn-pane -k -t "$PANE" -c "$PWD" -e AIPASS_HOME="${AIPASS_HOME:-$(cd "$(dirname "$(readlink -f "$(command -v drone)")")/../.." && pwd)}" "claude --model $MODEL \"\$(cat .ai_mail.local/handoff.md)\""
+   ```
+
+   This kills Codex in this pane and starts Claude Code in its place, in the same directory, with the handoff as its first prompt. Codex runs this shell from its long-lived app-server daemon, not from the pane: the shell's ancestors never reach the pane, and `$TMUX_PANE` is whatever pane first started the daemon. So the pane is the one whose command is `codex` and whose path is this directory. The daemon also carries the env of the Codex that first started it; when that env lacks `AIPASS_HOME`, every hook exits 127 and the value here falls back to the repo that owns the `drone` on PATH. Nothing runs after it; do not expect to see its output. The Codex thread stays on disk, resumable by hand with `codex resume`.
+
+Never exist twice: do not open Claude in a new window or a second pane while this one lives. The pane is the seat.
+"""
 
 
 def inbox_json() -> str:

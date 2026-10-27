@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Hook engine — unified dispatcher; gates fail closed, injectors skip on error
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL.
@@ -435,6 +435,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
                 "stdout_len": len(result["stdout"]),
                 "stderr_preview": result["stderr"][:200] if result["stderr"] else "",
                 "cwd": str(Path.cwd()),
+                "session_id": payload_session_id,
             }
         )
 

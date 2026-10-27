@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for close_ops handler — plan closure business logic
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-29
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -429,6 +429,35 @@ class TestClosePlanImplSuccess:
         deps["save_registry"].assert_called()
         deps["update_dashboard_local"].assert_called_once()
         deps["push_to_plans_central"].assert_called_once()
+
+    @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess")
+    def test_a_plan_already_in_its_own_projects_archive_is_not_moved_again(
+        self, mock_subprocess, _mock_find, _mock_resolve, tmp_path, make_project, monkeypatch
+    ):
+        archive = make_project("ext") / ".backup" / "processed_plans"
+        archive.mkdir(parents=True)
+        plan_file = archive / "FPLAN-0001_test_2026-03-20.md"
+        plan_file.write_text("# FPLAN-0001: test\nSome actual plan notes.", encoding="utf-8")
+        monkeypatch.setattr("aipass.flow.apps.handlers.plan.close_ops.PROCESSED_PLANS_DIR", tmp_path / "host_archive")
+        registry = {"plans": {"1": {"status": "open", "location": str(archive), "file_path": str(plan_file)}}}
+        deps = _make_deps()
+        deps["load_registry"].return_value = registry
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
+        ):
+            result = close_plan_impl(plan_num="1", **deps)
+
+        assert result["success"] is True
+        mock_append.assert_called_once_with("1", ANY, archive)
+        deps["archive_plan_fn"].assert_not_called()
+        assert registry["plans"]["1"]["processed"] is True
+        mock_subprocess.Popen.assert_called_once()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: presenter.py
 # Description: Watchdog presentation layer — handler result dicts rendered as CLI output
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-22
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 """Watchdog presentation — turning handler result dicts into console output.
@@ -91,7 +91,10 @@ def _tail_baseline_wire(meta: dict) -> str:
     Never a field that reads ``?`` on the happy path: it teaches the operator to
     ignore the row. Only ``via=monitor`` means covered; ``background`` wakes on exit only.
     """
-    return f"session={meta.get('session') or 'NONE (fg)'} via={meta.get('wrapper') or 'unrecorded'}"
+    return (
+        f"seat={meta.get('seat') or 'unrecorded'} session={meta.get('session') or 'NONE (fg)'} "
+        f"via={meta.get('wrapper') or 'unrecorded'}"
+    )
 
 
 def _tail_timer(meta: dict) -> str:
@@ -138,7 +141,8 @@ def print_delivery_lag() -> None:
     """
     dispatches_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.dispatches")
     try:
-        open_now = dispatches_mod.outstanding()
+        seat = dispatches_mod.seat_email()
+        open_now = [entry for entry in dispatches_mod.outstanding() if dispatches_mod.is_mine(entry, seat)]
     except dispatches_mod.RegisterUnavailable as exc:
         # Logged too: the log is what remains if coverage went blind with nobody at the terminal.
         logger.warning("[watchdog] dispatch register unavailable: %s", exc)

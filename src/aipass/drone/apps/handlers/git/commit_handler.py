@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.2.3
+# Version: 1.3.0
 # Created: 2026-05-12
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Commit handler with scoped staging."""
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -72,6 +73,52 @@ def _find_branch_for_path(filepath: str, repo_root: Path) -> tuple[str, Path] | 
         if (parent / ".trinity").is_dir():
             found = (parent.name, parent)
     return found
+
+
+def _ruff_bin(repo_root: Path) -> str | None:
+    """ruff on PATH, else the repo's own venv copy, else None."""
+    venv_ruff = repo_root / ".venv" / "bin" / "ruff"
+    return shutil.which("ruff") or (str(venv_ruff) if venv_ruff.exists() else None)
+
+
+def _changed_python_files(repo_root: Path) -> list[str]:
+    """The Python files ``git status`` lists as changed or new, repo-relative."""
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo_root),
+    )
+    paths = [line[3:].split(" -> ")[-1] for line in status.stdout.splitlines() if len(line) >= 4]
+    return [path for path in paths if path.endswith((".py", ".pyi")) and (repo_root / path).is_file()]
+
+
+def _lint_gate(repo_root: Path) -> tuple[dict | None, list[str]]:
+    """Refuse a lint-dirty tree before touching it; then fix and format only the changed files.
+
+    Returns the refusal (None when the gate passed) and the files ruff rewrote.
+    """
+    ruff_bin = _ruff_bin(repo_root)
+    targets = [p for p in ("src", "tests") if (repo_root / p).is_dir()]
+    if not ruff_bin or not targets:
+        return None, []
+    lint_check = subprocess.run([ruff_bin, "check", *targets], capture_output=True, text=True, cwd=str(repo_root))
+    if lint_check.returncode != 0:
+        refusal = f"Lint errors — fix before committing (nothing was changed):\n{lint_check.stdout.strip()}"
+        return {"stdout": "", "stderr": refusal, "exit_code": 1}, []
+
+    changed = _changed_python_files(repo_root)
+    if not changed:
+        return None, []
+    before = {path: (repo_root / path).read_bytes() for path in changed}
+    for argv in (["check", "--fix", *changed], ["format", *changed]):
+        subprocess.run([ruff_bin, *argv], capture_output=True, text=True, cwd=str(repo_root))
+    return None, [path for path in changed if (repo_root / path).read_bytes() != before[path]]
+
+
+def _rewrite_note(rewritten: list[str]) -> str:
+    """The line naming every file ruff rewrote, '' when it rewrote none."""
+    return f"ruff rewrote {len(rewritten)} file(s): {', '.join(rewritten)}" if rewritten else ""
 
 
 def _run_test_gate(repo_root: Path) -> dict | None:
@@ -146,6 +193,7 @@ def commit_changes(
     if repo_root is None:
         repo_root = find_repo_root()
 
+    rewritten: list[str] = []
     if files:
         add_result = subprocess.run(
             ["git", "add", "--"] + files,
@@ -156,42 +204,13 @@ def commit_changes(
         if add_result.returncode != 0:
             return {"stdout": "", "stderr": f"Failed to stage: {add_result.stderr.strip()}", "exit_code": 1}
     elif all_files:
-        import shutil
-
-        ruff_bin = shutil.which("ruff")
-        if not ruff_bin:
-            venv_ruff = repo_root / ".venv" / "bin" / "ruff"
-            if venv_ruff.exists():
-                ruff_bin = str(venv_ruff)
-        if ruff_bin:
-            subprocess.run(
-                [ruff_bin, "check", "--fix", "src/", "tests/"],
-                capture_output=True,
-                text=True,
-                cwd=str(repo_root),
-            )
-            subprocess.run(
-                [ruff_bin, "format", "src/", "tests/"],
-                capture_output=True,
-                text=True,
-                cwd=str(repo_root),
-            )
-            lint_check = subprocess.run(
-                [ruff_bin, "check", "src/", "tests/"],
-                capture_output=True,
-                text=True,
-                cwd=str(repo_root),
-            )
-            if lint_check.returncode != 0:
-                return {
-                    "stdout": "",
-                    "stderr": f"Lint errors — fix before committing:\n{lint_check.stdout.strip()}",
-                    "exit_code": 1,
-                }
+        lint_refusal, rewritten = _lint_gate(repo_root)
+        if lint_refusal is not None:
+            return lint_refusal
 
         test_gate_result = _run_test_gate(repo_root)
         if test_gate_result is not None:
-            return test_gate_result
+            return {**test_gate_result, "stdout": _rewrite_note(rewritten)}
 
         add_result = subprocess.run(
             ["git", "add", "-A"],
@@ -212,7 +231,7 @@ def commit_changes(
     )
     if diff_check.returncode == 0:
         return {
-            "stdout": "",
+            "stdout": _rewrite_note(rewritten),
             "stderr": "Nothing to commit: no changes staged",
             "exit_code": 1,
         }
@@ -236,7 +255,7 @@ def commit_changes(
     )
 
     return {
-        "stdout": result.stdout.strip(),
+        "stdout": "\n".join(part for part in (_rewrite_note(rewritten), result.stdout.strip()) if part),
         "stderr": result.stderr.strip(),
         "exit_code": result.returncode,
     }

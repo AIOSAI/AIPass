@@ -140,6 +140,15 @@
       "anchor": "from aipass.drone.apps.handlers.git.repo_context import AIPASS_REGISTRY_NAME"
     },
     {
+      "file": "apps/plugins/devpulse_ops/auth.py",
+      "standard": "encapsulation",
+      "lines": [
+        24
+      ],
+      "reason": "Line 24 imports release_handler, repo_door and session_home from handlers/git — drone-internal, same branch, same subsystem as line 23. The gate must read the upstream slug the release handler targets, ask the same admin rail the --repo door asks, and place the session the same way the handlers log it; git_module imports this plugin, so routing through the module would be a cycle. Line-scoped and anchored like line 23: any other direct handler import in the authority gate must still be reported.",
+      "anchor": "from aipass.drone.apps.handlers.git import release_handler, repo_door, session_home"
+    },
+    {
       "file": "apps/handlers/git/repo_context.py",
       "standard": "json_structure",
       "reason": "Pure predicate — one constant and one boolean over the filesystem, no operation to log. A log_operation() call here would fire on every git command to record 'a question was asked'; the callers that ACT on the answer (tag_handler, auth) log their own outcomes. Wiring json_handler in to satisfy the checker would be scaffolding, not logging."

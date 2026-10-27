@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.3.0
+# Version: 2.5.0
 # Created: 2026-03-14
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -50,11 +50,24 @@ _MANIFEST_TRACKED: tuple = (
     ".claude/settings.json",
     ".claude/settings.local.json",
     ".agents/skills/prep/SKILL.md",
+    ".claude/commands/codex.md",
+    ".codex/skills/claude/SKILL.md",
     "AGENTS.md",
 )
 
+NAVMAP_REL = ".aipass/tier1_navmap.md"
+#: Seeded when absent, then the owner's: init update only creates them, never rewrites one.
+OWNER_SEEDS: tuple = (
+    (".aipass/.gitignore", sc.aipass_gitignore),
+    (".updateignore", sc.updateignore),
+)
 PREP_SKILL_REL = ".agents/skills/prep/SKILL.md"
 LEGACY_PREP_REL = ".claude/commands/prep.md"
+#: The provider switch pair, one file per CLI so neither offers its own switch.
+SWITCH_PAIR: tuple = (
+    (".claude/commands/codex.md", sc.codex_command_md),
+    (".codex/skills/claude/SKILL.md", sc.claude_skill_md),
+)
 SKILLS_REL = ".agents/skills"
 SKILLS_LINK_REL = ".claude/skills"
 _SKILLS_LINK_TARGET = Path("..") / ".agents" / "skills"
@@ -111,7 +124,8 @@ def shared_skills_state(target: Path) -> dict:
     ``skills`` the folder names under .agents/skills holding a SKILL.md, ``incomplete``
     those whose frontmatter lacks a name or a description, ``link`` one of the
     LINK_STATE_* values, ``link_to`` where a symlinked .claude/skills resolves,
-    ``legacy_prep`` "managed", "edited" or "" for an old .claude/commands/prep.md."""
+    ``legacy_prep`` "managed", "edited" or "" for an old .claude/commands/prep.md,
+    ``switch_missing`` the SWITCH_PAIR paths absent."""
     master = target / SKILLS_REL
     skills = sorted(p.parent for p in master.glob("*/SKILL.md"))
     incomplete = [s.name for s in skills if not {"name", "description"} <= _frontmatter_keys(s / "SKILL.md")]
@@ -126,6 +140,7 @@ def shared_skills_state(target: Path) -> dict:
     else:
         state = LINK_STATE_MISSING
     legacy = target / LEGACY_PREP_REL
+    switch_missing = [rel for rel, _ in SWITCH_PAIR if not (target / rel).is_file()]
     legacy_prep = "" if not legacy.is_file() else "managed" if _is_managed_legacy_prep(target, legacy) else "edited"
     return {
         "skills": [s.name for s in skills],
@@ -133,17 +148,20 @@ def shared_skills_state(target: Path) -> dict:
         "link": state,
         "link_to": link_to,
         "legacy_prep": legacy_prep,
+        "switch_missing": switch_missing,
     }
 
 
 def repair_shared_skills(target: Path) -> list[str]:
-    """Make a missing .claude/skills link, and retire an unedited legacy prep command once the skill exists.
+    """Make a missing .claude/skills link, write a missing switch file, retire an unedited legacy prep command.
 
-    Returns one line per change. A copy, a foreign link and an edited prep.md are the owner's: left."""
+    Returns one line per change. A copy, a foreign link, an edited prep.md and an existing switch file are the
+    owner's: left."""
     actions: list[str] = []
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
         actions.append(note or f"Linked {SKILLS_LINK_REL} -> {_SKILLS_LINK_TARGET.as_posix()}")
+    actions.extend(f"Wrote {rel}" for rel in write_switch_pair(target))
     legacy = target / LEGACY_PREP_REL
     if legacy.is_file() and (target / PREP_SKILL_REL).is_file() and _is_managed_legacy_prep(target, legacy):
         disabled = sm.disabled_path(legacy)
@@ -154,6 +172,17 @@ def repair_shared_skills(target: Path) -> list[str]:
     return actions
 
 
+def write_switch_pair(target: Path) -> list[str]:
+    """Write each SWITCH_PAIR file absent under *target*; an existing one is never touched. Returns the paths written."""
+    written: list[str] = []
+    for rel, content in SWITCH_PAIR:
+        if not (target / rel).exists():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            sm.write_text_lf(target / rel, content())
+            written.append(rel)
+    return written
+
+
 def _is_managed_legacy_prep(target: Path, legacy: Path) -> bool:
     """True when prep.md is what AIPass wrote: the manifest's hash, or the template body unedited."""
     digest = sm.hash_file(legacy)
@@ -161,6 +190,33 @@ def _is_managed_legacy_prep(target: Path, legacy: Path) -> bool:
         sm.manifest_hashes(target).get(LEGACY_PREP_REL),
         sm.sha256_text(sc.prep_md()),
     )
+
+
+def navmap_stub(target: Path, name: str) -> str:
+    """The project's navmap stub, its citizens read from the project registry; none when it is unreadable."""
+    registries = registries_in(target)
+    try:
+        branches = json.loads(registries[0].read_text(encoding="utf-8")).get("branches", []) if registries else []
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("navmap stub: registry unreadable, listing no citizens: %s", exc)
+        branches = []
+    citizens = [
+        (b.get("email") or f"@{str(b.get('name', '?')).lower()}", " ".join(str(b.get("description", "")).split()))
+        for b in branches
+        if isinstance(b, dict)
+    ]
+    return sc.navmap_md(name, citizens)
+
+
+def write_owner_seeds(target: Path) -> list[str]:
+    """Write each OWNER_SEEDS file absent under *target*. Returns the paths written."""
+    written: list[str] = []
+    for rel, content in OWNER_SEEDS:
+        if not (target / rel).exists():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            sm.write_text_lf(target / rel, content())
+            written.append(rel)
+    return written
 
 
 def _link_venv(link: Path, dest: Path) -> None:
@@ -379,14 +435,16 @@ def init_project(
     aipass_dir = target / ".aipass"
     aipass_dir.mkdir(exist_ok=True)
 
-    for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-        tier_dest = aipass_dir / tier_file
-        if not tier_dest.exists() and aipass_home:
-            tier_src = Path(aipass_home) / ".aipass" / tier_file
-            if tier_src.is_file():
-                # Not copy2: a CRLF checkout of AIPASS_HOME would land a hash no template comparison matches.
-                sm.write_text_lf(tier_dest, tier_src.read_text(encoding="utf-8"))
-                created.append(str(tier_dest))
+    kernel_dest = aipass_dir / "tier0_kernel.md"
+    if not kernel_dest.exists() and aipass_home:
+        kernel_src = Path(aipass_home) / ".aipass" / "tier0_kernel.md"
+        if kernel_src.is_file():
+            # Not copy2: a CRLF checkout of AIPASS_HOME would land a hash no template comparison matches.
+            sm.write_text_lf(kernel_dest, kernel_src.read_text(encoding="utf-8"))
+            created.append(str(kernel_dest))
+    if not (target / NAVMAP_REL).exists():
+        sm.write_text_lf(target / NAVMAP_REL, navmap_stub(target, name))
+        created.append(str(target / NAVMAP_REL))
 
     hooks_json_path = aipass_dir / "hooks.json"
     if not hooks_json_path.exists() and aipass_home:
@@ -398,11 +456,10 @@ def init_project(
         else:
             logger.info("hooks template not found at %s — skipping", template)
 
-    for md_name in sm.SEED_FILES:
-        dest = target / md_name
-        if not dest.exists():
-            sm.write_text_lf(dest, agents_md_seed(name, aipass_home))
-            created.append(str(dest))
+    agents_dest = target / "AGENTS.md"
+    if not agents_dest.exists():
+        sm.write_text_lf(agents_dest, agents_md_seed(name, aipass_home))
+        created.append(str(agents_dest))
 
     readme_md_path = target / "README.md"
     if not readme_md_path.exists():
@@ -414,6 +471,7 @@ def init_project(
     if not gitignore_path.exists():
         sm.write_text_lf(gitignore_path, sc.gitignore())
         created.append(str(gitignore_path))
+    created.extend(str(target / rel) for rel in write_owner_seeds(target))
 
     # settings.json is tracked: permissions only, machine-local paths go in settings.local.json.
     claude_dir = target / ".claude"
@@ -435,6 +493,7 @@ def init_project(
         prep_path.parent.mkdir(parents=True, exist_ok=True)
         sm.write_text_lf(prep_path, sc.prep_skill_md())
         created.append(str(prep_path))
+    created.extend(str(target / rel) for rel in write_switch_pair(target))
     notes: list[str] = []
     if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
         note = link_skills(target)
@@ -560,7 +619,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     name = registry_path.stem.replace("_REGISTRY", "")
 
     aipass_home = _detect_aipass_home()
-    recorded = sm.manifest_hashes(target)
+    recorded = sm.trusted_hashes(target)
     installed = sm.installed_version()
     stamped = sm.stamped_version(target)
     ignored = sm.read_ignore(target)
@@ -611,25 +670,23 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         # The plan's counts and exit code both read "writes", so they never disagree.
         files.append({"path": rel, "action": action, "reason": reason, "writes": len(writes) > writes_before})
 
-    managed: list[tuple] = []
-    for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-        src = Path(aipass_home) / ".aipass" / tier_file if aipass_home else None
-        text = _read_text(src) if src and src.is_file() else None
-        managed.append((f".aipass/{tier_file}", aipass_dir / tier_file, text))
-    managed.append((PREP_SKILL_REL, target / PREP_SKILL_REL, sc.prep_skill_md()))
+    kernel_src = Path(aipass_home) / ".aipass" / "tier0_kernel.md" if aipass_home else None
+    managed: list[tuple] = [
+        (".aipass/tier0_kernel.md", aipass_dir / "tier0_kernel.md", _read_text(kernel_src) if kernel_src else None),
+        (NAVMAP_REL, target / NAVMAP_REL, navmap_stub(target, name)),
+        ("AGENTS.md", target / "AGENTS.md", agents_md_seed(name, aipass_home)),
+        (PREP_SKILL_REL, target / PREP_SKILL_REL, sc.prep_skill_md()),
+    ]
+    managed.extend((rel, target / rel, content()) for rel, content in SWITCH_PAIR)
 
     for rel, dest, template_text in managed:
         current_hash = sm.hash_file(dest)
         template_hash = sm.sha256_text(template_text) if template_text is not None else None
         action, reason = sm.decide(current_hash, template_hash, recorded.get(rel))
+        # The stub follows the roster only while it is the stub: an unedited host map is still not the project's.
+        if rel == NAVMAP_REL and action == sm.ACTION_UPDATE and sc.NAVMAP_STUB_MARKER not in (_read_text(dest) or ""):
+            action, reason = sm.ACTION_KEPT_LOCAL, "not the project stub (the host's map or your own)"
         record(rel, dest, action, reason, template_text)
-
-    for md_name in sm.SEED_FILES:
-        dest = target / md_name
-        if dest.exists():
-            record(md_name, dest, sm.ACTION_CURRENT, "seed — never rewritten")
-            continue
-        record(md_name, dest, sm.ACTION_CREATE, "seed absent", agents_md_seed(name, aipass_home))
 
     # Merge files keep user values through the merge itself, so they are never "kept (local edits)".
     settings_path = claude_dir / "settings.json"
@@ -735,6 +792,18 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             )
             retires.append(stale_path)
 
+    # Hook scripts from before the provider manifest: retired only while they hold the bytes AIPass wrote.
+    for rel in sorted(recorded):
+        old_hook = target / rel
+        if rel.startswith(".claude/hooks/") and rel.endswith(".py") and not sm.is_ignored(rel, ignored):
+            if old_hook.is_file() and sm.hash_file(old_hook) == recorded[rel]:
+                reason = f"no hook runs it since the provider manifest; renamed to {sm.disabled_path(old_hook).name}"
+                files.append({"path": rel, "action": sm.ACTION_RETIRE, "reason": reason, "writes": True})
+                retires.append(old_hook)
+
+    _plan_ignore_files(target, ignored, files, writes)
+    shadows = _plan_shadows(target, ignored, files)
+
     legacy_prep = target / LEGACY_PREP_REL
     if legacy_prep.is_file() and not sm.is_ignored(LEGACY_PREP_REL, ignored):
         if _is_managed_legacy_prep(target, legacy_prep):
@@ -773,7 +842,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
             manifest_next[rel] = recorded[rel]
 
     stamp_pending = stamped != installed
-    file_writes = bool(writes or retires or symlinks or handlers or skills_link)
+    file_writes = bool(writes or retires or symlinks or handlers or skills_link or shadows)
     pending = file_writes or stamp_pending
     # Stamp-only applies without a go: the receipt is the contract, and a go on a plan
     # touching no file teaches approval without reading. Same queues as ``pending``.
@@ -786,6 +855,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         aipass_dir.mkdir(exist_ok=True)
         claude_dir.mkdir(exist_ok=True)
         backup_dir = _apply_writes(target, writes, retires, symlinks)
+        notes.extend(_retire_shadows(target, shadows))
         if skills_link:
             note = link_skills(target)
             notes.extend([note] if note else [])
@@ -819,12 +889,67 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         "skipped_files": [
             str(registry_path),
             str(target / "README.md"),
-            str(target / ".gitignore"),
         ],
         "removed_files": [str(path) for path in retires],
         "trust_enrolled": trust_reenrol,
         "notes": notes,
     }
+
+
+def _plan_ignore_files(target: Path, ignored: list, files: list, writes: list) -> None:
+    """Plan the root .gitignore merge and the OWNER_SEEDS that are absent, appending to *files* and *writes*.
+
+    Append-only: a template line the .gitignore lacks goes under one dated comment; no owner line is removed or
+    moved. An ``"lines"`` key on the entry lists what the merge adds, for the dry-run print."""
+    for rel, content in ((".gitignore", None), *OWNER_SEEDS):
+        dest = target / rel
+        if sm.is_ignored(rel, ignored):
+            files.append({"path": rel, "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME, "writes": False})
+            continue
+        if not dest.exists():
+            writes.append((dest, content() if content else sc.gitignore()))
+            files.append({"path": rel, "action": sm.ACTION_CREATE, "reason": "absent", "writes": True})
+            continue
+        if content:
+            continue
+        existing = _read_text(dest)
+        missing = sc.gitignore_lines_missing(existing, sc.gitignore()) if existing is not None else []
+        if existing is None or not missing:
+            reason = "unreadable as UTF-8, left as it is" if existing is None else "holds every template line"
+            files.append({"path": rel, "action": sm.ACTION_CURRENT, "reason": reason, "writes": False})
+            continue
+        head = existing if existing.endswith("\n") or not existing else existing + "\n"
+        merged = f"{head}\n# Added by aipass init update {date.today().isoformat()}\n" + "".join(
+            f"{x}\n" for x in missing
+        )
+        writes.append((dest, merged))
+        reason = f"merge adds {len(missing)} line(s)"
+        files.append({"path": rel, "action": sm.ACTION_UPDATE, "reason": reason, "writes": True, "lines": missing})
+
+
+def _plan_shadows(target: Path, ignored: list, files: list) -> list:
+    """Plan the retirement of each live CLAUDE file beside AGENTS.md, doctor's instruction shadow; returns them."""
+    # Lazy: the scanner logs through prax, which this handler never imports at load.
+    from aipass.aipass.apps.handlers.structure_scan.structure_scanner import find_instruction_shadows
+
+    shadows = []
+    for shadow in find_instruction_shadows(target):
+        rel = shadow.path.relative_to(target).as_posix()
+        if sm.is_ignored(rel, ignored):
+            files.append({"path": rel, "action": sm.ACTION_SKIPPED, "reason": sm.IGNORE_NAME, "writes": False})
+            continue
+        texts = "equal" if shadow.equal else "differs"
+        reason = f"shadows AGENTS.md ({texts}); renamed to {shadow.path.name}(disabled)"
+        files.append({"path": rel, "action": sm.ACTION_RETIRE, "reason": reason, "writes": True})
+        shadows.append(shadow)
+    return shadows
+
+
+def _retire_shadows(target: Path, shadows: list) -> list[str]:
+    """Rename each planned shadow with doctor's own fix; returns a note per refusal."""
+    from aipass.aipass.apps.handlers.structure_scan.structure_scanner import disable_shadow
+
+    return [msg for ok, msg in (disable_shadow(shadow, target) for shadow in shadows) if not ok]
 
 
 def _handler_names(hooks: dict) -> set:

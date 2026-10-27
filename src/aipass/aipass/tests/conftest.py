@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
-# Version: 1.4.0
+# Version: 1.6.0
 # Created: 2026-05-04
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.6.0 (2026-10-26): no_live_shadow_fix keeps doctor --fix from renaming the live repo's CLAUDE files
+#   - v1.5.0 (2026-10-26): no_real_codex keeps doctor's Codex rows off the real binary and ~/.codex
 #   - v1.4.0 (2026-10-10): temp_test_dir, sample_test_data retired - requested only by the .archive scaffold (PR #774)
 #   - v1.3.0 (2026-10-05): tools_on_path writes PATH so shutil.which answers for real (DPLAN-0354 leg 8)
 #   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
-#   - v1.1.0 (2026-09-27): template C1/C2 fixtures; unused mock_json_handler removed (DPLAN-0354)
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 # =============================================
 
 """Shared pytest fixtures for aipass tests."""
@@ -84,6 +84,20 @@ def pinned_console_width() -> None:
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def no_real_codex(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Doctor's Codex rows see no codex on PATH unless a test hands them a fake, and
+    CODEX_HOME is tmp_path/codex_home, so no test reads or writes the real ~/.codex."""
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex_home"))
+    monkeypatch.setattr("aipass.aipass.apps.modules._doctor_wire._codex_which", lambda name: None)
+
+
+@pytest.fixture(autouse=True)
+def no_live_shadow_fix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """doctor --fix renames CLAUDE files in the project the cwd sits in, the live repo under pytest."""
+    monkeypatch.setattr("aipass.aipass.apps.modules.doctor._shadow_root", lambda: None)
 
 
 @pytest.fixture(autouse=True)

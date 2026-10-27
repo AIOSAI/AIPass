@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_session_start.py
-# Version: 1.3.0
+# Version: 1.4.0
 # Description: Tests for the SessionStart handlers: cadence reset, the culture file, the session pointer
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -134,6 +134,30 @@ class TestCulture:
     def test_aipass_home_unset_injects_nothing(self, monkeypatch):
         monkeypatch.delenv("AIPASS_HOME", raising=False)
         assert handle_culture({}) == {"stdout": "", "exit_code": 0}
+
+    @staticmethod
+    def _home(tmp_path, monkeypatch):
+        home = tmp_path / "aipass"
+        (home / ".claude").mkdir(parents=True)
+        (home / ".claude" / "AGENTS.md").write_text("# AIPass - Culture\n", encoding="utf-8")
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        return home
+
+    def test_a_claude_seat_inside_aipass_home_is_not_told_twice(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path, monkeypatch)
+        assert handle_culture({"cwd": str(home / "src")}) == {"stdout": "", "exit_code": 0}
+
+    def test_a_codex_seat_inside_aipass_home_gets_the_culture(self, tmp_path, monkeypatch):
+        home = self._home(tmp_path, monkeypatch)
+        result = handle_culture({"cwd": str(home / "src"), "provider": "codex"})
+        assert result == {"stdout": "# AIPass - Culture\n", "exit_code": 0}
+
+    def test_a_claude_seat_in_an_external_project_gets_the_host_culture(self, tmp_path, monkeypatch):
+        self._home(tmp_path, monkeypatch)
+        project = tmp_path / "vera"
+        (project / ".claude").mkdir(parents=True)
+        (project / ".claude" / "AGENTS.md").write_text("# Vera's own\n", encoding="utf-8")
+        assert handle_culture({"cwd": str(project)}) == {"stdout": "# AIPass - Culture\n", "exit_code": 0}
 
 
 def _reset_cadence_globals(monkeypatch: pytest.MonkeyPatch) -> None:

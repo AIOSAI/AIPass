@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_bootstrap_hooks.py
 # Description: Tests for the hooks.json and tier files init and update scaffold into a project
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-10-08
-# Modified: 2026-10-08
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py: hooks.json, its union merge, and the tier files."""
@@ -14,6 +14,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -292,8 +293,7 @@ def test_init_project_creates_tier_files(tmp_path):
     assert (target / ".aipass" / "tier1_navmap.md").exists()
 
 
-def test_init_project_tier_files_match_canonical(tmp_path):
-    """Tier files in new project match the canonical source exactly."""
+def test_init_project_copies_the_kernel_and_writes_the_project_navmap_stub_not_the_host_map(tmp_path):
     target = tmp_path / "proj"
     target.mkdir()
 
@@ -301,12 +301,11 @@ def test_init_project_tier_files_match_canonical(tmp_path):
 
     if result["aipass_home"] is None:
         pytest.skip("AIPASS_HOME not detectable in this environment")
-
-    for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-        canonical = Path(result["aipass_home"]) / ".aipass" / tier_file
-        if not canonical.exists():
-            pytest.skip(f"{tier_file} not found in canonical .aipass/")
-        assert (target / ".aipass" / tier_file).read_bytes() == canonical.read_bytes()
+    canonical = Path(result["aipass_home"]) / ".aipass"
+    assert (target / ".aipass" / "tier0_kernel.md").read_bytes() == (canonical / "tier0_kernel.md").read_bytes()
+    navmap = (target / ".aipass" / "tier1_navmap.md").read_text(encoding="utf-8")
+    assert navmap.startswith("# CANON — Navigation map\n")
+    assert navmap != (canonical / "tier1_navmap.md").read_text(encoding="utf-8")
 
 
 def test_init_project_tier_files_in_created_list(tmp_path):
@@ -323,8 +322,7 @@ def test_init_project_tier_files_in_created_list(tmp_path):
     assert any("tier1_navmap.md" in f for f in result["created_files"])
 
 
-def test_init_project_no_tier_files_without_aipass_home(tmp_path, monkeypatch):
-    """Without AIPASS_HOME, tier files are not created."""
+def test_init_project_without_aipass_home_writes_no_kernel_but_still_the_navmap_stub(tmp_path, monkeypatch):
     target = tmp_path / "proj"
     target.mkdir()
 
@@ -336,7 +334,7 @@ def test_init_project_no_tier_files_without_aipass_home(tmp_path, monkeypatch):
     init_project(target, project_name="notiers")
 
     assert not (target / ".aipass" / "tier0_kernel.md").exists()
-    assert not (target / ".aipass" / "tier1_navmap.md").exists()
+    assert "# NOTIERS — Navigation map" in (target / ".aipass" / "tier1_navmap.md").read_text(encoding="utf-8")
 
 
 def test_init_project_hooks_json_has_tiers_enabled(tmp_path):
@@ -420,3 +418,43 @@ def test_update_project_keeps_an_edited_tier_file(tmp_path):
     assert str(navmap.resolve()) in result["kept_files"]
     assert navmap.read_text(encoding="utf-8") == "# The studio's own map\n"
     assert navmap.with_name("tier1_navmap.md.aipass-new").is_file()
+
+
+def test_update_project_keeps_an_unedited_host_navmap_and_offers_the_stub_beside_it(tmp_path):
+    """Projects born before the stub hold the host's roster map, recorded as AIPass's own write."""
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="older")
+    navmap = target / ".aipass" / "tier1_navmap.md"
+    navmap.write_text("# AIPass — Navigation map\n", encoding="utf-8")
+    manifest = target / ".aipass" / "scaffold_manifest.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["files"][".aipass/tier1_navmap.md"] = hashlib.sha256(navmap.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(document), encoding="utf-8")
+
+    result = update_project(target)
+
+    assert navmap.read_text(encoding="utf-8") == "# AIPass — Navigation map\n"
+    sidecar = navmap.with_name("tier1_navmap.md.aipass-new").read_text(encoding="utf-8")
+    assert sidecar.startswith("# OLDER — Navigation map\n")
+    entry = next(e for e in result["files"] if e["path"] == ".aipass/tier1_navmap.md")
+    assert entry["reason"] == "not the project stub (the host's map or your own)"
+
+
+def test_update_project_refreshes_an_unedited_navmap_stub_with_the_registry_citizens(tmp_path):
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="roster")
+    navmap = target / ".aipass" / "tier1_navmap.md"
+    assert "none yet" in navmap.read_text(encoding="utf-8")
+    registry = target / "ROSTER_REGISTRY.json"
+    data = json.loads(registry.read_text(encoding="utf-8"))
+    data["branches"] = [{"name": "SCOUT", "email": "@scout", "description": "Finds  things,\n fast"}]
+    registry.write_text(json.dumps(data), encoding="utf-8")
+
+    update_project(target)
+
+    text = navmap.read_text(encoding="utf-8")
+    assert " - @scout — Finds things, fast\n" in text
+    assert "none yet" not in text
+    assert not navmap.with_name("tier1_navmap.md.aipass-new").exists()

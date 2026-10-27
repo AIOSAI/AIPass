@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_access_handlers.py
 # Description: Tests for the git door handlers — diff, log, show, commit, checkout, PR routing and help
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-10-08
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/git/commit_handler.py and the diff, log, show and checkout handlers beside it."""
@@ -254,7 +254,8 @@ class TestShowCommandRouting:
 
 @pytest.fixture()
 def ruff_in_venv(repo_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A ruff the commit lane finds on disk: none on PATH, one in the repo's own .venv."""
+    """A ruff the commit lane finds on disk: none on PATH, one in the repo's own .venv, and a src/ to lint."""
+    (repo_dir / "src").mkdir(exist_ok=True)
     empty_path = tmp_path / "empty_path"
     empty_path.mkdir()
     monkeypatch.setenv("PATH", str(empty_path))
@@ -284,9 +285,10 @@ def _assert_ordered_calls(mock_run: MagicMock, expected: list[tuple[tuple[str, .
             assert marker not in argv, f"unexpected {marker!r} in argv {argv!r} (call order mismatch?)"
 
 
-_RUFF_FIX = (("check", "--fix"), ())
-_RUFF_FORMAT = (("format",), ("--fix",))
-_RUFF_GATE = (("check",), ("--fix",))
+# fix and format name the changed file alone, never the src/ and tests/ trees.
+_RUFF_FIX = (("check", "--fix", "src/aipass/api/app.py"), ("src", "tests"))
+_RUFF_FORMAT = (("format", "src/aipass/api/app.py"), ("--fix", "src", "tests"))
+_RUFF_GATE = (("check", "src"), ("--fix", "tests"))
 _GIT_STATUS = (("status", "--porcelain"), ())
 _PYTEST = (("-m", "pytest"), ())
 _GIT_ADD_ALL = (("add", "-A"), ())
@@ -328,14 +330,18 @@ class TestCommitChanges:
         mock_add = MagicMock(returncode=0, stderr="")
         mock_diff = MagicMock(returncode=1, stdout="", stderr="")
         mock_commit = MagicMock(returncode=0, stdout="[main def456] all commit", stderr="")
+        changed = repo_dir / "src" / "aipass" / "api" / "app.py"
+        changed.parent.mkdir(parents=True)
+        changed.write_text("x = 1\n", encoding="utf-8")
 
         with (
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[
+                    mock_ruff_gate,
+                    mock_status,
                     mock_ruff_fix,
                     mock_ruff_format,
-                    mock_ruff_gate,
                     mock_status,
                     mock_add,
                     mock_diff,
@@ -348,12 +354,19 @@ class TestCommitChanges:
         assert result["exit_code"] == 0
         _assert_ordered_calls(
             mock_run,
-            [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
+            [
+                _RUFF_GATE,
+                _GIT_STATUS,
+                _RUFF_FIX,
+                _RUFF_FORMAT,
+                _GIT_STATUS,
+                _GIT_ADD_ALL,
+                _GIT_DIFF_CACHED,
+                _GIT_COMMIT,
+            ],
         )
 
     def test_commit_all_blocks_on_test_failure(self, repo_dir: Path, ruff_in_venv: Path) -> None:
-        mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
-        mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
         mock_status = MagicMock(
             returncode=0,
@@ -375,7 +388,7 @@ class TestCommitChanges:
         with (
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
-                side_effect=[mock_ruff_fix, mock_ruff_format, mock_ruff_gate, mock_status, mock_pytest],
+                side_effect=[mock_ruff_gate, mock_status, mock_status, mock_pytest],
             ) as mock_run,
         ):
             result = commit_changes("fail commit", all_files=True)
@@ -383,11 +396,9 @@ class TestCommitChanges:
         assert result["exit_code"] == 1
         assert "Test failures" in result["stderr"]
         assert "drone" in result["stderr"]
-        _assert_ordered_calls(mock_run, [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _PYTEST])
+        _assert_ordered_calls(mock_run, [_RUFF_GATE, _GIT_STATUS, _GIT_STATUS, _PYTEST])
 
     def test_commit_all_passes_with_green_tests(self, repo_dir: Path, ruff_in_venv: Path) -> None:
-        mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
-        mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
         mock_status = MagicMock(
             returncode=0,
@@ -409,9 +420,8 @@ class TestCommitChanges:
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[
-                    mock_ruff_fix,
-                    mock_ruff_format,
                     mock_ruff_gate,
+                    mock_status,
                     mock_status,
                     mock_pytest,
                     mock_add,
@@ -425,12 +435,10 @@ class TestCommitChanges:
         assert result["exit_code"] == 0
         _assert_ordered_calls(
             mock_run,
-            [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _PYTEST, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
+            [_RUFF_GATE, _GIT_STATUS, _GIT_STATUS, _PYTEST, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
         )
 
     def test_commit_all_skips_branches_without_tests(self, repo_dir: Path, ruff_in_venv: Path) -> None:
-        mock_ruff_fix = MagicMock(returncode=0, stdout="", stderr="")
-        mock_ruff_format = MagicMock(returncode=0, stdout="", stderr="")
         mock_ruff_gate = MagicMock(returncode=0, stdout="", stderr="")
         mock_status = MagicMock(
             returncode=0,
@@ -445,9 +453,8 @@ class TestCommitChanges:
             patch(
                 "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
                 side_effect=[
-                    mock_ruff_fix,
-                    mock_ruff_format,
                     mock_ruff_gate,
+                    mock_status,
                     mock_status,
                     mock_add,
                     mock_diff,
@@ -460,7 +467,7 @@ class TestCommitChanges:
         assert result["exit_code"] == 0
         _assert_ordered_calls(
             mock_run,
-            [_RUFF_FIX, _RUFF_FORMAT, _RUFF_GATE, _GIT_STATUS, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
+            [_RUFF_GATE, _GIT_STATUS, _GIT_STATUS, _GIT_ADD_ALL, _GIT_DIFF_CACHED, _GIT_COMMIT],
         )
 
     def test_commit_os_error(self, repo_dir: Path) -> None:

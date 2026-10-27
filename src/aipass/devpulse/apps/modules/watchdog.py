@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watchdog.py
 # Description: Watchdog Module — directed wake system for devpulse
-# Version: 2.1.1
+# Version: 2.2.0
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 """Watchdog Module — devpulse's personal directed-wake system.
@@ -12,12 +12,12 @@ Reference: docs/watchdog.md.
 """
 
 import importlib
-import os
 from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.cli.apps.modules import console, err_console, error
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.watchdog import dispatches as _dispatches
 from aipass.devpulse.apps.handlers.watchdog import presenter
 from aipass.devpulse.apps.handlers.watchdog import registry as _registry
 
@@ -285,7 +285,7 @@ def _sign_in_wire() -> dict | None:
 
     Must match the test the statusline paints green on. A pure read: nothing is pruned or written.
     """
-    session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    session = _dispatches.seat_session_id() or ""
     for watch in _registry.list_active(prune_stale=False):
         if watch.get("type") != "baseline_wire":
             continue

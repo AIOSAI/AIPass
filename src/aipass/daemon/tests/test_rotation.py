@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.4.1
+# Version: 1.5.0
 # Created:2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
@@ -424,6 +424,23 @@ class TestManagerLane:
         _ok, _detail, mock_wake = self._fire(target, {}, return_value=(FakeStatus("woken"), True))
         assert mock_wake.call_args.args == ("@commons",)
         assert "scheduled" not in mock_wake.call_args.kwargs
+
+    def test_a_named_provider_reaches_the_wake(self):
+        target = {"email": "@commons", "citizen_class": "aipass_framework"}
+        job = rotation_job(wake={"fresh": True, "model": "gpt-6-sol", "provider": "codex"})
+        with (
+            patch(f"{MODULE}.build_roster", return_value=[target]),
+            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
+            patch(WAKE_SEAM, return_value=(FakeStatus("woken"), True)) as mock_wake,
+        ):
+            rotation_module.fire_rotation(job, {})
+        assert mock_wake.call_args.kwargs["provider"] == "codex"
+        assert mock_wake.call_args.kwargs["model"] == "gpt-6-sol"
+
+    def test_an_absent_provider_is_not_passed(self):
+        target = {"email": "@commons", "citizen_class": "aipass_framework"}
+        _ok, _detail, mock_wake = self._fire(target, {}, return_value=(FakeStatus("woken"), True))
+        assert "provider" not in mock_wake.call_args.kwargs, "wake_branch names the default, not rounds"
 
     def test_wake_exception_is_reported_not_raised(self):
         """Mutant killed: _wake_steward reports a wake exception as errored=False (a miss)."""

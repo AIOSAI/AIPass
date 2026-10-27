@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-05
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -27,6 +27,7 @@ import pytest
 
 from aipass.cli.apps.modules import display
 from aipass.drone.apps.handlers import registry_handler, router_handler
+from aipass.drone.apps.handlers.git import session_home
 from aipass.drone.apps.handlers.json import json_handler
 
 # Not imported from seedgo: its guard refuses another branch's caller.
@@ -54,6 +55,12 @@ def clean_command_state() -> Generator[None, None, None]:
 def _clean_identity_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give every test a fresh caller-identity dedupe set (dedupe is per process; pytest is one)."""
     monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())
+
+
+@pytest.fixture(autouse=True)
+def _no_agent_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The suite runs inside a real agent session, and the git fence would place every tmp seat against it."""
+    monkeypatch.delenv(session_home.SESSION_ENV, raising=False)
 
 
 @pytest.fixture(autouse=True)

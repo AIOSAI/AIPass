@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: feed.py
 # Description: Watchdog Feed Handler — read completions off the push feed instead of polling for them
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-21
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 # The cursor is a set of line digests, never wire.py's byte offset: @ai_mail's
@@ -56,12 +56,14 @@ def feed_file(repo_root: Path | None = None) -> Path:
     )
 
 
-def cursor_file_for(repo_root: Path, name: str = WIRE_CURSOR_NAME) -> Path:
+def cursor_file_for(repo_root: Path, name: str = WIRE_CURSOR_NAME, seat: str | None = None) -> Path:
     """Where a reader remembers which feed lines it has already delivered.
 
-    Keep ``name``: two readers on one cursor silently steal each other's events.
+    Keep ``name``, and pass ``seat`` for a per-seat reader: two readers on one cursor silently
+    steal each other's events (every line drained is marked seen, delivered or not).
     """
-    return repo_root.joinpath("src", "aipass", "devpulse", "devpulse_json", name)
+    filename = f"{seat.lstrip('@')}.{name}" if seat else name
+    return repo_root.joinpath("src", "aipass", "devpulse", "devpulse_json", filename)
 
 
 def _digest(raw_line: str) -> str:

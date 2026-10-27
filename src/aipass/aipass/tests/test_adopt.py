@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -537,7 +537,7 @@ def test_aipass_public_commands_includes_adopt(capsys: pytest.CaptureFixture[str
     assert "Turn an existing projects/ directory into a full project" in out
 
 
-def test_adopt_writes_the_prep_skill_and_links_claude_skills_to_it(host_env):
+def test_adopt_writes_the_prep_skill_the_switch_pair_and_links_claude_skills_to_it(host_env):
     _, target = host_env
     with _no_home(), patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"):
         result = adopt_project(target, no_agent=True)
@@ -546,7 +546,9 @@ def test_adopt_writes_the_prep_skill_and_links_claude_skills_to_it(host_env):
     assert skill.read_text(encoding="utf-8") == sc.prep_skill_md()
     assert (target / ".claude" / "skills").resolve() == (target / ".agents" / "skills").resolve()
     assert str(target / ".claude" / "skills") in result["files"]
-    assert not (target / ".claude" / "commands").exists()
+    assert (target / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
+    assert (target / ".codex" / "skills" / "claude" / "SKILL.md").read_text(encoding="utf-8") == sc.claude_skill_md()
+    assert not (target / ".claude" / "commands" / "prep.md").exists()
     assert result["notes"] == []
 
 

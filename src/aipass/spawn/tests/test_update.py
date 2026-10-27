@@ -3,7 +3,7 @@
 # Description: Tests for spawn update orchestrator
 # Version: 1.2.4
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -784,6 +784,60 @@ class TestUpdateIgnoreIsTheOwnersDecision:
         self._update(template_dir, mock_registry, dry_run=False)
 
         assert path.read_text(encoding="utf-8") == before
+
+    def test_the_project_root_file_protects_the_citizen_beside_the_branch_file(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        (branch_dir / "README.md").unlink()
+        (tmp_path / ".updateignore").write_text("test_*/README.md\n", encoding="utf-8")
+        self._ignore(branch_dir, "DASHBOARD.local.json\n")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert sorted(g["branch_path"] for g in result["_ignored_detail"]) == ["DASHBOARD.local.json", "README.md"]
+        assert not (branch_dir / "README.md").exists(), "a root-protected file was written by --apply"
+
+    def test_a_root_pattern_is_project_relative_not_branch_relative(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        (template_dir / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
+        (tmp_path / ".updateignore").write_text("docs/guide.md\n", encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert result["owner_protected"] == 0
+        assert "docs/guide.md" in [a["template_path"] for a in result["_additions_detail"]]
+
+    def test_a_bare_name_in_the_root_file_matches_inside_every_citizen(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        (branch_dir / "README.md").unlink()
+        (tmp_path / ".updateignore").write_text("README.md\n", encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert [g["branch_path"] for g in result["_ignored_detail"]] == ["README.md"]
+
+    def test_a_wildcard_directory_pattern_also_withholds_the_bare_directory(
+        self, tmp_path, template_dir, branch_dir, mock_registry
+    ):
+        (template_dir / "notes").mkdir()
+        (template_dir / "notes" / "a.md").write_text("# a\n", encoding="utf-8")
+        (tmp_path / ".updateignore").write_text("test_*/notes/\n", encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert [g["branch_path"] for g in result["_ignored_detail"]] == ["notes/a.md"]
+        assert not (branch_dir / "notes").exists(), "the directory row slipped past a wildcard prefix"
+
+    def test_an_unreadable_root_file_refuses_the_update(self, tmp_path, template_dir, branch_dir, mock_registry):
+        (tmp_path / ".updateignore").write_bytes(b"\xff\xfe README.md")
+        before = self._tree(branch_dir)
+
+        with pytest.raises(UpdateIgnoreUnreadable, match=r"\.updateignore"):
+            self._update(template_dir, mock_registry, dry_run=False)
+
+        assert self._tree(branch_dir) == before
 
     @staticmethod
     def _tree(root):

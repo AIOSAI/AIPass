@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.6.0
+# Version: 1.9.1
 # Created: 2026-07-11
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -11,8 +11,9 @@
 Hooks are strip-and-readd (stale bridge entries go); env, permissions and the
 top-level settings scalars are additive only: a value the user set is reported,
 never overwritten. The manifest is the single source; this file holds no defaults.
-``cli.codex`` hooks go whole into the repo's .codex/hooks.json. Both doors (setup.sh,
-doctor --fix) back up before the write, receipt after.
+``cli.codex`` hooks merge into the user-level Codex hooks.json, AIPass groups first. Both
+doors (setup.sh, doctor --fix) back up before the write, receipt after. setup.sh alone
+also sets the Codex config pins, line by line, keeping every other line of config.toml.
 """
 
 from __future__ import annotations
@@ -400,9 +401,198 @@ def plan_wire_provider(manifest_path: Path, settings_path: Optional[Path] = None
     return _make_plan(settings_path, before, settings, actions, DOOR_DOCTOR_FIX, "Updated ~/.claude/settings.json")
 
 
-def codex_hooks_path(manifest_path: Path) -> Path:
-    """The repo's Codex hooks file: ``<repo root>/.codex/hooks.json``, the root taken from the manifest."""
+CODEX_BRIDGE_MARK = "src/aipass/hooks/apps/handlers/bridges/codex.py"
+# (key path, its table header or None for top level); each must read false.
+CODEX_PINS = (
+    (("features", "memories"), "[features]"),
+    (("include_collaboration_mode_instructions",), None),
+    (("features", "collaboration_modes"), "[features]"),
+    (("tools", "experimental_request_user_input", "enabled"), "[tools.experimental_request_user_input]"),
+)
+_TABLE_HEADER = re.compile(r"^\s*\[")
+
+
+def codex_home() -> Path:
+    """$CODEX_HOME when set, else ~/.codex."""
+    home = os.environ.get("CODEX_HOME")
+    return Path(home) if home else Path.home() / ".codex"
+
+
+def codex_config_path() -> Path:
+    """Codex's config.toml in codex_home()."""
+    return codex_home() / "config.toml"
+
+
+def read_codex_config(path: Path) -> tuple[dict, str]:
+    """(the parsed config, '') or ({}, why it could not be read). Read-only: the owner edits it."""
+    try:
+        import tomllib  # type: ignore[import-not-found]  # stdlib 3.11+, absent on 3.10
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            logger.warning("[provider_wire] no tomllib and no tomli: config.toml unread below Python 3.11")
+            return {}, "reading config.toml needs Python 3.11+ or the tomli package"
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8")), ""
+    except FileNotFoundError:
+        logger.info("[provider_wire] no codex config at %s", path)
+        return {}, f"{path} missing"
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        logger.warning("[provider_wire] codex config unreadable: %s: %s", path, exc)
+        return {}, f"{path} unreadable: {exc}"
+
+
+def codex_pin_value(config: dict, keys: tuple) -> Any:
+    """The value at *keys* in a parsed config.toml; None when any step is absent."""
+    value: Any = config
+    for key in keys:
+        value = value.get(key) if isinstance(value, dict) else None
+    return value
+
+
+def _set_pin_line(lines: List[str], keys: tuple, table: Optional[str]) -> List[str]:
+    """*lines* with ``<key> = false`` in *table*'s section (top level when None), replacing a line that sets it."""
+    line = f"{keys[-1]} = false"
+    assigns = re.compile(rf"^\s*{re.escape(keys[-1])}\s*=")
+    headers = [i for i, text in enumerate(lines) if _TABLE_HEADER.match(text)]
+    if table is None:
+        start, end = 0, headers[0] if headers else len(lines)
+    else:
+        own = [i for i in headers if lines[i].split("#")[0].strip() == table]
+        if not own:
+            return [*lines, *([""] if lines and lines[-1].strip() else []), table, line]
+        start, end = own[0] + 1, next((i for i in headers if i > own[0]), len(lines))
+    for i in range(start, end):
+        if assigns.match(lines[i]):
+            return [*lines[:i], line, *lines[i + 1 :]]
+    at = end if table is None else start
+    return [*lines[:at], line, *lines[at:]]
+
+
+def set_codex_pins(config_path: Path, door: str = DOOR_SETUP_SH) -> List[str]:
+    """Set each CODEX_PINS key that does not read false, one line each; every other line is kept.
+
+    Refuses (SettingsBackupError, nothing written) a config.toml it cannot parse, or one where
+    the line edit breaks the file or leaves a pin unset (a dotted key, an inline table, a string)."""
+    try:
+        import tomllib  # type: ignore[import-not-found]  # stdlib 3.11+, absent on 3.10
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            logger.warning("[provider_wire] no tomllib and no tomli: Codex pins unset below Python 3.11")
+            return ["Skipped the Codex config pins: setting them needs Python 3.11+ or the tomli package"]
+    before = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    try:
+        config = tomllib.loads(before)
+    except tomllib.TOMLDecodeError as exc:
+        raise SettingsBackupError(f"{config_path} unreadable ({exc}) — not touching it") from exc
+    lines, named = before.splitlines(), []
+    for keys, table in CODEX_PINS:
+        if codex_pin_value(config, keys) is not False:
+            lines = _set_pin_line(lines, keys, table)
+            named.append(".".join(keys))
+    if not named:
+        return []
+    after = "\n".join(lines) + "\n"
+    try:
+        result = tomllib.loads(after)
+    except tomllib.TOMLDecodeError as exc:
+        raise SettingsBackupError(f"setting the Codex pins would break {config_path} — not touching it") from exc
+    if any(codex_pin_value(result, k) is not False for k, _ in CODEX_PINS):
+        raise SettingsBackupError(f"a line edit leaves the Codex pins unset in {config_path} — not touching it")
+    record = backup_before_write(config_path, door)
+    actions = [f"Backed up Codex config to {record.backup}"] if record.backup else []
+    try:
+        config_path.write_text(after, encoding="utf-8")
+    except OSError as exc:
+        logger.error("[provider_wire] codex config write failed at %s: %s", config_path, exc)
+        raise SettingsBackupError(f"Codex config write failed at {config_path}; no receipt written") from exc
+    actions.append(f"Set Codex pins in {config_path}: {', '.join(named)}")
+    actions.append(f"Receipt: {write_receipt(record, sha256_of(config_path), actions)}")
+    return actions
+
+
+def refresh_codex(manifest_path: Path) -> List[str]:
+    """setup.sh's Codex door: cli.codex merged into the user-level hooks.json, then the config pins.
+
+    The hooks plan is the one doctor --fix applies, so the two doors cannot disagree."""
+    actions: List[str] = []
+    plan = plan_codex_hooks(manifest_path, DOOR_SETUP_SH)
+    if plan is not None:
+        actions.extend(apply_settings_plan(plan))
+    actions.extend(set_codex_pins(codex_config_path(), DOOR_SETUP_SH))
+    written = _read_settings(codex_hooks_path()).get("hooks", {})
+    rows = sum(len(g.get("hooks", [])) for groups in written.values() for g in groups or [] if is_bridge_group(g))
+    actions.append(f"Codex hooks: {rows} AIPass row(s) in {codex_hooks_path()}")
+    json_handler.log_operation("refresh_codex", {"actions": len(actions)})
+    return actions
+
+
+def codex_hooks_path() -> Path:
+    """The user-level Codex hooks file, which Codex reads from every cwd: codex_home()/hooks.json."""
+    return codex_home() / "hooks.json"
+
+
+def repo_codex_hooks_path(manifest_path: Path) -> Path:
+    """The repo-level ``<repo root>/.codex/hooks.json``, the root taken from the manifest."""
     return manifest_path.parent.parent / ".codex" / "hooks.json"
+
+
+def is_bridge_group(group: Any) -> bool:
+    """Does this hook group run the AIPass Codex bridge?"""
+    hooks = group.get("hooks", []) if isinstance(group, dict) else []
+    return any(CODEX_BRIDGE_MARK in str(h.get("command", "")) for h in hooks if isinstance(h, dict))
+
+
+def _foreign_part(group: Any) -> Optional[Any]:
+    """The group with its bridge rows taken out; None when nothing else is left."""
+    if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+        return group
+    kept = [h for h in group["hooks"] if not (isinstance(h, dict) and CODEX_BRIDGE_MARK in str(h.get("command", "")))]
+    return {**group, "hooks": kept} if kept else None
+
+
+def merge_codex_hooks(before: dict, wanted: dict) -> dict:
+    """*before* with its bridge rows replaced by *wanted*'s; every other row kept, behind them.
+
+    Codex keys trust by ``<file>:<event>:<group>:<index>``, so AIPass groups go first in each
+    event: a foreign group ahead would shift every AIPass key and untrust it."""
+    merged = copy.deepcopy(before)
+    old = before.get("hooks")
+    old = old if isinstance(old, dict) else {}
+    hooks: Dict[str, Any] = {}
+    for event in [*wanted["hooks"], *(e for e in old if e not in wanted["hooks"])]:
+        foreign = [part for g in old.get(event, []) or [] if (part := _foreign_part(g)) is not None]
+        groups = copy.deepcopy(wanted["hooks"].get(event, [])) + foreign
+        if groups:
+            hooks[event] = groups
+    merged["hooks"] = hooks
+    return merged
+
+
+def repo_codex_double_fire(manifest_path: Path) -> Optional[Path]:
+    """The repo-level hooks file when it still holds bridge rows, which Codex fires beside the user-level ones."""
+    path = repo_codex_hooks_path(manifest_path)
+    try:
+        doc = _read_settings(path)
+    except SettingsBackupError as exc:
+        logger.warning("[provider_wire] repo codex hooks unreadable, double-fire unknown: %s", exc)
+        return None
+    events = doc.get("hooks")
+    events = events if isinstance(events, dict) else {}
+    return path if any(is_bridge_group(g) for groups in events.values() for g in groups or []) else None
+
+
+def codex_trust_keys(hooks_path: Path, wanted: dict) -> List[str]:
+    """The ``[hooks.state]`` keys Codex trusts the AIPass rows under, once they sit first."""
+    keys = []
+    for event, groups in wanted["hooks"].items():
+        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+        for g, group in enumerate(groups):
+            keys.extend(f"{hooks_path}:{snake}:{g}:{i}" for i in range(len(group["hooks"])))
+    return keys
 
 
 def codex_hooks_document(manifest: dict) -> Optional[dict]:
@@ -417,7 +607,7 @@ def codex_hooks_document(manifest: dict) -> Optional[dict]:
 
 
 def plan_codex_hooks(manifest_path: Path, door: str = DOOR_DOCTOR_FIX) -> Optional[SettingsPlan]:
-    """Replace ``.codex/hooks.json`` whole (it is AIPass's) to match ``cli.codex``; None when it does.
+    """Merge ``cli.codex`` into the user-level Codex hooks file; None when it already matches.
 
     No rows plans nothing, rather than empty a file the manifest has not caught up with."""
     manifest = json_handler.read_json(manifest_path)
@@ -426,15 +616,16 @@ def plan_codex_hooks(manifest_path: Path, door: str = DOOR_DOCTOR_FIX) -> Option
     wanted = codex_hooks_document(manifest)
     if wanted is None:
         return None
-    codex_path = codex_hooks_path(manifest_path).resolve()
+    codex_path = codex_hooks_path()
     before = _read_settings(codex_path)
-    if before == wanted:
+    after = merge_codex_hooks(before, wanted)
+    if before == after:
         return None
     count = sum(len(entries) for entries in wanted["hooks"].values())
     return SettingsPlan(
         codex_path,
         before,
-        wanted,
+        after,
         [f"Wrote {count} Codex hook(s) from cli.codex"],
         [f"Write {count} Codex hook(s) from cli.codex into {codex_path}"],
         [],
@@ -455,7 +646,7 @@ def apply_settings_plan(plan: SettingsPlan, door: Optional[str] = None, consent:
 
 
 def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = None) -> List[str]:
-    """Write the manifest's Claude wiring into ~/.claude/settings.json, then cli.codex into .codex/hooks.json.
+    """Write the manifest's Claude wiring into ~/.claude/settings.json; refresh_codex is Codex's door.
 
     setup.sh is the only caller; doctor --fix plans the same writes. Raises on an
     unreadable manifest rather than leave stale wiring in place."""
@@ -481,8 +672,5 @@ def refresh_provider_hooks(manifest_path: Path, settings_path: Optional[Path] = 
     _write_with_receipt(
         settings_path, settings, record, actions, "Updated ~/.claude/settings.json (hooks, env, permissions, settings)"
     )
-    codex = plan_codex_hooks(manifest_path, DOOR_SETUP_SH)
-    if codex is not None:
-        actions.extend(apply_settings_plan(codex))
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions

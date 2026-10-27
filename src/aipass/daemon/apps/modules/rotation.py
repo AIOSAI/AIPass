@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rotation.py
 # Description: Rounds firing + status surface (drone @daemon rotation)
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-12
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -136,7 +136,7 @@ def _scheduled_lane_available() -> bool:
         return False
 
 
-def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
+def _wake_steward(target: dict, prompt: str, model: str, fresh: bool, provider: Optional[str]) -> tuple:
     """Wake one steward. Returns (ok: bool, detail: str, errored: bool).
 
     `errored` separates a crash in the wake path from an ordinary busy target (just a miss).
@@ -153,6 +153,8 @@ def _wake_steward(target: dict, prompt: str, model: str, fresh: bool) -> tuple:
         # A rounds night owes @daemon nothing. sender stays: the bounce and the manager gate read it.
         "wake_back": False,
     }
+    if provider:
+        kwargs["provider"] = provider
 
     # Managers only travel the scheduled lane — never the interactive tmux path.
     if target.get("citizen_class") == MANAGER_CLASS:
@@ -203,13 +205,14 @@ def fire_rotation(job: dict, runstate: dict, header: str = "") -> tuple:
     wake = job.get("wake", {})
     model = wake.get("model") or DEFAULT_WAKE_MODEL
     fresh = wake.get("fresh", True)
+    provider = wake.get("provider")
     prompt = render_prompt(job.get("prompt", ""), email)
     if header:
         prompt = compose_prompt(header, prompt)
 
-    _log(f"ROUNDS: {email} — wake_branch(fresh={fresh}, model={model}, manager={is_manager})")
+    _log(f"ROUNDS: {email} — wake_branch(fresh={fresh}, model={model}, provider={provider}, manager={is_manager})")
 
-    ok, detail, errored = _wake_steward(target, prompt, model, fresh)
+    ok, detail, errored = _wake_steward(target, prompt, model, fresh, provider)
 
     if ok:
         _log(f"OK: {email} — {detail}")

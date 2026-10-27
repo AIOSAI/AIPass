@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: search.py
 # Description: Search Orchestration Module
-# Version: 0.5.1
+# Version: 0.6.0
 # Created: 2025-11-27
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -197,6 +197,8 @@ def show_search_results(
             meta_lines.append(f"[dim]Time:[/dim] {metadata['timestamp']}")
         if metadata.get("source"):
             meta_lines.append(f"[dim]Source:[/dim] {metadata['source']}")
+        if metadata.get("project"):
+            meta_lines.append(f"[dim]Project:[/dim] {metadata['project']}")
 
         meta_text = " | ".join(meta_lines) if meta_lines else ""
 

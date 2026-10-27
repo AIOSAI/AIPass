@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Tests for hook engine dispatch logic: the dispatcher core; contracts and safeguards in two siblings
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-10-08
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/engine.py: the dispatcher core and the hook dispatch it drives."""
@@ -418,6 +418,16 @@ class TestLogVolume:
         assert [e["event"] for e in entries if e.get("action") == "complete"] == ["PreToolUse"]
         ran = [(e["event"], e["hook"], e["exit_code"]) for e in entries if "exit_code" in e]
         assert ran == [("PreToolUse", "rm_gate", 0)]
+
+    def test_each_hook_line_names_the_payload_session_so_parity_can_read_one_session(self, mock_logger):
+        with (
+            patch("aipass.hooks.apps.modules.engine._log") as mock_log,
+            patch("aipass.hooks.apps.modules.engine._run_hook") as mock_run,
+        ):
+            mock_run.return_value = {"exit_code": 0, "stdout": "", "stderr": "", "elapsed_ms": 1}
+            dispatch("PreToolUse", '{"tool_name":"Bash","session_id":"s-123"}', self.CONFIG)
+        ran = [c.args[0] for c in mock_log.call_args_list if "exit_code" in c.args[0]]
+        assert [e["session_id"] for e in ran] == ["s-123"]
 
     def test_verbose_env_restores_the_lines(self, mock_logger, monkeypatch):
         """AIPASS_HOOKS_VERBOSE_LOG=1 is the DEBUG-level stand-in."""

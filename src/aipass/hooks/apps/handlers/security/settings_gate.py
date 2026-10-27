@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: settings_gate.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: No AI changes a provider's top-level settings alone: Claude asks the owner, Codex and headless deny
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-10-25
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """The provider-settings gate (DPLAN-0424): the owner accepts every change to a CLI's own settings.
 
 Protected: Codex's top level (~/.codex/*.toml, hooks.json, auth.json, rules/**, and the same under
 $CODEX_HOME), Claude's (~/.claude/settings.json, settings.local.json), the repo wiring
-(.claude/provider_manifest.json, .codex/hooks.json), and the installers that write them
+(.claude/provider_manifest.json; .codex/hooks.json, retired, stays protected so it never returns
+unnoticed beside the user-level file and fires every hook twice), and the installers that write them
 (aipass doctor --fix, setup.sh, provider_wire.py) run from Bash.
 
 Interactive Claude asks the owner for Codex's files, the wiring and the installers; its own settings

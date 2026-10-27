@@ -1,25 +1,28 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.1.3
+# Version: 1.3.0
 # Created: 2026-05-14
-# Modified: 2026-10-17
+# Modified: 2026-10-27
 # =============================================
 
 """
 Structure Scanner — detect misplaced agents, init pollution, registry mismatches.
 
-Plain data out, no Rich markup: display belongs to the doctor module.
+Plain data out, no Rich markup beyond the shared doctor glyphs: display belongs to the doctor module.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.prax import logger
 from aipass.aipass.shared.registry_discovery import registries_in
 
@@ -402,6 +405,68 @@ def check_root_artifacts(project_root: Path, aipass_home: Path | str | None = No
     return hits
 
 
+#: Claude Code reads AGENTS.md only when none of these sits in cwd or above.
+_SHADOW_NAMES = ("CLAUDE.md", "CLAUDE.local.md")
+
+
+class InstructionShadow(NamedTuple):
+    """A live CLAUDE file that silences the AGENTS.md beside it in Claude Code."""
+
+    path: Path
+    agents_path: Path
+    equal: bool
+
+
+def find_instruction_shadows(project_root: Path) -> List[InstructionShadow]:
+    """CLAUDE.md / CLAUDE.local.md at *project_root* or its .claude/, beside an AGENTS.md there."""
+    dirs = (project_root, project_root / ".claude")
+    agents = [d / "AGENTS.md" for d in dirs if (d / "AGENTS.md").is_file()]
+    if not agents:
+        return []
+    shadows: List[InstructionShadow] = []
+    for folder in dirs:
+        beside = folder / "AGENTS.md" if (folder / "AGENTS.md").is_file() else agents[0]
+        for name in _SHADOW_NAMES:
+            path = folder / name
+            # One file under both names (a symlink either way) says the same thing to both CLIs.
+            if not path.is_file() or path.resolve() == beside.resolve():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            equal = text == beside.read_text(encoding="utf-8", errors="replace")
+            shadows.append(InstructionShadow(path, beside, equal))
+    json_handler.log_operation("find_instruction_shadows", {"count": len(shadows), "root": str(project_root)})
+    return shadows
+
+
+def disable_shadow(shadow: InstructionShadow, project_root: Path) -> "tuple[bool, str]":
+    """Rename *shadow* to '<name>(disabled)' beside it. Never copies, deletes or overwrites.
+
+    Refuses when the root holds $HOME (its .claude/CLAUDE.md is the user's own memory) or
+    when the file's folder resolves outside the root, e.g. a .claude symlinked elsewhere.
+    """
+    root = project_root.resolve()
+    home = Path.home().resolve()
+    rel = shadow.path.relative_to(project_root).as_posix()
+    target = shadow.path.with_name(f"{shadow.path.name}(disabled)")
+    if root == home or root in home.parents:
+        return False, f"Left {rel}: the project root holds $HOME, whose CLAUDE files are the user's"
+    if not shadow.path.parent.resolve().is_relative_to(root):
+        return False, f"Left {rel}: its folder resolves outside the project root"
+    if target.exists() or target.is_symlink():
+        return False, f"Left {rel}: {target.name} already exists beside it"
+    shadow.path.rename(target)
+    logger.info("[structure_scan] renamed instruction shadow %s -> %s", shadow.path, target.name)
+    return True, f"Renamed {rel} -> {target.name}"
+
+
+def disable_shadows(project_root: Path) -> "List[tuple[bool, str]]":
+    """Rename every shadow under *project_root*: one (renamed, what happened) per file."""
+    actions = [disable_shadow(shadow, project_root) for shadow in find_instruction_shadows(project_root)]
+    if actions:
+        json_handler.log_operation("disable_shadows", {"root": str(project_root), "actions": [a for _, a in actions]})
+    return actions
+
+
 def check_pyproject(project_root: Path) -> Dict[str, Any]:
     """Check for pyproject.toml presence at project root."""
     pyproject = project_root / "pyproject.toml"
@@ -409,3 +474,48 @@ def check_pyproject(project_root: Path) -> Dict[str, Any]:
         "found": pyproject.exists(),
         "path": str(pyproject) if pyproject.exists() else "",
     }
+
+
+#: Folders spawn and the services write inside a project: tracked, they ship one installation's state.
+_RUNTIME_DIR_PATTERNS = (".chroma", "docs.local", "dropbox", ".spawn", "*_json")
+_RUNTIME_FILE_PATTERNS = ("*_REGISTRY.json",)
+
+
+def _runtime_owner(rel: str) -> Optional[str]:
+    """The runtime folder or file *rel* belongs to, project-relative, or None for a project file."""
+    parts = rel.split("/")
+    for depth, part in enumerate(parts[:-1]):
+        if any(fnmatch.fnmatch(part, pattern) for pattern in _RUNTIME_DIR_PATTERNS):
+            return "/".join(parts[: depth + 1])
+    return rel if any(fnmatch.fnmatch(parts[-1], pattern) for pattern in _RUNTIME_FILE_PATTERNS) else None
+
+
+def check_gitignore_coverage(project_root: Path) -> "List[tuple[str, str, str, str]]":
+    """Doctor rows ``(label, glyph, detail, fix)``: runtime files on disk that git tracks, one FAIL per owner.
+
+    Read-only: lists the index with ``ls-files``, never changes it. The AIPass source tree is not measured,
+    since its .gitignore ships spawn's templates by negation on purpose."""
+    label = "gitignore coverage"
+    if (project_root / "src" / "aipass").is_dir() and (project_root / "pyproject.toml").is_file():
+        return [(label, GLYPH_PASS, "not measured: the AIPass source tree ships its templates tracked", "")]
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(project_root), "ls-files", "-z"], capture_output=True, encoding="utf-8", check=False
+        )
+    except OSError as exc:
+        logger.warning("[structure_scan] ls-files could not run in %s: %s", project_root, exc)
+        return [(label, GLYPH_WARN, f"not measured: git could not run ({exc})", "Install git")]
+    if listed.returncode != 0:
+        return [(label, GLYPH_PASS, "not a git repository: nothing tracked", "")]
+    counts: Dict[str, int] = {}
+    for rel in filter(None, listed.stdout.split("\0")):
+        owner = _runtime_owner(rel)
+        if owner and (project_root / rel).exists():
+            counts[owner] = counts.get(owner, 0) + 1
+    json_handler.log_operation("check_gitignore_coverage", {"root": str(project_root), "owners": len(counts)})
+    rows = []
+    for owner, count in sorted(counts.items()):
+        recursive = " --recursive" if (project_root / owner).is_dir() else ""
+        fix = f"drone @git untrack{recursive} {owner} (files stay on disk); aipass init update adds the ignore line"
+        rows.append((f"{label}: {owner}", GLYPH_FAIL, f"{count} tracked file(s) one installation writes", fix))
+    return rows or [(label, GLYPH_PASS, "no runtime file tracked", "")]

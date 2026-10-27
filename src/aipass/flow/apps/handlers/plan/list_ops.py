@@ -1,21 +1,27 @@
 # =================== AIPass ====================
 # Name: list_ops.py
 # Description: Plan Listing Implementation Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-08
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
 Plan Listing Operations Handler
 """
 
+from pathlib import Path
 from typing import Dict, Any, Tuple
 
 from aipass.prax import logger
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.plan.project_scope import caller_project_root, describe_project, find_project_root
+from aipass.flow.apps.handlers.repo_root import find_repo_root
 
 MODULE_NAME = "list_plans"
+
+# "Not injected" (resolve it) vs None, "stands in no project" (refuse the listing).
+_UNSET = object()
 
 
 def _get_all_registry_info() -> Tuple[list[str], Dict[str, str]]:
@@ -47,13 +53,31 @@ def list_plans_impl(
     get_registry_statistics: Any = None,
     format_plans_list: Any = None,
     format_statistics_summary: Any = None,
+    caller_project: Any = _UNSET,
+    host_project: Any = _UNSET,
 ) -> Dict[str, Any]:
     """
     Implement plan listing workflow across all plan-type registries.
 
     The callables are injected by the list_plans module; filter_type is "open", "closed" or "all".
+    Rows are the caller's project's; only "all" from the host project's seat lists every project.
     """
     try:
+        if caller_project is _UNSET:
+            caller_project = caller_project_root()
+        if host_project is _UNSET:
+            host_project = find_repo_root(caller=MODULE_NAME)
+        if caller_project is None:
+            return {
+                "success": False,
+                "error": "you stand in no project (no project register above your directory); nothing listed",
+                "formatted_list": "",
+                "formatted_stats": "",
+                "empty": True,
+                "filter_type": filter_type,
+            }
+        whole_fleet = filter_type == "all" and caller_project == host_project
+
         merged_plans: Dict[str, Any] = {}
         reg_files, reg_prefix_map = _get_all_registry_info()
 
@@ -75,6 +99,14 @@ def list_plans_impl(
             registry = load_registry()
             merged_plans = registry.get("plans", {})
 
+        if not whole_fleet:
+            cache: Dict[Path, Any] = {}
+            merged_plans = {
+                key: info
+                for key, info in merged_plans.items()
+                if info.get("location") and find_project_root(Path(info["location"]), cache) == caller_project
+            }
+
         merged_registry: Dict[str, Any] = {"plans": merged_plans}
 
         if not merged_plans:
@@ -92,7 +124,8 @@ def list_plans_impl(
         else:
             filter_status = filter_type  # "open" or "closed"
 
-        formatted_list = format_plans_list(merged_plans, filter_status)
+        scope = "fleet" if whole_fleet else describe_project(caller_project)
+        formatted_list = format_plans_list(merged_plans, filter_status, scope=scope)
 
         stats = get_registry_statistics(merged_registry)
         formatted_stats = format_statistics_summary(stats)

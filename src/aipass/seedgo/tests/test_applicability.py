@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.16.5
+# Version: 1.16.6
 # Created: 2026-08-09
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/applicability.py and its two consumers."""
@@ -174,6 +174,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "duplicate_test",
         "file_top",
         "flag_never_passed",
+        "host_coupled_oracle",
         "import_site",
         "literal_path",
         "mock_console",

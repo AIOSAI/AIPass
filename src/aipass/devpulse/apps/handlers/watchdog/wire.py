@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.4.0
+# Version: 2.7.1
 # Created: 2026-08-19
-# Modified: 2026-10-17
+# Modified: 2026-10-27
 # =============================================
 
 """Watchdog Wire Handler — deliver this seat's dispatch completions into THIS session."""
@@ -92,7 +92,7 @@ def _touch_heartbeat() -> None:
 
 
 def _stdout_target_via_lsof(pid: int) -> Path | None:
-    """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``_stdout_target``.
+    """``lsof -p <pid> -a -d 1 -Fn`` — the portable half of ``stdout_target``.
 
     None on any failure: a wrong path would be read as a wrapper identity.
     """
@@ -114,7 +114,7 @@ def _stdout_target_via_lsof(pid: int) -> Path | None:
     return None
 
 
-def _stdout_target(pid: int | None = None) -> Path | None:
+def stdout_target(pid: int | None = None) -> Path | None:
     """Where a process's stdout actually goes — the wire-identity primitive.
 
     None when the pid is gone or fd/1 is unreadable: the target is unknown.
@@ -129,7 +129,7 @@ def _stdout_target(pid: int | None = None) -> Path | None:
         return None
 
 
-def _session_dir_of(target: Path | None) -> Path | None:
+def session_dir_of(target: Path | None) -> Path | None:
     """The session dir a stdout target belongs to, or None."""
     if target is None or target.parent.name != "tasks":
         return None
@@ -151,13 +151,13 @@ def _wrapper_of(target: Path | None) -> str:
         return WRAPPER_FOREGROUND
     if str(target).startswith("socket:"):
         return WRAPPER_MONITOR
-    if _session_dir_of(target) is not None:
+    if session_dir_of(target) is not None:
         return WRAPPER_BACKGROUND
     return WRAPPER_FOREGROUND
 
 
 def _cmdline_via_ps(pid: int) -> str:
-    """``ps -p <pid> -o command=`` — the portable half of ``_cmdline``."""
+    """``ps -p <pid> -o command=`` — the portable half of ``cmdline``."""
     try:
         done = subprocess.run(
             ["ps", "-p", str(pid), "-o", "command="],
@@ -172,7 +172,7 @@ def _cmdline_via_ps(pid: int) -> str:
     return done.stdout.strip()
 
 
-def _cmdline(pid: int) -> str:
+def cmdline(pid: int) -> str:
     """A process's cmdline, NUL-separated fields joined with spaces. "" on error."""
     if sys.platform != "linux":
         return _cmdline_via_ps(pid)
@@ -184,19 +184,20 @@ def _cmdline(pid: int) -> str:
     return raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
 
 
-def _looks_like_ours(pid: int) -> bool:
+def looks_like_ours(pid: int) -> bool:
     """True if the pid's cmdline names the watchdog.
 
     A takeover must never SIGTERM a recycled pid; its entry is still deregistered.
     """
-    return "watchdog" in _cmdline(pid)
+    return "watchdog" in cmdline(pid)
 
 
-def _sweep_wires(storage_path: Path | None) -> None:
-    """One pass over the registry: bury the dead, take over every live wire.
+def _sweep_wires(storage_path: Path | None, seat: str) -> None:
+    """One pass over the registry: bury the dead, take over every live wire of THIS seat.
 
-    Every live wire, same session or not: a wire proves a writer, never a listener;
-    only the arm happening now is known to have ears.
+    Same session or not: a wire proves a writer, never a listener; only the arm happening
+    now is known to have ears. Another seat's wire (a project manager's) is left alone: it
+    delivers that seat's completions, which this arm never would.
     """
     for watch in _registry.list_active(storage_path=storage_path, prune_stale=False):
         if watch.get("type") != _WIRE_KIND:
@@ -212,8 +213,14 @@ def _sweep_wires(storage_path: Path | None) -> None:
             _stderr(f"watchdog wire: buried dead wire entry {handle} (pid {pid})")
             continue
 
-        their_session = _session_dir_of(_stdout_target(pid))
-        if _looks_like_ours(pid):
+        their_seat = (watch.get("metadata") or {}).get("seat")
+        if their_seat and their_seat != seat:
+            _stderr(f"watchdog wire: {handle} (pid {pid}) is {their_seat}'s wire — left alone")
+            logger.info("[watchdog.wire] left another seat's wire alone handle=%s seat=%s", handle, their_seat)
+            continue
+
+        their_session = session_dir_of(stdout_target(pid))
+        if looks_like_ours(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
             _stderr(
                 f"watchdog wire: took over stale wire {handle} (pid {pid}, "
@@ -241,7 +248,7 @@ def _sweep_stale_daemons(storage_path: Path | None) -> int:
         pid = watch.get("pid")
         if not isinstance(handle, str):
             continue
-        if isinstance(pid, int) and _registry.is_pid_alive(pid) and _looks_like_ours(pid):
+        if isinstance(pid, int) and _registry.is_pid_alive(pid) and looks_like_ours(pid):
             result = _registry.kill_watch(handle, storage_path=storage_path)
             _stderr(
                 f"watchdog wire: retired pre-r4 detection daemon {handle} (pid {pid}) "
@@ -274,8 +281,8 @@ def _result(state: str, **extra) -> dict:
     return base
 
 
-def _dead_cursor_file(repo_root: Path) -> Path:
-    return _feed.cursor_file_for(repo_root, name=DEAD_CURSOR_NAME)
+def _dead_cursor_file(repo_root: Path, seat: str) -> Path:
+    return _feed.cursor_file_for(repo_root, name=DEAD_CURSOR_NAME, seat=seat)
 
 
 def _load_announced(path: Path) -> list[str]:
@@ -357,7 +364,7 @@ def _announce_dead(root: Path, seat: str, announced: list[str]) -> int:
         _stdout_event(_format_dead(row))
         announced.append(_dead_key(row))
     if fresh:
-        _save_announced(_dead_cursor_file(root), announced)
+        _save_announced(_dead_cursor_file(root, seat), announced)
         logger.warning("[watchdog.wire] announced %s dead dispatch(es)", len(fresh))
         json_handler.log_operation("dead_dispatches_announced", {"count": len(fresh)})
     return len(fresh)
@@ -390,10 +397,10 @@ def arm_wire(
         logger.error("[watchdog.wire] seat unresolved: %s", exc)
         raise SystemExit(1) from exc
 
-    my_target = _stdout_target()
-    my_session = _session_dir_of(my_target)
+    my_target = stdout_target()
+    my_session = session_dir_of(my_target)
     # The statusline matches the conversation id; the tasks-dir name is only a fallback.
-    session_name = os.environ.get("CLAUDE_CODE_SESSION_ID") or (my_session.name if my_session is not None else None)
+    session_name = _dispatches.seat_session_id() or (my_session.name if my_session is not None else None)
 
     # A continuous wire refuses when it cannot see its wrapper, or sees a run_in_background
     # file that is heard only on exit. The refusal itself exits, so it is heard; --once stays legal.
@@ -417,7 +424,7 @@ def arm_wire(
         logger.error("[watchdog.wire] refused continuous arm under run_in_background stdout=%s", my_target)
         raise SystemExit(1)
 
-    _sweep_wires(storage_path)
+    _sweep_wires(storage_path, seat)
     _sweep_stale_daemons(storage_path)
 
     # A takeover sends SIGTERM; the finally below must still deregister.
@@ -427,6 +434,7 @@ def arm_wire(
         _WIRE_KIND,
         metadata={
             "session": session_name,
+            "seat": seat,
             "wrapper": _wrapper_of(my_target),
             "tasks_dir": my_session.name if my_session is not None else None,
             "stdout": str(my_target) if my_target is not None else None,
@@ -435,7 +443,7 @@ def arm_wire(
     )
     json_handler.log_operation("arm_wire", {"handle": handle, "session": session_name, "once": once})
 
-    feed_cursor_file = _feed.cursor_file_for(root)
+    feed_cursor_file = _feed.cursor_file_for(root, seat=seat)
     feed_source = _feed.feed_file(root)
     feed_state: dict | None = None
 
@@ -458,7 +466,7 @@ def arm_wire(
             logger.info("[watchdog.wire] replayed %s missed completions", replayed)
 
         # A death most likely waits at sign-in: the reboot that killed the monitor killed the old wire.
-        announced = _load_announced(_dead_cursor_file(root))
+        announced = _load_announced(_dead_cursor_file(root, seat))
         dead = _announce_dead(root, seat, announced)
         last_dead_check = time.monotonic()
 

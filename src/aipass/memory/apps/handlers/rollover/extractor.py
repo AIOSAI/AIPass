@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.8.0
+# Version: 0.9.0
 # Created: 2025-11-16
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
 Memory Extraction Handler
 """
 
+import copy
 from pathlib import Path
 from typing import Any, Dict, Optional
 from datetime import datetime
@@ -290,10 +291,34 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def commit_trimmed(file_path: Path, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """Write the trimmed file once its entries are stored; ``new_lines`` on success."""
-    if not isinstance(data, dict):
+def _apply_trim(fresh: Dict[str, Any], source: Dict[str, Any], trimmed: Dict[str, Any]) -> Dict[str, Any]:
+    """``fresh`` less exactly the entries the trim took from ``source``; every other edit since the read stands."""
+    for key, kept in trimmed.items():
+        before, now = source.get(key), fresh.get(key)
+        if isinstance(kept, list) and isinstance(before, list) and isinstance(now, list):
+            remaining = list(now)
+            for entry in before:
+                if entry not in kept and entry in remaining:
+                    remaining.remove(entry)
+            fresh[key] = remaining
+    return fresh
+
+
+def commit_trimmed(file_path: Path, data: Optional[Dict[str, Any]], source: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Write the trimmed file once its entries are stored; ``new_lines`` on success.
+
+    Storage takes seconds, and an owner may edit the file meanwhile: writing ``data`` then would put
+    back the image read at extraction and drop that edit. So the file is re-read here, and when it
+    moved since ``source`` was read, only the archived entries leave the fresh image.
+    """
+    if not isinstance(data, dict) or not isinstance(source, dict):
         return {"success": False, "error": "No trimmed data to write"}
+    fresh = _read_memory_file(file_path)
+    if fresh is None:
+        return {"success": False, "error": f"Failed to re-read {file_path.name} before the trim"}
+    if fresh != source:
+        logger.info(f"[extractor] {file_path} changed during storage; trimming the fresh image")
+        data = _apply_trim(fresh, source, data)
     try:
         _write_memory_file(file_path, data)
     except Exception as e:
@@ -318,7 +343,11 @@ def extract_items(file_path: Path) -> Dict[str, Any]:
     _ext_branch, _ext_ftype, _ext_file_limits = file_limits(config_loader.section("rollover"), file_path)
 
     if _ext_file_limits:
-        return _extract_items_v2(file_path, data)
+        source = copy.deepcopy(data)
+        result = _extract_items_v2(file_path, data)
+        if "trimmed" in result:
+            result["source"] = source
+        return result
 
     # Fail loud; never fall back to v1 line-count.
     logger.warning(
@@ -396,4 +425,5 @@ def extract_with_metadata(file_path: Path) -> Dict[str, Any]:
         "count": len(enriched),
         "old_lines": result.get("old_lines"),
         "trimmed": result.get("trimmed"),
+        "source": result.get("source"),
     }

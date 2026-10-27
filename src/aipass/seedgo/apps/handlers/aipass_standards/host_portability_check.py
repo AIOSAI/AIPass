@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_portability_check.py
 # Description: Host Portability Standards Checker Handler
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-09-12
-# Modified: 2026-10-24
+# Modified: 2026-10-27
 # =============================================
 
 """Host Portability Standards Checker Handler.
@@ -126,6 +126,15 @@ PASS_THRESHOLD = 75
 #: (PosixPath, PureWindowsPath, ...) carries its own _flavour on every Python.
 _FLAVOURLESS_BASES = frozenset({"Path", "PurePath"})
 _FLAVOUR_FIX = "below Python 3.12 Path.__new__ needs _flavour on the subclass (AttributeError on 3.10 and 3.11)"
+
+#: Arm G: (since, backport). shortcut: backported modules only; add a 3.14 module when a floor allows one.
+_VERSION_BOUND = {
+    "tomllib": ((3, 11), "tomli"),
+    "zoneinfo": ((3, 9), "backports.zoneinfo"),
+    "graphlib": ((3, 9), "graphlib_backport"),
+}
+_FLOOR = re.compile(r"""^requires-python\s*=\s*["']\s*>=\s*3\.(\d+)""", re.MULTILINE)
+_SCOPE_EDGES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
 #: Arm E: the two spellings a path can carry. RESOLVED passed through
 #: ``.resolve()`` / ``os.path.realpath`` (or a same-file helper that returns
@@ -916,6 +925,62 @@ def _unanswered_git_identity(tree: ast.Module) -> List[Tuple[int, str]]:
     return [(emptied[0], f"empties git's config, no {' or '.join(missing)} - {_IDENTITY_FIX}{', '.join(missing)}")]
 
 
+def _imported_modules(node: ast.AST) -> List[str]:
+    """The absolute module names an import statement loads."""
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+        return [node.module]
+    return []
+
+
+def _version_bound_imports(tree: ast.Module, floor: Tuple[int, int] | None) -> List[Tuple[int, str]]:
+    """An import of a stdlib module newer than the declared floor whose guard never imports its backport.
+
+    A degraded except branch runs only on the floor's CI lane; tests written on a newer seat pin the other answer.
+    """
+    if floor is None:
+        return []
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    violations: List[Tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        for name in _imported_modules(node):
+            since, backport = _VERSION_BOUND.get(name, (floor, ""))
+            if since <= floor:
+                continue
+            guard = parents.get(node)
+            while guard is not None and not isinstance(guard, (ast.Try, ast.If, *_SCOPE_EDGES)):
+                guard = parents.get(guard)
+            if isinstance(guard, (ast.Try, ast.If)) and any(
+                backport in _imported_modules(inner) for inner in ast.walk(guard)
+            ):
+                continue
+            violations.append(
+                (
+                    node.lineno,
+                    f"import {name} - stdlib from {since[0]}.{since[1]}, the declared floor is {floor[0]}.{floor[1]}: "
+                    f"fall back to `import {backport} as {name}` in the same try, so the floor's lane runs "
+                    "the answer every other lane tests",
+                )
+            )
+    return violations
+
+
+def _declared_floor(branch_root: Path) -> Tuple[int, int] | None:
+    """The nearest pyproject.toml's ``requires-python >=3.N``; None when none declares one.
+
+    An unreadable pyproject raises: a floor nobody could read is not a floor nobody declared."""
+    for folder in (branch_root, *branch_root.parents):
+        pyproject = folder / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+        match = _FLOOR.search(pyproject.read_text(encoding="utf-8"))
+        return (3, int(match.group(1))) if match else None
+    return None
+
+
 def _corpus_files(branch_root: Path, ignore_entries: list) -> List[Path]:
     """Every auditable .py file under apps/, tests/ and lib/."""
     files: List[Path] = []
@@ -943,8 +1008,10 @@ def _relative(path: Path, branch_root: Path) -> str:
         return path.as_posix()
 
 
-def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
-    """Every arm (A to F) over one file. Returns (violations, acquitted binary sites).
+def scan_file(file_path: str, floor: Tuple[int, int] | None = None) -> Tuple[List[Tuple[int, str]], int]:
+    """Every arm (A to G) over one file. Returns (violations, acquitted binary sites).
+
+    Arm G runs only with the branch's declared ``floor``.
 
     A file that cannot be read or parsed reports NOTHING: an unparseable file is ruff's business.
     """
@@ -969,6 +1036,7 @@ def scan_file(file_path: str) -> Tuple[List[Tuple[int, str]], int]:
     violations.extend(_flavourless_subclasses(tree))
     violations.extend(_mixed_spelling_comparisons(tree))
     violations.extend(_unanswered_git_identity(tree))
+    violations.extend(_version_bound_imports(tree, floor))
     violations.sort(key=lambda row: row[0])
     return violations, acquitted
 
@@ -993,7 +1061,7 @@ def _violation_items(rows: Iterable[Tuple[str, int, str]]) -> List[Dict]:
 
 
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
-    """Check a branch for host assumptions: Linux-only OS calls and a 3.12-only Path subclass."""
+    """Check a branch for host assumptions: Linux-only OS calls, a 3.12-only Path subclass, a stdlib import above the floor."""
     branch_root = Path(branch_path)
 
     if is_bypassed(branch_path, _BYPASS_KEY, bypass_rules=bypass_rules):
@@ -1005,6 +1073,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
 
     ignore_entries = load_ignore_entries(branch_root)
     files = _corpus_files(branch_root, ignore_entries)
+    floor = _declared_floor(branch_root.resolve())
     if not files:
         return _result(
             100,
@@ -1017,7 +1086,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> Dict:
     acquitted_total = 0
     for path in files:
         rel = _relative(path, branch_root)
-        violations, acquitted = scan_file(str(path))
+        violations, acquitted = scan_file(str(path), floor)
         acquitted_total += acquitted
         for lineno, detail in violations:
             if is_bypassed(rel, _BYPASS_KEY, lineno, bypass_rules):

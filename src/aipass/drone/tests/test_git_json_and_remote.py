@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
 # Description: The git read doors and their --json, remote, gh tiers, merge-main, the read twins and lock
-# Version: 1.0.7
+# Version: 1.0.8
 # Created: 2026-08-18
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
@@ -666,7 +666,8 @@ class TestGhPassthroughTiers:
             assert f"  {command} <write> " in owner_part
         assert "  gh issue list|view|status  drone @git issue list|view|status\n" in page
         gh_lines = [line for line in page.splitlines() if line.startswith(tuple(f"  {c} " for c in GH_SUBCOMMANDS))]
-        assert len(gh_lines) == 6
+        assert "  issue create|comment --repo AIOSAI/AIPass --body 'text'\n" in global_part
+        assert len(gh_lines) == 7
         assert all(len(line) <= 80 for line in gh_lines)
 
 

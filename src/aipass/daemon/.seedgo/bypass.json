@@ -55,13 +55,13 @@
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [147, 153],
+      "lines": [149, 155],
       "reason": "citizen_class_for (daemon, fleet green legs 2 and 3): None means 'unreadable' on every path that returns it (an unreadable .trinity or passport, a passport or identity that is not a dict); no passport can hold None, and an absent passport answers ''. The checker reads the guard returns as a success path, but they are the same answer for the same case. Callers (inbox sweep, rounds roster) leave a None citizen out."
     },
     {
       "file": "apps/handlers/schedule/discovery.py",
       "standard": "logged_fallback",
-      "lines": [258],
+      "lines": [270],
       "reason": "_load_schedule_file (daemon, fleet green leg 5): None means 'this schedule file cannot be used', for an unreadable file and a malformed one alike; the one caller, discover_jobs, skips that file with a warning naming it, so one bad file cannot stop the fleet's tick. A raise would stop discovery for every citizen."
     },
     {

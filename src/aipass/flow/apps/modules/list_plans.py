@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: list_plans.py
 # Description: PLAN listing module with filtering
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2025-11-21
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -100,10 +100,14 @@ def print_help():
     console.print("  closed    List closed plans only")
     console.print("  all       List all plans (open + closed)")
     console.print()
+    console.print(
+        "Lists the plans of the project you stand in; [cyan]all[/cyan] from the host seat lists every project."
+    )
+    console.print()
     console.print("[yellow]EXAMPLES:[/yellow]")
     console.print("  [dim]drone @flow list open[/dim]       # Open plans")
     console.print("  [dim]drone @flow list closed[/dim]     # Closed plans")
-    console.print("  [dim]drone @flow list all[/dim]        # Everything")
+    console.print("  [dim]drone @flow list all[/dim]        # Everything in your project")
     console.print()
     console.print()
 

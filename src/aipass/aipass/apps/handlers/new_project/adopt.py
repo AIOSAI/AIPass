@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adopt.py
 # Description: aipass adopt — bring an existing projects/ directory into AIPass
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-07-20
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -27,11 +27,15 @@ from aipass.aipass.apps.handlers.new_project import (
 from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
 from aipass.aipass.apps.handlers.init.bootstrap import (
     LINK_STATE_MISSING,
+    NAVMAP_REL,
+    OWNER_SEEDS,
     PREP_SKILL_REL,
     SKILLS_LINK_REL,
+    SWITCH_PAIR,
     _link_venv,
     _managed_manifest_entries,
     link_skills,
+    navmap_stub,
     shared_skills_state,
 )
 from aipass.aipass.shared import scaffold_content as sc
@@ -121,16 +125,18 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
     # A half-adopted tree keeps no registry, so a rerun is not refused as already adopted.
     try:
         aipass_dir = target / ".aipass"
+        _write_if_missing(target / NAVMAP_REL, navmap_stub(target, reg), dry_run=dry_run, planned=files)
+        for rel, content in OWNER_SEEDS:
+            _write_if_missing(target / rel, content(), dry_run=dry_run, planned=files)
         if aipass_home:
-            for tier_file in ("tier0_kernel.md", "tier1_navmap.md"):
-                src_path = Path(aipass_home) / ".aipass" / tier_file
-                if src_path.is_file():
-                    _write_if_missing(
-                        aipass_dir / tier_file,
-                        src_path.read_text(encoding="utf-8"),
-                        dry_run=dry_run,
-                        planned=files,
-                    )
+            kernel_src = Path(aipass_home) / ".aipass" / "tier0_kernel.md"
+            if kernel_src.is_file():
+                _write_if_missing(
+                    aipass_dir / "tier0_kernel.md",
+                    kernel_src.read_text(encoding="utf-8"),
+                    dry_run=dry_run,
+                    planned=files,
+                )
 
             hooks_template = Path(aipass_home) / ".aipass" / "project_hooks.json"
             if hooks_template.is_file():
@@ -142,8 +148,7 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
                 if not already_had_hooks and not dry_run:
                     _enroll_project(target)
 
-        for md_name in sm.SEED_FILES:
-            _write_if_missing(target / md_name, agents_md_seed(reg, aipass_home), dry_run=dry_run, planned=files)
+        _write_if_missing(target / "AGENTS.md", agents_md_seed(reg, aipass_home), dry_run=dry_run, planned=files)
 
         claude_dir = target / ".claude"
         _write_if_missing(claude_dir / "settings.json", _claude_settings(), dry_run=dry_run, planned=files)
@@ -158,6 +163,8 @@ def adopt_project(target: Path, *, no_agent: bool = False, dry_run: bool = False
             )
 
         _write_if_missing(target / PREP_SKILL_REL, sc.prep_skill_md(), dry_run=dry_run, planned=files)
+        for rel, content in SWITCH_PAIR:
+            _write_if_missing(target / rel, content(), dry_run=dry_run, planned=files)
         if shared_skills_state(target)["link"] == LINK_STATE_MISSING:
             note = None if dry_run else link_skills(target)
             notes.extend([note] if note else [])

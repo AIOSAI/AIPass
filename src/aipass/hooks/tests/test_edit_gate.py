@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py and its PreToolUse sibling settings_backup.py."""
@@ -867,12 +867,12 @@ class TestEditGateExternalProject:
             )
         assert result["exit_code"] == 0
 
-    def test_the_manager_row_writes_its_projects_unrowed_files_and_not_its_agents(self, registered_projects: dict):
-        """The owner's go, 2026-10-16 18:45: superseding DPLAN-0356 item 5 for files in no branch row."""
+    def test_the_manager_row_writes_its_projects_unrowed_files_and_its_agents(self, registered_projects: dict):
+        """The owner's rulings, 2026-10-16 (unrowed files) and 2026-10-26 (its citizens' branches)."""
         assert _write(registered_projects["vera_seat"], registered_projects["vera"] / "README.md")["exit_code"] == 0
-        agents = _write(registered_projects["vera_seat"], Path(registered_projects["writer"]) / "draft.md")
-        assert agents["exit_code"] == 2
-        assert "Cross-branch" in json.loads(agents["stdout"])["reason"]
+        assert (
+            _write(registered_projects["vera_seat"], Path(registered_projects["writer"]) / "draft.md")["exit_code"] == 0
+        )
 
     def test_a_nested_projects_manager_writes_its_root_and_app_tree(self, registered_projects: dict):
         baud = registered_projects["baud"]

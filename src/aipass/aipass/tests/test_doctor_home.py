@@ -1,18 +1,20 @@
 # =================== AIPass ====================
 # Name: test_doctor_home.py
-# Description: Tests for doctor's home, owner-seating, preflight, citizen-count and shared-skills rows
-# Version: 1.1.0
+# Description: Tests for doctor's home, owner-seating, preflight, citizen-count, shared-skills and shadow rows
+# Version: 1.5.0
 # Created: 2026-10-08
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
-"""Tests for apps/modules/doctor.py: the AIPASS_HOME rows, owner seating, preflight, the drone count, shared skills."""
+"""Tests for apps/modules/doctor.py: AIPASS_HOME rows, seating, preflight, drone count, skills, shadows, gitignore."""
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 import logging
 import os
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -22,6 +24,7 @@ from aipass.aipass.apps.handlers.ui.progress import (
     GLYPH_PASS,
     GLYPH_WARN,
 )
+from aipass.aipass.apps.handlers.structure_scan.structure_scanner import check_gitignore_coverage
 from aipass.aipass.apps.modules.doctor import (
     CheckResult,
     check_identity,
@@ -434,6 +437,62 @@ class TestHomeAgreement:
             rows = check_identity()
         return [r for r in rows if r.label in ("AIPASS_HOME split", "AIPASS_HOME pair")]
 
+    @staticmethod
+    def _run_at_registry(root, configured):
+        """The home rows when doctor stands at a registry root, Claude Code's tree stood in for."""
+        mod = "aipass.aipass.apps.modules.doctor"
+        registry = root / "PROJ_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        with (
+            patch(f"{mod}._find_registry", return_value=registry),
+            patch(f"{mod}._configured_aipass_home", return_value=configured),
+            patch(f"{mod}._check_global_aipass_home", return_value=[]),
+        ):
+            rows = check_identity()
+        return [r for r in rows if r.label in ("AIPASS_HOME", "AIPASS_HOME split", "AIPASS_HOME pair")]
+
+    @staticmethod
+    def _aipass_tree(path):
+        (path / "src" / "aipass").mkdir(parents=True)
+        return path
+
+    @staticmethod
+    def _external_project(path, names_home):
+        (path / ".claude").mkdir(parents=True)
+        settings = {"env": {"AIPASS_HOME": str(names_home)}}
+        (path / ".claude" / "settings.local.json").write_text(json.dumps(settings), encoding="utf-8")
+        return path
+
+    def test_an_external_project_on_the_global_tree_is_no_split(self, tmp_path) -> None:
+        tree = self._aipass_tree(tmp_path / "AIPass")
+        project = self._external_project(tmp_path / "Vera", tree)
+
+        rows = self._run_at_registry(project, str(tree))
+
+        assert [(r.label, r.glyph, r.detail) for r in rows] == [("AIPASS_HOME", GLYPH_PASS, str(tree))]
+
+    def test_an_external_project_on_another_tree_is_still_a_split(self, tmp_path) -> None:
+        tree = self._aipass_tree(tmp_path / "AIPass")
+        other = self._aipass_tree(tmp_path / "AIPass2")
+        project = self._external_project(tmp_path / "Vera", other)
+
+        rows = self._run_at_registry(project, str(tree))
+
+        (split,) = [r for r in rows if r.label == "AIPASS_HOME split"]
+        assert split.glyph == GLYPH_FAIL
+        assert str(other) in split.detail and str(tree) in split.detail
+
+    def test_an_aipass_tree_under_another_trees_settings_is_a_split(self, tmp_path) -> None:
+        tree = self._aipass_tree(tmp_path / "AIPass")
+        checkout = self._aipass_tree(tmp_path / "AIPass2")
+        self._external_project(checkout, tree)
+
+        rows = self._run_at_registry(checkout, str(tree))
+
+        (split,) = [r for r in rows if r.label == "AIPASS_HOME split"]
+        assert split.glyph == GLYPH_FAIL
+        assert str(checkout) in split.detail
+
     def test_split_brain_is_an_error(self, tmp_path) -> None:
         """Two different trees is a real fault, not an advisory."""
         a, b = tmp_path / "tree1", tmp_path / "tree2"
@@ -606,6 +665,8 @@ class TestSharedSkillsRows:
         fixes = [r.detail for r in self.printed["Scaffold"] if r.label == "skills fix"]
         assert fixes == [
             "Linked .claude/skills -> ../.agents/skills",
+            "Wrote .claude/commands/codex.md",
+            "Wrote .codex/skills/claude/SKILL.md",
             "Retired .claude/commands/prep.md -> prep(disabled).md: .agents/skills/prep/SKILL.md replaces it",
         ]
 
@@ -620,3 +681,237 @@ class TestSharedSkillsRows:
         assert legacy.read_text(encoding="utf-8") == "# my own prep\n"
         assert rows["legacy prep"].glyph == GLYPH_WARN
         assert "is edited, so it is yours and kept" in rows["legacy prep"].detail
+
+    def test_a_missing_switch_file_is_named_with_both_cures(self) -> None:
+        command = self.root / ".claude" / "commands" / "codex.md"
+        command.parent.mkdir(parents=True)
+        command.write_text(sc.codex_command_md(), encoding="utf-8")
+
+        row = self._rows()["provider switch"]
+
+        assert row.glyph == GLYPH_WARN
+        assert row.detail == "missing .codex/skills/claude/SKILL.md: the chat cannot switch CLI here"
+        assert row.remediation == f"Run: aipass doctor --fix, or 'aipass init update {self.root}'"
+
+    def test_fix_writes_the_missing_switch_file_and_leaves_an_edited_one(self) -> None:
+        skill = self.root / ".codex" / "skills" / "claude" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("# my own switch\n", encoding="utf-8")
+
+        rows = self._rows(fix=True)
+
+        assert (self.root / ".claude" / "commands" / "codex.md").read_text(encoding="utf-8") == sc.codex_command_md()
+        assert skill.read_text(encoding="utf-8") == "# my own switch\n"
+        assert rows["provider switch"].glyph == GLYPH_PASS
+
+
+class TestInstructionShadowRows:
+    """The Structure group's instruction shadow row and its --fix, through run_doctor; other groups answer nothing."""
+
+    @pytest.fixture(autouse=True)
+    def _every_other_edge(self, monkeypatch, tmp_path) -> None:
+        mod = "aipass.aipass.apps.modules.doctor"
+        for name in ("_check_system", "check_identity", "_check_community", "_check_scaffold", "_check_sandbox"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.fix_provider_settings", lambda *_a, **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_wire_verify", lambda: [])
+        monkeypatch.setattr(f"{mod}._fix_owner_seating", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_owner_seating", lambda: [])
+        monkeypatch.setattr(f"{mod}._fix_shared_skills", lambda: [])
+        monkeypatch.setattr(f"{mod}._detect_aipass_home", lambda: None)
+        self.root = tmp_path / "proj"
+        (self.root / ".claude").mkdir(parents=True)
+        (self.root / "PROJ_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
+        (self.root / "AGENTS.md").write_text("# agents\n", encoding="utf-8")
+        monkeypatch.chdir(self.root)
+        monkeypatch.setattr(f"{mod}._shadow_root", lambda: self.root)
+        self.printed: dict = {}
+
+        def _record(groups):
+            self.printed.update(groups)
+            return 0, 0, 0
+
+        monkeypatch.setattr(f"{mod}._print_doctor_groups", _record)
+
+    def _write(self, rel: str, text: str) -> None:
+        (self.root / rel).write_text(text, encoding="utf-8")
+
+    def _rows(self, **kwargs) -> dict:
+        run_doctor(**kwargs)
+        return {r.label: r for r in self.printed["Structure"] if "shadow" in r.label}
+
+    def test_a_root_claude_md_with_other_text_fails_naming_the_rename(self) -> None:
+        self._write("CLAUDE.md", "# old seed\n")
+
+        row = self._rows()["instruction shadow: CLAUDE.md"]
+
+        shadow = self.root / "CLAUDE.md"
+        assert row.glyph == GLYPH_FAIL
+        assert row.detail == "Claude Code reads it, not AGENTS.md; texts differ, copying it over is the owner's call"
+        assert row.remediation == f"mv '{shadow}' '{shadow}(disabled)', or aipass doctor --fix (renames only)"
+
+    def test_a_dot_claude_copy_of_agents_md_fails_and_says_the_texts_are_equal(self) -> None:
+        self._write(".claude/CLAUDE.md", "# agents\n")
+
+        row = self._rows()["instruction shadow: .claude/CLAUDE.md"]
+
+        assert row.glyph == GLYPH_FAIL
+        assert row.detail == "Claude Code reads it, not AGENTS.md; texts equal, the rename is the whole fix"
+
+    def test_only_disabled_claude_files_pass(self) -> None:
+        self._write("CLAUDE.md(disabled)", "# old seed\n")
+
+        rows = self._rows()
+
+        assert list(rows) == ["instruction shadow"]
+        assert rows["instruction shadow"].glyph == GLYPH_PASS
+
+    def test_a_claude_md_with_no_agents_md_beside_it_is_no_shadow_and_is_left(self) -> None:
+        (self.root / "AGENTS.md").rename(self.root / "AGENTS.md(disabled)")
+        self._write("CLAUDE.md", "# the only file\n")
+
+        rows = self._rows(fix=True)
+
+        assert rows["instruction shadow"].glyph == GLYPH_PASS
+        assert (self.root / "CLAUDE.md").read_text(encoding="utf-8") == "# the only file\n"
+
+    def test_fix_renames_every_shadow_and_a_second_run_passes(self) -> None:
+        self._write("CLAUDE.md", "# old seed\n")
+        self._write(".claude/CLAUDE.local.md", "# local\n")
+
+        fixed = self._rows(fix=True)
+        again = self._rows()
+
+        assert not (self.root / "CLAUDE.md").exists()
+        assert (self.root / "CLAUDE.md(disabled)").read_text(encoding="utf-8") == "# old seed\n"
+        assert (self.root / ".claude" / "CLAUDE.local.md(disabled)").read_text(encoding="utf-8") == "# local\n"
+        assert (self.root / "AGENTS.md").read_text(encoding="utf-8") == "# agents\n"
+        assert "instruction shadow: CLAUDE.md" not in fixed
+        assert fixed["instruction shadow"].glyph == GLYPH_PASS
+        assert fixed["shadow fix"].glyph == GLYPH_PASS
+        assert list(again) == ["instruction shadow"]
+        assert again["instruction shadow"].glyph == GLYPH_PASS
+
+    def test_fix_reports_each_rename(self) -> None:
+        self._write("CLAUDE.md", "# old seed\n")
+        self._write(".claude/CLAUDE.md", "# culture\n")
+
+        run_doctor(fix=True)
+
+        assert [r.detail for r in self.printed["Structure"] if r.label == "shadow fix"] == [
+            "Renamed CLAUDE.md -> CLAUDE.md(disabled)",
+            "Renamed .claude/CLAUDE.md -> CLAUDE.md(disabled)",
+        ]
+
+    def test_fix_never_overwrites_an_existing_disabled_file(self) -> None:
+        self._write("CLAUDE.md", "# newer\n")
+        self._write("CLAUDE.md(disabled)", "# older\n")
+
+        rows = self._rows(fix=True)
+
+        assert (self.root / "CLAUDE.md").read_text(encoding="utf-8") == "# newer\n"
+        assert (self.root / "CLAUDE.md(disabled)").read_text(encoding="utf-8") == "# older\n"
+        assert rows["instruction shadow: CLAUDE.md"].glyph == GLYPH_FAIL
+        assert rows["shadow fix"].glyph == GLYPH_WARN
+        assert rows["shadow fix"].detail == "Left CLAUDE.md: CLAUDE.md(disabled) already exists beside it"
+
+    def test_fix_leaves_the_claude_files_of_a_root_that_is_home(self) -> None:
+        self._write(".claude/CLAUDE.md", "# the user's own memory\n")
+
+        with _home_at(self.root):
+            rows = self._rows(fix=True)
+
+        assert (self.root / ".claude" / "CLAUDE.md").read_text(encoding="utf-8") == "# the user's own memory\n"
+        assert rows["shadow fix"].detail == (
+            "Left .claude/CLAUDE.md: the project root holds $HOME, whose CLAUDE files are the user's"
+        )
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
+    def test_fix_leaves_a_claude_folder_that_links_outside_the_root(self, tmp_path) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "CLAUDE.md").write_text("# not this project's\n", encoding="utf-8")
+        (self.root / ".claude").rename(self.root / "unused")
+        (self.root / ".claude").symlink_to(elsewhere, target_is_directory=True)
+
+        rows = self._rows(fix=True)
+
+        assert (elsewhere / "CLAUDE.md").read_text(encoding="utf-8") == "# not this project's\n"
+        assert rows["shadow fix"].detail == "Left .claude/CLAUDE.md: its folder resolves outside the project root"
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need a Windows privilege")
+    def test_a_claude_md_linked_to_agents_md_is_one_file_and_passes(self) -> None:
+        (self.root / "CLAUDE.md").symlink_to("AGENTS.md")
+
+        rows = self._rows()
+
+        assert list(rows) == ["instruction shadow"]
+        assert rows["instruction shadow"].glyph == GLYPH_PASS
+
+
+class TestGitignoreCoverageRows:
+    """The Structure group's gitignore coverage row, through run_doctor in a real repo under tmp_path."""
+
+    root: Path
+    printed: dict
+    _every_other_edge = TestInstructionShadowRows._every_other_edge
+    _write = TestInstructionShadowRows._write
+
+    def _track(self, *rels: str) -> None:
+        for rel in rels:
+            (self.root / rel).parent.mkdir(parents=True, exist_ok=True)
+            self._write(rel, "state\n")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-f", *rels], cwd=self.root, check=True)
+
+    def _rows(self, **kwargs) -> dict:
+        run_doctor(**kwargs)
+        return {r.label: r for r in self.printed["Structure"] if r.label.startswith("gitignore coverage")}
+
+    def test_tracked_runtime_folders_and_the_registry_fail_one_row_each_with_the_untrack_line(self) -> None:
+        self._track(".chroma/db.sqlite3", ".chroma/idx/a.bin", "src/p/vera/docs.local/n.md", "src/p/vera/README.md")
+        subprocess.run(["git", "add", "-f", "PROJ_REGISTRY.json"], cwd=self.root, check=True)
+
+        rows = self._rows(fix=True)
+
+        assert sorted(rows) == [
+            "gitignore coverage: .chroma",
+            "gitignore coverage: PROJ_REGISTRY.json",
+            "gitignore coverage: src/p/vera/docs.local",
+        ]
+        chroma = rows["gitignore coverage: .chroma"]
+        assert (chroma.glyph, chroma.detail) == (GLYPH_FAIL, "2 tracked file(s) one installation writes")
+        assert chroma.remediation.startswith("drone @git untrack --recursive .chroma (files stay on disk)")
+        assert rows["gitignore coverage: PROJ_REGISTRY.json"].remediation.startswith("drone @git untrack PROJ_")
+        assert (self.root / ".chroma" / "db.sqlite3").is_file()
+
+    def test_a_tracked_file_gone_from_disk_and_a_project_file_pass(self) -> None:
+        self._track("dropbox/gone.md", "src/p/vera/apps/vera.py")
+        (self.root / "dropbox" / "gone.md").rename(self.root / "gone.md(disabled)")
+
+        rows = self._rows()
+
+        assert list(rows) == ["gitignore coverage"]
+        assert (rows["gitignore coverage"].glyph, rows["gitignore coverage"].detail) == (
+            GLYPH_PASS,
+            "no runtime file tracked",
+        )
+
+    def test_the_aipass_source_tree_is_not_measured_its_templates_ship_tracked(self) -> None:
+        self._track("src/aipass/spawn/templates/citizen/dropbox/README.md", "pyproject.toml")
+
+        rows = self._rows()
+
+        assert list(rows) == ["gitignore coverage"]
+        assert rows["gitignore coverage"].detail.startswith("not measured: the AIPass source tree")
+
+    def test_a_folder_that_is_no_repository_passes_with_nothing_tracked(self) -> None:
+        rows = self._rows()
+
+        assert rows["gitignore coverage"].detail == "not a git repository: nothing tracked"
+        assert check_gitignore_coverage(self.root) == [
+            ("gitignore coverage", GLYPH_PASS, "not a git repository: nothing tracked", "")
+        ]

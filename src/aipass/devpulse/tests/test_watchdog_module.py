@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog module router
 # Version: 1.1.2
 # Created: 2026-04-14
-# Modified: 2026-10-22
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
@@ -24,6 +24,7 @@ import pytest
 
 from aipass.cli.apps.modules import display as cli_display
 from aipass.devpulse.apps.handlers.watchdog import dispatches as wd_dispatches
+from aipass.devpulse.apps.handlers.watchdog import presenter as wd_presenter
 from aipass.devpulse.apps.handlers.watchdog import registry as wd_registry
 from aipass.devpulse.apps.handlers.watchdog import wire as wd_wire
 from aipass.devpulse.apps.modules import watchdog as wd_mod
@@ -210,6 +211,21 @@ def _serve_registry(monkeypatch, fake_registry, fake_timer=None):
         raise wd_dispatches.RegisterUnavailable("no register in this test")
 
     monkeypatch.setattr(wd_dispatches, "outstanding", _unavailable)
+
+
+def test_status_counts_only_the_callers_seats_dispatches(capsys, monkeypatch):
+    """A fleet-wide count tells a seat it has work out when it does not (issue #810, @vera's seat)."""
+    monkeypatch.setattr(wd_dispatches, "seat_email", lambda repo_root=None: "@vera")
+    monkeypatch.setattr(
+        wd_dispatches,
+        "outstanding",
+        lambda repo_root=None: [{"sender": "@devpulse", "target": "@aipass"}, {"sender": "@vera", "target": "@writer"}],
+    )
+
+    wd_presenter.print_delivery_lag()
+
+    out = capsys.readouterr().out
+    assert "outstanding: 1 (@writer)" in out and "@aipass" not in out
 
 
 def test_cancel_requires_handle(capsys):

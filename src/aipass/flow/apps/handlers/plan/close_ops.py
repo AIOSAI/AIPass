@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-03-08
-# Modified: 2026-10-24
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -34,6 +34,7 @@ from aipass.flow.apps.handlers.plan.close_helpers import (
     _spawn_background_runner,
     _cleanup_orphaned_plan,
 )
+from aipass.flow.apps.handlers.plan.project_scope import archive_dir_for
 
 MODULE_NAME = "close_plan"
 
@@ -352,7 +353,8 @@ def close_plan_impl(
 
         messages.append({"type": "step", "text": "[3/5] Archiving plan..."})
         try:
-            if plan_file.exists() and plan_file.parent == PROCESSED_PLANS_DIR:
+            already_archived = plan_file.parent == archive_dir_for(plan_file, PROCESSED_PLANS_DIR)
+            if plan_file.exists() and already_archived:
                 archive_success = True
                 logger.info(f"[{MODULE_NAME}] {plan_label} already in processed_plans/, skipping move")
                 messages.append({"type": "dim", "text": "  Already in processed_plans/ — skipping move"})
@@ -371,7 +373,7 @@ def close_plan_impl(
                 if not saved:
                     warn = "  Archived, but could not save the registry: the row reads unarchived"
                     messages.append({"type": "warning", "text": warn})
-                if plan_file.parent != PROCESSED_PLANS_DIR:
+                if not already_archived:
                     logger.info(f"[{MODULE_NAME}] Archived {plan_label} to processed_plans")
                     messages.append({"type": "dim", "text": "  Plan archived to processed_plans/"})
             else:
@@ -435,7 +437,7 @@ def close_plan_impl(
             messages.append({"type": "step", "text": "[VERIFY] Checking physical state..."})
             try:
                 original_source = Path(plan_info.get("file_path", ""))
-                dest = PROCESSED_PLANS_DIR / original_source.name
+                dest = archive_dir_for(original_source, PROCESSED_PLANS_DIR) / original_source.name
                 if dest.exists():
                     messages.append({"type": "dim", "text": f"  [OK] File in processed_plans/: {original_source.name}"})
                 else:

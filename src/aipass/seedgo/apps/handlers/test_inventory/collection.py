@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: collection.py
 # Description: the corpus definition - which test functions the inventory counts
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-01
-# Modified: 2026-10-24
+# Modified: 2026-10-27
 # =============================================
 
 """
@@ -18,7 +18,6 @@ the defaults are used and recorded."""
 
 import ast
 import fnmatch
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -136,14 +135,18 @@ def _ini_list(value) -> Tuple[str, ...]:
 
 def _load_pytest_table(config: Path) -> Tuple[dict, str, str]:
     """The `[tool.pytest.ini_options]` table, its source, and any caveat."""
-    if sys.version_info < (3, 11):
-        note = (
-            f"tomllib is unavailable on this interpreter, so {config.name} was NOT read "
-            f"and pytest's own defaults are in force; the corpus may differ from what CI collects"
-        )
-        logger.warning(f"[INVENTORY] {note}")
-        return {}, "pytest defaults", note
-    import tomllib
+    try:
+        import tomllib  # type: ignore[import-not-found]  # stdlib 3.11+, absent on 3.10
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ModuleNotFoundError:
+            note = (
+                f"neither tomllib nor tomli is available on this interpreter, so {config.name} was NOT read "
+                f"and pytest's own defaults are in force; the corpus may differ from what CI collects"
+            )
+            logger.warning(f"[INVENTORY] {note}")
+            return {}, "pytest defaults", note
 
     if not config.is_file():
         return {}, "pytest defaults", f"{config} does not exist, so pytest's own defaults are in force"

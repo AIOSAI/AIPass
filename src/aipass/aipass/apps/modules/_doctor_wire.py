@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: _doctor_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.3.0
+# Version: 1.5.1
 # Created: 2026-05-08
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -13,6 +13,7 @@ doctor_wire — auto-wire provider settings
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -34,11 +35,16 @@ from aipass.aipass.apps.handlers.provider_wire import (
     SettingsGap,
     SettingsPlan,
     apply_settings_plan,
+    CODEX_PINS,
+    codex_config_path,
     codex_hooks_document,
     codex_hooks_path,
+    codex_trust_keys,
     manifest_settings,
     plan_codex_hooks,
     plan_wire_provider,
+    read_codex_config,
+    repo_codex_double_fire,
     settings_diff,
     settings_gaps,
 )
@@ -115,10 +121,42 @@ def check_settings_scalars(
 
 
 CODEX_HOOKS_LABEL = "codex hooks"
+CODEX_TRUST_LABEL = "codex trust"
+CODEX_DOUBLE_FIRE_LABEL = "codex double-fire"
+TRUST_ALL = "Run `codex` once and choose 'Trust all and continue'"
 
 
 def check_codex_hooks(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
-    """One row: does the repo's .codex/hooks.json hold exactly what cli.codex makes? None without rows."""
+    """The user-level hooks file, its trust, and a repo file firing the bridge twice. None without rows."""
+    rows = _codex_hooks_rows(manifest, manifest_path)
+    double = repo_codex_double_fire(manifest_path) if rows else None
+    if double is not None:
+        detail = f"Codex hooks double-fire: {double} still holds bridge rows"
+        rows.append(
+            SettingsCheckResult(
+                CODEX_DOUBLE_FIRE_LABEL, GLYPH_FAIL, detail, "Remove them by hand: --fix leaves the project's file"
+            )
+        )
+    return rows
+
+
+def _codex_trust_row(wanted: dict) -> SettingsCheckResult:
+    """Does config.toml hold a trusted_hash for every AIPass row of the user-level file?"""
+    config, problem = read_codex_config(codex_config_path())
+    if problem:
+        return SettingsCheckResult(CODEX_TRUST_LABEL, GLYPH_WARN, problem, TRUST_ALL)
+    state = config.get("hooks", {}).get("state", {})
+    keys = codex_trust_keys(codex_hooks_path(), wanted)
+    untrusted = [k for k in keys if "trusted_hash" not in (state.get(k) or {})]
+    if untrusted:
+        return SettingsCheckResult(
+            CODEX_TRUST_LABEL, GLYPH_WARN, f"Codex hooks not trusted ({len(untrusted)} of {len(keys)} rows)", TRUST_ALL
+        )
+    return SettingsCheckResult(CODEX_TRUST_LABEL, GLYPH_PASS, f"{len(keys)} AIPass rows trusted", "")
+
+
+def _codex_hooks_rows(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
+    """Does the user-level hooks file hold cli.codex's rows first, and are they trusted?"""
     wanted = codex_hooks_document(manifest)
     if wanted is None:
         return []
@@ -129,10 +167,108 @@ def check_codex_hooks(manifest: dict, manifest_path: Path) -> List[SettingsCheck
         logger.warning("[doctor] codex hooks unreadable: %s", exc)
         return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_WARN, str(exc), f"Run: {WIRE_COMMAND}")]
     if plan is None:
-        return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_PASS, f"{count} Codex hooks match cli.codex", "")]
+        return [
+            SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_PASS, f"{count} Codex hooks match cli.codex", ""),
+            _codex_trust_row(wanted),
+        ]
     state = "differs from" if plan.before else "missing, wanted by"
-    detail = f"{codex_hooks_path(manifest_path)} {state} cli.codex ({count} hooks)"
+    detail = f"{codex_hooks_path()} {state} cli.codex ({count} hooks)"
     return [SettingsCheckResult(CODEX_HOOKS_LABEL, GLYPH_WARN, detail, f"Run: {WIRE_COMMAND}")]
+
+
+CODEX_BINARY_LABEL = "codex binary"
+CODEX_LOGIN_LABEL = "codex login"
+CODEX_MODEL_LABEL = "codex model"
+CODEX_PINS_LABEL = "codex pins"
+# Seams: the suite's conftest makes codex absent, so no test runs the real binary.
+_codex_which = shutil.which
+_codex_run = subprocess.run
+
+
+def check_codex_side(manifest: dict, manifest_path: Path) -> List[SettingsCheckResult]:
+    """The codex hooks row, then Codex's binary, login, model and config pins."""
+    rows = check_codex_hooks(manifest, manifest_path)
+    return rows + check_codex_cli(codex_config_path()) if rows else rows
+
+
+def _codex_proc(args: List[str]) -> Optional[subprocess.CompletedProcess]:
+    """Run one read-only codex verb; None when it could not run at all."""
+    try:
+        return _codex_run(args, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("[doctor] %s failed: %s", " ".join(args), exc)
+        return None
+
+
+def _first_line(proc: Optional[subprocess.CompletedProcess]) -> str:
+    text = "" if proc is None else (proc.stdout or proc.stderr or "").strip()
+    return text.splitlines()[0] if text else "no output"
+
+
+def check_codex_cli(config_path: Path) -> List[SettingsCheckResult]:
+    """Codex's binary, login, model and config pins. Read-only: config.toml is the owner's to edit."""
+    codex = _codex_which("codex")
+    if not codex:
+        return [
+            SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_PASS, "not on PATH — Codex is optional, rows skipped", "")
+        ]
+    version = _codex_proc([codex, "--version"])
+    if version is None or version.returncode != 0:
+        rows = [SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_WARN, f"{codex}: --version failed", "Reinstall Codex")]
+    else:
+        rows = [SettingsCheckResult(CODEX_BINARY_LABEL, GLYPH_PASS, _first_line(version), "")]
+    login = _codex_proc([codex, "login", "status"])
+    if login is not None and login.returncode == 0:
+        rows.append(SettingsCheckResult(CODEX_LOGIN_LABEL, GLYPH_PASS, _first_line(login), ""))
+    else:
+        rows.append(SettingsCheckResult(CODEX_LOGIN_LABEL, GLYPH_WARN, _first_line(login), "Run: codex login"))
+    config, problem = read_codex_config(config_path)
+    rows.append(_codex_model_row(codex, config, problem, config_path))
+    rows.extend(_codex_pin_rows(config, problem, config_path))
+    return rows
+
+
+def _codex_model_row(codex: str, config: dict, problem: str, path: Path) -> SettingsCheckResult:
+    """Is the configured model in the catalog `codex debug models` fetches for this login?"""
+    if problem:
+        return SettingsCheckResult(CODEX_MODEL_LABEL, GLYPH_WARN, problem, "")
+    model = config.get("model")
+    if not model:
+        return SettingsCheckResult(CODEX_MODEL_LABEL, GLYPH_PASS, "none set — Codex's default", "")
+    proc = _codex_proc([codex, "debug", "models"])
+    try:
+        catalog = json.loads(proc.stdout)["models"] if proc is not None and proc.returncode == 0 else None
+        slugs = {m["slug"]: m.get("visibility") for m in catalog} if catalog is not None else None
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning("[doctor] codex model catalog unreadable: %s", exc)
+        slugs = None
+    if slugs is None:
+        return SettingsCheckResult(CODEX_MODEL_LABEL, GLYPH_WARN, f"{model}: model catalog unreadable", "")
+    if model in slugs:
+        return SettingsCheckResult(CODEX_MODEL_LABEL, GLYPH_PASS, f"{model} in this login's catalog", "")
+    listed = ", ".join(slug for slug, shown in slugs.items() if shown == "list")
+    fix = f"Set model in {path} by hand to one of: {listed}"
+    return SettingsCheckResult(CODEX_MODEL_LABEL, GLYPH_WARN, f"{model} not in this login's catalog", fix)
+
+
+def _codex_pin_rows(config: dict, problem: str, path: Path) -> List[SettingsCheckResult]:
+    """One PASS row when every pin reads false; else one WARN per pin, its fix the line to add by hand."""
+    if problem:
+        return [SettingsCheckResult(CODEX_PINS_LABEL, GLYPH_WARN, problem, "")]
+    rows = []
+    for keys, table in CODEX_PINS:
+        value: Any = config
+        for key in keys:
+            value = value.get(key) if isinstance(value, dict) else None
+        if value is False:
+            continue
+        name = ".".join(keys)
+        detail = f"{name} missing" if value is None else f"{name} is {json.dumps(value)}"
+        where = f"under {table}" if table else "above the first [table]"
+        rows.append(
+            SettingsCheckResult(CODEX_PINS_LABEL, GLYPH_WARN, detail, f"Add to {path} {where}: {keys[-1]} = false")
+        )
+    return rows or [SettingsCheckResult(CODEX_PINS_LABEL, GLYPH_PASS, f"{len(CODEX_PINS)} config pins set", "")]
 
 
 SETTINGS_FIX_LABEL = "settings fix"

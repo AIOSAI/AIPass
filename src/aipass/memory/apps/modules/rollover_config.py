@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover_config.py
 # Description: The `config` verb surface over rollover limits - get / set / set-default
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -99,12 +99,12 @@ def _handle_config(args: List[str]) -> bool:
 def _resolve_branch(raw: str, ctx: _Json) -> str | None:
     """Match *raw* against the registry case-insensitively; the lowercase key, or None after refusing.
 
-    The registry carries uppercase names (BACKUP, DAEMON) while per_branch keys are lowercase.
+    read_scope, not the write scope: config writes only our own file, so declared externals resolve.
     """
     name = raw[1:] if raw.startswith("@") else raw
 
     try:
-        branches = detector._read_registry()
+        branches = detector.read_scope()
     except Exception as exc:
         logger.warning(f"[rollover] Failed to read registry: {exc}")
         _refuse(ctx, f"Failed to read registry: {exc}")
@@ -400,7 +400,7 @@ def print_introspection() -> None:
 
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/json/[/cyan]     [dim]config_loader.py[/dim]")
-    console.print("  [cyan]handlers/monitor/[/cyan]  [dim]detector.py (registry — branch names)[/dim]")
+    console.print("  [cyan]handlers/monitor/[/cyan]  [dim]detector.py (read scope — branch names)[/dim]")
     console.print()
 
     console.print("[yellow]Subcommands:[/yellow]")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
 # Description: Tests for shared/project_home.py — instruction-file ancestor fence helpers
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-07-31
-# Modified: 2026-10-21
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for shared/project_home.py and the instruction-file ancestor-fence helpers it drives."""
@@ -73,7 +73,7 @@ def test_claude_local_settings_default_omits_excludes(tmp_path):
     """nested=False (the default) — no claudeMdExcludes key at all."""
     home = str(tmp_path / "AIPass")
     data = json.loads(claude_local_settings(home))
-    assert data == {"env": {"AIPASS_HOME": home}}
+    assert data == {"env": {"AIPASS_HOME": home}, "autoCompactWindow": 350000}
     assert "claudeMdExcludes" not in data
 
 
@@ -185,14 +185,24 @@ def test_merge_local_settings_no_excludes_key_when_neither_side_has_any(tmp_path
     assert "claudeMdExcludes" not in merged
 
 
-def test_merge_local_settings_empty_existing(tmp_path):
-    """An empty existing dict (e.g. unparseable file rebuilt to {}) is filled entirely from generated."""
+def test_merge_local_settings_empty_existing_gets_env_and_fence_but_no_compaction_default(tmp_path):
+    """An empty existing dict (e.g. unparseable file rebuilt to {}) gets env and fence; the compaction
+    default is a new file's only, so a merge never adds it."""
     home = str(tmp_path / "AIPass")
     generated = json.loads(claude_local_settings(home, nested=True))
 
     merged = merge_local_settings({}, generated)
 
-    assert merged == generated
+    assert merged == {key: value for key, value in generated.items() if key != "autoCompactWindow"}
+
+
+def test_merge_local_settings_keeps_the_owners_compaction_window(tmp_path):
+    home = str(tmp_path / "AIPass")
+    generated = json.loads(claude_local_settings(home))
+
+    merged = merge_local_settings({"autoCompactWindow": 200000}, generated)
+
+    assert merged["autoCompactWindow"] == 200000
 
 
 def _make_nested(projects_dir: Path, name: str, registry: bool = True) -> Path:

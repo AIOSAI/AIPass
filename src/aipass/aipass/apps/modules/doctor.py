@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.7.0
+# Version: 1.11.0
 # Created: 2026-04-16
-# Modified: 2026-10-25
+# Modified: 2026-10-27
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -45,8 +45,11 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     check_placement,
     check_pyproject,
     check_registry_consistency,
+    check_gitignore_coverage,
     check_root_artifacts,
     detect_pollution,
+    disable_shadows,
+    find_instruction_shadows,
     find_project_root,
     scan_agents,
 )
@@ -56,7 +59,7 @@ from aipass.aipass.apps.modules._doctor_fix import (
 )
 from aipass.aipass.apps.modules._doctor_wire import (
     _prompt_auto_wire as prompt_auto_wire,
-    check_codex_hooks,
+    check_codex_side,
     check_settings_scalars,
     check_wire_verify,
     fix_provider_settings,
@@ -340,7 +343,7 @@ def check_identity() -> List[CheckResult]:
 
     reg_path = _find_registry()
     if reg_path:
-        active_home = str(reg_path.parent)
+        active_home = _tree_in_use(reg_path.parent)
         results.append(CheckResult("AIPASS_HOME", GLYPH_PASS, active_home, ""))
     else:
         active_home = os.environ.get("AIPASS_HOME", "")
@@ -575,7 +578,7 @@ def check_provider_manifest(
 
     settings_rows, missing_settings = check_settings_scalars(manifest, settings_path)
     results.extend(CheckResult(*row) for row in settings_rows)
-    results.extend(CheckResult(*row) for row in check_codex_hooks(manifest, manifest_path))
+    results.extend(CheckResult(*row) for row in check_codex_side(manifest, manifest_path))
 
     # Gate on what the wire verb would actually change, not on the glyphs: a settings key
     # the user set to their own value warns forever and must never trigger the prompt.
@@ -784,7 +787,6 @@ def _check_community() -> List[CheckResult]:
 def _check_structure() -> List[CheckResult]:
     """Run Structure group checks — agent placement, pollution, registry consistency."""
     results: List[CheckResult] = []
-
     project_root = find_project_root(Path.cwd())
     if project_root is None:
         results.append(
@@ -830,7 +832,6 @@ def _check_structure() -> List[CheckResult]:
             )
     else:
         results.append(CheckResult("pollution", GLYPH_PASS, "no duplicates", ""))
-
     reg_path = _discover_registry(start_path=project_root)
     if reg_path and reg_path.exists():
         reg_issues = check_registry_consistency(reg_path, agents, project_root=project_root)
@@ -879,7 +880,35 @@ def _check_structure() -> List[CheckResult]:
         else:
             results.append(CheckResult("instruction fence", GLYPH_PASS, "all nested projects fenced", ""))
 
+    results.extend(_check_instruction_shadow(project_root))
+    results.extend(CheckResult(*row) for row in check_gitignore_coverage(project_root))
     return results
+
+
+def _shadow_root() -> Optional[Path]:
+    """The project doctor stands in: the one root --fix renames shadows under."""
+    return find_project_root(Path.cwd())
+
+
+def _check_instruction_shadow(project_root: Path) -> List[CheckResult]:
+    """A live CLAUDE file beside AGENTS.md: Claude Code reads it and never sees AGENTS.md."""
+    rows: List[CheckResult] = []
+    for shadow in find_instruction_shadows(project_root):
+        agents = shadow.agents_path.relative_to(project_root).as_posix()
+        texts = "equal, the rename is the whole fix" if shadow.equal else "differ, copying it over is the owner's call"
+        label = f"instruction shadow: {shadow.path.relative_to(project_root).as_posix()}"
+        cure = f"mv '{shadow.path}' '{shadow.path}(disabled)', or {_FIX_COMMAND} (renames only)"
+        rows.append(CheckResult(label, GLYPH_FAIL, f"Claude Code reads it, not {agents}; texts {texts}", cure))
+    return rows or [CheckResult("instruction shadow", GLYPH_PASS, "no live CLAUDE file beside AGENTS.md", "")]
+
+
+def _fix_instruction_shadow() -> List[CheckResult]:
+    """--fix: rename each shadow to '(disabled)' beside it; the rechecked rows, then one row per action."""
+    root = _shadow_root()
+    if root is None or not (actions := disable_shadows(root)):
+        return []
+    fixed = [CheckResult("shadow fix", GLYPH_PASS if ok else GLYPH_WARN, action, "") for ok, action in actions]
+    return _check_instruction_shadow(root) + fixed
 
 
 def _check_sandbox() -> List[CheckResult]:
@@ -1077,7 +1106,28 @@ def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[Chec
     ]
 
 
-_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "skills fix")
+def _tree_in_use(root: Path) -> str:
+    """The AIPass tree a session at the registry root *root* runs on.
+
+    *root* itself when it is an AIPass tree. An external project keeps its own registry but runs
+    on the tree its .claude settings name (local first); *root* when they name none."""
+    if (root / "src" / "aipass").is_dir():
+        return str(root)
+    for name in ("settings.local.json", "settings.json"):
+        path = root / ".claude" / name
+        if not path.is_file():
+            continue
+        try:
+            named = json.loads(path.read_text(encoding="utf-8")).get("env", {}).get("AIPASS_HOME", "")
+        except (json.JSONDecodeError, OSError, AttributeError) as exc:
+            logger.warning("[doctor] project settings unreadable for AIPASS_HOME: %s: %s", path, exc)
+            continue
+        if named:
+            return str(named)
+    return str(root)
+
+
+_SKILL_ROW_LABELS = ("shared skills", "skills link", "legacy prep", "provider switch", "skills fix")
 _FIX_COMMAND = "aipass doctor --fix"
 
 
@@ -1122,11 +1172,19 @@ def _check_shared_skills(root: Path) -> List[CheckResult]:
     elif state["legacy_prep"] == "edited":
         detail = f"{bs.LEGACY_PREP_REL} is edited, so it is yours and kept: /prep is offered twice"
         rows.append(CheckResult("legacy prep", GLYPH_WARN, detail, f"Fold your edits into {bs.PREP_SKILL_REL}"))
+
+    if state["switch_missing"]:
+        detail = f"missing {', '.join(state['switch_missing'])}: the chat cannot switch CLI here"
+        cure = f"{fix}, or 'aipass init update {root}'"
+        rows.append(CheckResult("provider switch", GLYPH_WARN, detail, cure))
+    else:
+        detail = "/codex and $claude present (" + ", ".join(rel for rel, _ in bs.SWITCH_PAIR) + ")"
+        rows.append(CheckResult("provider switch", GLYPH_PASS, detail, ""))
     return rows
 
 
 def _fix_shared_skills() -> List[CheckResult]:
-    """--fix: make a missing skills link, retire an unedited legacy prep command; one row per change."""
+    """--fix: make a missing skills link, write a missing switch file, retire an unedited legacy prep command."""
     from aipass.aipass.apps.handlers.init.bootstrap import repair_shared_skills
 
     reg_path = _find_registry()
@@ -1279,6 +1337,11 @@ def _compute_doctor_groups(
             rechecked = _check_shared_skills(reg_path.parent) if reg_path else []
             scaffold = [r for r in groups.get("Scaffold", []) if r.label not in _SKILL_ROW_LABELS]
             groups["Scaffold"] = scaffold + rechecked + skills_fix
+
+        shadow_fix = _fix_instruction_shadow()
+        if shadow_fix:
+            structure = [r for r in groups.get("Structure", []) if not r.label.startswith("instruction shadow")]
+            groups["Structure"] = structure + shadow_fix
 
     return groups
 

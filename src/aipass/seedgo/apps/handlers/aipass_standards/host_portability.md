@@ -1,6 +1,6 @@
 # Host Portability
-**Status:** Draft v1.4 (arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
-**Date:** 2026-10-22
+**Status:** Draft v1.5 (arm G, a stdlib import above the floor; arm F, an emptied git identity; arm E, a symlinked prefix — PR #774; arm D, the host's Python — PR #774; arm C, lib/ corpus — FPLAN-0554 round three)
+**Date:** 2026-10-27
 
 ---
 
@@ -174,6 +174,32 @@ the host's identity away gives one back.
 
 **Fleet, 2026-10-22:** 5 test files empty git's config, all drone; 0 rows. The
 specimen at 1.3.0 is convicted at the `GIT_CONFIG_GLOBAL` line.
+
+### Arm G — a stdlib import newer than the declared floor
+
+An `import X` / `from X import ...` where X joined the stdlib after the
+`requires-python = ">=3.N"` of the nearest `pyproject.toml` above the branch.
+The except branch of such an import is the answer only the floor's CI lane
+runs; a seat on a newer Python, and every test written there, pins the other
+one. Specimen: aipass `provider_wire.py` before 1.9.1 did `import tomllib` in a
+`try` whose `except` returned "needs Python 3.11+"; fourteen tests were red on
+PR #811's 3.10 lane and green on 3.11 to 3.13.
+
+**Table:** `tomllib` 3.11 (backport `tomli`), `zoneinfo` 3.9
+(`backports.zoneinfo`), `graphlib` 3.9 (`graphlib_backport`).
+**Acquitted:** the nearest enclosing `try` or `if` imports the backport anywhere
+inside it — `try: import tomllib / except: import tomli as tomllib`, nested or
+at module level (aipass `structure_scanner.py`, `aipass.py`). A function or
+class boundary ends the search: a `try` around a `def` guards nothing inside it.
+**Not read:** a `sys.version_info` gate on its own — it moves the degraded
+answer, it does not run it. No `pyproject.toml`, or none declaring a `>=`
+floor: the arm is off.
+**Cure:** the backport fallback, and a test that hides both modules through
+`sys.modules` and pins the last answer (aipass `tests/test_structure_scan.py`).
+
+**Fleet, 2026-10-27:** 5 version-bound imports, floor 3.10; 1 row, seedgo's own
+`test_inventory/collection.py` (a version gate, no tomli), cured to the
+fallback in collection 1.0.3.
 
 ### Valid guards (recognized by checker)
 - a platform test anywhere in the enclosing function: `sys.platform`, `os.name`,

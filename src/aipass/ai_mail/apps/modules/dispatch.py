@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch.py
 # Description: Dispatch Module
-# Version: 3.6.0
+# Version: 3.7.0
 # Created: 2026-02-02
-# Modified: 2026-10-25
+# Modified: 2026-10-26
 # =============================================
 
 """
@@ -65,7 +65,7 @@ MODEL OPTIONS:
 PROVIDER OPTIONS:
   --provider claude   Claude Code (default)
   --provider codex    Codex CLI; --model is passed verbatim as -m, absent means ~/.codex/config.toml.
-                      Managers stay Claude-only.
+                      Managers wake on Codex in the same lanes as on Claude.
 """
     console.print(help_text)
 

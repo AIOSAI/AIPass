@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.4.1
+# Version: 1.6.0
 # Created: 2026-04-14
-# Modified: 2026-10-17
+# Modified: 2026-10-26
 # =============================================
 
 """Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
@@ -180,6 +180,22 @@ def test_an_unreadable_lock_is_a_held_lock(monkeypatch, tmp_path):
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
     assert ticks == [1]
     assert result["reason"].endswith("(lock removed)")
+
+
+def test_an_unreadable_tail_is_in_flight_and_never_cached(tmp_path):
+    """A transcript that cannot be read is no verdict: in flight now, read again on the next ask."""
+    transcript = tmp_path / "a.jsonl"
+    transcript.write_text("x\n", encoding="utf-8")
+    scanner = agent_handler.TranscriptScanner(tmp_path, now=0.0)
+    scanner.tick(1.0)
+    seen_ns = os.stat(transcript).st_mtime_ns
+    transcript.unlink()
+    transcript.mkdir()  # stat still answers, the read raises, on every platform
+    assert scanner.last_entry_inflight() is True
+    transcript.rmdir()
+    transcript.write_text("x\n", encoding="utf-8")
+    os.utime(transcript, ns=(seen_ns, seen_ns))  # same cache key: a cached failure would still read in flight
+    assert scanner.last_entry_inflight() is False
 
 
 def test_watch_agent_no_active_lock(monkeypatch, tmp_path):
@@ -690,39 +706,26 @@ def test_scanner_vanished_file_is_not_activity(tmp_path):
     assert s.tick(2.0) is True  # survivors still tracked
 
 
-def test_scanner_inflight_verdict_cached_until_file_changes(tmp_path, monkeypatch):
+def test_scanner_inflight_verdict_cached_until_file_changes(tmp_path):
     """The tail parse runs only when the newest file's (size, mtime) changed; silence reuses the verdict."""
     proj = tmp_path / "proj"
-    _write_jsonl(
-        proj,
-        {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}]}},
-    )
+    inflight = {"message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash"}]}}
+    done = {"message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}}
+    transcript = _write_jsonl(proj, inflight)
     s = agent_handler.TranscriptScanner(proj, now=0.0)
     s.tick(1.0)
-
-    reads = {"n": 0}
-    real_tail = agent_handler._tail_lines
-
-    def counting_tail(path, max_bytes=1_000_000):
-        """Count tail reads so the cache's no-re-read guarantee is assertable."""
-        reads["n"] += 1
-        return real_tail(path, max_bytes)
-
-    monkeypatch.setattr(agent_handler, "_tail_lines", counting_tail)
-
     assert s.last_entry_inflight() is True
-    first = reads["n"]
+
+    seen_ns = os.stat(transcript).st_mtime_ns
+    transcript.write_text(json.dumps(done).ljust(len(json.dumps(inflight))) + "\n", encoding="utf-8")
+    os.utime(transcript, ns=(seen_ns, seen_ns))  # same size, same mtime: the key is unchanged
     for now in (2.0, 3.0, 4.0):
         s.tick(now)
-        assert s.last_entry_inflight() is True
-    assert reads["n"] == first  # unchanged file → cached verdict, zero re-reads
+        assert s.last_entry_inflight() is True  # unchanged key → cached verdict, the done line unread
 
-    _write_jsonl(
-        proj, {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "done"}]}}
-    )
+    _write_jsonl(proj, done)
     s.tick(5.0)
     assert s.last_entry_inflight() is False  # change → re-read → new verdict
-    assert reads["n"] > first
 
 
 def test_scanner_parent_inflight_covers_composing_subagent(tmp_path):
@@ -911,3 +914,82 @@ def test_pid_alive_asks_the_registry_for_the_zombie_rule(monkeypatch, tmp_path):
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=60, poll_interval=0.01)
     assert calls == [os.getpid()]
     assert result["agent_state"] == "crashed"
+
+
+# Verbatim ~/.codex/sessions rollout lines.
+_CODEX_RESPONSE_ITEM = (
+    '{"timestamp":"2026-05-24T20:51:19.010Z","type":"response_item","payload":{"type":"function_call",'
+    '"name":"exec_command","arguments":"{\\"cmd\\":\\"drone --help\\",\\"yield_time_ms\\":10000,'
+    '\\"max_output_tokens\\":12000}","call_id":"call_wADEomvKq47K13N4PdSqvbB2"}}'
+)
+_CODEX_TASK_COMPLETE = (
+    '{"timestamp":"2026-05-15T23:21:07.369Z","type":"event_msg","payload":{"type":"task_complete",'
+    '"turn_id":"019e2df1-7da4-76d3-8e62-174023da0df3","last_agent_message":"NO","completed_at":1778887267,'
+    '"duration_ms":5749,"time_to_first_token_ms":5531}}'
+)
+_CODEX_TURN_ABORTED = (
+    '{"timestamp":"2026-09-20T06:40:52.909Z","ordinal":142,"type":"event_msg","payload":{"type":"turn_aborted",'
+    '"turn_id":"01a0bd8a-9a6a-7d00-a6e8-9701801884c4","reason":"interrupted","started_at":1789886372,'
+    '"completed_at":1789886452,"duration_ms":80448}}'
+)
+
+
+def _write_pointer(branch: Path, provider: str | None, session_id: str = "thread-1") -> None:
+    data = {"session_id": session_id, "cwd": str(branch)}
+    if provider is not None:
+        data["provider"] = provider
+    (branch / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
+    (branch / ".ai_mail.local" / "session.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_scanner_follows_the_branch_pointer_between_codex_and_claude(tmp_path, monkeypatch):
+    """A codex pointer watches its one rollout; a claude pointer or none walks the projects dir."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    proj = tmp_path / "proj"
+    claude_file = _write_jsonl(proj, {"message": {"role": "assistant", "content": [{"type": "tool_use"}]}})
+    rollout = tmp_path / "rollout-2026-10-26T09-59-59-thread-1.jsonl"
+    rollout.write_text(_CODEX_RESPONSE_ITEM + "\n", encoding="utf-8")
+    monkeypatch.setattr(agent_handler, "codex_thread_file", lambda tid: rollout if tid == "thread-1" else None)
+
+    _write_pointer(branch, "codex")
+    s = agent_handler.TranscriptScanner(proj, now=0.0, branch_path=branch)
+    assert s.provider == "codex" and s._paths == [str(rollout)]
+    assert s.last_entry_inflight() is True
+
+    with rollout.open("a", encoding="utf-8") as fh:
+        fh.write(_CODEX_TASK_COMPLETE + "\n")
+    assert s.tick(1.0) is True
+    assert s.last_entry_inflight() is False
+
+    _write_pointer(branch, "claude")
+    s.refresh(2.0)
+    assert s.provider == "claude" and s._paths == [str(claude_file)]
+
+    (branch / ".ai_mail.local" / "session.json").unlink()
+    s.refresh(3.0)
+    assert s.provider == "claude" and s._paths == [str(claude_file)]
+
+
+@pytest.mark.parametrize(
+    ("tail", "inflight"),
+    [
+        ([_CODEX_RESPONSE_ITEM], True),
+        ([_CODEX_RESPONSE_ITEM, _CODEX_TASK_COMPLETE], False),
+        ([_CODEX_RESPONSE_ITEM, _CODEX_TURN_ABORTED], False),
+        ([_CODEX_RESPONSE_ITEM, _CODEX_TASK_COMPLETE[:40]], True),
+    ],
+    ids=["turn-open", "task-complete", "turn-aborted", "torn-tail"],
+)
+def test_codex_rollout_tail_decides_inflight(tmp_path, monkeypatch, tail, inflight):
+    """A Codex turn is in flight until an event_msg ends it; a torn last line is Codex mid-write."""
+    branch = tmp_path / "branch"
+    branch.mkdir()
+    rollout = tmp_path / "rollout-thread-1.jsonl"
+    rollout.write_text("\n".join(tail) + "\n", encoding="utf-8")
+    monkeypatch.setattr(agent_handler, "codex_thread_file", lambda tid: rollout)
+    _write_pointer(branch, "codex")
+
+    s = agent_handler.TranscriptScanner(tmp_path / "proj", now=0.0, branch_path=branch)
+
+    assert s.last_entry_inflight() is inflight
