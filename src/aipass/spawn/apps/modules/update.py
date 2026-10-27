@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: Update orchestrator — thin CLI layer for branch updates
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-24
+# Modified: 2026-10-27
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -182,6 +182,9 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
             f"  Markdown:   {md_differs} differ, {md_matches} match{unreadable} "
             f"[dim](read-only - update never rewrites a .md)[/dim]"
         )
+    gitignore = result.get("gitignore")
+    if gitignore:
+        console.print(f"  .gitignore: {gitignore} [dim](read-only - update never rewrites it)[/dim]")
 
     errs = result.get("errors", [])
     if errs:
@@ -262,6 +265,7 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
     total_skip = sum(r.get("skipped_py", 0) for r in results)
     total_prot = sum(r.get("owner_protected", 0) for r in results)
     total_md = sum(r.get("md_differs", 0) for r in results)
+    total_gi = sum(r.get("gitignore") == "differs" for r in results)
     total_err = sum(len(r.get("errors", [])) for r in results)
 
     for r in results:
@@ -275,7 +279,7 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
         f"  Totals: +{total_add} added, ~{total_upd} updated, "
         f">{total_ren} renamed, -{total_prn} pruned, "
         f"!{total_skip} py-skipped, ={total_prot} owner-protected, "
-        f"~{total_md} md-drifted (reported, never written)"
+        f"~{total_md} md-drifted, ~{total_gi} gitignore-drifted (reported, never written)"
     )
 
     if total_err:

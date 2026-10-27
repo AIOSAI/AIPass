@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.2.4
+# Version: 1.3.0
 # Created: 2026-03-07
-# Modified: 2026-10-26
+# Modified: 2026-10-27
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -594,6 +594,64 @@ class TestMarkdownIsReportedAndNeverWritten:
 
         assert result["owner_protected"] == 1
         assert "README.md" not in self._states(result)
+
+
+class TestGitignoreIsReportedAndNeverWritten:
+    """A branch `.gitignore` is compared to the template like a `.md`; update never writes an existing one."""
+
+    TEMPLATE_IGNORE = "__pycache__/\n*.pyc\n"
+
+    @pytest.fixture(autouse=True)
+    def _template_ignore(self, template_dir):
+        (template_dir / ".gitignore").write_text(self.TEMPLATE_IGNORE, encoding="utf-8")
+
+    def _update(self, template_dir, mock_registry, dry_run=True):
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            return update_branch("test_branch", dry_run=dry_run)
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    def test_a_drifted_gitignore_reports_differs_and_is_byte_identical_after(
+        self, template_dir, branch_dir, mock_registry, dry_run
+    ):
+        drifted = "__pycache__/\n*.pyc\nlogs/\n"
+        (branch_dir / ".gitignore").write_text(drifted, encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry, dry_run=dry_run)
+
+        assert result["gitignore"] == "differs"
+        assert (branch_dir / ".gitignore").read_text(encoding="utf-8") == drifted
+
+    def test_a_gitignore_as_the_template_ships_it_reports_matches(self, template_dir, branch_dir, mock_registry):
+        (branch_dir / ".gitignore").write_text(self.TEMPLATE_IGNORE, encoding="utf-8")
+
+        assert self._update(template_dir, mock_registry)["gitignore"] == "matches"
+
+    def test_a_missing_gitignore_is_added_and_reports_as_absent(self, template_dir, branch_dir, mock_registry):
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert result["gitignore"] == "absent"
+        assert (branch_dir / ".gitignore").read_text(encoding="utf-8") == self.TEMPLATE_IGNORE
+
+    def test_the_branch_report_and_the_fleet_summary_name_a_drifted_gitignore(
+        self, capsys, template_dir, branch_dir, mock_registry
+    ):
+        (branch_dir / ".gitignore").write_text("logs/\n", encoding="utf-8")
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+            patch("aipass.spawn.apps.modules.update.find_registry", return_value=mock_registry),
+        ):
+            handle_update(["@test_branch"])
+            branch_out = capsys.readouterr().out
+            handle_update(["specialist", "--all"])
+            fleet_out = capsys.readouterr().out
+
+        assert ".gitignore: differs" in branch_out
+        assert "1 gitignore-drifted" in fleet_out
 
 
 class TestUpdateIgnoreIsTheOwnersDecision:

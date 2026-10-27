@@ -11,6 +11,10 @@ PyPI version — not the changelog header.
 
 ## [Unreleased]
 
+### Added
+
+- **spawn**: `drone @spawn update` reports a branch `.gitignore` against the citizen template (`matches`, `differs`, `absent` or `unreadable`, the `.md` lane's states) in the branch report and as `gitignore-drifted` in the fleet summary, and never writes an existing one, preview or `--apply` (`handlers/update_ops.py` 2.6.0, `modules/update.py` 1.3.0, `tests/test_update.py` 1.3.0, `docs/update_engine.md`; 5 pins red first, 5 mutants red).
+
 ### Fixed
 
 - **memory**: `drone @memory pool process` takes the same lock as the background auto-process child, so two runs never race the same pool files. While another run holds it, the verb names the holder's pid, processes nothing and exits 2 (`auto_process.py` 1.2.0 `run_locked`, `pool.py` 1.1.0; two pins in `tests/test_auto_process.py`).
